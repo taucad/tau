@@ -39,6 +39,10 @@ import {
   ModelComponentActionDropdown,
 } from '@taucad/workbench-panes/component-menu/component-action-menu';
 import type { ModelComponentActionMenuData } from '@taucad/workbench-panes/component-menu/component-action-menu';
+import {
+  HoveredModelComponentBadge,
+  placeModelComponentNameBadge,
+} from '@taucad/workbench-panes/component-menu/component-name-badge';
 import { PaneAction } from '@taucad/workbench-panes/components/pane-action';
 import { WorkbenchToggleButton } from '@taucad/workbench-panes/components/workbench-toggle';
 import { workbenchPanes } from '@taucad/workbench-panes/registry/pane-registry';
@@ -201,27 +205,21 @@ type PageHeaderProps = Readonly<{
   selected: GeometryComponentReference | undefined;
   /** The selected part's menu, which its name in the header opens. */
   selectedMenu: ModelComponentActionMenuData | undefined;
-  isPanelOpen: boolean;
   onOpenPane: (pane: WorkbenchPaneId) => void;
-  onTogglePanel: () => void;
+  /** The workbench toggle, drawn last while the lane is closed; the open lane draws it at the end of its tabs. */
+  toggle: React.ReactNode;
 }>;
 
 /**
- * The tab's header, as the app's viewer header: the shown file as the workbench's one editor tab (its name, then its
- * path, and the selected component, whose name opens its part menu), then the app's top-right cluster: Share and
- * Export, which open their panes, and the one workbench toggle (viewer chrome D4, D5, D8).
+ * The canvas's header, as the app's viewer header: the shown file as the workbench's one editor tab (its name, then
+ * its path, and the selected component, whose name opens its part menu), then Share and Export, which open their
+ * panes (viewer chrome D4, D5, D8). The open lane's tabs continue the same row beside it, ending in the workbench
+ * toggle, as the app's dock groups share one top bar; with the lane closed the toggle ends this header.
  *
- * @param props - The shown model, selection and its menu, whether the lane is open, and what the actions do.
+ * @param props - The shown model, selection and its menu, what the actions do and the toggle while the lane is closed.
  * @returns The header.
  */
-function PageHeader({
-  model,
-  selected,
-  selectedMenu,
-  isPanelOpen,
-  onOpenPane,
-  onTogglePanel,
-}: PageHeaderProps): React.JSX.Element {
+function PageHeader({ model, selected, selectedMenu, onOpenPane, toggle }: PageHeaderProps): React.JSX.Element {
   const path = model === undefined ? undefined : (model.sourceFile ?? model.path);
   return (
     <div className='flex h-9 shrink-0 items-center gap-1 border-b px-0.5'>
@@ -277,15 +275,36 @@ function PageHeader({
           }}
           {...foldClasses}
         />
-        {/* The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height. */}
-        <Separator orientation='vertical' className='data-[orientation=vertical]:h-4' />
-        <WorkbenchToggleButton isOpen={isPanelOpen} onClick={onTogglePanel} />
+        {toggle}
       </div>
     </div>
   );
 }
 
 const basenameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+
+type ToggleProps = Readonly<{
+  isOpen: boolean;
+  onToggle: () => void;
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
+  buttonRef: React.RefObject<HTMLButtonElement | null>;
+}>;
+
+/**
+ * The one workbench toggle and the rule before it, top right in whichever header ends the row.
+ *
+ * @param props - Whether the lane is open, what the toggle does and the ref that takes focus back after a toggle.
+ * @returns The toggle.
+ */
+function HeaderToggle({ isOpen, onToggle, buttonRef }: ToggleProps): React.JSX.Element {
+  return (
+    <>
+      {/* The variant, not `h-4`: the separator's own `data-[orientation=vertical]:h-full` outranks a bare height. */}
+      <Separator orientation='vertical' className='data-[orientation=vertical]:h-4' />
+      <WorkbenchToggleButton ref={buttonRef} isOpen={isOpen} onClick={onToggle} />
+    </>
+  );
+}
 
 /** What the canvas shows besides the model: progress, a failure, or the wait for a first model. */
 function StatusLine({ state }: Readonly<{ state: PageState }>): React.ReactNode {
@@ -354,6 +373,8 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   const enableSurfaces = useSelector(graphicsRef, (snapshot) => snapshot.context.enableSurfaces);
   const enableMatcap = useSelector(graphicsRef, (snapshot) => snapshot.context.enableMatcap);
   const enableGizmo = useSelector(graphicsRef, (snapshot) => snapshot.context.enableGizmo);
+  /* The unit the hover label names its part in. */
+  const interactionUnitId = useSelector(graphicsRef, (snapshot) => snapshot.context.modelInteractionUnitId);
 
   useEffect(() => {
     setSelected(undefined);
@@ -625,13 +646,41 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     };
   }, [notice]);
 
-  /* Closing drops the last pane request, so the lane reopens on its opening tabs instead of replaying it. */
+  /* Closing drops the last pane request, so the lane reopens on its opening tabs instead of replaying it. The toggle
+   * moves between the canvas header and the lane's, so the one it lands in takes focus back. */
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const isToggleFocusPending = useRef(false);
   const togglePanel = useCallback(() => {
     if (isPanelOpen) {
       setOpenPaneRequest(undefined);
     }
+    isToggleFocusPending.current = toggleRef.current !== null && toggleRef.current === document.activeElement;
     setIsPanelOpen(!isPanelOpen);
   }, [isPanelOpen]);
+  useEffect(() => {
+    if (isToggleFocusPending.current) {
+      isToggleFocusPending.current = false;
+      toggleRef.current?.focus();
+    }
+  }, [isPanelOpen]);
+  const toggle = <HeaderToggle isOpen={isPanelOpen} buttonRef={toggleRef} onToggle={togglePanel} />;
+
+  /* The hover label (VUI parity with the app's viewer): placed from custom properties on the canvas region, so a
+   * pointer move never re-renders the page; only entering and leaving the canvas is state. */
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const [isPointerOverCanvas, setIsPointerOverCanvas] = useState(false);
+  const isPointerOverCanvasRef = useRef(false);
+  const onCanvasPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    placeModelComponentNameBadge(event.currentTarget, event, controlsRef.current);
+    if (!isPointerOverCanvasRef.current) {
+      isPointerOverCanvasRef.current = true;
+      setIsPointerOverCanvas(true);
+    }
+  }, []);
+  const onCanvasPointerLeave = useCallback(() => {
+    isPointerOverCanvasRef.current = false;
+    setIsPointerOverCanvas(false);
+  }, []);
 
   return (
     <ViewerEnvironmentProvider value={environment}>
@@ -653,83 +702,94 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 paddingLeft: view.safeArea.left,
               }}
             >
-              {isInline ? null : (
-                <PageHeader
-                  model={shown?.model}
-                  selected={selected}
-                  selectedMenu={componentMenu.selectedMenu}
-                  isPanelOpen={isPanelOpen}
-                  onOpenPane={openPane}
-                  onTogglePanel={togglePanel}
-                />
-              )}
               <div className='flex min-h-0 flex-1'>
-                {/* In the tab the region takes focus, so its part menu has a keyboard route (VUI-6, D8). */}
-                <section
-                  id={canvasRegionId}
-                  aria-label='Model viewer'
-                  tabIndex={isInline ? undefined : 0}
-                  className='@container/viewer relative min-w-0 flex-1 overflow-hidden focus-visible:focus-outline'
-                  {...(isInline ? {} : componentMenu.regionProps)}
-                >
-                  {shown === undefined && state.kind !== 'loading' ? (
-                    <div className='flex size-full items-center justify-center p-4 text-center'>
-                      {state.kind === 'failed' ? (
-                        <StatusLine state={state} />
-                      ) : (
-                        <p className='text-sm text-muted-foreground'>Waiting for a model.</p>
-                      )}
-                    </div>
-                  ) : (
-                    <ModelViewer
-                      graphicsRef={graphicsRef}
-                      artifact={shown?.artifact}
-                      artifactHash={shown?.model.sha256}
-                      /* The unit the panes name: the source, or the GLB itself when it has none. */
-                      sourceFile={shown?.model.sourceFile ?? shown?.model.path}
-                      enablePan={!isInline}
-                      enableZoom={!isInline}
-                      graphicsOptions={{
-                        enableGrid,
-                        enableAxes,
-                        enableLines,
-                        enableSurfaces,
-                        enableMatcap,
-                        /* The view cube belongs to the tab; a card shows the canvas and two actions (E2). */
-                        enableGizmo: !isInline && enableGizmo,
-                      }}
-                      /* Top-right of the canvas, as in the workbench (viewer parity V5). */
-                      gizmoContainer={isInline ? undefined : `#${canvasRegionId}`}
-                      onComponentReference={setSelected}
-                      onComponentSecondaryPointerCandidate={
-                        isInline ? undefined : componentMenu.onComponentSecondaryPointerCandidate
-                      }
+                {/* The canvas column: its header and the open lane's tabs make one top row (viewer chrome D4). */}
+                <div className='@container/viewer flex min-w-0 flex-1 flex-col'>
+                  {isInline ? null : (
+                    <PageHeader
+                      model={shown?.model}
+                      selected={selected}
+                      selectedMenu={componentMenu.selectedMenu}
+                      onOpenPane={openPane}
+                      toggle={isPanelOpen ? null : toggle}
                     />
                   )}
-                  <div className='pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-1 p-2'>
-                    {shown === undefined || !isInline ? null : (
-                      <p className='rounded-md bg-background/80 px-2 py-1 text-xs font-medium'>
-                        {shown.model.title}
-                        {selected === undefined ? null : (
-                          <span className='text-muted-foreground'> · {selected.label}</span>
+                  {/* In the tab the region takes focus, so its part menu has a keyboard route (VUI-6, D8). */}
+                  <section
+                    id={canvasRegionId}
+                    aria-label='Model viewer'
+                    tabIndex={isInline ? undefined : 0}
+                    className='@container/viewer relative min-h-0 min-w-0 flex-1 overflow-hidden focus-visible:focus-outline'
+                    onPointerMove={onCanvasPointerMove}
+                    onPointerLeave={onCanvasPointerLeave}
+                    {...(isInline ? {} : componentMenu.regionProps)}
+                  >
+                    {shown === undefined && state.kind !== 'loading' ? (
+                      <div className='flex size-full items-center justify-center p-4 text-center'>
+                        {state.kind === 'failed' ? (
+                          <StatusLine state={state} />
+                        ) : (
+                          <p className='text-sm text-muted-foreground'>Waiting for a model.</p>
                         )}
-                      </p>
+                      </div>
+                    ) : (
+                      <ModelViewer
+                        graphicsRef={graphicsRef}
+                        artifact={shown?.artifact}
+                        artifactHash={shown?.model.sha256}
+                        /* The unit the panes name: the source, or the GLB itself when it has none. */
+                        sourceFile={shown?.model.sourceFile ?? shown?.model.path}
+                        enablePan={!isInline}
+                        enableZoom={!isInline}
+                        graphicsOptions={{
+                          enableGrid,
+                          enableAxes,
+                          enableLines,
+                          enableSurfaces,
+                          enableMatcap,
+                          /* The view cube belongs to the tab; a card shows the canvas and two actions (E2). */
+                          enableGizmo: !isInline && enableGizmo,
+                        }}
+                        /* Top-right of the canvas, as in the workbench (viewer parity V5). */
+                        gizmoContainer={isInline ? undefined : `#${canvasRegionId}`}
+                        onComponentReference={setSelected}
+                        onComponentSecondaryPointerCandidate={
+                          isInline ? undefined : componentMenu.onComponentSecondaryPointerCandidate
+                        }
+                      />
                     )}
-                    {shown === undefined ? null : <StatusLine state={state} />}
-                  </div>
-                  {/* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */}
-                  {isInline ? null : (
-                    <div className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'>
-                      {notice === undefined ? null : <Notice text={notice} />}
-                      <ViewerControls />
+                    <div className='pointer-events-none absolute inset-x-0 top-0 flex flex-col items-start gap-1 p-2'>
+                      {shown === undefined || !isInline ? null : (
+                        <p className='rounded-md bg-background/80 px-2 py-1 text-xs font-medium'>
+                          {shown.model.title}
+                          {selected === undefined ? null : (
+                            <span className='text-muted-foreground'> · {selected.label}</span>
+                          )}
+                        </p>
+                      )}
+                      {shown === undefined ? null : <StatusLine state={state} />}
                     </div>
-                  )}
-                  {isInline && notice !== undefined ? (
-                    <div className='absolute right-2 bottom-2'>
-                      <Notice text={notice} />
-                    </div>
-                  ) : null}
-                </section>
+                    {/* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */}
+                    {isInline ? null : (
+                      <div
+                        ref={controlsRef}
+                        className='pointer-events-none absolute inset-x-2 bottom-2 z-10 flex flex-col items-center-safe gap-2'
+                      >
+                        {notice === undefined ? null : <Notice text={notice} />}
+                        <ViewerControls />
+                      </div>
+                    )}
+                    {isInline && notice !== undefined ? (
+                      <div className='absolute right-2 bottom-2'>
+                        <Notice text={notice} />
+                      </div>
+                    ) : null}
+                    <HoveredModelComponentBadge
+                      unitId={interactionUnitId}
+                      isSuppressed={!isPointerOverCanvas || (!isInline && componentMenu.isOpen)}
+                    />
+                  </section>
+                </div>
                 {isInline || !isPanelOpen ? null : (
                   <WorkbenchLane
                     bridge={bridge}
@@ -740,6 +800,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                     reveal={reveal}
                     componentActions={rowMenus}
                     openPaneRequest={openPaneRequest}
+                    headerEnd={toggle}
                   />
                 )}
               </div>

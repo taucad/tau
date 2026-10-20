@@ -177,6 +177,8 @@ export type ViewerComponentMenu = Readonly<{
   onComponentSecondaryPointerCandidate: (target: ViewerSecondaryGestureMenu['target'] | undefined) => void;
   /** The selected part's menu data, for the header's `ModelComponentActionDropdown`; `undefined` with no part. */
   selectedMenu: ModelComponentActionMenuData | undefined;
+  /** Whether the canvas part menu is open; the hover label hides while it is, as the menu names its part. */
+  isOpen: boolean;
   /** Close the menu, for example when the shown model changes. */
   close: () => void;
   /** The menu and its keys; render it anywhere inside the page's `KeyboardProvider` and other providers. */
@@ -346,6 +348,7 @@ export function useViewerComponentMenu({
     regionProps,
     onComponentSecondaryPointerCandidate,
     selectedMenu,
+    isOpen: open !== undefined,
     close,
     menu: (
       <>

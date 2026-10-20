@@ -122,9 +122,13 @@ describe('PaneLane', () => {
     expect(screen.getByRole('button', { name: 'Open workbench tab' })).toBeVisible();
   });
 
-  it('should leave hiding the lane to its host', () => {
-    renderLane();
+  it('should leave hiding the lane to its host, drawing its toggle at the end of the header row', () => {
+    renderLane({ headerEnd: <button type='button'>Toggle Workbench lane</button> });
 
     expect(screen.queryByRole('button', { name: 'Hide workbench' })).toBeNull();
+    const plus = screen.getByRole('button', { name: 'Open workbench tab' });
+    const toggle = screen.getByRole('button', { name: 'Toggle Workbench lane' });
+    expect(plus.compareDocumentPosition(toggle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(toggle.parentElement).toBe(screen.getByRole('tablist').parentElement);
   });
 });

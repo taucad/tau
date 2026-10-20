@@ -311,8 +311,10 @@ const drawn = async (root: Frame | Page, action: string): Promise<void> => {
 };
 
 /**
- * Check the tab's chrome against the desktop's (VUI-1, VUI-2): the bar ends with Viewer settings, the header carries
- * Share, Export and the one workbench toggle, which hides and shows the lane, and Export opens its pane.
+ * Check the tab's chrome against the desktop's (VUI-1, VUI-2): the bar ends with Viewer settings, the canvas header
+ * carries Share and Export, and the one workbench toggle ends the top row: in the lane's header beside its tabs while
+ * the lane is open, in the canvas header while it is closed. The toggle hides and shows the lane, and Export opens its
+ * pane.
  *
  * @param root - The frame or page the viewer is in, drawn in the tab composition.
  * @param isOpenAtLoad - Whether the lane is open when the page loads (the tab is at least 720 px wide).
@@ -326,23 +328,34 @@ const checkTabChrome = async (root: Frame | Page, isOpenAtLoad: boolean): Promis
     expect(await root.getByRole('button', { name, exact: true }).count()).toBe(0);
   }
   const header = root.getByRole('group', { name: 'Workbench actions' });
-  const toggle = header.getByRole('button', { name: 'Toggle Workbench lane' });
-  expect(await header.ariaSnapshot()).toBe(
-    [
-      '- group "Workbench actions":',
-      '  - button "Share"',
-      '  - button "Export"',
-      `  - button "Toggle Workbench lane"${isOpenAtLoad ? ' [pressed]' : ''}`,
-    ].join('\n'),
-  );
+  /* One toggle on the page, wherever the row ends. */
+  const toggle = root.getByRole('button', { name: 'Toggle Workbench lane' });
   const lane = root.getByRole('complementary', { name: 'Workbench' });
+  const closedHeader = [
+    '- group "Workbench actions":',
+    '  - button "Share"',
+    '  - button "Export"',
+    '  - button "Toggle Workbench lane"',
+  ].join('\n');
   expect(await lane.count()).toBe(isOpenAtLoad ? 1 : 0);
+  expect(await toggle.count()).toBe(1);
 
   if (isOpenAtLoad) {
+    expect(await header.ariaSnapshot()).toBe(
+      ['- group "Workbench actions":', '  - button "Share"', '  - button "Export"'].join('\n'),
+    );
+    expect(await lane.getByRole('button', { name: 'Toggle Workbench lane' }).getAttribute('aria-pressed')).toBe('true');
+    /* The lane's tabs share the canvas header's row: one top row, no second row of tabs. */
+    const headerBox = await header.boundingBox();
+    const tabsBox = await lane.getByRole('tablist', { name: 'Open panes' }).boundingBox();
+    expect(
+      Math.abs((headerBox?.y ?? 0) + (headerBox?.height ?? 0) / 2 - ((tabsBox?.y ?? 0) + (tabsBox?.height ?? 0) / 2)),
+    ).toBeLessThan(2);
     await toggle.click();
     await expect.poll(async () => lane.count()).toBe(0);
     expect(await toggle.getAttribute('aria-pressed')).toBe('false');
   }
+  expect(await header.ariaSnapshot()).toBe(closedHeader);
   /* Export opens the closed lane on its pane. */
   await header.getByRole('button', { name: 'Export', exact: true }).click();
   await lane.getByRole('tabpanel', { name: 'Export' }).waitFor();
@@ -1322,6 +1335,35 @@ describe('the viewer page from a text host', () => {
       await lane.getByRole('tabpanel', { name: 'Kinematics' }).waitFor();
       expect(await tablist.evaluate((list) => list.scrollLeft)).toBe(0);
       await capture(page, 'lane-header');
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    "should name the part under the pointer as the app's viewer does, and drop the name when the pointer leaves",
+    async () => {
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
+      const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+
+      const region = page.getByRole('region', { name: 'Model viewer' });
+      const box = await region.boundingBox();
+      if (box === null) {
+        throw new Error('The canvas region has no box.');
+      }
+      const badge = page.getByTestId('model-component-name-badge');
+      /* The surface fills the middle of the framed view; the label names it as the Model pane's row does. */
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+      await expect.poll(async () => badge.textContent(), { timeout: 30_000 }).toBe('surface');
+      expect(await badge.getAttribute('aria-hidden')).toBe('true');
+      await capture(page, 'hover-label');
+      /* Off the canvas, into the lane: the label goes. */
+      const lane = await page.getByRole('complementary', { name: 'Workbench' }).boundingBox();
+      await page.mouse.move((lane?.x ?? 0) + 40, (lane?.y ?? 0) + 200, { steps: 4 });
+      await expect.poll(async () => badge.count()).toBe(0);
       await page.close();
     },
     kernelCallLimit,

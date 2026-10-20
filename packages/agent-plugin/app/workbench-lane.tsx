@@ -44,6 +44,8 @@ type WorkbenchLaneProps = Readonly<{
   componentActions: ModelSource['componentActions'];
   /** Opens a pane when the part menu asks for one. */
   openPaneRequest: Readonly<{ pane: WorkbenchPaneId; requestId: number }> | undefined;
+  /** The page's workbench toggle, at the end of the lane's tabs in the page's one top row. */
+  headerEnd: React.ReactNode;
 }>;
 
 /**
@@ -61,6 +63,7 @@ export function WorkbenchLane({
   reveal,
   componentActions,
   openPaneRequest,
+  headerEnd,
 }: WorkbenchLaneProps): React.JSX.Element {
   /* The page shows one model: its one unit is the source when it has one, else the drawn file. */
   const entryPath = model === undefined ? undefined : (model.sourceFile ?? model.path);
@@ -106,6 +109,7 @@ export function WorkbenchLane({
         panes={offeredPanes}
         initialOpen={openingPanes}
         openRequest={openPaneRequest}
+        headerEnd={headerEnd}
         renderPane={(pane) => {
           switch (pane) {
             case 'parameters': {

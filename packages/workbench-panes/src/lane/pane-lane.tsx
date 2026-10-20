@@ -38,6 +38,11 @@ export type PaneLaneProps = Readonly<{
   renderPane: (pane: WorkbenchPaneId) => ReactNode;
   /** Opens `pane` and makes it the active tab each time `requestId` changes (a part menu's "Show kinematics"). */
   openRequest?: Readonly<{ pane: WorkbenchPaneId; requestId: number }>;
+  /**
+   * Drawn at the end of the lane's header, after the `+` menu. A host whose own header sits beside the lane puts its
+   * workbench toggle here, so the tabs share the page's one top row and the toggle ends it, top right.
+   */
+  headerEnd?: ReactNode;
   className?: string;
 }>;
 
@@ -60,14 +65,24 @@ const groupLabels = { design: 'Design', project: 'Project' } as const;
 
 /**
  * The workbench lane outside the Tau app: a tab per open pane, the same `+` menu of panes (grouped, with their
- * shortcuts) the app's workbench offers, and a resizable edge. One pane shows at a time. Showing and hiding the lane is
- * the host's: a header's `WorkbenchToggleButton` (`components/workbench-toggle`).
+ * shortcuts) the app's workbench offers, and a resizable edge. One pane shows at a time. Its header is one 36 px row,
+ * as tall as a page header, so a host draws its own header beside the lane and the two make one top row, as the app's
+ * dock groups share theirs: the host's header ends with its actions, the lane's with `headerEnd`. Showing and hiding
+ * the lane is the host's: a `WorkbenchToggleButton` (`components/workbench-toggle`) in `headerEnd` while the lane is
+ * open, and at the end of the host's header while it is closed.
  *
  * @param props - The offered panes, the opening tabs and how to draw a pane.
  * @returns The lane.
  * @public
  */
-export function PaneLane({ panes, initialOpen, renderPane, openRequest, className }: PaneLaneProps): React.JSX.Element {
+export function PaneLane({
+  panes,
+  initialOpen,
+  renderPane,
+  openRequest,
+  headerEnd,
+  className,
+}: PaneLaneProps): React.JSX.Element {
   const [open, setOpen] = useState<readonly WorkbenchPaneId[]>(() =>
     initialOpen.filter((pane) => panes.includes(pane)),
   );
@@ -153,7 +168,7 @@ export function PaneLane({ panes, initialOpen, renderPane, openRequest, classNam
           />
         ),
       )}
-      <div className='flex h-9 shrink-0 items-center gap-1 px-1'>
+      <div className='flex h-9 shrink-0 items-center gap-1 border-b px-1'>
         <div
           role='tablist'
           aria-label='Open panes'
@@ -250,6 +265,7 @@ export function PaneLane({ panes, initialOpen, renderPane, openRequest, classNam
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        {headerEnd}
       </div>
       <div className='min-h-0 flex-1 overflow-hidden'>
         {open.map((pane) => (

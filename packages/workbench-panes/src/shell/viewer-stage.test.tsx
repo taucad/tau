@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { GraphicsProvider } from '@taucad/viewer/hooks/use-graphics';
+import type { ModelComponentActionMenuData } from '#component-menu/component-action-menu.jsx';
 import { useViewerPartMenu } from '#component-menu/use-viewer-part-menu.jsx';
 import { ViewerStage } from '#shell/viewer-stage.jsx';
 import type { ViewerStageCanvasProps, ViewerStageProps } from '#shell/viewer-stage.jsx';
@@ -149,6 +150,16 @@ describe('ViewerStage', () => {
       expect(screen.queryByTestId('model-component-name-badge')).not.toBeInTheDocument();
     });
 
+    it('should follow the host on whether a model is drawn', () => {
+      const { region } = renderStage({ isModelShown: false });
+      showViewerModel(graphics!, 'model-1');
+      hoverViewerComponent(graphics!, gearComponentId);
+
+      firePointer(region, 'pointermove', { clientX: 50, clientY: 50 });
+
+      expect(screen.queryByTestId('model-component-name-badge')).not.toBeInTheDocument();
+    });
+
     it('should show no label while no model is drawn', () => {
       const { region } = renderStage();
       hoverViewerComponent(graphics!, gearComponentId);
@@ -156,6 +167,22 @@ describe('ViewerStage', () => {
       firePointer(region, 'pointermove', { clientX: 50, clientY: 50 });
 
       expect(screen.queryByTestId('model-component-name-badge')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('decoratePartMenu', () => {
+    it('should hand the open menu the host decoration', () => {
+      const decoratePartMenu = vi.fn((data: ModelComponentActionMenuData) => data);
+      const { region } = renderStage({ decoratePartMenu });
+      showViewerModel(graphics!, 'model-1');
+
+      firePointer(region, 'pointerdown', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+      act(() => {
+        canvas.props?.onComponentSecondaryPointerCandidate?.({ unitId: viewerUnitId, componentId: gearComponentId });
+      });
+      firePointer(region, 'pointerup', { button: 2, pointerId: 3, clientX: 50, clientY: 50 });
+
+      expect(decoratePartMenu).toHaveBeenCalledWith(expect.objectContaining({ unitId: viewerUnitId }));
     });
   });
 

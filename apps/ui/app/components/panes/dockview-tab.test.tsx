@@ -47,7 +47,7 @@ describe('DockviewTab', () => {
       'z-10',
       'size-4.5!',
       'opacity-0',
-      'group-hover/default-tab:opacity-100',
+      'group-hover/tab:opacity-100',
       'pointer-coarse:opacity-100',
     );
   });

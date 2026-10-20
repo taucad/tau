@@ -5,7 +5,11 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ModelComponentActionMenuData } from '#component-menu/component-action-menu.jsx';
 import { useViewerPartMenu } from '#component-menu/use-viewer-part-menu.jsx';
-import type { UseViewerPartMenuOptions, ViewerPartMenu } from '#component-menu/use-viewer-part-menu.jsx';
+import type {
+  UseViewerPartMenuOptions,
+  ViewerPartMenu,
+  ViewerPartMenuDecorator,
+} from '#component-menu/use-viewer-part-menu.jsx';
 import {
   createViewerGraphics,
   firePointer,
@@ -24,7 +28,14 @@ afterEach(() => {
 
 const latest: { menu?: ViewerPartMenu } = {};
 
-function Harness(options: Omit<UseViewerPartMenuOptions, 'graphicsRef'> & { readonly graphicsRef: ViewerGraphics }) {
+type HarnessOptions = Omit<UseViewerPartMenuOptions, 'graphicsRef'> & {
+  readonly decoratePartMenu?: ViewerPartMenuDecorator;
+};
+
+function Harness({
+  decoratePartMenu,
+  ...options
+}: HarnessOptions & { readonly graphicsRef: ViewerGraphics }): React.JSX.Element {
   const partMenu = useViewerPartMenu(options);
   latest.menu = partMenu;
   return (
@@ -35,12 +46,12 @@ function Harness(options: Omit<UseViewerPartMenuOptions, 'graphicsRef'> & { read
         aria-label='CAD canvas'
         data-open={partMenu.isOpen ? 'true' : 'false'}
       />
-      {partMenu.menu}
+      {partMenu.renderMenu(decoratePartMenu)}
     </div>
   );
 }
 
-const renderHarness = (options: Omit<UseViewerPartMenuOptions, 'graphicsRef'> = {}) => {
+const renderHarness = (options: HarnessOptions = {}) => {
   graphics = createViewerGraphics();
   const graphicsRef = graphics;
   render(
@@ -159,6 +170,9 @@ describe('useViewerPartMenu', () => {
       rightPress(region, 0);
 
       expect(decoratePartMenu).toHaveBeenCalledWith(expect.objectContaining({ unitId: viewerUnitId }));
+      // The host reads the undecorated data, for example to prepare the part's thumbnail.
+      expect(latest.menu?.openMenuData?.node.id).toBe(gearComponentId);
+      expect(latest.menu?.openMenuData).not.toHaveProperty('onRetryPreview');
     });
   });
 

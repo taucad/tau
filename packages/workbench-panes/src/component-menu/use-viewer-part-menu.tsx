@@ -43,12 +43,15 @@ export type UseViewerPartMenuOptions = Readonly<{
   graphicsRef: GraphicsRef;
   /** The host's part verbs; the menu leaves out the item of an absent verb. */
   actions?: ModelComponentHostActions;
-  /**
-   * Adds host-only data to the canvas menu, such as the Tau app's part thumbnail and its retry and decode callbacks.
-   * Called on every render with the menu open; return `data` unchanged to add nothing.
-   */
-  decoratePartMenu?: (data: ModelComponentActionMenuData) => ModelComponentActionMenuData;
 }>;
+
+/**
+ * Adds host-only data to the canvas menu's data, such as the Tau app's part thumbnail and its retry and decode
+ * callbacks. Called on every render while the menu is open; return `data` unchanged to add nothing.
+ *
+ * @public
+ */
+export type ViewerPartMenuDecorator = (data: ModelComponentActionMenuData) => ModelComponentActionMenuData;
 
 /**
  * The canvas region's part-menu handlers and ref, which `ViewerStage` spreads on its region.
@@ -83,12 +86,17 @@ export type ViewerPartMenu = Readonly<{
   onComponentSecondaryPointerCandidate: (target: ViewerSecondaryGestureMenu['target'] | undefined) => void;
   /** The selected part's menu data, for a header's `ModelComponentActionDropdown`; `undefined` with no part. */
   selectedMenu: ModelComponentActionMenuData | undefined;
+  /** The open canvas menu's data, before any decoration, such as for a host that prepares the part's thumbnail. */
+  openMenuData: ModelComponentActionMenuData | undefined;
   /** Whether the canvas menu is open; the hover label hides while it is, as the menu names its part. */
   isOpen: boolean;
   /** Close the menu. A new model closes it without this. */
   close: () => void;
-  /** The menu and its keys; render it inside the host's `KeyboardProvider` and `TooltipProvider`. */
-  menu: React.JSX.Element;
+  /**
+   * Draws the menu and binds its keys; `ViewerStage` calls it. Render it inside the host's `KeyboardProvider` and
+   * `TooltipProvider`.
+   */
+  renderMenu: (decoratePartMenu?: ViewerPartMenuDecorator) => React.JSX.Element;
 }>;
 
 /** The open menu, whether a key opened it, and the model it opened on. */
@@ -131,7 +139,7 @@ function releaseCapture(event: React.PointerEvent<HTMLElement>): void {
 /**
  * The canvas part menu: the secondary gesture, the keyboard route, the menu data and the anchored menu.
  *
- * @param options - The graphics actor, the host's part verbs and an optional decoration of the menu data.
+ * @param options - The graphics actor and the host's part verbs.
  * @returns The region's handlers and ref, the canvas callback, the selected part's menu data and the menu.
  * @public
  *
@@ -148,11 +156,7 @@ function releaseCapture(event: React.PointerEvent<HTMLElement>): void {
  * }
  * ```
  */
-export function useViewerPartMenu({
-  graphicsRef,
-  actions,
-  decoratePartMenu,
-}: UseViewerPartMenuOptions): ViewerPartMenu {
+export function useViewerPartMenu({ graphicsRef, actions }: UseViewerPartMenuOptions): ViewerPartMenu {
   const [opened, setOpened] = useState<OpenMenu | undefined>(undefined);
   const gesture = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
@@ -265,21 +269,20 @@ export function useViewerPartMenu({
     [graphicsRef],
   );
 
-  const shownData = data === undefined || decoratePartMenu === undefined ? data : decoratePartMenu(data);
-
   return {
     regionProps,
     onComponentSecondaryPointerCandidate,
     selectedMenu,
+    openMenuData: data,
     isOpen: open !== undefined,
     close,
-    menu: (
+    renderMenu: (decoratePartMenu) => (
       <>
         <ViewerPartMenuKeys isEnabled={isKeyTarget} onOpen={openFromKey} />
         <ViewerModelComponentActionMenu
           isOpen={open !== undefined}
           point={open?.point}
-          data={shownData}
+          data={data === undefined || decoratePartMenu === undefined ? data : decoratePartMenu(data)}
           shouldFocusFirstItem={open?.isFromKey === true}
           returnFocusTo={returnFocusTo}
           onOpenChange={onOpenChange}

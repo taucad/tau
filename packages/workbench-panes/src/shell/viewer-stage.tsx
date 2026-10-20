@@ -9,7 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import type { ModelComponentSecondaryPointerTarget } from '@taucad/viewer/graphics/three/react/gltf-mesh';
 import { RuntimeErrorOverlay } from '@taucad/viewer/model-viewer';
 import { HoveredModelComponentBadge, placeModelComponentNameBadge } from '#component-menu/component-name-badge.jsx';
-import type { ViewerPartMenu } from '#component-menu/use-viewer-part-menu.jsx';
+import type { ViewerPartMenu, ViewerPartMenuDecorator } from '#component-menu/use-viewer-part-menu.jsx';
 import type { GraphicsRef } from '#host/workbench-host.jsx';
 import { ViewerStatusPill } from '#shell/viewer-status.jsx';
 
@@ -57,30 +57,40 @@ export type ViewerStageCanvasProps = Readonly<{
  *
  * @public
  */
-export type ViewerStageProps = Readonly<{
-  /** The viewer's graphics actor; the stage reads whether a model is drawn and which unit it is. */
-  graphicsRef: GraphicsRef;
-  /** The canvas region's element id, unique on the page; the view cube draws inside it. */
-  regionId: string;
-  /** The canvas region's accessible name. "CAD canvas" when absent. */
-  regionLabel?: string;
-  /** Draws the host's canvas element with the stage's region wiring. */
-  renderCanvas: (canvas: ViewerStageCanvasProps) => React.ReactNode;
-  /**
-   * The part menu from `useViewerPartMenu`. Without it the region takes no focus and offers no part menu, as in the
-   * agent plugin's inline card or while a host's renderer is closed.
-   */
-  partMenu?: ViewerPartMenu;
-  /** What is running or failed. Idle when absent. */
-  status?: ViewerStageStatus;
-  /** Host content under the status, such as an upgrade banner or a view notice. */
-  statusExtra?: React.ReactNode;
-  /** The bottom controls, usually `ViewerControls` with the host's slots; the hover label flips above them. */
-  controls?: React.ReactNode;
-  /** Host overlays inside the canvas region, such as an empty-state message. */
-  children?: React.ReactNode;
-  className?: string;
-}>;
+export type ViewerStageProps = Readonly<
+  Omit<React.HTMLAttributes<HTMLDivElement>, 'children' | 'className'> & {
+    /** The viewer's graphics actor; the stage reads whether a model is drawn and which unit it is. */
+    graphicsRef: GraphicsRef;
+    /** The canvas region's element id, unique on the page; the view cube draws inside it. */
+    regionId: string;
+    /** The canvas region's accessible name. "CAD canvas" when absent. */
+    regionLabel?: string;
+    /** Draws the host's canvas element with the stage's region wiring. */
+    renderCanvas: (canvas: ViewerStageCanvasProps) => React.ReactNode;
+    /**
+     * The part menu from `useViewerPartMenu`. Without it the region takes no focus and offers no part menu, as in the
+     * agent plugin's inline card or while a host's renderer is closed.
+     */
+    partMenu?: ViewerPartMenu;
+    /** Adds host-only data to the open part menu, such as the Tau app's part thumbnail. */
+    decoratePartMenu?: ViewerPartMenuDecorator;
+    /**
+     * Whether the canvas draws a model: the status sits higher over one and the hover label shows only then. Whether the
+     * graphics actor holds an artifact when absent.
+     */
+    isModelShown?: boolean;
+    /** What is running or failed. Idle when absent. */
+    status?: ViewerStageStatus;
+    /** Host content under the status, such as an upgrade banner or a view notice. */
+    statusExtra?: React.ReactNode;
+    /** The bottom controls, usually `ViewerControls` with the host's slots; the hover label flips above them. */
+    controls?: React.ReactNode;
+    /** Host overlays inside the canvas region, such as an empty-state message. */
+    children?: React.ReactNode;
+    /** Classes on the stage's root, which also takes the other HTML attributes, such as a test id or key handler. */
+    className?: string;
+  }
+>;
 
 /** Over a model the status sits in the upper sixth, below the view cube and the tab strip, above the model's middle. */
 const statusOverModelClasses = 'top-[clamp(5rem,16%,8rem)]';
@@ -158,11 +168,14 @@ export function ViewerStage({
   regionLabel = 'CAD canvas',
   renderCanvas,
   partMenu,
+  decoratePartMenu,
+  isModelShown,
   status,
   statusExtra,
   controls,
   children,
   className,
+  ...layoutProps
 }: ViewerStageProps): React.JSX.Element {
   const layoutRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
@@ -170,18 +183,25 @@ export function ViewerStage({
   const ownRegionRef = useRef<HTMLElement | null>(null);
   const regionRef = partMenu?.regionProps.ref ?? ownRegionRef;
   const [isPointerOver, setIsPointerOver] = useState(false);
-  const hasModel = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
+  const hasArtifact = useSelector(graphicsRef, (state) => state.context.artifact !== undefined);
+  const hasModel = isModelShown ?? hasArtifact;
   const unitId = useSelector(graphicsRef, (state) => state.context.modelInteractionUnitId);
 
-  const handlePointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    const layout = layoutRef.current;
-    if (layout === null) {
-      return;
-    }
-    // The controls are read at each move: the bar grows and shrinks as tools start and stop.
-    placeModelComponentNameBadge(layout, { clientX: event.clientX, clientY: event.clientY }, controlsRef.current);
-    setIsPointerOver(true);
-  }, []);
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const layout = layoutRef.current;
+      if (layout === null) {
+        return;
+      }
+      // The controls are read at each move: the bar grows and shrinks as tools start and stop.
+      placeModelComponentNameBadge(layout, { clientX: event.clientX, clientY: event.clientY }, controlsRef.current);
+      // Only entry is state: a repeated update could still render the stage once more on a later move.
+      if (!isPointerOver) {
+        setIsPointerOver(true);
+      }
+    },
+    [isPointerOver],
+  );
   const handlePointerLeave = useCallback(() => {
     setIsPointerOver(false);
   }, []);
@@ -190,6 +210,7 @@ export function ViewerStage({
 
   return (
     <div
+      {...layoutProps}
       ref={layoutRef}
       data-viewer-frame
       data-slot='viewer-stage'
@@ -201,6 +222,7 @@ export function ViewerStage({
         ref={regionRef}
         id={regionId}
         data-slot='viewer-canvas-region'
+        data-testid='cad-viewer-canvas-region'
         role='application'
         aria-label={regionLabel}
         tabIndex={partMenu === undefined ? undefined : 0}
@@ -223,7 +245,7 @@ export function ViewerStage({
         )}
         {children}
       </section>
-      {partMenu?.menu}
+      {partMenu?.renderMenu(decoratePartMenu)}
       <HoveredModelComponentBadge
         unitId={unitId}
         isSuppressed={!isPointerOver || !hasModel || partMenu?.isOpen === true}

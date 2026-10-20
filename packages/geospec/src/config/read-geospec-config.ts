@@ -1,3 +1,4 @@
+import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { defineConfigBuiltinCode } from '#config/define-config.js';
 import type { GeoSpecConfigData } from '#config/types.js';
@@ -65,7 +66,6 @@ export const readGeoSpecConfig = async (options: ReadGeoSpecConfigOptions): Prom
   if (candidates.length > 1) {
     return notApplied('invalid', `Multiple GeoSpec configs found: ${candidates.join(', ')}. Keep one.`);
   }
-  const { createEsbuildModuleVm } = await import('@taucad/esbuild/vm');
   const vm = await createEsbuildModuleVm({ filesystem });
   try {
     vm.registerModule('geospec/config', { version: '0.0.0', code: defineConfigBuiltinCode });

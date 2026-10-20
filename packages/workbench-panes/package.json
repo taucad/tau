@@ -38,6 +38,7 @@
     ".": "./src/index.ts",
     "./component-menu/component-action-menu": "./src/component-menu/component-action-menu.tsx",
     "./component-menu/component-actions": "./src/component-menu/component-actions.ts",
+    "./component-menu/component-name-badge": "./src/component-menu/component-name-badge.tsx",
     "./component-menu/viewer-component-action-menu": "./src/component-menu/viewer-component-action-menu.tsx",
     "./component-menu/viewer-secondary-gesture": "./src/component-menu/viewer-secondary-gesture.ts",
     "./components/pane-action": "./src/components/pane-action.tsx",
@@ -85,6 +86,11 @@
         "types": "./dist/component-menu/component-actions.d.mts",
         "import": "./dist/component-menu/component-actions.mjs",
         "default": "./dist/component-menu/component-actions.mjs"
+      },
+      "./component-menu/component-name-badge": {
+        "types": "./dist/component-menu/component-name-badge.d.mts",
+        "import": "./dist/component-menu/component-name-badge.mjs",
+        "default": "./dist/component-menu/component-name-badge.mjs"
       },
       "./component-menu/viewer-component-action-menu": {
         "types": "./dist/component-menu/viewer-component-action-menu.d.mts",

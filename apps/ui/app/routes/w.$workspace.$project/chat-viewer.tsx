@@ -21,7 +21,6 @@ import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state
 import type { ModelComponentSecondaryPointerTarget } from '@taucad/viewer/graphics/three/react/gltf-mesh';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
-import { popoverSurfaceVariants } from '@taucad/ui/components/popover.variants';
 import { useProject } from '#hooks/use-project.js';
 import { useFileTreeSelector } from '#hooks/use-file-tree.js';
 import { useFileContent } from '#hooks/use-file-content.js';
@@ -35,7 +34,6 @@ import {
   GraphicsProvider,
   useGraphics,
   useGraphicsSelector,
-  useKinematicsSelector,
   useModelInteractionSelector,
 } from '@taucad/viewer/hooks/use-graphics';
 import type { ViewCameraSeed } from '@taucad/viewer/services/graphics-camera-registry';
@@ -51,7 +49,6 @@ import {
   deriveModelInteractionUnitId,
   getModelInteractionUnitState,
 } from '@taucad/viewer/machines/model-interaction.machine';
-import { describeKinematicsHover, getKinematicsUnitState } from '@taucad/viewer/machines/kinematics.machine';
 import {
   selectCadEvaluation,
   selectCadCapabilities,
@@ -74,15 +71,15 @@ import type {
   ViewerSecondaryGesturePoint,
   ViewerSecondaryGestureState,
 } from '@taucad/workbench-panes/component-menu/viewer-secondary-gesture';
+import {
+  HoveredModelComponentBadge,
+  placeModelComponentNameBadge,
+} from '@taucad/workbench-panes/component-menu/component-name-badge';
 import { ExactMeasurementProvider } from '@taucad/viewer/graphics/three/react/exact-measurement';
 import type { ExactOccurrenceDistanceRequest } from '@taucad/viewer/graphics/three/react/exact-measurement';
 import { measureExactOccurrenceDistance } from '#workers/measurement-exact.client.js';
 
 const emptyViewerPreviewSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map();
-
-const componentNameBadgeRightEdgeThresholdPx = 220;
-/** Within this distance of the bottom controls' top edge the badge flips above the pointer. */
-const componentNameBadgeBottomThresholdPx = 56;
 
 /** One visible Dockview pane owns one runtime view; the CAD unit separately keeps its default view. */
 function usePaneRuntimeView({
@@ -723,23 +720,6 @@ const ViewerContent = memo(function ({
   const presentedArtifactKey = useGraphicsSelector((state) => state.context.artifactKey);
   const presentedSourceFile = useGraphicsSelector((state) => state.context.artifactSourceFile);
   const presentedKey = useGraphicsSelector((state) => state.context.gltfPresentation.presentedKey);
-  const componentNameForPointer = useModelInteractionSelector((state) => {
-    const unit = getModelInteractionUnitState(state.context, modelInteractionUnitId);
-    const { hoveredComponentId } = unit;
-    // The open action menu already names its part, and the badge would draw over it.
-    if (!hoveredComponentId || viewerActionMenu) {
-      return undefined;
-    }
-    return unit.manifest?.nodesById[hoveredComponentId]?.name;
-  });
-  const hoveredComponentId = useModelInteractionSelector(
-    (state) => getModelInteractionUnitState(state.context, modelInteractionUnitId).hoveredComponentId,
-  );
-  const kinematicsDetail = useKinematicsSelector((state) =>
-    hoveredComponentId
-      ? describeKinematicsHover(getKinematicsUnitState(state.context, modelInteractionUnitId), hoveredComponentId)
-      : undefined,
-  );
   const viewerActionMenuData = useModelInteractionSelector((state): ModelComponentActionMenuData | undefined => {
     if (!viewerActionMenu) {
       return undefined;
@@ -878,27 +858,12 @@ const ViewerContent = memo(function ({
   const updateViewerPointerPosition = useCallback(
     (event: React.PointerEvent<HTMLDivElement>): void => {
       const layout = viewerLayoutRef.current;
-      const viewerBounds = layout?.getBoundingClientRect();
-      if (!layout || !viewerBounds) {
+      if (!layout) {
         setIsPointerOverViewer(false);
         return;
       }
 
-      const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
-      const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
-      // Read at each move rather than kept: the bar grows and shrinks as tools start and stop.
-      const controlsTop =
-        (bottomControlsRef.current?.getBoundingClientRect().top ?? viewerBounds.bottom) - viewerBounds.top;
-      layout.style.setProperty('--viewer-hover-label-x', `${x}px`);
-      layout.style.setProperty('--viewer-hover-label-y', `${y}px`);
-      layout.style.setProperty(
-        '--viewer-hover-label-translate-x',
-        x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'calc(-100% - 8px)' : '8px',
-      );
-      layout.style.setProperty(
-        '--viewer-hover-label-translate-y',
-        y > controlsTop - componentNameBadgeBottomThresholdPx ? 'calc(-100% - 10px)' : '10px',
-      );
+      placeModelComponentNameBadge(layout, event, bottomControlsRef.current);
       if (!isPointerOverViewer) {
         setIsPointerOverViewer(true);
       }
@@ -1109,9 +1074,11 @@ const ViewerContent = memo(function ({
         onOpenChange={handleViewerActionMenuOpenChange}
       />
 
-      {!isGeometryUnitClosed && isPointerOverViewer && componentNameForPointer ? (
-        <ModelComponentNameBadge componentName={componentNameForPointer} detail={kinematicsDetail} />
-      ) : undefined}
+      {/* The open action menu already names its part, and the badge would draw over it. */}
+      <HoveredModelComponentBadge
+        unitId={modelInteractionUnitId}
+        isSuppressed={isGeometryUnitClosed || !isPointerOverViewer || viewerActionMenu !== undefined}
+      />
 
       {/* Reopen-renderer overlay — shown when the geometry unit was closed */}
       {isGeometryUnitClosed && (
@@ -1172,34 +1139,6 @@ const ViewerContent = memo(function ({
     </div>
   );
 });
-
-function ModelComponentNameBadge({
-  componentName,
-  detail,
-}: {
-  readonly componentName: string;
-  /** A second, quieter line: what the part does in the mechanism while the Kinematics pane is open. */
-  readonly detail?: string;
-}): React.JSX.Element {
-  return (
-    <div
-      aria-hidden='true'
-      data-testid='model-component-name-badge'
-      className={cn(
-        popoverSurfaceVariants(),
-        'pointer-events-none absolute z-20 flex max-w-[min(18rem,calc(100%-1rem))] flex-col px-2 py-1 text-xs',
-      )}
-      style={{
-        left: 'var(--viewer-hover-label-x, 0px)',
-        top: 'var(--viewer-hover-label-y, 0px)',
-        translate: 'var(--viewer-hover-label-translate-x, 8px) var(--viewer-hover-label-translate-y, 10px)',
-      }}
-    >
-      <span className='truncate font-medium'>{componentName}</span>
-      {detail ? <span className='truncate text-muted-foreground'>{detail}</span> : null}
-    </div>
-  );
-}
 
 /** Keep file absence and rendering errors hidden until the authored checkout is acknowledged. */
 export const ChatViewer = memo(function (props: ChatViewerProps): React.JSX.Element {

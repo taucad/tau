@@ -5,13 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { loadGeoSpecConfig } from '#config/node/index.js';
 import { resolveGeoSpecConfig } from '#config/validate.js';
 import { createConfigFixture } from '#config/fixtures.test-support.js';
+import { defineConfig } from '#config/index.js';
 import type { GeoSpecConfig } from '#config/index.js';
+import type { GeoSpecModelExporter } from '#model/types.js';
 import type { GeoSpecDiscoveryFileSystem } from '#runner/discovery.js';
 import { discoverGeoSpecFiles } from '#runner/discovery.js';
 // oxlint-disable-next-line no-restricted-imports -- Read the literal JSON fixture without a TypeScript source alias.
 import expected from './__fixtures__/expected.json' with { type: 'json' };
-// oxlint-disable-next-line no-restricted-imports -- Read the same project-relative JSON data as native config fixtures.
-import manifest from './__fixtures__/tau.json' with { type: 'json' };
 
 const filesystem: GeoSpecDiscoveryFileSystem = {
   readdir,
@@ -30,7 +30,7 @@ describe('trusted Node GeoSpec configuration', () => {
     });
   });
 
-  it('should import Tau data and replace whole fields without mutating either input', async () => {
+  it('should replace whole fields without mutating either input', async () => {
     const projectPath = await createConfigFixture(['mjs']);
     const configPath = await realpath(join(projectPath, 'geospec.config.mjs'));
     const imported = (await import(pathToFileURL(configPath).href)) as { default: unknown };
@@ -41,9 +41,6 @@ describe('trusted Node GeoSpec configuration', () => {
       testNamePattern: undefined,
       testTimeout: 600,
       bail: false,
-      cache: false,
-      cacheDirectory: '.tau/overridden',
-      subjects: { alternate: { kind: 'tau-project', manifestPath: 'tau.json', manifest, format: 'glb' } },
     };
     const beforeOverrides = structuredClone(overrides);
     expect(await loadGeoSpecConfig({ projectPath })).toStrictEqual({ configPath, options: expected.configured });
@@ -53,8 +50,26 @@ describe('trusted Node GeoSpec configuration', () => {
     });
     expect(imported.default).toStrictEqual(before);
     expect(overrides).toStrictEqual(beforeOverrides);
-    const emptySubjects = await loadGeoSpecConfig({ projectPath, overrides: { subjects: {} } });
-    expect(emptySubjects.options.subjects).toStrictEqual({});
+  });
+
+  it('should resolve a defineConfig import to this copy when the project has no geospec install', async () => {
+    const projectPath = await createConfigFixture(['ts']);
+    expect(await loadGeoSpecConfig({ projectPath })).toStrictEqual({
+      configPath: await realpath(join(projectPath, 'geospec.config.ts')),
+      options: expected.configured,
+    });
+  });
+
+  it('should keep live exporters by identity', () => {
+    const exporter: GeoSpecModelExporter = {
+      id: 'fixture',
+      extensions: ['py'],
+      capabilities: { formats: ['step'] },
+      export: async () => ({ bytes: new Uint8Array([1]), format: 'step' }),
+    };
+    const resolved = resolveGeoSpecConfig(defineConfig({ exporters: [exporter] }));
+    expect(resolved.exporters?.[0]).toBe(exporter);
+    expect(defineConfig({ bail: true })).toStrictEqual({ bail: true });
   });
 
   it('should reject multiple implicit files and honor an explicit selection', async () => {
@@ -92,23 +107,18 @@ describe('trusted Node GeoSpec configuration', () => {
     { value: { testTimeout: 0 }, message: 'GeoSpec testTimeout must be positive finite milliseconds.' },
     { value: { bail: 'yes' }, message: 'GeoSpec bail must be a boolean.' },
     { value: { include: 'cases' }, message: 'GeoSpec include must be an array of strings.' },
+    { value: { cache: true }, message: "Unsupported GeoSpec config field 'cache'." },
+    { value: { cacheDirectory: '.tau' }, message: "Unsupported GeoSpec config field 'cacheDirectory'." },
+    { value: { subjects: {} }, message: "Unsupported GeoSpec config field 'subjects'." },
+    { value: { runtime: [] }, message: "Unsupported GeoSpec config field 'runtime'." },
+    { value: { exporters: {} }, message: 'GeoSpec exporters must be an array of model exporters.' },
+    { value: { exporters: [{ id: '' }] }, message: 'GeoSpec exporters[0] must have a non-empty string id.' },
+    {
+      value: { exporters: [{ id: 'x', extensions: ['py'], capabilities: { formats: ['step'] } }] },
+      message: "GeoSpec exporter 'x' must have an export function.",
+    },
   ])('should reject an ordinary invalid setting: $message', ({ value, message }) => {
     expect(() => resolveGeoSpecConfig(value)).toThrow(TypeError);
     expect(() => resolveGeoSpecConfig(value)).toThrow(message);
-  });
-
-  it('should validate descriptor data without claiming Tau manifest schema admission', () => {
-    const data = {
-      subjects: {
-        part: { kind: 'tau-project', manifestPath: 'tau.json', manifest: { unvalidated: true }, format: 'step' },
-      },
-    };
-    expect(resolveGeoSpecConfig(data)).toStrictEqual(data);
-    const wrongManifest = { subjects: { part: { ...data.subjects.part, manifest: [] } } };
-    expect(() => resolveGeoSpecConfig(wrongManifest)).toThrow(TypeError);
-    expect(() => resolveGeoSpecConfig(wrongManifest)).toThrow('GeoSpec manifest must be a plain object.');
-    const wrongFormat = { subjects: { part: { ...data.subjects.part, format: 'stl' } } };
-    expect(() => resolveGeoSpecConfig(wrongFormat)).toThrow(TypeError);
-    expect(() => resolveGeoSpecConfig(wrongFormat)).toThrow("GeoSpec Tau descriptor format must be 'step' or 'glb'.");
   });
 });

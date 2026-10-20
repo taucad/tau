@@ -343,14 +343,6 @@
       "lookups": 1
     },
     {
-      "id": "typescript:GeoSpecTauProjectDescriptor.parameters",
-      "name": "parameters",
-      "score": 9,
-      "workspace": 4,
-      "examples": 4,
-      "lookups": 1
-    },
-    {
       "id": "typescript:GeometryProvenance.parameters",
       "name": "parameters",
       "score": 9,
@@ -664,14 +656,6 @@
     },
     {
       "id": "typescript:GeoSpecNativeLoadModelOptions.format",
-      "name": "format",
-      "score": 3,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 3
-    },
-    {
-      "id": "typescript:GeoSpecTauProjectDescriptor.format",
       "name": "format",
       "score": 3,
       "workspace": 0,
@@ -1169,14 +1153,6 @@
     {
       "id": "typescript:GeoSpecComponentInterferencePairExpectation",
       "name": "GeoSpecComponentInterferencePairExpectation",
-      "score": 1,
-      "workspace": 0,
-      "examples": 0,
-      "lookups": 1
-    },
-    {
-      "id": "typescript:GeoSpecConfig.cache",
-      "name": "cache",
       "score": 1,
       "workspace": 0,
       "examples": 0,

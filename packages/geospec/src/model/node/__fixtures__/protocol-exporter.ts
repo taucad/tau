@@ -27,6 +27,10 @@ switch (mode) {
     process.exitCode = 3;
     break;
   }
+  case 'hang': {
+    setTimeout(() => undefined, 60_000);
+    break;
+  }
   case 'escape': {
     print({ protocol: 1, format: 'glb', primary: '../outside.glb', consumedSources: [] });
     break;

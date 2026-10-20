@@ -42,6 +42,8 @@ export type CommandExporterOptions = {
   readonly cwd?: string;
   /** Extra environment variables, merged over this process's. */
   readonly env?: Readonly<Record<string, string>>;
+  /** Positive milliseconds one export may run before the command is killed and the export fails. */
+  readonly exportTimeout?: number;
 };
 
 const protocolError = z.object({
@@ -170,10 +172,13 @@ export const commandExporter = (options: CommandExporterOptions): GeoSpecModelEx
   if (options.capabilities.formats.length === 0) {
     throw new TypeError(`commandExporter '${options.id}' must declare at least one format.`);
   }
+  if (options.exportTimeout !== undefined && !(Number.isFinite(options.exportTimeout) && options.exportTimeout > 0)) {
+    throw new TypeError(`commandExporter '${options.id}' exportTimeout must be positive finite milliseconds.`);
+  }
   if (options.capabilities.inlineSources === true) {
     throw new TypeError(`commandExporter '${options.id}' cannot accept inline sources: protocol 1 passes files only.`);
   }
-  const { id } = options;
+  const { id, exportTimeout } = options;
   return {
     id,
     extensions: [...options.extensions],
@@ -182,14 +187,24 @@ export const commandExporter = (options: CommandExporterOptions): GeoSpecModelEx
       const project = request.projectPath ?? options.cwd ?? process.cwd();
       const out = await mkdtemp(join(tmpdir(), 'geospec-export-'));
       try {
+        const exportDeadline = exportTimeout === undefined ? undefined : AbortSignal.timeout(exportTimeout);
+        const signals = [request.signal, exportDeadline].filter((signal) => signal !== undefined);
         let result: CommandResult;
         try {
           result = await run(executable, [...leading, ...protocolArguments(request, project, out)], {
             cwd: options.cwd ?? project,
             env: { ...process.env, ...options.env },
-            signal: request.signal,
+            signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
           });
         } catch (error) {
+          if (exportDeadline?.aborted === true && request.signal?.aborted !== true) {
+            throw failed({
+              id,
+              file: request.file,
+              reason: `it ran longer than ${String(exportTimeout)} ms.`,
+              details: { exportTimeout },
+            });
+          }
           throw failed({
             id,
             file: request.file,

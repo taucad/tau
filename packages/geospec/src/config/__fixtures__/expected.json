@@ -4,86 +4,14 @@
     "exclude": ["**/skip.geospec.ts"],
     "testNamePattern": "ordinary",
     "testTimeout": 1200,
-    "bail": true,
-    "cache": true,
-    "cacheDirectory": ".tau/config-cache",
-    "subjects": {
-      "part": {
-        "kind": "tau-project",
-        "manifestPath": "tau.json",
-        "manifest": {
-          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
-          "name": "C1 ordinary fixture",
-          "description": "Config data import control",
-          "tags": [],
-          "assets": {
-            "main": {
-              "entryPath": "main.ts"
-            }
-          }
-        },
-        "format": "step",
-        "parameters": {
-          "width": 4
-        }
-      }
-    }
-  },
-  "overrides": {
-    "include": [],
-    "exclude": [],
-    "testTimeout": 600,
-    "bail": false,
-    "cache": false,
-    "cacheDirectory": ".tau/overridden",
-    "subjects": {
-      "alternate": {
-        "kind": "tau-project",
-        "manifestPath": "tau.json",
-        "manifest": {
-          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
-          "name": "C1 ordinary fixture",
-          "description": "Config data import control",
-          "tags": [],
-          "assets": {
-            "main": {
-              "entryPath": "main.ts"
-            }
-          }
-        },
-        "format": "glb"
-      }
-    }
+    "bail": true
   },
   "resolved": {
     "include": [],
     "exclude": [],
     "testNamePattern": "ordinary",
     "testTimeout": 600,
-    "bail": false,
-    "cache": false,
-    "cacheDirectory": ".tau/overridden",
-    "subjects": {
-      "alternate": {
-        "kind": "tau-project",
-        "manifestPath": "tau.json",
-        "manifest": {
-          "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-          "id": "proj_aaaaaaaaaaaaaaaaaaaaa",
-          "name": "C1 ordinary fixture",
-          "description": "Config data import control",
-          "tags": [],
-          "assets": {
-            "main": {
-              "entryPath": "main.ts"
-            }
-          }
-        },
-        "format": "glb"
-      }
-    }
+    "bail": false
   },
   "noConfig": {},
   "discoveryConfigured": ["cases/keep.geospec.ts"],

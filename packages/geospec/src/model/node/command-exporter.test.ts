@@ -99,11 +99,36 @@ describe('commandExporter', () => {
     expect(error.diagnostics).toMatchObject([{ code: 'GEOSPEC_EXPORTER_FAILED' }]);
   });
 
+  it('should kill a command that outlives exportTimeout and report GEOSPEC_EXPORTER_FAILED', async () => {
+    const error = await rejection(
+      exporterFor('hang', { exportTimeout: 200 }).export({ file: 'main.py', format: 'glb' }),
+    );
+
+    expect(error.diagnostics).toMatchObject([
+      { code: 'GEOSPEC_EXPORTER_FAILED', message: /ran longer than 200 ms/u, details: { exportTimeout: 200 } },
+    ]);
+  });
+
+  it('should report a caller abort as an abort, not a timeout', async () => {
+    const controller = new AbortController();
+    const pending = exporterFor('hang', { exportTimeout: 30_000 }).export({
+      file: 'main.py',
+      format: 'glb',
+      signal: controller.signal,
+    });
+    controller.abort();
+    const error = await rejection(pending);
+
+    expect(error.diagnostics[0]?.message).not.toMatch(/ran longer/u);
+  });
+
   it('should refuse inline sources and incomplete options at construction', () => {
     expect(() => exporterFor('ok', { capabilities: { formats: ['glb'], inlineSources: true } })).toThrow(
       /inline sources/u,
     );
     expect(() => exporterFor('ok', { command: [] })).toThrow(TypeError);
     expect(() => exporterFor('ok', { capabilities: { formats: [] } })).toThrow(/format/u);
+    expect(() => exporterFor('ok', { exportTimeout: 0 })).toThrow(/exportTimeout/u);
+    expect(() => exporterFor('ok', { exportTimeout: Number.POSITIVE_INFINITY })).toThrow(/exportTimeout/u);
   });
 });

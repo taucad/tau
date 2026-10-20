@@ -26,7 +26,6 @@ const packageConfig: UserConfig = {
   format: 'esm',
   outDir: 'dist',
   external: [
-    '@taucad/project-core',
     '@taucad/runtime',
     '@taucad/runtime/types',
     '@taucad/esbuild/vm',

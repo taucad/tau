@@ -1,9 +1,7 @@
-/* oxlint-disable no-barrel-files/no-barrel-files -- Public portable configuration types. */
-/** Portable configuration types; the native loader is in config/node. @module */
+/* oxlint-disable no-barrel-files/no-barrel-files -- Public portable configuration entry point. */
+/** Portable configuration: types, `defineConfig` and the spec-VM reader; the native loader is in config/node. @module */
 
-export type {
-  GeoSpecConfig,
-  GeoSpecTauProjectDescriptor,
-  LoadedGeoSpecConfig,
-  LoadGeoSpecConfigOptions,
-} from '#config/types.js';
+export { defineConfig } from '#config/define-config.js';
+export { readGeoSpecConfig } from '#config/read-geospec-config.js';
+export type { ReadGeoSpecConfigOptions, ReadGeoSpecConfigResult } from '#config/read-geospec-config.js';
+export type { GeoSpecConfig, GeoSpecConfigData, LoadedGeoSpecConfig, LoadGeoSpecConfigOptions } from '#config/types.js';

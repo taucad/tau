@@ -127,7 +127,6 @@
   },
   "dependencies": {
     "@taucad/esbuild": "workspace:*",
-    "@taucad/project-core": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "zod": "catalog:"
   },

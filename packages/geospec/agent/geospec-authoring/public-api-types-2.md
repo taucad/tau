@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-61 top-level symbols. Signatures are verbatim typescript.
+60 top-level symbols. Signatures are verbatim typescript.
 
 // Inline code-CAD model load options
 LoadModelCodeOptions: {
@@ -274,6 +274,8 @@ CommandExporterOptions: {
     readonly cwd?: string;
     /** Extra environment variables, merged over this process's. */
     readonly env?: Readonly<Record<string, string>>;
+    /** Positive milliseconds one export may run before the command is killed and the export fails. */
+    readonly exportTimeout?: number;
 }
 
   readonly id: string
@@ -292,6 +294,9 @@ CommandExporterOptions: {
 
   // Extra environment variables, merged over this process's
   readonly env?: Readonly<Record<string, string>>
+
+  // Positive milliseconds one export may run before the command is killed and the export fails
+  readonly exportTimeout?: number
 
 // Collects suites, tests, assertions, and async completion state for one GeoSpec module execution
 GeoSpecCollector: {
@@ -1477,19 +1482,3 @@ GeoSpecPmiNumber: {
   readonly millimetres: string
 
   readonly name: string
-
-// A uniquely forward-transferred face
-GeoSpecPmiFaceAssociation: {
-    readonly sourceFaceId: number;
-    readonly occurrenceRoute: readonly number[];
-    readonly occurrence: number | null;
-    readonly publicFaceOrdinal: number;
-}
-
-  readonly sourceFaceId: number
-
-  readonly occurrenceRoute: readonly number[]
-
-  readonly occurrence: number | null
-
-  readonly publicFaceOrdinal: number

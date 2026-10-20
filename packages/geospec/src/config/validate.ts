@@ -1,6 +1,5 @@
-import { assertGeoSpecJsonValue } from '#engine/protocol.js';
-import type { GeoSpecConfig, GeoSpecTauProjectDescriptor } from '#config/types.js';
-import type { JSONValue } from '@taucad/runtime/types';
+import type { GeoSpecConfig } from '#config/types.js';
+import type { GeoSpecModelExporter } from '#model/types.js';
 
 const object = (value: unknown, label: string): Record<string, unknown> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -13,44 +12,29 @@ const object = (value: unknown, label: string): Record<string, unknown> => {
   return value as Record<string, unknown>;
 };
 
-const jsonObject = (value: unknown, label: string): Record<string, JSONValue> => {
-  const result = object(value, label);
-  assertGeoSpecJsonValue(result);
-  return result as Record<string, JSONValue>;
-};
-
-const descriptor = (value: unknown): GeoSpecTauProjectDescriptor => {
-  const input = object(value, 'GeoSpec Tau descriptor');
-  for (const key of Reflect.ownKeys(input)) {
-    if (typeof key !== 'string' || !['kind', 'manifestPath', 'manifest', 'format', 'parameters'].includes(key)) {
-      throw new TypeError(`Unsupported GeoSpec Tau descriptor field '${String(key)}'.`);
-    }
+const exporter = (value: unknown, index: number): GeoSpecModelExporter => {
+  const label = `GeoSpec exporters[${String(index)}]`;
+  if (value === null || typeof value !== 'object') {
+    throw new TypeError(`${label} must be a model exporter object.`);
   }
-  const { kind, manifestPath, manifest, format, parameters } = input;
-  if (kind !== 'tau-project') {
-    throw new TypeError("GeoSpec Tau descriptor kind must be 'tau-project'.");
+  const { id, extensions, capabilities, export: run } = value as Partial<Record<keyof GeoSpecModelExporter, unknown>>;
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new TypeError(`${label} must have a non-empty string id.`);
+  }
+  if (!Array.isArray(extensions) || !extensions.every((extension) => typeof extension === 'string')) {
+    throw new TypeError(`GeoSpec exporter '${id}' extensions must be an array of strings.`);
   }
   if (
-    typeof manifestPath !== 'string' ||
-    manifestPath.length === 0 ||
-    manifestPath.length > 2048 ||
-    manifestPath.includes('\0') ||
-    manifestPath.includes('\\') ||
-    manifestPath.startsWith('/') ||
-    manifestPath.split('/').some((segment) => segment.length === 0 || segment === '.' || segment === '..')
+    capabilities === null ||
+    typeof capabilities !== 'object' ||
+    !Array.isArray((capabilities as { formats?: unknown }).formats)
   ) {
-    throw new TypeError('GeoSpec manifestPath must be a normalized project-relative POSIX path.');
+    throw new TypeError(`GeoSpec exporter '${id}' must declare capabilities with a formats array.`);
   }
-  if (format !== 'step' && format !== 'glb') {
-    throw new TypeError("GeoSpec Tau descriptor format must be 'step' or 'glb'.");
+  if (typeof run !== 'function') {
+    throw new TypeError(`GeoSpec exporter '${id}' must have an export function.`);
   }
-  return {
-    kind,
-    manifestPath,
-    manifest: jsonObject(manifest, 'GeoSpec manifest'),
-    format,
-    ...(parameters === undefined ? {} : { parameters: jsonObject(parameters, 'GeoSpec parameters') }),
-  };
+  return value as GeoSpecModelExporter;
 };
 
 const validateConfig = (value: unknown): GeoSpecConfig => {
@@ -77,8 +61,7 @@ const validateConfig = (value: unknown): GeoSpecConfig => {
         result[key] = items;
         break;
       }
-      case 'testNamePattern':
-      case 'cacheDirectory': {
+      case 'testNamePattern': {
         if (entry === undefined) {
           break;
         }
@@ -98,8 +81,7 @@ const validateConfig = (value: unknown): GeoSpecConfig => {
         result[key] = entry;
         break;
       }
-      case 'bail':
-      case 'cache': {
+      case 'bail': {
         if (entry === undefined) {
           break;
         }
@@ -109,19 +91,14 @@ const validateConfig = (value: unknown): GeoSpecConfig => {
         result[key] = entry;
         break;
       }
-      case 'subjects': {
+      case 'exporters': {
         if (entry === undefined) {
           break;
         }
-        const subjects = object(entry, 'GeoSpec subjects');
-        result.subjects = Object.fromEntries(
-          Reflect.ownKeys(subjects).map((name) => {
-            if (typeof name !== 'string') {
-              throw new TypeError('GeoSpec subjects keys must be strings.');
-            }
-            return [name, descriptor(subjects[name])];
-          }),
-        );
+        if (!Array.isArray(entry)) {
+          throw new TypeError('GeoSpec exporters must be an array of model exporters.');
+        }
+        result.exporters = (entry as unknown[]).map((item, index) => exporter(item, index));
         break;
       }
       default: {

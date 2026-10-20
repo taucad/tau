@@ -35,7 +35,7 @@ const noBinding = 'Cannot find native binding.';
 
 /** A candidate the napi-rs loader tried that is not installed, or a platform it has no candidate for. */
 const absentCandidate =
-  /^(?:Cannot find module '(?:\.\/geospec-engine\.|geospec-engine-)|Unsupported architecture on )/v;
+  /^(?:Cannot find module '(?:\.\/geospec-engine\.|geospec-engine-)|Unsupported architecture on )/u;
 
 /**
  * The messages of an error and its causes, outermost first.

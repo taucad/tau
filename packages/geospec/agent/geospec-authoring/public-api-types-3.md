@@ -1,6 +1,6 @@
 # geospec — Types (3)
 
-28 top-level symbols. Signatures are verbatim typescript.
+30 top-level symbols. Signatures are verbatim typescript.
 
 // Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
 MinimumDistanceFact: {
@@ -363,6 +363,81 @@ GeoSpecFixedMatcherDescriptor: {
   readonly expected: 'true'
 
   readonly mode: 'sync'
+
+// The platform the CLI runs against
+GeoSpecCliHost: {
+    /** Absolute project root for a relative `projectPath`. */
+    cwd(): string;
+    write(line: string): void;
+    /** Recursive discovery filesystem. */
+    discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
+    /**
+     * Import the project's `geospec.config.*`, or the explicit one, for its data fields.
+     * @throws Error when the config is ambiguous, invalid or fails to import.
+     */
+    loadConfig(options: {
+        projectPath: string;
+        configPath: string | undefined;
+    }): Promise<{
+        readonly configPath?: string;
+        readonly options: GeoSpecConfigData;
+    }>;
+    /** Build the runner the selected files execute on; its workers import the same config for its exporters. */
+    createRunner(options: {
+        projectPath: string;
+        configPath: string | undefined;
+        workers: number | undefined;
+        shardTimeout: number | undefined;
+    }): GeoSpecRunner;
+}
+
+  // Absolute project root for a relative `projectPath`
+  // GeoSpecCliHost.cwd (method)
+  cwd(): string;
+
+  // GeoSpecCliHost.write (method)
+  write(line: string): void;
+
+  // Recursive discovery filesystem
+  // GeoSpecCliHost.discoveryFileSystem (method)
+  discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
+
+  // Import the project's `geospec.config.*`, or the explicit one, for its data fields
+  // Throws: Error when the config is ambiguous, invalid or fails to import.
+  // GeoSpecCliHost.loadConfig (method)
+  loadConfig(options: {
+          projectPath: string;
+          configPath: string | undefined;
+      }): Promise<{
+          readonly configPath?: string;
+          readonly options: GeoSpecConfigData;
+      }>;
+
+  // Build the runner the selected files execute on
+  // GeoSpecCliHost.createRunner (method)
+  createRunner(options: {
+          projectPath: string;
+          configPath: string | undefined;
+          workers: number | undefined;
+          shardTimeout: number | undefined;
+      }): GeoSpecRunner;
+
+// Options for {@link createNodeGeoSpecCliHost}
+NodeGeoSpecCliHostOptions: {
+    /** Report sink used by embedding hosts and tests; defaults to stdout. */
+    readonly reportStream?: (text: string) => void;
+    /**
+     * URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test`
+     * can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`).
+     */
+    readonly exporterModules?: readonly string[];
+}
+
+  // Report sink used by embedding hosts and tests
+  readonly reportStream?: (text: string) => void
+
+  // URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test` can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`)
+  readonly exporterModules?: readonly string[]
 
 // Installed Vitest matcher map and lifecycle settlement hook
 GeoSpecVitestAdapter: {

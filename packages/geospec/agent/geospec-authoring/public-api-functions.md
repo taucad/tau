@@ -1,6 +1,6 @@
 # geospec — Functions
 
-44 top-level symbols. Signatures are verbatim typescript.
+46 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -217,6 +217,17 @@ export declare function evaluateGeoSpecNativeQuery(options: GeoSpecNativeQueryOp
 // resolveGeoSpecMaximumWorkUnitLimit (function)
 export declare function resolveGeoSpecMaximumWorkUnitLimit(maximum?: number): number;
 //   maximum: The host's configured maximum, when it sets one
+
+// Run the CLI
+// runGeoSpecCli (function)
+export declare function runGeoSpecCli(argv: readonly string[], host: GeoSpecCliHost): Promise<number>;
+//   argv: Arguments after the executable and script
+//   host: The injected platform
+
+// Build the Node CLI host
+// createNodeGeoSpecCliHost (function)
+export declare function createNodeGeoSpecCliHost(options?: NodeGeoSpecCliHostOptions): GeoSpecCliHost;
+//   options: Report sink and host-supplied exporter modules
 
 // Create Vitest matchers over an existing runner-independent client
 // createGeoSpecVitestAdapter (function)

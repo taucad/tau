@@ -1,6 +1,6 @@
 # geospec public API index
 
-geospec 0.1.0-beta.8 · 916 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.8 · 927 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -47,12 +47,14 @@ createGeoSpecAssertionClient (function) [lines 195-198] — Create a standalone 
 createGeoSpecMatcherMethods (function) [lines 200-207] — Create the one registry-derived matcher surface used by every JavaScript…
 evaluateGeoSpecNativeQuery (function) [lines 209-213] — Submit an ancillary query with positive polarity through the native…
 resolveGeoSpecMaximumWorkUnitLimit (function) [lines 215-219] — Resolve a host's largest authored work-unit budget
-createGeoSpecVitestAdapter (function) [lines 221-224] — Create Vitest matchers over an existing runner-independent client
-installGeoSpecVitest (function) [lines 226-229] — Register GeoSpec matchers and their settlement hook in the active…
-setupGeoSpecVitest (function) [lines 231-234] — Create a native client and register it with the active…
-defineConfig (function) [lines 236-240] — Type a `geospec.config.*` default export
-readGeoSpecConfig (function) [lines 242-246] — Read a project's `geospec.config.*` data fields through the spec VM,…
-loadGeoSpecConfig (function) [lines 248-252] — Load one trusted project config using Node's native module loader
+runGeoSpecCli (function) [lines 221-225] — Run the CLI
+createNodeGeoSpecCliHost (function) [lines 227-230] — Build the Node CLI host
+createGeoSpecVitestAdapter (function) [lines 232-235] — Create Vitest matchers over an existing runner-independent client
+installGeoSpecVitest (function) [lines 237-240] — Register GeoSpec matchers and their settlement hook in the active…
+setupGeoSpecVitest (function) [lines 242-245] — Create a native client and register it with the active…
+defineConfig (function) [lines 247-251] — Type a `geospec.config.*` default export
+readGeoSpecConfig (function) [lines 253-257] — Read a project's `geospec.config.*` data fields through the spec VM,…
+loadGeoSpecConfig (function) [lines 259-263] — Load one trusted project config using Node's native module loader
 
 ## Constants — `public-api-constants.md`
 
@@ -900,31 +902,40 @@ GeoSpecFixedMatcherDescriptor (type) [lines 354-365] [3 members] — A canonical
   GeoSpecFixedMatcherDescriptor.contract (property)
   GeoSpecFixedMatcherDescriptor.expected (property)
   GeoSpecFixedMatcherDescriptor.mode (property)
-GeoSpecVitestAdapter (type) [lines 367-376] [2 members] — Installed Vitest matcher map and lifecycle settlement hook
+GeoSpecCliHost (type) [lines 367-423] [5 members] — The platform the CLI runs against
+  GeoSpecCliHost.cwd (method) — Absolute project root for a relative `projectPath`
+  GeoSpecCliHost.write (method)
+  GeoSpecCliHost.discoveryFileSystem (method) — Recursive discovery filesystem
+  GeoSpecCliHost.loadConfig (method) — Import the project's `geospec.config.*`, or the explicit one, for its…
+  GeoSpecCliHost.createRunner (method) — Build the runner the selected files execute on
+NodeGeoSpecCliHostOptions (type) [lines 425-440] [2 members] — Options for {@link createNodeGeoSpecCliHost}
+  NodeGeoSpecCliHostOptions.reportStream (property) — Report sink used by embedding hosts and tests
+  NodeGeoSpecCliHostOptions.exporterModules (property) — URLs of modules each pool worker imports for exporters that…
+GeoSpecVitestAdapter (type) [lines 442-451] [2 members] — Installed Vitest matcher map and lifecycle settlement hook
   GeoSpecVitestAdapter.matchers (property)
   GeoSpecVitestAdapter.flush (method)
-ReadGeoSpecConfigOptions (type) [lines 378-390] [2 members] — Options for {@link readGeoSpecConfig}
+ReadGeoSpecConfigOptions (type) [lines 453-465] [2 members] — Options for {@link readGeoSpecConfig}
   ReadGeoSpecConfigOptions.filesystem (property) — The project filesystem
   ReadGeoSpecConfigOptions.projectPath (property) — Rooted directory holding the config, in the filesystem's spelling
-ReadGeoSpecConfigResult (type) [lines 392-410] [1 members] — Outcome of {@link readGeoSpecConfig}
+ReadGeoSpecConfigResult (type) [lines 467-485] [1 members] — Outcome of {@link readGeoSpecConfig}
   ReadGeoSpecConfigResult.status (property)
-GeoSpecConfig (type) [lines 412-441] [6 members] — Trusted project configuration using existing discovery and runner options
+GeoSpecConfig (type) [lines 487-516] [6 members] — Trusted project configuration using existing discovery and runner options
   GeoSpecConfig.include (property)
   GeoSpecConfig.exclude (property)
   GeoSpecConfig.testNamePattern (property)
   GeoSpecConfig.testTimeout (property) — Positive finite milliseconds
   GeoSpecConfig.bail (property)
   GeoSpecConfig.exporters (property) — Model exporters for `loadModel({ file })`
-GeoSpecConfigData (type) [lines 443-455] [5 members] — The config's data fields
+GeoSpecConfigData (type) [lines 518-530] [5 members] — The config's data fields
   GeoSpecConfigData.include (property)
   GeoSpecConfigData.exclude (property)
   GeoSpecConfigData.testNamePattern (property)
   GeoSpecConfigData.testTimeout (property) — Positive finite milliseconds
   GeoSpecConfigData.bail (property)
-LoadedGeoSpecConfig (type) [lines 457-465] [2 members] — Resolved file identity and validated configuration data
+LoadedGeoSpecConfig (type) [lines 532-540] [2 members] — Resolved file identity and validated configuration data
   LoadedGeoSpecConfig.configPath (property)
   LoadedGeoSpecConfig.options (property)
-LoadGeoSpecConfigOptions (type) [lines 467-482] [3 members] — Options for one trusted Node configuration load
+LoadGeoSpecConfigOptions (type) [lines 542-557] [3 members] — Options for one trusted Node configuration load
   LoadGeoSpecConfigOptions.projectPath (property)
   LoadGeoSpecConfigOptions.configPath (property) — Explicit file, resolved relative to the project unless absolute
   LoadGeoSpecConfigOptions.overrides (property) — Own defined fields override configuration without deep merging

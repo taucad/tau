@@ -29,17 +29,20 @@ const cadViewerProps = vi.hoisted(() => ({
   onModelComponentSecondaryPointerCandidate: undefined as
     | ((target: { readonly unitId: string; readonly componentId: string } | undefined) => void)
     | undefined,
+  eventSource: undefined as { readonly current: HTMLElement } | undefined,
 }));
 
 vi.mock('#cad/cad-viewer.jsx', () => ({
   CadViewer: (props: {
     readonly enablePan?: boolean;
     readonly enableZoom?: boolean;
+    readonly eventSource?: { readonly current: HTMLElement };
     readonly onModelComponentSecondaryPointerCandidate?: (
       target: { readonly unitId: string; readonly componentId: string } | undefined,
     ) => void;
   }) => {
     cadViewerProps.onModelComponentSecondaryPointerCandidate = props.onModelComponentSecondaryPointerCandidate;
+    cadViewerProps.eventSource = props.eventSource;
     return (
       <div
         data-testid='cad-viewer'
@@ -166,6 +169,15 @@ describe('ModelViewer', () => {
       render(<ModelViewer artifact={testArtifact} artifactHash={testHash} enablePan />);
 
       expect(screen.getByTestId('cad-viewer')).toHaveAttribute('data-enable-pan', 'true');
+    });
+
+    it('should forward eventSource to CadViewer, so a host region drives the canvas pointer events', () => {
+      const region = document.createElement('section');
+      const eventSource = { current: region };
+
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} eventSource={eventSource} />);
+
+      expect(cadViewerProps.eventSource).toBe(eventSource);
     });
 
     it('should forward enableZoom to CadViewer', () => {

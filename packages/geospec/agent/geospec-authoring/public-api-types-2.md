@@ -1319,7 +1319,7 @@ GeoSpecMatcherMethods: {
 }
 
 // One positive-only ancillary query
-// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports, including failed/refused reports, without assertion errors.
+// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports without assertion errors. A query asserts nothing, so it never fails: one whose evidence is missing or cannot decide returns a refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`.
 GeoSpecQueryOptions: {
     readonly capability: GeoSpecQueryCapability;
     readonly claimId?: string;

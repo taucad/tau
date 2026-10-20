@@ -5,14 +5,14 @@
 [![license](https://img.shields.io/npm/l/@taucad/agent-plugin.svg)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue.svg)](https://docs.npmjs.com/generating-provenance-statements)
 
-Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, PicoGK).
+Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy, PicoGK).
 
 ## Why this package?
 
 - **One plugin for both hosts.** This package's folder is a Codex plugin and a Claude Code plugin; each host reads its own manifest and MCP server config.
 - **The agent sees the part it builds.** Ten Tau tools evaluate a model, run its GeoSpec tests, return screenshots as images, export STEP, STL, 3MF or glTF, read and edit its parameters, arrange the Tau workbench, show it in the Tau viewer and prepare native kernels; see [Tools](#tools).
 - **You see it too.** `show_model` opens the Tau viewer: inside Codex desktop and Claude Desktop as an MCP App, and as a local browser link in the CLIs.
-- **Kernel knowledge when a task needs it.** An onboarding skill, `tau`, plus API skills for replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, PicoGK, GeoSpec and the workbench.
+- **Kernel knowledge when a task needs it.** An onboarding skill, `tau`, plus API skills for replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy, PicoGK, GeoSpec and the workbench.
 - **Nothing to install inside the plugin.** It has no dependencies: a small launcher finds your Tau CLI, or fetches the matching release with `npx`.
 - **Your project stays clean.** Screenshots and large test reports live in a per-session temporary folder; only exports and workbench records land under the project's `.tau/`.
 
@@ -100,7 +100,7 @@ With `TAU_HOST_MACHINES=true` in the server's environment (the Codex manifest pa
 
 ### Native kernels
 
-`.py` (Build123d) and `.cs` (PicoGK) files run on a native runtime, an interpreter and wheels or a .NET runtime, that is downloaded once into a payload store every Tau app on the computer shares. No CAD tool downloads: until the runtime is prepared, every tool answers a `.py` or `.cs` file with `KERNEL_NOT_PREPARED`, naming the kernel, the bytes preparing downloads and the call that prepares it. That call is `prepare_kernel` with `{ "kernel": "build123d" }` or `{ "kernel": "picogk" }`; it reports progress, keeps every verified file when it is cancelled, and is the one tool that reaches the network, so approving it is the consent to download. A runtime prepared elsewhere, by `tau prepare` or the Tau app, is used on the next call with no `prepare_kernel`.
+`.py` (Build123d, or SMLibPy when the file imports `smlibpy`) and `.cs` (PicoGK) files run on a native runtime, an interpreter and wheels or a .NET runtime, that is downloaded once into a payload store every Tau app on the computer shares. No CAD tool downloads: until the runtime is prepared, every tool answers a `.py` or `.cs` file with `KERNEL_NOT_PREPARED`, naming the kernel, the bytes preparing downloads and the call that prepares it. That call is `prepare_kernel` with `{ "kernel": "build123d" }`, `{ "kernel": "smlibpy" }` or `{ "kernel": "picogk" }`; it reports progress, keeps every verified file when it is cancelled, and is the one tool that reaches the network, so approving it is the consent to download. A runtime prepared elsewhere, by `tau prepare` or the Tau app, is used on the next call with no `prepare_kernel`.
 
 The server does not pass its environment on: the threads that run models get the platform's own variables, the proxy and CA variables, and Tau's `TAU_*` acquisition profile (`TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`, `TAU_CONFIG_DIR`, `TAU_ACQUISITION`, `TAU_PAYLOAD_TARGET`, `TAU_PAYLOAD_EMULATION`), and nothing else. The Codex manifest forwards those names to the server, and with a proxy set the launcher sets `NODE_USE_ENV_PROXY=1` so downloads use it.
 
@@ -150,11 +150,12 @@ Running `tau mcp` without the plugin serves no viewer unless you pass `--viewer-
 | `cad-smlib`         | SMLib NURBS BRep solids (`@classcad/smlibwasm`)                                                      |
 | `cad-tscircuit`     | tscircuit circuit boards                                                                             |
 | `cad-build123d`     | build123d Python BRep (`main.py`), after `prepare_kernel`                                            |
+| `cad-smlibpy`       | SMLibPy Python NURBS BRep (`main.py` importing `smlibpy`), after `prepare_kernel`                    |
 | `cad-picogk`        | PicoGK C# voxel engineering (`main.cs`), after `prepare_kernel`                                      |
 | `geospec-authoring` | Writing `*.geospec.ts` geometry tests                                                                |
 | `workbench`         | The Tau app's workbench views and panes                                                              |
 
-Which kernel when: the `tau` skill. The kernel skills are copied at build time from the packages that own each API. `cad-opencascadejs` (16 MB) is left out: `cad-replicad` covers BRep authoring on the same kernel. `cad-zoo` is not shipped because KCL is not available from the plugin, and `cad-smlibpy` is not shipped either: write Python models in build123d.
+Which kernel when: the `tau` skill. The kernel skills are copied at build time from the packages that own each API. `cad-opencascadejs` (16 MB) is left out: `cad-replicad` covers BRep authoring on the same kernel. `cad-zoo` is not shipped because KCL is not available from the plugin.
 
 ## How it works
 

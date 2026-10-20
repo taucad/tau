@@ -2,7 +2,7 @@
   "name": "tau",
   "displayName": "Tau",
   "version": "0.1.0-beta.7",
-  "description": "Code-CAD for coding agents: build replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d and PicoGK models, check them with GeoSpec tests, screenshot them and export STEP, STL, 3MF or glTF. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.",
+  "description": "Code-CAD for coding agents: build replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy and PicoGK models, check them with GeoSpec tests, screenshot them and export STEP, STL, 3MF or glTF. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.",
   "author": {
     "name": "Tau",
     "url": "https://tau.new"
@@ -22,6 +22,7 @@
     "smlib",
     "tscircuit",
     "build123d",
+    "smlibpy",
     "picogk",
     "geospec",
     "step",

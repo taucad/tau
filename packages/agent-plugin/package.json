@@ -1,7 +1,7 @@
 {
   "name": "@taucad/agent-plugin",
   "version": "0.1.0-beta.7",
-  "description": "Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, PicoGK).",
+  "description": "Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy, PicoGK).",
   "type": "module",
   "sideEffects": [
     "./src/launch.ts",

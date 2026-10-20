@@ -1,6 +1,6 @@
 # Tau
 
-> Tau is code-CAD: a parametric model is code (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d or PicoGK) and Tau evaluates it, checks its geometry with GeoSpec tests, renders screenshots and exports STEP, STL, 3MF or glTF. The Tau plugin gives Claude Code and Codex those tools and the kernel skills; the server runs on your computer, and the Tau app and Tau Desktop open the same project folder.
+> Tau is code-CAD: a parametric model is code (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy or PicoGK) and Tau evaluates it, checks its geometry with GeoSpec tests, renders screenshots and exports STEP, STL, 3MF or glTF. The Tau plugin gives Claude Code and Codex those tools and the kernel skills; the server runs on your computer, and the Tau app and Tau Desktop open the same project folder.
 
 {release}
 
@@ -52,7 +52,7 @@ From the project folder, run the doctor in the installed plugin folder: `node ~/
 
 ## Which kernel
 
-The entry file's extension picks the kernel; where the plugin ships a skill for the kernel (`cad-replicad`, `cad-openscad`, `cad-jscad`, `cad-manifold`, `cad-picovoxel`, `cad-smlib`, `cad-tscircuit`, `cad-build123d`, `cad-picogk`), load it before writing code. Default: replicad (`main.ts`) for parts and assemblies that need exact BRep and STEP. OpenSCAD (`main.scad`) when the user writes or has OpenSCAD. Manifold (`main.ts`, `manifold-3d`) for mesh booleans and mesh input; JSCAD (`@jscad/modeling`) for 2D-profile CSG. PicoVoxel (`picovoxel`) for lattices, SDFs and porous forms. SMLib (`@classcad/smlibwasm`) for NURBS BRep solids. tscircuit (`main.tsx`) for circuit boards. build123d (`main.py`) when the user wants Python; PicoGK (`main.cs`) for C# voxel engineering; both download a native runtime once with `prepare_kernel`. KCL (`main.kcl`) runs on Zoo's cloud engine and is not available from the plugin.
+The entry file's extension picks the kernel; where the plugin ships a skill for the kernel (`cad-replicad`, `cad-openscad`, `cad-jscad`, `cad-manifold`, `cad-picovoxel`, `cad-smlib`, `cad-tscircuit`, `cad-build123d`, `cad-smlibpy`, `cad-picogk`), load it before writing code. Default: replicad (`main.ts`) for parts and assemblies that need exact BRep and STEP. OpenSCAD (`main.scad`) when the user writes or has OpenSCAD. Manifold (`main.ts`, `manifold-3d`) for mesh booleans and mesh input; JSCAD (`@jscad/modeling`) for 2D-profile CSG. PicoVoxel (`picovoxel`) for lattices, SDFs and porous forms. SMLib (`@classcad/smlibwasm`) for NURBS BRep solids. tscircuit (`main.tsx`) for circuit boards. build123d (`main.py`) when the user wants Python; SMLibPy (`main.py` importing `smlibpy`) for NURBS BRep in Python, or when the project already imports it; PicoGK (`main.cs`) for C# voxel engineering; each downloads a native runtime once with `prepare_kernel`. KCL (`main.kcl`) runs on Zoo's cloud engine and is not available from the plugin.
 
 ## Next
 

@@ -10,7 +10,12 @@ const owner = vi.hoisted(() => ({
     id: 'tau',
     ...options,
   })),
-  resolved: { kernels: [{ id: 'kernel', extensions: ['ts'] }, { id: 'fallback', extensions: ['*', 'ts', 'scad'] }] },
+  resolved: {
+    kernels: [
+      { id: 'kernel', extensions: ['ts'] },
+      { id: 'fallback', extensions: ['*', 'ts', 'scad'] },
+    ],
+  },
   resolve: vi.fn(async (_runtime: unknown, _config: unknown) => owner.resolved),
   deployments: [] as unknown[],
   deploymentsOf: vi.fn((_runtime: unknown) => owner.deployments),
@@ -71,7 +76,9 @@ describe('configured native Node worker Runtime', () => {
 
   it('serves the default runtime unchanged when it lists no native kernel', async () => {
     owner.deployments = [];
-    await (await runtimeFactory())();
+    await (
+      await runtimeFactory()
+    )();
     expect(owner.resolve).toHaveBeenCalledWith(owner.defaults, undefined);
     expect(owner.deploymentsOf).toHaveBeenCalledWith(owner.resolved);
     expect(owner.install).not.toHaveBeenCalled();
@@ -80,7 +87,9 @@ describe('configured native Node worker Runtime', () => {
 
   it('binds the native kernels the default runtime lists to the payload store before the client starts', async () => {
     owner.deployments = [{ deployment: { package: '@taucad/picogk' }, kernels: [] }];
-    await (await runtimeFactory())();
+    await (
+      await runtimeFactory()
+    )();
     expect(owner.storeResolver).toHaveBeenCalledWith({ managed: expect.any(Object) as unknown });
     expect(owner.install).toHaveBeenCalledWith(owner.resolver);
     expect(owner.install.mock.invocationCallOrder[0]).toBeLessThan(owner.client.mock.invocationCallOrder[0]!);

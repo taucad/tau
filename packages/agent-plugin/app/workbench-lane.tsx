@@ -4,7 +4,6 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
-import type { GeometryComponentReference } from '@taucad/types';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
 import { ExportPane } from '@taucad/workbench-panes/export/export-pane';
@@ -34,8 +33,6 @@ type WorkbenchLaneProps = Readonly<{
   /** The shown model; the panes show nothing until there is one. */
   model: TauViewerModel | undefined;
   graphicsRef: GraphicsRef;
-  /** The component selected in the Model pane, or `undefined` when cleared. */
-  onSelect: (reference: GeometryComponentReference | undefined) => void;
   /** Show the model again after a parameter edit is written. */
   onParametersWritten: () => void;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
@@ -58,7 +55,6 @@ export function WorkbenchLane({
   bridge,
   model,
   graphicsRef,
-  onSelect,
   onParametersWritten,
   reveal,
   componentActions,
@@ -95,12 +91,12 @@ export function WorkbenchLane({
       useUnits: () => units,
       parameters,
       kinematics: { ...createKinematicsSource(bridge), subscribeReveal: reveal.subscribeKinematics },
-      model: createModelSource(bridge, { onSelect, componentActions, reveal: reveal.model }),
+      model: createModelSource(bridge, { componentActions, reveal: reveal.model }),
       ...(model === undefined
         ? {}
         : { export: createExportSource(bridge, model), share: createShareSource(bridge, model) }),
     }),
-    [bridge, componentActions, model, onSelect, parameters, reveal, units],
+    [bridge, componentActions, model, parameters, reveal, units],
   );
 
   return (

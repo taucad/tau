@@ -7,7 +7,7 @@ import { Worker as NodeWorker } from 'node:worker_threads';
 
 import { NodeIO, getBounds } from '@gltf-transform/core';
 
-import type { GeoSpecModelArtifact } from 'geospec/model';
+import type { GeoSpecModelArtifact, GeoSpecModelExporter } from 'geospec/model';
 
 import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -76,10 +76,13 @@ for (const state of states) {
     }),
   });
   client.on('log', (entry) => runtimeLogs.push(entry));
-  const exporter = await tauClientExporter({ client });
-  const result = await (async (): Promise<GeoSpecModelArtifact> => {
+  const { exporter, result } = await (async (): Promise<{
+    exporter: GeoSpecModelExporter;
+    result: GeoSpecModelArtifact;
+  }> => {
     try {
-      return await exporter.export({ file: entryPath, format });
+      const created = await tauClientExporter({ client });
+      return { exporter: created, result: await created.export({ file: entryPath, format }) };
     } finally {
       await client.shutdown();
     }

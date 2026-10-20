@@ -71,6 +71,7 @@ const projectRuntime = () =>
 const hostRuntime = () =>
   mock<HostRuntimeClient>({
     capabilities: { registrations: [{ kind: 'kernel', id: 'replicad', extensions: ['ts'] }], routes: [] },
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the partial manifest omits fields the full one requires; the exporter reads only registrations.
   } as unknown as Partial<HostRuntimeClient>);
 
 describe('native host GeoSpec composition', () => {

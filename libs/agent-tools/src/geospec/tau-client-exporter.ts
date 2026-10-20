@@ -297,6 +297,29 @@ const exportThrough = async (
   };
 };
 
+const release = async (created: TauExporterClient): Promise<void> => {
+  if (created.shutdown) {
+    await created.shutdown();
+  } else {
+    created.terminate?.();
+  }
+};
+
+const start = async (client: () => Promise<TauExporterClient>): Promise<TauExporterClient> => {
+  const created = await client();
+  try {
+    await created.connect();
+  } catch (error) {
+    try {
+      await release(created);
+    } catch {
+      // The connect failure is the one to report.
+    }
+    throw error;
+  }
+  return created;
+};
+
 /**
  * A GeoSpec model exporter over a Tau Runtime client: it claims the files the client's kernels declare,
  * resolves the route that gives canonical Z-up millimetre evidence, exports once and closes the document.
@@ -314,12 +337,17 @@ export const tauClientExporter = async (options: TauClientExporterOptions): Prom
       await client.connect();
       return client;
     }
-    owned ??= (async () => {
-      const created = await client();
-      await created.connect();
-      return created;
-    })();
-    return owned;
+    owned ??= start(client);
+    const pending = owned;
+    try {
+      return await pending;
+    } catch (error) {
+      // A failed start is not cached, so the next export starts a fresh client.
+      if (owned === pending) {
+        owned = undefined;
+      }
+      throw error;
+    }
   };
   const extensions = options.extensions ?? kernelExtensions(await connected());
   return {
@@ -348,12 +376,14 @@ export const tauClientExporter = async (options: TauClientExporterOptions): Prom
       if (pending === undefined) {
         return;
       }
-      const created = await pending;
-      if (created.shutdown) {
-        await created.shutdown();
-      } else {
-        created.terminate?.();
+      let created: TauExporterClient;
+      try {
+        created = await pending;
+      } catch {
+        // The export that started it already reported the failure.
+        return;
       }
+      await release(created);
     },
   };
 };

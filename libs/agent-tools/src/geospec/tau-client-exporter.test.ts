@@ -193,6 +193,36 @@ describe('tauClientExporter client lifetime', () => {
     expect(created[0]?.shutdown).toHaveBeenCalledOnce();
   });
 
+  it('should shut down a lazy client whose connect fails and start a fresh one on the next export', async () => {
+    const first = { ...fixtureClient(), shutdown: vi.fn(async () => undefined) };
+    vi.mocked(first.client.connect).mockRejectedValueOnce(new Error('worker failed to start'));
+    const second = fixtureClient();
+    const factory = vi
+      .fn<() => Promise<TauExporterClient>>()
+      .mockResolvedValueOnce({ ...first.client, shutdown: first.shutdown })
+      .mockResolvedValueOnce(second.client);
+    const exporter = await tauClientExporter({ client: factory, extensions: ['ts'] });
+
+    await expect(exporter.export(request())).rejects.toThrow('worker failed to start');
+    expect(first.shutdown).toHaveBeenCalledOnce();
+
+    await exporter.export(request());
+    expect(factory).toHaveBeenCalledTimes(2);
+    expect(second.exportModel).toHaveBeenCalledOnce();
+    await exporter.close?.();
+    expect(second.client.terminate).toHaveBeenCalledOnce();
+  });
+
+  it('should close cleanly after a lazy client that never started', async () => {
+    const factory = vi.fn(async () => {
+      throw new Error('no worker');
+    });
+    const exporter = await tauClientExporter({ client: factory, extensions: ['ts'] });
+
+    await expect(exporter.export(request())).rejects.toThrow('no worker');
+    await expect(exporter.close?.()).resolves.toBeUndefined();
+  });
+
   it('should terminate a lazy client that has no shutdown', async () => {
     const { client } = fixtureClient();
     const exporter = await tauClientExporter({ client: async () => client, extensions: ['ts'] });

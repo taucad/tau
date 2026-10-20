@@ -11,8 +11,9 @@
 # summary row; the raw files are the job's artifact.
 #
 # The facts cell requires `spctl` to accept the app as notarised. Staging releases are signed
-# with Developer ID but not notarised (release-build.yml), so a desktop-staging@ tag fails that
-# cell while its other cells still run; only a production desktop@ release can pass the gate.
+# with Developer ID but not notarised unless release-desktop-staging.yml was dispatched with
+# `notarize` (release-build.yml), so a plain desktop-staging@ tag fails that cell while its other
+# cells still run; a notarised staging tag or a production desktop@ release can pass the gate.
 #
 # GitHub-hosted runners report SIP disabled, so the quarantined-copy cell is recorded as
 # unobservable there (ruling X19) and needs a SIP-enabled Mac running the same script.

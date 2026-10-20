@@ -12,8 +12,9 @@
 # (and the UI's source kit), a desktop release after native OTA qualification.
 # A UI release also builds the serve UI layer `tau serve` downloads by digest
 # and publishes it as its own immutable release (serve-ui-layer-*).
-# Staging keeps Developer ID signing and release hardening but skips notarization;
-# production also notarizes and staples. Both retain source/relink release assets:
+# Staging keeps Developer ID signing and release hardening but skips notarization
+# unless release-desktop-staging.yml was dispatched with `notarize` (its tag carries a
+# `Notarize: true` line); production always notarizes and staples. Both retain source/relink release assets:
 # the kit is the taucad/geospec release asset for the `geospec-engine` catalog
 # pin, and while that asset is missing, the releases that ship OCCT refuse.
 # The first mirrored candidate establishes a baseline without changing live feeds.
@@ -55,6 +56,7 @@ jobs:
       channel: ${{ steps.tag.outputs.channel }}
       macos: ${{ steps.tag.outputs.macos }}
       macos-targets: ${{ steps.tag.outputs.macos-targets }}
+      notarize: ${{ steps.tag.outputs.notarize }}
     steps:
       - name: Resolve the release tag
         id: tag
@@ -104,13 +106,18 @@ jobs:
           # Mac architectures: a production release packages both. A staging candidate packages Intel
           # only when release-desktop-staging.yml annotated its tag with the line below (the nightly);
           # every other staging candidate is Apple silicon only.
+          # Notarization likewise: production always, a staging candidate only when its tag carries
+          # `Notarize: true` (a dispatch that asked for it).
           arches='arm64 x64'
+          notarize=true
           if [ "$channel" = staging ]; then
             arches=arm64
+            notarize=false
             object=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object | "\(.type) \(.sha)"')
             if [ "${object%% *}" = tag ]; then
               message=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/${object#* }" --jq .message)
               if grep -qx 'Mac architectures: arm64 x64' <<< "$message"; then arches='arm64 x64'; fi
+              if grep -qx 'Notarize: true' <<< "$message"; then notarize=true; fi
             fi
           fi
           macos=$(jq -cn --arg arches "$arches" '[
@@ -118,6 +125,7 @@ jobs:
             {arch: "x64", runner: "macos-26-intel", machine: "x86_64", "package-target": "package-macos-release-intel"}
           ] | map(select(.arch as $arch | $arches | split(" ") | index($arch)))')
           echo "Mac architectures: $arches"
+          echo "Notarize: $notarize"
           {
             echo "tag=$TAG"
             echo "project=$project"
@@ -126,6 +134,7 @@ jobs:
             echo "channel=$channel"
             echo "macos=$macos"
             echo "macos-targets=$(sed -E 's/(^| )/\1darwin-/g' <<< "$arches")"
+            echo "notarize=$notarize"
           } >> "$GITHUB_OUTPUT"
 
   verify-app:
@@ -304,6 +313,7 @@ jobs:
       POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      TAU_DESKTOP_NOTARIZE: ${{ needs.resolve.outputs.notarize }}
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos-${{ matrix.arch }}
     steps:
       - name: Checkout the release
@@ -358,7 +368,7 @@ jobs:
         run: |
           set -euo pipefail
           names=(MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID)
-          if [ "$TAU_DESKTOP_CHANNEL" = production ]; then
+          if [ "$TAU_DESKTOP_NOTARIZE" = true ]; then
             names+=(APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID)
           fi
           for name in "${names[@]}"; do
@@ -393,7 +403,7 @@ jobs:
             exit 1
           fi
           # package-macos.mts notarizes through this keychain profile.
-          if [ "$TAU_DESKTOP_CHANNEL" = production ]; then
+          if [ "$TAU_DESKTOP_NOTARIZE" = true ]; then
           printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$api_key"
           xcrun notarytool store-credentials tau-notary --key "$api_key" --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" --keychain "$keychain"
@@ -405,12 +415,14 @@ jobs:
             echo "TAU_SIGNING_KEYCHAIN=$keychain"
           } >> "$GITHUB_ENV"
 
-      - name: Package and sign; notarize production
+      - name: Package and sign; notarize production and requested staging
         env:
           TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE: ${{ steps.geospec-kit.outputs.archive }}
         run: |
           config=()
-          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then config+=(--configuration=staging); fi
+          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then
+            config+=(--configuration="$([ "$TAU_DESKTOP_NOTARIZE" = true ] && echo staging-notarized || echo staging)")
+          fi
           pnpm nx run desktop:${{ matrix.package-target }} --parallel=1 "${config[@]}"
 
       # Uploaded before verification so a failed verify leaves the signed app
@@ -448,7 +460,9 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           config=()
-          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then config+=(--configuration=staging); fi
+          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then
+            config+=(--configuration="$([ "$TAU_DESKTOP_NOTARIZE" = true ] && echo staging-notarized || echo staging)")
+          fi
           pnpm nx run desktop:verify-macos-release "${config[@]}"
 
       - name: Delete the signing keychain

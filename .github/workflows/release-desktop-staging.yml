@@ -4,6 +4,8 @@
 # archive and its OTA replacement are still exercised once a day while `main` pushes cost one
 # macOS packaging job each. The tag records which: an annotated tag whose message carries a
 # `Mac architectures: arm64 x64` line is a full candidate, a lightweight tag is arm64 only.
+# Staging is not notarized unless a dispatch sets `notarize`, which adds a `Notarize: true` line;
+# per-push candidates run many times a day and stay off Apple's notary service.
 # Production `desktop@*` tags always package both.
 name: Release desktop to staging
 run-name: Release desktop to staging
@@ -17,6 +19,10 @@ on:
         description: 'Also package and qualify the Intel (x64) archive'
         type: boolean
         default: true
+      notarize:
+        description: 'Notarize and staple the macOS archives (production does; staging does not by default)'
+        type: boolean
+        default: false
   workflow_run:
     workflows: [CI]
     types: [completed]
@@ -113,11 +119,15 @@ jobs:
           TARGET: ${{ steps.target.outputs.sha }}
           EVENT: ${{ github.event_name }}
           DISPATCH_INTEL: ${{ inputs.intel }}
+          DISPATCH_NOTARIZE: ${{ inputs.notarize }}
         run: |
           set -euo pipefail
           intel=false
           if [ "$EVENT" = schedule ] || { [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_INTEL" = true ]; }; then intel=true; fi
           echo "intel=$intel" >> "$GITHUB_OUTPUT"
+          notarize=false
+          if [ "$EVENT" = workflow_dispatch ] && [ "$DISPATCH_NOTARIZE" = true ]; then notarize=true; fi
+          echo "notarize=$notarize" >> "$GITHUB_OUTPUT"
           releases=$(gh release list --limit 100 --json tagName --jq '.[] | select(.tagName | startswith("desktop-staging@")) | .tagName')
           previous=$(head -n 1 <<< "$releases")
           # The nightly compares with the newest full candidate, so it skips only when Intel already
@@ -160,6 +170,7 @@ jobs:
           TARGET: ${{ steps.target.outputs.sha }}
           RUN_NUMBER: ${{ github.run_number }}
           INTEL: ${{ steps.selected.outputs.intel }}
+          NOTARIZE: ${{ steps.selected.outputs.notarize }}
         run: |
           set -euo pipefail
           version=$(jq -r .version apps/desktop/package.json)
@@ -168,10 +179,12 @@ jobs:
             exit 1
           fi
           tag="desktop-staging@${version}-staging.${RUN_NUMBER}"
+          signing='Developer ID signed without notarization'
+          if [ "$NOTARIZE" = true ]; then signing='Developer ID signed, notarized and stapled'; fi
           cat > "$RUNNER_TEMP/notes.md" <<NOTES
           Staging build of the Tau desktop app from \`${TARGET}\` on \`main\`.
 
-          It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is Developer ID signed without notarization. The channel feed advances only after a native OTA acceptance test.
+          It signs in to and works against https://taucad.dev, never production, and follows its isolated staging update feed. macOS is ${signing}. The channel feed advances only after a native OTA acceptance test.
           NOTES
           sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
           # A draft, because a published release is immutable (go-live DEL-20):
@@ -179,12 +192,15 @@ jobs:
           # push, not the draft, starts release-build.yml.
           gh release create "$tag" --draft --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
             --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false
-          # release-build.yml reads the architectures from the tag: a full candidate's tag is
-          # annotated with the line it looks for, an arm64-only candidate's is lightweight.
+          # release-build.yml reads the architectures and notarization from the tag: it is annotated
+          # with the lines it looks for, and a plain arm64-only candidate's tag is lightweight.
+          lines=()
+          if [ "$INTEL" = true ]; then lines+=('Mac architectures: arm64 x64'); fi
+          if [ "$NOTARIZE" = true ]; then lines+=('Notarize: true'); fi
           ref_sha=$TARGET
-          if [ "$INTEL" = true ]; then
+          if [ "${#lines[@]}" -gt 0 ]; then
             ref_sha=$(gh api "repos/$GH_REPO/git/tags" -f tag="$tag" -f object="$TARGET" -f type=commit \
-              -f message="Mac architectures: arm64 x64" --jq .sha)
+              -f message="$(printf '%s\n' "${lines[@]}")" --jq .sha)
           fi
           gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$tag" -f sha="$ref_sha" --silent
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -194,8 +210,9 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
           ARCHES: ${{ steps.selected.outputs.intel == 'true' && 'Apple silicon and Intel' || 'Apple silicon only' }}
+          SIGNING: ${{ steps.selected.outputs.notarize == 'true' && ', notarized' || '' }}
         run: |
           {
-            echo "Created the draft prerelease $TAG and its tag ($ARCHES)."
+            echo "Created the draft prerelease $TAG and its tag ($ARCHES$SIGNING)."
             echo "**Release build** packages it, attaches the archives and publishes it once main CI is green on this commit."
           } >> "$GITHUB_STEP_SUMMARY"

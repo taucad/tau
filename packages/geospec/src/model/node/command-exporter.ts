@@ -42,6 +42,8 @@ export type CommandExporterOptions = {
   readonly cwd?: string;
   /** Extra environment variables, merged over this process's. */
   readonly env?: Readonly<Record<string, string>>;
+  /** Positive milliseconds one export may run before the command is killed and the export fails. */
+  readonly exportTimeout?: number;
 };
 
 const protocolError = z.object({
@@ -126,6 +128,12 @@ const decodeText = (chunks: ReadonlyArray<Uint8Array<ArrayBuffer>>): string => {
   return chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
 };
 
+/** The largest delay `AbortSignal.timeout` accepts, in milliseconds. */
+const maxTimeout = 2_147_483_647;
+
+/** Milliseconds an aborted command has to exit after SIGTERM before it is killed. */
+const killGrace = 2000;
+
 type CommandResult = { readonly exitCode: number | undefined; readonly stdout: string; readonly stderr: string };
 
 const run = async (
@@ -144,8 +152,24 @@ const run = async (
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => stdout.push(chunk));
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
-    child.once('error', reject);
+    let failure: Error | undefined;
+    let forceKill: NodeJS.Timeout | undefined;
+    child.once('error', (error) => {
+      if (child.pid === undefined) {
+        reject(error);
+        return;
+      }
+      // An abort sends SIGTERM and reports here before the command exits; settle on 'close' so the
+      // caller never cleans up under a live command, and kill one that ignores SIGTERM.
+      failure = error;
+      forceKill = setTimeout(() => child.kill('SIGKILL'), killGrace);
+    });
     child.once('close', (exitCode) => {
+      clearTimeout(forceKill);
+      if (failure !== undefined) {
+        reject(failure);
+        return;
+      }
       resolve({
         exitCode: exitCode ?? undefined,
         stdout: decodeText(stdout),
@@ -170,10 +194,18 @@ export const commandExporter = (options: CommandExporterOptions): GeoSpecModelEx
   if (options.capabilities.formats.length === 0) {
     throw new TypeError(`commandExporter '${options.id}' must declare at least one format.`);
   }
+  if (
+    options.exportTimeout !== undefined &&
+    !(Number.isInteger(options.exportTimeout) && options.exportTimeout > 0 && options.exportTimeout <= maxTimeout)
+  ) {
+    throw new TypeError(
+      `commandExporter '${options.id}' exportTimeout must be whole milliseconds from 1 to ${String(maxTimeout)}.`,
+    );
+  }
   if (options.capabilities.inlineSources === true) {
     throw new TypeError(`commandExporter '${options.id}' cannot accept inline sources: protocol 1 passes files only.`);
   }
-  const { id } = options;
+  const { id, exportTimeout } = options;
   return {
     id,
     extensions: [...options.extensions],
@@ -182,14 +214,24 @@ export const commandExporter = (options: CommandExporterOptions): GeoSpecModelEx
       const project = request.projectPath ?? options.cwd ?? process.cwd();
       const out = await mkdtemp(join(tmpdir(), 'geospec-export-'));
       try {
+        const exportDeadline = exportTimeout === undefined ? undefined : AbortSignal.timeout(exportTimeout);
+        const signals = [request.signal, exportDeadline].filter((signal) => signal !== undefined);
         let result: CommandResult;
         try {
           result = await run(executable, [...leading, ...protocolArguments(request, project, out)], {
             cwd: options.cwd ?? project,
             env: { ...process.env, ...options.env },
-            signal: request.signal,
+            signal: signals.length > 1 ? AbortSignal.any(signals) : signals[0],
           });
         } catch (error) {
+          if (exportDeadline?.aborted === true && request.signal?.aborted !== true) {
+            throw failed({
+              id,
+              file: request.file,
+              reason: `it ran longer than ${String(exportTimeout)} ms.`,
+              details: { exportTimeout },
+            });
+          }
           throw failed({
             id,
             file: request.file,

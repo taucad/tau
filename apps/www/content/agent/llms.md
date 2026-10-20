@@ -1,6 +1,6 @@
 # Tau
 
-> Tau is code-CAD: a parametric model is code (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d or PicoGK) and Tau evaluates it, checks its geometry with GeoSpec tests, renders screenshots and exports STEP, STL, 3MF or glTF. The Tau plugin gives Claude Code and Codex those tools and the kernel skills; the server runs on your computer, and the Tau app and Tau Desktop open the same project folder.
+> Tau is code-CAD: a parametric model is code (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy or PicoGK) and Tau evaluates it, checks its geometry with GeoSpec tests, renders screenshots and exports STEP, STL, 3MF or glTF. The Tau plugin gives Claude Code and Codex those tools and the kernel skills; the server runs on your computer, and the Tau app and Tau Desktop open the same project folder.
 
 {release}
 
@@ -31,19 +31,20 @@ Start a new session (Claude Code) or thread (Codex) after installing: the tools 
 
 ## Check
 
-- Claude Code: `claude plugin list` prints `tau@taucad`, its version and `enabled`; `claude mcp list` prints `plugin:tau:tau: node …/dist/launch.mjs - ✔ Connected`.
-- Codex: `codex plugin list` prints `tau@taucad  installed, enabled  <version>`.
-- `tau --version` must print the same version as the plugin.
-- Tell the user: the plugin version, `tau --version` and `which tau`, whether the server connected, and that a new session or thread is needed.
+From the project folder, run the doctor in the installed plugin folder: `node ~/.claude/plugins/cache/taucad/tau/<version>/dist/doctor.mjs` (Claude Code) or `node ~/.codex/plugins/cache/taucad/tau/<version>/dist/doctor.mjs` (Codex). It prints `ok`, `warn` or `fail` for Node.js, npm and its cache, the CLI the launcher runs and its version, a live `initialize` and the skills, then `next` lines with fixes.
+
+- Claude Code: `claude plugin list` prints `tau@taucad`, its version and `enabled`.
+- Codex: `codex plugin list --marketplace taucad` prints `tau@taucad  installed, enabled  <version>`.
+- `tau --version` must print the plugin's version; the two `beta` installs can differ. If they do: `npm install -g @taucad/cli@<plugin version>`.
+- Tell the user: the plugin version, `tau --version`, `which tau`, the doctor's result, and that the tools appear in a new session or thread. The doctor or any shell handshake proves the launcher and CLI start, not that the host loads the tools: do not report "connected" from one. A handshake run outside the project folder reports that folder as the project.
 
 ## If it does not work
 
-- `EACCES` or "root-owned files" from npm: `sudo chown -R $(id -u):$(id -g) ~/.npm`, then retry.
+- `EACCES` or "root-owned files" from npm: for this install, a one-off cache that changes nothing of the user's: `npm install -g @taucad/cli@beta --cache "$(mktemp -d)"`. The lasting fix: `sudo chown -R $(id -u):$(id -g) ~/.npm`.
 - `npm warn install-scripts` naming `@parcel/watcher`, `@google/genai`, `protobufjs` and `esbuild` during the CLI install: expected and harmless; the CLI works with those scripts skipped. Do not add `--allow-scripts`.
 - `tau: command not found` after installing: open a new shell, or add `$(npm prefix -g)/bin` to PATH.
-- No Tau tools in a new session, or `claude mcp list` says `connection timed out after 30000ms`: without a global CLI of the plugin's version the plugin fetches that version with npx, about 37 s on a cold cache, longer than Claude Code's 30 s start limit. Install the CLI (step one) and start again, or once: `MCP_TIMEOUT=600000 claude`. Codex waits up to 10 minutes. For the reason, run `node ~/.claude/plugins/cache/taucad/tau/<version>/dist/launch.mjs </dev/null`, which prints what the host hides, or `claude --debug` and read `~/.claude/debug/<session-id>.txt`.
-- `claude mcp list` says `CONNECTION_CLOSED`: the launcher exited, and running it by hand (above) prints a `tau:` line with the fix. Check `node -v` (24 or later) and `npm -v` (11 or later); Node 22 ships npm 10. A root-owned npm cache shows this or the timeout above: the `EACCES` fix.
-- `tau --version` is older than the plugin: `npm install -g @taucad/cli@beta` again; the plugin needs its own version.
+- No Tau tools in a new session, or `claude mcp list` says `connection timed out after 30000ms`: without a global CLI of the plugin's version the plugin fetches that version with npx, about 37 s on a cold cache, longer than Claude Code's 30 s start limit. Install the CLI (step one) and start again, or once: `MCP_TIMEOUT=600000 claude`. Codex waits up to 10 minutes. For the reason, run the doctor (Check), which prints what the host hides, or `claude --debug` and read `~/.claude/debug/<session-id>.txt`.
+- `claude mcp list` says `CONNECTION_CLOSED`: the launcher exited, and the doctor's `server` line gives its `tau:` line with the fix. Check `node -v` (24 or later) and `npm -v` (11 or later); Node 22 ships npm 10. A root-owned npm cache shows this or the timeout above: the `EACCES` fix.
 - `Could not resolve @taucad/agent-plugin@beta from the npm registry`: npm is missing, the registry is unreachable, or `.npmrc` points elsewhere.
 - `marketplace add` says `taucad` already exists with another source: an older catalog pointed at `taucad/tau`. Claude Code: `claude plugin marketplace remove taucad` (if it says not found, delete `extraKnownMarketplaces.taucad` from `~/.claude/settings.json`), then add it again. Codex: `codex plugin marketplace remove taucad`, delete `[plugins."tau@taucad"]` from `~/.codex/config.toml` if it remains, then add it again.
 - `claude plugin list` shows `tau@tau-dev`: a development catalog from a Tau checkout. `claude plugin uninstall tau@tau-dev`, then `claude plugin marketplace remove tau-dev`.
@@ -51,7 +52,7 @@ Start a new session (Claude Code) or thread (Codex) after installing: the tools 
 
 ## Which kernel
 
-The entry file's extension picks the kernel; where the plugin ships a skill for the kernel (`cad-replicad`, `cad-openscad`, `cad-jscad`, `cad-manifold`, `cad-picovoxel`, `cad-smlib`, `cad-tscircuit`, `cad-build123d`, `cad-picogk`), load it before writing code. Default: replicad (`main.ts`) for parts and assemblies that need exact BRep and STEP. OpenSCAD (`main.scad`) when the user writes or has OpenSCAD. Manifold (`main.ts`, `manifold-3d`) for mesh booleans and mesh input; JSCAD (`@jscad/modeling`) for 2D-profile CSG. PicoVoxel (`picovoxel`) for lattices, SDFs and porous forms. SMLib (`@classcad/smlibwasm`) for NURBS BRep solids. tscircuit (`main.tsx`) for circuit boards. build123d (`main.py`) when the user wants Python; PicoGK (`main.cs`) for C# voxel engineering; both download a native runtime once with `prepare_kernel`. KCL (`main.kcl`) runs on Zoo's cloud engine and is not available from the plugin.
+The entry file's extension picks the kernel; where the plugin ships a skill for the kernel (`cad-replicad`, `cad-openscad`, `cad-jscad`, `cad-manifold`, `cad-picovoxel`, `cad-smlib`, `cad-tscircuit`, `cad-build123d`, `cad-smlibpy`, `cad-picogk`), load it before writing code. Default: replicad (`main.ts`) for parts and assemblies that need exact BRep and STEP. OpenSCAD (`main.scad`) when the user writes or has OpenSCAD. Manifold (`main.ts`, `manifold-3d`) for mesh booleans and mesh input; JSCAD (`@jscad/modeling`) for 2D-profile CSG. PicoVoxel (`picovoxel`) for lattices, SDFs and porous forms. SMLib (`@classcad/smlibwasm`) for NURBS BRep solids. tscircuit (`main.tsx`) for circuit boards. build123d (`main.py`) when the user wants Python; SMLibPy (`main.py` importing `smlibpy`) for NURBS BRep in Python, or when the project already imports it; PicoGK (`main.cs`) for C# voxel engineering; each downloads a native runtime once with `prepare_kernel`. KCL (`main.kcl`) runs on Zoo's cloud engine and is not available from the plugin.
 
 ## Next
 

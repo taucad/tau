@@ -1,3 +1,4 @@
+import { bundlePattern, workspace } from '@taucad/nx';
 import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
@@ -20,4 +21,8 @@ const packageConfig: UserConfig = {
   outDir: 'dist',
 };
 
-export default defineConfig(packageConfig);
+// The private `@taucad/agent-tools` exporter is bundled into the worker entry; its declarations stay out of the API.
+export default defineConfig(async () => {
+  const pattern = bundlePattern(await workspace(), 'geospec-engine');
+  return { ...packageConfig, deps: { alwaysBundle: [pattern], dts: { neverBundle: [pattern] } } } satisfies UserConfig;
+});

@@ -11,7 +11,7 @@
 
 /** The plugin `description` of both manifests and of every catalog's `tau` entry. @internal */
 export const pluginDescription =
-  'Code-CAD for coding agents: build replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d and PicoGK models, check them with GeoSpec tests, screenshot them and export STEP, STL, 3MF or glTF. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.';
+  'Code-CAD for coding agents: build replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy and PicoGK models, check them with GeoSpec tests, screenshot them and export STEP, STL, 3MF or glTF. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.';
 
 /** The `description` of the published taucad marketplace itself, beside its `tau` entry. @internal */
 export const marketplaceDescription =
@@ -22,7 +22,7 @@ export const codexShortDescription = 'Code-CAD you can see and test';
 
 /** The Codex `interface.longDescription`. @internal */
 export const codexLongDescription =
-  'Author parametric CAD in replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d or PicoGK, then let Tau evaluate it, run its GeoSpec geometry tests, render screenshots and export STEP, STL, 3MF or glTF from your project folder. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.';
+  'Author parametric CAD in replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy or PicoGK, then let Tau evaluate it, run its GeoSpec geometry tests, render screenshots and export STEP, STL, 3MF or glTF from your project folder. Needs Node.js 24 and the Tau CLI: npm install -g @taucad/cli@beta.';
 
 /** The Codex `interface.defaultPrompt` entries. @internal */
 export const codexDefaultPrompts: readonly string[] = [
@@ -44,6 +44,7 @@ export const pluginKeywords: readonly string[] = [
   'smlib',
   'tscircuit',
   'build123d',
+  'smlibpy',
   'picogk',
   'geospec',
   'step',
@@ -54,4 +55,4 @@ export const pluginKeywords: readonly string[] = [
 
 /** The npm `description` in `package.json`. @internal */
 export const packageDescription =
-  'Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, PicoGK).';
+  'Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy, PicoGK).';

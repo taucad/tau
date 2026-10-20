@@ -20,7 +20,9 @@ import { readManagedPreparation } from '@taucad/runtime/preparation/node';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { defineRuntime, resolveRuntimeDefinition } from '@taucad/runtime/worker';
 import { assertRootedPath } from '@taucad/runtime/kernel';
-import type { GeoSpecRuntimeClient } from 'geospec/model';
+import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
+import type { TauExporterClient } from '@taucad/agent-tools/geospec/exporter';
+import type { GeoSpecModelExporter } from 'geospec/model';
 
 const exampleMiddleware = () => [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()];
 
@@ -101,7 +103,9 @@ export const createExampleRuntimeClient = async (projectPath: string): Promise<R
   createNodeClient({ runtime: exampleRuntime, projectPath });
 
 /** Isolate C# compilations while preserving shared imports for bundled examples. @public */
-export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Promise<GeoSpecRuntimeClient> => {
+export const createExampleGeoSpecRuntimeClient = async (
+  projectPath: string,
+): Promise<TauExporterClient & { terminate(): void }> => {
   let client: RuntimeClient<typeof exampleRuntime> | undefined;
   let activeRoot: string | undefined;
   return {
@@ -155,3 +159,22 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
     },
   };
 };
+
+const { kernels: exampleKernels } = await resolveRuntimeDefinition(exampleRuntime, undefined);
+/** File extensions the example runtime's kernels claim, without the catch-all. @public */
+export const exampleKernelExtensions: readonly string[] = [
+  ...new Set(exampleKernels.flatMap(({ extensions = [] }) => extensions).filter((extension) => extension !== '*')),
+];
+
+/**
+ * A GeoSpec exporter over the example corpus: each run scope gets its own isolated example client, shut down when the
+ * scope releases.
+ * @param projectPath - The example corpus root.
+ * @returns The exporter.
+ * @public
+ */
+export const createExampleGeoSpecExporter = async (projectPath: string): Promise<GeoSpecModelExporter> =>
+  tauClientExporter({
+    client: async () => createExampleGeoSpecRuntimeClient(projectPath),
+    extensions: exampleKernelExtensions,
+  });

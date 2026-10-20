@@ -5,8 +5,6 @@ import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { describe, expect, it } from 'vitest';
-import { mock } from 'vitest-mock-extended';
-import type { RuntimeDocument } from '@taucad/runtime/client';
 import type {
   GeoSpecAssertionClient,
   GeoSpecCanonicalClaimReport,
@@ -17,7 +15,7 @@ import type { GeoSpecAssertion } from 'geospec/runner';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeModelEngine } from 'geospec/runner/native';
 import type { GeoSpecRunnerEvent } from 'geospec/runner/worker';
-import type { GeoSpecRuntimeClient, RuntimeClientWithRoutes } from 'geospec/model';
+import type { GeoSpecModelExporter, GeoSpecModelExportRequest } from 'geospec/model';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import { createModelLoader } from '#model/load-model.js';
@@ -466,39 +464,14 @@ for (const route of routes) {
           return inner.releaseSubject(request);
         },
       };
-      const runtimeCalls: Array<{ format: string; options: unknown }> = [];
-      let runtimeConnects = 0;
-      let runtimeTerminates = 0;
-      const runtime: GeoSpecRuntimeClient & RuntimeClientWithRoutes = {
-        async connect() {
-          runtimeConnects += 1;
-        },
-        terminate() {
-          runtimeTerminates += 1;
-        },
-        bestRouteFor(format) {
-          return {
-            kernelId: 'replicad',
-            fidelity: format === 'step' ? 'brep' : 'mesh',
-            exportOptions: {
-              schema: { properties: { coordinateSystem: {}, unit: {} } },
-              defaults: {},
-            },
-          };
-        },
-        open(input) {
-          const document = mock<RuntimeDocument>();
-          document.export.mockImplementation(async (format, request) => {
-            runtimeCalls.push({ format, options: { source: input.source, options: request?.options } });
-            return {
-              success: true,
-              exportId: 'glb',
-              evaluationId: 'evaluation-1',
-              issues: [],
-              files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.from(glbBytes) }],
-            };
-          });
-          return document;
+      const exportCalls: GeoSpecModelExportRequest[] = [];
+      const exporter: GeoSpecModelExporter = {
+        id: 'fixture',
+        extensions: ['ts'],
+        capabilities: { formats: ['glb', 'step'] },
+        async export(request) {
+          exportCalls.push(request);
+          return { bytes: Uint8Array.from(glbBytes), format: 'glb' };
         },
       };
       const events: GeoSpecRunnerEvent[] = [];
@@ -506,7 +479,7 @@ for (const route of routes) {
         filesystem,
         nativeAssertions: { engine, workUnitLimit: 1_000_000 },
         model: {
-          runtime,
+          exporters: [exporter],
           async readSource(source) {
             if (source !== 'baseline.step') {
               throw new Error(`Unexpected direct source: ${JSON.stringify(source)}`);
@@ -524,14 +497,12 @@ for (const route of routes) {
 
       try {
         const result = await runner.run({ files: [entryPath] });
-        // This controlled Runtime exports pinned bytes without compiling a source graph.
+        // This controlled exporter returns pinned bytes without compiling a source graph.
         // Claims can pass, but that fixture must not qualify coherent source execution.
         expect(result.success).toBe(false);
         expect([result.passed, result.failed, result.selectedTests]).toEqual([3, 0, 3]);
         expect(result.files[0]?.result.success).toBe(true);
         expect(releases).toHaveLength(2);
-        expect(runtimeConnects).toBe(1);
-        expect(runtimeTerminates).toBe(0);
         expect(ingests).toMatchObject([
           {
             request: {
@@ -574,15 +545,7 @@ for (const route of routes) {
         expect(admittedSubjectHashes[2]).toBe(admittedSubjectHashes[0]);
         expect(admittedSubjectHashes[3]).toBe(admittedSubjectHashes[0]);
         expect(admittedSubjectHashes[1]).not.toBe(admittedSubjectHashes[0]);
-        expect(runtimeCalls).toEqual([
-          {
-            format: 'glb',
-            options: {
-              source: { path: 'model.ts' },
-              options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
-            },
-          },
-        ]);
+        expect(exportCalls).toEqual([{ file: 'model.ts', format: 'glb' }]);
         expect(events.map(({ type }) => type)).toEqual(['run-start', 'file-start', 'file-complete', 'run-complete']);
         expect(timeline).toEqual(['run-start', 'file-start', 'file-complete', 'release', 'release', 'run-complete']);
 
@@ -652,7 +615,7 @@ for (const route of routes) {
                 events: events.map(({ type }) => type),
                 timeline,
                 ingests,
-                runtimeCalls,
+                exportCalls,
                 releases: releases.length,
                 tests: fileResult.tests,
                 reports: assertions.map((assertion) => serializableReport(assertion.report!)),

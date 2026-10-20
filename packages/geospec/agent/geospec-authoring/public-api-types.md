@@ -1,6 +1,6 @@
 # geospec — Types
 
-92 top-level symbols. Signatures are verbatim typescript.
+89 top-level symbols. Signatures are verbatim typescript.
 
 // A model admitted by one live GeoSpec host scope
 GeoSpecSubject: {
@@ -1558,6 +1558,75 @@ ConnectedComponentsResult: {
 
   gaps: ClusterGap[]
 
+// Runtime export intent recorded when GeoSpec obtains evidence from a CAD runtime instead of a direct geometry file
+GeometryExportIntent: {
+    requested: {
+        format: GeometryFileFormat;
+        coordinateSystem?: 'y-up' | 'z-up';
+        unit?: {
+            length?: 'meter' | 'millimeter';
+        };
+        tessellation?: {
+            linearTolerance?: number;
+            angularToleranceDegrees?: number;
+        };
+    };
+    honored?: {
+        format: GeometryFileFormat;
+        coordinateSystem?: 'y-up' | 'z-up';
+        unit?: {
+            length?: 'meter' | 'millimeter';
+        };
+        tessellation?: {
+            linearTolerance?: number;
+            angularToleranceDegrees?: number;
+        };
+        sourceUnit?: GeoSpecUnit;
+    };
+    route?: {
+        kernelId?: string;
+        sourceFormat?: string;
+        targetFormat?: string;
+        transcoderId?: string;
+        fidelity?: 'mesh' | 'brep' | (string & {});
+        direct: boolean;
+    };
+}
+
+  requested: {
+          format: GeometryFileFormat;
+          coordinateSystem?: 'y-up' | 'z-up';
+          unit?: {
+              length?: 'meter' | 'millimeter';
+          };
+          tessellation?: {
+              linearTolerance?: number;
+              angularToleranceDegrees?: number;
+          };
+      }
+
+  honored?: {
+          format: GeometryFileFormat;
+          coordinateSystem?: 'y-up' | 'z-up';
+          unit?: {
+              length?: 'meter' | 'millimeter';
+          };
+          tessellation?: {
+              linearTolerance?: number;
+              angularToleranceDegrees?: number;
+          };
+          sourceUnit?: GeoSpecUnit;
+      }
+
+  route?: {
+          kernelId?: string;
+          sourceFormat?: string;
+          targetFormat?: string;
+          transcoderId?: string;
+          fidelity?: 'mesh' | 'brep' | (string & {});
+          direct: boolean;
+      }
+
 // Diagnostic form permitted inside a wire-safe subject snapshot
 GeometryEvidenceDiagnostic: Omit<GeometryDiagnostic, 'details'> & {
     details?: JSONValue;
@@ -1756,70 +1825,6 @@ WatertightResult: {
 
   perPrimitive: WatertightPrimitiveBreakdown[]
 
-// Runtime route metadata used to decide whether a runtime export can honor GeoSpec evidence requirements
-GeoSpecExportRoute: Partial<ExportRoute> & {
-    kernelId?: string;
-    sourceFormat?: string;
-    targetFormat?: string;
-    transcoderId?: string;
-    fidelity?: string;
-    exportOptions?: {
-        schema?: {
-            properties?: Record<string, unknown>;
-        };
-        defaults?: Record<string, unknown>;
-    };
-}
-
-RuntimeBackedModelFormat: Exclude<GeoSpecModelFormat, 'mesh-buffer'>
-
-// Runtime client shape for route-aware Tau runtimes
-RuntimeClientWithRoutes: GeoSpecRuntimeClient & {
-    bestRouteFor(format: string, options?: {
-        readonly kernelId?: string;
-    }): GeoSpecExportRoute | undefined;
-}
-
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
-
-  // RuntimeClientWithRoutes.on (method)
-  on?(event: 'telemetry', handler: (batch: {
-          readonly entries: ReadonlyArray<{
-              name: string;
-              duration: number;
-              startTime: number;
-              workerTimeOrigin: number;
-          }>;
-      }) => void): () => void;
-
-  // RuntimeClientWithRoutes.bestRouteFor (method)
-  bestRouteFor(format: string, options?: {
-          readonly kernelId?: string;
-      }): GeoSpecExportRoute | undefined;
-
-// Resolved runtime export request and provenance for a GeoSpec model load
-RuntimeExportIntent: {
-    options: Record<string, unknown>;
-    provenance: GeometryExportIntent;
-    sourceUnit: GeoSpecUnit;
-}
-
-  options: Record<string, unknown>
-
-  provenance: GeometryExportIntent
-
-  sourceUnit: GeoSpecUnit
-
-// Structured failure returned when a runtime cannot provide the requested GeoSpec evidence
-RuntimeExportIntentFailure: {
-    success: false;
-    diagnostics: GeometryDiagnostic[];
-}
-
-  success: false
-
-  diagnostics: GeometryDiagnostic[]
-
 // Defaults accepted by {@link import ('./load-model.js').createModelLoader}
 CreateModelLoaderOptions: {
     /** Initialized compiled engine supplied by the host, never selected by an authored spec. */
@@ -1828,16 +1833,9 @@ CreateModelLoaderOptions: {
     readSource?: GeoSpecNativeSourceReader;
     /** Geometry format to export when an individual call does not specify one. */
     format?: GeoSpecModelFormat;
-    /** Runtime client or lazy runtime factory. */
-    runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-    /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
-    sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
-    /**
-     * Model exporters for source-kind files, consulted when no runtime is configured; the first whose
-     * `extensions` claim the file exports it.
-     */
+    /** Model exporters for source-kind files; the first whose `extensions` claim the file exports it. */
     exporters?: readonly GeoSpecModelExporter[];
-    /** Project root used by runtime integrations. */
+    /** Absolute project root passed to the exporter. */
     projectPath?: string;
     /** STEP reader strategy used for STEP sources or exports. */
     stepStreaming?: StepStreamingMode;
@@ -1858,16 +1856,10 @@ CreateModelLoaderOptions: {
   // Geometry format to export when an individual call does not specify one
   format?: GeoSpecModelFormat
 
-  // Runtime client or lazy runtime factory
-  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-
-  // Source-specific runtime adapters, e.g
-  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
-
-  // Model exporters for source-kind files, consulted when no runtime is configured
+  // Model exporters for source-kind files
   exporters?: readonly GeoSpecModelExporter[]
 
-  // Project root used by runtime integrations
+  // Absolute project root passed to the exporter
   projectPath?: string
 
   // STEP reader strategy used for STEP sources or exports
@@ -1932,12 +1924,14 @@ GeoSpecModelArtifact: {
     }>;
     /**
      * Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits,
-     * optionally prefixed `sha256:`). The load records it as the subject's source revision.
+     * optionally prefixed `sha256:`), or `'missing'` for a file the export looked for and did not find. The
+     * load records it as the subject's source revision.
      */
-    readonly consumedSources?: ReadonlyArray<{
-        readonly path: string;
-        readonly sha256: string;
-    }>;
+    readonly consumedSources?: GeoSpecConsumedSources;
+    /** Notices from a successful export, admitted with the subject so its evidence keeps them. */
+    readonly diagnostics?: readonly GeometryDiagnostic[];
+    /** The export options the exporter applied, recorded in the load evidence beside the exporter id. */
+    readonly exportOptions?: Readonly<Record<string, unknown>>;
 }
 
   readonly bytes: Uint8Array<ArrayBuffer>
@@ -1953,11 +1947,14 @@ GeoSpecModelArtifact: {
           readonly bytes: Uint8Array<ArrayBuffer>;
       }>
 
-  // Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits, optionally prefixed `sha256:`)
-  readonly consumedSources?: ReadonlyArray<{
-          readonly path: string;
-          readonly sha256: string;
-      }>
+  // Every source file the export read, as a path from the project root with its SHA-256 (64 hex digits, optionally prefixed `sha256:`), or `'missing'` for a file the export looked for and did not find
+  readonly consumedSources?: GeoSpecConsumedSources
+
+  // Notices from a successful export, admitted with the subject so its evidence keeps them
+  readonly diagnostics?: readonly GeometryDiagnostic[]
+
+  // The export options the exporter applied, recorded in the load evidence beside the exporter id
+  readonly exportOptions?: Readonly<Record<string, unknown>>
 
 // Turns a source-kind model file into GLB or STEP bytes for GeoSpec
 GeoSpecModelExporter: {
@@ -1965,7 +1962,16 @@ GeoSpecModelExporter: {
     readonly extensions: readonly string[];
     readonly capabilities: GeoSpecExporterCapabilities;
     export(request: GeoSpecModelExportRequest): Promise<GeoSpecModelArtifact>;
-    /** Releases what the exporter holds; called by whoever constructed it, never by the loader. */
+    /**
+     * The sources an export of `file` would read now, without exporting. With it, the loader reuses an
+     * earlier identical load in the same scope when every digest still matches; without it, every file
+     * load exports afresh.
+     */
+    revision?(request: Pick<GeoSpecModelExportRequest, 'file' | 'projectPath'>): Promise<GeoSpecConsumedSources | undefined>;
+    /**
+     * Releases what the exporter created for one scope. The loader calls it from `releaseAll` for every
+     * exporter it exported through in that scope; the exporter stays usable for the next one.
+     */
     close?(): Promise<void>;
 }
 
@@ -1978,7 +1984,11 @@ GeoSpecModelExporter: {
   // GeoSpecModelExporter.export (method)
   export(request: GeoSpecModelExportRequest): Promise<GeoSpecModelArtifact>;
 
-  // Releases what the exporter holds
+  // The sources an export of `file` would read now, without exporting
+  // GeoSpecModelExporter.revision (method)
+  revision?(request: Pick<GeoSpecModelExportRequest, 'file' | 'projectPath'>): Promise<GeoSpecConsumedSources | undefined>;
+
+  // Releases what the exporter created for one scope
   // GeoSpecModelExporter.close (method)
   close?(): Promise<void>;
 
@@ -2034,10 +2044,16 @@ GeoSpecModelFormat: MeshFileFormat | 'step' | 'stp'
 // Function shape used by GeoSpec runners to provide model loading inside VM executed test files
 GeoSpecModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>) => Promise<GeoSpecSubject>
 
-// A configured loader whose shared runtime can be released with its owner
+// A configured loader whose admissions can be released with its owner
 ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
     dispose(): Promise<void>;
 }
 
   // ManagedGeoSpecModelLoader.dispose (method)
   dispose(): Promise<void>;
+
+// The source files one export read, each with its SHA-256 or `'missing'`
+GeoSpecConsumedSources: ReadonlyArray<{
+    readonly path: string;
+    readonly sha256: string;
+}>

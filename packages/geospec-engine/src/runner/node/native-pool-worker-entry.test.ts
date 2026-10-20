@@ -6,7 +6,16 @@ const owner = vi.hoisted(() => ({
   loader: vi.fn<(options: CreateGeoSpecNativeModelLoaderOptions) => void>(),
   close: vi.fn(),
   client: vi.fn(async () => ({})),
-  resolved: { kernels: [{ id: 'kernel', extensions: ['ts'] }] },
+  exporter: vi.fn(async (options: { client: () => Promise<unknown>; extensions: readonly string[] }) => ({
+    id: 'tau',
+    ...options,
+  })),
+  resolved: {
+    kernels: [
+      { id: 'kernel', extensions: ['ts'] },
+      { id: 'fallback', extensions: ['*', 'ts', 'scad'] },
+    ],
+  },
   resolve: vi.fn(async (_runtime: unknown, _config: unknown) => owner.resolved),
   deployments: [] as unknown[],
   deploymentsOf: vi.fn((_runtime: unknown) => owner.deployments),
@@ -24,6 +33,7 @@ vi.mock('geospec-engine/node', () => ({
   },
 }));
 vi.mock('geospec/runner/native', () => ({ createGeoSpecNativeModelLoader: owner.loader }));
+vi.mock('@taucad/agent-tools/geospec/exporter', () => ({ tauClientExporter: owner.exporter }));
 vi.mock('@taucad/runtime/node', () => ({ createNodeClient: owner.client }));
 vi.mock('@taucad/runtime/worker', () => ({ resolveRuntimeDefinition: owner.resolve }));
 vi.mock('@taucad/native-process-core/store', () => ({
@@ -35,9 +45,11 @@ vi.mock('#model/default-runtime.js', () => ({ defaultRuntime: owner.defaults }))
 vi.mock('geospec/runner/node', () => ({ createNodeVmFileSystem: vi.fn(() => ({})) }));
 vi.mock('geospec/runner/worker', () => ({ startGeoSpecPoolWorkerHost: vi.fn() }));
 
-const runtimeFactory = () => {
-  startNativePoolWorker({ postMessage: vi.fn(), on: vi.fn() }, { projectPath: '/project', grant: 1 });
-  const factory = owner.loader.mock.calls.at(-1)?.[0].runtime;
+const runtimeFactory = async () => {
+  await startNativePoolWorker({ postMessage: vi.fn(), on: vi.fn() }, { projectPath: '/project', grant: 1 });
+  const [exporter] = owner.loader.mock.calls.at(-1)?.[0].exporters ?? [];
+  expect(exporter).toBe(await owner.exporter.mock.results.at(-1)?.value);
+  const factory = owner.exporter.mock.calls.at(-1)?.[0].client;
   if (typeof factory !== 'function') {
     throw new TypeError('The Node worker must supply its owning Runtime factory.');
   }
@@ -56,9 +68,17 @@ afterEach(() => {
 });
 
 describe('configured native Node worker Runtime', () => {
+  it("claims the default runtime's kernel extensions without the catch-all", async () => {
+    await runtimeFactory();
+    expect(owner.exporter.mock.calls.at(-1)?.[0].extensions).toEqual(['ts', 'scad']);
+    expect(owner.client).not.toHaveBeenCalled();
+  });
+
   it('serves the default runtime unchanged when it lists no native kernel', async () => {
     owner.deployments = [];
-    await runtimeFactory()();
+    await (
+      await runtimeFactory()
+    )();
     expect(owner.resolve).toHaveBeenCalledWith(owner.defaults, undefined);
     expect(owner.deploymentsOf).toHaveBeenCalledWith(owner.resolved);
     expect(owner.install).not.toHaveBeenCalled();
@@ -67,7 +87,9 @@ describe('configured native Node worker Runtime', () => {
 
   it('binds the native kernels the default runtime lists to the payload store before the client starts', async () => {
     owner.deployments = [{ deployment: { package: '@taucad/picogk' }, kernels: [] }];
-    await runtimeFactory()();
+    await (
+      await runtimeFactory()
+    )();
     expect(owner.storeResolver).toHaveBeenCalledWith({ managed: expect.any(Object) as unknown });
     expect(owner.install).toHaveBeenCalledWith(owner.resolver);
     expect(owner.install.mock.invocationCallOrder[0]).toBeLessThan(owner.client.mock.invocationCallOrder[0]!);
@@ -76,7 +98,7 @@ describe('configured native Node worker Runtime', () => {
 
   it('refuses a malformed managed profile without falling back to another Runtime', async () => {
     vi.stubEnv('TAU_ACQUISITION', 'sometimes');
-    await expect(runtimeFactory()()).rejects.toThrow('TAU_ACQUISITION');
+    await expect((await runtimeFactory())()).rejects.toThrow('TAU_ACQUISITION');
     expect(owner.install).not.toHaveBeenCalled();
     expect(owner.client).not.toHaveBeenCalled();
   });

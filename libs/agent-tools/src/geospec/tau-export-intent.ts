@@ -1,19 +1,21 @@
-import type { GeoSpecUnit } from '#geometry-unit.js';
-import type { GeometryDiagnostic, GeometryExportIntent } from '#mesh/types.js';
-import type { GeoSpecModelFormat, GeoSpecRuntimeClient } from '#model/types.js';
+/**
+ * The Tau Runtime export intent behind `tauClientExporter`: which route and options give GeoSpec canonical
+ * Z-up millimetre evidence, and the typed refusal when a kernel cannot.
+ *
+ * @module
+ */
+
+import type { GeoSpecUnit, GeometryDiagnostic, GeometryExportIntent } from 'geospec/mesh';
+import { geoSpecMeshEvidenceMatchers } from 'geospec/model';
+import type { GeoSpecExportFormat } from 'geospec/model';
 import type { ExportRoute } from '@taucad/runtime/types';
 
-/**
- *
- *
- * @public
- */
-export type RuntimeBackedModelFormat = Exclude<GeoSpecModelFormat, 'mesh-buffer'>;
+import type { TauExporterClient } from '#geospec/tau-client-exporter.js';
 
-/** Runtime route metadata used to decide whether a runtime export can honor GeoSpec evidence requirements.
- *
- * @public
- */
+/** A format a Tau Runtime export serves GeoSpec, with STEP's `stp` alias. */
+export type RuntimeBackedModelFormat = GeoSpecExportFormat | 'stp';
+
+/** Runtime route metadata used to decide whether a runtime export can honor GeoSpec evidence requirements. */
 export type GeoSpecExportRoute = Partial<ExportRoute> & {
   kernelId?: string;
   sourceFormat?: string;
@@ -28,50 +30,25 @@ export type GeoSpecExportRoute = Partial<ExportRoute> & {
   };
 };
 
-/** Runtime client shape for route-aware Tau runtimes.
- *
- * @public
- */
-export type RuntimeClientWithRoutes = GeoSpecRuntimeClient & {
+/** Runtime client shape for route-aware Tau runtimes. */
+export type RuntimeClientWithRoutes = TauExporterClient & {
   bestRouteFor(format: string, options?: { readonly kernelId?: string }): GeoSpecExportRoute | undefined;
 };
 
-/** Resolved runtime export request and provenance for a GeoSpec model load.
- *
- * @public
- */
+/** Resolved runtime export request and provenance for a GeoSpec model load. */
 export type RuntimeExportIntent = {
   options: Record<string, unknown>;
   provenance: GeometryExportIntent;
   sourceUnit: GeoSpecUnit;
 };
 
-/** Structured failure returned when a runtime cannot provide the requested GeoSpec evidence.
- *
- * @public
- */
+/** Structured failure returned when a runtime cannot provide the requested GeoSpec evidence. */
 export type RuntimeExportIntentFailure = {
   success: false;
   diagnostics: GeometryDiagnostic[];
 };
 
-const stepFormats = new Set<GeoSpecModelFormat>(['step', 'stp']);
-
-/**
- * The matchers mesh evidence answers, as the GeoSpec authoring skill lists
- * them (`packages/geospec/agent/geospec-authoring/SKILL.md`): bounds, volume,
- * surface area, connected components and watertightness. Every other
- * exact-feature matcher needs STEP BRep evidence.
- *
- * @public
- */
-export const geoSpecMeshEvidenceMatchers = [
-  'toHaveBoundingBox',
-  'toHaveVolume',
-  'toHaveSurfaceArea',
-  'toHaveConnectedComponents',
-  'toBeWatertight',
-] as const;
+const stepFormats = new Set<RuntimeBackedModelFormat>(['step', 'stp']);
 
 type TessellationIntent = {
   linearTolerance?: number;
@@ -167,10 +144,10 @@ const kernelBrepUnsupported = (options: {
   };
 };
 
-const hasRuntimeRoutes = (runtime: GeoSpecRuntimeClient): runtime is RuntimeClientWithRoutes =>
+const hasRuntimeRoutes = (runtime: TauExporterClient): runtime is RuntimeClientWithRoutes =>
   typeof (runtime as { bestRouteFor?: unknown }).bestRouteFor === 'function';
 
-const hasAnyRouteMetadata = (runtime: GeoSpecRuntimeClient, format: RuntimeBackedModelFormat): boolean => {
+const hasAnyRouteMetadata = (runtime: TauExporterClient, format: RuntimeBackedModelFormat): boolean => {
   const { capabilities } = runtime as { capabilities?: { routes?: readonly unknown[] } };
   if ((capabilities?.routes?.length ?? 0) > 0) {
     return true;
@@ -209,9 +186,13 @@ const canonicalUnsupported = (options: {
   ],
 });
 
-/** @public */
+/**
+ * Resolve the export options and provenance a Tau Runtime route gives GeoSpec, or the typed refusal.
+ * @param options - The client, requested format, tessellation and the evaluating kernel when known.
+ * @returns The intent, or a failure with GeoSpec diagnostics.
+ */
 export const resolveRuntimeExportIntent = (options: {
-  runtime: GeoSpecRuntimeClient;
+  runtime: TauExporterClient;
   format: RuntimeBackedModelFormat;
   meshLinearTolerance?: number;
   meshAngularToleranceDegrees?: number;

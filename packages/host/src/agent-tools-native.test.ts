@@ -9,7 +9,7 @@ import type { RuntimeDocument, UpdateOutcome, ViewUpdateOutcome } from '@taucad/
 import type { SourceRevision } from '@taucad/runtime/types';
 import type { GeoSpecNativeRunnerOptions } from 'geospec/runner/native';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
-import type { GeoSpecRuntimeClient } from 'geospec/model';
+import type { TauExporterClient } from '@taucad/agent-tools/geospec';
 import type { HostRuntimeClient } from '#agent-tools.js';
 
 const native = vi.hoisted(() => {
@@ -54,6 +54,26 @@ const freshFactory = async () => {
   return createHostGeoSpecRunner;
 };
 
+/**
+ * A project runtime whose one kernel claims `.ts` files and declares no export routes.
+ * @returns The mocked client.
+ */
+const projectRuntime = () =>
+  mock<TauExporterClient>({
+    capabilities: { registrations: [{ kind: 'kernel', extensions: ['ts'] }] },
+    routesFor: () => [],
+  } as Partial<TauExporterClient>);
+
+/**
+ * An attached host runtime whose one kernel claims `.ts` files.
+ * @returns The mocked client.
+ */
+const hostRuntime = () =>
+  mock<HostRuntimeClient>({
+    capabilities: { registrations: [{ kind: 'kernel', id: 'replicad', extensions: ['ts'] }], routes: [] },
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the partial manifest omits fields the full one requires; the exporter reads only registrations.
+  } as unknown as Partial<HostRuntimeClient>);
+
 describe('native host GeoSpec composition', () => {
   const temporaryRoots: string[] = [];
   const project = async (name: string): Promise<string> => {
@@ -73,7 +93,7 @@ describe('native host GeoSpec composition', () => {
 
   it('should borrow the project runtime and keep the shared engine open after the SDK runner', async () => {
     const createHostGeoSpecRunner = await freshFactory();
-    const runtime = mock<GeoSpecRuntimeClient>();
+    const runtime = projectRuntime();
     const bytes = new Uint8Array([1, 2, 3]);
     const read = vi.fn();
     function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
@@ -105,10 +125,13 @@ describe('native host GeoSpec composition', () => {
     expect(native.filesystem).toHaveBeenCalledExactlyOnceWith(root);
     const options = native.runner.mock.calls[0]?.[0];
     expect(options?.filesystem).toBe(filesystem);
-    const trackedRuntime = options?.model?.runtime;
-    if (trackedRuntime === undefined || typeof trackedRuntime === 'function') {
-      throw new Error('Expected the borrowed project runtime.');
+    const [exporter, ...others] = options?.model?.exporters ?? [];
+    if (exporter === undefined) {
+      throw new Error('Expected an exporter over the borrowed project runtime.');
     }
+    expect(others).toEqual([]);
+    expect(exporter.id).toBe('tau');
+    expect(exporter.extensions).toEqual(['ts']);
     const sourceRevision: SourceRevision = { entry: 'widget.ts', files: { 'widget.ts': 'missing' } };
     const document = mock<RuntimeDocument>();
     document.export.mockResolvedValue({
@@ -120,14 +143,15 @@ describe('native host GeoSpec composition', () => {
       sourceRevision,
     });
     runtime.open.mockReturnValue(document);
-    const trackedDocument = trackedRuntime.open({ source: { path: 'widget.ts' } });
-    const exported = await trackedDocument.export('glb');
-    expect(exported.sourceRevision).toEqual(sourceRevision);
-    expect(runtime.open).toHaveBeenCalledExactlyOnceWith({ source: { path: 'widget.ts' } });
-    expect(document.export).toHaveBeenCalledExactlyOnceWith('glb');
-    trackedDocument.close();
+    const exported = await exporter.export({ file: 'widget.ts', format: 'glb' });
+    expect(exported.consumedSources).toEqual([{ path: 'widget.ts', sha256: 'missing' }]);
+    expect(runtime.open).toHaveBeenCalledExactlyOnceWith({ source: { path: 'widget.ts' }, watch: false });
+    expect(document.export).toHaveBeenCalledExactlyOnceWith('glb', {
+      options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+    });
     expect(document.close).toHaveBeenCalledOnce();
-    expect(trackedRuntime).toBe(runtime);
+    await exporter.close?.();
+    expect(runtime.shutdown).not.toHaveBeenCalled();
     expect(runner).not.toHaveProperty('sourceRevisions');
     expect(options?.model?.projectPath).toBe(root);
     // The product reads verdicts and localized failures, not complete success witnesses.
@@ -149,7 +173,7 @@ describe('native host GeoSpec composition', () => {
     const createHostGeoSpecRunner = await freshFactory();
     native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
     native.runner.mockImplementation(() => mock<GeoSpecRunner>());
-    const runtime = mock<GeoSpecRuntimeClient>();
+    const runtime = projectRuntime();
 
     const root = await project('widget');
     const first = await createHostGeoSpecRunner(root, runtime);
@@ -175,7 +199,7 @@ describe('native host GeoSpec composition', () => {
     const createHostGeoSpecRunner = await freshFactory();
     native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
     native.runner.mockImplementation(() => mock<GeoSpecRunner>());
-    const runtime = mock<GeoSpecRuntimeClient>();
+    const runtime = projectRuntime();
     const rootA = await project('a');
     const rootB = await project('b');
 
@@ -202,7 +226,7 @@ describe('native host GeoSpec composition', () => {
     const createHostGeoSpecRunner = await freshFactory();
     native.filesystem.mockReturnValue(mock<GeoSpecNativeRunnerOptions['filesystem']>());
     native.runner.mockImplementation(() => mock<GeoSpecRunner>());
-    const runtime = mock<GeoSpecRuntimeClient>();
+    const runtime = projectRuntime();
     const root = await project('project');
     const alias = join(root, '..', 'alias');
     await symlink(root, alias);
@@ -225,7 +249,7 @@ describe('native host GeoSpec composition', () => {
       throw new Error('Permission denied (os error 13)');
     });
     try {
-      const runner = await createHostGeoSpecRunner(root, mock<GeoSpecRuntimeClient>());
+      const runner = await createHostGeoSpecRunner(root, projectRuntime());
       expect(native.engine).toHaveBeenCalledTimes(2);
       expect(native.engine.mock.calls[1]).toEqual([undefined, undefined, { maxMeshBytes: 1024 * 1024 * 1024 }]);
       expect(warning).toHaveBeenCalledOnce();
@@ -247,7 +271,7 @@ describe('native host GeoSpec composition', () => {
       throw new Error('native engine configuration failed');
     });
     try {
-      await expect(createHostGeoSpecRunner(root, mock<GeoSpecRuntimeClient>())).rejects.toThrow(
+      await expect(createHostGeoSpecRunner(root, projectRuntime())).rejects.toThrow(
         'native engine configuration failed',
       );
       expect(native.engine).toHaveBeenCalledTimes(2);
@@ -274,7 +298,7 @@ describe('native host GeoSpec composition', () => {
       const createHostToolRegistry = await freshRegistry();
       const workspaceRoot = await project('default-runner');
       await writeFile(join(workspaceRoot, 'cube.geospec.ts'), 'export const spec = 1;\n', 'utf8');
-      const client = mock<HostRuntimeClient>();
+      const client = hostRuntime();
       const runtimeClient = vi.fn(async () => client);
       const sdkRunner = mock<GeoSpecRunner>();
       sdkRunner.run.mockResolvedValue({ success: true, passed: 0, failed: 0, selectedTests: 0, files: [], issues: [] });
@@ -289,7 +313,9 @@ describe('native host GeoSpec composition', () => {
       expect(result.isError).toBe(false);
       expect(runtimeClient).toHaveBeenCalledWith(workspaceRoot);
       expect(native.runner).toHaveBeenCalledOnce();
-      expect(native.runner.mock.calls[0]?.[0].model?.runtime).toBe(client);
+      const [exporter] = native.runner.mock.calls[0]?.[0].model?.exporters ?? [];
+      expect(exporter?.id).toBe('tau');
+      expect(client.connect).toHaveBeenCalled();
       expect(sdkRunner.run).toHaveBeenCalledExactlyOnceWith({ files: ['cube.geospec.ts'] });
       expect(sdkRunner.close).toHaveBeenCalledOnce();
     });
@@ -330,7 +356,7 @@ describe('native host GeoSpec composition', () => {
       try {
         const registry = createHostToolRegistry({
           workspaceRoot,
-          runtimeClient: async () => mock<HostRuntimeClient>(),
+          runtimeClient: async () => hostRuntime(),
         });
         const result = await registry.invoke({
           toolCallId: 'test-model',
@@ -377,7 +403,7 @@ describe('native host GeoSpec composition', () => {
       const geospecRunner = vi.fn(async () => runner);
       const registry = createHostToolRegistry({
         workspaceRoot,
-        runtimeClient: async () => mock<HostRuntimeClient>(),
+        runtimeClient: async () => hostRuntime(),
         geospecRunner,
       });
 
@@ -393,7 +419,7 @@ describe('native host GeoSpec composition', () => {
       const createHostToolRegistry = await freshRegistry();
       const registry = createHostToolRegistry({
         workspaceRoot: await project('withheld'),
-        runtimeClient: async () => mock<HostRuntimeClient>(),
+        runtimeClient: async () => hostRuntime(),
         geospecRunner: false,
       });
       expect(registry.list().map((tool) => tool.name)).not.toContain('test_model');
@@ -465,7 +491,7 @@ describe('native host GeoSpec composition', () => {
           },
         };
         const view = { rendering: vi.fn(async () => rendered), close: vi.fn() };
-        const client = mock<HostRuntimeClient>();
+        const client = hostRuntime();
         client.open.mockReturnValue({
           evaluation: vi.fn(async () => evaluated),
           export: vi.fn(),

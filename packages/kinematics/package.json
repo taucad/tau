@@ -1,6 +1,6 @@
 {
   "name": "@taucad/kinematics",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "Serializable mechanisms, pure forward kinematics, couplings, animation sampling and a damped least-squares pose solver",
   "type": "module",
   "sideEffects": false,

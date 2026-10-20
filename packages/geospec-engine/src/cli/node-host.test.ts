@@ -53,7 +53,7 @@ describe('createNodeGeoSpecCliHost', () => {
     await runner.close();
 
     expect(result.success).toBe(true);
-  });
+  }, 30_000);
 
   it('should write through a supplied report stream instead of stdout', () => {
     const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);

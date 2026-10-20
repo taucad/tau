@@ -53,7 +53,7 @@ beforeEach(async () => {
       ? '.tau/artifacts/bracket.glb'
       : { errorCode: 'KERNEL_ERROR', message: 'Bad model.' };
   });
-  viewer = createLocalMcpViewer({ page, rootOf: () => root, renderGlb });
+  viewer = createLocalMcpViewer({ page, namedRoot: () => root, workspaceRoot: root, renderGlb });
 });
 
 afterEach(async () => {
@@ -346,7 +346,8 @@ describe('createLocalMcpViewer', () => {
       /* A host that names the project per call (Codex `_meta`); without it, the server's start folder. */
       const perCall = createLocalMcpViewer({
         page,
-        rootOf: (meta) => (meta?.['project'] === 'a' ? root : elsewhere),
+        namedRoot: (meta) => (meta?.['project'] === 'a' ? root : undefined),
+        workspaceRoot: elsewhere,
         renderGlb,
       });
       try {
@@ -380,7 +381,7 @@ describe('createLocalMcpViewer', () => {
         success: true,
         parameters: {},
       }));
-      const withHost = createLocalMcpViewer({ page, rootOf: () => root, renderGlb, hostCall });
+      const withHost = createLocalMcpViewer({ page, namedRoot: () => root, workspaceRoot: root, renderGlb, hostCall });
       try {
         const { viewerUrl, model } = shownModel(await withHost.show({ targetFile: 'src/bracket.ts' }, text));
         const { origin, token, modelId } = loopbackOf(viewerUrl);

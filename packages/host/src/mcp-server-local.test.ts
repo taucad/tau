@@ -395,6 +395,98 @@ describe('serveLocalHostMcp', () => {
     }
   });
 
+  it("should run the viewer page's calls in the shown model's project, not the server's start folder", async () => {
+    /* Codex starts the server in the plugin cache and names the thread's folder only on the agent's own calls. */
+    const start = await mkdtemp(join(tmpdir(), 'tau-plugin-cache-'));
+    const project = await mkdtemp(join(tmpdir(), 'tau-project-'));
+    await writeFile(join(project, 'gear.ts'), '');
+    const checkouts = new Map<string, { readonly cwd: string }>();
+    const registry: ToolRegistry = {
+      list: () => [
+        { name: toolName.getParameters, description: 'Read.', inputSchema: { type: 'object', properties: {} } },
+      ],
+      invoke: async ({ runId, toolName: name, input }): Promise<HostToolResult> => {
+        const root = (runId === undefined ? undefined : checkouts.get(runId)?.cwd) ?? '';
+        const { targetFile } = z.object({ targetFile: z.string() }).parse(input);
+        if (!(await exists(join(root, targetFile)))) {
+          return { content: { success: false, errorCode: 'ENOENT', message: join(root, targetFile) }, isError: true };
+        }
+        if (name === toolName.exportModel) {
+          await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+          await writeFile(join(root, '.tau', 'artifacts', 'gear.glb'), 'glb');
+          return {
+            content: {
+              success: true,
+              files: [{ artifactPath: '.tau/artifacts/gear.glb', mimeType: 'model/gltf-binary' }],
+            },
+            isError: false,
+          };
+        }
+        return { content: { success: true, status: 'resolved', root }, isError: false };
+      },
+    };
+    const local = await serveLocalHostMcp({
+      workspaceRoot: start,
+      registry,
+      checkouts,
+      viewerPage: { html: '<!doctype html>', sha256: 'd'.repeat(64) },
+      runtimeClient: async (root) => ({
+        capabilities: {
+          routes: [
+            {
+              targetFormat: 'stl',
+              kernelId: 'replicad',
+              fidelity: 'mesh',
+              exportOptions: { schema: {}, defaults: {} },
+            },
+          ],
+        },
+        connect: async () => undefined,
+        describe: async ({ source }) => ({
+          kernelId: (await exists(join(root, source.path))) ? 'replicad' : undefined,
+        }),
+      }),
+    });
+    try {
+      const viewer = served.options?.viewer;
+      const dispatch = served.options?.dispatch;
+      const formats = viewer?.pageTools?.find(({ name }) => name === 'app_export_formats');
+      if (viewer === undefined || dispatch === undefined || formats === undefined) {
+        throw new Error('serveLocalHostMcp did not serve the viewer');
+      }
+      const thread = { threadId: 'thread-1' };
+      const shown = await viewer.show(
+        { targetFile: 'gear.ts' },
+        { toolCallId: 'show-1', presentation: 'inline', meta: { ...codexMeta(project), ...thread } },
+      );
+      const modelId = z.object({ model: z.object({ id: z.string() }) }).parse(shown).model.id;
+      const getParameters = { toolName: toolName.getParameters, args: { targetFile: 'gear.ts' } };
+
+      /* The page's calls carry the conversation (Codex adds `threadId`) and, for its own tools, the model's id. */
+      expect(await dispatch(getParameters, { toolCallId: 'page-1', meta: thread })).toEqual({
+        success: true,
+        status: 'resolved',
+        root: project,
+      });
+      const page = { toolCallId: 'page-2', presentation: 'inline' } as const;
+      expect(await formats.call({ modelId, targetFile: 'gear.ts' }, { ...page, meta: thread })).toMatchObject({
+        kernelId: 'replicad',
+      });
+      expect(await formats.call({ modelId, targetFile: 'gear.ts' }, page)).toMatchObject({ kernelId: 'replicad' });
+      /* A conversation that showed nothing, and a call that names its folder, behave as before. */
+      expect(await dispatch(getParameters, { toolCallId: 'page-3', meta: { threadId: 'other' } })).toMatchObject({
+        errorCode: 'ENOENT',
+      });
+      expect(
+        await dispatch(getParameters, { toolCallId: 'agent-1', meta: { ...codexMeta(start), ...thread } }),
+      ).toMatchObject({ errorCode: 'ENOENT' });
+    } finally {
+      await local.close();
+      await rm(start, { recursive: true, force: true });
+      await rm(project, { recursive: true, force: true });
+    }
+  });
+
   it('should offer prepare_kernel as open-world and idempotent, and forward its progress reports to the client', async () => {
     const registry: ToolRegistry = {
       list: () => [

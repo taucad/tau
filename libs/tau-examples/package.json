@@ -41,6 +41,7 @@
   "devDependencies": {
     "@classcad/smlibwasm": "catalog:",
     "@jscad/modeling": "catalog:",
+    "@taucad/agent-tools": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",

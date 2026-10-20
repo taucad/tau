@@ -594,9 +594,10 @@ describe('tau agent (scripted command projections)', () => {
   it('should record an external run whose daemon died mid-turn as abandoned', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-acp-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-acp-cfg-'));
+    /* The `SIGKILL`ed daemon's runtime child outlives it and can still be writing here, so removal retries. */
     disposers.push(async () => {
-      await rm(workspace, { recursive: true, force: true });
-      await rm(configDirectory, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+      await rm(configDirectory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     });
     await writeFile(
       join(configDirectory, 'host.json'),

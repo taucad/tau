@@ -1,6 +1,6 @@
 {
   "name": "@taucad/gltf",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "glTF import and transcoding toolkit for Tau",
   "type": "module",
   "sideEffects": false,

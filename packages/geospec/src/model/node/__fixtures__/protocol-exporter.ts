@@ -13,7 +13,7 @@ const print = (document: unknown): void => {
   process.stdout.write(JSON.stringify(document));
 };
 
-const { GEOSPEC_FIXTURE_MODE: mode } = process.env;
+const { GEOSPEC_FIXTURE_MODE: mode, GEOSPEC_FIXTURE_PID_FILE: pidFile } = process.env;
 
 switch (mode) {
   case 'refuse': {
@@ -25,6 +25,16 @@ switch (mode) {
     process.stdout.write('not json');
     process.stderr.write('fixture stderr');
     process.exitCode = 3;
+    break;
+  }
+  case 'stubborn': {
+    process.on('SIGTERM', () => undefined);
+    writeFileSync(pidFile ?? join(out, 'pid'), String(process.pid));
+    setTimeout(() => undefined, 60_000);
+    break;
+  }
+  case 'hang': {
+    setTimeout(() => undefined, 60_000);
     break;
   }
   case 'escape': {

@@ -1,4 +1,5 @@
 import { createEsbuildModuleVm } from '@taucad/esbuild/vm';
+import { defineConfigBuiltinCode } from '#config/define-config.js';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { sha256Bytes } from '@taucad/runtime/kernel';
 import { createCollector } from '#runner/collector.js';
@@ -360,6 +361,7 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     version: '0.0.0-poc',
     code: createGeospecModelBuiltinCode(runToken),
   });
+  vm.registerModule('geospec/config', { version: '0.0.0-poc', code: defineConfigBuiltinCode });
   for (const [name, module_] of Object.entries(options.builtinModules ?? {})) {
     vm.registerModule(name, module_);
   }

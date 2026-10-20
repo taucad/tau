@@ -193,7 +193,7 @@ describe('model exporters', () => {
     expect(ingestSubject).not.toHaveBeenCalled();
   });
 
-  it('should export a file afresh on every load, since an exporter offers no source snapshot', async () => {
+  it('should export a file afresh on every load, since this exporter offers no revision', async () => {
     const { engine } = fixtureEngine();
     const { exporter, exportModel } = fixtureExporter();
     const loader = createGeoSpecNativeModelLoader({ engine, exporters: [exporter] });
@@ -204,15 +204,19 @@ describe('model exporters', () => {
     expect(exportModel).toHaveBeenCalledTimes(2);
   });
 
-  it('should leave a configured runtime in charge, consulting exporters only without one', async () => {
+  it('should keep the first claiming exporter in charge, never falling back to a later one after it fails', async () => {
     const { engine } = fixtureEngine();
-    const { exporter, exportModel } = fixtureExporter({ extensions: ['*'] });
-    const runtime = vi.fn(async () => {
-      throw new Error('runtime route taken');
+    const failing = fixtureExporter({
+      export: async () => {
+        throw new Error('first exporter failed');
+      },
     });
-    const loader = createGeoSpecNativeModelLoader({ engine, runtime, exporters: [exporter] });
+    const fallback = fixtureExporter({ id: 'fallback', extensions: ['*'] });
+    const loader = createGeoSpecNativeModelLoader({ engine, exporters: [failing.exporter, fallback.exporter] });
 
-    await expect(loader({ file: 'main.py' })).rejects.toThrow('runtime route taken');
-    expect(exportModel).not.toHaveBeenCalled();
+    expect(await diagnosticsOf(loader({ file: 'main.py' }))).toMatchObject([
+      { code: 'GEOSPEC_EXPORTER_FAILED', details: { exporter: 'fixture', file: 'main.py' } },
+    ]);
+    expect(fallback.exportModel).not.toHaveBeenCalled();
   });
 });

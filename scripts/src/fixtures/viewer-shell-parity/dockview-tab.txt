@@ -1,0 +1,15 @@
+// The Tau app's dockview tab before it drew the shared tab leaf (dockview-tab.tsx).
+import { Box, X } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+
+export const DockviewTab = ({ title }: { title: string }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <div className='dv-default-tab group/default-tab fade-row size-full min-w-0 overflow-hidden py-1 pr-1 pl-2'>
+        <span className='dockview-tab-title fade-label flex-1'>{title}</span>
+        <X className='size-3.5' />
+      </div>
+    </TooltipTrigger>
+    <TooltipContent>{title}</TooltipContent>
+  </Tooltip>
+);

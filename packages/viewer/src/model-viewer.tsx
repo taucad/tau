@@ -122,6 +122,11 @@ export type ModelViewerProps = {
    * as in the Tau workbench; without one it sits in the canvas's bottom-right corner.
    */
   readonly gizmoContainer?: HTMLElement | string;
+  /**
+   * The element the canvas takes its pointer events from, such as the canvas region that holds the viewer, so a press
+   * on an overlay over the canvas still reaches the model. The canvas's own element when absent.
+   */
+  readonly eventSource?: React.RefObject<HTMLElement>;
 };
 
 type ReferencingCadViewerProps = React.ComponentProps<typeof CadViewer> & {
@@ -188,6 +193,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
   onComponentReference,
   onComponentSecondaryPointerCandidate,
   gizmoContainer,
+  eventSource,
 }: ModelViewerCoreProps): React.JSX.Element {
   const effectiveState: ModelViewerState = viewerState ?? (artifact ? 'ready' : 'loading');
   const knownArtifact = useMemo(() => (artifact ? asKnownArtifact(artifact) : undefined), [artifact]);
@@ -269,6 +275,7 @@ const ModelViewerCore = memo(function ModelViewerCore({
             enableMatcap={graphicsOptions?.enableMatcap}
             enableGizmo={graphicsOptions?.enableGizmo}
             gizmoContainer={gizmoContainer}
+            eventSource={eventSource}
             className={graphicsOptions?.viewerClassName}
             stageOptions={stageOptions}
           />

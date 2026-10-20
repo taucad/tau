@@ -7,8 +7,9 @@ import { Worker as NodeWorker } from 'node:worker_threads';
 
 import { NodeIO, getBounds } from '@gltf-transform/core';
 
-import { parseProjectManifestBytes } from '@taucad/project-core';
-import { exportTauProjectArtifact } from 'geospec/config';
+import type { GeoSpecModelArtifact, GeoSpecModelExporter } from 'geospec/model';
+
+import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { nodeWorkerTransport } from '@taucad/runtime/transport/node';
@@ -18,8 +19,8 @@ assert.ok(process.argv[3], 'Usage: export-artifacts.ts <workspace-root> <new-out
 const outputRoot = resolve(workspaceRoot, process.argv[3]);
 const format = process.argv[4] ?? 'step';
 assert.ok(format === 'step' || format === 'glb', 'Export format must be step or glb.');
-const fixtureRoot = resolve(workspaceRoot, 'packages/geospec/host-tests/tau-project-c2/fixtures');
-const workerPath = resolve(workspaceRoot, 'packages/geospec/host-tests/tau-project-c2/runtime.worker.ts');
+const fixtureRoot = resolve(workspaceRoot, 'libs/agent-tools/host-tests/tau-project-c2/fixtures');
+const workerPath = resolve(workspaceRoot, 'libs/agent-tools/host-tests/tau-project-c2/runtime.worker.ts');
 const workerUrl = pathToFileURL(workerPath);
 
 class TsxWorker extends NodeWorker {
@@ -61,49 +62,43 @@ const records = [];
 for (const state of states) {
   const projectRoot = resolve(fixtureRoot, state.id);
   const manifestBytes = Uint8Array.from(await readFile(resolve(projectRoot, 'tau.json')));
-  const parsedManifest = parseProjectManifestBytes(manifestBytes);
-  if (!parsedManifest.success) {
-    throw new Error(`${state.id}: invalid Tau manifest: ${JSON.stringify(parsedManifest.issue)}`);
-  }
-  let runtimeCount = 0;
-  const runtimeLogs: Array<{ runtimeIndex: number; entry: unknown }> = [];
-  const result = await exportTauProjectArtifact({
-    descriptor: {
-      kind: 'tau-project',
-      manifestPath: 'tau.json',
-      manifest: parsedManifest.data,
-      format,
-    },
-    createRuntime: () => {
-      runtimeCount += 1;
-      const runtimeIndex = runtimeCount;
-      const client = createRuntimeClient({
-        transport: nodeWorkerTransport({
-          url: workerUrl,
-          fileSystem: fromNodeFs(projectRoot),
-          workerCtor: TsxWorker,
-        }),
-      });
-      client.on('log', (entry) => runtimeLogs.push({ runtimeIndex, entry }));
-      return client;
-    },
+  const manifest = JSON.parse(new TextDecoder().decode(manifestBytes)) as {
+    assets?: { main?: { entryPath?: string } };
+  };
+  const entryPath = manifest.assets?.main?.entryPath;
+  assert.ok(entryPath, `${state.id}: tau.json must name assets.main.entryPath`);
+  const runtimeLogs: unknown[] = [];
+  const client = createRuntimeClient({
+    transport: nodeWorkerTransport({
+      url: workerUrl,
+      fileSystem: fromNodeFs(projectRoot),
+      workerCtor: TsxWorker,
+    }),
   });
+  client.on('log', (entry) => runtimeLogs.push(entry));
+  const { exporter, result } = await (async (): Promise<{
+    exporter: GeoSpecModelExporter;
+    result: GeoSpecModelArtifact;
+  }> => {
+    try {
+      const created = await tauClientExporter({ client });
+      return { exporter: created, result: await created.export({ file: entryPath, format }) };
+    } finally {
+      await client.shutdown();
+    }
+  })();
   const runtimeLogPath = resolve(outputRoot, `${state.id}.runtime.json`);
   await writeFile(runtimeLogPath, `${JSON.stringify(runtimeLogs, null, 2)}\n`);
-  if (!result.success) {
-    throw new Error(`${state.id}: ${JSON.stringify(result.issues)}`);
-  }
-  assert.equal(runtimeCount, 2, `${state.id}: adapter must use two fresh runtime lifetimes`);
 
   const artifactPath = resolve(outputRoot, `${state.id}.${format}`);
   const headerPath = resolve(outputRoot, `${state.id}.header.step`);
-  const headerBytes = format === 'step' ? stepHeader(result.data.bytes) : undefined;
-  await writeFile(artifactPath, result.data.bytes);
+  const headerBytes = format === 'step' ? stepHeader(result.bytes) : undefined;
+  await writeFile(artifactPath, result.bytes);
   if (headerBytes) {
     await writeFile(headerPath, headerBytes);
   }
   const persisted = Uint8Array.from(await readFile(artifactPath));
-  assert.deepEqual(persisted, result.data.bytes, `${state.id}: persisted bytes changed`);
+  assert.deepEqual(persisted, result.bytes, `${state.id}: persisted bytes changed`);
   let meshBounds;
   if (format === 'glb') {
     const document = await new NodeIO().readBinary(persisted);
@@ -126,8 +121,6 @@ for (const state of states) {
       path: relative(workspaceRoot, artifactPath),
       byteLength: persisted.byteLength,
       sha256: sha256(persisted),
-      name: result.data.name,
-      mimeType: result.data.mimeType,
     },
     rawHeader: headerBytes
       ? {
@@ -138,23 +131,15 @@ for (const state of states) {
         }
       : undefined,
     meshBounds,
-    frame: result.data.frame,
+    frame: { coordinateSystem: 'z-up', sourceUnit: result.sourceUnit ?? 'mm', lengthUnit: 'millimeter' },
     source: {
-      manifestPath: result.data.source.manifestPath,
-      manifestSha256: sha256(result.data.source.manifestBytes),
-      projectEntryPath: result.data.source.projectEntryPath,
-      entryPath: result.data.source.entryPath,
-      kernelId: result.data.source.kernelId,
-      files: result.data.source.files.map((file) => ({
-        path: file.path,
-        role: file.role,
-        byteLength: file.content.byteLength,
-        sha256: file.sha256,
-      })),
+      manifestPath: 'tau.json',
+      manifestSha256: sha256(manifestBytes),
+      entryPath,
+      files: result.consumedSources ?? [],
     },
-    export: result.data.export,
-    issues: result.issues,
-    runtimeCount,
+    export: { exporter: exporter.id, options: result.exportOptions },
+    issues: result.diagnostics ?? [],
     runtimeLog: relative(workspaceRoot, runtimeLogPath),
   });
 }
@@ -167,7 +152,7 @@ assert.equal(sourceIdentity('baseline'), sourceIdentity('revert'));
 assert.notEqual(sourceIdentity('baseline'), sourceIdentity('comment'));
 assert.notEqual(sourceIdentity('baseline'), sourceIdentity('dimension'));
 
-const adapterPath = resolve(workspaceRoot, 'packages/geospec/src/config/tau-project-artifact.ts');
+const adapterPath = resolve(workspaceRoot, 'libs/agent-tools/src/geospec/tau-client-exporter.ts');
 const manifestPath = resolve(outputRoot, 'export-manifest.json');
 await writeFile(
   manifestPath,

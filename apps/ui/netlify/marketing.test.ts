@@ -234,7 +234,7 @@ it('should retain app robots restrictions and advertise marketing only on the en
   expect(await disabled.text()).toBe(body);
 });
 
-describe('marketing download channel before JavaScript', () => {
+describe('marketing staging links before JavaScript', () => {
   afterEach(() => vi.unstubAllGlobals());
   const files = [
     'Tau-macos-x64.zip',
@@ -245,9 +245,11 @@ describe('marketing download channel before JavaScript', () => {
   ];
   const scripts =
     '<script>const anchor = `<a href="https://downloads.tau.new/latest/Tau-macos-arm64.zip">Download</a>`;</script><script type="application/ld+json">{"url":"https://tau.new/download/"}</script>';
-  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}`;
+  const prompt = (site: string): string =>
+    `<code id="agent-prompt-text">Install the Tau plugin from ${site}/llms.txt</code>`;
+  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${prompt('https://tau.new')}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}`;
 
-  it('should serve every archive link from staging while preserving scripts and document policies', async () => {
+  it('should serve every archive link and the agent prompt from staging while preserving scripts and document policies', async () => {
     vi.stubGlobal('Netlify', { env: { get: () => origin } });
     vi.stubGlobal(
       'fetch',
@@ -272,6 +274,7 @@ describe('marketing download channel before JavaScript', () => {
       files.map((file) => `https://downloads.taucad.dev/latest/${file}`),
     );
     expect(body).toContain(scripts);
+    expect(body).toContain(prompt('https://taucad.dev'));
     expect(body).toContain('<link rel="canonical" href="https://tau.new/download/">');
     expect(response.status).toBe(200);
     expect(response.headers.get('content-security-policy')).toBe("script-src 'self' 'sha256-boot'");

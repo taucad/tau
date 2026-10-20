@@ -1,6 +1,6 @@
 {
   "name": "@taucad/dotnet-kernel-core",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "Shared TypeScript side of Tau native .NET kernels: launch set, options, session, workspace mirror and layer manifest",
   "type": "module",
   "sideEffects": false,

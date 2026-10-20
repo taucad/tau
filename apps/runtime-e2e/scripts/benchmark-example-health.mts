@@ -33,7 +33,7 @@ import { performance } from 'node:perf_hooks';
 import process from 'node:process';
 import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
-import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
+import { createExampleGeoSpecExporter } from '@taucad/tau-examples/runtime';
 import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeLoadModelOptions, ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { GeoSpecRunner, GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
@@ -98,12 +98,13 @@ const median = (values: readonly number[]): number => {
   return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
 };
 
-const createRunner = (observations: Map<string, ModelObservation>): GeoSpecRunner => {
+const createRunner = async (observations: Map<string, ModelObservation>): Promise<GeoSpecRunner> => {
   const engine = new Engine();
+  const exporter = await createExampleGeoSpecExporter(examplesRoot);
   const baseLoader = createGeoSpecNativeModelLoader({
     engine,
     projectPath: examplesSource,
-    runtime: async () => createExampleGeoSpecRuntimeClient(examplesRoot),
+    exporters: [exporter],
   });
   const nativeModelLoader: ManagedGeoSpecNativeModelLoader = Object.assign(
     async (options: GeoSpecNativeLoadModelOptions) => {
@@ -140,7 +141,7 @@ const createRunner = (observations: Map<string, ModelObservation>): GeoSpecRunne
 const runSample = async (options: { iteration: number; expectedModels: number }): Promise<Sample> => {
   const started = performance.now();
   const observations = new Map<string, ModelObservation>();
-  const runner = createRunner(observations);
+  const runner = await createRunner(observations);
   const shards: Sample['shards'] = [];
   runner.on('file-complete', (event) => shards.push(event));
   let sample: Sample | undefined;

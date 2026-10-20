@@ -1,6 +1,6 @@
 {
   "name": "@taucad/picovoxel",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "PicoVoxel voxel, implicit and lattice CAD kernel for Tau",
   "type": "module",
   "sideEffects": false,

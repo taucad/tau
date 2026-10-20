@@ -1,6 +1,6 @@
 # geospec — Functions
 
-7 top-level symbols. Signatures are verbatim typescript.
+6 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -40,18 +40,3 @@ export declare function createModelLoader(defaults: CreateModelLoaderOptions): M
 // loadModel (function)
 export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(_options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
 //   _options: Source, code, or file model load options
-
-// resolveRuntimeExportIntent (function)
-export declare function resolveRuntimeExportIntent(options: {
-    runtime: GeoSpecRuntimeClient;
-    format: RuntimeBackedModelFormat;
-    meshLinearTolerance?: number;
-    meshAngularToleranceDegrees?: number;
-    /**
-     * The kernel that evaluates this source, when the host knows it. Routes are
-     * then chosen among that kernel's own, so a mesh-only kernel is told its
-     * BRep matchers are unsupported instead of being sent to another kernel's
-     * STEP route.
-     */
-    kernelId?: string;
-}): RuntimeExportIntent | RuntimeExportIntentFailure;

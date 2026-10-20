@@ -1,6 +1,6 @@
 {
   "name": "@taucad/jobs-solvers",
-  "version": "0.1.0-beta.7",
+  "version": "0.1.0-beta.8",
   "description": "OpenFOAM and CalculiX job providers for Tau engineering workloads",
   "type": "module",
   "sideEffects": false,

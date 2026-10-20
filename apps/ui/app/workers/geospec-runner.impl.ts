@@ -18,6 +18,7 @@
 
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecKernelEvidence } from '@taucad/agent-tools/geospec';
+import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { fromFsLike } from '@taucad/runtime/filesystem';
@@ -390,9 +391,11 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       }),
     );
     {
-      const [native, { createNativeGeoSpecRunner }] = await Promise.all([
+      const [native, { createNativeGeoSpecRunner }, exporter] = await Promise.all([
         import('geospec-engine'),
         import('geospec/runner/native'),
+        // The session owns the client and terminates it on close; the exporter only borrows it.
+        tauClientExporter({ client: runtimeClient }),
       ]);
       await native.initialize();
       const engine = new native.Engine();
@@ -431,7 +434,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
           ...(request.maxWorkUnitLimit === undefined ? {} : { maximumWorkUnitLimit: request.maxWorkUnitLimit }),
         },
         model: {
-          runtime: runtimeClient,
+          exporters: [exporter],
           readSource: async (source) => {
             if (typeof source !== 'string') {
               throw new TypeError('Project GeoSpec sources must be rooted filesystem paths or in-memory bytes.');

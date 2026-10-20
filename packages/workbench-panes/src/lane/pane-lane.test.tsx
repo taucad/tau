@@ -53,7 +53,9 @@ describe('PaneLane', () => {
 
     await user.click(screen.getByRole('tab', { name: 'Model' }));
     expect(screen.getByText('model body')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Close Model' }));
+    // The close glyph is a pointer target inside the tab's row, never a second focusable control.
+    const modelTab = screen.getByRole('tab', { name: 'Model' }).closest<HTMLElement>('[data-slot="workbench-tab"]')!;
+    await user.click(modelTab.querySelector<HTMLElement>('.fade-action')!);
 
     expect(screen.queryByRole('tab', { name: 'Model' })).toBeNull();
     expect(screen.getByRole('tab', { name: 'Parameters' })).toHaveAttribute('aria-selected', 'true');
@@ -110,16 +112,26 @@ describe('PaneLane', () => {
     expect(edge).toHaveAttribute('aria-valuenow', '260');
   });
 
-  it('should name each tab in full and show its whole title as a tooltip beside the + button', () => {
+  it('should name each tab in full and show its whole title as a tooltip beside the + button', async () => {
+    const user = userEvent.setup();
     renderLane({ initialOpen: ['parameters', 'model', 'kinematics'] });
 
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((tab) => [tab.textContent, tab.getAttribute('title')])).toEqual([
-      ['Parameters', 'Parameters'],
-      ['Model', 'Model'],
-      ['Kinematics', 'Kinematics'],
-    ]);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Parameters', 'Model', 'Kinematics']);
     expect(screen.getByRole('button', { name: 'Open workbench tab' })).toBeVisible();
+
+    await user.hover(screen.getByRole('tab', { name: 'Kinematics' }));
+
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Kinematics');
+  });
+
+  it('should draw each tab with the shared tab leaf, shrinking to 48 px and scrolling past that', () => {
+    renderLane({ initialOpen: ['parameters', 'model'] });
+
+    const row = screen.getByRole('tab', { name: 'Model' }).closest('[data-slot="workbench-tab"]');
+    expect(row).toHaveClass('fade-row', 'w-36', 'min-w-12', 'shrink');
+    expect(screen.getByRole('tablist')).toHaveClass('overflow-x-auto');
+    expect(row?.querySelectorAll('button')).toHaveLength(1);
   });
 
   it('should leave hiding the lane to its host, drawing its toggle at the end of the header row', () => {

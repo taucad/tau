@@ -117,9 +117,10 @@ const createProject = async (client: BrowserClient, name: string): Promise<strin
   return page.evaluate(async (project: string) => {
     const root = await navigator.storage.getDirectory();
     const directory = await root.getDirectoryHandle(project);
-    const handle = await directory.getFileHandle('tau.json');
+    const metadata = await directory.getDirectoryHandle('.tau');
+    const handle = await metadata.getFileHandle('project.json');
     const file = await handle.getFile();
-    return (JSON.parse(await file.text()) as { readonly id: string }).id;
+    return (JSON.parse(await file.text()) as { readonly projectId: string }).projectId;
   }, slug);
 };
 

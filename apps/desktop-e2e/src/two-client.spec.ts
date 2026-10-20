@@ -135,7 +135,7 @@ const scratch = async (label: string): Promise<string> => {
  * Read the project id the browser client wrote into its own OPFS store.
  *
  * The slug is the store directory the project lives in, and it matters once the
- * client holds more than one: an unslugged walk returns whichever `tau.json` it
+ * client holds more than one: an unslugged walk returns whichever identity record it
  * reaches first, which is how a2's first close-and-continue run registered the
  * wrong project on the remote and then failed at the listing instead of at its
  * subject.
@@ -145,19 +145,20 @@ const browserProjectId = async (client: BrowserClient, slug?: string): Promise<s
     if (project !== undefined) {
       const root = await navigator.storage.getDirectory();
       const directory = await root.getDirectoryHandle(project);
-      const handle = await directory.getFileHandle('tau.json');
+      const metadata = await directory.getDirectoryHandle('.tau');
+      const handle = await metadata.getFileHandle('project.json');
       const file = await handle.getFile();
-      const parsed = JSON.parse(await file.text()) as { readonly id?: string };
-      return parsed.id;
+      const parsed = JSON.parse(await file.text()) as { readonly projectId?: string };
+      return parsed.projectId;
     }
     const walk = async (directory: FileSystemDirectoryHandle, depth: number): Promise<string | undefined> => {
       const entries = (directory as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries();
       for await (const [name, handle] of entries) {
-        if (name === 'tau.json' && handle.kind === 'file') {
+        if (directory.name === '.tau' && name === 'project.json' && handle.kind === 'file') {
           const file = await (handle as FileSystemFileHandle).getFile();
-          const parsed = JSON.parse(await file.text()) as { readonly id?: string };
-          if (parsed.id !== undefined) {
-            return parsed.id;
+          const parsed = JSON.parse(await file.text()) as { readonly projectId?: string };
+          if (parsed.projectId !== undefined) {
+            return parsed.projectId;
           }
         }
         if (handle.kind === 'directory' && depth > 0) {
@@ -2761,9 +2762,10 @@ describe('backup by default and one library', () => {
 
   const statusText = async (client: PageClient): Promise<string> =>
     (await revisionStatus(client.page).textContent()) ?? '';
-  const manifestId = async (root: string): Promise<string | undefined> => {
+  const localProjectId = async (root: string): Promise<string | undefined> => {
     try {
-      return (JSON.parse(await readFile(join(root, 'tau.json'), 'utf8')) as { readonly id?: string }).id;
+      return (JSON.parse(await readFile(join(root, '.tau/project.json'), 'utf8')) as { readonly projectId?: string })
+        .projectId;
     } catch {
       return undefined;
     }
@@ -2796,7 +2798,7 @@ describe('backup by default and one library', () => {
     const destinationSlug = await openCloudOnlyProject(second.page, { projectsUrl, name, message: 'D20 open' });
     const root = join(second.homeRoot, destinationSlug);
     await expect
-      .poll(async () => manifestId(root), { message: 'D20: opened under the remote’s id', timeout: 120_000 })
+      .poll(async () => localProjectId(root), { message: 'D20: opened under the remote’s id', timeout: 120_000 })
       .toBe(projectId);
     const remote = required(await gitHead(await tauRepository(projectId)), 'D20: Tau Cloud has no head.');
     await expect.poll(async () => gitHead(root), { timeout: 180_000 }).toBe(remote);
@@ -2865,7 +2867,7 @@ describe('backup by default and one library', () => {
       await localCard.getByRole('link', { name: `Open ${name}`, exact: true }).click();
       await expect.poll(async () => third.page.url(), { timeout: 120_000 }).toMatch(/\/w\//u);
       const root = join(third.homeRoot, projectSlug(third.page));
-      expect(await manifestId(root)).toBe(projectId);
+      expect(await localProjectId(root)).toBe(projectId);
       const remote = required(await gitHead(await tauRepository(projectId)), 'D20: Tau Cloud has no head.');
       await expect
         .poll(async () => gitHead(root), { message: 'D20: the first open pulls', timeout: 180_000 })

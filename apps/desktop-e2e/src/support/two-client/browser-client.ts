@@ -327,7 +327,7 @@ export const launchBrowserClient = async (options: {
       consoleErrors.push(message.text());
     }
   });
-  page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.message}`));
+  page.on('pageerror', (error) => consoleErrors.push(`pageerror: ${error.stack ?? error.message}`));
 
   const capture = async (label: string): Promise<string> => {
     const directory = join(diagnosticsRoot, label);

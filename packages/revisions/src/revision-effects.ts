@@ -39,7 +39,11 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
-import { convertCheckedOutProjectManifest, validateLegacyProjectIdentity } from '#project-manifest-conversion.js';
+import {
+  prepareProjectManifest,
+  validateLegacyProjectIdentity,
+  verifyPreparedProjectManifest,
+} from '#project-manifest-conversion.js';
 import { caseCollisions } from '#case-collisions.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
@@ -1258,22 +1262,26 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
-    afterApply: async (place, target, signal) => {
+    prepareTarget: async (place, target, signal) => {
       const expected = target.get('tau.json');
       if (expected === undefined) {
-        return target;
+        return { tree: target };
       }
-      const converted = await useFileSystem(place, async (filesystem) =>
-        convertCheckedOutProjectManifest({ filesystem, projectId: options.projectId, expected, signal }),
+      const prepared = await useFileSystem(place, async (filesystem) =>
+        prepareProjectManifest({ filesystem, projectId: options.projectId, expected, signal }),
       );
-      if (converted === undefined) {
-        return target;
+      if (prepared === undefined) {
+        return { tree: target };
       }
-      return new ImmutableRevisionTree(
-        target
-          .entries()
-          .map((entry) => [entry.path, entry.path === 'tau.json' ? converted : entry.content, entry.mode]),
-      );
+      return {
+        tree: new ImmutableRevisionTree(
+          target
+            .entries()
+            .map((entry) => [entry.path, entry.path === 'tau.json' ? prepared.bytes : entry.content, entry.mode]),
+        ),
+        verify: async () =>
+          useFileSystem(place, async (filesystem) => verifyPreparedProjectManifest(filesystem, prepared, signal)),
+      };
     },
   });
   const materializeTree: typeof applyMaterializedTree = async (place, target, materialization) => {

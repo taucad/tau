@@ -267,7 +267,7 @@ const liveCheckout: Checkout = {
 /** The extracted apply primitive over the counting checkout used by the crash rows. */
 const materializer = (
   checkout: RevisionFileSystem,
-  afterApply?: Parameters<typeof createApplyTreeEffects>[0]['afterApply'],
+  prepareTarget?: Parameters<typeof createApplyTreeEffects>[0]['prepareTarget'],
 ) => {
   let temporary = 0;
   return createApplyTreeEffects({
@@ -275,7 +275,7 @@ const materializer = (
     capture: async () =>
       captureRevisionTree(checkout, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
     onApplyingTree: undefined,
-    ...(afterApply === undefined ? {} : { afterApply }),
+    ...(prepareTarget === undefined ? {} : { prepareTarget }),
     policy: tauRevisionPolicy.policy,
     withCheckoutFence: async (_checkoutId, operation) => operation(),
     checkoutTreeId: async (_checkoutId, tree) => revisionTreeId(tree, 'sha1'),
@@ -703,6 +703,18 @@ describe('a path that changes kind', () => {
 });
 
 describe('conversion inside recoverable materialization', () => {
+  it('should retain a concurrent authored edit when preparation fails before applying any bytes', async () => {
+    const context = await project({ 'tau.json': 'before' });
+    const target = new ImmutableRevisionTree([['tau.json', 'incoming']]);
+    await expect(
+      materializer(context.checkout, async () => {
+        await context.tree.writeFile('tau.json', 'incoming');
+        throw new Error('identity conflict');
+      })(liveCheckout, target),
+    ).rejects.toThrow('identity conflict');
+    expect(await context.tree.readFile('tau.json', 'utf8')).toBe('incoming');
+  });
+
   it('should restore the previous files and withhold publication when conversion fails', async () => {
     const context = await project({ 'tau.json': 'before', 'part.ts': 'old' });
     let published = false;
@@ -730,8 +742,7 @@ describe('conversion inside recoverable materialization', () => {
     const converted = new ImmutableRevisionTree([['tau.json', 'converted']]);
     await expect(
       materializer(context.checkout, async () => {
-        await context.tree.writeFile('tau.json', 'converted');
-        return converted;
+        return { tree: converted };
       })(liveCheckout, target, {
         publish: async () => {
           throw new Error('publish refused');

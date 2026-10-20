@@ -47,12 +47,12 @@ export const createApplyTreeEffects = (
     useFileSystem: UseCheckoutFileSystem;
     capture: (place: Checkout, modeBasis?: ImmutableRevisionTree) => Promise<ImmutableRevisionTree>;
     onApplyingTree: RevisionActorsOptions['onApplyingTree'];
-    /** A verified current-tree conversion, owned by this transaction, before graph publication. */
-    afterApply?: (
+    /** Prepare the verified target before exposing bytes, and recheck its identity before publication. */
+    prepareTarget?: (
       place: Checkout,
       target: ImmutableRevisionTree,
       signal: AbortSignal | undefined,
-    ) => Promise<ImmutableRevisionTree>;
+    ) => Promise<Readonly<{ tree: ImmutableRevisionTree; verify?: () => Promise<void> }>>;
     policy: PathPolicy;
     withCheckoutFence: <Result>(checkoutId: string, operation: () => Promise<Result>) => Promise<Result>;
     /** The tree id a capture of this checkout records as, through its warm memo (E3). */
@@ -384,14 +384,18 @@ export const createApplyTreeEffects = (
       before: ImmutableRevisionTree,
     ): Promise<Readonly<{ paths: readonly string[]; result: Result | undefined }>> => {
       await materialization.validate?.(before);
-      let recoveryTarget = target;
+      const prepared = (await dependencies.prepareTarget?.(place, target, materialization.signal)) ?? {
+        tree: target,
+      };
+      materialization.signal?.throwIfAborted();
+      const recoveryTarget = prepared.tree;
       try {
         /* `applyTree` verifies the paths it wrote by re-reading them (C3); that
          * re-read is the settlement's second and last walk, so nothing here
          * captures the tree again to compare it a second time. */
-        const paths = await applyTree(place, target, { from: before, signal: materialization.signal });
+        const paths = await applyTree(place, prepared.tree, { from: before, signal: materialization.signal });
         materialization.signal?.throwIfAborted();
-        recoveryTarget = (await dependencies.afterApply?.(place, target, materialization.signal)) ?? target;
+        await prepared.verify?.();
         materialization.signal?.throwIfAborted();
         return { paths, result: await materialization.publish?.() };
       } catch (error) {

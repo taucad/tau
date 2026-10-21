@@ -409,9 +409,8 @@ const mirrorFetchGapMilliseconds = 2000;
  * The server keeps repositories in object storage (git storage substrate D1),
  * so the suite reads them the way any client would: a forced mirror fetch over
  * smart HTTP refreshes every advertised ref (heads, tags, `refs/tau/chats/*`)
- * and prunes deleted ones before each read. A failed fetch (the repository does
- * not exist yet) removes the mirror, so reads resolve `undefined` rather than
- * stale refs.
+ * and prunes deleted ones before each read. Only a missing remote removes the
+ * mirror; a failed read must not masquerade as missing project content.
  */
 const tauRepository = async (projectId: string): Promise<string> => {
   /* Every read is a fetch through the API's own git budget, which the devices
@@ -437,14 +436,21 @@ const tauRepository = async (projectId: string): Promise<string> => {
       mirror,
     );
   let fetched = await fetchMirror();
-  /* The suite's reads share the devices' git budget (W13d): a 429 is a wait,
-   * not a repository that does not exist, so the mirror waits out the window
-   * rather than answering `undefined` for a revision the remote holds. */
-  for (let waited = 0; fetched.code !== 0 && /\b429\b/u.test(fetched.stderr) && waited < 60_000; waited += 5000) {
+  /* The suite shares the devices' request and concurrent-lease budgets. The
+   * API's 429/503 admission refusals ask clients to retry; neither means that
+   * the repository or its files disappeared. Keep the wait bounded. */
+  for (
+    let waited = 0;
+    fetched.code !== 0 && /\b(?:429|503)\b/u.test(fetched.stderr) && waited < 60_000;
+    waited += 5000
+  ) {
     await delay(5000);
     fetched = await fetchMirror();
   }
   if (fetched.code !== 0) {
+    if (!/\b404\b/u.test(fetched.stderr)) {
+      throw new Error(`Reading the cloud mirror for ${projectId} failed: ${fetched.stderr}`);
+    }
     await rm(mirror, { recursive: true, force: true });
   }
   return mirror;

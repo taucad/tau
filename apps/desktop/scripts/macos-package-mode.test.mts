@@ -81,7 +81,8 @@ console.log('✓ macOS package modes are mutually exclusive, and only release zi
 
 const packageSource = readFileSync(new URL('package-macos.mts', import.meta.url), 'utf8');
 const licenceGate = packageSource.indexOf('if (zip || dmg) {');
-assert.ok(licenceGate > packageSource.indexOf('const { release, unsigned, zip, notarize: shouldNotarize }'));
+const modeParse = packageSource.indexOf('parseMacosPackageMode(');
+assert.ok(modeParse !== -1 && licenceGate !== -1 && licenceGate > modeParse);
 assert.ok(
   packageSource.slice(licenceGate).startsWith(`if (zip || dmg) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')],`),

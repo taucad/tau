@@ -706,12 +706,18 @@ describe('a project on the browser client', () => {
    * This case is the only one in the file that must run with the browser's own
    * security boundary intact, so it opens its own client. */
   it('should let a real browser page reach the Tau Hosted Remote advertisement', async () => {
-    if (!owner) {
-      throw new Error('The account was not seeded.');
-    }
-    await registerProjectOnRemote(owner, projectId, 'W18 Two Client');
-    const strict = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+    // CORS has its own account so the live devices cannot spend its lease allowance.
+    const corsAccount = tauTestAccount('two-client-cors');
+    let corsOwner: TauCloudOwnerIds | undefined;
+    let strict: BrowserClient | undefined;
     try {
+      const corsBearer = await seedTauTestUser(corsAccount);
+      corsOwner = await tauCloudOwnerIds(corsAccount.email);
+      await seedProPlan(corsOwner);
+      strict = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(corsBearer) });
+      const slug = await createProjectInBrowser(strict, 'W18 CORS');
+      const corsProjectId = required(await browserProjectId(strict, slug), 'W11a: CORS project identity is absent.');
+      await registerProjectOnRemote(corsOwner, corsProjectId, 'W18 CORS');
       await strict.page.goto('/', { waitUntil: 'domcontentloaded' });
       const outcome = await strict.page.evaluate(
         async ({ api, id }: Readonly<{ api: string; id: string }>) => {
@@ -725,7 +731,7 @@ describe('a project on the browser client', () => {
             return { ok: false, status: 0, error: String(error).slice(0, 200) };
           }
         },
-        { api: desktopE2EApiUrl, id: projectId },
+        { api: desktopE2EApiUrl, id: corsProjectId },
       );
       expect(outcome, 'W11a (DEF-5): the advertisement was blocked before it was sent').toEqual(
         expect.objectContaining({ ok: true, status: 200 }),
@@ -733,7 +739,11 @@ describe('a project on the browser client', () => {
     } catch (error) {
       await captureAndRethrow(error, 'browser-hosted-remote-advertisement', [strict]);
     } finally {
-      await strict.close();
+      await strict?.close();
+      if (corsOwner) {
+        await forgetSeededProjects(corsOwner);
+        await deleteTauTestUser(corsAccount.email);
+      }
     }
   }, 600_000);
 

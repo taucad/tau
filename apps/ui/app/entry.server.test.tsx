@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { createStaticHandler } from 'react-router';
 import type { AppLoadContext, EntryContext } from 'react-router';
+import { mock, mockDeep } from 'vitest-mock-extended';
 import { describe, it, expect } from 'vitest';
 
 import handleRequest from '#entry.server.js';
@@ -13,6 +17,56 @@ const entryContext = contextMatching('root', 'routes/_index');
 const loadContext = {} as unknown as AppLoadContext;
 
 describe('entry.server handleRequest', () => {
+  it.each([
+    { method: 'GET', status: 200 },
+    { method: 'HEAD', status: 200 },
+    { method: 'GET', status: 500 },
+    { method: 'HEAD', status: 404 },
+  ])(
+    'should deliver the static report-only CSP on workspace $method documents with status $status',
+    async ({ method, status }) => {
+      const request = new Request('https://taucad.dev/w/home/fixture', { method });
+      const handler = createStaticHandler([{ id: 'root', path: '*' }]);
+      const staticHandlerContext = await handler.query(request);
+      if (staticHandlerContext instanceof Response) {
+        throw new TypeError('Expected a document context');
+      }
+      const context = mock<EntryContext>({
+        staticHandlerContext,
+        serverHandoffStream: undefined,
+        isSpaMode: false,
+        branches: undefined,
+        manifest: mockDeep<EntryContext['manifest']>({
+          entry: { module: '/entry.js', imports: [] },
+          routes: {
+            root: {
+              id: 'root',
+              parentId: undefined,
+              path: '*',
+              index: false,
+              module: '/root.js',
+              hasLoader: false,
+              hasClientLoader: false,
+            },
+          },
+        }),
+        future: mock<EntryContext['future']>(),
+      });
+      context.routeModules = { root: { default: () => <p>Workspace fixture</p> } };
+      const response = await handleRequest(request, status, new Headers(), context, mock<AppLoadContext>());
+      // Drain the real React stream before assertions, including on a failing regression.
+      const body = await response.text();
+      const netlifyConfig = readFileSync(resolve(import.meta.dirname, '../netlify.toml'), 'utf8');
+      const staticPolicy = /^Content-Security-Policy-Report-Only = "(.+)"$/mu.exec(netlifyConfig)?.[1];
+      expect(staticPolicy).toContain("default-src 'self';");
+      expect(response.headers.get('Content-Security-Policy-Report-Only')).toBe(staticPolicy);
+      expect(response.headers.has('Content-Security-Policy')).toBe(false);
+      expect(response.headers.get('Cross-Origin-Embedder-Policy')).toBe('require-corp');
+      expect(response.status).toBe(status);
+      expect(body).toBe(method === 'HEAD' ? '' : '<p>Workspace fixture</p>');
+    },
+  );
+
   it('should apply cross-origin isolation headers to the response (HEAD path)', async () => {
     const request = new Request('https://tau.example/', { method: 'HEAD' });
     const responseHeaders = new Headers();

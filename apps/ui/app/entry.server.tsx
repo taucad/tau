@@ -7,6 +7,7 @@ import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
 import type { AppLoadContext, EntryContext } from 'react-router';
+import { reportOnlyContentSecurityPolicy } from '#lib/content-security-policy.server.js';
 import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 import { createModulePreloadCap, criticalModuleHrefs, isNotFoundRender } from '#lib/module-preload-cap.js';
 
@@ -23,6 +24,7 @@ export default function handleRequest(
   _loadContext: AppLoadContext,
 ): Promise<Response> | Response {
   applyHandleRequestHeaders(responseHeaders);
+  responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
   /* OQ-P11: `Document-Policy: js-profiling` lets a developer take a real sampling profile of this
    * document from `Profiler`. It is off the production origin, where it would offer every visitor's
    * browser a profiler it has no use for. */

@@ -135,6 +135,9 @@ Cross-Origin-Resource-Policy = "same-origin"
 Cross-Origin-Embedder-Policy = "require-corp"
 # JavaScript Profiling
 Document-Policy = "js-profiling"
+# Static-file policy; SSR documents set the matching policy in
+# app/lib/content-security-policy.server.ts. entry.server.test.tsx checks parity.
+# Netlify custom headers do not apply to function responses.
 # Content Security Policy (CSP) - Start with report-only mode
 # NOTE: Test thoroughly before switching to enforcing mode
 # Remove '-Report-Only' suffix to enforce

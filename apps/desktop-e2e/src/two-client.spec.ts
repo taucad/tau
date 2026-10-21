@@ -2279,100 +2279,109 @@ describe('close and continue', () => {
   }, 900_000);
 
   it('should say Not backed up while the API is unreachable and push the queued close head on reconnect', async () => {
-    const client = required(browser, 'The browser client did not launch.');
-    const accountOwner = required(owner, 'The account was not seeded.');
-    const slug = await createProjectInBrowser(client, 'W18 Offline Close');
-    const offlineProjectId = (await browserProjectId(client, slug)) ?? '';
-    if (!offlineProjectId) {
-      throw new Error(`${continuationOwner} offline: source project id is absent`);
-    }
-    await registerProjectOnRemote(accountOwner, offlineProjectId, 'W18 Offline Close');
-    await openSyncRegion(client);
-    await chooseTauCloud(client);
-    await expect
-      .poll(async () => syncRegionText(client), {
-        message: `${continuationOwner} offline: source remote must be connected before the outage`,
-        timeout: 180_000,
-      })
-      .toMatch(/Backed up/u);
-    await createFileInBrowser(client, 'offline-baseline.scad');
-    await saveRevisionInBrowser(client);
-    let baseline: string | undefined;
-    await expect
-      .poll(
-        async () => {
-          const remote = await tauRepository(offlineProjectId);
-          const head = await gitHead(remote);
-          const file =
-            head === undefined ? undefined : await gitOutput(remote, ['show', `${head}:offline-baseline.scad`]);
-          baseline = file !== undefined && head === (await browserHead(client, slug)) ? head : undefined;
-          return baseline;
-        },
-        {
-          message: `${continuationOwner} offline: both heads must contain the saved baseline before the outage`,
-          timeout: 120_000,
-        },
-      )
-      .toBeDefined();
-    const beforeClose = required(baseline, `${continuationOwner} offline: source baseline is absent before close`);
-    await expect
-      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
-        message: `${continuationOwner} offline: Tau Cloud must acknowledge the baseline before the outage`,
-        timeout: 180_000,
-      })
-      .toBe(beforeClose);
-    await openSyncRegion(client);
-    await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
-
-    /* Unreachable for this client only: the API is shared with the rest of the
-     * file and stopping its listener would decide the outcome of every other
-     * case in the run. */
-    await client.context.route(`${desktopE2EApiUrl}/**`, async (route) => route.abort('connectionfailed'));
-    /* Restored even when a step below fails: this is the suite's shared browser,
-     * and a left-over abort made every later case read the account as free. */
-    let queuedCloseRevisionId = '';
+    // Request interception and service-worker delivery cannot jointly own this outage.
+    const client = await launchBrowserClient({
+      oneTimeToken: await mintOneTimeToken(bearer),
+      serviceWorkers: 'block',
+    });
     try {
-      await editThenHide(client, {
-        slug,
-        contents: 'cube([34, 34, 34]); // edited while the API was down\n',
-        row: 'offline',
-      });
-      queuedCloseRevisionId = await awaitCloseRevision(client, {
-        slug,
-        beforeClose,
-        row: 'offline',
-      });
-
-      /* The reopen, still offline: this is the window V18's sentence is about. */
-      await client.page.reload({ waitUntil: 'domcontentloaded' });
+      const accountOwner = required(owner, 'The account was not seeded.');
+      const slug = await createProjectInBrowser(client, 'W18 Offline Close');
+      const offlineProjectId = (await browserProjectId(client, slug)) ?? '';
+      if (!offlineProjectId) {
+        throw new Error(`${continuationOwner} offline: source project id is absent`);
+      }
+      await registerProjectOnRemote(accountOwner, offlineProjectId, 'W18 Offline Close');
       await openSyncRegion(client);
+      await chooseTauCloud(client);
       await expect
         .poll(async () => syncRegionText(client), {
-          message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
-          timeout: 120_000,
+          message: `${continuationOwner} offline: source remote must be connected before the outage`,
+          timeout: 180_000,
         })
-        .toMatch(/Not backed up · 1 revision/u);
+        .toMatch(/Backed up/u);
+      await createFileInBrowser(client, 'offline-baseline.scad');
+      await saveRevisionInBrowser(client);
+      let baseline: string | undefined;
       await expect
-        .poll(async () => browserHead(client, slug), {
-          message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,
-          timeout: 120_000,
+        .poll(
+          async () => {
+            const remote = await tauRepository(offlineProjectId);
+            const head = await gitHead(remote);
+            const file =
+              head === undefined ? undefined : await gitOutput(remote, ['show', `${head}:offline-baseline.scad`]);
+            baseline = file !== undefined && head === (await browserHead(client, slug)) ? head : undefined;
+            return baseline;
+          },
+          {
+            message: `${continuationOwner} offline: both heads must contain the saved baseline before the outage`,
+            timeout: 120_000,
+          },
+        )
+        .toBeDefined();
+      const beforeClose = required(baseline, `${continuationOwner} offline: source baseline is absent before close`);
+      await expect
+        .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
+          message: `${continuationOwner} offline: Tau Cloud must acknowledge the baseline before the outage`,
+          timeout: 180_000,
+        })
+        .toBe(beforeClose);
+      await openSyncRegion(client);
+      await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+
+      /* Unreachable for this client only: the API is shared with the rest of the
+       * file and stopping its listener would decide the outcome of every other
+       * case in the run. */
+      await client.context.route(`${desktopE2EApiUrl}/**`, async (route) => route.abort('connectionfailed'));
+      /* End the simulated outage even when an assertion fails. */
+      let queuedCloseRevisionId = '';
+      try {
+        await editThenHide(client, {
+          slug,
+          contents: 'cube([34, 34, 34]); // edited while the API was down\n',
+          row: 'offline',
+        });
+        queuedCloseRevisionId = await awaitCloseRevision(client, {
+          slug,
+          beforeClose,
+          row: 'offline',
+        });
+
+        /* The reopen, still offline: this is the window V18's sentence is about. */
+        await client.page.reload({ waitUntil: 'domcontentloaded' });
+        await openSyncRegion(client);
+        await expect
+          .poll(async () => syncRegionText(client), {
+            message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
+            timeout: 120_000,
+          })
+          .toMatch(/Not backed up · 1 revision/u);
+        await expect
+          .poll(async () => browserHead(client, slug), {
+            message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,
+            timeout: 120_000,
+          })
+          .toBe(queuedCloseRevisionId);
+      } finally {
+        await client.context.unroute(`${desktopE2EApiUrl}/**`);
+      }
+      await expect
+        .poll(async () => syncRegionText(client), {
+          message: `${continuationOwner} offline: queued close must complete without another gesture`,
+          timeout: 180_000,
+        })
+        .toMatch(/Backed up/u);
+      await expect
+        .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
+          message: `${continuationOwner} offline: Tau Cloud destination head must equal the queued close revisionId`,
+          timeout: 180_000,
         })
         .toBe(queuedCloseRevisionId);
+    } catch (error) {
+      await captureAndRethrow(error, 'offline-close-and-reconnect', [client]);
     } finally {
-      await client.context.unroute(`${desktopE2EApiUrl}/**`);
+      await client.close();
     }
-    await expect
-      .poll(async () => syncRegionText(client), {
-        message: `${continuationOwner} offline: queued close must complete without another gesture`,
-        timeout: 180_000,
-      })
-      .toMatch(/Backed up/u);
-    await expect
-      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
-        message: `${continuationOwner} offline: Tau Cloud destination head must equal the queued close revisionId`,
-        timeout: 180_000,
-      })
-      .toBe(queuedCloseRevisionId);
   }, 900_000);
 });
 

@@ -164,6 +164,8 @@ vi.mock('node:worker_threads', async (importOriginal) => {
 
 const app = {
   isPackaged: false,
+  commandLine: { hasSwitch: vi.fn(() => false) },
+  setPath: vi.fn((_name: string, _path: string) => undefined),
   dock: { setIcon: vi.fn() },
   requestSingleInstanceLock: vi.fn(() => true),
   whenReady: vi.fn(async () => state.ready),
@@ -468,6 +470,7 @@ afterEach(async () => {
   state.authToken = undefined;
   state.headerOptions = undefined;
   app.isPackaged = false;
+  app.commandLine.hasSwitch.mockReturnValue(false);
   state.protocolClient.length = 0;
   state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
@@ -1135,6 +1138,35 @@ describe('desktop main compute owner', () => {
 
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
+
+  it.each([
+    { overrides: true, explicitProfile: true, usesChannelProfile: false },
+    { overrides: true, explicitProfile: false, usesChannelProfile: true },
+    { overrides: false, explicitProfile: true, usesChannelProfile: true },
+    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+  ])(
+    'should isolate a staging profile according to $overrides/$explicitProfile',
+    async (options) => {
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-staging-profile-'));
+      state.ready = Promise.withResolvers<void>().promise;
+      app.isPackaged = true;
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
+      app.commandLine.hasSwitch.mockReturnValue(options.explicitProfile);
+      await writeFile(
+        join(state.userData, 'package.json'),
+        JSON.stringify({ tauDesktop: { channel: 'staging', environmentOverrides: options.overrides } }),
+      );
+      await import('#main/main.js');
+      const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
+      if (options.usesChannelProfile) {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
+      } else {
+        expect(profileCall).toBeUndefined();
+      }
+      expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
+    },
+    bootMilliseconds,
+  );
 
   const boot = async (): Promise<void> => {
     vi.stubGlobal('tauCloudBuildEnabled', false);

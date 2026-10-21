@@ -15,13 +15,10 @@
 #     `.github/workflows/deploy-production.yml` with a release tag.
 # There are no PR deploy previews.
 #
-# SOURCE MAPS (`pnpm nx run ui:sourcemaps`): run inside the Netlify build for
-# **production context** only (`[build]` + `[context.production]` include them);
-# previews skip sourcemaps uploads to avoid leaking prod PostHog project keys into
-# PR builds (POSTHOG_CLI_* are still present on staging for main-branch builds —
-# use a distinct PostHog env per site in Terraform if needed). A failed upload
-# fails the build unless `TAU_SOURCEMAPS_OPTIONAL=true`, which `deploy-ui.yml`
-# sets for staging only, so a bad staging PostHog key cannot block the deploy.
+# SOURCE MAPS: GitHub Actions supplies and validates a separate PostHog personal
+# key/project ID per environment. Netlify stores no source-map credentials.
+# Only Actions enables uploading; production requires it to succeed, while
+# staging may continue with a warning. Public analytics keys are independent.
 #
 # Actions installs the workspace's development dependencies before this build.
 # Use Nx's default TypeScript transpiler for config imports and dependency builds.
@@ -29,7 +26,7 @@
 [build]
 # Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 publish = "build/client"
 
 [build.environment]
@@ -45,7 +42,7 @@ NX_NO_CLOUD = "true"
 directory = ".netlify/v1/functions"
 
 [context.production]
-command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && (pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
+command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && ([ \"$TAU_SOURCEMAPS_ENABLED\" = true ] && POSTHOG_CLI_TOKEN=\"$TAU_POSTHOG_CLI_TOKEN\" POSTHOG_CLI_ENV_ID=\"$TAU_POSTHOG_CLI_ENV_ID\" pnpm nx run ui:sourcemaps || { [ \"$TAU_SOURCEMAPS_OPTIONAL\" = true ] && echo \"Warning: PostHog source map upload disabled or failed; continuing because TAU_SOURCEMAPS_OPTIONAL=true.\"; })"
 
 [context.deploy-preview]
 command = "pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"

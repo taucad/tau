@@ -37,11 +37,14 @@ import { picogkRuntimeManifestSchema } from '@taucad/picogk';
 import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
+import { desktopArtifactName } from '#shared/desktop-release.js';
 import { isQuickLookEnabled } from '#shared/quick-look.js';
 import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Shared install container verifier.
+import { verifyMacosDmg } from './macos-dmg.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts share their packaging contract.
 import { desktopPackageChannel, desktopPackageVersion, prepareNativeClosures } from './runtime-stage.mjs';
 
@@ -57,6 +60,7 @@ const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
 const {
   release,
   unsigned,
+  dmg,
   notarize: shouldNotarize,
 } = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
 const { computeClosureIntegrity, parsePluginDeployment, reverifyClosure, targetKey } =
@@ -626,6 +630,29 @@ if (release) {
 if (shouldNotarize) {
   run('xcrun', ['stapler', 'validate', appPath]);
   run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
+}
+
+if (dmg) {
+  await verifyMacosDmg({
+    appPath,
+    dmgPath: resolve(
+      outputRoot,
+      desktopArtifactName({
+        kind: 'macos-dmg',
+        channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
+        version: desktopPackageVersion(
+          (JSON.parse(readFileSync(resolve(desktopRoot, 'package.json'), 'utf8')) as { version: string }).version,
+        ),
+        arch: architecture,
+      }),
+    ),
+    trust: {
+      signed: release || process.env['TAU_LOCAL_CODESIGN_IDENTITY'] !== undefined,
+      notarized: shouldNotarize,
+      developerId: release,
+      team: release ? process.env['APPLE_TEAM_ID'] : undefined,
+    },
+  });
 }
 
 /* The sandbox runtime's Linux and Windows helpers stay out of the macOS package (runtime-stage.mts). */

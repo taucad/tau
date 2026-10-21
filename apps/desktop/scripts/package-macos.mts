@@ -11,9 +11,9 @@
  * TAU_LOCAL_CODESIGN_IDENTITY opts a staging development package into Apple Development signing
  * (auto, an exact certificate name, or its fingerprint), preserving debugging and local overrides.
  * Local acceptance: pnpm nx run desktop:package-macos:local (auto-selects the single development certificate).
- * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
+ * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip] [--dmg]
  * Output: <output root>/Tau-darwin-<arch>/Tau.app, copied as APFS clones of its inputs; the distribution archive
- * <output root>/Tau-macos-<arch>.zip only for --release or when --zip is passed.
+ * <output root>/Tau-macos-<arch>.zip only for --release or when --zip is passed; optional Tau-macos-<arch>.dmg with --dmg.
  * Exit codes: 0 on a verified app/ZIP; non-zero on missing artifacts, credentials, or validation failure.
  */
 
@@ -30,12 +30,16 @@ import { notarize } from '@electron/notarize';
 import { sign } from '@electron/osx-sign';
 import { packager } from '@electron/packager';
 
+import { desktopArtifactName } from '#shared/desktop-release.js';
+
 import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Shared operational signing helper.
 import { localSigningIdentity } from './local-signing.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Shared install container builder and verifier.
+import { createMacosDmg } from './macos-dmg.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyTree } from '@taucad/nx/runtime-closure';
 import { copyGeoSpecEngine, copyGeoSpecSourceRelink } from './runtime-closure.mjs';
@@ -91,6 +95,7 @@ const {
   release,
   unsigned,
   zip,
+  dmg,
   notarize: shouldNotarize,
 } = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
 if (
@@ -99,10 +104,13 @@ if (
 ) {
   throw new Error('Local signing requires a staging development package, without --release or --unsigned.');
 }
+if (dmg && release && !/^[A-Z0-9]{10}$/u.test(process.env['APPLE_TEAM_ID'] ?? '')) {
+  throw new Error('A release DMG requires APPLE_TEAM_ID for signer verification.');
+}
 // Resolve before removing any previous package output.
 const localIdentity = localSigningIdentity();
 // Local non-ZIP packages remain development-only; every distribution archive is held.
-if (zip) {
+if (zip || dmg) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')], {
     stdio: 'inherit',
   });
@@ -408,6 +416,30 @@ if (shouldNotarize) {
 const zipPath = resolve(outputRoot, `Tau-macos-${architecture}.zip`);
 if (zip) {
   execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], { stdio: 'inherit' });
+}
+if (dmg) {
+  const dmgPath = resolve(
+    outputRoot,
+    desktopArtifactName({
+      kind: 'macos-dmg',
+      channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
+      version: desktopPackageVersion(metadata.version),
+      arch: architecture,
+    }),
+  );
+  await createMacosDmg({
+    appPath,
+    dmgPath,
+    trust: {
+      signed: release || localIdentity !== undefined,
+      notarized: shouldNotarize,
+      developerId: release,
+      team: release ? process.env['APPLE_TEAM_ID'] : undefined,
+    },
+    identity,
+    keychainProfile: process.env['TAU_NOTARYTOOL_PROFILE'] ?? 'tau-notary',
+  });
+  console.log(`Verified install container: ${dmgPath}`);
 }
 await rm(stageRoot, { recursive: true, force: true });
 console.log(

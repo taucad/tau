@@ -34,36 +34,56 @@ assert.throws(
   /exactly one matching/u,
 );
 
-assert.deepEqual(parseMacosPackageMode([]), { release: false, unsigned: false, zip: false, notarize: false });
-assert.deepEqual(parseMacosPackageMode(['--release']), { release: true, unsigned: false, zip: true, notarize: true });
+assert.deepEqual(parseMacosPackageMode([]), {
+  release: false,
+  unsigned: false,
+  zip: false,
+  dmg: false,
+  notarize: false,
+});
+assert.deepEqual(parseMacosPackageMode(['--release']), {
+  release: true,
+  unsigned: false,
+  zip: true,
+  dmg: false,
+  notarize: true,
+});
 assert.deepEqual(parseMacosPackageMode(['--unsigned']), {
   release: false,
   unsigned: true,
   zip: false,
+  dmg: false,
   notarize: false,
 });
 assert.deepEqual(parseMacosPackageMode(['--unsigned', '--zip']), {
   release: false,
   unsigned: true,
   zip: true,
+  dmg: false,
   notarize: false,
 });
-assert.deepEqual(parseMacosPackageMode(['--zip']), { release: false, unsigned: false, zip: true, notarize: false });
+assert.deepEqual(parseMacosPackageMode(['--zip']), {
+  release: false,
+  unsigned: false,
+  zip: true,
+  dmg: false,
+  notarize: false,
+});
 assert.throws(() => parseMacosPackageMode(['--release', '--unsigned']), {
   name: 'TypeError',
   message: '--release and --unsigned cannot be used together',
 });
 assert.throws(() => parseMacosPackageMode(['--zipped']), {
   name: 'TypeError',
-  message: 'Usage: <script> [--release | --unsigned] [--zip] [--skip-notarization]',
+  message: 'Usage: <script> [--release | --unsigned] [--zip] [--dmg] [--skip-notarization]',
 });
 console.log('✓ macOS package modes are mutually exclusive, and only release zips unless --zip is passed');
 
 const packageSource = readFileSync(new URL('package-macos.mts', import.meta.url), 'utf8');
-const licenceGate = packageSource.indexOf('if (zip) {');
+const licenceGate = packageSource.indexOf('if (zip || dmg) {');
 assert.ok(licenceGate > packageSource.indexOf('const { release, unsigned, zip, notarize: shouldNotarize }'));
 assert.ok(
-  packageSource.slice(licenceGate).startsWith(`if (zip) {
+  packageSource.slice(licenceGate).startsWith(`if (zip || dmg) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')],`),
 );
 assert.ok(licenceGate < packageSource.indexOf('const runtimePackages = await resolveRuntimePackages'));
@@ -85,6 +105,7 @@ assert.deepEqual(parseMacosPackageMode(['--release', '--skip-notarization'], 'st
   release: true,
   unsigned: false,
   zip: true,
+  dmg: false,
   notarize: false,
 });
 for (const [args, channel] of [
@@ -102,3 +123,18 @@ assert.equal(macosPackageArchitecture('darwin', 'arm64'), 'arm64');
 assert.equal(macosPackageArchitecture('darwin', 'x64'), 'x64');
 assert.throws(() => macosPackageArchitecture('linux', 'x64'));
 assert.throws(() => macosPackageArchitecture('darwin', 'ia32'));
+
+assert.deepEqual(parseMacosPackageMode(['--dmg']), {
+  release: false,
+  unsigned: false,
+  zip: false,
+  dmg: true,
+  notarize: false,
+});
+assert.deepEqual(parseMacosPackageMode(['--release', '--dmg']), {
+  release: true,
+  unsigned: false,
+  zip: true,
+  dmg: true,
+  notarize: true,
+});

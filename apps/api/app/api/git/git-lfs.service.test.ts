@@ -44,7 +44,7 @@ describe('GitLfsService finalized-object boundary', () => {
       etag: 'etag',
       contentLength: stored.current.byteLength,
     })),
-    presignPut: vi.fn(async () => 'https://store.test/upload'),
+    presignPut: vi.fn<ObjectStorageService['presignPut']>().mockResolvedValue('https://store.test/upload'),
     presignGet: vi.fn(async () => 'https://store.test/download'),
   };
   const repositories = {
@@ -57,8 +57,7 @@ describe('GitLfsService finalized-object boundary', () => {
     readLfsObjects: vi.fn(async () => [{ oid, size: bytes.byteLength, finalized: true }]),
     finalizeLfsObject: vi
       .fn<GitRepositoryService['finalizeLfsObject']>()
-      .mockResolvedValueOnce('finalized')
-      .mockResolvedValue('already-finalized'),
+      .mockImplementation(async ({ verifyContent }) => ((await verifyContent()) ? 'finalized' : 'invalid')),
   };
 
   /* Whether the reservation row still exists when the locked clear runs; false
@@ -80,8 +79,7 @@ describe('GitLfsService finalized-object boundary', () => {
     updates = [];
     repositories.finalizeLfsObject
       .mockReset()
-      .mockResolvedValueOnce('finalized')
-      .mockResolvedValue('already-finalized');
+      .mockImplementation(async ({ verifyContent }) => ((await verifyContent()) ? 'finalized' : 'invalid'));
   });
 
   /** The strings a `select pg_advisory_xact_lock(hashtextextended($1, 0))` carries. */
@@ -123,6 +121,39 @@ describe('GitLfsService finalized-object boundary', () => {
       databaseStub(),
     );
 
+  it('should refuse a whole upload batch before reserving when one file exceeds 100 MiB', async () => {
+    const result = await service().batch({
+      access,
+      operation: 'upload',
+      objects: [
+        { oid, size: bytes.byteLength },
+        { oid: 'a'.repeat(64), size: 104_857_601 },
+      ],
+      authorization: undefined,
+      endpoint: 'https://api.test/repo/info/lfs/objects',
+    });
+    expect(result.status).toBe(200);
+    if (result.status === 200) {
+      expect(result.body.objects.map((object) => object.error?.code)).toEqual([422, 413]);
+      expect(result.body.objects[1]?.error?.message).toContain('100 MiB');
+    }
+    expect(repositories.reserveLfsObjects).not.toHaveBeenCalled();
+    expect(objectStorage.presignPut).not.toHaveBeenCalled();
+  });
+
+  it('should admit a file of exactly 100 MiB for reservation and signing', async () => {
+    const result = await service().batch({
+      access,
+      operation: 'upload',
+      objects: [{ oid, size: 104_857_600 }],
+      authorization: undefined,
+      endpoint: 'https://api.test/repo/info/lfs/objects',
+    });
+    expect(result.status).toBe(200);
+    expect(repositories.reserveLfsObjects).toHaveBeenCalledOnce();
+    expect(objectStorage.presignPut.mock.calls[0]?.[0]).toMatchObject({ contentLength: 104_857_600 });
+  });
+
   it('signs an exact length and SHA-256 and finalizes valid bytes idempotently', async () => {
     const batch = await service().batch({
       access,
@@ -162,14 +193,14 @@ describe('GitLfsService finalized-object boundary', () => {
   ])('refuses $label before finalization', async ({ body, requestedOid, size }) => {
     stored.current = body;
     await expect(service().verify({ access, oid: requestedOid, size })).resolves.toBe(false);
-    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
+    expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
   });
 
   it('fails closed when a formerly valid object is overwritten with corrupt same-length bytes', async () => {
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(true);
     stored.current = new Uint8Array(bytes.byteLength).fill(9);
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
-    expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
+    expect(repositories.finalizeLfsObject).toHaveBeenCalledTimes(2);
   });
 
   it('advertises a download only for a finalized row with matching stored length', async () => {

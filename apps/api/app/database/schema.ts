@@ -268,6 +268,8 @@ export const projectGitLfsObject = pgTable(
     finalizedAt: timestamp('finalized_at', { withTimezone: true }),
     /** First observation that no retained Git tree reaches this object. */
     unreachableAt: timestamp('unreachable_at', { withTimezone: true }),
+    /** Latest admitted upload request; older rows fall back to their creation time. */
+    lastRequestedAt: timestamp('last_requested_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -283,7 +285,7 @@ export const projectGitLfsObject = pgTable(
       .on(table.unreachableAt)
       .where(sql`${table.unreachableAt} is not null`),
     index('project_git_lfs_object_unfinalized_idx')
-      .on(table.createdAt)
+      .on(sql`coalesce(${table.lastRequestedAt}, ${table.createdAt})`)
       .where(sql`${table.finalizedAt} is null`),
     check('project_git_lfs_object_size_nonnegative', sql`${table.sizeBytes} >= 0`),
   ],

@@ -73,7 +73,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Bootstrap and maintain the local database exactly as the Fly release_command does: apply the Drizzle migrations, install the billing protections and the runtime role, and — with TAU_CLOUD_ENABLED=true — derive the development tariff from the code route table over infra/billing/development.commercial.json and publish it when its content moved. Idempotent: a second run reports `unchanged`."
+        "description": "Bootstrap and maintain the local database exactly as the Fly release_command does: apply the Drizzle migrations, install the billing protections and the runtime role, and \u2014 with TAU_CLOUD_ENABLED=true \u2014 derive the development tariff from the code route table over infra/billing/development.commercial.json and publish it when its content moved. Idempotent: a second run reports `unchanged`."
       },
       "dependsOn": ["build:billing-command"],
       "options": {
@@ -249,6 +249,14 @@
         "surge": {
           "command": "node --import @oxc-node/core/register apps/api/app/testing/billing-load/run.ts --profile=surge-64"
         }
+      }
+    },
+    "probe:private-storage": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/api/scripts/check-private-storage.mts",
+        "cwd": "{workspaceRoot}"
       }
     }
   }

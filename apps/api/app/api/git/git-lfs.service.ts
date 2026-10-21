@@ -9,7 +9,7 @@ import { projectGitLfsObject } from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { LfsObjectLocation } from '#api/git/lfs-keys.js';
 import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
-import { quotaRefusalSentence } from '#api/git/git.constants.js';
+import { projectFileLimitBytes, quotaRefusalSentence } from '#api/git/git.constants.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 
@@ -166,6 +166,22 @@ export class GitLfsService {
       return { status: 200, body: { transfer: 'basic', objects } };
     }
 
+    if (args.objects.some((object) => object.size > projectFileLimitBytes)) {
+      return {
+        status: 200,
+        body: {
+          transfer: 'basic',
+          objects: args.objects.map((object) => ({
+            ...object,
+            authenticated: true,
+            error:
+              object.size > projectFileLimitBytes
+                ? { code: 413, message: 'Individual project files must be 100 MiB or smaller.' }
+                : { code: 422, message: 'Upload batch refused because another file exceeds 100 MiB.' },
+          })),
+        },
+      };
+    }
     const reservation = await this.repositories.reserveLfsObjects({ access: args.access, objects: args.objects });
     if (reservation.status === 'quota') {
       // The client maps the refused objects back to paths.
@@ -256,26 +272,38 @@ export class GitLfsService {
 
   /** Verify exact stored bytes before making the reserved object readable. */
   public async verify(args: { access: GitAccess; oid: string; size: number }): Promise<boolean> {
-    const stored = await this.#storedAt(args.access, args.oid);
-    if (stored === undefined || stored.size !== args.size) {
+    if (args.size > projectFileLimitBytes) {
       return false;
     }
-    const blob = await this.objectStorage.getBlob(stored.location);
-    const hash = createHash('sha256');
-    let size = 0;
-    for await (const chunk of blob.body) {
-      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
-      size += bytes.byteLength;
-      if (size > args.size) {
-        blob.body.destroy();
-        return false;
-      }
-      hash.update(bytes);
-    }
-    if (size !== args.size || hash.digest('hex') !== args.oid) {
-      return false;
-    }
-    return (await this.repositories.finalizeLfsObject(args)) !== 'unreserved';
+    const outcome = await this.repositories.finalizeLfsObject({
+      ...args,
+      verifyContent: async () => {
+        // Bound all provider I/O while holding the owner lock, including response consumption.
+        const signal = AbortSignal.timeout(120_000);
+        const stored = await this.#storedAt(args.access, args.oid, signal);
+        if (stored === undefined || stored.size !== args.size) {
+          return false;
+        }
+        const blob = await this.objectStorage.getBlob({ ...stored.location, signal });
+        const hash = createHash('sha256');
+        let size = 0;
+        try {
+          for await (const chunk of blob.body) {
+            const bytes =
+              typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
+            size += bytes.byteLength;
+            if (size > args.size) {
+              return false;
+            }
+            hash.update(bytes);
+          }
+          return size === args.size && hash.digest('hex') === args.oid;
+        } finally {
+          blob.body.destroy();
+        }
+      },
+    });
+    return outcome === 'finalized' || outcome === 'already-finalized';
   }
 
   /**
@@ -289,11 +317,16 @@ export class GitLfsService {
    * @param oid - git-lfs's own SHA-256 object identity.
    * @returns The location holding the bytes and their stored length.
    */
-  async #storedAt(access: GitAccess, oid: string): Promise<{ location: LfsObjectLocation; size: number } | undefined> {
+  async #storedAt(
+    access: GitAccess,
+    oid: string,
+    signal?: AbortSignal,
+  ): Promise<{ location: LfsObjectLocation; size: number } | undefined> {
     return resolveLfsObjectLocation(this.objectStorage, {
       ownerId: access.ownerId,
       projectId: access.projectId,
       oid,
+      ...(signal === undefined ? {} : { signal }),
     });
   }
 

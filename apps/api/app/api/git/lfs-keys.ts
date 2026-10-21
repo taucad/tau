@@ -87,11 +87,11 @@ export const lfsObjectLocations = (
  */
 export const resolveLfsObjectLocation = async (
   storage: ObjectStorageService,
-  args: { readonly ownerId: string; readonly projectId: string; readonly oid: string },
+  args: { readonly ownerId: string; readonly projectId: string; readonly oid: string; readonly signal?: AbortSignal },
 ): Promise<{ location: LfsObjectLocation; size: number } | undefined> => {
   for (const location of lfsObjectLocations(args.ownerId, args.projectId, args.oid)) {
     // oxlint-disable-next-line no-await-in-loop -- the legacy key is only read when the tenant key misses
-    const stored = await storage.headBlob(location);
+    const stored = await storage.headBlob(args.signal === undefined ? location : { ...location, signal: args.signal });
     if (stored !== undefined) {
       return { location, size: stored.size };
     }

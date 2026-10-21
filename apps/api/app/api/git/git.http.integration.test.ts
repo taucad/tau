@@ -399,10 +399,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         objects: objects.map((object) => ({ ...object, finalized: lfsRows.get(object.oid)?.finalized ?? false })),
       };
     });
-    vi.spyOn(repositories, 'finalizeLfsObject').mockImplementation(async ({ oid, size }) => {
+    vi.spyOn(repositories, 'finalizeLfsObject').mockImplementation(async ({ oid, size, verifyContent }) => {
       const row = lfsRows.get(oid);
       if (row === undefined || row.size !== size) {
         return 'unreserved';
+      }
+      if (!(await verifyContent())) {
+        return 'invalid';
       }
       if (row.finalized) {
         return 'already-finalized';
@@ -814,7 +817,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       transfer: string;
-      objects: Array<{ oid: string; actions?: { upload?: { href: string }; verify?: { href: string } } }>;
+      objects: Array<{
+        oid: string;
+        actions?: { upload?: { href: string; header?: Record<string, string> }; verify?: { href: string } };
+      }>;
     };
     expect(body.transfer).toBe('basic');
     const action = body.objects[0]?.actions?.upload;
@@ -823,7 +829,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(action?.href).toContain(`/tenants/${tenantLfsObjectKey(ownerId, projectId, oid)}?`);
     expect(body.objects[0]?.actions?.verify?.href).toContain('/info/lfs/objects/verify');
 
-    const stored = await fetch(action?.href ?? '', { method: 'PUT', body: bytes });
+    const stored = await fetch(action?.href ?? '', { method: 'PUT', body: bytes, headers: action?.header });
     expect(stored.ok, `presigned PUT failed: ${String(stored.status)}`).toBe(true);
     const verified = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
       method: 'POST',

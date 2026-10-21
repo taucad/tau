@@ -1,7 +1,7 @@
 [
   {
-    "name": "Revisions ES module outputs — 106.09 kB brotli with checked legacy manifest conversion (2026-10-19)",
+    "name": "Revisions ES module outputs — legacy cloud-tree preparation and checked manifest conversion, 106.35 kB brotli in CI on 2026-10-20 (106.09 kB on macOS Node 26.8.1, 2026-10-21)",
     "path": "dist/**/*.mjs",
-    "limit": "106.2 kB"
+    "limit": "106.5 kB"
   }
 ]

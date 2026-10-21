@@ -193,14 +193,77 @@ describe('GitLfsService finalized-object boundary', () => {
   ])('refuses $label before finalization', async ({ body, requestedOid, size }) => {
     stored.current = body;
     await expect(service().verify({ access, oid: requestedOid, size })).resolves.toBe(false);
-    expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
   });
 
   it('fails closed when a formerly valid object is overwritten with corrupt same-length bytes', async () => {
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(true);
     stored.current = new Uint8Array(bytes.byteLength).fill(9);
     await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
-    expect(repositories.finalizeLfsObject).toHaveBeenCalledTimes(2);
+    expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
+  });
+
+  it('finishes streaming before entering the finalization transaction', async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const body = Readable.from(
+      (async function* () {
+        entered.resolve();
+        await resume.promise;
+        yield bytes;
+      })(),
+    );
+    objectStorage.getBlob.mockResolvedValueOnce({
+      body,
+      contentType: 'application/octet-stream',
+      etag: 'etag',
+      contentLength: bytes.byteLength,
+    });
+    const verification = service().verify({ access, oid, size: bytes.byteLength });
+    await entered.promise;
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
+    resume.resolve();
+    await expect(verification).resolves.toBe(true);
+    expect(body.destroyed).toBe(true);
+  });
+
+  it.each(['deleted', 'replaced', 'resized'] as const)('refuses an object %s after hashing', async (change) => {
+    repositories.finalizeLfsObject.mockImplementationOnce(async ({ verifyContent }) => {
+      objectStorage.headBlob.mockResolvedValueOnce(
+        change === 'deleted'
+          ? undefined
+          : {
+              contentType: 'application/octet-stream',
+              size: change === 'resized' ? bytes.byteLength + 1 : bytes.byteLength,
+              etag: change === 'replaced' ? 'different' : 'etag',
+              cacheControl: '',
+            },
+      );
+      return (await verifyContent()) ? 'finalized' : 'invalid';
+    });
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+  });
+
+  it('refuses a new tenant object shadowing the hashed legacy location even with the same ETag', async () => {
+    storedNamespace = 'blobs';
+    repositories.finalizeLfsObject.mockImplementationOnce(async ({ verifyContent }) => {
+      storedNamespace = 'tenants';
+      return (await verifyContent()) ? 'finalized' : 'invalid';
+    });
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+  });
+
+  it('requires the GET response identity and destroys a body without one', async () => {
+    const body = Readable.from([bytes]);
+    objectStorage.getBlob.mockResolvedValueOnce({
+      body,
+      contentType: 'application/octet-stream',
+      etag: '',
+      contentLength: bytes.byteLength,
+    });
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+    expect(body.destroyed).toBe(true);
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
   });
 
   it('advertises a download only for a finalized row with matching stored length', async () => {

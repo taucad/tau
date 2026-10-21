@@ -480,8 +480,8 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
     }
   }, 120_000);
 
-  it.each(['headers', 'body'] as const)(
-    'should release the owner lock after stalled verification %s',
+  it.each(['headers', 'body', 'locked headers'] as const)(
+    'should bound stalled verification %s without retaining the owner lock for hashing',
     async (phase) => {
       const locator = await newProject();
       const object = pointerFor(`timeout ${phase}`);
@@ -503,11 +503,20 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
         storageLimitBytes: 1024,
       };
       const controller = new AbortController();
-      const verificationDeadline = vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(controller.signal);
+      const entered = Promise.withResolvers<void>();
+      const originalTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const stalledDeadline = phase === 'locked headers' ? 5000 : 120_000;
+      const verificationDeadline = vi
+        .spyOn(AbortSignal, 'timeout')
+        .mockImplementation((milliseconds) =>
+          milliseconds === stalledDeadline ? controller.signal : originalTimeout(milliseconds),
+        );
+      let heads = 0;
       const storage = mock<ObjectStorageService>({
         headBlob: async (args) => {
-          expect(args.signal).toBe(controller.signal);
-          if (phase === 'headers') {
+          heads += 1;
+          if (phase === 'headers' || (phase === 'locked headers' && heads === 2)) {
+            expect(args.signal).toBe(controller.signal);
             return new Promise((_resolve, reject) => {
               args.signal?.addEventListener(
                 'abort',
@@ -516,12 +525,15 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
                 },
                 { once: true },
               );
-              controller.abort();
+              entered.resolve();
             });
           }
           return driver.headBlob(args);
         },
         getBlob: async (args) => {
+          if (phase !== 'body') {
+            return driver.getBlob(args);
+          }
           expect(args.signal).toBe(controller.signal);
           const body = addAbortSignal(
             controller.signal,
@@ -532,20 +544,29 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
             }),
           );
           queueMicrotask(() => {
-            controller.abort();
+            entered.resolve();
           });
           return { body, contentType: 'application/octet-stream', etag: 'test' };
         },
       });
       try {
-        await expect(
+        const rejected = expect(
           new GitLfsService(storage, repositories, databaseService).verify({
             access,
             oid: object.oid,
             size: object.size,
           }),
         ).rejects.toThrow();
-        expect(verificationDeadline).toHaveBeenCalledWith(120_000);
+        await entered.promise;
+        if (phase !== 'locked headers') {
+          // This must complete while hashing is still stalled, not merely after its timeout.
+          await expect(
+            repositories.reserveLfsObjects({ access, objects: [{ oid: object.oid, size: object.size }] }),
+          ).resolves.toMatchObject({ status: 'reserved' });
+        }
+        controller.abort();
+        await rejected;
+        expect(verificationDeadline).toHaveBeenCalledWith(stalledDeadline);
         const pendingRow = await rowFor(locator, object.oid);
         expect(pendingRow?.finalizedAt).toBeNull();
         // A second same-owner transaction must progress, without charging again.
@@ -554,6 +575,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
         ).resolves.toMatchObject({ status: 'reserved' });
         expect(await lfsBytesOf(locator)).toBe(object.size);
       } finally {
+        controller.abort();
         verificationDeadline.mockRestore();
         await databaseService.onModuleDestroy();
       }
@@ -589,6 +611,63 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
       expect(finalizedRow?.finalizedAt).toBeInstanceOf(Date);
       expect(await lfsBytesOf(locator)).toBe(object.size);
     } finally {
+      await databaseService.onModuleDestroy();
+    }
+  }, 15_000);
+
+  it('should refuse finalization when retirement removes the reservation during hashing', async () => {
+    const locator = await newProject();
+    const clientDirectory = newClient();
+    writeFileSync(path.join(clientDirectory, 'main.scad'), 'cube(1);\n');
+    commitAll(clientDirectory, 'no pointer');
+    await pushAndCommit(locator, clientDirectory, ['main']);
+    const object = pointerFor('retired during verification');
+    await seedObject(locator, object, undefined);
+    const now = new Date();
+    await database
+      .update(projectGitLfsObject)
+      .set({ finalizedAt: null, createdAt: new Date(now.getTime() - 25 * 60 * 60 * 1000) })
+      .where(eq(projectGitLfsObject.projectId, locator.projectId));
+    const databaseService = new DatabaseService(
+      new ConfigService<Environment, true>(getEnvironment()),
+      mock<PinoLogger>(),
+    );
+    const repositories = new GitRepositoryService(databaseService, mock(), driver, mock(), store, mock(), mock());
+    const access: GitAccess = {
+      ...locator,
+      role: 'owner',
+      callerId: locator.ownerId,
+      remainingBytes: 1024,
+      storageLimitBytes: 1024,
+    };
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const storage = mock<ObjectStorageService>({
+      headBlob: driver.headBlob.bind(driver),
+      getBlob: async (args) => {
+        const blob = await driver.getBlob(args);
+        blob.body.destroy();
+        entered.resolve();
+        await resume.promise;
+        // A GET snapshot can finish even after its object is deleted.
+        return { ...blob, body: Readable.from([object.body]) };
+      },
+    });
+    try {
+      const verification = new GitLfsService(storage, repositories, databaseService).verify({
+        access,
+        oid: object.oid,
+        size: object.size,
+      });
+      await entered.promise;
+      const retirement = await retireLfsObjects(deps(), { ...locator, now });
+      expect(retirement.retired).toEqual([object.oid]);
+      resume.resolve();
+      await expect(verification).resolves.toBe(false);
+      expect(await rowFor(locator, object.oid)).toBeUndefined();
+      expect(await lfsBytesOf(locator)).toBe(0);
+    } finally {
+      resume.resolve();
       await databaseService.onModuleDestroy();
     }
   }, 15_000);

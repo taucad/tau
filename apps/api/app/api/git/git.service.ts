@@ -612,7 +612,7 @@ export class GitRepositoryService {
     access: GitAccess;
     oid: string;
     size: number;
-    /** Run under the retirement lock: deletion cannot race byte verification. */
+    /** Short identity re-check under the retirement lock, after hashing outside the transaction. */
     verifyContent: () => Promise<boolean>;
   }): Promise<'finalized' | 'already-finalized' | 'unreserved' | 'invalid'> {
     return this.databaseService.database.transaction(async (transaction) => {

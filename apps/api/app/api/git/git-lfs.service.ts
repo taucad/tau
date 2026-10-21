@@ -275,32 +275,46 @@ export class GitLfsService {
     if (args.size > projectFileLimitBytes) {
       return false;
     }
+    // Hash without occupying a pooled database connection or the owner's retirement lock.
+    const signal = AbortSignal.timeout(120_000);
+    const stored = await this.#storedAt(args.access, args.oid, signal);
+    if (stored === undefined || stored.size !== args.size) {
+      return false;
+    }
+    const blob = await this.objectStorage.getBlob({ ...stored.location, signal });
+    const hash = createHash('sha256');
+    let size = 0;
+    try {
+      if (blob.etag === '') {
+        return false;
+      }
+      for await (const chunk of blob.body) {
+        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
+        size += bytes.byteLength;
+        if (size > args.size) {
+          return false;
+        }
+        hash.update(bytes);
+      }
+      if (size !== args.size || hash.digest('hex') !== args.oid) {
+        return false;
+      }
+    } finally {
+      blob.body.destroy();
+    }
     const outcome = await this.repositories.finalizeLfsObject({
       ...args,
       verifyContent: async () => {
-        // Bound all provider I/O while holding the owner lock, including response consumption.
-        const signal = AbortSignal.timeout(120_000);
-        const stored = await this.#storedAt(args.access, args.oid, signal);
-        if (stored === undefined || stored.size !== args.size) {
-          return false;
-        }
-        const blob = await this.objectStorage.getBlob({ ...stored.location, signal });
-        const hash = createHash('sha256');
-        let size = 0;
-        try {
-          for await (const chunk of blob.body) {
-            const bytes =
-              typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
-            size += bytes.byteLength;
-            if (size > args.size) {
-              return false;
-            }
-            hash.update(bytes);
-          }
-          return size === args.size && hash.digest('hex') === args.oid;
-        } finally {
-          blob.body.destroy();
-        }
+        // Re-resolve under the lock: a tenant copy may now shadow the hashed legacy object.
+        const current = await this.#storedAt(args.access, args.oid, AbortSignal.timeout(5000));
+        return (
+          current !== undefined &&
+          current.size === args.size &&
+          current.etag === blob.etag &&
+          current.location.namespace === stored.location.namespace &&
+          current.location.key === stored.location.key &&
+          current.location.tier === stored.location.tier
+        );
       },
     });
     return outcome === 'finalized' || outcome === 'already-finalized';
@@ -321,7 +335,7 @@ export class GitLfsService {
     access: GitAccess,
     oid: string,
     signal?: AbortSignal,
-  ): Promise<{ location: LfsObjectLocation; size: number } | undefined> {
+  ): Promise<{ location: LfsObjectLocation; size: number; etag: string } | undefined> {
     return resolveLfsObjectLocation(this.objectStorage, {
       ownerId: access.ownerId,
       projectId: access.projectId,

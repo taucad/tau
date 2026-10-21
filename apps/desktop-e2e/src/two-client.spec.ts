@@ -1593,8 +1593,10 @@ describe('live and automatic', () => {
   const record = (values: Readonly<Record<string, number>>): string =>
     `${JSON.stringify({ activeGroup: 'default', groups: { default: { values } } }, undefined, 2)}\n`;
 
-  /* Every device on one head, and that head on Tau Cloud. */
-  const expectConverged = async (row: string): Promise<string> => {
+  /* Every device on one head, and that head on Tau Cloud. A new edit must advance
+   * beyond the previously settled head; equality alone can accept the old state. */
+  const expectConverged = async (row: string, after?: string): Promise<string> => {
+    let converged: string | undefined;
     await expect
       .poll(
         async () => {
@@ -1603,12 +1605,14 @@ describe('live and automatic', () => {
             browserHead(a(), sourceSlug),
             gitHead(destinationRoot),
           ]);
-          return remote !== undefined && remote === onA && remote === onB ? remote : undefined;
+          converged = remote !== undefined && remote !== after && remote === onA && remote === onB ? remote : undefined;
+          return converged;
         },
         { message: `W5b ${row}: both devices must settle on Tau Cloud's head without a reload`, timeout: 180_000 },
       )
       .toBeDefined();
-    return required(await remoteHead(), `W5b ${row}: Tau Cloud has no head.`);
+    // Return the verified observation, not a second fetch that can see a different, unsettled head.
+    return required(converged, `W5b ${row}: Tau Cloud has no converged head.`);
   };
 
   beforeAll(async () => {
@@ -1680,7 +1684,7 @@ describe('live and automatic', () => {
     await createFileInBrowser(a(), 'browser-only.scad');
     await saveRevisionInBrowser(a());
 
-    const merged = await expectConverged('different files');
+    const merged = await expectConverged('different files', before);
     const remote = await tauRepository(liveProjectId);
     expect(await gitOutput(remote, ['rev-list', '--parents', '-n', '1', merged]), 'B6: a merge revision').toMatch(
       /^\S+ \S+ \S+$/u,
@@ -1727,7 +1731,7 @@ describe('live and automatic', () => {
     }
 
     await expectVisible(turnReply(a().page, 'Add the agent part (W5b rule 9).'), 180_000);
-    const merged = await expectConverged('leased divergence');
+    const merged = await expectConverged('leased divergence', before);
     expect(await remoteFile(merged, 'agent.scad')).toBe('cube(3); // the agent');
     expect(await remoteFile(merged, 'during-turn.scad')).toBe('cylinder(2, 2, 2); // desktop during the turn');
   }, 900_000);
@@ -1745,14 +1749,14 @@ describe('live and automatic', () => {
       .toBe(record({ height: 10, width: 10 }));
     /* The bytes land before the pull publishes its head; an edit in that window
      * is a divergence from the pre-pull head (add/add), not this row's merge. */
-    await expectConverged('parameter record base');
+    const before = await expectConverged('parameter record base');
 
     /* Adjacent lines: a line merge conflicts here, the record codec does not. */
     await writeFile(join(destinationRoot, ...recordPath), record({ height: 10, width: 20 }));
     await writeBrowserFile(recordPath, record({ height: 30, width: 10 }));
     await saveRevisionInBrowser(a());
 
-    const merged = await expectConverged('parameter record');
+    const merged = await expectConverged('parameter record', before);
     expect(JSON.parse(required(await remoteFile(merged, recordPath.join('/')), 'D12: no merged record.'))).toEqual({
       activeGroup: 'default',
       groups: { default: { values: { height: 30, width: 20 } } },
@@ -1808,7 +1812,7 @@ describe('live and automatic', () => {
     await expect
       .poll(async () => readBrowserFile(a(), sourceSlug, ['overlap.scad']), { timeout: 180_000 })
       .toBe('cube(0); // base\n');
-    await expectConverged('D14 base');
+    const before = await expectConverged('D14 base');
     await openRevisionsPane(a());
     await openRevisionsPane(b());
 
@@ -1845,7 +1849,7 @@ describe('live and automatic', () => {
     await expect.poll(async () => finish.isEnabled(), { timeout: 120_000 }).toBe(true);
     await finish.click();
 
-    const decided = await expectConverged('D14 decision');
+    const decided = await expectConverged('D14 decision', before);
     expect(await remoteFile(decided, 'overlap.scad')).toBe(desktopText(2).trimEnd());
     expect(
       await gitOutput(await tauRepository(liveProjectId), ['rev-list', '--parents', '-n', '1', decided]),
@@ -1887,10 +1891,10 @@ describe('live and automatic', () => {
     await expect
       .poll(async () => readBrowserFile(a(), sourceSlug, ['undo-mine.scad']), { timeout: 180_000 })
       .toBe('cube(5); // desktop, to undo\n');
-    await expectConverged('undo base');
+    const before = await expectConverged('undo base');
     await writeBrowserFile(['undo-theirs.scad'], 'sphere(5); // browser, on top\n');
     await saveRevisionInBrowser(a());
-    const onTop = await expectConverged('the other device on top');
+    const onTop = await expectConverged('the other device on top', before);
     expect(await remoteFile(onTop, 'undo-theirs.scad')).toBe('sphere(5); // browser, on top');
 
     await undoOnDesktop();
@@ -1907,7 +1911,7 @@ describe('live and automatic', () => {
       expect(await gitHead(destinationRoot), 'D15: a refused Undo mints nothing').toBe(onTop);
       return;
     }
-    const undone = await expectConverged('undo');
+    const undone = await expectConverged('undo', onTop);
     expect(undone).not.toBe(onTop);
     expect(await remoteFile(undone, 'undo-mine.scad'), 'D15: this device’s own change is undone').toBeUndefined();
     expect(await remoteFile(undone, 'undo-theirs.scad'), 'D15: the other device’s bytes are untouched').toBe(
@@ -1964,13 +1968,21 @@ describe('close and continue', () => {
     const { slug, beforeClose, row } = options;
     /* `editThenHide` owns the page-clock <=1 s proof. Durable completion is a
      * different observable and gets the existing bounded close wait. */
+    let closed: string | undefined;
     await expect
-      .poll(async () => browserHead(client, slug), {
-        message: `${continuationOwner} ${row}: close dispatch must mint a new source revisionId`,
-        timeout: 120_000,
-      })
-      .not.toBe(beforeClose);
-    return required(await browserHead(client, slug), `${continuationOwner} ${row}: source close revisionId is absent`);
+      .poll(
+        async () => {
+          const head = await browserHead(client, slug);
+          closed = head === beforeClose ? undefined : head;
+          return closed;
+        },
+        {
+          message: `${continuationOwner} ${row}: close dispatch must mint a new source revisionId`,
+          timeout: 120_000,
+        },
+      )
+      .toBeDefined();
+    return required(closed, `${continuationOwner} ${row}: source close revisionId is absent`);
   };
 
   it('should continue a hidden browser tab on a desktop shell with the same file, close revision and chat', async () => {
@@ -2285,16 +2297,24 @@ describe('close and continue', () => {
       .toMatch(/Backed up/u);
     await createFileInBrowser(client, 'offline-baseline.scad');
     await saveRevisionInBrowser(client);
+    let baseline: string | undefined;
     await expect
-      .poll(async () => browserHead(client, slug), {
-        message: `${continuationOwner} offline: the product must mint the backed-up baseline before the outage`,
-        timeout: 120_000,
-      })
+      .poll(
+        async () => {
+          const remote = await tauRepository(offlineProjectId);
+          const head = await gitHead(remote);
+          const file =
+            head === undefined ? undefined : await gitOutput(remote, ['show', `${head}:offline-baseline.scad`]);
+          baseline = file !== undefined && head === (await browserHead(client, slug)) ? head : undefined;
+          return baseline;
+        },
+        {
+          message: `${continuationOwner} offline: both heads must contain the saved baseline before the outage`,
+          timeout: 120_000,
+        },
+      )
       .toBeDefined();
-    const beforeClose = required(
-      await browserHead(client, slug),
-      `${continuationOwner} offline: source head is absent before close`,
-    );
+    const beforeClose = required(baseline, `${continuationOwner} offline: source baseline is absent before close`);
     await expect
       .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
         message: `${continuationOwner} offline: Tau Cloud must acknowledge the baseline before the outage`,

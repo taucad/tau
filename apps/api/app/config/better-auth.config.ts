@@ -17,6 +17,7 @@ import type { DatabaseService } from '#database/database.service.js';
 import { storageTombstone } from '#database/schema.js';
 import type { Environment } from '#config/environment.config.js';
 import { staticAuthConfig } from '#config/auth.js';
+import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
 import type { EmailService } from '#email/email.service.js';
 import {
   buildFrontendForgotPasswordUrl,
@@ -150,6 +151,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     }),
     // Desktop sign-in handoff (ruling D7) — must mirror auth.ts at this index.
     oneTimeToken({ storeToken: 'hashed' }),
+    cliDeviceAuthorization(configService.get('TAU_FRONTEND_URL', { infer: true })),
     // `bearer()` stays LAST (see auth.ts).
     bearer(),
   ];
@@ -309,7 +311,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       // the cookie to every subdomain of that host. Host-only is the narrowest scope.
       database: {
         generateId(options) {
-          const prefix = prefixFromModel[options.model];
+          const prefix = options.model === 'deviceCode' ? idPrefix.verification : prefixFromModel[options.model];
 
           if (!prefix) {
             throw new Error(`Model ID not supported: ${options.model}`);

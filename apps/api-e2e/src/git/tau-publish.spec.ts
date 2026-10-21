@@ -66,7 +66,7 @@ it('should publish a named graph revision through the CLI and serve its bytes to
     environment['GIT_CONFIG_GLOBAL'] = '/dev/null';
     environment['GIT_CONFIG_SYSTEM'] = '/dev/null';
     environment['GIT_TERMINAL_PROMPT'] = '0';
-    environment['TAU_API_TOKEN'] = owner.token;
+    environment['TAU_AUTH_TOKEN'] = owner.token;
     environment['TAU_API_URL'] = gitE2EApiUrl;
     environment['TAU_CONFIG_DIR'] = join(temporaryRoot, 'tau-config');
     const { stdout } = await execFileAsync(

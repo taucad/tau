@@ -1,3 +1,4 @@
+import { resolveAuthToken } from '#auth.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -33,7 +34,7 @@ import type { Acquisition } from '#acquisition.js';
 import { prepareServeUi } from '#serve-ui.js';
 import type { ServeUi } from '#serve-ui.js';
 import { stageUiEnvironment } from '#ui-environment.js';
-import { cliZooProxyUrl } from '#zoo-proxy.js';
+import { resolveZooAuthToken, cliZooProxyUrl } from '#zoo-proxy.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { createComputeStoreHost } from '#compute-store.js';
@@ -296,7 +297,7 @@ export const handOffLink = (target: HandOffTarget, served: string, code: string)
  * @param port - The resolved loopback port, or `undefined` to leave the capability off.
  * @returns The agent options, or `undefined` when the capability is off.
  */
-const agentOptions = (
+const agentOptions = async (
   args: {
     readonly ui?: string | undefined;
     readonly workspace?: string;
@@ -310,7 +311,7 @@ const agentOptions = (
     readonly allowedOrigins?: string | readonly string[];
   },
   port: number | undefined,
-): HostDaemonAgentOptions | undefined => {
+): Promise<HostDaemonAgentOptions | undefined> => {
   const uiRoot = args.ui ? resolve(args.ui) : undefined;
   const allowedOrigins = parseAllowedOrigins(args.allowedOrigins);
   if (port === undefined) {
@@ -327,7 +328,7 @@ const agentOptions = (
   /* The same session token `tau publish` and `tau clone` take, for the same
    * reason: a terminal has no cookie jar, and the device credential this daemon
    * paired with authenticates the relay only (C67). */
-  const tauApiToken = process.env['TAU_API_TOKEN'];
+  const tauApiToken = await resolveAuthToken(args.gateway ?? args.apiUrl);
   return {
     workspaceRoot: agentWorkspaceRoot(args.workspace, process.cwd()),
     tauCloudEnabled: tauCloudEnabled(),
@@ -1015,7 +1016,7 @@ export const serveCommand = defineCommand({
     /* A hand-off admits its target's origin beside the listed ones (X54). */
     /* `multiple` yields an array at run time though citty types one string. */
     const listedOrigins: unknown = args.allowedOrigins;
-    const configured = agentOptions(
+    const configured = await agentOptions(
       {
         ...args,
         ui: uiDirectory,
@@ -1117,7 +1118,7 @@ export const serveCommand = defineCommand({
         }),
         native: kernels.native,
       },
-      zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: process.env['TAU_API_TOKEN'] },
+      zooProxy: { url: zooProxyUrl, apiUrl, sessionToken: await resolveZooAuthToken(apiUrl, zooProxyUrl) },
       maxSessions,
       systemSkillBundles: skillBundles,
       pair: args.pair,

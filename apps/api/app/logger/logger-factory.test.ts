@@ -22,6 +22,7 @@ const requestLogOptions = async (): Promise<Options> => {
 
 describe('request log URL redaction', () => {
   it.each([
+    ['/v1/auth/device?user_code=ABCD-EFGH', '/v1/auth/device'],
     ['/v1/github/callback?code=oauth-code&state=oauth-state', '/v1/github/callback'],
     ['/v1/github/callback/?error=access_denied&state=oauth-state', '/v1/github/callback/'],
     ['/v1/auth/callback/github?code=oauth-code&state=oauth-state', '/v1/auth/callback/github'],

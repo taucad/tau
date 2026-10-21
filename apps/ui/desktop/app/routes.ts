@@ -32,6 +32,7 @@ const routes: RouteConfigEntry[] = await flatRoutes({
     // Web-only: the desktop sign-in callback lands in the system browser, not
     // in the shell (see `desktop-auth-signin-blueprint.md`).
     '../../app/routes/auth.desktop/**',
+    '../../app/routes/auth.cli/**',
 
     // Server `action` — the desktop theme preference is local (`use-theme.tsx`).
     '../../app/routes/action.set-theme.ts',

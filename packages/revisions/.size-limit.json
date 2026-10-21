@@ -1,7 +1,7 @@
 [
   {
-    "name": "Revisions ES module outputs \u2014 identity conversion, repeated conflict refresh and chat purge; measured 107.332 kB brotli on macOS and CI, 2026-10-21",
+    "name": "Revisions ES module outputs \u2014 atomic LFS hydration and bounded durable close; measured 108425 bytes brotli on macOS, 2026-10-21",
     "path": "dist/**/*.mjs",
-    "limit": "107.5 kB"
+    "limit": "108.6 kB"
   }
 ]

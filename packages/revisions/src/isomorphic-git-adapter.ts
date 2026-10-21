@@ -1144,10 +1144,14 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    * @param remote - The remote's name in git's config, or an address not recorded yet (R2).
    * @returns Every advertised ref, `HEAD` and peeled tags dropped.
    */
-  const advertisedReferences = async (remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]> => {
+  const advertisedReferences = async (
+    remote: string | RevisionRemoteAddress,
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ): Promise<readonly RemoteRef[]> => {
+    options?.signal?.throwIfAborted();
     const url = typeof remote === 'string' ? await remoteUrl(remote) : remote.url;
     const name = typeof remote === 'string' ? remote : remote.name;
-    const http = boundBy(requireHttp());
+    const http = boundBy(requireHttp(), options?.signal);
     /* Seam 1 of 3 (N1). The advertisement is the *first* thing every remote
      * verb does, so it is where a 401, a `403 GIT_SYNC_NOT_ENTITLED` and a 404
      * arrive — and until this catch existed the library's own
@@ -1685,8 +1689,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
       );
     },
 
-    listRemoteRefs: async (remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]> =>
-      advertisedReferences(remote),
+    listRemoteRefs: async (
+      remote: string | RevisionRemoteAddress,
+      options?: Readonly<{ signal?: AbortSignal }>,
+    ): Promise<readonly RemoteRef[]> => advertisedReferences(remote, options),
 
     /**
      * Bring the remote's refs into `refs/remotes/<remote>/…`.

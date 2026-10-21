@@ -24,7 +24,7 @@ import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import { decodeCommit, decodeTag, encodeCommit, encodeTag } from '#git-objects.js';
 import type { DecodedCommit } from '#git-objects.js';
-import { runGitCommand } from '#git-command.js';
+import { CommandAbortedError, runGitCommand } from '#git-command.js';
 import type { GitCommandResult } from '#git-command.js';
 import { parseTransportValue, quoteFastImportPath } from '#native-git-adapter.js';
 import { NativeGitError } from '#native-git.types.js';
@@ -315,7 +315,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return pinned;
   };
 
+  // Network LFS operations can carry several admitted objects. Keep a finite wall cap
+  // independent of the 30-second local plumbing budget and stock LFS activity/retry limits.
+  const transferDeadline = 15 * 60_000;
+
   type GitRunOptions = Readonly<{
+    deadline?: number;
     input?: ReadonlyArray<Uint8Array<ArrayBuffer>>;
     env?: Record<string, string | undefined>;
     signal?: AbortSignal;
@@ -358,8 +363,14 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         env: options.env ?? gitEnvironment(),
         ...(options.input === undefined ? {} : { input: options.input }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
+        ...(options.deadline === undefined ? {} : { deadline: options.deadline }),
       });
     } catch (error) {
+      if (error instanceof CommandAbortedError) {
+        throw new RevisionPortError('ENGINE_FAILED', `Native Git stopped ${args[0] ?? 'a command'}: ${error.reason}.`, {
+          cause: error,
+        });
+      }
       throw new RevisionPortError('ENGINE_UNAVAILABLE', `Native Git could not start ${args[0] ?? 'a command'}.`, {
         cause: error,
       });
@@ -674,8 +685,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       return new Uint8Array(stored.buffer as ArrayBuffer, stored.byteOffset, stored.byteLength);
     } catch (error) {
       throw new RevisionPortError(
-        'UNKNOWN_REVISION',
-        'A large object this revision references is not on this machine yet.',
+        (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'MISSING_LARGE_OBJECT' : 'ENGINE_FAILED',
+        'A large object this revision references could not be read on this machine.',
         { cause: error },
       );
     }
@@ -1019,7 +1030,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
   };
 
-  const listRemoteReferences = async (remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]> => {
+  const listRemoteReferences = async (
+    remote: string | RevisionRemoteAddress,
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ): Promise<readonly RemoteRef[]> => {
+    options?.signal?.throwIfAborted();
     const name = typeof remote === 'string' ? remote : remote.name;
     guardTransportValue(name, 'remote');
     /* R2: an address not recorded yet is read by URL, with the credential its
@@ -1030,7 +1045,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
     const env = await remoteEnvironment(name, typeof remote === 'string' ? undefined : [remoteOf(name, remote.url)]);
     const listing = textDecoder
-      .decode(await output(['ls-remote', '--refs', '--', target], { env, remote: name }))
+      .decode(await output(['ls-remote', '--refs', '--', target], { env, remote: name, signal: options?.signal }))
       .trim();
     return Object.freeze(
       listing
@@ -1636,11 +1651,15 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         throw new RevisionPortError('UNSUPPORTED_OPERATION', 'This Git host cannot enforce a fetch byte limit.');
       }
       guardTransportValue(input.remote, 'remote');
-      const advertised = input.refs === undefined ? await listRemoteReferences(input.remote) : undefined;
-      const wanted =
-        advertised === undefined
-          ? (input.refs ?? [])
-          : advertised.map((reference) => reference.name).filter((ref) => !isHostLocalRef(ref));
+      const advertised =
+        input.refs === undefined ? await listRemoteReferences(input.remote, { signal: input.signal }) : undefined;
+      const wanted = [
+        ...new Set(
+          advertised === undefined
+            ? (input.refs ?? [])
+            : advertised.map((reference) => reference.name).filter((ref) => !isHostLocalRef(ref)),
+        ),
+      ];
       for (const ref of wanted) {
         guardTransportValue(ref, 'ref', true);
       }
@@ -1662,31 +1681,59 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       /* Once per fetch (C73): `listRemotes` is `1 + 3R` processes on this leg. */
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
-      await output(
-        [
-          'fetch',
-          '--no-tags',
-          '--',
-          input.remote,
-          ...wanted.map((ref) => `+${ref}:${remoteTrackingRef(input.remote, ref)}`),
-        ],
-        {
-          env: await remoteEnvironment(input.remote, configuredRemotes),
-          signal: input.signal,
-          remote: input.remote,
-        },
+      // Tracking refs only become visible once their LFS payloads are present.
+      // Suppress the remote's configured refmap too: explicit staging refspecs
+      // alone still allow Git to opportunistically update normal tracking refs.
+      const transaction = `${stagingRefPrefix}-fetch-${randomUUID()}`;
+      const references = await Promise.all(
+        wanted.map(async (ref, index) => {
+          const tracked = remoteTrackingRef(input.remote, ref);
+          return { ref, tracked, staged: `${transaction}/${index}`, previous: await rawRef(tracked) };
+        }),
       );
-      const fetchedReferences = wanted.map((ref) => remoteTrackingRef(input.remote, ref));
-      const fetchedLargeObjects = await largeObjectPaths(fetchedReferences.map((name) => ({ name })));
-      if (
-        fetchedLargeObjects.length > 0 &&
-        configuredRemote !== undefined &&
-        remoteCarriesLargeObjects(configuredRemote)
-      ) {
-        await output(['lfs', 'fetch', '--', input.remote, ...fetchedReferences], {
-          env: await remoteEnvironment(input.remote, configuredRemotes),
-          signal: input.signal,
-          remote: input.remote,
+      try {
+        await output(
+          [
+            'fetch',
+            '--no-tags',
+            '--no-write-fetch-head',
+            '--refmap=',
+            '--',
+            input.remote,
+            ...references.map(({ ref, staged }) => `+${ref}:${staged}`),
+          ],
+          {
+            deadline: transferDeadline,
+            env: await remoteEnvironment(input.remote, configuredRemotes),
+            signal: input.signal,
+            remote: input.remote,
+          },
+        );
+        if (configuredRemote !== undefined && remoteCarriesLargeObjects(configuredRemote)) {
+          // Let LFS enumerate the pinned tips; a failed ls-files is not proof
+          // that the transfer has no large objects.
+          await output(['lfs', 'fetch', '--', input.remote, ...references.map(({ staged }) => staged)], {
+            deadline: transferDeadline,
+            env: await remoteEnvironment(input.remote, configuredRemotes),
+            signal: input.signal,
+            remote: input.remote,
+          });
+        }
+        const zero = await zeroObjectId();
+        const updates = await Promise.all(
+          references.map(async ({ tracked, staged, previous }) => {
+            const fetched = await rawRef(staged);
+            if (fetched === undefined) {
+              throw new RevisionPortError('ENGINE_FAILED', 'Native Git did not return the requested ref.');
+            }
+            return `update ${tracked} ${fetched} ${previous ?? zero}\n`;
+          }),
+        );
+        input.signal?.throwIfAborted();
+        await output(['update-ref', '--stdin'], { input: [textEncoder.encode(updates.join(''))] });
+      } finally {
+        await output(['update-ref', '--stdin'], {
+          input: [textEncoder.encode(references.map(({ staged }) => `delete ${staged}\n`).join(''))],
         });
       }
       await Promise.all(
@@ -1788,6 +1835,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
         throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
       } else if (large.length > 0) {
         const transfer = await run(['lfs', 'push', '--', destination, ...input.refs.map((ref) => ref.name)], {
+          deadline: transferDeadline,
           env,
           signal: input.signal,
           remote: input.remote,
@@ -1837,7 +1885,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           destination,
           ...input.refs.map((ref) => `${ref.name}:${ref.remoteName ?? ref.name}`),
         ],
-        { env, remote: input.remote, signal: input.signal },
+        { deadline: transferDeadline, env, remote: input.remote, signal: input.signal },
       );
       const stdout = textDecoder.decode(result.stdout);
       const stderr = textDecoder.decode(result.stderr);

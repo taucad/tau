@@ -24,7 +24,7 @@
  * | 15 | `queued --offline--> (no retry) --online--> opening` | offline stops the backoff; `online` resumes it |
  * | 16 | `opening --offline at entry--> queued` | exit 1: offline skips the pull outright (F16) |
  * | 17 | `opening --after pullRenderWindow-->` facet leaves `checking` | exit 2: the row stops saying `Checking…` at 3 s |
- * | 18 | `opening --after pullDeadline--> queued` | exit 3: the pull is abandoned at 10 s and the project gets on with itself |
+ * | 18 | `opening --after pullDeadline--> queued` | exit 3: the pull is abandoned at 15 min and the project gets on with itself |
  * | 19 | `opening.fetching → fastForwarding → backedUp` | a clean checkout fast-forwards |
  * | 20 | `opening.fetching → merging → conflicted` | a diverged one merges, and this lane provides no `merge` (W10) |
  * | 21 | `opening.fetching → onError → queued` | the fetch has a failure edge |
@@ -274,7 +274,7 @@ describe('syncMachine', () => {
         hasAppliedRemote: true,
         chats: 'loading',
       });
-      harness.clock.advance(7000);
+      harness.clock.advance(15 * 60_000 - 3000);
       await vi.waitFor(() => {
         expect(harness.effects.running('writePending')).toBe(1);
       });
@@ -1189,7 +1189,7 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
-  it('rows 17 + 18: the row stops saying Checking… at 3 s and the pull is abandoned at 10 s', async () => {
+  it('rows 17 + 18: the row stops saying Checking… at 3 s and the pull is abandoned at 15 min', async () => {
     const harness = start();
 
     await vi.waitFor(() => {
@@ -1202,10 +1202,89 @@ describe('syncMachine', () => {
     expect(harness.actor.getSnapshot().matches({ opening: 'fetching' })).toBe(true);
 
     harness.clock.advance(7000);
+    expect(harness.actor.getSnapshot().matches({ opening: 'fetching' })).toBe(true);
+    expect(harness.effects.running('fetch')).toBe(1);
+    harness.clock.advance(15 * 60_000 - 10_000);
     expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
 
     harness.stop();
   });
+
+  it('answers a correlated request held at close without restarting transport on release', async () => {
+    const harness = start();
+    try {
+      await openCleanly(harness);
+      const pushes = harness.effects.inputsFor('push').length;
+      harness.actor.send({ type: 'quiesce', phase: 'hold' });
+      harness.actor.send({ type: 'syncNow', pushId: 'late-publish' });
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+      harness.actor.send({ type: 'quiesce', phase: 'release' });
+      expect(harness.actor.getSnapshot().matches('backedUp')).toBe(true);
+      expect(harness.effects.inputsFor('push')).toHaveLength(pushes);
+      expect(harness.emitted.filter((event) => event['pushId'] === 'late-publish')).toEqual([
+        { type: 'pushSettled', pushId: 'late-publish', outcome: 'queued' },
+      ]);
+      expect(harness.actor.getSnapshot().context.pushIds).toEqual([]);
+      expect(harness.actor.getSnapshot().context.nextPushIds).toEqual([]);
+      harness.actor.send({ type: 'syncNow', pushId: 'after-refused-close' });
+      await vi.waitFor(() => {
+        expect(harness.effects.running('push')).toBe(1);
+      });
+    } finally {
+      harness.stop();
+    }
+  });
+
+  it.each(['fetch', 'push'])(
+    'close quiescence waits for %s completion, records retry and suppresses new wakes until release',
+    async (operation) => {
+      const harness = start();
+      try {
+        await vi.waitFor(() => {
+          expect(harness.effects.running('fetch')).toBe(1);
+        });
+        if (operation === 'push') {
+          harness.effects.settle('fetch', {
+            output: { leases: {}, integration: 'ahead' } satisfies SyncFetchActorOutput,
+          });
+          await vi.waitFor(() => {
+            expect(harness.effects.running('push')).toBe(1);
+          });
+        }
+        harness.actor.send({ type: 'close' });
+        harness.actor.send({ type: 'quiesce', phase: 'hold' });
+        harness.actor.send({ type: 'quiesce', phase: 'cancel' });
+        harness.actor.send({ type: 'remoteMoved', generation: 2, refs: [] });
+        expect(harness.actor.getSnapshot().matches(operation === 'fetch' ? { opening: 'fetching' } : 'pushing')).toBe(
+          true,
+        );
+        harness.effects.settle(operation, { error: new Error('Transport cancelled.') });
+        const callsBeforeRecord = harness.effects.inputsFor(operation).length;
+        await vi.waitFor(() => {
+          expect(harness.effects.running('writePending')).toBe(1);
+        });
+        expect(harness.actor.getSnapshot().matches('recording')).toBe(true);
+        expect(harness.effects.inputsFor('writePending').at(-1)).toMatchObject({
+          record: { entries: [expect.objectContaining({ ref: mainRef })] },
+        });
+        harness.effects.settle('writePending', { output: undefined });
+        await vi.waitFor(() => {
+          expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+        });
+        expect(harness.effects.inputsFor(operation)).toHaveLength(callsBeforeRecord);
+        harness.actor.send({ type: 'remoteMoved', generation: 3, refs: [] });
+        harness.clock.advance(60_000);
+        expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+        harness.actor.send({ type: 'quiesce', phase: 'release' });
+        harness.clock.advance(60_000);
+        await vi.waitFor(() => {
+          expect(harness.actor.getSnapshot().matches({ opening: 'fetching' })).toBe(true);
+        });
+      } finally {
+        harness.stop();
+      }
+    },
+  );
 
   it('row 20: a diverged branch records and announces its conflict', async () => {
     const harness = start();
@@ -2036,6 +2115,10 @@ describe('syncMachine', () => {
     });
 
     harness.clock.advance(60_000);
+    expect(harness.actor.getSnapshot().matches('pushing')).toBe(true);
+    expect(harness.effects.running('push')).toBe(1);
+    harness.clock.advance(14 * 60_000);
+    expect(harness.actor.getSnapshot().matches('recording')).toBe(true);
     await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
 
     await vi.waitFor(() => {
@@ -2407,7 +2490,7 @@ describe('syncMachine', () => {
       expect(slow.effects.running('fetch')).toBe(1);
     });
     slow.actor.send({ type: 'syncNow', pushId: 'publish-2' });
-    slow.clock.advance(10_000);
+    slow.clock.advance(15 * 60_000);
     expect(settledPushes(slow)).toEqual([{ type: 'pushSettled', pushId: 'publish-2', outcome: 'queued' }]);
     slow.stop();
   });
@@ -2543,8 +2626,8 @@ describe('syncMachine', () => {
     busy.stop();
   });
 
-  it('L2-F9: the open pull’s deadline is exported for the bounds that wait on it', () => {
-    expect(machineModule.syncPullDeadlineMilliseconds).toBe(10_000);
+  it('L2-F9: the open pull has a finite fifteen-minute transfer deadline', () => {
+    expect(machineModule.syncPullDeadlineMilliseconds).toBe(15 * 60_000);
   });
 });
 

@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 
 /** Captured child-process result. @public */
@@ -101,7 +101,12 @@ export const runCommand = async (options: RunCommandOptions): Promise<GitCommand
   const environment: Record<string, string | undefined> = { ...process.env, ...options.env };
   environment['GIT_TERMINAL_PROMPT'] = '0';
   environment['LC_ALL'] = 'C';
-  const child = spawn(options.executable, options.args, { cwd: options.cwd, env: environment, stdio: 'pipe' });
+  const child = spawn(options.executable, options.args, {
+    cwd: options.cwd,
+    env: environment,
+    stdio: 'pipe',
+    detached: process.platform !== 'win32',
+  });
 
   const stdout: Array<Uint8Array<ArrayBuffer>> = [];
   const stderr: Array<Uint8Array<ArrayBuffer>> = [];
@@ -109,26 +114,49 @@ export const runCommand = async (options: RunCommandOptions): Promise<GitCommand
   let stderrLength = 0;
   let aborted: CommandAbortReason | undefined;
 
-  /**
-   * A stopped command settles when the *process* is killed, not when its pipes
-   * close.
-   *
-   * `close` fires only once every stdio stream has closed, and a killed shell
-   * leaves whatever it spawned holding the pipes it inherited — so waiting for
-   * it turns a 250 ms deadline into however long the grandchild runs, which is
-   * exactly the unbounded wait this function exists to remove.
-   *
-   * ponytail: the grandchild is orphaned, not killed. Reaping the group needs
-   * `detached: true` and `process.kill(-pid)`, which changes signal delivery
-   * for every engine call; do that when a leaked engine child is observed.
-   */
+  // Kill the entire engine operation: git delegates transfers to git-lfs and its workers.
+  // Do not await pipe closure: an exited parent may leave descendants holding those pipes.
   const stopped = Promise.withResolvers<never>();
   const stop = (reason: CommandAbortReason): void => {
-    aborted ??= reason;
-    child.kill('SIGKILL');
-    stopped.reject(new CommandAbortedError(reason, `The command was stopped by its ${reason}.`));
+    if (aborted !== undefined) {
+      return;
+    }
+    aborted = reason;
+    const { pid } = child;
+    let cleanupFailed = false;
+    if (pid !== undefined) {
+      if (process.platform === 'win32') {
+        // Do not target a Windows pid after exit, when it may have been reused.
+        if (child.exitCode === null && child.signalCode === null) {
+          // Leave time for durable queue persistence inside the separate two-second close margin.
+          const killed = spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', timeout: 1000 });
+          cleanupFailed = killed.status !== 0;
+          // Retain direct-child termination even if taskkill is unavailable or times out.
+          child.kill('SIGKILL');
+        } else {
+          // An exited parent cannot safely identify its remaining Windows descendants.
+          cleanupFailed = true;
+        }
+      } else {
+        try {
+          process.kill(-pid, 'SIGKILL');
+        } catch {
+          // The group may already have exited. Killing the direct child remains a safe fallback.
+          child.kill('SIGKILL');
+        }
+      }
+    }
+    stopped.reject(
+      new CommandAbortedError(
+        reason,
+        `The command was stopped by its ${reason}.${cleanupFailed ? ' Process-tree cleanup failed.' : ''}`,
+      ),
+    );
   };
   const collect = (chunks: Array<Uint8Array<ArrayBuffer>>, chunk: Uint8Array<ArrayBuffer>, length: number): number => {
+    if (aborted !== undefined) {
+      return length;
+    }
     const next = length + chunk.byteLength;
     if (next > maxBuffer) {
       stop('output-limit');

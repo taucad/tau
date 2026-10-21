@@ -28,6 +28,31 @@
       "owner": "storage-gateway W15"
     },
     {
+      "id": "STORAGE-PROCESS-CLEANUP",
+      "bound": "Windows taskkill process-tree cleanup, 1 second inside the close persistence margin; failure is reported",
+      "site": "packages/revisions/src/git-command.ts",
+      "token": "spawnSync('taskkill'",
+      "class": "External edge",
+      "owner": "storage-gateway W15"
+    },
+    {
+      "id": "STORAGE-CLOSE-GRACE",
+      "bound": "Cancel owned network transports after 10 seconds of close grace; local reconciliation is not cancelled",
+      "site": "packages/revisions/src/revision-effects.ts",
+      "token": "const cancel = setTimeout(",
+      "class": "External edge",
+      "owner": "storage-gateway W15"
+    },
+    {
+      "id": "STORAGE-LOCAL-CUT",
+      "bound": "Existing pre-merge checkout cut wait, 10 seconds; separated from the longer network budget",
+      "site": "packages/revisions/src/sync.machine.ts",
+      "token": "mintDeadline:",
+      "class": "Peer",
+      "owner": "revisions W5",
+      "fixedBy": "revisions W5 follow-up: answer-only local pre-merge cut settlement (existing correlated cut wait, previously covered by A9)"
+    },
+    {
       "id": "A3",
       "bound": "Checkout idle window",
       "site": "packages/revisions/src/checkout.machine.ts",
@@ -45,7 +70,7 @@
     },
     {
       "id": "A9",
-      "bound": "Pull deadline",
+      "bound": "Active background pull budget, 15 minutes; local render remains 3 seconds",
       "site": "packages/revisions/src/sync.machine.ts",
       "token": "pullDeadline",
       "class": "External edge",
@@ -69,7 +94,7 @@
     },
     {
       "id": "A12",
-      "bound": "Push network deadline, 60 s (RM-S16)",
+      "bound": "Active background push budget, 15 minutes; close has its own shorter cancellation bound",
       "site": "packages/revisions/src/sync.machine.ts",
       "token": "pushDeadline",
       "class": "External edge",
@@ -77,7 +102,7 @@
     },
     {
       "id": "A13",
-      "bound": "Git command deadline",
+      "bound": "Git command deadline: local plumbing 30 seconds; explicit fetch/push and LFS operations 15 minutes",
       "site": "packages/revisions/src/git-command.ts",
       "token": "stop('deadline')",
       "class": "External edge",
@@ -85,7 +110,7 @@
     },
     {
       "id": "B2",
-      "bound": "Sync quiesce at close",
+      "bound": "Sync quiesce at close, 12 seconds; refusal unless remote persistence or durable local retry is confirmed",
       "site": "packages/revisions/src/revision-effects.ts",
       "token": "timeoutMilliseconds",
       "class": "External edge",

@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-10-19'
+updated: '2026-10-21'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -187,11 +187,13 @@ Open a project by fetching before its first tree render under these bounds:
 | Offline                        | Render local state and pull on the next online event    |
 | Fetch settles within 3 seconds | Apply fast-forward or ordinary merge before render      |
 | Still pending after 3 seconds  | Render local state and continue in background           |
-| Still pending after 10 seconds | Abort that request, queue retry, and render local state |
+| Still pending after 15 minutes | Abort that request, queue retry, and retain local state |
 
-Nest every lifecycle bound strictly inside the wait that awaits it, so the person hears the inner operation's own reason rather than the outer wait's generic one: the sync pull deadline is shorter than the close-path sync quiesce, and a turn's base-cut settlement is shorter than the host's turn admission. Declare each constant beside its owner — the pull deadline in `packages/revisions/src/sync.machine.ts` or `sync.types.ts`, the cut settlement in `turn.machine.ts`, the quiesce and admission waits in `revision-effects.ts` — and pin the ordering with a unit assertion there.
+Give an active background pull or push a finite 15-minute transfer budget so supported large objects can complete; retain the 3-second local-render boundary. Keep the local pre-merge cut bounded to 10 seconds independently of transfers.
 
-While a project is open, learn that the remote moved from the project's `revision` entry on the existing durable-events long poll, which carries only the manifest generation, the moved ref names and each moved ref's new object id, and is authorized by project `read` access; fetch the bytes over Git. A device that already holds every announced head, as its own ref or its tracking ref, makes no request at all; an entry without heads, or with a head the device does not hold, pulls. Never add a head-only Git route, a socket namespace, or another transport for this.
+Bound close separately: allow active network work 10 seconds, then cancel its network transports while allowing their owning effects to finish local reconciliation, before waiting up to 2 further seconds for durable pending-push persistence. Hold new background triggers throughout the close attempt; release that hold after refusal so a later retry can proceed. Do not cancel a local apply or queue write to claim success. If persistence or local work has not settled within the 12-second sync quiesce, refuse close rather than discard the obligation. Never extend close to the background transfer budget. Keep a turn's base-cut settlement shorter than the host's turn admission. Declare each constant beside its owner — transfer and local-cut deadlines in `packages/revisions/src/sync.machine.ts`, cut settlement in `turn.machine.ts`, close quiesce and admission waits in `revision-effects.ts` — and pin their behavior with cancellation and durable-record tests.
+
+While a project is open, learn that the remote moved from the project's `revision` entry on the existing durable-events long poll, which carries only the manifest generation, the moved ref names and each moved ref's new object id, and is authorized by project `read` access; fetch the bytes over Git. Re-establish large-object hydration with one normal bounded fetch on the first pull of each effect session, even when persisted tracking tips match; tracking refs from an interrupted older client do not prove complete bytes. Subsequent pull advertisements may skip a fetch only for tips this session successfully fetched and still tracks. A stream echo that already holds every announced head, as its own ref or its tracking ref, makes no request at all; an entry without heads, or with a head the device does not hold, pulls. Never add a head-only Git route, a socket namespace, or another transport for this.
 
 Integrate on every fetch, not only on open. Fast-forward a clean checkout. Auto-merge a diverged clean checkout whose changes do not overlap and land the merge revision: a path changed on one side takes that side, and a text file changed on both sides merges by line when no hunk overlaps. Cut a dirty checkout first through its checkout child (trigger `merge`), then treat it as clean. Merge `.tau/parameters/**` per key and let a binary choose one side. Route only overlapping changes to a conflicted revision on the conflict line (rule 8). Never re-base a leased live checkout: the merge waits for the lease to retire, then applies.
 

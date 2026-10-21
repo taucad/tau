@@ -2032,6 +2032,7 @@ export const openProjectRevisions = async (
       tree = createProjectRevisionsActor({
         port,
         projectId,
+        deviceId: () => hostDeviceId,
         filesystem: (checkout) => authority.open(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),

@@ -1471,9 +1471,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
    * empty directory with nothing but the project's id and where its remote is,
    * and `openFromRemote` is the whole gesture.
    */
-  it.runIf(gitToolchainOnPath)(
-    'opens a project this machine has never held from its remote',
-    async () => {
+  it.runIf(gitToolchainOnPath).each([false, true])(
+    'should open a project this machine has never held from its remote (chats=%s)',
+    async (withChats) => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-remote-'));
       const first = await mkdtemp(join(tmpdir(), 'tau-host-open-a-'));
       const second = await mkdtemp(join(tmpdir(), 'tau-host-open-b-'));
@@ -1507,10 +1507,21 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         head: revisionId(receipt.commitId),
       });
       await port.setRemote({ name: 'tau', url: bare });
+      const chatRef = 'refs/tau/chats/chat_one';
+      const chatRecord = '{"id":"chat_one","name":"From the browser"}';
+      if (withChats) {
+        const chat = await port.writeRevision({
+          parents: [],
+          tree: new ImmutableRevisionTree([['chat.json', chatRecord]]),
+          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+          summary: { generated: 'Browser chat' },
+        });
+        await port.updateRef({ name: chatRef, expectedHead: undefined, head: revisionId(chat.commitId) });
+      }
       await port.push({
         remote: 'tau',
         atomic: true,
-        refs: [{ name: 'refs/heads/main' }],
+        refs: [{ name: 'refs/heads/main' }, ...(withChats ? [{ name: chatRef }] : [])],
       });
 
       const revisions = await openProjectRevisions({
@@ -1529,6 +1540,11 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         /* The live checkout, not only the graph: the file is on disk with device
          A's bytes, and `main` is where A left it. */
         expect(await readFile(join(second, 'part.ts'), 'utf8')).toBe('export const part = 1;\n');
+        if (withChats) {
+          expect(JSON.parse(await readFile(join(second, '.tau/chats/chat_one/chat.json'), 'utf8'))).toEqual(
+            JSON.parse(chatRecord),
+          );
+        }
         expect(await revisions.describe()).toMatchObject({
           branch: 'main',
           revisionNumber: 1,

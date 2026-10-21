@@ -83,6 +83,7 @@ describe('tscircuit package identity', () => {
       '@tscircuit/props': props!.version,
       react: react!.version,
       'react-dom': react!.version,
+      '@biomejs/biome': '2.5.15',
       debug: '4.4.3',
       flatbush: '4.6.2',
     });

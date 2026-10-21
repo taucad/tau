@@ -1135,7 +1135,7 @@ const syncMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sync',
-  version: '3',
+  version: '4',
   context: ({ input }) => ({
     projectId: input.projectId,
     branch: input.branch ?? defaultBranch,
@@ -1564,6 +1564,10 @@ const syncMachineDefinition = setup({
                   into: event.output.into,
                   paths: event.output.paths,
                 });
+              } else if (context.parentRef !== undefined) {
+                /* The same line can now contain another decision (D14). Re-read
+                 * its records without repeating D55's user-facing announcement. */
+                enq.sendTo(context.parentRef, { type: 'conflictsChanged' });
               }
               return { target: '#sync.conflicted', context: conflict };
             },

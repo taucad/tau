@@ -262,6 +262,8 @@ export type ProjectRevisionsMachineEvent =
   | Readonly<{ type: 'pushSettled'; pushId: string; outcome: SyncPushOutcome }>
   /* The conflict card's verbs, addressed to one conflicted revision's child (S33). */
   | (Readonly<{ type: 'resolution'; revisionId: string }> & Readonly<{ event: ResolutionMachineEvent }>)
+  /* A known conflict line may now hold another undecided revision. */
+  | Readonly<{ type: 'conflictsChanged' }>
   /* `branch.machine` says a merge collided; the registry is stale and nothing
    * else would ever say so (W10 review R1, P41). */
   | Readonly<{ type: 'mergeConflicted'; branch: string; into: string; paths: readonly string[] }>
@@ -774,6 +776,7 @@ const projectRevisionsMachineDefinition = setup({
   },
 }).createMachine({
   id: 'project-revisions',
+  version: '1',
   context: ({ input }) => ({
     projectId: input.projectId,
     checkouts: [],
@@ -1466,6 +1469,10 @@ const projectRevisionsMachineDefinition = setup({
         /* The merge moved the source branch onto a conflicted revision, so the registry is re-read (P41). */
         mergeConflicted: ({ event }: RootArgs<'mergeConflicted'>, enq: ProjectRevisionsEnqueue): RootTransition => {
           enq.emit(event);
+          enq.sendTo('checkouts', { type: 'open' });
+          return {};
+        },
+        conflictsChanged: (_, enq) => {
           enq.sendTo('checkouts', { type: 'open' });
           return {};
         },

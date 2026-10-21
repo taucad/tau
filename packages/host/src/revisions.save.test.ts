@@ -8,12 +8,14 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { writeChatRef } from '@taucad/revisions';
 import type { RevisionPort } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 
@@ -51,9 +53,10 @@ const git = (repository: string, args: readonly string[]): string =>
 /**
  * One project with one revision on `main`, offered to a bare remote named `tau`.
  *
+ * @param includeChat - Whether the remote also advertises a browser chat.
  * @returns The bare remote, and the project's id on it.
  */
-const remoteWithOneRevision = async (): Promise<Readonly<{ bare: string; projectId: string }>> => {
+const remoteWithOneRevision = async (includeChat = false): Promise<Readonly<{ bare: string; projectId: string }>> => {
   const bare = await directory('remote');
   const first = await directory('first');
   process.env['TAU_CONFIG_DIR'] = await directory('config');
@@ -74,10 +77,45 @@ const remoteWithOneRevision = async (): Promise<Readonly<{ bare: string; project
   await port.updateRef({ name: 'refs/heads/main', expectedHead: undefined, head: revisionId(receipt.commitId) });
   await port.setRemote({ name: 'tau', url: bare });
   await port.push({ remote: 'tau', atomic: true, refs: [{ name: 'refs/heads/main' }] });
+  if (includeChat) {
+    const chat = join(first, '.tau/chats/chat-remote');
+    await mkdir(chat, { recursive: true });
+    await writeFile(join(chat, 'chat.json'), '{"id":"chat-remote","name":"Fixture"}');
+    await writeFile(join(chat, 'events.jsonl'), '{"leaderEpoch":"fixture","sequence":0}\n');
+    const recorded = await writeChatRef({
+      port,
+      filesystem: new NodeFsProvider(first),
+      deviceId: 'browser-fixture',
+      chatId: 'chat-remote',
+      syncChats: true,
+      actorId: 'ada',
+      now: Date.UTC(2026, 8, 26),
+    });
+    await port.push({ remote: 'tau', atomic: true, refs: [{ name: recorded.ref }] });
+  }
   return { bare, projectId };
 };
 
 describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
+  it('should clone project files and remote chat records through the terminal verbs', async () => {
+    const { bare, projectId } = await remoteWithOneRevision(true);
+    const second = await directory('with-chat');
+    const opener = openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    try {
+      expect(await opener.openFromRemote()).toMatchObject({ status: 'opened' });
+      expect(await readFile(join(second, 'part.ts'), 'utf8')).toBe('export const part = 1;\n');
+      expect(JSON.parse(await readFile(join(second, '.tau/chats/chat-remote/chat.json'), 'utf8'))).toMatchObject({
+        id: 'chat-remote',
+        name: 'Fixture',
+      });
+      expect(await readFile(join(second, '.tau/chats/chat-remote/events/browser-fixture.jsonl'), 'utf8')).toBe(
+        '{"leaderEpoch":"fixture","sequence":0}\n',
+      );
+    } finally {
+      await opener.close();
+    }
+  }, 120_000);
+
   it('records the files as a revision by the person running it, and pushes it to the remote', async () => {
     const { bare, projectId } = await remoteWithOneRevision();
     const second = await directory('second');

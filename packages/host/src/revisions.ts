@@ -2040,6 +2040,7 @@ export const openProjectRevisions = (
         /* The person this process runs for, as both other Node hosts record
          * (AC15): without it a terminal's save is authored by `tau-host`. */
         actor: hostRevisionActor(),
+        deviceId: () => hostDeviceId,
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
         ...(registerRemoteProject === undefined ? {} : { registerRemoteProject }),

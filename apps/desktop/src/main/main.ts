@@ -146,7 +146,7 @@ protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
 
 /* A packaged build ignores endpoint, renderer, client-root, executable-path and
  * `TAU_E2E_*` overrides unless it was packaged to honour them (ad-hoc and
- * unsigned e2e packages; never a release). Scrubbed before anything below
+ * certificate-signed or unsigned development packages; never a release). Scrubbed before anything below
  * reads `process.env`, so every later read and every child sees the result. */
 const environmentLocked = app.isPackaged && !packagedOverridesEnabled(app.getAppPath());
 if (environmentLocked) {
@@ -157,7 +157,10 @@ if (environmentLocked) {
 const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
 app.setName(desktopChannel === 'staging' ? 'Tau Staging' : 'Tau');
 if (desktopChannel === 'staging') {
-  app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  // Development acceptance runs may explicitly isolate their profile; releases retain the channel profile.
+  if (environmentLocked || !app.commandLine.hasSwitch('user-data-dir')) {
+    app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  }
   app.setPath('sessionData', app.getPath('userData'));
 }
 const otaProbe = prepareOtaProbe({

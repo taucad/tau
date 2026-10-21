@@ -2,9 +2,32 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
+import { authorizeCliZooProxy, cliZooProxyUrl, resolveZooAuthToken } from '#zoo-proxy.js';
+
+const saved = vi.hoisted(() => ({ getPassword: vi.fn(async () => 'saved-session') }));
+vi.mock('@napi-rs/keyring', () => ({
+  AsyncEntry: class {
+    public getPassword = saved.getPassword;
+  },
+}));
+
+it('never sends a saved API session to an unrelated WebSocket origin', async () => {
+  saved.getPassword.mockClear();
+  expect(
+    await resolveZooAuthToken('https://api.example.test', 'wss://other.example.test/v1/kernels/zoo', {}),
+  ).toBeUndefined();
+  expect(saved.getPassword).not.toHaveBeenCalled();
+  expect(await resolveZooAuthToken('https://api.example.test', 'wss://api.example.test/v1/kernels/zoo', {})).toBe(
+    'saved-session',
+  );
+  expect(
+    await resolveZooAuthToken('https://api.example.test', 'wss://other.example.test/v1/kernels/zoo', {
+      TAU_AUTH_TOKEN: 'explicit',
+    }),
+  ).toBe('explicit');
+});
 
 const originalWebSocket = globalThis.WebSocket;
 
@@ -42,7 +65,7 @@ describe('authorizeCliZooProxy', () => {
     });
     const origin = `ws://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
     try {
-      authorizeCliZooProxy({ ...environment, TAU_WEBSOCKET_URL: origin });
+      await authorizeCliZooProxy({ ...environment, TAU_WEBSOCKET_URL: origin });
       const socket = new globalThis.WebSocket(`${origin}${path}`);
       socket.addEventListener('error', () => undefined);
       return await seen;
@@ -51,13 +74,14 @@ describe('authorizeCliZooProxy', () => {
     }
   };
 
-  it('puts TAU_API_TOKEN on the Zoo proxy upgrade only', async () => {
-    expect(await upgradeAuthorization({ TAU_API_TOKEN: 'session-1' }, '/v1/kernels/zoo?a=1')).toBe('Bearer session-1');
-    expect(await upgradeAuthorization({ TAU_API_TOKEN: 'session-1' }, '/v1/agents/control')).toBeUndefined();
+  it('puts TAU_AUTH_TOKEN on the Zoo proxy upgrade only', async () => {
+    expect(await upgradeAuthorization({ TAU_AUTH_TOKEN: 'session-1' }, '/v1/kernels/zoo?a=1')).toBe('Bearer session-1');
+    expect(await upgradeAuthorization({ TAU_AUTH_TOKEN: 'session-1' }, '/v1/agents/control')).toBeUndefined();
   });
 
-  it('leaves WebSocket alone without a token', () => {
-    authorizeCliZooProxy({ TAU_API_URL: 'http://localhost:4000' });
+  it('leaves WebSocket alone without a token', async () => {
+    saved.getPassword.mockResolvedValueOnce('');
+    await authorizeCliZooProxy({ TAU_API_URL: 'http://localhost:4000' });
 
     expect(globalThis.WebSocket).toBe(originalWebSocket);
   });

@@ -721,7 +721,7 @@ describe('registerProjectFailureMessage', () => {
  * The browser worker and the Node daemon each carried their own copy, and they
  * disagreed: the worker answered 401 with *Sign in to publish this project.*
  * and had a rung for a version too large to share, while the daemon answered
- * 401 with a `TAU_API_TOKEN` hint and had no 413 rung at all — so the same
+ * 401 with a `TAU_AUTH_TOKEN` hint and had no 413 rung at all — so the same
  * response produced a different sentence depending on which host asked (C6).
  */
 describe('publishFailureMessage', () => {

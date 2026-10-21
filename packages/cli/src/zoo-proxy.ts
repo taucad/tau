@@ -7,6 +7,7 @@
  * `WebSocket` for the one proxy URL instead.
  */
 
+import { authApiOrigin, resolveAuthToken } from '#auth.js';
 import { withZooProxyHeaders } from '@taucad/zoo/proxy';
 
 /** The Tau Cloud API, which `tau serve` relays to by default too. */
@@ -21,7 +22,7 @@ type ZooProxyEnvironment = Readonly<Record<string, string | undefined>>;
  */
 export const cliZooCloseErrors: Readonly<Record<string, string>> = {
   1013: 'Zoo execution is unavailable on this Tau API right now. Your project is safe; try again later.',
-  4401: 'Set TAU_API_TOKEN to a Tau session token to use the Zoo kernel.',
+  4401: 'Run tau auth login or set TAU_AUTH_TOKEN to use the Zoo kernel.',
   4403: 'Zoo execution requires Pro on this Tau account.',
 };
 /* eslint-enable @typescript-eslint/naming-convention -- End numeric WebSocket close-code keys. */
@@ -43,7 +44,28 @@ export const cliZooProxyUrl = (environment: ZooProxyEnvironment): string => {
 };
 
 /**
- * Put `TAU_API_TOKEN` on this process's Zoo proxy upgrades.
+ * Saved account sessions may authenticate only the matching API WebSocket origin.
+ * @param apiUrl - Selected API origin.
+ * @param socketUrl - Destination WebSocket URL.
+ * @param environment - Optional explicit credential override.
+ * @returns The eligible session bearer, if available.
+ */
+export const resolveZooAuthToken = async (
+  apiUrl: string,
+  socketUrl: string,
+  environment: ZooProxyEnvironment = process.env,
+): Promise<string | undefined> => {
+  const apiOrigin = authApiOrigin(apiUrl);
+  const socket = new URL(socketUrl);
+  const expected = apiOrigin.replace(/^http/u, 'ws');
+  if (!environment['TAU_AUTH_TOKEN'] && socket.origin !== expected) {
+    return undefined;
+  }
+  return resolveAuthToken(apiOrigin, environment);
+};
+
+/**
+ * Put `TAU_AUTH_TOKEN` on this process's Zoo proxy upgrades.
  *
  * For the in-process commands (`tau export`, `tau view`): the variable is
  * already in this process's environment, which project code shares, so this
@@ -52,8 +74,12 @@ export const cliZooProxyUrl = (environment: ZooProxyEnvironment): string => {
  *
  * @param environment - Usually `process.env`.
  */
-export const authorizeCliZooProxy = (environment: ZooProxyEnvironment): void => {
-  const token = environment['TAU_API_TOKEN'];
+export const authorizeCliZooProxy = async (environment: ZooProxyEnvironment): Promise<void> => {
+  const token = await resolveZooAuthToken(
+    authApiOrigin(environment['TAU_API_URL']),
+    cliZooProxyUrl(environment),
+    environment,
+  );
   if (token === undefined || token === '') {
     return;
   }

@@ -931,6 +931,22 @@
       "token": "objectCacheIdle",
       "class": "Debounce",
       "owner": "revisions memory"
+    },
+    {
+      "id": "CLI-AUTH-HTTP",
+      "bound": "15-second HTTP deadline for CLI authentication requests, combined with caller cancellation",
+      "site": "packages/cli/src/auth.ts",
+      "token": "AbortSignal.timeout(15_000)",
+      "class": "External edge",
+      "owner": "CLI-A1"
+    },
+    {
+      "id": "CLI-AUTH-POLL",
+      "bound": "Device grant polling uses the advertised interval (five seconds normally), increases on slow_down, and stops within the ten-minute grant lifetime or caller cancellation",
+      "site": "packages/cli/src/auth.ts",
+      "token": "await delay(pollInterval, undefined, { signal })",
+      "class": "External edge",
+      "owner": "CLI-A1"
     }
   ]
 }

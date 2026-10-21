@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Exercise API-issued private storage, rather than treating health/signing as upload success.
- * Required: TAU_STORAGE_PROBE_PROJECT (disposable staging project), TAU_API_TOKEN (hidden env).
+ * Required: TAU_STORAGE_PROBE_PROJECT (disposable staging project), TAU_AUTH_TOKEN (hidden env).
  * Optional: TAU_STORAGE_PROBE_BYTES (1..104857600, default 1024).
  * Usage: pnpm nx run api:probe:private-storage
  * Writes one generated fixture, retained for normal project cleanup; never deletes user data.
@@ -42,7 +42,7 @@ const requireOk = (condition: boolean): void => {
 const main = async (): Promise<void> => {
   const project = required('TAU_STORAGE_PROBE_PROJECT');
   requireOk(/^[a-zA-Z0-9_-]+$/u.test(project));
-  const token = required('TAU_API_TOKEN');
+  const token = required('TAU_AUTH_TOKEN');
   const size = Number(process.env['TAU_STORAGE_PROBE_BYTES'] ?? 1024);
   requireOk(Number.isSafeInteger(size) && size > 0 && size <= 104_857_600);
   const bytes = Uint8Array.from(randomBytes(size));

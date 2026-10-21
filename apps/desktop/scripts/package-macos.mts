@@ -7,7 +7,10 @@
  * native kernel closure: it downloads each on first use);
  * TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE names that engine version's source/relink archive (required for an arm64 --release);
  * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT; optional TAU_DESKTOP_CHANNEL (production, the default, or staging);
- * Apple credentials only for --release; --unsigned skips all package signing.
+ * A signing certificate is required for --release or local signing; --unsigned skips package signing.
+ * TAU_LOCAL_CODESIGN_IDENTITY opts a staging development package into Apple Development signing
+ * (auto, an exact certificate name, or its fingerprint), preserving debugging and local overrides.
+ * Local acceptance: pnpm nx run desktop:package-macos:local (auto-selects the single development certificate).
  * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
  * Output: <output root>/Tau-darwin-<arch>/Tau.app, copied as APFS clones of its inputs; the distribution archive
  * <output root>/Tau-macos-<arch>.zip only for --release or when --zip is passed.
@@ -31,6 +34,8 @@ import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Shared operational signing helper.
+import { localSigningIdentity } from './local-signing.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyTree } from '@taucad/nx/runtime-closure';
 import { copyGeoSpecEngine, copyGeoSpecSourceRelink } from './runtime-closure.mjs';
@@ -88,6 +93,14 @@ const {
   zip,
   notarize: shouldNotarize,
 } = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
+if (
+  process.env['TAU_LOCAL_CODESIGN_IDENTITY'] !== undefined &&
+  (release || unsigned || desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']) !== 'staging')
+) {
+  throw new Error('Local signing requires a staging development package, without --release or --unsigned.');
+}
+// Resolve before removing any previous package output.
+const localIdentity = localSigningIdentity();
 // Local non-ZIP packages remain development-only; every distribution archive is held.
 if (zip) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')], {
@@ -99,7 +112,7 @@ const extensions =
   isQuickLookEnabled() && shipsNativeGeometry
     ? (['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const)
     : [];
-const adhocAppEntitlements = [
+const developmentAppEntitlements = [
   'com.apple.security.cs.allow-jit',
   'com.apple.security.cs.disable-library-validation',
   'com.apple.security.device.audio-input',
@@ -262,7 +275,7 @@ await stageRuntimePackages({
   stageRoot,
   packages: runtimePackages,
   stagedDependencies: geospecEngineDependencies,
-  /* Ad-hoc and unsigned packages back the packaged e2e lane, which points
+  /* Development packages back the packaged e2e lane, which points
    * the app at local services; a release ignores those overrides
    * (`packagedOverridesEnabled` in src/main/environment.ts). A staging
    * package defaults to taucad.dev and follows its isolated update feed. */
@@ -281,7 +294,7 @@ const packagePaths = await packager({
   platform: 'darwin',
   arch: architecture,
   name: 'Tau',
-  appBundleId: 'com.taucad.tau.desktop',
+  appBundleId: localIdentity ? 'com.taucad.tau.desktop.local' : 'com.taucad.tau.desktop',
   appCategoryType: 'public.app-category.graphics-design',
   appVersion: desktopPackageVersion(metadata.version),
   /* Squirrel.Mac compares bundle versions, so the build version is the release version. */
@@ -342,13 +355,13 @@ await flipFuses(appPath, {
   ...macosPackageFuses({ release }),
 });
 
-const identity = release ? developerIdentity() : '-';
+const identity = release ? developerIdentity() : (localIdentity ?? '-');
 if (!unsigned) {
   await sign({
     app: appPath,
     platform: 'darwin',
     identity,
-    identityValidation: release,
+    identityValidation: release || localIdentity !== undefined,
     preAutoEntitlements: false,
     preEmbedProvisioningProfile: false,
     strictVerify: true,
@@ -357,7 +370,7 @@ if (!unsigned) {
     ignore: (path) => path.includes('/Contents/Resources/git/') && !isMachObject(path),
     optionsForFile: (path) => ({
       ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))
-        ? { entitlements: adhocAppEntitlements }
+        ? { entitlements: developmentAppEntitlements }
         : {}),
       ...(release && path.endsWith('/Tau Helper (Plugin).app')
         ? {
@@ -398,6 +411,6 @@ if (zip) {
 }
 await rm(stageRoot, { recursive: true, force: true });
 console.log(
-  `${shouldNotarize ? 'Signed and notarized' : release ? 'Developer ID signed' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`,
+  `${shouldNotarize ? 'Signed and notarized' : release ? 'Developer ID signed' : unsigned ? 'Unsigned' : localIdentity ? 'Apple Development signed' : 'Ad-hoc signed'} Tau: ${appPath}`,
 );
 console.log(zip ? `Distribution archive: ${zipPath}` : 'No distribution archive; pass --zip to write one.');

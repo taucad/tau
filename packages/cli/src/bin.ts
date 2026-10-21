@@ -46,6 +46,10 @@ const lazyCommand = (name: string, description: string, load: () => Promise<Comm
   });
 
 const subCommands: Record<string, CommandDef> = {
+  auth: lazyCommand('auth', 'Sign in to Tau Cloud and manage this CLI’s session', async () => {
+    const { authCommand } = await import('./commands/auth.js');
+    return authCommand as CommandDef;
+  }),
   serve: lazyCommand('serve', 'Serve a project folder to the browser on this machine', async () => {
     const { serveCommand } = await import('./commands/serve.js');
     return serveCommand as CommandDef;

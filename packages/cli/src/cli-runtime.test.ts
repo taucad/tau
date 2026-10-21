@@ -110,7 +110,7 @@ describe('createCliRuntime', () => {
     expect(zooKernel?.extensions).toEqual(['kcl']);
     expect(zooKernel?.options).toMatchObject({
       baseUrl: 'ws://localhost:4001/v1/kernels/zoo',
-      closeErrors: { 4401: expect.stringContaining('TAU_API_TOKEN') as unknown },
+      closeErrors: { 4401: expect.stringContaining('TAU_AUTH_TOKEN') as unknown },
     });
     expect(zooKernel?.options).not.toHaveProperty('token');
   });

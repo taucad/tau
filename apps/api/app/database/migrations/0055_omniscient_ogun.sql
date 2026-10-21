@@ -1,0 +1,1 @@
+CREATE INDEX "device_code_expires_at_idx" ON "device_code" USING btree ("expires_at");

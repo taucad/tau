@@ -727,7 +727,7 @@ const answeredCode = async (response: Response): Promise<Readonly<{ code?: strin
  *
  * One owner, for the same reason {@link registerProjectFailureMessage} has one:
  * the worker and the daemon each carried a copy and they disagreed about two
- * classes — 401, where the daemon printed a `TAU_API_TOKEN` hint the browser
+ * classes — 401, where the daemon printed a `TAU_AUTH_TOKEN` hint the browser
  * never could, and a version too large to share, which the daemon reported as
  * *"Try again."* One sentence per response, whichever host asked.
  *

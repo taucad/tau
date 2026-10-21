@@ -97,9 +97,17 @@
       ],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register ../../scripts/src/wait-for-url.ts http://localhost:3001 && node --env-file=../ui/.env scripts/run-electron-vite.mts dev",
+        "command": "node --import @oxc-node/core/register ../../scripts/src/wait-for-url.ts http://localhost:3001 && node --import @oxc-node/core/register --env-file=../ui/.env scripts/run-electron-vite.mts dev",
         "env": {
           "ELECTRON_RENDERER_URL": "http://localhost:3001"
+        }
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "ELECTRON_RENDERER_URL": "http://localhost:3001",
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto"
+          }
         }
       }
     },
@@ -117,9 +125,17 @@
       ],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node --env-file=../ui/.env scripts/run-electron-vite.mts preview --skipBuild",
+        "command": "node --import @oxc-node/core/register --env-file=../ui/.env scripts/run-electron-vite.mts preview --skipBuild",
         "env": {
           "NODE_ENV": "production"
+        }
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "NODE_ENV": "production",
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto"
+          }
         }
       }
     },
@@ -171,6 +187,14 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts"
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto",
+            "TAU_DESKTOP_CHANNEL": "staging"
+          }
+        }
       }
     },
     "package-macos-release": {
@@ -347,6 +371,14 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts"
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto",
+            "TAU_DESKTOP_CHANNEL": "staging"
+          }
+        }
       }
     },
     "package-macos-release-intel": {

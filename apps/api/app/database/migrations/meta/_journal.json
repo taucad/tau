@@ -372,6 +372,20 @@
       "when": 1792551571083,
       "tag": "0053_chilly_manta",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1792562988234,
+      "tag": "0054_daffy_harpoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792563449128,
+      "tag": "0055_omniscient_ogun",
+      "breakpoints": true
     }
   ]
 }

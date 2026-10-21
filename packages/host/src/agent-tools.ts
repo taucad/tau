@@ -100,6 +100,8 @@ export type HostTestModelCounts = {
  *
  * @example <caption>The planetary run's headline</caption>
  * ```typescript
+ * import { formatTestModelHeadline } from '@taucad/host/agent-tools';
+ *
  * formatTestModelHeadline('inconclusive', { passed: 5, failed: 0, inconclusive: 5, unsupported: 0, notRun: 0, skipped: 0, total: 10 });
  * // 'GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10.'
  * ```

@@ -402,7 +402,7 @@ jobs:
         if: matrix.ecosystem != 'kcl'
         env:
           ZOO_TOKEN: ${{ secrets.ZOO_TOKEN }}
-          TAU_API_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
+          TAU_AUTH_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
         run: node scripts/src/check-standalone-project.ts --ecosystem "${{ matrix.ecosystem }}" --work "$RUNNER_TEMP/standalone"
 
       # The lock-parity oracle of the JavaScript row (blueprint I5): the lock Tau writes passes `npm ci`

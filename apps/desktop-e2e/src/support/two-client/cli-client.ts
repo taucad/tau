@@ -9,7 +9,7 @@ import { desktopE2EApiUrl } from '#support/config.js';
  * The terminal as the third client (revisions charter W15).
  *
  * `tau` exactly as a person runs it, signed in with the same account's session
- * as the other two clients: `TAU_API_URL` and `TAU_API_TOKEN`, the pair
+ * as the other two clients: `TAU_API_URL` and `TAU_AUTH_TOKEN`, the pair
  * `tau clone`, `tau publish` and `tau revisions save` are told. Spawned from its
  * TypeScript source through the workspace's `tsx` by default. Acceptance runs
  * set `TAU_E2E_BUILT_CLI=true` to exercise the freshly built executable instead.
@@ -41,7 +41,7 @@ export const runCli = async (args: readonly string[], token: string): Promise<Cl
         env: {
           ...process.env,
           TAU_API_URL: desktopE2EApiUrl,
-          TAU_API_TOKEN: token,
+          TAU_AUTH_TOKEN: token,
           /* The operator's own git configuration must not decide what a terminal proves. */
           GIT_CONFIG_GLOBAL: '/dev/null',
           GIT_TERMINAL_PROMPT: '0',

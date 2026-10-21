@@ -2,7 +2,7 @@
  * The daemon's half of the runtime child's Zoo credential.
  *
  * The runtime child runs project code under a minimal environment, so it never
- * gets `TAU_API_TOKEN`. The daemon, which holds it, trades it for a Zoo-scoped
+ * gets `TAU_AUTH_TOKEN`. The daemon, which holds it, trades it for a Zoo-scoped
  * token and sends only that, to every live child, and the latest one to each
  * child it starts later (`docs/research/zoo-kernel-local-hosts-blueprint.md`).
  */
@@ -16,7 +16,7 @@ export type HostZooProxyOptions = {
   readonly url: string;
   /** The Tau API that mints Zoo-scoped tokens. */
   readonly apiUrl: string;
-  /** `TAU_API_TOKEN`; absent, the child's Zoo kernel reports that sign-in is needed. */
+  /** `TAU_AUTH_TOKEN`; absent, the child's Zoo kernel reports that sign-in is needed. */
   readonly sessionToken?: string | undefined;
 };
 

@@ -9,9 +9,8 @@
  * `tau` remote and waits for W13's open pull to materialize the live checkout.
  * Nothing here checks anything out itself.
  *
- * Two things only a terminal has to be told, exactly as `tau publish` is told
- * them: which API (`TAU_API_URL`) and the session token (`TAU_API_TOKEN`). The
- * token authorizes the listing and the fetch; nothing is written under the
+ * Like `tau publish`, this uses the selected API (`TAU_API_URL`) and either
+ * the saved login or explicit `TAU_AUTH_TOKEN` override. The token authorizes the listing and the fetch; nothing is written under the
  * project — not into `.git/config`, not into a credential helper, not into the
  * remote URL (P40).
  */
@@ -64,9 +63,9 @@ const listCloudProjects = async (
   });
   if (!response.ok) {
     throw cliError(
-      response.status === 401 ? 'NO_API_TOKEN' : 'PROJECTS_UNAVAILABLE',
+      response.status === 401 ? 'NO_AUTH_TOKEN' : 'PROJECTS_UNAVAILABLE',
       response.status === 401
-        ? 'Tau Cloud did not accept this token. Set TAU_API_TOKEN to a current session token.'
+        ? 'Tau Cloud did not accept this token. Set TAU_AUTH_TOKEN to a current session token.'
         : 'Tau Cloud could not list this account’s projects. Try again.',
       exitCodes.refused,
     );
@@ -111,7 +110,7 @@ export const cloneCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const api = requireApi();
+    const api = await requireApi();
     const projects = await listCloudProjects(api);
 
     if (args.project === undefined || args.project === '') {

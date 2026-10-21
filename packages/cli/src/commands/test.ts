@@ -270,7 +270,7 @@ export const testCommand = defineCommand({
       );
     }
 
-    authorizeCliZooProxy(process.env);
+    await authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot: process.cwd(),
       plugin: args.plugin,

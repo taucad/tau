@@ -6,8 +6,9 @@
  * cloning Electron.app into ignored build output before launch.
  *
  * Usage:
- *   node scripts/run-electron-vite.mts dev
- *   node scripts/run-electron-vite.mts preview --skipBuild
+ *   node --import @oxc-node/core/register scripts/run-electron-vite.mts dev
+ *   node --import @oxc-node/core/register scripts/run-electron-vite.mts preview --skipBuild
+ * Optional TAU_LOCAL_CODESIGN_IDENTITY: auto, exact Apple Development certificate name or fingerprint.
  *
  * Exit codes:
  *   0  Electron exited normally
@@ -19,6 +20,9 @@ import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { spawn, spawnSync } from 'node:child_process';
+
+// oxlint-disable-next-line no-restricted-imports -- Shared operational signing helper.
+import { localSigningIdentity } from './local-signing.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const electronVite = resolve(desktopRoot, 'node_modules/electron-vite/bin/electron-vite.js');
@@ -38,7 +42,8 @@ const prepareMacBundle = (): string => {
   const targetBundle = join(overrideRoot, 'Electron.app');
   const icon = resolve(desktopRoot, 'resources/icon.icns');
   const stampPath = join(overrideRoot, '.tau-brand');
-  const stamp = `${electronExecutable}\n${statSync(icon).size}:${statSync(icon).mtimeMs}\nmicrophone-dictation\n`;
+  const identity = localSigningIdentity() ?? '-';
+  const stamp = `${electronExecutable}\n${statSync(icon).size}:${statSync(icon).mtimeMs}\nmicrophone-dictation\n${identity}\n`;
 
   if (existsSync(targetBundle) && existsSync(stampPath) && readFileSync(stampPath, 'utf8') === stamp) {
     return join(targetBundle, 'Contents/MacOS/Electron');
@@ -61,7 +66,8 @@ const prepareMacBundle = (): string => {
     plist,
   ]);
   copyFileSync(icon, join(targetBundle, 'Contents/Resources/tau.icns'));
-  run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', targetBundle]);
+  run('/usr/bin/codesign', ['--force', '--deep', '--sign', identity, '--timestamp=none', targetBundle]);
+  run('/usr/bin/codesign', ['--verify', '--deep', '--strict', targetBundle]);
   writeFileSync(stampPath, stamp);
   return join(targetBundle, 'Contents/MacOS/Electron');
 };

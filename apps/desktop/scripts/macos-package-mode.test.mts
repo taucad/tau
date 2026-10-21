@@ -16,6 +16,23 @@ import { FuseV1Options } from '@electron/fuses';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Operational signing helper under test.
+import { selectLocalSigningIdentity } from './local-signing.mjs';
+
+const developmentFingerprint = 'A'.repeat(40);
+const signingListing = `1) ${developmentFingerprint} "Apple Development: Test Developer (TEST)"\n2) ${'B'.repeat(40)} "Developer ID Application: Test (TEAM)"`;
+for (const selection of ['auto', developmentFingerprint.toLowerCase(), 'Apple Development: Test Developer (TEST)']) {
+  assert.equal(selectLocalSigningIdentity(selection, signingListing), developmentFingerprint);
+}
+for (const selection of ['', '-', 'missing', 'B'.repeat(40)]) {
+  assert.throws(() => selectLocalSigningIdentity(selection, signingListing), /exactly one matching Apple Development/u);
+}
+assert.throws(() => selectLocalSigningIdentity('auto', ''), /exactly one matching/u);
+assert.throws(
+  () =>
+    selectLocalSigningIdentity('auto', `${signingListing}\n3) ${'C'.repeat(40)} "Apple Development: Other (OTHER)"`),
+  /exactly one matching/u,
+);
 
 assert.deepEqual(parseMacosPackageMode([]), { release: false, unsigned: false, zip: false, notarize: false });
 assert.deepEqual(parseMacosPackageMode(['--release']), { release: true, unsigned: false, zip: true, notarize: true });
@@ -49,7 +66,7 @@ assert.ok(
   packageSource.slice(licenceGate).startsWith(`if (zip) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')],`),
 );
-assert.ok(licenceGate < packageSource.indexOf('let geospecAssemblyInput'));
+assert.ok(licenceGate < packageSource.indexOf('const runtimePackages = await resolveRuntimePackages'));
 
 /* Security assessment 2026-10 desktop F-3: the hardening fuses are on in every mode,
  * RunAsNode is never touched (ACP adapters need it), and only a release refuses --inspect. */

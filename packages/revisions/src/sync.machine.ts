@@ -104,6 +104,8 @@ type SyncMachineContextFields = Readonly<{
   retryAfterMilliseconds: number | undefined;
   /** Whether the last settle was retryable, fatal, or fine. */
   failure: 'none' | 'retry' | 'fatal';
+  /** A local retry-record write failed; only a successful write clears it. */
+  queueWriteError: string | undefined;
   /** Set while the open pull is still inside its first window (F16's 3 s). */
   withinPullWindow: boolean;
   /** Memory-only acknowledgement, rebuilt by a successful pull after restart. */
@@ -1170,7 +1172,7 @@ const syncMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sync',
-  version: '5',
+  version: '6',
   context: ({ input }) => ({
     projectId: input.projectId,
     branch: input.branch ?? defaultBranch,
@@ -1187,6 +1189,7 @@ const syncMachineDefinition = setup({
     attempt: 0,
     retryAfterMilliseconds: undefined,
     failure: 'none',
+    queueWriteError: undefined,
     withinPullWindow: false,
     hasAppliedRemote: false,
     chats: 'unknown',
@@ -2032,17 +2035,19 @@ const syncMachineDefinition = setup({
          * backoff. A genuine divergence still arrives through `merging`.
          */
         /* The state it lands in answers every push it carried (RM-R11). */
-        onDone: ({ context }) =>
-          context.failure === 'fatal'
-            ? { target: 'failed' }
-            : context.failure === 'retry'
-              ? { target: 'queued' }
-              : { target: 'backedUp' },
+        onDone: ({ context }) => ({
+          target: context.failure === 'fatal' ? 'failed' : context.failure === 'retry' ? 'queued' : 'backedUp',
+          context: { queueWriteError: undefined },
+        }),
         /* A queue that cannot be written is the one failure this machine cannot
          * retry its way out of: nothing would remember what is owed. */
         onError: {
           target: 'failed',
-          context: ({ event }) => ({ error: reason(event.error), reason: 'unknown' }),
+          context: ({ event }) => ({
+            error: reason(event.error),
+            reason: 'unknown',
+            queueWriteError: reason(event.error),
+          }),
         },
       },
     },
@@ -2407,11 +2412,11 @@ const syncMachineDefinition = setup({
               projectId: context.projectId,
               record: { version: 1, entries: context.pending },
             }),
-            onDone: { target: 'settled' },
+            onDone: { target: 'settled', context: { queueWriteError: undefined } },
             /* The refusal stays the row's reason; the next settle that records rewrites the queue. */
             onError: ({ event }, enq) => {
               enq(reportQueueWriteFailure, event.error);
-              return { target: 'settled' };
+              return { target: 'settled', context: { queueWriteError: reason(event.error) } };
             },
           },
         },

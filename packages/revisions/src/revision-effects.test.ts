@@ -327,6 +327,133 @@ describe('close cancels background transfers', () => {
   });
 });
 
+describe('close distinguishes remote refusal from failed local persistence', () => {
+  it.each([
+    { operation: 'pull', persistence: 'written' },
+    { operation: 'pull', persistence: 'rejected' },
+    { operation: 'push', persistence: 'written' },
+    { operation: 'push', persistence: 'rejected' },
+  ])('allows $operation refusal only with a $persistence retry record', async ({ operation, persistence }) => {
+    const context = await fixture();
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'local']]),
+      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      summary: { generated: 'Local' },
+    });
+    let head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head });
+    await context.port.setHead('main');
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const write = Promise.withResolvers<void>();
+    let writing = false;
+    let rejectWrite = persistence === 'rejected';
+    let transient = false;
+    const { filesystem } = context;
+    const writeFile = filesystem.writeFile.bind(filesystem);
+    vi.spyOn(filesystem, 'writeFile').mockImplementation(async (path, content) => {
+      if (path.startsWith('.git/sync-pending')) {
+        writing = true;
+        await write.promise;
+        if (rejectWrite) {
+          throw new Error('Retry record disk failure.');
+        }
+      }
+      await writeFile(path, content);
+    });
+    const refused = new RevisionPortError('REMOTE_DAMAGED', 'Remote repository is damaged.');
+    const { actor } = createProjectRevisionsActor({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          if (transient) {
+            throw new RevisionPortError('REMOTE_UNAVAILABLE', 'Temporarily unavailable.');
+          }
+          if (operation === 'pull') {
+            throw refused;
+          }
+          return [];
+        },
+        push: async () => {
+          throw refused;
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => filesystem,
+    });
+    const mint = async (): Promise<void> => {
+      const next = await context.port.writeRevision({
+        parents: [head],
+        tree: new ImmutableRevisionTree([['main.ts', `${head} changed`]]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: 2 },
+        summary: { generated: 'Close work' },
+      });
+      const before = head;
+      head = revisionId(next.commitId);
+      await context.port.updateRef({ name: 'main', expectedHead: before, head });
+      actor.send({
+        type: 'sync',
+        event: { type: 'revisionMinted', checkoutId: 'live', branch: 'main', trigger: 'close', revisionId: head },
+      });
+    };
+    actor.start();
+    try {
+      if (operation === 'pull') {
+        await vi.waitFor(() => {
+          expect(selectRevisionStatus(actor.getSnapshot()).sync.state).toBe('failed');
+        });
+        await mint();
+      }
+      await vi.waitFor(() => {
+        expect(writing).toBe(true);
+      });
+      const closing = (async () => {
+        try {
+          await awaitSyncSettled(actor);
+          return undefined;
+        } catch (error) {
+          return asError(error);
+        }
+      })();
+      write.resolve();
+      const outcome = await closing;
+      if (persistence === 'written') {
+        expect(outcome).toBeUndefined();
+        expect(JSON.parse(await filesystem.readFile('.git/sync-pending', 'utf8'))).toMatchObject({
+          entries: [expect.objectContaining({ ref: 'refs/heads/main', head })],
+        });
+        expect(selectRevisionStatus(actor.getSnapshot()).sync).toMatchObject({ state: 'failed', reason: 'damaged' });
+      } else {
+        expect(outcome).toBeInstanceOf(Error);
+        expect(outcome?.message).toContain('Retry record disk failure');
+        expect(actor.getSnapshot().status).toBe('active');
+        transient = true;
+        actor.send({ type: 'syncNow' });
+        await vi.waitFor(() => {
+          expect(selectRevisionStatus(actor.getSnapshot()).sync.state).toBe('queued');
+        });
+        await expect(awaitSyncSettled(actor)).rejects.toThrow('Retry record disk failure');
+        transient = false;
+        actor.send({ type: 'syncNow' });
+        await vi.waitFor(() => {
+          expect(selectRevisionStatus(actor.getSnapshot()).sync.state).toBe('failed');
+        });
+        rejectWrite = false;
+        await mint();
+        await expect(awaitSyncSettled(actor)).resolves.toBeUndefined();
+        expect(actor.getSnapshot().children.sync?.getSnapshot().context.queueWriteError).toBeUndefined();
+        expect(JSON.parse(await filesystem.readFile('.git/sync-pending', 'utf8'))).toMatchObject({
+          entries: [expect.objectContaining({ ref: 'refs/heads/main', head })],
+        });
+      }
+    } finally {
+      write.resolve();
+      actor.stop();
+    }
+  });
+});
+
 it('does not restart transport when a correlated request races successful close completion', async () => {
   const context = await fixture();
   await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });

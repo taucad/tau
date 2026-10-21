@@ -5137,14 +5137,29 @@ export const awaitSyncSettled = async (
     if (snapshot.status !== 'active') {
       return new Error('Revision backup stopped before it settled.');
     }
-    if (sync.state === 'failed') {
-      return new Error(sync.error ?? 'Revision backup failed before its retry could be recorded.');
-    }
     const scheduler = snapshot.children.sync?.getSnapshot();
+    if (sync.state === 'failed') {
+      /* A terminal remote refusal stays visible after its durable retry record
+       * lands. Local persistence failure is different: closing would lose work. */
+      if (scheduler?.matches({ failed: 'recording' })) {
+        return 'waiting';
+      }
+      if (scheduler?.context.queueWriteError !== undefined) {
+        return new Error(scheduler.context.queueWriteError);
+      }
+      return scheduler?.matches({ failed: 'settled' }) || scheduler?.matches('manual')
+        ? 'settled'
+        : new Error(sync.error ?? 'Revision backup failed before its retry could be recorded.');
+    }
     if (scheduler?.matches({ conflicted: 'offering' })) {
       return 'waiting';
     }
-    return settledSyncStates.has(sync.state) ? 'settled' : 'waiting';
+    if (settledSyncStates.has(sync.state)) {
+      return scheduler?.context.queueWriteError === undefined
+        ? 'settled'
+        : new Error(scheduler.context.queueWriteError);
+    }
+    return 'waiting';
   };
   const initial = inspect();
   if (initial instanceof Error) {

@@ -273,15 +273,14 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
   }, 120_000);
 
   /**
-   * Run one `save` whose port never answers `stalled`, with the verb's own bound brought forward.
+   * Run one `save` whose port never answers `stalled`, with the scheduler's bound brought forward.
    *
    * Only the timer of exactly `bound` ms is shortened, and it fires once the
    * stall is reached, so everything else (git's own deadlines, the machines'
    * windows) keeps real time.
    *
    * @param project - The project directory and its id.
-   * @param stall - The port method that never settles, and the verb's wait for
-   *   its answer: 30 s for the cut, publish's 60 s + 30 s for the push.
+   * @param stall - The port method that never settles, and the scheduler's wait for its answer.
    * @returns What `save` reported.
    */
   const saveStalled = async (
@@ -342,7 +341,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     /* The scheduler's own push deadline answers a hung push (A12, RM-R11); the save has no bound of its own. */
     const outcome = await saveStalled(
       { workspaceRoot: second, projectId },
-      { method: 'push', boundMilliseconds: 60_000 },
+      { method: 'push', boundMilliseconds: 15 * 60_000 },
     );
 
     expect(outcome).toMatchObject({ status: 'saved' });

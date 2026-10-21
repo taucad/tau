@@ -14,6 +14,7 @@ import {
   decodeProjectionFile,
   iterateProjectionHistory,
   validateProjectionClosure,
+  validateProjectionIdentity,
 } from './filesystem-projection-writer.ts';
 /* oxlint-enable no-restricted-imports */
 // oxlint-disable-next-line no-restricted-imports -- Fixture-only type shared with the existing rooted importer.
@@ -200,7 +201,7 @@ export const generateProjectionDirectory = async (options: {
     throw new Error('Authentic tool seed SHA mismatch.');
   }
   const closure = JSON.parse(seed.toString('utf8')) as ProjectionClosure;
-  await validateProjectionClosure(closure);
+  await validateProjectionClosure(closure, { allowLegacy: true });
   const histories = closure.files.filter((file) => /^\.tau\/chats\/[^/]+\/events\.jsonl$/u.test(file.path));
   if (histories.length !== 1) {
     throw new Error('Directory producer requires one authentic chat history.');
@@ -357,14 +358,15 @@ export const validateProjectionDirectory = async (
     }
   }
   const manifestFile = receipt.files.find((file) => file.path === 'tau.json');
-  if (
-    !manifestFile ||
-    manifestFile.byteLength > 1_048_576 ||
-    (JSON.parse(await readFile(rootedFixturePath(root, 'tau.json'), 'utf8')) as { id?: string }).id !==
-      receipt.project.projectId
-  ) {
-    throw new Error('Raw closure manifest identity does not match its rooted authority.');
+  const identityFile = receipt.files.find((file) => file.path === '.tau/project.json');
+  if (!manifestFile || manifestFile.byteLength > 262_144 || (identityFile && identityFile.byteLength > 1024)) {
+    throw new Error('Raw closure has no bounded project metadata.');
   }
+  validateProjectionIdentity(
+    new Uint8Array(await readFile(rootedFixturePath(root, 'tau.json'))),
+    identityFile ? new Uint8Array(await readFile(rootedFixturePath(root, identityFile.path))) : undefined,
+    { projectId: receipt.project.projectId, allowLegacy: true },
+  );
   const historyPath = `.tau/chats/${receipt.chatId}/events.jsonl`;
   const history = receipt.files.find((file) => file.path === historyPath);
   if (!history || history.sha256 !== expected.historySha256) {

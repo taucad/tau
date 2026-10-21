@@ -1106,6 +1106,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * @returns The descriptors, empty when discovery failed.
    */
   const discoverExternalAgents = async (): Promise<readonly ExternalAgentDescriptor[]> => {
+    const baseConfig = {
+      gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
+      systemPrompt: desktopAgentSystemPrompt,
+      tauApiUrl: environment['TAU_API_URL']!,
+      tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+    };
     try {
       const acp = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 1500 });
       log.log('info', 'agent-host.external-agents', {
@@ -1115,10 +1121,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       services.post({
         type: 'agentHost',
         config: {
-          gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
-          systemPrompt: desktopAgentSystemPrompt,
-          tauApiUrl: environment['TAU_API_URL']!,
-          tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+          ...baseConfig,
           externalAgents: acp.agents,
         },
       });
@@ -1128,6 +1131,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return externalAgentDescriptors(acp);
     } catch (error) {
       log.log('error', 'agent-host.external-agents-failed', { message: String(error) });
+      // Optional CLI discovery cannot leave the project's history and gateway unconfigured.
+      services.post({ type: 'agentHost', config: baseConfig });
       return [];
     }
   };

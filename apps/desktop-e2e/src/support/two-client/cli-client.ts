@@ -11,13 +11,14 @@ import { desktopE2EApiUrl } from '#support/config.js';
  * `tau` exactly as a person runs it, signed in with the same account's session
  * as the other two clients: `TAU_API_URL` and `TAU_AUTH_TOKEN`, the pair
  * `tau clone`, `tau publish` and `tau revisions save` are told. Spawned from its
- * TypeScript source through the workspace's `tsx`, as `packages/cli`'s own
- * integration tests spawn it, so this tier needs no CLI build.
+ * TypeScript source through the workspace's `tsx` by default. Acceptance runs
+ * set `TAU_E2E_BUILT_CLI=true` to exercise the freshly built executable instead.
  */
 
 const execFileAsync = promisify(execFile);
 const workspaceRoot = resolve(import.meta.dirname, '../../../../..');
-const binPath = resolve(workspaceRoot, 'packages/cli/src/bin.ts');
+const builtCli = process.env['TAU_E2E_BUILT_CLI'] === 'true';
+const binPath = resolve(workspaceRoot, builtCli ? 'packages/cli/dist/bin/tau.mjs' : 'packages/cli/src/bin.ts');
 
 /** How one `tau` run ended. */
 export type CliRun = Readonly<{ code: number; stdout: string; stderr: string }>;
@@ -31,20 +32,24 @@ export type CliRun = Readonly<{ code: number; stdout: string; stderr: string }>;
  */
 export const runCli = async (args: readonly string[], token: string): Promise<CliRun> => {
   try {
-    const { stdout, stderr } = await execFileAsync(process.execPath, ['--import', 'tsx', binPath, ...args], {
-      cwd: workspaceRoot,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        TAU_API_URL: desktopE2EApiUrl,
-        TAU_AUTH_TOKEN: token,
-        /* The operator's own git configuration must not decide what a terminal proves. */
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        GIT_TERMINAL_PROMPT: '0',
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      [...(builtCli ? [] : ['--import', 'tsx']), binPath, ...args],
+      {
+        cwd: workspaceRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TAU_API_URL: desktopE2EApiUrl,
+          TAU_AUTH_TOKEN: token,
+          /* The operator's own git configuration must not decide what a terminal proves. */
+          GIT_CONFIG_GLOBAL: '/dev/null',
+          GIT_TERMINAL_PROMPT: '0',
+        },
+        maxBuffer: 16 * 1024 * 1024,
+        timeout: 300_000,
       },
-      maxBuffer: 16 * 1024 * 1024,
-      timeout: 300_000,
-    });
+    );
     return { code: 0, stdout, stderr };
   } catch (error) {
     const failure = error as { code?: number; stdout?: string; stderr?: string };

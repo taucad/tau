@@ -191,6 +191,7 @@ const startHarness = async (
   const revisions = options.revisions
     ? createProjectRevisions({
         workspaceRoot,
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         checkouts,
         /* The test construction (W3a R7): `isomorphic-git` over the same root,
          * so this suite needs no `git` on PATH. A daemon takes the native port. */
@@ -3150,8 +3151,7 @@ describe('external turns through the revision port', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-manifest-'));
     roots.push(cwd);
     const manifest = {
-      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-      id: 'proj_0123456789ABCDEFGHIJK',
+      $schema: 'https://tau.new/schemas/tau-v1.json',
       name: 'Relief',
       description: '',
       tags: [],

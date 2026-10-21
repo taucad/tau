@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import { describe, expect, it } from 'vitest';
-import { projectManifestSchemaUrl } from '@taucad/types';
+import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import {
   extractRepositoryImportFiles,
   normalizeRepositoryArchive,
@@ -11,7 +11,6 @@ const mebibyte = 1024 * 1024;
 
 const manifest = JSON.stringify({
   $schema: projectManifestSchemaUrl,
-  id: 'proj_123456789012345678901',
   name: 'Repository example',
   description: 'Portable repository fixture',
   tags: ['test'],
@@ -49,6 +48,23 @@ const compressible = (length: number): Uint8Array<ArrayBuffer> => {
 };
 
 describe('repository archive normalization', () => {
+  it('converts a legacy declaration without copying project identity into the share', async () => {
+    const legacy = {
+      ...projectManifestSchema.parse(JSON.parse(manifest)),
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_123456789012345678901',
+    };
+    const opened = await normalizeRepositoryArchive(
+      await archive({
+        'repo/tau.json': JSON.stringify(legacy),
+        'repo/main.ts': 'export default 1;',
+      }),
+      '',
+    );
+    const content = opened.files.find(({ path }) => path === 'tau.json')?.content;
+    expect(JSON.parse(new TextDecoder().decode(content))).toEqual(JSON.parse(manifest));
+  });
+
   it('selects the requested subtree and returns one canonical project archive', async () => {
     const input = await archive({
       'repo-root/README.md': 'outer',

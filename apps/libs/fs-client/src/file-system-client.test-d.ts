@@ -94,7 +94,7 @@ describe('FileSystemClient explicit-workspace contract', () => {
       files: Readonly<Record<string, { readonly content: Uint8Array<ArrayBuffer> }>>;
       manifest: Uint8Array<ArrayBuffer>;
     }>();
-    expectTypeOf<Input>().not.toHaveProperty('projectId');
+    expectTypeOf<Input['projectId']>().toEqualTypeOf<string>();
   });
 
   it('does not expose move overwrite or bulk rollback options', () => {

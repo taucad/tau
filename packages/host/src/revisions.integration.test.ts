@@ -201,7 +201,7 @@ const harness = async (
   const checkouts = new Map<string, TurnCheckout>();
   const revisions = createProjectRevisions({
     workspaceRoot,
-    projectId: 'project-1',
+    projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
     port,
     checkouts,
     events: (event) => {
@@ -355,7 +355,7 @@ const ports = [
       createIsomorphicGitRevisionPort({
         filesystem: new NodeFsProvider(workspaceRoot),
         checkouts: {
-          projectId: 'project-1',
+          projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
           root: () => new NodeFsProvider(workspaceRoot),
         },
       }),
@@ -368,7 +368,7 @@ const ports = [
     create: (workspaceRoot: string, checkoutsDirectory: string): RevisionPort =>
       createNativeGitRevisionPort({
         repositoryPath: workspaceRoot,
-        checkouts: { projectId: 'project-1', directory: checkoutsDirectory },
+        checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', directory: checkoutsDirectory },
       }),
   },
 ];
@@ -391,7 +391,7 @@ describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
     try {
       missing = createProjectRevisions({
         workspaceRoot,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         events: (event) => events.push(event),
       });
       await expect
@@ -429,7 +429,7 @@ describe.runIf(gitToolchainOnPath)('a disk host that cannot record', () => {
     process.env['PATH'] = '';
     const bundled = createProjectRevisions({
       workspaceRoot: bundledRoot,
-      projectId: 'project-1',
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       gitExecutable: bundledGit,
       events: (event) => bundledEvents.push(event),
     });
@@ -668,7 +668,7 @@ for (const row of ports) {
         ]),
       );
       expect(history.status).toMatchObject({
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         line: { kind: 'branch', name: 'main' },
       });
       /* One revision by id, and how far two heads have gone apart: History's
@@ -682,7 +682,7 @@ for (const row of ports) {
         held.revisions.channel.request({ command: 'divergence', head, base: parent }),
       ).resolves.toMatchObject({ result: { ahead: 1, behind: 0 } });
       await expect(held.revisions.channel.request({ command: 'open' })).resolves.toMatchObject({
-        status: { projectId: 'project-1' },
+        status: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' },
       });
 
       /* B7 (W8 TS-S5): the verb answers with the checkout the registry made, never on a bound. */
@@ -712,7 +712,7 @@ for (const row of ports) {
       }>;
       expect(linkedStatus.status.checkoutRoot).toMatch(/^\/checkouts\//u);
       expect(linkedStatus.status.branches.find((branch) => branch.name === 'main')?.checkoutRoot).toBe(
-        '/projects/project-1',
+        '/projects/proj_AAAAAAAAAAAAAAAAAAAAA',
       );
       expect(linkedStatus.status.branches.find((branch) => branch.name === 'isolated-run')?.checkoutRoot).toMatch(
         /^\/checkouts\//u,
@@ -740,7 +740,7 @@ for (const row of ports) {
         done: false,
         value: {
           kind: 'status',
-          value: { projectId: 'project-1', line: { kind: 'branch', name: 'isolated-run' } },
+          value: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', line: { kind: 'branch', name: 'isolated-run' } },
         },
       });
       abort.abort();
@@ -913,7 +913,7 @@ for (const row of ports) {
         turnId: 'message-run-1',
         runId: 'run-1',
         chatId: 'chat-1',
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         checkoutId: 'live',
         branch: 'main',
         changedPaths: ['main.ts'],
@@ -1051,7 +1051,7 @@ for (const row of ports) {
           roots.push(checkoutsDirectory);
           const second = createProjectRevisions({
             workspaceRoot,
-            projectId: 'project-1',
+            projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
             port: row.create(workspaceRoot, checkoutsDirectory),
           });
           /* The second registry has read the lease: what survives its open is measured, never waited out. */
@@ -1331,7 +1331,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
       /* No `port`: exactly what `host-daemon.ts` and the Electron utility pass. */
       const revisions = createProjectRevisions({
         workspaceRoot,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       });
       try {
         for (let attempt = 0; attempt < 200 && !existsSync(join(workspaceRoot, '.git')); attempt += 1) {
@@ -1356,7 +1356,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
 
       const desktopPort = createProjectRevisionPort({
         workspaceRoot,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       });
       const desktopDescriptor = await desktopPort.describe();
       expect(desktopDescriptor.engine).toBe('native-git');
@@ -1391,7 +1391,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
        * that its default resolves to native Git rather than a test-only alias. */
       const cliPort = createProjectRevisionPort({
         workspaceRoot: cliRoot,
-        projectId: 'cli-project',
+        projectId: 'proj_CCCCCCCCCCCCCCCCCCCCC',
       });
       await cliPort.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
       const cliReceipt = await cliPort.writeRevision(revision);
@@ -1401,9 +1401,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         expectedHead: undefined,
         head: revisionId(cliReceipt.commitId),
       });
-      const cli = openProjectRevisions({
+      const cli = await openProjectRevisions({
         workspaceRoot: cliRoot,
-        projectId: 'cli-project',
+        projectId: 'proj_CCCCCCCCCCCCCCCCCCCCC',
       });
       try {
         expect(await cli.describeEngine()).toMatchObject({
@@ -1453,7 +1453,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         branch: 'side',
         from: revisionId(desktopReceipt.commitId),
       });
-      expect(linked?.root.startsWith(join(configDirectory, 'checkouts', 'project-1'))).toBe(true);
+      expect(linked?.root.startsWith(join(configDirectory, 'checkouts', 'proj_AAAAAAAAAAAAAAAAAAAAA'))).toBe(true);
       expect(linked?.root.startsWith(workspaceRoot)).toBe(false);
       expect(existsSync(join(linked?.root ?? '', 'part.ts'))).toBe(true);
     } finally {
@@ -1471,9 +1471,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
    * empty directory with nothing but the project's id and where its remote is,
    * and `openFromRemote` is the whole gesture.
    */
-  it.runIf(gitToolchainOnPath)(
-    'opens a project this machine has never held from its remote',
-    async () => {
+  it.runIf(gitToolchainOnPath).each([false, true])(
+    'should open a project this machine has never held from its remote (chats=%s)',
+    async (withChats) => {
       const bare = await mkdtemp(join(tmpdir(), 'tau-host-open-remote-'));
       const first = await mkdtemp(join(tmpdir(), 'tau-host-open-a-'));
       const second = await mkdtemp(join(tmpdir(), 'tau-host-open-b-'));
@@ -1487,7 +1487,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
       const author = { name: 'Tau', email: 'noreply@tau.new' };
       const port = createProjectRevisionPort({
         workspaceRoot: first,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       });
       await port.init({ author });
       await port.setHead('main');
@@ -1507,15 +1507,26 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         head: revisionId(receipt.commitId),
       });
       await port.setRemote({ name: 'tau', url: bare });
+      const chatRef = 'refs/tau/chats/chat_one';
+      const chatRecord = '{"id":"chat_one","name":"From the browser"}';
+      if (withChats) {
+        const chat = await port.writeRevision({
+          parents: [],
+          tree: new ImmutableRevisionTree([['chat.json', chatRecord]]),
+          provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+          summary: { generated: 'Browser chat' },
+        });
+        await port.updateRef({ name: chatRef, expectedHead: undefined, head: revisionId(chat.commitId) });
+      }
       await port.push({
         remote: 'tau',
         atomic: true,
-        refs: [{ name: 'refs/heads/main' }],
+        refs: [{ name: 'refs/heads/main' }, ...(withChats ? [{ name: chatRef }] : [])],
       });
 
-      const revisions = openProjectRevisions({
+      const revisions = await openProjectRevisions({
         workspaceRoot: second,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         remoteUrl: () => bare,
       });
       try {
@@ -1529,6 +1540,11 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         /* The live checkout, not only the graph: the file is on disk with device
          A's bytes, and `main` is where A left it. */
         expect(await readFile(join(second, 'part.ts'), 'utf8')).toBe('export const part = 1;\n');
+        if (withChats) {
+          expect(JSON.parse(await readFile(join(second, '.tau/chats/chat_one/chat.json'), 'utf8'))).toEqual(
+            JSON.parse(chatRecord),
+          );
+        }
         expect(await revisions.describe()).toMatchObject({
           branch: 'main',
           revisionNumber: 1,
@@ -1561,9 +1577,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
         stdio: 'ignore',
       });
 
-      const revisions = openProjectRevisions({
+      const revisions = await openProjectRevisions({
         workspaceRoot: second,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         remoteUrl: () => bare,
       });
       try {
@@ -1610,7 +1626,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
       const record = async (root: string, body: string, summary: string): Promise<void> => {
         const port = createProjectRevisionPort({
           workspaceRoot: root,
-          projectId: 'project-1',
+          projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         });
         await port.init({ author });
         await port.setHead('main');
@@ -1633,7 +1649,7 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
       await record(first, 'export const part = 1;\n', 'Device A');
       const offering = createProjectRevisionPort({
         workspaceRoot: first,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       });
       await offering.setRemote({ name: 'tau', url: bare });
       await offering.push({
@@ -1646,9 +1662,9 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
       /* On disk as well as in the graph, so "untouched" is a claim about files. */
       await writeFile(join(second, 'part.ts'), 'export const part = 2;\n');
 
-      const revisions = openProjectRevisions({
+      const revisions = await openProjectRevisions({
         workspaceRoot: second,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
         remoteUrl: () => bare,
       });
       try {
@@ -1675,14 +1691,14 @@ describe.runIf(gitToolchainOnPath)('the disk-host default', () => {
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-host-discard-config-'));
     roots.push(workspaceRoot, configDirectory);
     process.env['TAU_CONFIG_DIR'] = configDirectory;
-    const revisions = openProjectRevisions({
+    const revisions = await openProjectRevisions({
       workspaceRoot,
-      projectId: 'project-1',
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
     });
     try {
       const port = createProjectRevisionPort({
         workspaceRoot,
-        projectId: 'project-1',
+        projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       });
       await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
       await port.setHead('main');
@@ -1747,10 +1763,10 @@ describe('a branch refusal over the host channel', () => {
     roots.push(workspaceRoot);
     const revisions = createProjectRevisions({
       workspaceRoot,
-      projectId: 'project-1',
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       port: createIsomorphicGitRevisionPort({
         filesystem: new NodeFsProvider(workspaceRoot),
-        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+        checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', root: () => new NodeFsProvider(workspaceRoot) },
       }),
     });
     const abort = new AbortController();
@@ -1800,10 +1816,10 @@ describe('a branch refusal over the host channel', () => {
     roots.push(workspaceRoot);
     const revisions = createProjectRevisions({
       workspaceRoot,
-      projectId: 'project-1',
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       port: createIsomorphicGitRevisionPort({
         filesystem: new NodeFsProvider(workspaceRoot),
-        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+        checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', root: () => new NodeFsProvider(workspaceRoot) },
       }),
     });
     const abort = new AbortController();
@@ -1837,10 +1853,10 @@ describe('a restore refusal over the host channel', () => {
     roots.push(workspaceRoot);
     const revisions = createProjectRevisions({
       workspaceRoot,
-      projectId: 'project-1',
+      projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
       port: createIsomorphicGitRevisionPort({
         filesystem: new NodeFsProvider(workspaceRoot),
-        checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+        checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', root: () => new NodeFsProvider(workspaceRoot) },
       }),
     });
     const abort = new AbortController();
@@ -1888,7 +1904,7 @@ describe('an editor conflict over the host channel (D14)', () => {
     roots.push(workspaceRoot);
     const port = createIsomorphicGitRevisionPort({
       filesystem: new NodeFsProvider(workspaceRoot),
-      checkouts: { projectId: 'project-1', root: () => new NodeFsProvider(workspaceRoot) },
+      checkouts: { projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', root: () => new NodeFsProvider(workspaceRoot) },
     });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const record = async (parents: readonly string[], content: string): Promise<RevisionId> => {
@@ -1905,7 +1921,7 @@ describe('an editor conflict over the host channel (D14)', () => {
     await port.updateRef({ name: 'main', expectedHead: undefined, head });
     await port.setHead('main');
     await writeFile(join(workspaceRoot, 'a.txt'), 'theirs\n');
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
     try {
       await revisions.channel.request({ command: 'open' });
 
@@ -1947,7 +1963,7 @@ describe.runIf(gitToolchainOnPath)('a Tau-managed remote credential over the hos
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-remote-credential-'));
     roots.push(workspaceRoot);
     const repositoryUrl = 'https://git.example.invalid/owner/repository.git';
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1' });
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
     const frame = (unavailable: string): Record<string, string> => ({
       command: 'remoteCredential',
       apiBaseUrl: 'https://api.tau.test',
@@ -1981,7 +1997,7 @@ describe('explicit GitHub credential custody over the host channel', () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-explicit-credential-'));
     roots.push(workspaceRoot);
     const port = createIsomorphicGitRevisionPort({ filesystem: new NodeFsProvider(workspaceRoot) });
-    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'project-1', port });
+    const revisions = createProjectRevisions({ workspaceRoot, projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA', port });
     const request = {
       command: 'pushGithub',
       repositoryUrl: 'https://github.com/owner/repository.git',

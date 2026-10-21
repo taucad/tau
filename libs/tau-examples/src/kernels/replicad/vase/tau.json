@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_1VjdguUg32d0rHEiZMFto",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Vase",
   "description": "A graceful, timeless vase design created through revolution of a carefully crafted profile. Adjustable wall thickness and elegant curves allow you to create everything from delicate bud vases to substantial statement pieces. Optional top fillets add refinement while maintaining the classic silhouette.",
   "tags": ["3d-printing", "parametric", "replicad"],

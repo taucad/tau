@@ -127,7 +127,7 @@ export const publishCommand = defineCommand({
     }
     const entryPath = args.entry === undefined || args.entry === '' ? await readEntryPath(workspaceRoot) : args.entry;
     const projectName = basename(workspaceRoot);
-    const revisions: ProjectRevisionVerbs = openProjectRevisions({ workspaceRoot, apiBaseUrl, apiToken });
+    const revisions: ProjectRevisionVerbs = await openProjectRevisions({ workspaceRoot, apiBaseUrl, apiToken });
     try {
       const outcome = await revisions.publish({
         tag: args.version,

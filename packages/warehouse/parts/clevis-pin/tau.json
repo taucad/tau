@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_NcclbaWXmw1S3E-Hw_G22",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Clevis pin",
   "description": "Headed pivot pin with a real transverse retaining hole.",
   "tags": [

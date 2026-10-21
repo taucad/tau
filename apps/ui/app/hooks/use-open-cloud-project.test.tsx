@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { act, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { projectToManifest } from '@taucad/types';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
@@ -15,7 +15,7 @@ import type { CloudProject } from '#hooks/use-cloud-projects.js';
  */
 
 const held: ProjectListItem = {
-  ...projectToManifest({
+  ...createProjectFixture({
     id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
     name: 'Gearbox Alpha',
     description: '',
@@ -30,7 +30,7 @@ const held: ProjectListItem = {
 /* In this device's Trash: held, so *Open* must not try to create it again. */
 const trashed: ProjectListItem = {
   ...held,
-  ...projectToManifest({ ...held, id: 'proj_ccccccccccccccccccccc', name: 'Old Hinge' }),
+  ...createProjectFixture({ ...held, id: 'proj_ccccccccccccccccccccc', name: 'Old Hinge' }),
   slugs: { workspaceSlug: 'home', projectSlug: 'old-hinge' },
   deletedAt: 5,
 };

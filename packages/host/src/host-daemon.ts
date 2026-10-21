@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { hostname } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MessageChannel } from 'node:worker_threads';
 
@@ -44,7 +44,6 @@ import {
   writeHostCredential,
 } from '#credential-store.js';
 import type { HostCredential } from '#credential-store.js';
-import { readProjectId } from '#machine-host.js';
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
 import type { KeepAwakeBlocker } from '#keep-awake.js';
@@ -54,6 +53,7 @@ import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
 import { keyedResource } from '#keyed-resource.js';
+import { resolveNodeProjectIdentity } from '#project-identity.js';
 import { createProjectHost } from '#project-host.js';
 import type { ProjectHost } from '#project-host.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
@@ -868,11 +868,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     /* Named here rather than left to the revision port's default, because a
      * job's slice can sit in one of these checkouts: the machine
      * host's artifact reader looks in the same directory the port writes. */
-    const checkoutsDirectory = join(defaultConfigDirectory(), 'checkouts', basename(agent.workspaceRoot));
-    /* The served root is the project, and its `tau.json` id is what a job
-     * names. A root without one prints nothing: no `request_job` is
-     * offered, and every artifact is refused. */
-    const projectId = await readProjectId(providerForAgentRoot(agent.workspaceRoot));
+    const projectId = (await resolveNodeProjectIdentity({
+      workspaceRoot: agent.workspaceRoot,
+      bootstrap: true,
+      filesystem: providerForAgentRoot(agent.workspaceRoot),
+    }))!;
+    const checkoutsDirectory = join(defaultConfigDirectory(), 'checkouts', projectId);
+    /* Explicit host admission establishes the stable identity every job names,
+     * including an intentionally empty workspace before its first manifest. */
     /**
      * Find a job's file: only this project's, in the served root and
      * then its checkouts, where a candidate turn's slice lands. The digest
@@ -882,7 +885,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * @returns The first candidate's bytes whose digest matches.
      */
     const readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'] = async (artifact) => {
-      if (projectId === undefined || artifact.projectId !== projectId) {
+      if (artifact.projectId !== projectId) {
         throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
       }
       const checkoutRoots = await readdir(checkoutsDirectory, { withFileTypes: true }).then(
@@ -912,7 +915,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const project = createProjectHost({
       workspaceRoot: agent.workspaceRoot,
       checkoutsDirectory,
-      ...(projectId === undefined ? {} : { projectId }),
+      projectId,
       /* The agent's facet rides an agent session of its own, so the host applies the agent rules whatever a call
        * claims; the route's session stays the person's. */
       ...(machines ? { machines: agentMachineFacet(machines, 'tau') } : {}),

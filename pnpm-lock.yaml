@@ -944,7 +944,7 @@ patchedDependencies:
   '@react-three/fiber@9.6.1': db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1
   monaco-editor@0.55.1: ae3f7cdcf75e408318c6920587da738f750140c6f284c62ce7dbf6a1737896db
   n8ao@1.10.2: 7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887
-  three@0.184.0: 81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993
+  three@0.184.0: 3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5
   vaul@1.1.2: 4d7c126bc95e7c5da45a5950038e40ad0e127dbf041cd91a85fd7d8fe64380a4
   vite-plugin-mkcert@2.0.0: 03b480d5b58a772a5b8d09aa61601839139c389c323e1d4fe6e70d399a4a2128
   zod@4.4.3: d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315
@@ -1081,10 +1081,10 @@ importers:
         version: 7.18.2(react-router@7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(typescript@5.9.3)
       '@react-three/drei':
         specifier: ^10.7.7
-        version: 10.7.9(@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)))(@types/react@19.2.17)(@types/three@0.184.1)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 10.7.9(@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)))(@types/react@19.2.17)(@types/three@0.184.1)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       '@react-three/fiber':
         specifier: 9.6.1
-        version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       '@rjsf/core':
         specifier: 6.11.0
         version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
@@ -1294,7 +1294,7 @@ importers:
         version: 12.43.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       n8ao:
         specifier: 'catalog:'
-        version: 1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)))(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)))(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       nestjs-pino:
         specifier: ^4.6.1
         version: 4.6.1(@nestjs/common@11.2.7(reflect-metadata@0.2.2)(rxjs@7.8.2))(pino-http@10.5.0)(pino@10.4.0)(rxjs@7.8.2)
@@ -1324,7 +1324,7 @@ importers:
         version: 1.438.9(@types/react@19.2.17)(react@19.2.7)
       postprocessing:
         specifier: 'catalog:'
-        version: 6.39.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 6.39.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       react:
         specifier: 'catalog:'
         version: 19.2.7
@@ -1390,13 +1390,13 @@ importers:
         version: 22.6.2(@types/node@24.0.15)
       three:
         specifier: ^0.184.0
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       three-mesh-bvh:
         specifier: ^0.9.10
-        version: 0.9.16(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 0.9.16(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       three-viewport-gizmo:
         specifier: npm:@taulabs/three-viewport-gizmo@2.2.4
-        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))'
+        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -2326,7 +2326,7 @@ importers:
     dependencies:
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
     devDependencies:
       vitest:
         specifier: 4.1.11
@@ -2379,7 +2379,7 @@ importers:
         version: 19.2.7(react@19.2.7)
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
     devDependencies:
       electron-vite:
         specifier: catalog:electron-vite7
@@ -2452,7 +2452,7 @@ importers:
         version: 7.18.2(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
     devDependencies:
       '@react-router/dev':
         specifier: catalog:react-router7
@@ -2789,7 +2789,7 @@ importers:
         version: 2.14.1
       camera-controls:
         specifier: 3.1.2
-        version: 3.1.2(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 3.1.2(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -2931,7 +2931,7 @@ importers:
         version: 11.1.2
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       unified:
         specifier: 'catalog:'
         version: 11.0.5
@@ -3010,7 +3010,7 @@ importers:
         version: 19.2.7(react@19.2.7)
       three:
         specifier: ^0.184.0
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -3077,7 +3077,7 @@ importers:
         version: 19.2.7(react@19.2.7)
       three:
         specifier: ^0.184.0
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -3147,7 +3147,7 @@ importers:
         version: 8.3.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -3237,7 +3237,7 @@ importers:
         version: 0.3.4
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 0.1.0(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
 
   libs/chat:
     dependencies:
@@ -3419,7 +3419,7 @@ importers:
         version: 3.4.1(@gltf-transform/core@4.5.1)(@gltf-transform/extensions@4.5.1)(@gltf-transform/functions@4.5.1(@types/node@24.0.15))(esbuild-wasm@0.28.2)
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 0.1.0(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       replicad:
         specifier: npm:@taulabs/replicad@1.1.0-taulabs.1
         version: '@taulabs/replicad@1.1.0-taulabs.1'
@@ -3547,7 +3547,7 @@ importers:
         version: 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@react-three/fiber':
         specifier: 9.6.1
-        version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       '@tailwindcss/vite':
         specifier: ^4.3.1
         version: 4.3.3(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -3604,7 +3604,7 @@ importers:
         version: 4.3.3
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       vite:
         specifier: 'catalog:'
         version: 8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
@@ -3902,7 +3902,13 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.2
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
     devDependencies:
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../../libs/xstate-testing
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -3946,6 +3952,9 @@ importers:
       type-fest:
         specifier: 'catalog:'
         version: 4.41.0
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
     devDependencies:
       '@parcel/watcher':
         specifier: 'catalog:'
@@ -4761,7 +4770,7 @@ importers:
         version: link:../../kinematics
       picovoxel:
         specifier: 'catalog:'
-        version: 0.1.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 0.1.0(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -5118,7 +5127,7 @@ importers:
         version: 0.0.30(typescript@5.9.3)
       circuit-json-to-gltf:
         specifier: 'catalog:'
-        version: 0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))(typescript@5.9.3)
+        version: 0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))(typescript@5.9.3)
       circuit-json-to-readable-netlist:
         specifier: 'catalog:'
         version: 0.0.17(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(circuit-json-to-connectivity-map@0.0.30(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3)
@@ -5421,7 +5430,7 @@ importers:
         version: 26.0.0(canvas@3.2.3)
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -5496,7 +5505,7 @@ importers:
         version: link:../spatial
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59
@@ -5590,7 +5599,7 @@ importers:
         version: 4.6.2
       '@react-three/drei':
         specifier: ^10.7.7
-        version: 10.7.9(@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)))(@types/react@19.2.17)(@types/three@0.184.1)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 10.7.9(@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)))(@types/react@19.2.17)(@types/three@0.184.1)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       '@rjsf/core':
         specifier: 6.11.0
         version: 6.11.0(@rjsf/utils@6.11.0(react@19.2.7))(react@19.2.7)
@@ -5623,7 +5632,7 @@ importers:
         version: link:../units
       camera-controls:
         specifier: 3.1.2
-        version: 3.1.2(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 3.1.2(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       clipper2-ts:
         specifier: 'catalog:'
         version: 2.0.1-17
@@ -5641,7 +5650,7 @@ importers:
         version: 0.552.0(react@19.2.7)
       n8ao:
         specifier: 'catalog:'
-        version: 1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)))(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)))(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       nanoid:
         specifier: 'catalog:'
         version: 5.1.16
@@ -5650,17 +5659,17 @@ importers:
         version: 8.0.0
       postprocessing:
         specifier: 'catalog:'
-        version: 6.39.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 6.39.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       three-mesh-bvh:
         specifier: ^0.9.10
-        version: 0.9.16(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 0.9.16(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       three-viewport-gizmo:
         specifier: npm:@taulabs/three-viewport-gizmo@2.2.4
-        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))'
+        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))'
     devDependencies:
       '@react-three/fiber':
         specifier: 9.6.1
-        version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+        version: 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../plugins/assimp
@@ -5726,7 +5735,7 @@ importers:
         version: 4.18.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       three:
         specifier: ^0.184.0
-        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       type-fest:
         specifier: 'catalog:'
         version: 4.41.0
@@ -29047,10 +29056,10 @@ snapshots:
 
   '@monacopilot/core@1.2.12': {}
 
-  '@monogrid/gainmap-js@3.4.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))':
+  '@monogrid/gainmap-js@3.4.0(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))':
     dependencies:
       promise-worker-transferable: 1.0.4
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   '@msgpack/msgpack@3.1.3': {}
 
@@ -32931,28 +32940,28 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
-  '@react-three/drei@10.7.9(@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)))(@types/react@19.2.17)(@types/three@0.184.1)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))':
+  '@react-three/drei@10.7.9(@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)))(@types/react@19.2.17)(@types/three@0.184.1)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))':
     dependencies:
       '@babel/runtime': 7.29.10
       '@mediapipe/tasks-vision': 0.10.17
-      '@monogrid/gainmap-js': 3.4.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
-      '@react-three/fiber': 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+      '@monogrid/gainmap-js': 3.4.0(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
+      '@react-three/fiber': 9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       '@use-gesture/react': 10.3.1(react@19.2.7)
-      camera-controls: 3.1.2(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+      camera-controls: 3.1.2(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       cross-env: 7.0.3
       detect-gpu: 5.0.70
       glsl-noise: 0.0.0
       hls.js: 1.7.3
-      maath: 0.10.8(@types/three@0.184.1)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
-      meshline: 3.3.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+      maath: 0.10.8(@types/three@0.184.1)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
+      meshline: 3.3.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       react: 19.2.7
-      stats-gl: 2.4.2(@types/three@0.184.1)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+      stats-gl: 2.4.2(@types/three@0.184.1)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       stats.js: 0.17.0
       suspend-react: 0.1.3(react@19.2.7)
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
-      three-mesh-bvh: 0.8.3(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
-      three-stdlib: 2.36.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
-      troika-three-text: 0.52.5(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
+      three-mesh-bvh: 0.8.3(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
+      three-stdlib: 2.36.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
+      troika-three-text: 0.52.5(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       tunnel-rat: 0.1.2(@types/react@19.2.17)(immer@10.2.0)(react@19.2.7)
       use-sync-external-store: 1.7.0(react@19.2.7)
       utility-types: 3.11.0
@@ -32964,7 +32973,7 @@ snapshots:
       - '@types/three'
       - immer
 
-  '@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))':
+  '@react-three/fiber@9.6.1(patch_hash=db75c8294e9748e2b0132cf6de312692f9ecd94e3e05ebcf6485a0c7deb93af1)(@types/react@19.2.17)(immer@10.2.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))':
     dependencies:
       '@babel/runtime': 7.29.10
       '@types/webxr': 0.5.24
@@ -32975,7 +32984,7 @@ snapshots:
       react-use-measure: 2.1.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       scheduler: 0.27.0
       suspend-react: 0.1.3(react@19.2.7)
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       use-sync-external-store: 1.7.0(react@19.2.7)
       zustand: 5.0.15(@types/react@19.2.17)(immer@10.2.0)(react@19.2.7)(use-sync-external-store@1.7.0(react@19.2.7))
     optionalDependencies:
@@ -34085,9 +34094,9 @@ snapshots:
       flatbush: 4.6.2
       opentype.js: 1.3.4
 
-  '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))':
+  '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))':
     dependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   '@testing-library/dom@10.4.2':
     dependencies:
@@ -36578,9 +36587,9 @@ snapshots:
 
   camelcase@8.0.0: {}
 
-  camera-controls@3.1.2(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  camera-controls@3.1.2(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   caniuse-api@3.0.0:
     dependencies:
@@ -36727,14 +36736,14 @@ snapshots:
       '@tscircuit/math-utils': 0.0.9(typescript@5.9.3)
       typescript: 5.9.3
 
-  circuit-json-to-gltf@0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))(typescript@5.9.3):
+  circuit-json-to-gltf@0.0.123(@resvg/resvg-js@2.6.2)(@resvg/resvg-wasm@2.6.2)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/circuit-json-util@0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(circuit-to-svg@0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))(typescript@5.9.3):
     dependencies:
       '@jscad/modeling': 2.13.0
       '@tscircuit/circuit-json-util': 0.0.111(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(transformation-matrix@3.1.0)
       circuit-json: 0.0.485(format-si-unit@0.0.14(typescript@5.9.3))
       circuit-to-svg: 0.0.413(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(typescript@5.9.3)
       earcut: 3.2.4
-      jscad-electronics: 0.0.159(@jscad/modeling@2.13.0)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))(typescript@5.9.3)
+      jscad-electronics: 0.0.159(@jscad/modeling@2.13.0)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))(typescript@5.9.3)
       jscad-planner: 0.0.14(typescript@5.9.3)
       jscad-to-gltf: 0.0.5(typescript@5.9.3)
       occt-import-js: 0.0.23
@@ -41104,7 +41113,7 @@ snapshots:
     dependencies:
       argparse: 2.0.1
 
-  jscad-electronics@0.0.159(@jscad/modeling@2.13.0)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))(typescript@5.9.3):
+  jscad-electronics@0.0.159(@jscad/modeling@2.13.0)(@tscircuit/alphabet@0.0.26(typescript@5.9.3))(@tscircuit/footprinter@0.0.426(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(typescript@5.9.3))(circuit-json@0.0.485(format-si-unit@0.0.14(typescript@5.9.3)))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))(typescript@5.9.3):
     dependencies:
       '@jscad/modeling': 2.13.0
       '@tscircuit/alphabet': 0.0.26(typescript@5.9.3)
@@ -41114,7 +41123,7 @@ snapshots:
       circuit-json: 0.0.485(format-si-unit@0.0.14(typescript@5.9.3))
       react: 19.2.7
       react-dom: 19.2.7(react@19.2.7)
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
     transitivePeerDependencies:
       - typescript
 
@@ -41773,10 +41782,10 @@ snapshots:
 
   lz-string@1.5.0: {}
 
-  maath@0.10.8(@types/three@0.184.1)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  maath@0.10.8(@types/three@0.184.1)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
       '@types/three': 0.184.1
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   macos-release@3.5.1: {}
 
@@ -42184,9 +42193,9 @@ snapshots:
       ts-dedent: 2.3.0
       uuid: 14.0.3
 
-  meshline@3.3.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  meshline@3.3.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   meshoptimizer@1.1.1: {}
 
@@ -42723,10 +42732,10 @@ snapshots:
       object-assign: 4.1.1
       thenify-all: 1.6.0
 
-  n8ao@1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)))(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  n8ao@1.10.2(patch_hash=7682d1711dbffaf9f0ede7b8cb77e4e35feb044375b964ed67c389a38e6f3887)(postprocessing@6.39.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)))(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
-      postprocessing: 6.39.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      postprocessing: 6.39.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   nan@2.29.0:
     optional: true
@@ -43960,9 +43969,9 @@ snapshots:
 
   picospinner@3.1.2: {}
 
-  picovoxel@0.1.0(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  picovoxel@0.1.0(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     optionalDependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   pify@4.0.1: {}
 
@@ -44368,9 +44377,9 @@ snapshots:
     dependencies:
       commander: 9.5.0
 
-  postprocessing@6.39.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  postprocessing@6.39.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   potpack@1.0.2: {}
 
@@ -46280,10 +46289,10 @@ snapshots:
 
   state-local@1.0.7: {}
 
-  stats-gl@2.4.2(@types/three@0.184.1)(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  stats-gl@2.4.2(@types/three@0.184.1)(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
       '@types/three': 0.184.1
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   stats.js@0.17.0: {}
 
@@ -46784,15 +46793,15 @@ snapshots:
     dependencies:
       real-require: 1.0.0
 
-  three-mesh-bvh@0.8.3(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  three-mesh-bvh@0.8.3(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
-  three-mesh-bvh@0.9.16(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  three-mesh-bvh@0.9.16(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
-  three-stdlib@2.36.1(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  three-stdlib@2.36.1(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
       '@types/draco3d': 1.4.10
       '@types/offscreencanvas': 2019.7.3
@@ -46800,9 +46809,9 @@ snapshots:
       draco3d: 1.5.7
       fflate: 0.6.11
       potpack: 1.0.2
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
-  three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993): {}
+  three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5): {}
 
   throttleit@2.1.0: {}
 
@@ -46905,17 +46914,17 @@ snapshots:
 
   triple-beam@1.4.1: {}
 
-  troika-three-text@0.52.5(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  troika-three-text@0.52.5(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
       bidi-js: 1.1.0
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
-      troika-three-utils: 0.52.5(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993))
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
+      troika-three-utils: 0.52.5(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5))
       troika-worker-utils: 0.52.0
       webgl-sdf-generator: 1.1.1
 
-  troika-three-utils@0.52.5(three@0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)):
+  troika-three-utils@0.52.5(three@0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)):
     dependencies:
-      three: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
+      three: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
 
   troika-worker-utils@0.52.0: {}
 

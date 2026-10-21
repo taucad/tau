@@ -798,7 +798,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 |-----------|---------|---------|
 | @babel/runtime | 7.29.10 | MIT |
 | @flatten-js/core | 1.6.14 | MIT |
-| @jscad/modeling | 2.13.0 | MIT |
 | @lume/kiwi | 0.4.4 | BSD-3-Clause |
 | @resvg/resvg-wasm | 2.6.2 | MPL-2.0 |
 | @thednp/dommatrix | 3.1.2 | MIT |
@@ -819,17 +818,13 @@ The circuit kernel bundles the following components. Their full license texts ac
 | @tscircuit/math-utils | 0.0.38 | MIT |
 | @tscircuit/miniflex | 0.0.4 | MIT |
 | @tscircuit/mm | 0.0.8 | MIT |
-| @tscircuit/mm | 0.0.9 | MIT |
-| @tscircuit/modelprinter | 0.0.2 | MIT |
 | @tscircuit/props | 0.0.646 | MIT |
 | @tscircuit/schematic-trace-solver | 0.0.184 | MIT |
 | @tscircuit/solver-utils | 0.0.19 | MIT |
 | @tscircuit/solver-utils | 0.0.21 | MIT |
 | @tscircuit/soup-util | 0.0.41 | MIT |
-| base64-js | 1.5.1 | MIT |
 | boolbase | 1.0.0 | ISC |
 | bpc-graph | 0.0.67 | MIT |
-| buffer | 6.0.3 | MIT |
 | calculate-cell-boundaries | 0.0.19 | MIT |
 | calculate-elbow | 0.0.12 | MIT |
 | calculate-elbow | 0.0.13 | MIT |
@@ -839,7 +834,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | circuit-json-to-bpc | 0.0.14 | MIT |
 | circuit-json-to-connectivity-map | 0.0.22 | MIT |
 | circuit-json-to-connectivity-map | 0.0.30 | MIT |
-| circuit-json-to-gltf | 0.0.123 | MIT |
 | circuit-json-to-readable-netlist | 0.0.17 | MIT |
 | circuit-json-to-spice | 0.0.46 | MIT |
 | circuit-to-svg | 0.0.413 | ISC, license text pending |
@@ -852,7 +846,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | domelementtype | 2.3.0 | BSD-2-Clause |
 | domhandler | 5.0.3 | BSD-2-Clause |
 | domutils | 3.2.2 | BSD-2-Clause |
-| earcut | 3.2.4 | ISC |
 | entities | 4.5.0 | BSD-2-Clause |
 | fast-png | 8.0.0 | MIT |
 | fflate | 0.8.3 | MIT |
@@ -863,12 +856,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | format-si-unit | 0.0.14 | MIT |
 | graphics-debug | 0.0.99 | no SPDX field, license text pending |
 | graphics-debug | 0.0.100 | no SPDX field, license text pending |
-| ieee754 | 1.2.1 | BSD-3-Clause |
 | iobuffer | 6.0.1 | MIT |
-| jscad-electronics | 0.0.159 | MIT |
-| jscad-planner | 0.0.13 | MIT |
-| jscad-planner | 0.0.14 | MIT |
-| jscad-to-gltf | 0.0.5 | MIT |
 | minicssgrid | 0.0.9 | MIT |
 | ms | 2.1.3 | MIT |
 | nanoid | 5.1.16 | MIT |
@@ -887,7 +875,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | spicey | 0.0.14 | MIT |
 | svg-path-commander | 2.3.3 | MIT |
 | svgson | 5.3.1 | MIT |
-| three | 0.184.0 | MIT |
 | transformation-matrix | 2.16.1 | MIT |
 | transformation-matrix | 3.1.0 | MIT |
 

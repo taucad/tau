@@ -124,6 +124,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
 
   protected _rootHandle: FileSystemDirectoryHandle;
   private readonly _handleCache = new Map<string, FileSystemDirectoryHandle>();
+  private readonly _pendingDirectoryHandles = new Map<string, Promise<FileSystemDirectoryHandle>>();
+  private _handleGeneration = 0;
   private readonly _handleCacheMax = handleCacheMaxEntries;
   private _exclusiveWritableSupported: boolean | undefined;
 
@@ -192,10 +194,20 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
     this._assertReady();
     this._assertRootedPath(path);
+    const generation = this._handleGeneration;
     const directoryHandle = await this._resolveDirectoryHandle(path);
     const entries: DirectoryEntry[] = [];
     for await (const [name, handle] of directoryEntries(directoryHandle)) {
       entries.push({ name, kind: handle.kind === 'directory' ? 'dir' : 'file' });
+      // Enumeration already supplied the same directory capability that a
+      // following child read would otherwise acquire in a separate browser call.
+      // Keep the existing bounded cache and refresh fencing; never retain bytes.
+      if (handle.kind === 'directory' && generation === this._handleGeneration) {
+        const childPath = path === '' ? name : `${path}/${name}`;
+        if (!this._handleCache.has(childPath)) {
+          this._setHandleCache(childPath, handle);
+        }
+      }
     }
     return entries;
   }
@@ -381,6 +393,8 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     this._assertReady();
     if (prefixes === undefined) {
       this._handleCache.clear();
+      this._pendingDirectoryHandles.clear();
+      this._handleGeneration++;
       return;
     }
     for (const prefix of prefixes) {
@@ -641,20 +655,35 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
     }
 
     const segments = this._splitPath(path);
+    const generation = this._handleGeneration;
     let handle = this._rootHandle;
     let resolvedPath = '';
 
     for (const segment of segments) {
       resolvedPath = resolvedPath === '' ? segment : `${resolvedPath}/${segment}`;
-      const cachedSegment = this._handleCache.get(resolvedPath);
+      const cachedSegment = generation === this._handleGeneration ? this._handleCache.get(resolvedPath) : undefined;
       if (cachedSegment) {
         this._touchHandleCache(resolvedPath);
         handle = cachedSegment;
         continue;
       }
       try {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal required
-        handle = await handle.getDirectoryHandle(segment);
+        // Concurrent sibling file reads share only the pending handle acquisition.
+        // Invalidation detaches old work so it cannot repopulate the current cache.
+        const current = generation === this._handleGeneration;
+        const pending = current ? this._pendingDirectoryHandles.get(resolvedPath) : undefined;
+        const acquisition = pending ?? handle.getDirectoryHandle(segment);
+        if (current && pending === undefined) {
+          this._pendingDirectoryHandles.set(resolvedPath, acquisition);
+        }
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Sequential directory traversal required.
+          handle = await acquisition;
+        } finally {
+          if (this._pendingDirectoryHandles.get(resolvedPath) === acquisition) {
+            this._pendingDirectoryHandles.delete(resolvedPath);
+          }
+        }
       } catch (error) {
         if (hasDomName(error, 'TypeMismatchError')) {
           throw this._enotdir(resolvedPath);
@@ -664,7 +693,9 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
         }
         throw error;
       }
-      this._setHandleCache(resolvedPath, handle);
+      if (generation === this._handleGeneration) {
+        this._setHandleCache(resolvedPath, handle);
+      }
     }
 
     return handle;
@@ -894,6 +925,12 @@ export class FileSystemAccessProvider extends AbstractFileSystemProvider {
   }
 
   private _invalidateHandleCachePrefix(path: string): void {
+    this._handleGeneration++;
+    this._pendingDirectoryHandles.clear();
+    if (path === '') {
+      this._handleCache.clear();
+      return;
+    }
     const prefix = path + '/';
     for (const key of this._handleCache.keys()) {
       if (key === path || key.startsWith(prefix)) {

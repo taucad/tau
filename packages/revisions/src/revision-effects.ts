@@ -24,6 +24,7 @@
  * turn actor (RM-R14), never an epoch sweep (W8 TS-S7, TS-R13).
  */
 
+import { parseProjectManifestBytes } from '@taucad/project-core';
 import { ResourceQueue } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { walk } from '@taucad/filesystem/content-ops';
@@ -38,6 +39,11 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
+import {
+  prepareProjectManifest,
+  validateLegacyProjectIdentity,
+  verifyPreparedProjectManifest,
+} from '#project-manifest-conversion.js';
 import { caseCollisions } from '#case-collisions.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
@@ -983,25 +989,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const holdsOnlyUnfetchedScaffold = async (files: ImmutableRevisionTree): Promise<boolean> => {
     const manifest = files.get('tau.json');
     const [remote] = await port.listRemotes();
-    if (manifest === undefined || remote === undefined) {
+    if (manifest === undefined || remote === undefined || !parseProjectManifestBytes(manifest).success) {
       return false;
     }
-    try {
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed manifest is `unknown` until read.
-      const { id } = JSON.parse(new TextDecoder().decode(manifest)) as Readonly<{ id?: unknown }>;
-      if (id !== options.projectId) {
-        return false;
-      }
-    } catch {
-      return false;
-    }
+    // This checkout's identity comes from its established host binding; the manifest is authored content.
     const fetched = await port.listRefs(`refs/remotes/${remote.name}`);
     return fetched.length === 0 && holdsNoWork(files, new ImmutableRevisionTree([['tau.json', manifest]]));
   };
 
   /**
    * Whether `tau.json` is the placeholder a Tau Cloud open writes before its
-   * first pull (`cloudProjectStub`): this project's id, the remote's name, and
+   * first pull (`cloudProjectStub`): the remote's name and
    * otherwise the stub's defaults. Setup like the generated files: the remote's
    * own manifest replaces it (e921b3d96). Any other edit is work (rule 6).
    *
@@ -1021,11 +1019,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       return false;
     }
-    const { $schema, id, name, description, tags, assets, ...rest } = parsed as Readonly<Record<string, unknown>>;
+    const { $schema, name, description, tags, assets, ...rest } = parsed as Readonly<Record<string, unknown>>;
     return (
       Object.keys(rest).length === 0 &&
       ($schema === undefined || typeof $schema === 'string') &&
-      id === options.projectId &&
       typeof name === 'string' &&
       description === '' &&
       Array.isArray(tags) &&
@@ -1252,7 +1249,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return record?.treeId;
   };
 
-  const { equalEntry, entryOf, materializeTree } = createApplyTreeEffects({
+  const {
+    equalEntry,
+    entryOf,
+    materializeTree: applyMaterializedTree,
+  } = createApplyTreeEffects({
     useFileSystem,
     capture,
     onApplyingTree: options.onApplyingTree,
@@ -1261,7 +1262,32 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
+    prepareTarget: async (place, target, signal) => {
+      const expected = target.get('tau.json');
+      if (expected === undefined) {
+        return { tree: target };
+      }
+      const prepared = await useFileSystem(place, async (filesystem) =>
+        prepareProjectManifest({ filesystem, projectId: options.projectId, expected, signal }),
+      );
+      if (prepared === undefined) {
+        return { tree: target };
+      }
+      return {
+        tree: new ImmutableRevisionTree(
+          target
+            .entries()
+            .map((entry) => [entry.path, entry.path === 'tau.json' ? prepared.bytes : entry.content, entry.mode]),
+        ),
+        verify: async () =>
+          useFileSystem(place, async (filesystem) => verifyPreparedProjectManifest(filesystem, prepared, signal)),
+      };
+    },
   });
+  const materializeTree: typeof applyMaterializedTree = async (place, target, materialization) => {
+    validateLegacyProjectIdentity(target.get('tau.json'), options.projectId);
+    return applyMaterializedTree(place, target, materialization);
+  };
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).

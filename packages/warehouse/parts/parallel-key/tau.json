@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_dtFGLIzHDtbgBCepzzJSd",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Parallel key",
   "description": "Round-ended parallel shaft key with editable length, width and height.",
   "tags": [

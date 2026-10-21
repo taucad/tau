@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_EVopA1t8nB_Y3nce_4hAJ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Internal-tooth lock washer",
   "description": "Internal-tooth lock washer with a modeled opening and editable section dimensions.",
   "tags": [

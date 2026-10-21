@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
-import { desktopE2EApiUrl, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
+import { desktopE2EApiUrl, desktopE2EDesktopCloudEnabled, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
@@ -92,7 +92,10 @@ const seed = async (label: string, plan: 'free' | 'pro'): Promise<Seeded> => {
   if (plan === 'pro') {
     await seedProPlan(owner);
   }
-  const client = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+  // Playwright recommends blocking service workers when intercepting requests. Mixing them
+  // here can abort startup chunks after navigation, before the refusal assertion even runs.
+  // Ordinary identity/browser clients retain workers; this fixture owns the fault-injected wire.
+  const client = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer), serviceWorkers: 'block' });
   return { email: account.email, bearer, owner, client };
 };
 
@@ -117,9 +120,10 @@ const createProject = async (client: BrowserClient, name: string): Promise<strin
   return page.evaluate(async (project: string) => {
     const root = await navigator.storage.getDirectory();
     const directory = await root.getDirectoryHandle(project);
-    const handle = await directory.getFileHandle('tau.json');
+    const metadata = await directory.getDirectoryHandle('.tau');
+    const handle = await metadata.getFileHandle('project.json');
     const file = await handle.getFile();
-    return (JSON.parse(await file.text()) as { readonly id: string }).id;
+    return (JSON.parse(await file.text()) as { readonly projectId: string }).projectId;
   }, slug);
 };
 
@@ -653,11 +657,10 @@ describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-s
       await openRevisions(b);
       await b.page.keyboard.press(`${modifier}+KeyS`);
       const actions = await refusedRow(b, ownerSentence, 'W8 row 4 desktop');
-      /* ponytail: this tier's desktop UI is the self-host build (ui:build:desktop
-       * without TAU_CLOUD_ENABLED, so canUpgradePlan is false) and offers no
-       * Upgrade; row 2 proves Upgrade on the cloud web build. Filed as quota
-       * here means no retry verb and the strip's quota ask. */
-      expect(actions, 'D17: filed as quota, so no Sync now or Retry').toEqual([]);
+      // Both builds classify quota without retry; only the Cloud build offers a plan action.
+      expect(actions, 'D17: exactly the actions supported by the desktop build').toEqual(
+        desktopE2EDesktopCloudEnabled ? [expect.stringMatching(/Upgrade/u)] : [],
+      );
       await expect
         .poll(async () => revisionStrip(b.page).textContent(), { timeout: 30_000 })
         .toContain('Over your plan');

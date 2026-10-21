@@ -498,7 +498,8 @@ describe('FileManagerProvider — bindProjectToWorkspace', () => {
       entries: [
         {
           status: 'valid',
-          manifest: { id: projectId },
+          projectId,
+          manifest: { name: projectId },
           locator: {
             backend: 'webaccess',
             workspaceId,

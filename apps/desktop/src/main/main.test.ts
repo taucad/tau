@@ -14,6 +14,7 @@ import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernel
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
+import { desktopAgentSystemPrompt } from '#main/environment.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -119,6 +120,7 @@ const state = vi.hoisted(() => ({
   nativePrepare: vi.fn(async (kernel: string) => ({ status: 'ready', kernel, byteLength: 1 })),
   nativeCancel: vi.fn(),
   runtimePost: vi.fn(),
+  servicesPost: vi.fn(),
 }));
 
 vi.mock('#tau/native-preparation.js', () => ({
@@ -385,7 +387,7 @@ vi.mock('#main/services-broker.js', () => ({
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
     return {
-      post: vi.fn(),
+      post: state.servicesPost,
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
       streamingMachines: state.servicesStreaming,
@@ -691,6 +693,28 @@ describe('desktop main compute owner', () => {
       const answer = state.handlers.get('tau:external-agents')!({ senderFrame: {} });
       discovery.resolve({ agents: [], refused: [] });
       await expect(answer).resolves.toEqual([]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'configures project history even when external agent discovery rejects',
+    async () => {
+      const discovery = Promise.withResolvers<{ agents: never[]; refused: never[] }>();
+      state.acpDiscovery = discovery.promise;
+      await bootstrap();
+      const answer = state.handlers.get('tau:external-agents')!({ senderFrame: {} });
+      discovery.reject(new Error('The external agent could not be discovered.'));
+      await expect(answer).resolves.toEqual([]);
+      expect(state.servicesPost).toHaveBeenCalledWith({
+        type: 'agentHost',
+        config: {
+          gatewayBaseUrl: 'http://127.0.0.1:1',
+          systemPrompt: desktopAgentSystemPrompt,
+          tauApiUrl: 'http://127.0.0.1:1',
+          tauWebSocketUrl: 'ws://127.0.0.1:1',
+        },
+      });
     },
     bootMilliseconds,
   );

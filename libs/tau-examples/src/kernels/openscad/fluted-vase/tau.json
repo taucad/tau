@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_iUOeWBRvV5MrxDf4xkvmW",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Fluted Vase",
   "description": "A 200 mm vase built as one seamless polyhedron: seven flutes twist 90° up to a rounded, ruffled rim. Height, wall thickness, flute count and twist are parameters.",
   "tags": ["generative", "organic", "3d-printing", "openscad"],

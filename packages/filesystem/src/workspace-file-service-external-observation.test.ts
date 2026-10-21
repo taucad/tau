@@ -478,6 +478,39 @@ describe('WorkspaceFileService external webaccess observation', () => {
     });
   });
 
+  it('should republish discovery for generated identity changes in a mounted project', async () => {
+    const { provider, eventBus } = await createWebAccessService({ native: true });
+    const events: unknown[] = [];
+    eventBus.subscribe((event) => events.push(event));
+    await provider.writeFile(`${alphaPhysicalRoot}/.tau/project.json`, '{}');
+    TestFileSystemObserver.instances[0]!.callback([
+      {
+        type: 'modified',
+        changedHandle: fileHandle('project.json'),
+        relativePathComponents: ['alpha-project', '.tau', 'project.json'],
+      },
+    ]);
+    await vi.waitFor(() => {
+      expect(events).toContainEqual({ type: 'directoryChanged', path: '/', backend: 'webaccess' });
+    });
+  });
+
+  it('should poll generated identity in an unmounted discovery directory', async () => {
+    const { service, provider, eventBus } = await createWebAccessService({
+      beforeConfigure: async ({ provider }) => {
+        await provider.writeFile('discovery-only/tau.json', '{}');
+        await provider.writeFile('discovery-only/.tau/project.json', 'before');
+      },
+    });
+    const events: unknown[] = [];
+    eventBus.subscribe((event) => events.push(event));
+    await service.pollExternalChanges();
+    events.length = 0;
+    await provider.writeFile('discovery-only/.tau/project.json', 'changed identity');
+    await service.pollExternalChanges();
+    expect(events).toContainEqual({ type: 'directoryChanged', path: '/', backend: 'webaccess' });
+  });
+
   it('keeps workspace app-state writes out of project discovery', async () => {
     const { service, eventBus } = await createWebAccessService({ native: true });
     const events: unknown[] = [];
@@ -781,7 +814,7 @@ describe('WorkspaceFileService external webaccess observation', () => {
     expect(alphaEvents).toEqual([{ type: 'reset' }]);
     const manifests = await service.listProjectManifests();
     const droppedProject = manifests.entries.find(({ locator }) => locator.relativeDirectory === 'dropped-project');
-    expect(droppedProject?.status).toBe('adoption-required');
+    expect(droppedProject?.status).toBe('invalid');
     await service.pollExternalChanges();
     expect(globalEvents).toHaveLength(3);
     expect(alphaEvents).toHaveLength(1);

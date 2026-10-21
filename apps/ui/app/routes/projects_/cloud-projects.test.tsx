@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { mock } from 'vitest-mock-extended';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { projectToManifest } from '@taucad/types';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 
@@ -13,7 +13,7 @@ import type { CloudProject } from '#hooks/use-cloud-projects.js';
  */
 
 const held: ProjectListItem = {
-  ...projectToManifest({
+  ...createProjectFixture({
     id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
     name: 'Gearbox Alpha',
     description: '',
@@ -25,12 +25,12 @@ const held: ProjectListItem = {
 };
 const heldLocal: ProjectListItem = {
   ...held,
-  ...projectToManifest({ ...held, id: 'proj_ccccccccccccccccccccc', name: 'Local Only' }),
+  ...createProjectFixture({ ...held, id: 'proj_ccccccccccccccccccccc', name: 'Local Only' }),
 };
 /* In this device's Trash: still held, so never Tau Cloud's alone. */
 const trashed: ProjectListItem = {
   ...held,
-  ...projectToManifest({ ...held, id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta' }),
+  ...createProjectFixture({ ...held, id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta' }),
   deletedAt: 5,
 };
 const cloud: readonly CloudProject[] = [

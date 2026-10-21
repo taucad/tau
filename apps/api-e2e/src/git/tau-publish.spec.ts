@@ -8,6 +8,8 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 
 import { expect, it } from 'vitest';
+import { projectManifestSchemaUrl, serializeProjectManifest } from '@taucad/project-core';
+import { projectIdentityPath, serializeProjectIdentity } from '@taucad/project-core/identity';
 
 import { gitE2EApiUrl } from '#git/config.js';
 import {
@@ -49,8 +51,20 @@ it('should publish a named graph revision through the CLI and serve its bytes to
     await expectGit(['config', 'user.email', 'v9@example.test'], project);
     await expectGit(['config', 'user.name', 'V9 Publish E2E'], project);
     await writeFile(join(project, entryPath), entryBytes, 'utf8');
-    await writeFile(join(project, 'tau.json'), JSON.stringify({ assets: { main: { entryPath } } }), 'utf8');
-    await expectGit(['add', '.'], project);
+    await writeFile(
+      join(project, 'tau.json'),
+      serializeProjectManifest({
+        $schema: projectManifestSchemaUrl,
+        name: 'V9 Publish E2E',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath } },
+      }),
+    );
+    // This fixture represents an admitted local project bound to its cloud ID.
+    await mkdir(join(project, '.tau'));
+    await writeFile(join(project, projectIdentityPath), serializeProjectIdentity({ version: 1, projectId }));
+    await expectGit(['add', 'tau.json', entryPath], project);
     await expectGit(['commit', '-m', 'publishable revision'], project);
     const localHead = await expectGit(['rev-parse', 'HEAD'], project);
     const revisionId = localHead.trim();

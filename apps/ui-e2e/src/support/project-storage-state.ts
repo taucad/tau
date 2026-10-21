@@ -23,6 +23,7 @@ export type ProjectStorageState = {
 
 export type PhysicalProjectEvidence = {
   readonly manifestText: string;
+  readonly identityText: string;
   readonly sourceText: string;
 };
 
@@ -272,7 +273,8 @@ export const readOpfsProjectEvidence = async (options: {
       const manifestText = await readFile(root, manifestPath);
       const manifest = JSON.parse(manifestText) as { assets: { main: { entryPath: string } } };
       const sourceText = await readFile(root, `${providerBasePath}/${manifest.assets.main.entryPath}`);
-      return { manifestText, sourceText };
+      const identityText = await readFile(root, `${providerBasePath}/.tau/project.json`);
+      return { manifestText, identityText, sourceText };
     } catch (error) {
       if (error instanceof DOMException && error.name === 'NotFoundError') {
         return undefined;
@@ -338,7 +340,11 @@ export const readIndexedDbProjectEvidence = async (
       if (sourceText === undefined) {
         throw new Error('IndexedDB Home project source is missing');
       }
-      return { manifestText, sourceText };
+      const identityText = await readText(`${basePath}/.tau/project.json`);
+      if (!identityText) {
+        throw new Error('IndexedDB Home project identity is missing');
+      }
+      return { manifestText, identityText, sourceText };
     } finally {
       db.close();
     }

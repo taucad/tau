@@ -24,6 +24,7 @@
 
 /* oxlint-disable eslint/no-await-in-loop, eslint/no-restricted-imports -- this composition suite is the boundary where ordered machine scripts meet their real hooks. */
 
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
@@ -32,7 +33,6 @@ import type { ActorRefFrom, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { workbenchRecords } from '@taucad/workbench';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
@@ -467,7 +467,7 @@ await import('#routes/w.$workspace.$project/project-live-sessions.js');
 
 const ready = (projectId: string): ProjectRouteAccess => ({
   status: 'ready',
-  project: projectToManifest({
+  project: createProjectFixture({
     id: projectId,
     name: projectId,
     description: '',

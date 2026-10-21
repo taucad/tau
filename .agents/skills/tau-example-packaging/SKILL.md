@@ -3,7 +3,7 @@ name: tau-example-packaging
 description: >-
   Packages a CAD example under libs/tau-examples/src/kernels/<kernel>/<example>/
   for Tau: classifies it with example.json (model, reference, test-fixture,
-  spec-fixture), writes a strict tau.json with a fresh proj_ id, shapes its
+  spec-fixture), writes a strict id-free tau.json, shapes its
   README or DESIGN.md, proves it with the geospec-engine CLI, regenerates the
   manifest and WebP thumbnails, runs the example-health and GeoSpec suite gates,
   records licence provenance for ports and decides whether it becomes a
@@ -39,11 +39,7 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
 
 - **Entry**: the first of `main.ts`, `main.py`, `main.cs`, `main.scad`, `main.cpp` at the example root. A row without one is never rendered, and a `model` row without one fails the health suite.
 - **Everything else is shipped**: every file except `example.json`, `thumbnail-featured.webp`, `.DS_Store` and `.tau/cache/` becomes a lazy builtin asset (the thumbnail included), so multi-file examples work and scratch files leak into the builtin. Symbolic links are rejected.
-- **`tau.json`** follows the strict `projectManifestSchema` (`libs/types/src/schemas/project-manifest.schema.ts`): `$schema`, `id`, `name`, `description`, `tags`, `assets.main.entryPath`, optional `assets.main.thumbnail`; no other keys. Generate a fresh id; never copy one from another example (duplicates throw):
-
-  ```bash
-  pnpm --dir libs/utils exec tsx -e "import { generatePrefixedId } from './src/id.utils.ts'; console.log(generatePrefixedId('proj'))"
-  ```
+- **`tau.json`** follows the strict `projectManifestSchema` (`libs/types/src/schemas/project-manifest.schema.ts`): `$schema`, `name`, `description`, `tags`, `assets.main.entryPath`, optional `assets.main.thumbnail`; no other keys. Do not include `id` or `projectId`; Tau creates identity when a project is imported. Builtins are keyed by their catalog locators.
 
   Name it for what it shows ("Rover Wheel"); the card already shows the kernel, so a kernel prefix only repeats it. Tags are lowercase and include the kernel id.
 
@@ -54,7 +50,7 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
 ## Workflow
 
 1. **Classify** with `example.json` (or none for a `model`) and adjust the `generation.test.ts` pins.
-2. **Write `tau.json`** with a fresh id. For a new public row, leave out `assets.main.thumbnail` until step 5: `generate-manifest` throws when a declared thumbnail file is missing.
+2. **Write an id-free `tau.json`**. For a new public row, leave out `assets.main.thumbnail` until step 5: `generate-manifest` throws when a declared thumbnail file is missing.
 3. **Prove the geometry** when the row has a suite:
 
    ```bash

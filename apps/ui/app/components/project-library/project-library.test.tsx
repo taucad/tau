@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { createContext, useContext, useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { projectManifestSchemaUrl, projectToManifest } from '@taucad/types';
+import { projectToManifest, projectManifestSchemaUrl } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { cookieName } from '#constants/cookie.constants.js';
@@ -30,7 +31,7 @@ function TestRouter({
 }
 
 const makeProject = (id: string, name: string, directory = `/${id}`): ProjectListItem => ({
-  ...projectToManifest({
+  ...createProjectFixture({
     id,
     name,
     description: `${name} description`,
@@ -539,13 +540,16 @@ describe('ProjectLibrary', () => {
         },
         {
           status: 'route-blocked',
-          manifest: projectToManifest({
-            id: 'proj_ccccccccccccccccccccc',
-            name: 'Blocked Project',
-            description: '',
-            tags: [],
-            assets: { main: { entryPath: 'main.ts' } },
-          }),
+          projectId: 'proj_ccccccccccccccccccccc',
+          manifest: projectToManifest(
+            createProjectFixture({
+              id: 'proj_ccccccccccccccccccccc',
+              name: 'Blocked Project',
+              description: '',
+              tags: [],
+              assets: { main: { entryPath: 'main.ts' } },
+            }),
+          ),
           locator: locator('blocked'),
         },
       ],
@@ -581,13 +585,16 @@ describe('ProjectLibrary', () => {
       conflicts: [
         {
           status: 'route-blocked',
-          manifest: projectToManifest({
-            id: 'proj_ccccccccccccccccccccc',
-            name: 'Blocked Project',
-            description: '',
-            tags: [],
-            assets: { main: { entryPath: 'main.ts' } },
-          }),
+          projectId: 'proj_ccccccccccccccccccccc',
+          manifest: projectToManifest(
+            createProjectFixture({
+              id: 'proj_ccccccccccccccccccccc',
+              name: 'Blocked Project',
+              description: '',
+              tags: [],
+              assets: { main: { entryPath: 'main.ts' } },
+            }),
+          ),
           locator,
         },
       ],
@@ -697,7 +704,7 @@ describe('ProjectLibrary', () => {
   });
 
   // R11 — adoption-required used to render an unactionable banner.
-  it('adopts an identity-less project directory on request', async () => {
+  it('adopts a directory with a damaged declaration on request', async () => {
     const locator = {
       backend: 'indexeddb',
       storageRootKey: 'indexeddb:tau-',
@@ -729,7 +736,7 @@ describe('ProjectLibrary', () => {
       </TestRouter>,
     );
 
-    expect(screen.getByText('This project needs a Tau identity before it can be opened.')).toBeInTheDocument();
+    expect(screen.getByText('This folder needs a valid tau.json before it can be opened.')).toBeInTheDocument();
     screen.getByRole('button', { name: 'Adopt' }).click();
 
     await vi.waitFor(() => {
@@ -744,7 +751,7 @@ describe('ProjectLibrary', () => {
       relativeDirectory: 'relief-copy',
       workspaceId: 'wsp_alpha',
     } as const;
-    const manifest = projectToManifest({
+    const manifest = createProjectFixture({
       id: 'proj_ccccccccccccccccccccc',
       name: 'Relief',
       description: '',
@@ -753,7 +760,7 @@ describe('ProjectLibrary', () => {
     });
     mockUseProjectsResult = {
       ...createUseProjectsResult(),
-      conflicts: [{ status: 'duplicate-id', manifest, locator }],
+      conflicts: [{ status: 'duplicate-id', projectId: manifest.id, manifest: projectToManifest(manifest), locator }],
     };
 
     render(

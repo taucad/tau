@@ -3,7 +3,15 @@ import { cleanup, render } from '@testing-library/react';
 import { useFrame } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import type { ComponentProps } from 'react';
-import { BoxGeometry, Mesh, MeshStandardMaterial, Vector3 } from 'three';
+import {
+  BoxGeometry,
+  DepthTexture,
+  Mesh,
+  MeshStandardMaterial,
+  Vector3,
+  WebGLCubeRenderTarget,
+  WebGLRenderer,
+} from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
@@ -25,6 +33,31 @@ import {
 } from '@taucad/runtime-testing/browser/three-renderer-output';
 
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
+import { createTauR3fGlProp } from '#graphics/three/canvas-three-gl.js';
+
+it('should release a cube environment after its canvas renderer has retired', async () => {
+  const canvas = document.createElement('canvas');
+  const factory = createTauR3fGlProp('webgl');
+  factory.bindCanvas(canvas);
+  const renderer = await factory({ canvas });
+  if (!(renderer instanceof WebGLRenderer)) {
+    throw new TypeError('The WebGL canvas must own a WebGL renderer.');
+  }
+  const target = new WebGLCubeRenderTarget(16);
+  renderer.setRenderTarget(target);
+  renderer.setRenderTarget(null);
+  const disposeDepth = vi.fn();
+  target.depthTexture = new DepthTexture(16, 16);
+  target.depthTexture.addEventListener('dispose', disposeDepth);
+  factory.bindCanvas(undefined);
+  await Promise.resolve();
+  expect(factory.isRetired()).toBe(true);
+  expect(() => {
+    target.dispose();
+    target.dispose();
+  }).not.toThrow();
+  expect(disposeDepth).toHaveBeenCalledOnce();
+});
 
 let state: RootState | undefined;
 let frames = 0;

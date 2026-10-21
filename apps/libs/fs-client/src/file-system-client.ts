@@ -1,10 +1,4 @@
-import type {
-  CheckedFileWrite,
-  CheckedFileWriteResult,
-  FileWritePrecondition,
-  FileStat,
-  ProjectManifest,
-} from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition, FileStat } from '@taucad/types';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import type {
   FileStatOptions,
@@ -18,6 +12,7 @@ import type {
   WorkspaceScope,
   ProjectRootConfiguration,
   ProjectDiscoveryResult,
+  ResolvedProjectManifest,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
   PermanentDeleteProjectDirectoryInput,
@@ -209,8 +204,8 @@ export type FileSystemClient = {
     input: CommitPendingProjectDirectoryInput,
   ): Promise<CommitPendingProjectDirectoryResult>;
   /** Give an `adoption-required` project directory an identity: `id` restores its route's previous one (R11). */
-  adoptProjectDirectory(locator: ProjectLocator, options?: { readonly id?: string }): Promise<ProjectManifest>;
-  /** Permanently remove one exact physical project after verifying its manifest identity. */
+  adoptProjectDirectory(locator: ProjectLocator, options?: { readonly id?: string }): Promise<ResolvedProjectManifest>;
+  /** Permanently remove one exact physical project after verifying its generated identity. */
   permanentlyDeleteProjectDirectory(
     input: PermanentDeleteProjectDirectoryInput,
   ): Promise<PermanentDeleteProjectDirectoryResult>;

@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_5oYhPaihAGIrlffKRv9-e",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flanged guide roller",
   "description": "Guide roller with two retaining flanges and an axle bore.",
   "tags": [

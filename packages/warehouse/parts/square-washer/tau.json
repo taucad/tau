@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_zdz2wDv6pIq4uQWOPMbJN",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Square washer",
   "description": "Square washer with a modeled opening and editable section dimensions.",
   "tags": [

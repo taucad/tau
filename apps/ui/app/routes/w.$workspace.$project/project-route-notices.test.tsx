@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectManifestSchemaUrl } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { Project } from '@taucad/types';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
@@ -26,7 +26,7 @@ const { ProjectRouteNotice, describeProjectRouteNotice } =
   await import('#routes/w.$workspace.$project/project-route-notices.js');
 
 const projectId = 'proj_0123456789ABCDEFGHIJK';
-const project: ProjectManifest = {
+const project: Project = {
   $schema: projectManifestSchemaUrl,
   id: projectId,
   name: 'planetary-gear',

@@ -10,7 +10,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
@@ -20,6 +20,7 @@ import type { CreateNodeMachineHostInput, NodeMachineHost } from '@taucad/runtim
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 
+import { resolveNodeProjectIdentity } from '#project-identity.js';
 import { defaultConfigDirectory } from '#credential-store.js';
 import {
   createMachineSecretStore,
@@ -28,7 +29,6 @@ import {
   machineAgentGrants,
   machineRouteGrants,
   openMachineHostIdentity,
-  readProjectId,
 } from '#machine-host.js';
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { openSecretVault } from '#secret-vault.js';
@@ -138,7 +138,7 @@ export type LocalMachines = Readonly<{
   /** The facet the tool registry's machine tools use. */
   facet: RuntimeTransportFacet<MachineClient>;
   /**
-   * Name the project a folder holds by its `tau.json` id, and admit the folder for the files jobs name.
+   * Name the project a folder holds by its durable local identity, and admit the folder for the files jobs name.
    *
    * Read on each call, so a folder that gains a `tau.json` prints from then on and one that loses it stops.
    *
@@ -201,16 +201,13 @@ const readProjectArtifact = async (
 };
 
 /**
- * Read a folder's `tau.json` id.
+ * Resolve a project folder's durable local identity.
  *
  * @param root - The folder, as `realpath` names it.
  * @returns The id, or `undefined` without a valid manifest.
  */
 const projectIdIn = async (root: string): Promise<string | undefined> =>
-  readProjectId({
-    stat: async (path) => stat(join(root, path)),
-    readFile: async (path) => new Uint8Array(await readFile(join(root, path))),
-  });
+  resolveNodeProjectIdentity({ workspaceRoot: root });
 
 /**
  * Open the shared machine store for a host beside project folders, such as `tau mcp --machines`, whose calls may
@@ -233,7 +230,7 @@ export const openLocalMachines = async (
       return { refused: 'no-project' };
     }
   }
-  /* Each folder a call named, by its real path, with the id its `tau.json` held then. */
+  /* Each folder a call named, by its real path, with the durable identity resolved then. */
   const named = new Map<string, string>();
   const host = await openSharedMachineHost({
     ...shared,

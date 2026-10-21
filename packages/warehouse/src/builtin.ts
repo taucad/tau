@@ -2,8 +2,7 @@
 import type { WarehousePart } from '#types.js';
 /** Editable parts; source bytes load only when requested. @public */
 export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.angle-profile",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_3mENsTKP0vxZya-qACIJr",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Angle profile",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -20,8 +19,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/angle-profile/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/angle-profile.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/angle-profile.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.ball-bearing",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_-sGe5sUbQzwUtvriLMqq_",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Open ball bearing",
   "description": "Two separate races and eight separately named rolling balls, with a through shaft opening and explicit outer envelope.",
   "tags": [
@@ -38,8 +36,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/ball-bearing/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/ball-bearing.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/ball-bearing.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.belleville-washer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_sBKjloqCV_KLzpE4OHdrZ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Belleville washer",
   "description": "Belleville washer with a modeled opening and editable section dimensions.",
   "tags": [
@@ -56,8 +53,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/belleville-washer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/belleville-washer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/belleville-washer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/belleville-washer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/belleville-washer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/belleville-washer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/belleville-washer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/belleville-washer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/belleville-washer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.blind-flange",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_lHYmOQOcvwRwMm6lomfrA",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Blind pipe flange",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -74,8 +70,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/blind-flange/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/blind-flange.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/blind-flange.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.blind-rivet",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_9uiVjuEBaX-b55jM4BMlX",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Blind rivet",
   "description": "Blind rivet with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -92,8 +87,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/blind-rivet/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/blind-rivet.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/blind-rivet.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/blind-rivet.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/blind-rivet.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/blind-rivet.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/blind-rivet.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/blind-rivet.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/blind-rivet.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.button-head-socket-screw",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_YnlYhrslLpFSCovZ1-Hil",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Button-head socket screw",
   "description": "Button-head socket screw with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -110,8 +104,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/button-head-socket-screw/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/button-head-socket-screw.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.cable-clip",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_46W7BMf0H-CHd7KiK8ryP",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Cable clip",
   "description": "Open cable-retention clip with a flat mounting foot.",
   "tags": [
@@ -128,8 +121,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/cable-clip/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/cable-clip.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/cable-clip.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/cable-clip.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/cable-clip.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/cable-clip.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/cable-clip.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/cable-clip.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/cable-clip.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.cable-gland",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_c46zvkYaaVJfeEKApibEt",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Cable gland",
   "description": "Through-bored gland with retaining flanges and wrench flats; sealing performance is unspecified.",
   "tags": [
@@ -146,8 +138,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/cable-gland/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/cable-gland.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/cable-gland.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/cable-gland.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/cable-gland.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/cable-gland.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/cable-gland.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/cable-gland.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/cable-gland.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.cable-grommet",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj__WM3pyo5aVNh_YrxKWyiO",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Cable grommet",
   "description": "Double-lip cable grommet with a real continuous bore and panel retention groove.",
   "tags": [
@@ -164,8 +155,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/cable-grommet/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/cable-grommet.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/cable-grommet.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/cable-grommet.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/cable-grommet.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/cable-grommet.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/cable-grommet.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/cable-grommet.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/cable-grommet.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.cap-nut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Wd36iF18uNfFKUtq1pDyZ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Cap nut",
   "description": "Cap nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -182,8 +172,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/cap-nut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/cap-nut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/cap-nut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/cap-nut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/cap-nut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/cap-nut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/cap-nut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/cap-nut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/cap-nut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.carriage-bolt",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_pVM47V2zGWugrE3sqi2aB",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Carriage bolt",
   "description": "Carriage bolt with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -200,8 +189,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/carriage-bolt/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/carriage-bolt.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/carriage-bolt.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/carriage-bolt.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/carriage-bolt.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/carriage-bolt.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/carriage-bolt.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/carriage-bolt.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/carriage-bolt.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.castle-nut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_sVyUMu69LgXtV5wgc3vZq",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Castle nut",
   "description": "Castle nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -218,8 +206,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/castle-nut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/castle-nut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/castle-nut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/castle-nut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/castle-nut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/castle-nut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/castle-nut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/castle-nut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/castle-nut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.circular-flange",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_ZLtf0jsD8tsyZrVcOaQOR",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Circular adapter flange",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -236,8 +223,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/circular-flange/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/circular-flange.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/circular-flange.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.clevis-pin",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_NcclbaWXmw1S3E-Hw_G22",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Clevis pin",
   "description": "Headed pivot pin with a real transverse retaining hole.",
   "tags": [
@@ -254,8 +240,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/clevis-pin/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/clevis-pin.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/clevis-pin.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/clevis-pin.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/clevis-pin.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/clevis-pin.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/clevis-pin.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/clevis-pin.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/clevis-pin.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.compression-spring",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_kmiHxq6yyIxvw6MoU0CsW",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Open-end compression spring",
   "description": "A true helical round-wire spring with individually adjustable outer diameter, wire diameter, pitch and integral coil count.",
   "tags": [
@@ -272,8 +257,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/compression-spring/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/compression-spring.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/compression-spring.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.concentric-reducer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_-iNopu5T-GVS46ju6z1pY",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Concentric reducer",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -290,8 +274,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/concentric-reducer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/concentric-reducer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/concentric-reducer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.countersunk-socket-screw",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_KbwbDR07neBsLs8FtRdwx",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Countersunk socket screw",
   "description": "Countersunk socket screw with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -308,8 +291,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/countersunk-socket-screw/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/countersunk-socket-screw.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.cross-plate",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_sVyHPisjZaYRmS7KPdmvR",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Cross mounting plate",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -326,8 +308,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/cross-plate/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/cross-plate.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/cross-plate.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.d-shaft",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_3X_zcVFfUF2IYBFcAAOHq",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "D-flat shaft",
   "description": "Round shaft with one drive flat over its exposed end.",
   "tags": [
@@ -344,8 +325,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/d-shaft/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/d-shaft.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/d-shaft.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.din-rail-clip",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_yMMc6BydMMDj1lXUIWJ3I",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "DIN-rail style mounting clip",
   "description": "Channel clip with inward retention lips; dimensions are generic and require qualification against the selected rail.",
   "tags": [
@@ -362,8 +342,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/din-rail-clip/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/din-rail-clip.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/din-rail-clip.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/din-rail-clip.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/din-rail-clip.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/din-rail-clip.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/din-rail-clip.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/din-rail-clip.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/din-rail-clip.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.dowel-pin",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Fw3LODW2_6Dzl7QggtjCk",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Dowel pin",
   "description": "Chamfered cylindrical locating pin.",
   "tags": [
@@ -380,8 +359,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/dowel-pin/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/dowel-pin.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/dowel-pin.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/dowel-pin.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/dowel-pin.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/dowel-pin.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/dowel-pin.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/dowel-pin.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/dowel-pin.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.enclosure-base",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_YTXH0JhzAUdNWY_L6rKrV",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Enclosure base",
   "description": "Uniform-wall open electronics enclosure base; external dimensions and wall are editable.",
   "tags": [
@@ -398,8 +376,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/enclosure-base/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/enclosure-base.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/enclosure-base.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/enclosure-base.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/enclosure-base.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/enclosure-base.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/enclosure-base.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/enclosure-base.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/enclosure-base.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.enclosure-lid",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Dn_if4M_tHPoFT_dUrxDD",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Enclosure lid",
   "description": "Uniform-wall open electronics enclosure lid; external dimensions and wall are editable.",
   "tags": [
@@ -416,8 +393,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/enclosure-lid/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/enclosure-lid.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/enclosure-lid.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/enclosure-lid.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/enclosure-lid.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/enclosure-lid.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/enclosure-lid.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/enclosure-lid.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/enclosure-lid.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.external-retaining-ring",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_x5OCQJUJp_fUb41FRY9kQ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "External retaining ring",
   "description": "External retaining ring with a modeled opening and editable section dimensions.",
   "tags": [
@@ -434,8 +410,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/external-retaining-ring/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/external-retaining-ring.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/external-retaining-ring.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/external-retaining-ring.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/external-retaining-ring.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/external-retaining-ring.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/external-retaining-ring.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/external-retaining-ring.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/external-retaining-ring.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.eye-bolt",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Fe8a1Nhp0SjR5vWPBW0Sn",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Eye bolt",
   "description": "Eye bolt with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -452,8 +427,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/eye-bolt/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/eye-bolt.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/eye-bolt.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/eye-bolt.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/eye-bolt.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/eye-bolt.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/eye-bolt.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/eye-bolt.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/eye-bolt.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.fan-guard",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_nj9xJGPI05ZNmr1DBjJC6",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Fan guard",
   "description": "Perforated frame with four mounting holes, three protective bars and a central hub.",
   "tags": [
@@ -470,8 +444,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/fan-guard/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/fan-guard.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/fan-guard.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/fan-guard.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/fan-guard.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/fan-guard.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/fan-guard.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/fan-guard.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/fan-guard.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.flanged-ball-bearing",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_al8ByPQXcqR7M3H9bi5Bv",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flanged ball bearing",
   "description": "Two separate races and eight separately named rolling balls, with a through shaft opening and explicit outer envelope.",
   "tags": [
@@ -488,8 +461,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/flanged-ball-bearing/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/flanged-ball-bearing.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.flanged-bushing",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_FKrFXvpNUOoQ61A-E7ahR",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flanged sleeve bushing",
   "description": "Shouldered sleeve with an integral axial locating flange.",
   "tags": [
@@ -506,8 +478,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/flanged-bushing/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/flanged-bushing.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/flanged-bushing.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.flanged-idler",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_5oYhPaihAGIrlffKRv9-e",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flanged guide roller",
   "description": "Guide roller with two retaining flanges and an axle bore.",
   "tags": [
@@ -524,8 +495,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/flanged-idler/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/flanged-idler.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/flanged-idler.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.flat-belt-pulley",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_RJ5lXBba8y3wbzZlHG68b",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Crowned flat-belt pulley",
   "description": "Crowned belt-running surface with a through-bored hub.",
   "tags": [
@@ -542,8 +512,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/flat-belt-pulley/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/flat-belt-pulley.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.flat-gasket",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_k9XPfh3IT092cfnX1qzH-",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flat gasket",
   "description": "Rectangular sealing blank with an open window and four mounting holes.",
   "tags": [
@@ -560,8 +529,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/flat-gasket/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/flat-gasket.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/flat-gasket.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/flat-gasket.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/flat-gasket.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/flat-gasket.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/flat-gasket.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/flat-gasket.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/flat-gasket.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.flat-washer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_xFHEoXnJFKI1bmLL7XI9P",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flat washer",
   "description": "Flat washer; one M3/M4/M5/M6/M8/M10 diameter selects all admitted head, socket or washer dimensions.",
   "tags": [
@@ -578,8 +546,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/flat-washer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/flat-washer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/flat-washer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/flat-washer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/flat-washer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/flat-washer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/flat-washer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/flat-washer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/flat-washer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.gear-rack",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_9EfzcgrdySK9ysxFjFA7E",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Straight gear rack",
   "description": "Metric-module, 20-degree involute transmission geometry with real teeth and a declared datum. Tooth profiles are reused from Tau’s planetary gear design.",
   "tags": [
@@ -596,8 +563,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/gear-rack/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/gear-rack.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/gear-rack.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.grooved-bushing",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_SqCgVEepHTin3Jzqm4n94",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Lubricated bushing",
   "description": "Sleeve with an internal oil-distribution groove and radial oil port.",
   "tags": [
@@ -614,8 +580,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/grooved-bushing/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/grooved-bushing.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/grooved-bushing.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.grooved-shaft",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_EZrzk7IL5NQFwwdSRQAlp",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Retaining-groove shaft",
   "description": "Turned shaft with two circumferential retention grooves.",
   "tags": [
@@ -632,8 +597,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/grooved-shaft/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/grooved-shaft.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/grooved-shaft.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.gusset-plate",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_UzyFz0zMSRWwu4eJhH5lo",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Triangular gusset",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -650,8 +614,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/gusset-plate/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/gusset-plate.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/gusset-plate.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.handwheel",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_7d8YbjeuieNs_gG_ZR3nc",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Four-spoke handwheel",
   "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
   "tags": [
@@ -668,8 +631,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/handwheel/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/handwheel.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/handwheel.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.heat-set-insert",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_MKN-MBO2Cfn1tO7IcfUaJ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Heat-set insert",
   "description": "Heat-set insert with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -686,8 +648,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/heat-set-insert/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/heat-set-insert.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/heat-set-insert.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/heat-set-insert.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/heat-set-insert.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/heat-set-insert.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/heat-set-insert.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/heat-set-insert.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/heat-set-insert.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.helical-gear",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_pJAXrZ5oPZn-IrpO3RVXm",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Helical gear",
   "description": "Metric-module, 20-degree involute transmission geometry with real teeth and a declared datum. Tooth profiles are reused from Tau’s planetary gear design.",
   "tags": [
@@ -704,8 +665,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/helical-gear/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/helical-gear.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/helical-gear.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.hex-bar",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Ptv8oJh82GolM2AJ9y7eA",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hexagonal bar",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -722,8 +682,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/hex-bar/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/hex-bar.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/hex-bar.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.hex-flange-nut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_BqTWMgfFD1fX6OuCX9m9e",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex flange nut",
   "description": "Hex flange nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -740,8 +699,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/hex-flange-nut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/hex-flange-nut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/hex-flange-nut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/hex-flange-nut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/hex-flange-nut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/hex-flange-nut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/hex-flange-nut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/hex-flange-nut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/hex-flange-nut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.hex-head-bolt",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_qOtk4I2XvMptPO9pKyM-O",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex-head bolt",
   "description": "Hex-head bolt; one M3/M4/M5/M6/M8/M10 diameter selects all admitted head, socket or washer dimensions.",
   "tags": [
@@ -758,8 +716,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/hex-head-bolt/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/hex-head-bolt.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/hex-head-bolt.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/hex-head-bolt.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/hex-head-bolt.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/hex-head-bolt.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/hex-head-bolt.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/hex-head-bolt.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/hex-head-bolt.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.hex-nut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_JoeeDW1pgjUhdXtwHipc0",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex nut",
   "description": "Hex nut; one M3/M4/M5/M6/M8/M10 diameter selects all admitted head, socket or washer dimensions.",
   "tags": [
@@ -776,8 +733,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/hex-nut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/hex-nut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/hex-nut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/hex-nut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/hex-nut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/hex-nut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/hex-nut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/hex-nut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/hex-nut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.hex-standoff",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_FH3owiJsjtCPmycx--Xww",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex standoff",
   "description": "Hex standoff with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -794,8 +750,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/hex-standoff/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/hex-standoff.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/hex-standoff.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/hex-standoff.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/hex-standoff.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/hex-standoff.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/hex-standoff.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/hex-standoff.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/hex-standoff.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.hose-barb",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_srSg8Zvz_583TYYRv_kpz",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hose barb adapter",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -812,8 +767,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/hose-barb/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/hose-barb.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/hose-barb.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.i-beam",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_JRfyM3tSCEsLyaT530tMS",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "I-beam",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -830,8 +784,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/i-beam/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/i-beam.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/i-beam.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.internal-tooth-lock-washer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_EVopA1t8nB_Y3nce_4hAJ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Internal-tooth lock washer",
   "description": "Internal-tooth lock washer with a modeled opening and editable section dimensions.",
   "tags": [
@@ -848,8 +801,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/internal-tooth-lock-washer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/internal-tooth-lock-washer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.keyed-shaft",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_0sHu6Z7hJiST3qLRIEnqC",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Keyed shaft",
   "description": "Chamfered shaft with a finite-length milled key seat.",
   "tags": [
@@ -866,8 +818,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/keyed-shaft/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/keyed-shaft.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/keyed-shaft.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.knurled-thumbscrew",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_ZBzD-j69H_0v-64UYSSUt",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Knurled thumbscrew",
   "description": "Knurled thumbscrew with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -884,8 +835,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/knurled-thumbscrew/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/knurled-thumbscrew.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.l-bracket",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_WqFzR21Smjxdk1rPd4Gtm",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "L mounting bracket",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -902,8 +852,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/l-bracket/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/l-bracket.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/l-bracket.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.lever-handle",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_r07Cji_N5ttKEernMt9Er",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flat lever handle",
   "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
   "tags": [
@@ -920,8 +869,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/lever-handle/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/lever-handle.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/lever-handle.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.motor-plate",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_745bI61qDqgr1lDNrzw6A",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Motor mounting plate",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -938,8 +886,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/motor-plate/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/motor-plate.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/motor-plate.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.mounting-disc",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_9L7Y-vTliB3VVJRFTuA9A",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Four-hole mounting disc",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -956,8 +903,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/mounting-disc/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/mounting-disc.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/mounting-disc.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.nylon-insert-locknut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_lTo5NAqvBVFMWoV76Is6S",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Nylon-insert locknut",
   "description": "Nylon-insert locknut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -974,8 +920,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/nylon-insert-locknut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/nylon-insert-locknut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.o-ring",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_yFNc4uXTVfZBU0F1fU1gl",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "O-ring",
   "description": "Circular-section toroidal O-ring in its undeformed free state.",
   "tags": [
@@ -992,8 +937,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/o-ring/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/o-ring.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/o-ring.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/o-ring.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/o-ring.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/o-ring.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/o-ring.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/o-ring.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/o-ring.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.pan-head-machine-screw",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_OOSnnjNun00O_CyFb-4mg",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Pan-head machine screw",
   "description": "Pan-head machine screw with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -1010,8 +954,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/pan-head-machine-screw/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/pan-head-machine-screw.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.panel-blanking-plug",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_TOCgnKQy5aayUHAFrDrV-",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Panel blanking plug",
   "description": "Solid blanking plug with two retention lips and a panel groove.",
   "tags": [
@@ -1028,8 +971,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/panel-blanking-plug/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/panel-blanking-plug.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.parallel-key",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_dtFGLIzHDtbgBCepzzJSd",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Parallel key",
   "description": "Round-ended parallel shaft key with editable length, width and height.",
   "tags": [
@@ -1046,8 +988,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/parallel-key/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/parallel-key.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/parallel-key.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/parallel-key.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/parallel-key.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/parallel-key.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/parallel-key.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/parallel-key.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/parallel-key.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.perforated-plate",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_w3MTl_Dou6wBmEkU3eobK",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Four-hole mounting plate",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -1064,8 +1005,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/perforated-plate/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/perforated-plate.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/perforated-plate.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.pipe-elbow",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_zxUdyJ9KrzwkeCFpG1w9d",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Swept pipe elbow",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -1082,8 +1022,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/pipe-elbow/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/pipe-elbow.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/pipe-elbow.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.pipe-flange",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_TxhhNWuKJ_GZXmplOMfgk",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hubbed pipe flange",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -1100,8 +1039,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/pipe-flange/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/pipe-flange.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/pipe-flange.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.pipe-nipple",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_ohjYXE8-zp94r9lvctaoC",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex pipe nipple",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -1118,8 +1056,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/pipe-nipple/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/pipe-nipple.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/pipe-nipple.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.pipe-tee",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_6VBTKCdcb23kC86cG1jJk",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Pipe tee",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -1136,8 +1073,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/pipe-tee/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/pipe-tee.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/pipe-tee.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.pull-handle",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_dyvfTbE9BMhPjtAy3S5eW",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Loop pull handle",
   "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
   "tags": [
@@ -1154,8 +1090,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/pull-handle/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/pull-handle.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/pull-handle.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.rectangular-tube",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_P0ypHLDh3AWYHRdU6Ghdc",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Rectangular hollow section",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -1172,8 +1107,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/rectangular-tube/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/rectangular-tube.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/rectangular-tube.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.rigid-coupling",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_JKDbgIL4T8A6m1aslpx9K",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Rigid shaft coupling",
   "description": "Through-bored coupling with two independently placed radial set-screw holes.",
   "tags": [
@@ -1190,8 +1124,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/rigid-coupling/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/rigid-coupling.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/rigid-coupling.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.ring-gear",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_tWsiNDnVQ4WYdJ-i6qajS",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Internal ring gear",
   "description": "Metric-module, 20-degree involute transmission geometry with real teeth and a declared datum. Tooth profiles are reused from Tau’s planetary gear design.",
   "tags": [
@@ -1208,8 +1141,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/ring-gear/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/ring-gear.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/ring-gear.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.rivet-nut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_9ZPGYf7ZG1lK6v1kbuAsZ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Rivet nut",
   "description": "Rivet nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -1226,8 +1158,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/rivet-nut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/rivet-nut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/rivet-nut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/rivet-nut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/rivet-nut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/rivet-nut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/rivet-nut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/rivet-nut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/rivet-nut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.round-tube",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_kac-DrWlYSJj1NXySvjun",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Round tube",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -1244,8 +1175,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/round-tube/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/round-tube.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/round-tube.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.set-screw-collar",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_JTIj77YkK1QsrqgniLmUs",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Set-screw shaft collar",
   "description": "Axial stop collar with a radial screw opening.",
   "tags": [
@@ -1262,8 +1192,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/set-screw-collar/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/set-screw-collar.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/set-screw-collar.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.shoulder-screw",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_vP-axHi4y3zckFHrceVue",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Shoulder screw",
   "description": "Shoulder screw with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -1280,8 +1209,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/shoulder-screw/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/shoulder-screw.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/shoulder-screw.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/shoulder-screw.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/shoulder-screw.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/shoulder-screw.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/shoulder-screw.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/shoulder-screw.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/shoulder-screw.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.sleeve-bushing",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_a_lbNRvW5id5qKQjj6yvx",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Plain sleeve bushing",
   "description": "Chamfered annular sleeve with a continuous shaft bore.",
   "tags": [
@@ -1298,8 +1226,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/sleeve-bushing/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/sleeve-bushing.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/sleeve-bushing.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.slotted-plate",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_IVkC5hYxnpT0dysKEG1pp",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted adjustment plate",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -1316,8 +1243,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/slotted-plate/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/slotted-plate.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/slotted-plate.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.slotted-shim",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_0VmxulgvyXn7ORx9iE9xf",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted shim",
   "description": "Slotted shim with a modeled opening and editable section dimensions.",
   "tags": [
@@ -1334,8 +1260,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/slotted-shim/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/slotted-shim.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/slotted-shim.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/slotted-shim.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/slotted-shim.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/slotted-shim.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/slotted-shim.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/slotted-shim.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/slotted-shim.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.slotted-spring-pin",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_wagZCtLVdKlC0tCpYBGRf",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted spring pin",
   "description": "Hollow cylindrical spring pin with a full-length open slot.",
   "tags": [
@@ -1352,8 +1277,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/slotted-spring-pin/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/slotted-spring-pin.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.socket-head-cap-screw",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_zyhRSjTqq_A6v4ve4tvrs",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Socket-head cap screw",
   "description": "Socket-head cap screw; one M3/M4/M5/M6/M8/M10 diameter selects all admitted head, socket or washer dimensions.",
   "tags": [
@@ -1370,8 +1294,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/socket-head-cap-screw/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/socket-head-cap-screw.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.socket-plug",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_gWmEx_NOFlda_GObYhGAy",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex-socket plug",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [
@@ -1388,8 +1311,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/socket-plug/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/socket-plug.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/socket-plug.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.socket-set-screw",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_u_e4rESStCH2yIUtF3DoT",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Socket set screw",
   "description": "Socket set screw with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -1406,8 +1328,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/socket-set-screw/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/socket-set-screw.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/socket-set-screw.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/socket-set-screw.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/socket-set-screw.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/socket-set-screw.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/socket-set-screw.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/socket-set-screw.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/socket-set-screw.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.split-bushing",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_JqpxOWjPFA_aVmN4FqbpT",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Split sleeve bushing",
   "description": "Slotted sleeve that can accommodate radial compression.",
   "tags": [
@@ -1424,8 +1345,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/split-bushing/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/split-bushing.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/split-bushing.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.split-collar",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_9zhA_t5JRFmBCbHWs4b5D",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Split clamp collar",
   "description": "Slit collar with a transverse clamping screw opening.",
   "tags": [
@@ -1442,8 +1362,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/split-collar/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/split-collar.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/split-collar.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.split-lock-washer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_I7ti9jCKyNTMtEx9sOYrz",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Split lock washer",
   "description": "Split lock washer with a modeled opening and editable section dimensions.",
   "tags": [
@@ -1460,8 +1379,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/split-lock-washer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/split-lock-washer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/split-lock-washer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/split-lock-washer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/split-lock-washer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/split-lock-washer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/split-lock-washer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/split-lock-washer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/split-lock-washer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.spur-gear",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_vx4dNSPZuZY0PZzslfamS",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Involute spur gear",
   "description": "Metric-module, 20-degree involute transmission geometry with real teeth and a declared datum. Tooth profiles are reused from Tau’s planetary gear design.",
   "tags": [
@@ -1478,8 +1396,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/spur-gear/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/spur-gear.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/spur-gear.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.square-bar",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_ISIkV9SJx8rG-xnbrcWeW",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Rectangular bar",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -1496,8 +1413,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/square-bar/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/square-bar.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/square-bar.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.square-washer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_zdz2wDv6pIq4uQWOPMbJN",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Square washer",
   "description": "Square washer with a modeled opening and editable section dimensions.",
   "tags": [
@@ -1514,8 +1430,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/square-washer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/square-washer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/square-washer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/square-washer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/square-washer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/square-washer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/square-washer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/square-washer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/square-washer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.star-knob",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_smdeWR2HX9rEdANakpv71",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Six-lobe hand knob",
   "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
   "tags": [
@@ -1532,8 +1447,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/star-knob/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/star-knob.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/star-knob.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.stepped-shaft",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_sK51FLB1FWdibdlmjSUng",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Stepped shaft",
   "description": "Turned shaft with two reduced journals and a full-diameter central shoulder.",
   "tags": [
@@ -1550,8 +1464,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/stepped-shaft/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/stepped-shaft.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/stepped-shaft.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.t-slot-extrusion",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_AeC2MVcmpnOAcOylk3ls0",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Four-slot extrusion",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -1568,8 +1481,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/t-slot-extrusion/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/t-slot-extrusion.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.t-slot-nut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_RBZ5KMRCzzPRNQAJbecBS",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "T-slot nut",
   "description": "T-slot nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -1586,8 +1498,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/t-slot-nut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/t-slot-nut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/t-slot-nut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/t-slot-nut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/t-slot-nut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/t-slot-nut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/t-slot-nut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/t-slot-nut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/t-slot-nut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.tab-washer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_kKZTfApZRke3wercHXRzl",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Tab washer",
   "description": "Tab washer with a modeled opening and editable section dimensions.",
   "tags": [
@@ -1604,8 +1515,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/tab-washer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/tab-washer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/tab-washer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/tab-washer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/tab-washer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/tab-washer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/tab-washer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/tab-washer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/tab-washer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.threaded-stud",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_KNvDRxoN4twslXk6gZJqN",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted threaded stud",
   "description": "Slotted threaded stud with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -1622,8 +1532,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/threaded-stud/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/threaded-stud.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/threaded-stud.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/threaded-stud.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/threaded-stud.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/threaded-stud.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/threaded-stud.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/threaded-stud.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/threaded-stud.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.thrust-bearing",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_tjNeJoVjz6GRTDtTa1j86",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Thrust ball bearing",
   "description": "Two separate races and eight separately named rolling balls, with a through shaft opening and explicit outer envelope.",
   "tags": [
@@ -1640,8 +1549,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/thrust-bearing/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/thrust-bearing.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/thrust-bearing.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.thumbwheel",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_04GQvStqpWWt7NDkaSCMY",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Scalloped thumbwheel",
   "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
   "tags": [
@@ -1658,8 +1566,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/thumbwheel/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/thumbwheel.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/thumbwheel.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.tubular-spacer",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_38kwwo_BrObPz53W1ulwr",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Tubular spacer",
   "description": "Tubular spacer with a modeled opening and editable section dimensions.",
   "tags": [
@@ -1676,8 +1583,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/tubular-spacer/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/tubular-spacer.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/tubular-spacer.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/tubular-spacer.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/tubular-spacer.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/tubular-spacer.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/tubular-spacer.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/tubular-spacer.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/tubular-spacer.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.u-bracket",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_S8_wKJlsvchAB1-bUQYSJ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "U mounting bracket",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -1694,8 +1600,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/u-bracket/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/u-bracket.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/u-bracket.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.u-channel",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_4jjq_nYsGpKg7orqjLpUX",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "U-channel",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [
@@ -1712,8 +1617,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/u-channel/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/u-channel.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/u-channel.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.v-belt-pulley",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_RSg02ND_PXs8aFHCFb4Te",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "V-groove pulley",
   "description": "Turned sheave with sloping groove flanks and a central shaft bore.",
   "tags": [
@@ -1730,8 +1634,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/v-belt-pulley/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/v-belt-pulley.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/v-belt-pulley.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.window-plate",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_uMBZupoTD7wgd2lhQ6JRy",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Windowed mounting plate",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [
@@ -1748,8 +1651,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/window-plate/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"gear-profile.ts",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["gear-profile.ts"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/window-plate.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/window-plate.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.wing-nut",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_AA2F3dRVSRzSkVvpL1_x_",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Wing nut",
   "description": "Wing nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [
@@ -1766,8 +1668,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/wing-nut/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/wing-nut.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/wing-nut.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/wing-nut.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/wing-nut.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/wing-nut.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/wing-nut.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/wing-nut.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/wing-nut.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.woodruff-key",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_jcyUpgvBdwK3FtVbRpCrv",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Woodruff key",
   "description": "Semicircular disk key with a flat top and cylindrical seating arc.",
   "tags": [
@@ -1784,8 +1685,7 @@ export const warehouseParts: readonly WarehousePart[] = [{locator:"warehouse.ang
   }
 },thumbnailUrl:new URL('../parts/woodruff-key/thumbnail.webp', import.meta.url).href,assets:[{path:"tau.json",load:async()=>{const source=await import('./projects/woodruff-key.js');return new TextEncoder().encode(source.files["tau.json"]);}},{path:"parameters.ts",load:async()=>{const source=await import('./projects/woodruff-key.js');return new TextEncoder().encode(source.files["parameters.ts"]);}},{path:"validation.ts",load:async()=>{const source=await import('./projects/woodruff-key.js');return new TextEncoder().encode(source.files["validation.ts"]);}},{path:"main.ts",load:async()=>{const source=await import('./projects/woodruff-key.js');return new TextEncoder().encode(source.files["main.ts"]);}},{path:"main.geospec.ts",load:async()=>{const source=await import('./projects/woodruff-key.js');return new TextEncoder().encode(source.files["main.geospec.ts"]);}},{path:"README.md",load:async()=>{const source=await import('./projects/woodruff-key.js');return new TextEncoder().encode(source.files["README.md"]);}},{path:"model.ts",load:async()=>{const source=await import('./projects/woodruff-key.js');return new TextEncoder().encode(source.files["model.ts"]);}},{path:'thumbnail.webp',load:async()=>{const source=await import('./projects/woodruff-key.js');return Uint8Array.from(globalThis.atob(source.thumbnail),(character)=>character.codePointAt(0) ?? 0);}}]},
 {locator:"warehouse.z-bracket",kernel:'replicad',manifest:{
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_noajVYpobG3QXJVHCGSU5",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Offset Z bracket",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [

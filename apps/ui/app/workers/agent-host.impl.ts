@@ -664,7 +664,7 @@ const composeProjectHost = async (
       ...(residentRuntime === undefined ? {} : { machines: residentRuntime.machines }),
       machineSettings: preferences,
       print: {
-        /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads
+        /* The established project ID every print request from this project's agent names (blueprint D5). An attempt reads
          * its artifact from the checkout its placement granted. */
         projectId: provide.authority.projectId,
         readArtifact: async ({ path, signal }) => {

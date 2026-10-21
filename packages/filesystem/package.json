@@ -98,7 +98,8 @@
     "@taucad/project-core": "workspace:*",
     "jszip": "^3.10.1",
     "nanoid": "catalog:",
-    "type-fest": "catalog:"
+    "type-fest": "catalog:",
+    "xstate": "catalog:"
   },
   "devDependencies": {
     "@parcel/watcher": "catalog:",

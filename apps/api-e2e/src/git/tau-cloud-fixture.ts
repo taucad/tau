@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
+import { generatePrefixedId } from '@taucad/utils/id';
 import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 
 /**
@@ -231,7 +232,7 @@ export const resetOwnerStorage = async (owner: TauCloudOwner): Promise<void> => 
 };
 
 /** A fresh project id in the shape `isProjectRepositoryId` accepts. */
-export const gitE2EProjectId = (): string => `proj_${randomUUID().replaceAll('-', '')}`;
+export const gitE2EProjectId = (): string => generatePrefixedId('proj');
 
 /**
  * Remove everything one owner left behind that may be removed.

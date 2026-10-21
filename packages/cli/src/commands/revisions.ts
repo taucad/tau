@@ -78,7 +78,7 @@ const open = async (
   if (!existsSync(workspaceRoot)) {
     throw cliError('NO_PROJECT', `${workspaceRoot} does not exist.`, exitCodes.refused);
   }
-  const revisions = openProjectRevisions({ workspaceRoot, ...session });
+  const revisions = await openProjectRevisions({ workspaceRoot, ...session });
   try {
     await revisions.describeEngine();
   } catch {

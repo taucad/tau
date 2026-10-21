@@ -3331,7 +3331,7 @@ describe('Saved machine profiles', () => {
 });
 
 describe('Print pane artifacts and history', () => {
-  /** Another project's `tau.json` id. */
+  /** Another project's established project ID. */
   const otherProjectId = 'proj_000000000000000000002';
 
   it('writes a slice once under its digest, replacing only a file that does not hold it', async () => {

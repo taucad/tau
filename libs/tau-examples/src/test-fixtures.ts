@@ -72,7 +72,7 @@ export const testFixtures = [
   {
     locator: "jscad.cube-cylinder-section-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_qIWjERe3Mu8SIuO82tkqb","name":"Cube Cylinder Section Fixture","description":"A deterministic cube with a cylindrical through-cut for WebGL section-view overlay depth regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Cube Cylinder Section Fixture","description":"A deterministic cube with a cylindrical through-cut for WebGL section-view overlay depth regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail0,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/cube-cylinder-section-fixture/main.ts") },
@@ -83,7 +83,7 @@ export const testFixtures = [
   {
     locator: "jscad.edge-occlusion-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_gr20SlrHcQcug04OlzVox","name":"Edge Occlusion Fixture","description":"A deterministic front-slab and rear-cuboid scene for low-FOV GLTF edge occlusion regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Edge Occlusion Fixture","description":"A deterministic front-slab and rear-cuboid scene for low-FOV GLTF edge occlusion regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail1,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/edge-occlusion-fixture/main.ts") },
@@ -94,7 +94,7 @@ export const testFixtures = [
   {
     locator: "jscad.non-manifold-section-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_fxgUGmBaByeuYKLLnCAi4","name":"Non-Manifold Section Fixture","description":"A deterministic one-mesh, non-booleaned pair of touching solids for section-view cap recovery regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Non-Manifold Section Fixture","description":"A deterministic one-mesh, non-booleaned pair of touching solids for section-view cap recovery regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail2,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/non-manifold-section-fixture/main.ts") },
@@ -105,7 +105,7 @@ export const testFixtures = [
   {
     locator: "jscad.section-cap-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_6d7yN2GPDnBHNp5tDKj4k","name":"Section Cap Fixture","description":"A deterministic holed housing with colored internal solids for section-view cap and contour-fill regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Section Cap Fixture","description":"A deterministic holed housing with colored internal solids for section-view cap and contour-fill regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail3,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/section-cap-fixture/main.ts") },
@@ -116,7 +116,7 @@ export const testFixtures = [
   {
     locator: "jscad.section-overlap-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_ZTFWxDD8N8ukkYmDCraiL","name":"Section Overlap Fixture","description":"A deterministic set of overlapping and tangent cuboids for section-plane overlap cap-shading regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Section Overlap Fixture","description":"A deterministic set of overlapping and tangent cuboids for section-plane overlap cap-shading regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail4,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/section-overlap-fixture/main.ts") },
@@ -127,7 +127,7 @@ export const testFixtures = [
   {
     locator: "jscad.section-overlap-heavy-planetary-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_IgqN2fxzG85CsgApKjCfT","name":"Heavy Planetary Section Overlap Fixture","description":"A deterministic dense planetary-style assembly for section-view overlap drag performance diagnostics.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Heavy Planetary Section Overlap Fixture","description":"A deterministic dense planetary-style assembly for section-view overlap drag performance diagnostics.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail5,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/section-overlap-heavy-planetary-fixture/main.ts") },
@@ -138,7 +138,7 @@ export const testFixtures = [
   {
     locator: "jscad.section-overlap-heavy-v8-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_WhNvy0j3FSsZgo5Z6x5vu","name":"Heavy V8 Section Overlap Fixture","description":"A deterministic engine-style assembly for section-view overlap drag performance diagnostics.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Heavy V8 Section Overlap Fixture","description":"A deterministic engine-style assembly for section-view overlap drag performance diagnostics.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail6,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/section-overlap-heavy-v8-fixture/main.ts") },
@@ -149,7 +149,7 @@ export const testFixtures = [
   {
     locator: "jscad.section-picking-fixture",
     kernel: "jscad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_D2xfPM58AjAVHbdJM5uAV","name":"Section Picking Fixture","description":"A deterministic two-cuboid scene for section-view clipping-aware model picking regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Section Picking Fixture","description":"A deterministic two-cuboid scene for section-view clipping-aware model picking regression testing.","tags":["3d-printing","parametric","jscad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail7,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/jscad/section-picking-fixture/main.ts") },
@@ -160,7 +160,7 @@ export const testFixtures = [
   {
     locator: "picovoxel.quasicrystal",
     kernel: "picovoxel",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000028","name":"PicoVoxel Quasicrystal","description":"PicoVoxel Quasicrystal community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoVoxel Quasicrystal","description":"PicoVoxel Quasicrystal community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail8,
     assets: [
       { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/quasicrystal/README.md") },
@@ -177,7 +177,7 @@ export const testFixtures = [
   {
     locator: "picovoxel.rover-wheel",
     kernel: "picovoxel",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000029","name":"PicoVoxel Rover Wheel","description":"PicoVoxel Rover Wheel community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoVoxel Rover Wheel","description":"PicoVoxel Rover Wheel community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail9,
     assets: [
       { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/rover-wheel/README.md") },
@@ -196,7 +196,7 @@ export const testFixtures = [
   {
     locator: "picovoxel.simple-fluid-simulation",
     kernel: "picovoxel",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_picovoxel000000000030","name":"PicoVoxel Simple Fluid Simulation","description":"PicoVoxel Simple Fluid Simulation community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"PicoVoxel Simple Fluid Simulation","description":"PicoVoxel Simple Fluid Simulation community example, adapted to Tau's injected-session runtime.","tags":["picovoxel","typescript","community-example"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail10,
     assets: [
       { path: "README.md", load: loadTextAsset.bind(undefined, "./kernels/picovoxel/simple-fluid-simulation/README.md") },
@@ -212,7 +212,7 @@ export const testFixtures = [
   {
     locator: "replicad.flower-attachment-section-outline-fixture",
     kernel: "replicad",
-    manifest: {"$schema":"https://tau.new/schemas/tau-schema-v1.json","id":"proj_2RXCvaH02ICXmgr557YOY","name":"Flower Attachment Section Outline Fixture","description":"A real exported Replicad flower attachment source fixture for section-view contour outline visual regression testing.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
+    manifest: {"$schema":"https://tau.new/schemas/tau-v1.json","name":"Flower Attachment Section Outline Fixture","description":"A real exported Replicad flower attachment source fixture for section-view contour outline visual regression testing.","tags":["3d-printing","parametric","replicad"],"assets":{"main":{"entryPath":"main.ts","thumbnail":"thumbnail.webp"}}},
     thumbnailUrl: thumbnail11,
     assets: [
       { path: "main.ts", load: loadTextAsset.bind(undefined, "./kernels/replicad/flower-attachment-section-outline-fixture/main.ts") },

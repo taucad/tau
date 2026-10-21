@@ -159,6 +159,12 @@ const countingCheckout = (
       }
       return real.readdir(path);
     },
+    readdirEntries: async (path: string) => {
+      if (path === '') {
+        counts.rootListings += 1;
+      }
+      return real.readdirEntries(path);
+    },
     writeFile: async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
       counts.writeFile += 1;
       await mutate('writeFile', async () => real.writeFile(pathOf(path), data));
@@ -259,13 +265,17 @@ const liveCheckout: Checkout = {
 };
 
 /** The extracted apply primitive over the counting checkout used by the crash rows. */
-const materializer = (checkout: RevisionFileSystem) => {
+const materializer = (
+  checkout: RevisionFileSystem,
+  prepareTarget?: Parameters<typeof createApplyTreeEffects>[0]['prepareTarget'],
+) => {
   let temporary = 0;
   return createApplyTreeEffects({
     useFileSystem: async (_place, operation) => operation(checkout),
     capture: async () =>
       captureRevisionTree(checkout, { exclude: (path) => !tauRevisionPolicy.policy.classify(path).versioned }),
     onApplyingTree: undefined,
+    ...(prepareTarget === undefined ? {} : { prepareTarget }),
     policy: tauRevisionPolicy.policy,
     withCheckoutFence: async (_checkoutId, operation) => operation(),
     checkoutTreeId: async (_checkoutId, tree) => revisionTreeId(tree, 'sha1'),
@@ -689,5 +699,57 @@ describe('a path that changes kind', () => {
 
     expect(await context.tree.exists('gone')).toBe(false);
     expect(await filesOf(context.tree)).toEqual(['kept/node_modules/pkg.js', 'main.ts']);
+  });
+});
+
+describe('conversion inside recoverable materialization', () => {
+  it('should retain a concurrent authored edit when preparation fails before applying any bytes', async () => {
+    const context = await project({ 'tau.json': 'before' });
+    const target = new ImmutableRevisionTree([['tau.json', 'incoming']]);
+    await expect(
+      materializer(context.checkout, async () => {
+        await context.tree.writeFile('tau.json', 'incoming');
+        throw new Error('identity conflict');
+      })(liveCheckout, target),
+    ).rejects.toThrow('identity conflict');
+    expect(await context.tree.readFile('tau.json', 'utf8')).toBe('incoming');
+  });
+
+  it('should restore the previous files and withhold publication when conversion fails', async () => {
+    const context = await project({ 'tau.json': 'before', 'part.ts': 'old' });
+    let published = false;
+    const target = new ImmutableRevisionTree([
+      ['tau.json', 'imported'],
+      ['part.ts', 'new'],
+    ]);
+    await expect(
+      materializer(context.checkout, async () => {
+        throw new Error('identity conflict');
+      })(liveCheckout, target, {
+        publish: async () => {
+          published = true;
+        },
+      }),
+    ).rejects.toThrow('identity conflict');
+    expect(published).toBe(false);
+    expect(await context.tree.readFile('tau.json', 'utf8')).toBe('before');
+    expect(await context.tree.readFile('part.ts', 'utf8')).toBe('old');
+  });
+
+  it('should roll back its converted bytes when later publication fails', async () => {
+    const context = await project({ 'tau.json': 'before' });
+    const target = new ImmutableRevisionTree([['tau.json', 'imported']]);
+    const converted = new ImmutableRevisionTree([['tau.json', 'converted']]);
+    await expect(
+      materializer(context.checkout, async () => {
+        return { tree: converted };
+      })(liveCheckout, target, {
+        publish: async () => {
+          throw new Error('publish refused');
+        },
+      }),
+    ).rejects.toThrow('publish refused');
+    expect(await context.tree.readFile('tau.json', 'utf8')).toBe('before');
+    expect(new TextDecoder().decode(target.get('tau.json'))).toBe('imported');
   });
 });

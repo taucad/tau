@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { createHash } from 'node:crypto';
 import { emptyChatLedger, foldChatLedger, parseEventLog, parseLogEvent, reduceEventLog } from '@taucad/agent-host';
+import { projectIdentitySchema } from '@taucad/project-core/identity';
 import { projectManifestSchema } from '@taucad/project-core';
 import type { AgentLogEvent } from '@taucad/agent-host';
 import { expect, test } from 'vitest';
@@ -476,6 +477,8 @@ test('diagnoses actual native 1000 turn possibly prewarmed selection warm and he
             .digest('hex'),
           manifest: {
             ...projectManifestSchema.parse(JSON.parse(await readFile(join(closureRoot, 'tau.json'), 'utf8'))),
+            id: projectIdentitySchema.parse(JSON.parse(await readFile(join(closureRoot, '.tau/project.json'), 'utf8')))
+              .projectId,
             sha256: createHash('sha256')
               .update(await readFile(join(closureRoot, 'tau.json')))
               .digest('hex'),
@@ -573,6 +576,9 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
     const closure = join(artifactRoot, 'rooted-project');
     const manifestBytes = await readFile(join(closure, 'tau.json'));
     const manifest = projectManifestSchema.parse(JSON.parse(manifestBytes.toString('utf8')));
+    const identity = projectIdentitySchema.parse(
+      JSON.parse(await readFile(join(closure, '.tau/project.json'), 'utf8')),
+    );
     let receipt = sourceReceipt;
     if (matrixPath === undefined) {
       expect(receipt.schema).toBe('tau-native-projection-fixture-v1');
@@ -615,13 +621,13 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       selectedExpected = selected!.expected;
       const proof = await validateProjectionDirectory(artifactRoot, selectedExpected);
       const raw = JSON.parse(await readFile(join(artifactRoot, 'receipt.json'), 'utf8')) as ProjectionDirectoryReceipt;
-      expect(raw.project.projectId).toBe(manifest.id);
+      expect(raw.project.projectId).toBe(identity.projectId);
       turnCount = selectedExpected.turns;
       seedBytes = selected!.seedBytes;
       receipt = {
         schema: 'tau-raw-projection-fixture-v1',
         manifest: {
-          id: manifest.id,
+          id: identity.projectId,
           name: manifest.name,
           sha256: createHash('sha256').update(manifestBytes).digest('hex'),
         },
@@ -633,7 +639,7 @@ test.skipIf(!process.env['TAU_E2E_PROJECTION_IMPORT_ROOT'])(
       };
     }
     expect(createHash('sha256').update(manifestBytes).digest('hex')).toBe(receipt.manifest.sha256);
-    expect(manifest.id).toBe(receipt.manifest.id);
+    expect(identity.projectId).toBe(receipt.manifest.id);
     expect(manifest.name).toBe(receipt.manifest.name);
     expect(await nativeFixtureFiles(closure)).toEqual(receipt.closureFiles);
     expect(await readdir(join(closure, '.tau/chats'))).toEqual([receipt.benchmarkChat]);

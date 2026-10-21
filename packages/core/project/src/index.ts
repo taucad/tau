@@ -1,5 +1,5 @@
 export {
-  parseAdoptableProjectManifestBytes,
+  convertLegacyProjectManifestBytes,
   parseProjectManifestBytes,
   projectIdSchema,
   projectManifestMaxBytes,
@@ -10,8 +10,7 @@ export {
   serializeProjectManifest,
 } from '#project-manifest.js';
 export type {
-  AdoptableProjectManifest,
-  AdoptableProjectManifestParseResult,
+  LegacyProjectManifestConversionResult,
   ProjectManifest,
   ProjectManifestParseIssue,
   ProjectManifestParseResult,

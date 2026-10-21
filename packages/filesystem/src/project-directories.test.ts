@@ -1,6 +1,6 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
@@ -17,7 +17,12 @@ import {
   projectToManifest,
   serializeProjectManifest,
 } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { Project } from '@taucad/types';
+import {
+  parseProjectIdentityBytes,
+  projectIdentityPath,
+  serializeProjectIdentity,
+} from '@taucad/project-core/identity';
 
 /** Distinct IndexedDB database prefixes for the rows that build their own authority. */
 let databaseSequence = 0;
@@ -42,23 +47,28 @@ describe('WorkspaceFileService', () => {
     rootProvider = context.provider;
   });
 
+  afterEach(() => {
+    service.dispose();
+  });
+
   describe('project discovery', () => {
-    const manifestProject = (id: string, name = id): ProjectManifest =>
-      projectToManifest({
-        id,
+    const manifestProject = (id: string, name = id): Project => ({
+      id,
+      ...projectToManifest({
         name,
         description: '',
         tags: [],
         assets: { main: { entryPath: 'main.ts' } },
-      });
+      }),
+    });
 
-    const writeManifest = async (
-      provider: FileSystemProvider,
-      directory: string,
-      project: ProjectManifest,
-    ): Promise<void> => {
+    const writeManifest = async (provider: FileSystemProvider, directory: string, project: Project): Promise<void> => {
       await provider.mkdir(directory);
       await provider.writeFile(`${directory}/tau.json`, serializeProjectManifest(projectToManifest(project)));
+      await provider.writeFile(
+        `${directory}/${projectIdentityPath}`,
+        serializeProjectIdentity({ version: 1, projectId: project.id }),
+      );
     };
 
     it('discovers valid manifests and applies deterministic duplicate-id ordering', async () => {
@@ -79,151 +89,224 @@ describe('WorkspaceFileService', () => {
       expect(result.roots).toEqual([{ status: 'complete', root: { backend: 'indexeddb' } }]);
     });
 
-    it('surfaces a malformed id as adoption-required without mutating the file', async () => {
+    it('should initialize hand-authored manifests without rewriting their bytes', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-      const source = projectToManifest(manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb', 'Dropped')) as Record<
-        string,
-        unknown
-      >;
-      source['id'] = 'copied-folder';
-      await provider.mkdir('dropped');
-      const bytes = encoder.encode(JSON.stringify(source));
-      await provider.writeFile('dropped/tau.json', bytes);
-      await service.configureProjectRoots({
-        projects: [],
-        roots: [{ backend: 'indexeddb' }],
-      });
-
-      expect(await service.listProjectManifests()).toMatchObject({
-        entries: [
-          {
-            status: 'adoption-required',
-            locator: { relativeDirectory: 'dropped' },
-            manifest: { name: 'Dropped' },
-          },
-        ],
-      });
-      expect(await provider.readFile('dropped/tau.json')).toEqual(bytes);
+      const bytes = serializeProjectManifest(
+        projectToManifest(manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb', 'Hand authored')),
+      );
+      await provider.writeFile('authored/tau.json', bytes);
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const first = await service.listProjectManifests();
+      const identity = parseProjectIdentityBytes(await provider.readFile(`authored/${projectIdentityPath}`));
+      expect(identity.projectId).toMatch(/^proj_[\dA-Za-z]{21}$/);
+      expect(first.entries).toMatchObject([
+        { status: 'valid', projectId: identity.projectId, manifest: { name: 'Hand authored' } },
+      ]);
+      expect(await provider.readFile('authored/tau.json')).toEqual(bytes);
+      const discovery1 = await service.listProjectManifests();
+      expect(discovery1.entries).toEqual(first.entries);
     });
 
-    // R11 — `adoption-required` used to be a dead-end banner.
-    describe('adoptProjectDirectory', () => {
-      const adoptable = {
-        $schema: projectManifestSchemaUrl,
-        name: 'Dropped',
-        description: 'copied without its identity',
-        tags: ['gearbox', 'v2'],
-        assets: { main: { entryPath: 'main.ts', thumbnail: 'thumb.png' } },
-      };
+    it('should converge concurrent discovery on one durable identity with one write', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await provider.writeFile(
+        'concurrent/tau.json',
+        serializeProjectManifest(projectToManifest(manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb'))),
+      );
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const writes = vi.spyOn(provider, 'writeFile');
+      const results = await Promise.all(Array.from({ length: 8 }, async () => service.listProjectManifests()));
+      const durable = parseProjectIdentityBytes(await provider.readFile(`concurrent/${projectIdentityPath}`));
+      for (const result of results) {
+        expect(result.entries).toMatchObject([{ status: 'valid', projectId: durable.projectId }]);
+      }
+      expect(writes.mock.calls.filter(([path]) => path === `concurrent/${projectIdentityPath}`)).toHaveLength(1);
+    });
 
-      const writeRaw = async (provider: FileSystemProvider, directory: string, value: unknown): Promise<void> => {
-        await provider.mkdir(directory);
-        await provider.writeFile(`${directory}/tau.json`, encoder.encode(JSON.stringify(value)));
-        await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
-      };
+    it('should observe identity replacement on repeated discovery without a stale cache', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const project = manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb');
+      await writeManifest(provider, 'changed', project);
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const discovery2 = await service.listProjectManifests();
+      expect(discovery2.entries).toMatchObject([{ status: 'valid', projectId: project.id }]);
+      const replacement = 'proj_ccccccccccccccccccccc';
+      await provider.writeFile(
+        `changed/${projectIdentityPath}`,
+        serializeProjectIdentity({ version: 1, projectId: replacement }),
+      );
+      const discovery3 = await service.listProjectManifests();
+      expect(discovery3.entries).toMatchObject([{ status: 'valid', projectId: replacement }]);
+    });
 
-      const locatorFor = async (directory: string) => {
-        const { entries } = await service.listProjectManifests();
-        const entry = entries.find((candidate) => candidate.locator.relativeDirectory === directory);
-        if (!entry) {
-          throw new Error(`No discovery entry for /${directory}`);
+    it('should keep established read-only projects usable and report missing persistence explicitly', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const project = manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb');
+      await writeManifest(provider, 'established', project);
+      await provider.writeFile('new/tau.json', serializeProjectManifest(projectToManifest(project)));
+      Object.defineProperty(provider, 'capabilities', {
+        value: { ...provider.capabilities, writable: false },
+        configurable: true,
+      });
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const writes = vi.spyOn(provider, 'writeFile');
+      const discovery4 = await service.listProjectManifests();
+      expect(discovery4.entries).toMatchObject([
+        { status: 'valid', projectId: project.id },
+        { status: 'invalid', issue: { code: 'identity-unavailable' } },
+      ]);
+      expect(writes).not.toHaveBeenCalled();
+    });
+
+    it('should preserve the legacy ID before converting exact prerelease bytes', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const legacy = {
+        ...manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb', 'Backed up'),
+        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      };
+      await provider.writeFile('legacy/tau.json', encoder.encode(JSON.stringify(legacy)));
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const discovery5 = await service.listProjectManifests();
+      expect(discovery5.entries).toMatchObject([{ status: 'valid', projectId: legacy.id }]);
+      expect(parseProjectIdentityBytes(await provider.readFile(`legacy/${projectIdentityPath}`)).projectId).toBe(
+        legacy.id,
+      );
+      const manifest = parseProjectManifestBytes(await provider.readFile('legacy/tau.json'));
+      expect(manifest).toMatchObject({ success: true, data: { $schema: projectManifestSchemaUrl, name: legacy.name } });
+      expect(decoder.decode(await provider.readFile('legacy/tau.json'))).not.toContain('"id"');
+    });
+
+    it('should refuse contradictory legacy and durable identity without rewriting either', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const legacy = {
+        ...manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb'),
+        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      };
+      const bytes = encoder.encode(JSON.stringify(legacy));
+      const actualProjectId = 'proj_ccccccccccccccccccccc';
+      await provider.writeFile('conflict/tau.json', bytes);
+      const identity = serializeProjectIdentity({ version: 1, projectId: actualProjectId });
+      await provider.writeFile(`conflict/${projectIdentityPath}`, identity);
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const discovery6 = await service.listProjectManifests();
+      expect(discovery6.entries).toMatchObject([
+        { status: 'invalid', issue: { code: 'identity-conflict', expectedProjectId: legacy.id, actualProjectId } },
+      ]);
+      expect(await provider.readFile('conflict/tau.json')).toEqual(bytes);
+      expect(await provider.readFile(`conflict/${projectIdentityPath}`)).toEqual(identity);
+    });
+
+    it('should retain the identity and preserve an external edit racing legacy conversion', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const legacy = {
+        ...manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb'),
+        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      };
+      await provider.writeFile('raced/tau.json', encoder.encode(JSON.stringify(legacy)));
+      const edited = serializeProjectManifest(
+        projectToManifest({ ...legacy, $schema: projectManifestSchemaUrl, name: 'External edit' }),
+      );
+      const original = provider.writeFile.bind(provider);
+      vi.spyOn(provider, 'writeFile').mockImplementation(async (path, bytes) => {
+        await original(path, bytes);
+        if (path === `raced/${projectIdentityPath}`) {
+          await original('raced/tau.json', edited);
         }
-        return entry.locator;
+      });
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const discovery7 = await service.listProjectManifests();
+      expect(discovery7.entries).toMatchObject([{ status: 'invalid', issue: { code: 'identity-unavailable' } }]);
+      expect(await provider.readFile('raced/tau.json')).toEqual(edited);
+      expect(parseProjectIdentityBytes(await provider.readFile(`raced/${projectIdentityPath}`)).projectId).toBe(
+        legacy.id,
+      );
+      const discovery8 = await service.listProjectManifests();
+      expect(discovery8.entries).toMatchObject([
+        { status: 'valid', projectId: legacy.id, manifest: { name: 'External edit' } },
+      ]);
+    });
+
+    it('should refuse matching converted bytes when identity changes during the checked replacement', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const legacy = {
+        ...manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb'),
+        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
       };
+      const replacementId = 'proj_ccccccccccccccccccccc';
+      await provider.writeFile('raced/tau.json', encoder.encode(JSON.stringify(legacy)));
+      const converted = serializeProjectManifest(projectToManifest(legacy));
+      const originalRead = provider.readFile.bind(provider);
+      let identityReads = 0;
+      async function readDuringRace(path: string): Promise<Uint8Array<ArrayBuffer>>;
+      async function readDuringRace(path: string, encoding: 'utf8'): Promise<string>;
+      async function readDuringRace(path: string, encoding?: 'utf8'): Promise<Uint8Array<ArrayBuffer> | string> {
+        const bytes = await originalRead(path);
+        if (path === `raced/${projectIdentityPath}` && ++identityReads === 1) {
+          await provider.writeFile('raced/tau.json', converted);
+          await provider.writeFile(
+            `raced/${projectIdentityPath}`,
+            serializeProjectIdentity({ version: 1, projectId: replacementId }),
+          );
+        }
+        return encoding === 'utf8' ? decoder.decode(bytes) : bytes;
+      }
+      vi.spyOn(provider, 'readFile').mockImplementation(readDuringRace);
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const raced = await service.listProjectManifests();
+      expect(raced.entries).toMatchObject([{ status: 'invalid', issue: { code: 'identity-unavailable' } }]);
+      const current = await service.listProjectManifests();
+      expect(current.entries).toMatchObject([{ status: 'valid', projectId: replacementId }]);
+    });
 
-      it('mints an identity in place and preserves every other field byte-stably', async () => {
+    it('should quarantine a malformed identity without changing either file', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      const bytes = serializeProjectManifest(projectToManifest(manifestProject('proj_bbbbbbbbbbbbbbbbbbbbb')));
+      await provider.writeFile('broken/tau.json', bytes);
+      await provider.writeFile(`broken/${projectIdentityPath}`, '{');
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const discovery9 = await service.listProjectManifests();
+      expect(discovery9.entries).toMatchObject([{ status: 'invalid', issue: { code: 'identity-invalid' } }]);
+      expect(await provider.readFile('broken/tau.json')).toEqual(bytes);
+      expect(await provider.readFile(`broken/${projectIdentityPath}`, 'utf8')).toBe('{');
+    });
+
+    it('should refuse unknown or malformed declarations before initializing identity', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await provider.writeFile('broken/tau.json', '{');
+      await provider.writeFile('future/tau.json', JSON.stringify({ $schema: 'https://tau.new/schemas/tau-v99.json' }));
+      await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+      const discovery = await service.listProjectManifests();
+      expect(discovery.entries.map(({ status }) => status)).toEqual(['invalid', 'invalid']);
+      expect(await provider.exists(`broken/${projectIdentityPath}`)).toBe(false);
+      expect(await provider.exists(`future/${projectIdentityPath}`)).toBe(false);
+    });
+
+    describe('adoptProjectDirectory', () => {
+      it('should recover a missing manifest while preserving its established identity', async () => {
         const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-        await writeRaw(provider, 'dropped', { ...adoptable, id: 'copied-folder' });
-
-        const adopted = await service.adoptProjectDirectory(await locatorFor('dropped'));
-
-        expect(adopted).toEqual({ ...adoptable, id: adopted.id });
-        expect(adopted.id).toMatch(/^proj_[\dA-Za-z]{21}$/);
-        expect(await provider.readFile('dropped/tau.json')).toEqual(serializeProjectManifest(adopted));
-        expect(await service.listProjectManifests()).toMatchObject({
-          entries: [{ status: 'valid', manifest: { id: adopted.id, name: 'Dropped' } }],
-        });
-      });
-
-      it('refuses a manifest that already carries a valid identity', async () => {
-        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-        const identified = manifestProject('proj_eeeeeeeeeeeeeeeeeeeee', 'Identified');
-        await writeRaw(provider, 'identified', identified);
-        const locator = await locatorFor('identified');
-
-        await expect(service.adoptProjectDirectory(locator)).rejects.toThrow(TypeError);
-        expect(decoder.decode(await provider.readFile('identified/tau.json'))).toBe(JSON.stringify(identified));
-      });
-
-      it('adopts the salvaged declaration when other fields are damaged too', async () => {
-        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-        await writeRaw(provider, 'broken', {
-          ...adoptable,
-          id: 'copied-folder',
-          assets: { main: { entryPath: '../escape.ts' } },
-          extra: true,
-        });
-
-        const adopted = await service.adoptProjectDirectory(await locatorFor('broken'));
-
-        expect(adopted).toEqual({ ...adoptable, id: adopted.id, assets: { main: { entryPath: 'main.ts' } } });
-        expect(await provider.readFile('broken/tau.json')).toEqual(serializeProjectManifest(adopted));
-      });
-
-      it('restores the identity the directory route remembers', async () => {
-        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-        const remembered = 'proj_mmmmmmmmmmmmmmmmmmmmm';
-        await writeRaw(provider, 'dropped', adoptable);
-
-        const adopted = await service.adoptProjectDirectory(await locatorFor('dropped'), { id: remembered });
-
-        expect(adopted).toEqual({ ...adoptable, id: remembered });
-        expect(await service.listProjectManifests()).toMatchObject({
-          entries: [{ status: 'valid', manifest: { id: remembered } }],
-        });
-      });
-
-      it('refuses a malformed restored identity or a foreign schema without writing', async () => {
-        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-        await writeRaw(provider, 'dropped', adoptable);
-        const locator = await locatorFor('dropped');
-        await expect(service.adoptProjectDirectory(locator, { id: 'not-an-id' })).rejects.toThrow(TypeError);
-
-        const foreign = { ...adoptable, $schema: 'https://tau.new/schemas/tau-schema-v2.json' };
-        await writeRaw(provider, 'foreign', foreign);
-        await expect(service.adoptProjectDirectory(await locatorFor('foreign'))).rejects.toThrow(TypeError);
-        expect(decoder.decode(await provider.readFile('foreign/tau.json'))).toBe(JSON.stringify(foreign));
-        expect(decoder.decode(await provider.readFile('dropped/tau.json'))).toBe(JSON.stringify(adoptable));
-      });
-
-      // A directory that has held Tau state never vanishes because its manifest did (blueprint F10).
-      it('surfaces a directory that lost tau.json but holds Tau state, and adopts it', async () => {
-        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-        await provider.mkdir('lost/.tau/chats', { recursive: true });
-        await provider.writeFile('lost/main.scad', encoder.encode('cube(10);'));
+        const projectId = 'proj_mmmmmmmmmmmmmmmmmmmmm';
+        await provider.writeFile(`lost/${projectIdentityPath}`, serializeProjectIdentity({ version: 1, projectId }));
+        await provider.writeFile('lost/main.scad', 'cube(10);');
         await provider.mkdir('plain-folder');
         await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+        const discovery = await service.listProjectManifests();
+        expect(discovery.entries).toMatchObject([{ status: 'adoption-required', issue: { code: 'manifest-missing' } }]);
+        const adopted = await service.adoptProjectDirectory(discovery.entries[0]!.locator);
+        expect(adopted).toMatchObject({
+          projectId,
+          manifest: { name: 'lost', assets: { main: { entryPath: 'main.scad' } } },
+        });
+        expect(await provider.readFile('lost/tau.json')).toEqual(serializeProjectManifest(adopted.manifest));
+      });
 
-        const { entries } = await service.listProjectManifests();
-        expect(entries).toEqual([
-          {
-            status: 'adoption-required',
-            /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
-            locator: expect.objectContaining({ relativeDirectory: 'lost' }),
-            issue: { code: 'manifest-missing' },
-            manifest: {
-              $schema: projectManifestSchemaUrl,
-              name: 'lost',
-              description: '',
-              tags: [],
-              assets: { main: { entryPath: 'main.scad' } },
-            },
-          },
-        ]);
-
-        const adopted = await service.adoptProjectDirectory(entries[0]!.locator);
-        expect(adopted).toMatchObject({ name: 'lost', assets: { main: { entryPath: 'main.scad' } } });
-        expect(await provider.readFile('lost/tau.json')).toEqual(serializeProjectManifest(adopted));
+      it('should refuse adoption of a manifest-bearing project and malformed restored IDs', async () => {
+        const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+        await writeManifest(provider, 'existing', manifestProject('proj_eeeeeeeeeeeeeeeeeeeee'));
+        await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
+        const discovery = await service.listProjectManifests();
+        const { locator } = discovery.entries[0]!;
+        await expect(service.adoptProjectDirectory(locator)).rejects.toThrow(TypeError);
+        await expect(service.adoptProjectDirectory(locator, { id: 'bad' })).rejects.toThrow(TypeError);
       });
     });
 
@@ -232,8 +315,17 @@ describe('WorkspaceFileService', () => {
     it('degrades a defective declaration instead of quarantining an identified project', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       const write = async (directory: string, value: unknown): Promise<string> => {
-        const text = JSON.stringify(value);
+        if (typeof value !== 'object' || value === null || !('id' in value) || typeof value.id !== 'string') {
+          throw new Error('Fixture requires runtime identity');
+        }
+        const manifest: Record<string, unknown> = { ...value };
+        delete manifest['id'];
+        const text = JSON.stringify(manifest);
         await provider.mkdir(directory);
+        await provider.writeFile(
+          `${directory}/${projectIdentityPath}`,
+          serializeProjectIdentity({ version: 1, projectId: value.id }),
+        );
         await provider.writeFile(`${directory}/tau.json`, encoder.encode(text));
         return text;
       };
@@ -256,17 +348,20 @@ describe('WorkspaceFileService', () => {
       const byDirectory = (directory: string) => entries.find((entry) => entry.locator.relativeDirectory === directory);
       expect(byDirectory('unsafe')).toMatchObject({
         status: 'valid',
-        manifest: { id: 'proj_ccccccccccccccccccccc', assets: { main: { entryPath: 'main.ts' } } },
+        projectId: 'proj_ccccccccccccccccccccc',
+        manifest: { assets: { main: { entryPath: 'main.ts' } } },
         issue: { code: 'manifest-invalid' },
       });
       expect(byDirectory('salvaged')).toMatchObject({
         status: 'valid',
-        manifest: { id: 'proj_ddddddddddddddddddddd', name: '' },
+        projectId: 'proj_ddddddddddddddddddddd',
+        manifest: { name: '' },
         issue: { code: 'manifest-invalid' },
       });
       expect(byDirectory('second-asset')).toMatchObject({
         status: 'valid',
-        manifest: { id: 'proj_fffffffffffffffffffff', assets: { main: { entryPath: 'main.ts' } } },
+        projectId: 'proj_fffffffffffffffffffff',
+        manifest: { assets: { main: { entryPath: 'main.ts' } } },
         issue: { code: 'manifest-invalid', issues: [{ code: 'unrecognized_keys', keys: ['second'] }] },
       });
       // An older reader never reinterprets a newer contract.
@@ -292,7 +387,7 @@ describe('WorkspaceFileService', () => {
             locator: { relativeDirectory: 'a-unreadable' },
             issue: { code: 'manifest-unreadable', message: 'storage unavailable' },
           },
-          { status: 'valid', manifest: { id: readable.id }, locator: { relativeDirectory: 'b-readable' } },
+          { status: 'valid', projectId: readable.id, locator: { relativeDirectory: 'b-readable' } },
         ],
         roots: [{ status: 'complete', root: { backend: 'indexeddb' } }],
       });
@@ -330,15 +425,18 @@ describe('WorkspaceFileService', () => {
       ]);
       expect(readFile.mock.calls.map(([path]) => path)).toEqual([
         'alpha/tau.json',
+        `alpha/${projectIdentityPath}`,
         'beta/tau.json',
+        `beta/${projectIdentityPath}`,
         'no-manifest/tau.json',
+        `no-manifest/${projectIdentityPath}`,
       ]);
       expect(stat).not.toHaveBeenCalled();
     });
 
     it('probes manifests with bounded concurrency in deterministic order', async () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
-      const names = Array.from({ length: 40 }, (_, index) => `p${String(index).padStart(2, '0')}`);
+      const names = Array.from({ length: 150 }, (_, index) => `p${String(index).padStart(3, '0')}`);
       for (const [index, name] of names.entries()) {
         // oxlint-disable-next-line no-await-in-loop -- Fixture writes are sequential for determinism.
         await writeManifest(provider, name, manifestProject(`proj_${String(index).padStart(21, 'z')}`));
@@ -363,7 +461,8 @@ describe('WorkspaceFileService', () => {
       const result = await service.listProjectManifests();
 
       expect(result.entries.map((entry) => entry.locator.relativeDirectory)).toEqual(names);
-      expect(maxInFlight).toBe(16);
+      // Sixty-four directories each read declaration and identity concurrently.
+      expect(maxInFlight).toBe(128);
     });
 
     it('discovers out-of-band project creation from the external-change path without refreshing per scan', async () => {
@@ -394,7 +493,7 @@ describe('WorkspaceFileService', () => {
           entries: [
             {
               status: 'valid',
-              manifest: { id: project.id },
+              projectId: project.id,
               locator: { relativeDirectory: 'out-of-band' },
             },
           ],
@@ -451,13 +550,16 @@ describe('WorkspaceFileService', () => {
         `${directory}/tau.json`,
         serializeProjectManifest(
           projectToManifest({
-            id,
             name: 'Readable Project',
             description: '',
             tags: [],
             assets: { main: { entryPath: 'main.ts' } },
           }),
         ),
+      );
+      await rootProvider.writeFile(
+        `${directory}/${projectIdentityPath}`,
+        serializeProjectIdentity({ version: 1, projectId: id }),
       );
       await rootProvider.writeFile(`${directory}/main.ts`, encoder.encode('export default {};'));
     };
@@ -477,7 +579,7 @@ describe('WorkspaceFileService', () => {
       expect(getProvider).not.toHaveBeenCalled();
     });
 
-    it('deletes only the exact directory after re-establishing manifest identity', async () => {
+    it('deletes only the exact directory after re-establishing generated identity', async () => {
       await writePhysicalProject();
 
       await expect(
@@ -516,7 +618,7 @@ describe('WorkspaceFileService', () => {
       expect(await rootProvider.exists(`${directory}/main.ts`)).toBe(true);
     });
 
-    it('deletes a degraded project whose manifest still carries its identity', async () => {
+    it('deletes a degraded project whose generated identity still matches', async () => {
       await writePhysicalProject();
       const manifest = await rootProvider.readFile(`${directory}/tau.json`);
       const degraded = JSON.parse(decoder.decode(manifest)) as Record<string, unknown>;
@@ -594,10 +696,13 @@ describe('WorkspaceFileService', () => {
       }
       if (fixture === 'foreign') {
         await deleteProvider.writeFile(
+          `${directory}/${projectIdentityPath}`,
+          serializeProjectIdentity({ version: 1, projectId: 'proj_fffffffffffffffffffff' }),
+        );
+        await deleteProvider.writeFile(
           `${directory}/tau.json`,
           serializeProjectManifest(
             projectToManifest({
-              id: 'proj_fffffffffffffffffffff',
               name: 'Foreign',
               description: '',
               tags: [],
@@ -635,11 +740,27 @@ describe('WorkspaceFileService', () => {
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
       ).rejects.toThrow('manifest delete failed');
       expect(await rootProvider.exists(manifestPath)).toBe(true);
+      expect(
+        parseProjectIdentityBytes(await rootProvider.readFile(`${directory}/${projectIdentityPath}`)).projectId,
+      ).toBe(projectId);
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
       ).resolves.toEqual({ status: 'deleted' });
       expect(await rootProvider.exists(directory)).toBe(false);
+    });
+
+    it('should preserve ambiguous marker casing until final removal and restore canonical identity on refusal', async () => {
+      await writePhysicalProject();
+      const identityPath = `${directory}/${projectIdentityPath}`;
+      const identityBytes = await rootProvider.readFile(identityPath);
+      const ambiguousPath = `${directory}/.tau/PROJECT.JSON`;
+      await rootProvider.writeFile(ambiguousPath, encoder.encode('foreign marker casing'));
+      await expect(
+        service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
+      ).rejects.toThrow();
+      expect(await rootProvider.readFile(identityPath)).toEqual(identityBytes);
+      expect(await rootProvider.readFile(ambiguousPath, 'utf8')).toBe('foreign marker casing');
     });
 
     it('restores the exact manifest bytes when final directory removal fails', async () => {
@@ -660,6 +781,9 @@ describe('WorkspaceFileService', () => {
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
       ).rejects.toThrow('final directory removal failed');
       expect(await rootProvider.readFile(manifestPath)).toEqual(manifest);
+      expect(
+        parseProjectIdentityBytes(await rootProvider.readFile(`${directory}/${projectIdentityPath}`)).projectId,
+      ).toBe(projectId);
 
       await expect(
         service.permanentlyDeleteProjectDirectory({ projectId, providerBasePath: directory, scope }),
@@ -705,7 +829,6 @@ describe('WorkspaceFileService', () => {
     const punctuationManifestSibling = 'tau.json!/sibling';
     const manifest = serializeProjectManifest(
       projectToManifest({
-        id: projectId,
         name: 'Pending Project',
         description: '',
         tags: [],
@@ -719,6 +842,7 @@ describe('WorkspaceFileService', () => {
       files: Record<string, { content: Uint8Array<ArrayBuffer> }> = defaultFiles,
     ): Promise<CommitPendingProjectDirectoryResult> => {
       const result = await service.commitPendingProjectDirectory({
+        projectId,
         providerBasePath: directory,
         scope,
         files,
@@ -804,6 +928,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.commitPendingProjectDirectory({
+          projectId,
           providerBasePath: directory,
           scope: { backend: 'memory', storageRootKey: 'memory:forbidden' },
           files: defaultFiles,
@@ -822,6 +947,7 @@ describe('WorkspaceFileService', () => {
 
         await expect(
           service.commitPendingProjectDirectory({
+            projectId,
             providerBasePath: directory,
             scope,
             files,
@@ -834,9 +960,13 @@ describe('WorkspaceFileService', () => {
       },
     );
 
-    it('replaces manifest-less residue and writes the manifest last', async () => {
+    it('should replace owned manifest-less residue and write the manifest last', async () => {
       await commitProvider.mkdir(directory, { recursive: true });
       await commitProvider.writeFile(`${directory}/stale.bin`, encoder.encode('stale'));
+      await commitProvider.writeFile(
+        `${directory}/${projectIdentityPath}`,
+        serializeProjectIdentity({ version: 1, projectId }),
+      );
       const writes: string[] = [];
       const originalWriteFile = commitProvider.writeFile.bind(commitProvider);
       vi.spyOn(commitProvider, 'writeFile').mockImplementation(async (path, data) => {
@@ -849,6 +979,43 @@ describe('WorkspaceFileService', () => {
       expect(await commitProvider.exists(`${directory}/stale.bin`)).toBe(false);
       expect(decoder.decode(await commitProvider.readFile(`${directory}/main.ts`))).toBe('export default {};');
       expect(writes.at(-1)).toBe(`${directory}/tau.json`);
+    });
+
+    it('should preserve identity across interrupted cleanup of owned pending residue', async () => {
+      const identityBytes = serializeProjectIdentity({ version: 1, projectId });
+      await commitProvider.writeFile(`${directory}/${projectIdentityPath}`, identityBytes);
+      await commitProvider.writeFile(`${directory}/old/value.txt`, 'old');
+      const remove = vi.spyOn(commitProvider, 'rmdir').mockRejectedValueOnce(new Error('cleanup interrupted'));
+      await expect(commit()).rejects.toThrow('cleanup interrupted');
+      expect(await commitProvider.readFile(`${directory}/${projectIdentityPath}`)).toEqual(identityBytes);
+      remove.mockRestore();
+      await expect(commit()).resolves.toEqual({ status: 'committed' });
+      expect(
+        parseProjectIdentityBytes(await commitProvider.readFile(`${directory}/${projectIdentityPath}`)).projectId,
+      ).toBe(projectId);
+    });
+
+    it('should preserve an unowned manifest-less directory', async () => {
+      await commitProvider.writeFile(`${directory}/keep.txt`, 'unrelated');
+      await expect(commit()).resolves.toEqual({ status: 'unidentifiable-manifest' });
+      expect(await commitProvider.readFile(`${directory}/keep.txt`, 'utf8')).toBe('unrelated');
+      expect(await commitProvider.exists(`${directory}/${projectIdentityPath}`)).toBe(false);
+    });
+
+    it('should refuse unmarked residue after a failure between directory allocation and identity commit', async () => {
+      const original = commitProvider.writeFile.bind(commitProvider);
+      const writes = vi.spyOn(commitProvider, 'writeFile').mockImplementation(async (path, bytes) => {
+        if (path === `${directory}/${projectIdentityPath}`) {
+          throw new Error('identity disk failure');
+        }
+        return original(path, bytes);
+      });
+      await expect(commit()).rejects.toThrow('identity disk failure');
+      expect(await commitProvider.exists(directory)).toBe(true);
+      writes.mockRestore();
+      await commitProvider.writeFile(`${directory}/keep.txt`, 'outside data');
+      await expect(commit()).resolves.toEqual({ status: 'unidentifiable-manifest' });
+      expect(await commitProvider.readFile(`${directory}/keep.txt`, 'utf8')).toBe('outside data');
     });
 
     it('is idempotent for an existing same-project manifest', async () => {
@@ -867,7 +1034,6 @@ describe('WorkspaceFileService', () => {
         `${directory}/tau.json`,
         serializeProjectManifest(
           projectToManifest({
-            id: foreignId,
             name: 'Foreign',
             description: '',
             tags: [],
@@ -876,11 +1042,16 @@ describe('WorkspaceFileService', () => {
         ),
       );
       await commitProvider.writeFile(`${directory}/keep.txt`, encoder.encode('keep'));
+      await commitProvider.writeFile(
+        `${directory}/${projectIdentityPath}`,
+        serializeProjectIdentity({ version: 1, projectId: foreignId }),
+      );
 
       await expect(commit()).resolves.toEqual({ status: 'identity-mismatch', actualProjectId: foreignId });
       expect(decoder.decode(await commitProvider.readFile(`${directory}/keep.txt`))).toBe('keep');
 
       await commitProvider.writeFile(`${directory}/tau.json`, encoder.encode('{invalid'));
+      await commitProvider.unlink(`${directory}/${projectIdentityPath}`);
       await expect(commit()).resolves.toEqual({ status: 'unidentifiable-manifest' });
       expect(decoder.decode(await commitProvider.readFile(`${directory}/keep.txt`))).toBe('keep');
     });
@@ -962,6 +1133,14 @@ describe('WorkspaceFileService', () => {
         },
       },
       {
+        name: 'a generated identity replacement',
+        input: { files: { '.tau/project.json': { content: encoder.encode('{}') } } },
+      },
+      {
+        name: 'an identity ancestor replacement',
+        input: { files: { '.tau': { content: encoder.encode('blocked') } } },
+      },
+      {
         name: 'a file below the reserved manifest path',
         input: { files: { [manifestDescendant]: { content: encoder.encode('unsafe') } } },
       },
@@ -984,6 +1163,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(
         service.commitPendingProjectDirectory({
+          projectId,
           providerBasePath: directory,
           scope,
           files: { [mainFile]: { content: encoder.encode('export default {};') } },
@@ -997,14 +1177,14 @@ describe('WorkspaceFileService', () => {
 
     it('leaves no commit marker after a failed manifest write and retries exactly', async () => {
       const originalWriteFile = commitProvider.writeFile.bind(commitProvider);
-      vi.spyOn(commitProvider, 'writeFile')
-        .mockImplementationOnce(async (path, data) => {
-          await originalWriteFile(path, data);
-        })
-        .mockRejectedValueOnce(new Error('manifest write failed'))
-        .mockImplementation(async (path, data) => {
-          await originalWriteFile(path, data);
-        });
+      let rejectManifest = true;
+      vi.spyOn(commitProvider, 'writeFile').mockImplementation(async (path, data) => {
+        if (path === `${directory}/tau.json` && rejectManifest) {
+          rejectManifest = false;
+          throw new Error('manifest write failed');
+        }
+        await originalWriteFile(path, data);
+      });
 
       await expect(commit()).rejects.toThrow('manifest write failed');
       expect(await commitProvider.exists(`${directory}/tau.json`)).toBe(false);
@@ -1019,15 +1199,17 @@ describe('WorkspaceFileService', () => {
       const context = await createWorkspaceFileService({ crossTabCoordinator: coordinator });
       const provider = await context.providerRegistry.getProvider(scope);
       const originalWriteFile = provider.writeFile.bind(provider);
-      vi.spyOn(provider, 'writeFile')
-        .mockImplementationOnce(async (path, data) => {
-          await originalWriteFile(path, data);
-        })
-        .mockRejectedValueOnce(new Error('manifest write failed'));
+      vi.spyOn(provider, 'writeFile').mockImplementation(async (path, data) => {
+        if (path === `${directory}/tau.json`) {
+          throw new Error('manifest write failed');
+        }
+        await originalWriteFile(path, data);
+      });
 
       try {
         await expect(
           context.service.commitPendingProjectDirectory({
+            projectId,
             providerBasePath: directory,
             scope,
             files: { [mainFile]: { content: encoder.encode('export default {};') } },
@@ -1057,6 +1239,7 @@ describe('WorkspaceFileService', () => {
 
       try {
         await context.service.commitPendingProjectDirectory({
+          projectId,
           providerBasePath: directory,
           scope,
           files: { [mainFile]: { content: encoder.encode('export default {};') } },
@@ -1089,7 +1272,7 @@ describe('WorkspaceFileService', () => {
       expect(decoder.decode(await commitProvider.readFile(`${directory}/main.ts`))).toBe('export default {};');
       expect(parseProjectManifestBytes(await commitProvider.readFile(`${directory}/tau.json`))).toMatchObject({
         success: true,
-        data: { id: projectId },
+        data: { $schema: projectManifestSchemaUrl },
       });
     });
 
@@ -1105,6 +1288,7 @@ describe('WorkspaceFileService', () => {
       const mutableManifest = new Uint8Array(manifest);
       const mutableContent = encoder.encode('owned content');
       const pending = service.commitPendingProjectDirectory({
+        projectId,
         providerBasePath: directory,
         scope,
         files: { [mainFile]: { content: mutableContent } },
@@ -1119,7 +1303,7 @@ describe('WorkspaceFileService', () => {
       await expect(commitProvider.readFile(`${directory}/main.ts`, 'utf8')).resolves.toBe('owned content');
       expect(parseProjectManifestBytes(await commitProvider.readFile(`${directory}/tau.json`))).toMatchObject({
         success: true,
-        data: { id: projectId },
+        data: { $schema: projectManifestSchemaUrl },
       });
     });
 
@@ -1148,6 +1332,7 @@ describe('WorkspaceFileService', () => {
       try {
         await expect(
           second.service.commitPendingProjectDirectory({
+            projectId,
             providerBasePath: directory,
             scope: indexedDbScope,
             files: { [mainFile]: { content: encoder.encode('authoritative') } },
@@ -1157,6 +1342,7 @@ describe('WorkspaceFileService', () => {
 
         await expect(
           first.service.commitPendingProjectDirectory({
+            projectId,
             providerBasePath: directory,
             scope: indexedDbScope,
             files: { [mainFile]: { content: encoder.encode('stale overwrite') } },

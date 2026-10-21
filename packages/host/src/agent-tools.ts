@@ -599,7 +599,7 @@ export type HostToolRegistryOptions = {
    */
   readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
   /**
-   * The `tau.json` id of the project `workspaceRoot` holds: the desktop's
+   * The durable identity of the project `workspaceRoot` holds: the desktop's
    * attached project, or the daemon's served root. Every artifact `request_job`
    * slices names it, which is how a machine host finds the file again. Omit it
    * and the job tools are not offered: a host that cannot name its project
@@ -779,7 +779,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
    * Every tool this host serves, over one absolute root.
    *
    * @param workspaceRoot - The tree this registry's tools read and write.
-   * @param projectId - The `tau.json` id every print artifact sliced there names; without one nothing is printed.
+   * @param projectId - The durable project identity every print artifact sliced there names; without one nothing is printed.
    * @returns The registry for that tree, and the machine settings owner it reads through.
    */
   const registryFor = (

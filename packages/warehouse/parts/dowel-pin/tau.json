@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Fw3LODW2_6Dzl7QggtjCk",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Dowel pin",
   "description": "Chamfered cylindrical locating pin.",
   "tags": [

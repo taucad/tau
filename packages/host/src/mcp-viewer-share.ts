@@ -7,7 +7,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { createHash, randomInt } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile } from 'node:fs/promises';
 import { basename, join, relative, sep } from 'node:path';
 
@@ -172,11 +172,6 @@ const failureOf = (error: unknown, fallback: string): TauMcpViewerFailure =>
     ? failure(error.code, error.message)
     : failure('SHARE_FAILED', error instanceof Error ? error.message : fallback);
 
-const randomProjectId = (): string => {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  return `proj_${Array.from({ length: 21 }, () => alphabet[randomInt(alphabet.length)]).join('')}`;
-};
-
 /**
  * The `tau.json` the link carries: the project's own, re-encoded with the shown entry as its main entry, as the
  * desktop re-encodes its project record; a folder without a valid one gets a fresh manifest named after it.
@@ -203,7 +198,6 @@ const manifestFor = async (
   }
   return {
     manifest: projectToManifest({
-      id: randomProjectId(),
       name: basename(root).slice(0, 200),
       description: '',
       tags: [],

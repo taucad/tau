@@ -1,5 +1,5 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { describe, expect, it, vi } from 'vitest';
-import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { deriveProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteState, ProjectRouteStateInput } from '#routes/w.$workspace.$project/project-route-state.js';
@@ -9,7 +9,7 @@ const otherProjectId = 'proj_bbbbbbbbbbbbbbbbbbbbb';
 const slugs = { workspaceSlug: 'rifont', projectSlug: 'planetary-gear' } as const;
 
 const project = (id: string, entryPath = 'main.ts') =>
-  projectToManifest({
+  createProjectFixture({
     id,
     name: id,
     description: '',

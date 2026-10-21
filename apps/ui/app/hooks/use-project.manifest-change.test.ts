@@ -1,7 +1,8 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { projectToManifest, readProjectManifestBytes, serializeProjectManifest } from '@taucad/types';
-import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
+import type { Project, ProjectManifestParseIssue } from '@taucad/types';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { FileNotFoundError } from '@taucad/fs-client/file-content-errors';
 import {
@@ -11,8 +12,8 @@ import {
   shouldDispatchParameterSettlement,
 } from '#hooks/use-project.js';
 
-const project = (name: string): ProjectManifest =>
-  projectToManifest({
+const project = (name: string): Project =>
+  createProjectFixture({
     id: 'proj_123456789012345678901',
     name,
     description: '',
@@ -27,7 +28,7 @@ const observe = ({
   issue,
   readManifest,
 }: {
-  readonly current: ProjectManifest;
+  readonly current: Project;
   readonly issue?: ProjectManifestParseIssue;
   readonly readManifest: () => Promise<Uint8Array<ArrayBuffer>>;
 }) => {
@@ -44,22 +45,22 @@ const observe = ({
 
 describe('createProjectManifestChangeObserver', () => {
   it('should retain the mounted manifest through malformed JSON and clear its issue when identical valid bytes return', async () => {
-    const retained = projectToManifest({
+    const retained = createProjectFixture({
       ...project('Retained details'),
       assets: { main: { entryPath: 'assembly.scad' } },
     });
-    const validBytes = serializeProjectManifest(retained);
+    const validBytes = serializeProjectManifest(projectToManifest(retained));
     let bytes = validBytes;
-    const current: { project: ProjectManifest; issue: ProjectManifestParseIssue | undefined } = {
+    const current: { project: Project; issue: ProjectManifestParseIssue | undefined } = {
       project: retained,
       issue: undefined,
     };
     const reload = vi.fn(() => {
-      const read = readProjectManifestBytes(bytes, { id: retained.id });
+      const read = readProjectManifestBytes(bytes);
       if (!read.success) {
         throw new Error('Expected a scoped manifest reading');
       }
-      current.project = read.data;
+      current.project = { ...read.data, id: retained.id };
       current.issue = read.issue;
     });
     const report = vi.fn((issue: ProjectManifestParseIssue) => {
@@ -107,7 +108,7 @@ describe('createProjectManifestChangeObserver', () => {
     });
     const pending = observer.check({ readManifest: readObservedManifest });
     observer.invalidate();
-    gate.resolve(serializeProjectManifest(project('Obsolete')));
+    gate.resolve(serializeProjectManifest(projectToManifest(project('Obsolete'))));
     await pending;
     expect(reload).not.toHaveBeenCalled();
     expect(report).not.toHaveBeenCalled();
@@ -122,7 +123,7 @@ describe('createProjectManifestChangeObserver', () => {
       readManifest: readObservedManifest,
     } = observe({
       current,
-      readManifest: async () => serializeProjectManifest(current),
+      readManifest: async () => serializeProjectManifest(projectToManifest(current)),
     });
 
     await observer.check({ readManifest: readObservedManifest });
@@ -143,7 +144,8 @@ describe('createProjectManifestChangeObserver', () => {
       report: vi.fn(),
       onSettled,
     });
-    const readManifest = async (): Promise<Uint8Array<ArrayBuffer>> => serializeProjectManifest(remote);
+    const readManifest = async (): Promise<Uint8Array<ArrayBuffer>> =>
+      serializeProjectManifest(projectToManifest(remote));
     await observer.check({ readManifest });
     expect(reload).toHaveBeenCalledOnce();
     expect(onSettled).not.toHaveBeenCalled();
@@ -160,7 +162,7 @@ describe('createProjectManifestChangeObserver', () => {
       observer,
       reload,
       readManifest: readObservedManifest,
-    } = observe({ current, readManifest: async () => serializeProjectManifest(changed) });
+    } = observe({ current, readManifest: async () => serializeProjectManifest(projectToManifest(changed)) });
 
     await observer.check({ readManifest: readObservedManifest });
     await observer.check({ readManifest: readObservedManifest });
@@ -202,11 +204,6 @@ describe('createProjectManifestChangeObserver', () => {
       'manifest-missing',
     ],
     [
-      'rewritten for another project',
-      async () => encode({ ...project('Current'), id: 'proj_abcdefghijklmnopqrstu' }),
-      'manifest-invalid',
-    ],
-    [
       'given a foreign $schema',
       async () => encode({ ...project('Current'), $schema: 'https://tau.new/schemas/tau-schema-v2.json' }),
       'manifest-unknown-schema',
@@ -234,7 +231,7 @@ describe('createProjectManifestChangeObserver', () => {
     } = observe({
       current,
       issue: { code: 'manifest-missing' },
-      readManifest: async () => serializeProjectManifest(current),
+      readManifest: async () => serializeProjectManifest(projectToManifest(current)),
     });
 
     await observer.check({ readManifest: readObservedManifest });
@@ -259,7 +256,7 @@ describe('createProjectManifestChangeObserver', () => {
 
     const pending = observer.check({ readManifest: readObservedManifest });
     observer.dispose();
-    resolveRead?.(serializeProjectManifest(project('External change')));
+    resolveRead?.(serializeProjectManifest(projectToManifest(project('External change'))));
     await pending;
 
     expect(reload).not.toHaveBeenCalled();
@@ -268,10 +265,13 @@ describe('createProjectManifestChangeObserver', () => {
 });
 
 describe('resolveScopedProjectManifest', () => {
-  it('should return a valid manifest whose ID matches the scoped project', async () => {
+  it('should attach the established route identity to an id-free declaration', async () => {
     const contentService = mock<FileContentService>();
     const expected = project('Current');
-    contentService.resolve.mockResolvedValue({ kind: 'text', content: serializeProjectManifest(expected) });
+    contentService.resolve.mockResolvedValue({
+      kind: 'text',
+      content: serializeProjectManifest(projectToManifest(expected)),
+    });
 
     await expect(resolveScopedProjectManifest({ contentService, projectId: expected.id })).resolves.toEqual({
       project: expected,
@@ -315,18 +315,17 @@ describe('resolveScopedProjectManifest', () => {
     );
   });
 
-  it('should reject a manifest whose ID does not match the scoped project', async () => {
+  it('should keep route identity when reading a declaration serialized from another runtime project', async () => {
     const contentService = mock<FileContentService>();
     const expectedId = project('Current').id;
-    const receivedId = 'proj_abcdefghijklmnopqrstu';
     contentService.resolve.mockResolvedValue({
       kind: 'text',
-      content: serializeProjectManifest({ ...project('Other'), id: receivedId }),
+      content: serializeProjectManifest(projectToManifest({ ...project('Other'), id: 'proj_abcdefghijklmnopqrstu' })),
     });
 
-    await expect(resolveScopedProjectManifest({ contentService, projectId: expectedId })).rejects.toThrow(
-      `expected ${expectedId}, received ${receivedId}`,
-    );
+    await expect(resolveScopedProjectManifest({ contentService, projectId: expectedId })).resolves.toEqual({
+      project: { ...project('Other'), id: expectedId },
+    });
   });
 
   it.each(['orphaned', 'loading'] as const)('should reject a %s manifest outcome', async (kind) => {

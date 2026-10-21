@@ -1,6 +1,7 @@
 import { readFile, realpath } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
 import { chatRecordSchema } from '@taucad/chat/schemas';
+import { projectIdentitySchema } from '@taucad/project-core/identity';
 import { projectManifestSchema } from '@taucad/project-core';
 import { expect } from 'vitest';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -49,10 +50,11 @@ export const openNativeProjectionProject = async (
     throw new Error('Native project records are outside the owned project directory.');
   }
   const manifest = projectManifestSchema.parse(JSON.parse(await readFile(manifestPath, 'utf8')));
+  const identity = projectIdentitySchema.parse(JSON.parse(await readFile(join(root, '.tau/project.json'), 'utf8')));
   const chat = chatRecordSchema.parse(JSON.parse(await readFile(chatPath, 'utf8')));
   expect(manifest.name).toBe(name);
-  if (chat.id !== chatId || chat.resourceId !== manifest.id) {
+  if (chat.id !== chatId || chat.resourceId !== identity.projectId) {
     throw new Error('Native chat record does not match the created project and selected chat.');
   }
-  return { root, projectId: manifest.id, chatId, manifestPath, chatPath };
+  return { root, projectId: identity.projectId, chatId, manifestPath, chatPath };
 };

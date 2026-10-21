@@ -5,7 +5,7 @@ import type { BuiltinProjectCardModel } from '#constants/project-examples.js';
 export const warehouseProjects: readonly BuiltinProjectCardModel[] = warehouseParts.map((part) => ({
   locator: part.locator,
   kernel: 'replicad',
-  id: part.manifest.id,
+  id: `warehouse:${part.locator}`,
   name: part.manifest.name,
   description: part.manifest.description,
   tags: part.manifest.tags,

@@ -17,6 +17,7 @@ export type * from '#types/publication.types.js';
 export type * from '#types/schema.types.js';
 export {
   checkProjectManifestReplacement,
+  convertLegacyProjectManifestBytes,
   describeProjectManifestIssue,
   parseProjectManifestBytes,
   projectIdSchema,
@@ -29,7 +30,6 @@ export {
   serializeProjectManifest,
 } from '#schemas/project-manifest.schema.js';
 export type {
-  AdoptableProjectManifest,
   ProjectManifest,
   ProjectManifestParseIssue,
   ProjectManifestParseResult,

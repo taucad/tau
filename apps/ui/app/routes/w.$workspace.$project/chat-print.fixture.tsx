@@ -55,7 +55,7 @@ import type { SliceSummary } from '#components/printer/printer-summary.js';
 export const timestamp = '2026-09-24T02:00:00.000Z';
 export const later = '2026-09-24T02:00:05.000Z';
 
-/** The open project's `tau.json` id, which every artifact the pane records carries (blueprint D5). */
+/** The open project's established project ID, which every artifact the pane records carries (blueprint D5). */
 export const projectId = 'proj_000000000000000000001';
 
 export const mockEditorSend = vi.fn();

@@ -4,11 +4,7 @@
   "properties": {
     "$schema": {
       "type": "string",
-      "const": "https://tau.new/schemas/tau-schema-v1.json"
-    },
-    "id": {
-      "type": "string",
-      "pattern": "^proj_[\\dA-Za-z]{21}$"
+      "const": "https://tau.new/schemas/tau-v1.json"
     },
     "name": {
       "type": "string",
@@ -57,8 +53,8 @@
       "type": "boolean"
     }
   },
-  "required": ["$schema", "id", "name", "description", "tags", "assets"],
+  "required": ["$schema", "name", "description", "tags", "assets"],
   "additionalProperties": false,
-  "$id": "https://tau.new/schemas/tau-schema-v1.json",
+  "$id": "https://tau.new/schemas/tau-v1.json",
   "title": "Tau Project Manifest v1"
 }

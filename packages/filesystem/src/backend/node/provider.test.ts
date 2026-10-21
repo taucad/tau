@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider, drainNodeFsProviderWatchClosures } from '#backend/node/provider.js';
+import { tauPathPolicy } from '#path-registry.js';
 import parcelWatcher from '@parcel/watcher';
 import type { Event as ParcelEvent } from '@parcel/watcher';
 
@@ -93,6 +94,54 @@ afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+describe('NodeFsProvider entry kinds', () => {
+  it('should classify ordinary files and directories without filesystem stats', async () => {
+    const root = createRoot();
+    mkdirSync(join(root, 'project'));
+    const provider = new NodeFsProvider(root);
+    const stat = vi.spyOn(fs, 'stat');
+    try {
+      const entries = await provider.readdirEntries('');
+      expect(entries.sort((left, right) => left.name.localeCompare(right.name))).toEqual([
+        { name: 'project', kind: 'dir' },
+        { name: 'target.txt', kind: 'file' },
+      ]);
+      expect(stat).not.toHaveBeenCalled();
+    } finally {
+      provider.dispose();
+    }
+  });
+
+  it('should classify admitted links while omitting broken, escaping and hidden-target links', async () => {
+    const root = createRoot();
+    const outside = createRoot();
+    mkdirSync(join(root, 'project'));
+    mkdirSync(join(root, '.git'));
+    writeFileSync(join(root, '.git', 'config'), 'private');
+    symlinkSync(join(root, 'project'), join(root, 'project-alias'));
+    symlinkSync(join(root, 'target.txt'), join(root, 'target-alias'));
+    symlinkSync(join(root, 'missing'), join(root, 'broken'));
+    symlinkSync(outside, join(root, 'escape'));
+    symlinkSync(join(root, '.git'), join(root, 'hidden-alias'));
+    const provider = new NodeFsProvider(root, { policy: tauPathPolicy });
+    try {
+      const entries = await provider.readdirEntries('');
+      expect(entries.sort((left, right) => left.name.localeCompare(right.name))).toEqual([
+        { name: '.git', kind: 'dir' },
+        { name: 'project', kind: 'dir' },
+        { name: 'project-alias', kind: 'dir' },
+        { name: 'target-alias', kind: 'file' },
+        { name: 'target.txt', kind: 'file' },
+      ]);
+      const names = await provider.readdir('');
+      expect(names.sort()).toEqual(entries.map(({ name }) => name).sort());
+      await expect(provider.readdirEntries('escape')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      provider.dispose();
+    }
+  });
 });
 
 describe('NodeFsProvider atomic writes', () => {

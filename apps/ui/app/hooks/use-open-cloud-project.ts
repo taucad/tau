@@ -88,7 +88,7 @@ export const useOpenCloudProject = (): ((entry: CloudProject) => Promise<void>) 
       }
       const created = await withNamedLock(`tau:open-cloud-project:${entry.id}`, async () => {
         const heldProjects = await getProjects({ includeDeleted: true });
-        const current = heldProjects.find((project) => project.manifest.id === entry.id);
+        const current = heldProjects.find((project) => project.projectId === entry.id);
         if (current?.library.deletedAt !== undefined) {
           throw new Error('Restore this project from Trash before opening it.');
         }

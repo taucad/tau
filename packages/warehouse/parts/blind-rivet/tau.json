@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_9uiVjuEBaX-b55jM4BMlX",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Blind rivet",
   "description": "Blind rivet with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

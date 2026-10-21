@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_pJAXrZ5oPZn-IrpO3RVXm",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Helical gear",
   "description": "Metric-module, 20-degree involute transmission geometry with real teeth and a declared datum. Tooth profiles are reused from Tau’s planetary gear design.",
   "tags": [

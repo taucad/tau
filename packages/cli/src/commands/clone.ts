@@ -148,7 +148,7 @@ export const cloneCommand = defineCommand({
     }
     await mkdir(workspaceRoot, { recursive: true });
 
-    const revisions: ProjectRevisionVerbs = openProjectRevisions({
+    const revisions: ProjectRevisionVerbs = await openProjectRevisions({
       workspaceRoot,
       projectId: project.id,
       apiBaseUrl: api.apiBaseUrl,

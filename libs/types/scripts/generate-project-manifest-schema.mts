@@ -14,7 +14,7 @@ import process from 'node:process';
 import { toJSONSchema } from 'zod';
 import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 
-const outputPath = resolve(import.meta.dirname, '../../../apps/ui/public/schemas/tau-schema-v1.json');
+const outputPath = resolve(import.meta.dirname, '../../../apps/ui/public/schemas/tau-v1.json');
 
 const main = (): void => {
   const schema = toJSONSchema(projectManifestSchema, { target: 'draft-7' }) as Record<string, unknown>;

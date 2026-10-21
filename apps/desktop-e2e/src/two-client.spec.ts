@@ -135,7 +135,7 @@ const scratch = async (label: string): Promise<string> => {
  * Read the project id the browser client wrote into its own OPFS store.
  *
  * The slug is the store directory the project lives in, and it matters once the
- * client holds more than one: an unslugged walk returns whichever `tau.json` it
+ * client holds more than one: an unslugged walk returns whichever identity record it
  * reaches first, which is how a2's first close-and-continue run registered the
  * wrong project on the remote and then failed at the listing instead of at its
  * subject.
@@ -145,19 +145,20 @@ const browserProjectId = async (client: BrowserClient, slug?: string): Promise<s
     if (project !== undefined) {
       const root = await navigator.storage.getDirectory();
       const directory = await root.getDirectoryHandle(project);
-      const handle = await directory.getFileHandle('tau.json');
+      const metadata = await directory.getDirectoryHandle('.tau');
+      const handle = await metadata.getFileHandle('project.json');
       const file = await handle.getFile();
-      const parsed = JSON.parse(await file.text()) as { readonly id?: string };
-      return parsed.id;
+      const parsed = JSON.parse(await file.text()) as { readonly projectId?: string };
+      return parsed.projectId;
     }
     const walk = async (directory: FileSystemDirectoryHandle, depth: number): Promise<string | undefined> => {
       const entries = (directory as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries();
       for await (const [name, handle] of entries) {
-        if (name === 'tau.json' && handle.kind === 'file') {
+        if (directory.name === '.tau' && name === 'project.json' && handle.kind === 'file') {
           const file = await (handle as FileSystemFileHandle).getFile();
-          const parsed = JSON.parse(await file.text()) as { readonly id?: string };
-          if (parsed.id !== undefined) {
-            return parsed.id;
+          const parsed = JSON.parse(await file.text()) as { readonly projectId?: string };
+          if (parsed.projectId !== undefined) {
+            return parsed.projectId;
           }
         }
         if (handle.kind === 'directory' && depth > 0) {
@@ -408,9 +409,8 @@ const mirrorFetchGapMilliseconds = 2000;
  * The server keeps repositories in object storage (git storage substrate D1),
  * so the suite reads them the way any client would: a forced mirror fetch over
  * smart HTTP refreshes every advertised ref (heads, tags, `refs/tau/chats/*`)
- * and prunes deleted ones before each read. A failed fetch (the repository does
- * not exist yet) removes the mirror, so reads resolve `undefined` rather than
- * stale refs.
+ * and prunes deleted ones before each read. Only a missing remote removes the
+ * mirror; a failed read must not masquerade as missing project content.
  */
 const tauRepository = async (projectId: string): Promise<string> => {
   /* Every read is a fetch through the API's own git budget, which the devices
@@ -436,14 +436,21 @@ const tauRepository = async (projectId: string): Promise<string> => {
       mirror,
     );
   let fetched = await fetchMirror();
-  /* The suite's reads share the devices' git budget (W13d): a 429 is a wait,
-   * not a repository that does not exist, so the mirror waits out the window
-   * rather than answering `undefined` for a revision the remote holds. */
-  for (let waited = 0; fetched.code !== 0 && /\b429\b/u.test(fetched.stderr) && waited < 60_000; waited += 5000) {
+  /* The suite shares the devices' request and concurrent-lease budgets. The
+   * API's 429/503 admission refusals ask clients to retry; neither means that
+   * the repository or its files disappeared. Keep the wait bounded. */
+  for (
+    let waited = 0;
+    fetched.code !== 0 && /\b(?:429|503)\b/u.test(fetched.stderr) && waited < 60_000;
+    waited += 5000
+  ) {
     await delay(5000);
     fetched = await fetchMirror();
   }
   if (fetched.code !== 0) {
+    if (!/\b404\b/u.test(fetched.stderr)) {
+      throw new Error(`Reading the cloud mirror for ${projectId} failed: ${fetched.stderr}`);
+    }
     await rm(mirror, { recursive: true, force: true });
   }
   return mirror;
@@ -699,12 +706,18 @@ describe('a project on the browser client', () => {
    * This case is the only one in the file that must run with the browser's own
    * security boundary intact, so it opens its own client. */
   it('should let a real browser page reach the Tau Hosted Remote advertisement', async () => {
-    if (!owner) {
-      throw new Error('The account was not seeded.');
-    }
-    await registerProjectOnRemote(owner, projectId, 'W18 Two Client');
-    const strict = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+    // CORS has its own account so the live devices cannot spend its lease allowance.
+    const corsAccount = tauTestAccount('two-client-cors');
+    let corsOwner: TauCloudOwnerIds | undefined;
+    let strict: BrowserClient | undefined;
     try {
+      const corsBearer = await seedTauTestUser(corsAccount);
+      corsOwner = await tauCloudOwnerIds(corsAccount.email);
+      await seedProPlan(corsOwner);
+      strict = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(corsBearer) });
+      const slug = await createProjectInBrowser(strict, 'W18 CORS');
+      const corsProjectId = required(await browserProjectId(strict, slug), 'W11a: CORS project identity is absent.');
+      await registerProjectOnRemote(corsOwner, corsProjectId, 'W18 CORS');
       await strict.page.goto('/', { waitUntil: 'domcontentloaded' });
       const outcome = await strict.page.evaluate(
         async ({ api, id }: Readonly<{ api: string; id: string }>) => {
@@ -718,7 +731,7 @@ describe('a project on the browser client', () => {
             return { ok: false, status: 0, error: String(error).slice(0, 200) };
           }
         },
-        { api: desktopE2EApiUrl, id: projectId },
+        { api: desktopE2EApiUrl, id: corsProjectId },
       );
       expect(outcome, 'W11a (DEF-5): the advertisement was blocked before it was sent').toEqual(
         expect.objectContaining({ ok: true, status: 200 }),
@@ -726,7 +739,11 @@ describe('a project on the browser client', () => {
     } catch (error) {
       await captureAndRethrow(error, 'browser-hosted-remote-advertisement', [strict]);
     } finally {
-      await strict.close();
+      await strict?.close();
+      if (corsOwner) {
+        await forgetSeededProjects(corsOwner);
+        await deleteTauTestUser(corsAccount.email);
+      }
     }
   }, 600_000);
 
@@ -1592,8 +1609,10 @@ describe('live and automatic', () => {
   const record = (values: Readonly<Record<string, number>>): string =>
     `${JSON.stringify({ activeGroup: 'default', groups: { default: { values } } }, undefined, 2)}\n`;
 
-  /* Every device on one head, and that head on Tau Cloud. */
-  const expectConverged = async (row: string): Promise<string> => {
+  /* Every device on one head, and that head on Tau Cloud. A new edit must advance
+   * beyond the previously settled head; equality alone can accept the old state. */
+  const expectConverged = async (row: string, after?: string): Promise<string> => {
+    let converged: string | undefined;
     await expect
       .poll(
         async () => {
@@ -1602,12 +1621,14 @@ describe('live and automatic', () => {
             browserHead(a(), sourceSlug),
             gitHead(destinationRoot),
           ]);
-          return remote !== undefined && remote === onA && remote === onB ? remote : undefined;
+          converged = remote !== undefined && remote !== after && remote === onA && remote === onB ? remote : undefined;
+          return converged;
         },
         { message: `W5b ${row}: both devices must settle on Tau Cloud's head without a reload`, timeout: 180_000 },
       )
       .toBeDefined();
-    return required(await remoteHead(), `W5b ${row}: Tau Cloud has no head.`);
+    // Return the verified observation, not a second fetch that can see a different, unsettled head.
+    return required(converged, `W5b ${row}: Tau Cloud has no converged head.`);
   };
 
   beforeAll(async () => {
@@ -1679,7 +1700,7 @@ describe('live and automatic', () => {
     await createFileInBrowser(a(), 'browser-only.scad');
     await saveRevisionInBrowser(a());
 
-    const merged = await expectConverged('different files');
+    const merged = await expectConverged('different files', before);
     const remote = await tauRepository(liveProjectId);
     expect(await gitOutput(remote, ['rev-list', '--parents', '-n', '1', merged]), 'B6: a merge revision').toMatch(
       /^\S+ \S+ \S+$/u,
@@ -1726,7 +1747,7 @@ describe('live and automatic', () => {
     }
 
     await expectVisible(turnReply(a().page, 'Add the agent part (W5b rule 9).'), 180_000);
-    const merged = await expectConverged('leased divergence');
+    const merged = await expectConverged('leased divergence', before);
     expect(await remoteFile(merged, 'agent.scad')).toBe('cube(3); // the agent');
     expect(await remoteFile(merged, 'during-turn.scad')).toBe('cylinder(2, 2, 2); // desktop during the turn');
   }, 900_000);
@@ -1744,14 +1765,14 @@ describe('live and automatic', () => {
       .toBe(record({ height: 10, width: 10 }));
     /* The bytes land before the pull publishes its head; an edit in that window
      * is a divergence from the pre-pull head (add/add), not this row's merge. */
-    await expectConverged('parameter record base');
+    const before = await expectConverged('parameter record base');
 
     /* Adjacent lines: a line merge conflicts here, the record codec does not. */
     await writeFile(join(destinationRoot, ...recordPath), record({ height: 10, width: 20 }));
     await writeBrowserFile(recordPath, record({ height: 30, width: 10 }));
     await saveRevisionInBrowser(a());
 
-    const merged = await expectConverged('parameter record');
+    const merged = await expectConverged('parameter record', before);
     expect(JSON.parse(required(await remoteFile(merged, recordPath.join('/')), 'D12: no merged record.'))).toEqual({
       activeGroup: 'default',
       groups: { default: { values: { height: 30, width: 20 } } },
@@ -1807,7 +1828,7 @@ describe('live and automatic', () => {
     await expect
       .poll(async () => readBrowserFile(a(), sourceSlug, ['overlap.scad']), { timeout: 180_000 })
       .toBe('cube(0); // base\n');
-    await expectConverged('D14 base');
+    const before = await expectConverged('D14 base');
     await openRevisionsPane(a());
     await openRevisionsPane(b());
 
@@ -1844,7 +1865,7 @@ describe('live and automatic', () => {
     await expect.poll(async () => finish.isEnabled(), { timeout: 120_000 }).toBe(true);
     await finish.click();
 
-    const decided = await expectConverged('D14 decision');
+    const decided = await expectConverged('D14 decision', before);
     expect(await remoteFile(decided, 'overlap.scad')).toBe(desktopText(2).trimEnd());
     expect(
       await gitOutput(await tauRepository(liveProjectId), ['rev-list', '--parents', '-n', '1', decided]),
@@ -1886,10 +1907,10 @@ describe('live and automatic', () => {
     await expect
       .poll(async () => readBrowserFile(a(), sourceSlug, ['undo-mine.scad']), { timeout: 180_000 })
       .toBe('cube(5); // desktop, to undo\n');
-    await expectConverged('undo base');
+    const before = await expectConverged('undo base');
     await writeBrowserFile(['undo-theirs.scad'], 'sphere(5); // browser, on top\n');
     await saveRevisionInBrowser(a());
-    const onTop = await expectConverged('the other device on top');
+    const onTop = await expectConverged('the other device on top', before);
     expect(await remoteFile(onTop, 'undo-theirs.scad')).toBe('sphere(5); // browser, on top');
 
     await undoOnDesktop();
@@ -1906,7 +1927,7 @@ describe('live and automatic', () => {
       expect(await gitHead(destinationRoot), 'D15: a refused Undo mints nothing').toBe(onTop);
       return;
     }
-    const undone = await expectConverged('undo');
+    const undone = await expectConverged('undo', onTop);
     expect(undone).not.toBe(onTop);
     expect(await remoteFile(undone, 'undo-mine.scad'), 'D15: this device’s own change is undone').toBeUndefined();
     expect(await remoteFile(undone, 'undo-theirs.scad'), 'D15: the other device’s bytes are untouched').toBe(
@@ -1963,13 +1984,21 @@ describe('close and continue', () => {
     const { slug, beforeClose, row } = options;
     /* `editThenHide` owns the page-clock <=1 s proof. Durable completion is a
      * different observable and gets the existing bounded close wait. */
+    let closed: string | undefined;
     await expect
-      .poll(async () => browserHead(client, slug), {
-        message: `${continuationOwner} ${row}: close dispatch must mint a new source revisionId`,
-        timeout: 120_000,
-      })
-      .not.toBe(beforeClose);
-    return required(await browserHead(client, slug), `${continuationOwner} ${row}: source close revisionId is absent`);
+      .poll(
+        async () => {
+          const head = await browserHead(client, slug);
+          closed = head === beforeClose ? undefined : head;
+          return closed;
+        },
+        {
+          message: `${continuationOwner} ${row}: close dispatch must mint a new source revisionId`,
+          timeout: 120_000,
+        },
+      )
+      .toBeDefined();
+    return required(closed, `${continuationOwner} ${row}: source close revisionId is absent`);
   };
 
   it('should continue a hidden browser tab on a desktop shell with the same file, close revision and chat', async () => {
@@ -2108,8 +2137,10 @@ describe('close and continue', () => {
       await source.page.waitForURL(/\/w\/[^/]+\/[^/?]+/u, { timeout: 180_000 });
       const slug = projectSlug(source.page);
       const sourceRoot = join(source.homeRoot, slug);
-      const manifest = JSON.parse(await readFile(join(sourceRoot, 'tau.json'), 'utf8')) as { readonly id?: string };
-      const projectId = manifest.id ?? '';
+      const identity = JSON.parse(await readFile(join(sourceRoot, '.tau/project.json'), 'utf8')) as {
+        readonly projectId?: string;
+      };
+      const projectId = identity.projectId ?? '';
       if (!projectId) {
         throw new Error(`${continuationOwner} ${direction}: source project id is absent`);
       }
@@ -2264,92 +2295,109 @@ describe('close and continue', () => {
   }, 900_000);
 
   it('should say Not backed up while the API is unreachable and push the queued close head on reconnect', async () => {
-    const client = required(browser, 'The browser client did not launch.');
-    const accountOwner = required(owner, 'The account was not seeded.');
-    const slug = await createProjectInBrowser(client, 'W18 Offline Close');
-    const offlineProjectId = (await browserProjectId(client, slug)) ?? '';
-    if (!offlineProjectId) {
-      throw new Error(`${continuationOwner} offline: source project id is absent`);
-    }
-    await registerProjectOnRemote(accountOwner, offlineProjectId, 'W18 Offline Close');
-    await openSyncRegion(client);
-    await chooseTauCloud(client);
-    await expect
-      .poll(async () => syncRegionText(client), {
-        message: `${continuationOwner} offline: source remote must be connected before the outage`,
-        timeout: 180_000,
-      })
-      .toMatch(/Backed up/u);
-    await createFileInBrowser(client, 'offline-baseline.scad');
-    await saveRevisionInBrowser(client);
-    await expect
-      .poll(async () => browserHead(client, slug), {
-        message: `${continuationOwner} offline: the product must mint the backed-up baseline before the outage`,
-        timeout: 120_000,
-      })
-      .toBeDefined();
-    const beforeClose = required(
-      await browserHead(client, slug),
-      `${continuationOwner} offline: source head is absent before close`,
-    );
-    await expect
-      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
-        message: `${continuationOwner} offline: Tau Cloud must acknowledge the baseline before the outage`,
-        timeout: 180_000,
-      })
-      .toBe(beforeClose);
-    await openSyncRegion(client);
-    await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
-
-    /* Unreachable for this client only: the API is shared with the rest of the
-     * file and stopping its listener would decide the outcome of every other
-     * case in the run. */
-    await client.context.route(`${desktopE2EApiUrl}/**`, async (route) => route.abort('connectionfailed'));
-    /* Restored even when a step below fails: this is the suite's shared browser,
-     * and a left-over abort made every later case read the account as free. */
-    let queuedCloseRevisionId = '';
+    // Request interception and service-worker delivery cannot jointly own this outage.
+    const client = await launchBrowserClient({
+      oneTimeToken: await mintOneTimeToken(bearer),
+      serviceWorkers: 'block',
+    });
     try {
-      await editThenHide(client, {
-        slug,
-        contents: 'cube([34, 34, 34]); // edited while the API was down\n',
-        row: 'offline',
-      });
-      queuedCloseRevisionId = await awaitCloseRevision(client, {
-        slug,
-        beforeClose,
-        row: 'offline',
-      });
-
-      /* The reopen, still offline: this is the window V18's sentence is about. */
-      await client.page.reload({ waitUntil: 'domcontentloaded' });
+      const accountOwner = required(owner, 'The account was not seeded.');
+      const slug = await createProjectInBrowser(client, 'W18 Offline Close');
+      const offlineProjectId = (await browserProjectId(client, slug)) ?? '';
+      if (!offlineProjectId) {
+        throw new Error(`${continuationOwner} offline: source project id is absent`);
+      }
+      await registerProjectOnRemote(accountOwner, offlineProjectId, 'W18 Offline Close');
       await openSyncRegion(client);
+      await chooseTauCloud(client);
       await expect
         .poll(async () => syncRegionText(client), {
-          message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
-          timeout: 120_000,
+          message: `${continuationOwner} offline: source remote must be connected before the outage`,
+          timeout: 180_000,
         })
-        .toMatch(/Not backed up · 1 revision/u);
+        .toMatch(/Backed up/u);
+      await createFileInBrowser(client, 'offline-baseline.scad');
+      await saveRevisionInBrowser(client);
+      let baseline: string | undefined;
       await expect
-        .poll(async () => browserHead(client, slug), {
-          message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,
-          timeout: 120_000,
+        .poll(
+          async () => {
+            const remote = await tauRepository(offlineProjectId);
+            const head = await gitHead(remote);
+            const file =
+              head === undefined ? undefined : await gitOutput(remote, ['show', `${head}:offline-baseline.scad`]);
+            baseline = file !== undefined && head === (await browserHead(client, slug)) ? head : undefined;
+            return baseline;
+          },
+          {
+            message: `${continuationOwner} offline: both heads must contain the saved baseline before the outage`,
+            timeout: 120_000,
+          },
+        )
+        .toBeDefined();
+      const beforeClose = required(baseline, `${continuationOwner} offline: source baseline is absent before close`);
+      await expect
+        .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
+          message: `${continuationOwner} offline: Tau Cloud must acknowledge the baseline before the outage`,
+          timeout: 180_000,
+        })
+        .toBe(beforeClose);
+      await openSyncRegion(client);
+      await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+
+      /* Unreachable for this client only: the API is shared with the rest of the
+       * file and stopping its listener would decide the outcome of every other
+       * case in the run. */
+      await client.context.route(`${desktopE2EApiUrl}/**`, async (route) => route.abort('connectionfailed'));
+      /* End the simulated outage even when an assertion fails. */
+      let queuedCloseRevisionId = '';
+      try {
+        await editThenHide(client, {
+          slug,
+          contents: 'cube([34, 34, 34]); // edited while the API was down\n',
+          row: 'offline',
+        });
+        queuedCloseRevisionId = await awaitCloseRevision(client, {
+          slug,
+          beforeClose,
+          row: 'offline',
+        });
+
+        /* The reopen, still offline: this is the window V18's sentence is about. */
+        await client.page.reload({ waitUntil: 'domcontentloaded' });
+        await openSyncRegion(client);
+        await expect
+          .poll(async () => syncRegionText(client), {
+            message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
+            timeout: 120_000,
+          })
+          .toMatch(/Not backed up · 1 revision/u);
+        await expect
+          .poll(async () => browserHead(client, slug), {
+            message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,
+            timeout: 120_000,
+          })
+          .toBe(queuedCloseRevisionId);
+      } finally {
+        await client.context.unroute(`${desktopE2EApiUrl}/**`);
+      }
+      await expect
+        .poll(async () => syncRegionText(client), {
+          message: `${continuationOwner} offline: queued close must complete without another gesture`,
+          timeout: 180_000,
+        })
+        .toMatch(/Backed up/u);
+      await expect
+        .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
+          message: `${continuationOwner} offline: Tau Cloud destination head must equal the queued close revisionId`,
+          timeout: 180_000,
         })
         .toBe(queuedCloseRevisionId);
+    } catch (error) {
+      await captureAndRethrow(error, 'offline-close-and-reconnect', [client]);
     } finally {
-      await client.context.unroute(`${desktopE2EApiUrl}/**`);
+      await client.close();
     }
-    await expect
-      .poll(async () => syncRegionText(client), {
-        message: `${continuationOwner} offline: queued close must complete without another gesture`,
-        timeout: 180_000,
-      })
-      .toMatch(/Backed up/u);
-    await expect
-      .poll(async () => gitHead(await tauRepository(offlineProjectId)), {
-        message: `${continuationOwner} offline: Tau Cloud destination head must equal the queued close revisionId`,
-        timeout: 180_000,
-      })
-      .toBe(queuedCloseRevisionId);
   }, 900_000);
 });
 
@@ -2759,9 +2807,10 @@ describe('backup by default and one library', () => {
 
   const statusText = async (client: PageClient): Promise<string> =>
     (await revisionStatus(client.page).textContent()) ?? '';
-  const manifestId = async (root: string): Promise<string | undefined> => {
+  const localProjectId = async (root: string): Promise<string | undefined> => {
     try {
-      return (JSON.parse(await readFile(join(root, 'tau.json'), 'utf8')) as { readonly id?: string }).id;
+      return (JSON.parse(await readFile(join(root, '.tau/project.json'), 'utf8')) as { readonly projectId?: string })
+        .projectId;
     } catch {
       return undefined;
     }
@@ -2794,7 +2843,7 @@ describe('backup by default and one library', () => {
     const destinationSlug = await openCloudOnlyProject(second.page, { projectsUrl, name, message: 'D20 open' });
     const root = join(second.homeRoot, destinationSlug);
     await expect
-      .poll(async () => manifestId(root), { message: 'D20: opened under the remote’s id', timeout: 120_000 })
+      .poll(async () => localProjectId(root), { message: 'D20: opened under the remote’s id', timeout: 120_000 })
       .toBe(projectId);
     const remote = required(await gitHead(await tauRepository(projectId)), 'D20: Tau Cloud has no head.');
     await expect.poll(async () => gitHead(root), { timeout: 180_000 }).toBe(remote);
@@ -2844,14 +2893,24 @@ describe('backup by default and one library', () => {
       await third.page.keyboard.press('Escape');
 
       await searchLibrary(third.page, { projectsUrl, name });
-      const localCard = localLibraryCard(third.page, name);
+      let reservedRoot: string | undefined;
       await expect
-        .poll(async () => localCard.locator('[data-slot="on-tau-cloud"]').count(), {
-          message: 'D20: materialized without a click',
-          timeout: 120_000,
-        })
-        .toBe(1);
-      expect(await cloudOnlyLibraryCard(third.page, name).count()).toBe(0);
+        .poll(
+          async () => {
+            const roots = readdirSync(third.homeRoot, { withFileTypes: true })
+              .filter((entry) => entry.isDirectory())
+              .map((entry) => join(third.homeRoot, entry.name));
+            const ids = await Promise.all(roots.map(async (root) => localProjectId(root)));
+            reservedRoot = roots.find((_, index) => ids[index] === projectId);
+            return reservedRoot;
+          },
+          { message: 'D20: reserve the remote identity without a click', timeout: 120_000 },
+        )
+        .toBeDefined();
+      // A reserved stub stays in the cloud presentation until its first pull supplies the files.
+      const cloudCard = cloudOnlyLibraryCard(third.page, name);
+      await expect.poll(async () => cloudCard.count(), { timeout: 60_000 }).toBe(1);
+      expect(await localLibraryCard(third.page, name).count()).toBe(0);
 
       /* The first open connects and pulls because the copy is marked for it. */
       await expect
@@ -2860,10 +2919,11 @@ describe('backup by default and one library', () => {
           timeout: 60_000,
         })
         .toBe('open');
-      await localCard.getByRole('link', { name: `Open ${name}`, exact: true }).click();
+      await cloudCard.getByRole('button', { name: `Open ${name}`, exact: true }).click();
       await expect.poll(async () => third.page.url(), { timeout: 120_000 }).toMatch(/\/w\//u);
       const root = join(third.homeRoot, projectSlug(third.page));
-      expect(await manifestId(root)).toBe(projectId);
+      expect(root, 'D20: opening reuses the reserved project').toBe(reservedRoot);
+      expect(await localProjectId(root)).toBe(projectId);
       const remote = required(await gitHead(await tauRepository(projectId)), 'D20: Tau Cloud has no head.');
       await expect
         .poll(async () => gitHead(root), { message: 'D20: the first open pulls', timeout: 180_000 })

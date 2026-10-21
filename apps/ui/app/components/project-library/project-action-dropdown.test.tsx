@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { projectToManifest } from '@taucad/types';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -32,7 +32,7 @@ vi.mock('#hooks/use-sidebar-status.js', () => ({
 }));
 
 const project = {
-  ...projectToManifest({
+  ...createProjectFixture({
     id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
     name: 'Readable Project',
     description: '',

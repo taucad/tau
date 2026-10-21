@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_x5OCQJUJp_fUb41FRY9kQ",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "External retaining ring",
   "description": "External retaining ring with a modeled opening and editable section dimensions.",
   "tags": [

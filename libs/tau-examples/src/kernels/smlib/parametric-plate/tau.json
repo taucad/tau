@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Kulj1acNGy2S886pszStG",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Parametric Mounting Plate",
   "description": "A mounting plate with rounded corners, a parametric grid of through holes and filleted top edges, built on the SMLib NURBS kernel.",
   "tags": ["smlib", "typescript", "parametric", "fillet", "brep"],

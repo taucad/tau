@@ -4,7 +4,7 @@
  * Extracted from `WorkspaceFileService` unchanged (charter D5/D14, W7). These
  * four operations are the project-directory *lifecycle*, not content: they scan
  * configured storage roots for each project directory's `tau.json`, parse and serialize the
- * manifest, and write a journal snapshot or remove a verified directory —
+ * manifest, resolve generated identity through shared actors, and write a journal snapshot or remove a verified directory —
  * always through a named authority operation holding the logical-project and
  * canonical-physical locks (authority Rules 5, 8 and 12).
  *
@@ -22,6 +22,21 @@
  */
 
 import { z } from 'zod';
+import { createAsyncLogic, toPromise } from 'xstate';
+import {
+  convertLegacyProjectManifestBytes,
+  createProjectIdentityActor,
+  createProjectIdentityResolver,
+  createProjectManifestConversionActor,
+  parseProjectIdentityBytes,
+  projectIdentityPath,
+  serializeProjectIdentity,
+} from '@taucad/project-core/identity';
+import type {
+  ProjectIdentityRecord,
+  ProjectIdentityResult,
+  ProjectIdentityResolver,
+} from '@taucad/project-core/identity';
 import {
   parseProjectManifestBytes,
   projectIdSchema,
@@ -33,7 +48,8 @@ import {
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type {
-  AdoptableProjectManifest,
+  CheckedFileWriteResult,
+  FileWritePrecondition,
   FileSystemBackend,
   ProjectManifest,
   ProjectManifestParseIssue,
@@ -63,7 +79,20 @@ import { isNotFoundError } from '#workspace-errors.js';
 import { projectRoute } from '#project-routes.js';
 
 /** Concurrent `tau.json` probes while scanning a discovery root. */
-const manifestProbeConcurrency = 16;
+const manifestProbeConcurrency = 64;
+
+/** Declaration or generated-identity failure affecting one discovery entry. @public */
+export type ProjectDiscoveryIssue =
+  | ProjectManifestParseIssue
+  | { readonly code: 'identity-invalid'; readonly message: string }
+  | { readonly code: 'identity-unavailable'; readonly message: string }
+  | { readonly code: 'identity-conflict'; readonly expectedProjectId: string; readonly actualProjectId: string };
+
+/** Resolved identity kept separate from the authored declaration. @public */
+export type ResolvedProjectManifest = {
+  readonly projectId: string;
+  readonly manifest: ProjectManifest;
+};
 
 /**
  * Validated or quarantined result from project discovery.
@@ -77,12 +106,14 @@ const manifestProbeConcurrency = 16;
 export type ProjectDiscoveryEntry =
   | {
       readonly status: 'valid';
+      readonly projectId: string;
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue?: ProjectManifestParseIssue;
     }
   | {
       readonly status: 'duplicate-id';
+      readonly projectId: string;
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue?: ProjectManifestParseIssue;
@@ -95,20 +126,21 @@ export type ProjectDiscoveryEntry =
        * never emits it.
        */
       readonly status: 'route-blocked';
+      readonly projectId: string;
       readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue?: ProjectManifestParseIssue;
     }
   | {
       readonly status: 'adoption-required';
-      readonly manifest: AdoptableProjectManifest;
+      readonly manifest: ProjectManifest;
       readonly locator: ProjectLocator;
       readonly issue: ProjectManifestParseIssue;
     }
   | {
       readonly status: 'invalid';
       readonly locator: ProjectLocator;
-      readonly issue: ProjectManifestParseIssue;
+      readonly issue: ProjectDiscoveryIssue;
     };
 
 /** Completeness of one configured physical-root scan. @public */
@@ -161,6 +193,7 @@ const pendingProjectFileDescriptorSchema = z.object({
 /** Complete runtime boundary for direct and bridged pending-project commits. @public */
 export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDirectoryInput> = z
   .object({
+    projectId: projectIdSchema,
     providerBasePath: z.string(),
     scope: pendingProjectScopeSchema,
     files: z.record(z.string(), pendingProjectFileDescriptorSchema),
@@ -186,7 +219,7 @@ export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDire
       });
     }
 
-    const treePaths = new Set(['tau.json']);
+    const treePaths = new Set(['tau.json', projectIdentityPath]);
     for (const relativePath of Object.keys(input.files)) {
       if (!isSafeRelativePath(relativePath)) {
         context.addIssue({
@@ -206,11 +239,17 @@ export const pendingProjectCommitInputSchema: z.ZodType<CommitPendingProjectDire
         });
         continue;
       }
-      if (relativePath === 'tau.json' || relativePath.endsWith('/tau.json')) {
+      if (
+        relativePath === 'tau.json' ||
+        relativePath.endsWith('/tau.json') ||
+        relativePath.toLowerCase() === '.tau' ||
+        relativePath.toLowerCase() === projectIdentityPath ||
+        relativePath.toLowerCase().startsWith(`${projectIdentityPath}/`)
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['files', relativePath],
-          message: 'Pending project files cannot contain a manifest',
+          message: 'Pending project files cannot contain a manifest or generated identity',
         });
       }
       treePaths.add(relativePath);
@@ -237,76 +276,24 @@ const basenameOf = (directory: string): string => (directory.split('/').at(-1) ?
 /** What one immediate child directory of a discovery root holds, as far as project identity goes. */
 type ProjectDirectoryReading =
   | { readonly kind: 'not-a-project' }
-  | { readonly kind: 'identified'; readonly manifest: ProjectManifest; readonly issue?: ProjectManifestParseIssue }
   | {
-      readonly kind: 'adoptable';
-      readonly manifest: AdoptableProjectManifest;
-      readonly issue: ProjectManifestParseIssue;
+      readonly kind: 'identified';
+      readonly projectId: string;
+      readonly manifest: ProjectManifest;
+      readonly issue?: ProjectManifestParseIssue;
     }
-  | { readonly kind: 'invalid'; readonly issue: ProjectManifestParseIssue };
+  | { readonly kind: 'adoptable'; readonly manifest: ProjectManifest; readonly issue: ProjectManifestParseIssue }
+  | { readonly kind: 'invalid'; readonly issue: ProjectDiscoveryIssue };
 
-/**
- * Classify one project directory by its manifest — the single reading that
- * discovery reports and that Adopt re-establishes under the physical lock
- * before it writes (R11, blueprint R6).
- *
- * A defective declaration still identifies its project; only a missing
- * identity makes the directory adoptable, and only unreadable, oversize or
- * foreign-schema bytes leave it quarantined. A directory holding `.tau/`
- * state has been a project, so losing its `tau.json` keeps it visible as
- * adoptable instead of letting it vanish with its chats (blueprint F10).
- *
- * @param provider - The discovery root's provider.
- * @param directory - Root-relative project directory.
- * @returns The directory's reading; never throws for manifest content.
- */
-async function readProjectDirectory(provider: FileSystemProvider, directory: string): Promise<ProjectDirectoryReading> {
-  let bytes: Uint8Array<ArrayBuffer>;
-  try {
-    bytes = await provider.readFile(joinRelativePath(directory, 'tau.json'));
-  } catch (error) {
-    if (!isNotFoundError(error)) {
-      return {
-        kind: 'invalid',
-        issue: { code: 'manifest-unreadable', message: error instanceof Error ? error.message : String(error) },
-      };
-    }
-    // One listing, no `stat`: it both proves Tau state and finds the likely main entry.
-    const entries = await readDirectoryEntries(provider, directory).catch(() => []);
-    if (!entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
-      return { kind: 'not-a-project' };
-    }
-    const mainFile = entries
-      .filter((entry) => entry.kind === 'file' && /^main\.[^.]+$/.test(entry.name))
-      .map((entry) => entry.name)
-      .sort()[0];
-    return {
-      kind: 'adoptable',
-      manifest: {
-        $schema: projectManifestSchemaUrl,
-        name: basenameOf(directory),
-        description: '',
-        tags: [],
-        assets: { main: { entryPath: mainFile ?? 'main.ts' } },
-      },
-      issue: { code: 'manifest-missing' },
-    };
-  }
-  const read = readProjectManifestBytes(bytes);
-  if (read.success) {
-    return read.issue === undefined
-      ? { kind: 'identified', manifest: read.data }
-      : { kind: 'identified', manifest: read.data, issue: read.issue };
-  }
-  if (read.adoptable === undefined) {
-    return { kind: 'invalid', issue: read.issue };
-  }
-  return {
-    kind: 'adoptable',
-    manifest: read.adoptable.name === '' ? { ...read.adoptable, name: basenameOf(directory) } : read.adoptable,
-    issue: read.issue,
-  };
-}
+type DirectoryAuthority = {
+  readonly provider: FileSystemProvider;
+  readonly directory: string;
+  readonly scope: WorkspaceScope;
+  readonly storageRootKey: string;
+  readonly alreadyLocked?: boolean;
+};
+
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
  * The project-directory lifecycle over the authority's own collaborators.
@@ -315,6 +302,8 @@ async function readProjectDirectory(provider: FileSystemProvider, directory: str
  */
 export class ProjectDirectories {
   private readonly _registry: ProviderRegistry;
+  private readonly _observedIdentityResolver: ProjectIdentityResolver;
+  private readonly _lifetime = new AbortController();
   private readonly _resourceQueue: ResourceQueue;
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private readonly _pipeline: MutationPipeline;
@@ -340,6 +329,27 @@ export class ProjectDirectories {
     filePool: () => SharedPool | undefined;
     revokeProjectRoute: (path: string, notifyPeers: boolean) => void;
   }) {
+    this._observedIdentityResolver = createProjectIdentityResolver({
+      capacity: 0,
+      actors: {
+        readIdentity: createAsyncLogic<ProjectIdentityRecord | undefined, { locationKey: string }>({
+          run: async () => {
+            throw new Error('Observed identity resolution requires an already-read record.');
+          },
+        }),
+        mintIdentity: createAsyncLogic<string, { locationKey: string }>({
+          run: async () => {
+            throw new Error('Observed identity resolution never generates identity.');
+          },
+        }),
+        initializeIdentity: createAsyncLogic<ProjectIdentityRecord, { locationKey: string; projectId: string }>({
+          run: async () => {
+            throw new Error('Observed identity resolution never initializes storage.');
+          },
+        }),
+      },
+    });
+    this._observedIdentityResolver.actor.start();
     this._registry = options.registry;
     this._resourceQueue = options.resourceQueue;
     this._crossTabCoordinator = options.crossTabCoordinator;
@@ -348,6 +358,12 @@ export class ProjectDirectories {
     this._discoveryRoots = options.discoveryRoots;
     this._filePool = options.filePool;
     this._revokeProjectRoute = options.revokeProjectRoute;
+  }
+
+  /** Stop the bounded owner when its filesystem authority is disposed. */
+  public dispose(): void {
+    this._lifetime.abort();
+    this._observedIdentityResolver.actor.stop();
   }
 
   /**
@@ -393,15 +409,26 @@ export class ProjectDirectories {
         // One unreadable child must not blank an otherwise readable root: it is
         // reported in place and the scan continues. `inaccessible` stays
         // reserved for failures of the root listing or its provider.
-        const reading = await readProjectDirectory(provider, relativeDirectory);
+        const reading = await this._readProjectDirectory({
+          provider,
+          directory: relativeDirectory,
+          scope,
+          storageRootKey,
+        });
         switch (reading.kind) {
           case 'not-a-project': {
             return undefined;
           }
           case 'identified': {
             return reading.issue === undefined
-              ? { status: 'valid', manifest: reading.manifest, locator }
-              : { status: 'valid', manifest: reading.manifest, locator, issue: reading.issue };
+              ? { status: 'valid', projectId: reading.projectId, manifest: reading.manifest, locator }
+              : {
+                  status: 'valid',
+                  projectId: reading.projectId,
+                  manifest: reading.manifest,
+                  locator,
+                  issue: reading.issue,
+                };
           }
           case 'adoptable': {
             return { status: 'adoption-required', manifest: reading.manifest, locator, issue: reading.issue };
@@ -445,12 +472,12 @@ export class ProjectDirectories {
     const occurrenceCount = new Map<string, number>();
     for (const entry of discovered) {
       if (entry.status === 'valid') {
-        occurrenceCount.set(entry.manifest.id, (occurrenceCount.get(entry.manifest.id) ?? 0) + 1);
+        occurrenceCount.set(entry.projectId, (occurrenceCount.get(entry.projectId) ?? 0) + 1);
       }
     }
     const entries = discovered.map(
       (entry): ProjectDiscoveryEntry =>
-        entry.status === 'valid' && (occurrenceCount.get(entry.manifest.id) ?? 0) > 1
+        entry.status === 'valid' && (occurrenceCount.get(entry.projectId) ?? 0) > 1
           ? { ...entry, status: 'duplicate-id' }
           : entry,
     );
@@ -459,19 +486,19 @@ export class ProjectDirectories {
 
   /**
    * Give an `adoption-required` project directory a Tau identity in place,
-   * writing the salvaged declaration discovery showed. Service-side because the
+   * writing the recovered declaration discovery showed and preserving its generated identity. Service-side because the
    * write must re-establish adoptability under the same physical lock every
    * other project mutation takes — a UI-side read/modify/write could adopt a
    * directory a sibling tab just repaired.
    *
    * @param locator - Discovery locator of the directory to adopt.
    * @param options - `id` restores the identity this exact directory's route was bound to; absent mints a fresh one.
-   * @returns The manifest now on disk, identity included.
+   * @returns The declaration now on disk and its separately resolved identity.
    */
   public async adoptProjectDirectory(
     locator: ProjectLocator,
     options?: { readonly id?: string },
-  ): Promise<ProjectManifest> {
+  ): Promise<ResolvedProjectManifest> {
     const path = assertRootedPath(locator.relativeDirectory);
     if (path !== locator.relativeDirectory || !isProjectDirectoryPath(path)) {
       throw new TypeError(`Adoption target must be a canonical project directory: ${locator.relativeDirectory}`);
@@ -487,19 +514,29 @@ export class ProjectDirectories {
     const physicalLock = `${locator.storageRootKey}:${path}`;
     return this._crossTabCoordinator.withLocks([physicalLock], async () =>
       this._resourceQueue.queueForMany([physicalLock], async () => {
-        const reading = await readProjectDirectory(provider, path);
+        const authority = {
+          provider,
+          directory: path,
+          scope: root.scope,
+          storageRootKey: locator.storageRootKey,
+          alreadyLocked: true,
+        };
+        const reading = await this._readProjectDirectory(authority);
         if (reading.kind !== 'adoptable') {
           throw new TypeError(`Project directory is not adoptable: ${path}`);
         }
-        const manifest = projectToManifest({
-          ...reading.manifest,
-          id: options?.id ?? generatePrefixedId(idPrefix.project),
+        const identity = await this._resolveIdentity({
+          ...authority,
+          preferredProjectId: options?.id,
+          alreadyLocked: true,
         });
+        if (identity.status !== 'resolved') {
+          throw new Error(`Project identity could not be established: ${JSON.stringify(identity)}`);
+        }
+        const manifest = projectToManifest(reading.manifest);
         await provider.writeFile(`${path}/tau.json`, serializeProjectManifest(manifest));
-        // Ponytail: no logical route to invalidate — an unadopted project was
-        // never mounted, so the caller's discovery refetch is the only reader.
         this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(root.scope, ''));
-        return manifest;
+        return { projectId: identity.projectId, manifest };
       }),
     );
   }
@@ -548,13 +585,16 @@ export class ProjectDirectories {
           return { status: 'unidentifiable' };
         }
         const manifest = await provider.readFile(manifestPath);
-        // Identity is what deletion verifies; a degraded declaration still carries it.
-        const parsed = readProjectManifestBytes(manifest);
-        if (!parsed.success) {
+        let identity: ProjectIdentityRecord | undefined;
+        let identityBytes: Uint8Array<ArrayBuffer>;
+        try {
+          identityBytes = await provider.readFile(`${path}/${projectIdentityPath}`);
+          identity = parseProjectIdentityBytes(identityBytes);
+        } catch {
           return { status: 'unidentifiable' };
         }
-        if (parsed.data.id !== projectId) {
-          return { status: 'identity-mismatch', actualProjectId: parsed.data.id };
+        if (identity.projectId !== projectId) {
+          return { status: 'identity-mismatch', actualProjectId: identity.projectId };
         }
 
         this._revokeProjectRoute(logicalRoot, true);
@@ -563,7 +603,7 @@ export class ProjectDirectories {
         const authorityParent = physicalParent === '' ? '/' : `/${physicalParent}`;
         const parentAuthority = this._scopedPhysicalAuthority(scope, physicalParent);
         try {
-          await this._deleteProjectDirectory(provider, path, manifest);
+          await this._deleteProjectDirectory({ provider, directoryPath: path, manifest, identity: identityBytes });
         } finally {
           this._filePool()?.clear();
           this._treeIndexes.clear();
@@ -610,22 +650,51 @@ export class ProjectDirectories {
             const existingManifestPath = `${path}/tau.json`;
             if (await provider.exists(existingManifestPath)) {
               const existing = readProjectManifestBytes(await provider.readFile(existingManifestPath));
-              if (!existing.success) {
+              let identity: ProjectIdentityRecord | undefined;
+              try {
+                identity = await this._readIdentity({ provider, directory: path, scope, storageRootKey });
+              } catch {
                 return { status: 'unidentifiable-manifest' };
               }
-              if (existing.data.id !== projectId) {
-                return { status: 'identity-mismatch', actualProjectId: existing.data.id };
+              if (!existing.success || identity === undefined) {
+                return { status: 'unidentifiable-manifest' };
+              }
+              if (identity.projectId !== projectId) {
+                return { status: 'identity-mismatch', actualProjectId: identity.projectId };
               }
               return { status: 'already-committed' };
             }
+            let residueIdentity: ProjectIdentityRecord | undefined;
+            try {
+              residueIdentity = await this._readIdentity({ provider, directory: path, scope, storageRootKey });
+            } catch {
+              return { status: 'unidentifiable-manifest' };
+            }
+            if (residueIdentity === undefined) {
+              return { status: 'unidentifiable-manifest' };
+            }
+            if (residueIdentity.projectId !== projectId) {
+              return { status: 'identity-mismatch', actualProjectId: residueIdentity.projectId };
+            }
             mutationBegan = true;
-            await this._pipeline.rmdirRecursive(provider, path);
+            await this._clearProjectDirectoryContents(provider, path);
           }
 
           mutationBegan = true;
           await provider.mkdir(path, { recursive: true });
           this._filePool()?.clear();
           this._treeIndexes.removeDirectory(logicalRoot);
+          const identity = await this._resolveIdentity({
+            provider,
+            directory: path,
+            scope,
+            storageRootKey,
+            preferredProjectId: projectId,
+            alreadyLocked: true,
+          });
+          if (identity.status !== 'resolved') {
+            throw new Error(`Pending project identity could not be established: ${JSON.stringify(identity)}`);
+          }
 
           for (const [relativePath, descriptor] of files) {
             const logicalPath = `${logicalRoot}/${relativePath}`;
@@ -650,7 +719,8 @@ export class ProjectDirectories {
             context,
           });
           const committed = parseProjectManifestBytes(await provider.readFile(`${path}/tau.json`));
-          if (!committed.success || committed.data.id !== projectId) {
+          const committedIdentity = await this._readIdentity({ provider, directory: path, scope, storageRootKey });
+          if (!committed.success || committedIdentity?.projectId !== projectId) {
             throw new Error(`Pending project manifest verification failed for ${projectId}`);
           }
 
@@ -666,6 +736,367 @@ export class ProjectDirectories {
         }
       }),
     );
+  }
+
+  private async _readIdentity(authority: DirectoryAuthority): Promise<ProjectIdentityRecord | undefined> {
+    let bytes: Uint8Array<ArrayBuffer>;
+    try {
+      bytes = await authority.provider.readFile(`${authority.directory}/${projectIdentityPath}`);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return undefined;
+      }
+      throw error;
+    }
+    try {
+      return parseProjectIdentityBytes(bytes);
+    } catch (error) {
+      throw Object.assign(new Error(`Invalid project identity: ${errorMessage(error)}`), { code: 'IDENTITY_INVALID' });
+    }
+  }
+
+  private async _resolveIdentity(
+    input: DirectoryAuthority & {
+      readonly preferredProjectId?: string;
+      readonly initialIdentity?: { readonly record: ProjectIdentityRecord | undefined };
+      readonly manifestBytes?: Uint8Array<ArrayBuffer>;
+      readonly alreadyLocked?: boolean;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<ProjectIdentityResult> {
+    if (input.initialIdentity?.record !== undefined) {
+      return this._observedIdentityResolver.resolve({
+        locationKey: `${input.storageRootKey}:${input.directory}`,
+        mode: 'read',
+        initialIdentity: input.initialIdentity,
+        ...(input.preferredProjectId === undefined ? {} : { preferredProjectId: input.preferredProjectId }),
+      });
+    }
+    const signal =
+      input.signal === undefined ? this._lifetime.signal : AbortSignal.any([this._lifetime.signal, input.signal]);
+    if (signal.aborted) {
+      return { status: 'failed', message: 'Project identity resolution was canceled.' };
+    }
+    const actor = createProjectIdentityActor({
+      input: {
+        locationKey: `${input.storageRootKey}:${input.directory}`,
+        mode: 'ensure',
+        ...(input.preferredProjectId === undefined ? {} : { preferredProjectId: input.preferredProjectId }),
+        ...(input.initialIdentity === undefined ? {} : { initialIdentity: input.initialIdentity }),
+      },
+      actors: {
+        readIdentity: createAsyncLogic<ProjectIdentityRecord | undefined, { locationKey: string }>({
+          run: async ({ signal }) => {
+            const identity = await this._readIdentity(input);
+            signal.throwIfAborted();
+            return identity;
+          },
+        }),
+        mintIdentity: createAsyncLogic<string, { locationKey: string }>({
+          run: async ({ signal }) => {
+            signal.throwIfAborted();
+            return generatePrefixedId(idPrefix.project);
+          },
+        }),
+        initializeIdentity: createAsyncLogic<ProjectIdentityRecord, { locationKey: string; projectId: string }>({
+          run: async ({ input: candidate, signal }) => {
+            const record: ProjectIdentityRecord = { version: 1, projectId: candidate.projectId };
+            const path = `${input.directory}/${projectIdentityPath}`;
+            const result = await this._checkedWrite({
+              ...input,
+              projectId: candidate.projectId,
+              path,
+              data: serializeProjectIdentity(record),
+              preconditions: [
+                { path, expected: null },
+                ...(input.manifestBytes === undefined
+                  ? []
+                  : [{ path: `${input.directory}/tau.json`, expected: input.manifestBytes }]),
+              ],
+              signal,
+            });
+            signal.throwIfAborted();
+            if (result.status === 'applied') {
+              return record;
+            }
+            const winner = await this._readIdentity(input);
+            signal.throwIfAborted();
+            if (winner === undefined) {
+              throw new Error(
+                'The project declaration changed while its identity was being initialized. Retry discovery.',
+              );
+            }
+            return winner;
+          },
+        }),
+      },
+    });
+    const cancel = (): void => {
+      actor.send({ type: 'cancel' });
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    actor.start();
+    try {
+      return await toPromise(actor);
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      actor.stop();
+    }
+  }
+
+  private async _checkedWrite(
+    input: DirectoryAuthority & {
+      readonly projectId: string;
+      readonly path: string;
+      readonly data: Uint8Array<ArrayBuffer>;
+      readonly preconditions: readonly FileWritePrecondition[];
+      readonly alreadyLocked?: boolean;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<CheckedFileWriteResult> {
+    const physicalLock = `${input.storageRootKey}:${input.directory}`;
+    const run = async (): Promise<CheckedFileWriteResult> => {
+      input.signal.throwIfAborted();
+      if (!input.provider.capabilities.writable) {
+        throw new Error('Project identity persistence is unavailable on this read-only storage.');
+      }
+      if (input.provider.writeFileChecked !== undefined) {
+        return input.provider.writeFileChecked({
+          path: input.path,
+          data: input.data,
+          preconditions: input.preconditions,
+        });
+      }
+      const conflicts = [];
+      for (const precondition of input.preconditions) {
+        let actual: Exclude<FileWritePrecondition['expected'], string>;
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- Compare every expected byte under the held physical lock.
+          actual = await input.provider.readFile(precondition.path);
+        } catch (error) {
+          if (!isNotFoundError(error)) {
+            throw error;
+          }
+          actual = null;
+        }
+        const expected =
+          typeof precondition.expected === 'string'
+            ? new TextEncoder().encode(precondition.expected)
+            : precondition.expected;
+        const matches =
+          actual === null
+            ? expected === null
+            : actual.byteLength === expected?.byteLength && actual.every((byte, index) => byte === expected[index]);
+        if (!matches) {
+          conflicts.push({ path: precondition.path, actual });
+        }
+      }
+      if (conflicts.length > 0) {
+        return { status: 'conflict', conflicts };
+      }
+      input.signal.throwIfAborted();
+      await input.provider.writeFile(input.path, input.data);
+      return { status: 'applied', content: input.data };
+    };
+    const locked = async (): Promise<CheckedFileWriteResult> =>
+      input.alreadyLocked === true ? run() : this._resourceQueue.queueForMany([physicalLock], run);
+    // Native checked writes own their authority fence. Browser providers without
+    // that primitive require Web Locks; best-effort exclusion is insufficient.
+    const result =
+      input.provider.writeFileChecked === undefined
+        ? await this._crossTabCoordinator.withRequiredLocks(input.alreadyLocked === true ? [] : [physicalLock], locked)
+        : await locked();
+    if (result.status === 'applied') {
+      const relativePath = input.path.slice(input.directory.length + 1);
+      const logicalPath = `${projectRoute(input.projectId)}/${relativePath}`;
+      this._filePool()?.invalidate(logicalPath);
+      this._treeIndexes.evict(logicalPath);
+      if (input.alreadyLocked !== true) {
+        this._pipeline.emitChangeEvent({ type: 'fileWritten', path: logicalPath, backend: input.scope.backend });
+        this._crossTabCoordinator.notifyDirectoryChange('/', this._scopedPhysicalAuthority(input.scope, ''));
+      }
+    }
+    return result;
+  }
+
+  private async _readProjectDirectory(authority: DirectoryAuthority): Promise<ProjectDirectoryReading> {
+    const { provider, directory } = authority;
+    const [manifestResult, identityResult] = await Promise.allSettled([
+      provider.readFile(`${directory}/tau.json`),
+      this._readIdentity(authority),
+    ]);
+    if (manifestResult.status === 'rejected') {
+      if (!isNotFoundError(manifestResult.reason)) {
+        return {
+          kind: 'invalid',
+          issue: { code: 'manifest-unreadable', message: errorMessage(manifestResult.reason) },
+        };
+      }
+      const entries = await readDirectoryEntries(provider, directory).catch(() => []);
+      if (!entries.some((entry) => entry.kind === 'dir' && entry.name === '.tau')) {
+        return { kind: 'not-a-project' };
+      }
+      const mainFile = entries
+        .filter((entry) => entry.kind === 'file' && /^main\.[^.]+$/.test(entry.name))
+        .map((entry) => entry.name)
+        .sort()[0];
+      return {
+        kind: 'adoptable',
+        manifest: {
+          $schema: projectManifestSchemaUrl,
+          name: basenameOf(directory),
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: mainFile ?? 'main.ts' } },
+        },
+        issue: { code: 'manifest-missing' },
+      };
+    }
+    if (identityResult.status === 'rejected') {
+      const error: unknown = identityResult.reason;
+      const invalid =
+        typeof error === 'object' && error !== null && 'code' in error && error.code === 'IDENTITY_INVALID';
+      return {
+        kind: 'invalid',
+        issue: { code: invalid ? 'identity-invalid' : 'identity-unavailable', message: errorMessage(error) },
+      };
+    }
+    const bytes = manifestResult.value;
+    const read = readProjectManifestBytes(bytes);
+    const legacy = read.success ? undefined : convertLegacyProjectManifestBytes(bytes);
+    if (legacy?.success === true) {
+      const { projectId, manifest } = legacy.data;
+      const nextBytes = serializeProjectManifest(manifest);
+      const actor = createProjectManifestConversionActor({
+        input: { projectId },
+        actors: {
+          establishIdentity: createAsyncLogic<ProjectIdentityResult, { projectId: string }>({
+            run: async ({ input, signal }) => {
+              const result = await this._resolveIdentity({
+                ...authority,
+                preferredProjectId: input.projectId,
+                initialIdentity: { record: identityResult.value },
+                manifestBytes: bytes,
+                signal,
+              });
+              signal.throwIfAborted();
+              return result;
+            },
+          }),
+          replaceManifest: createAsyncLogic<'converted' | 'unchanged' | 'conflict', { projectId: string }>({
+            run: async ({ input, signal }) => {
+              const identityBytes = await provider.readFile(`${directory}/${projectIdentityPath}`);
+              signal.throwIfAborted();
+              if (parseProjectIdentityBytes(identityBytes).projectId !== input.projectId) {
+                return 'conflict';
+              }
+              const result = await this._checkedWrite({
+                ...authority,
+                projectId: input.projectId,
+                path: `${directory}/tau.json`,
+                data: nextBytes,
+                preconditions: [
+                  { path: `${directory}/tau.json`, expected: bytes },
+                  { path: `${directory}/${projectIdentityPath}`, expected: identityBytes },
+                ],
+                signal,
+              });
+              signal.throwIfAborted();
+              if (result.status === 'applied') {
+                return 'converted';
+              }
+              // A failed precondition can be an identity replacement even when
+              // another writer already published the same declaration bytes.
+              return result.status === 'unchanged' ? 'unchanged' : 'conflict';
+            },
+          }),
+        },
+      });
+      const cancel = (): void => {
+        actor.send({ type: 'cancel' });
+      };
+      this._lifetime.signal.addEventListener('abort', cancel, { once: true });
+      actor.start();
+      if (this._lifetime.signal.aborted) {
+        cancel();
+      }
+      try {
+        const result = await toPromise(actor);
+        if (result.status === 'converted' || result.status === 'unchanged') {
+          return { kind: 'identified', projectId, manifest };
+        }
+        if (
+          result.status === 'conflict' &&
+          identityResult.value !== undefined &&
+          identityResult.value.projectId !== projectId
+        ) {
+          return {
+            kind: 'invalid',
+            issue: {
+              code: 'identity-conflict',
+              expectedProjectId: projectId,
+              actualProjectId: identityResult.value.projectId,
+            },
+          };
+        }
+        return {
+          kind: 'invalid',
+          issue: {
+            code: 'identity-unavailable',
+            message:
+              result.status === 'failed'
+                ? result.message
+                : 'Project declaration changed during conversion. Retry discovery.',
+          },
+        };
+      } finally {
+        this._lifetime.signal.removeEventListener('abort', cancel);
+        actor.stop();
+      }
+    }
+    if (!read.success) {
+      return { kind: 'invalid', issue: read.issue };
+    }
+    if (
+      identityResult.value === undefined &&
+      (read.issue?.code === 'manifest-invalid-json' || read.issue?.code === 'manifest-unknown-schema')
+    ) {
+      return { kind: 'invalid', issue: read.issue };
+    }
+    const identity = await this._resolveIdentity({
+      ...authority,
+      initialIdentity: { record: identityResult.value },
+      manifestBytes: bytes,
+    });
+    switch (identity.status) {
+      case 'resolved': {
+        return {
+          kind: 'identified',
+          projectId: identity.projectId,
+          manifest: read.data,
+          ...(read.issue === undefined ? {} : { issue: read.issue }),
+        };
+      }
+      case 'conflict': {
+        return {
+          kind: 'invalid',
+          issue: {
+            code: 'identity-conflict',
+            expectedProjectId: identity.expectedProjectId,
+            actualProjectId: identity.actualProjectId,
+          },
+        };
+      }
+      case 'failed': {
+        return { kind: 'invalid', issue: { code: 'identity-unavailable', message: identity.message } };
+      }
+      case 'missing': {
+        return {
+          kind: 'invalid',
+          issue: { code: 'identity-unavailable', message: 'Project identity has not been persisted.' },
+        };
+      }
+    }
   }
 
   private _validatePendingProjectCommit(input: CommitPendingProjectDirectoryInput): {
@@ -685,7 +1116,7 @@ export class ProjectDirectories {
     if (!parsedManifest.success) {
       throw new TypeError('Pending project commit manifest is invalid');
     }
-    const projectId = parsedManifest.data.id;
+    const { projectId } = parsedInput.data;
     const scope: StorageRootConfig = { ...parsedInput.data.scope };
     const storageRootKey = this._registry.resolveStorageRootKey(scope);
     const path = parsedInput.data.providerBasePath;
@@ -714,31 +1145,55 @@ export class ProjectDirectories {
     };
   }
 
-  private async _deleteProjectDirectory(
-    provider: FileSystemProvider,
-    directoryPath: string,
-    manifest: Uint8Array<ArrayBuffer>,
-  ): Promise<void> {
-    const manifestPath = joinRelativePath(directoryPath, 'tau.json');
+  private async _clearProjectDirectoryContents(provider: FileSystemProvider, directoryPath: string): Promise<void> {
+    const stateDirectory = joinRelativePath(directoryPath, '.tau');
     const entries = await provider.readdir(directoryPath);
     for (const entry of entries) {
-      if (entry === 'tau.json') {
+      const canonicalName = entry.toLowerCase();
+      if (canonicalName === 'tau.json' || canonicalName === '.tau') {
         continue;
       }
-      const fullPath = joinRelativePath(directoryPath, entry);
-      // oxlint-disable-next-line no-await-in-loop -- Preserve the manifest until every sibling is gone.
-      await this._pipeline.removeRecursive(provider, fullPath);
+      // oxlint-disable-next-line no-await-in-loop -- Preserve both identity markers until every sibling is gone.
+      await this._pipeline.removeRecursive(provider, joinRelativePath(directoryPath, entry));
     }
-    await provider.unlink(manifestPath);
+    const stateEntries = await provider.readdir(stateDirectory);
+    for (const entry of stateEntries) {
+      if (entry.toLowerCase() === 'project.json') {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Preserve identity while removing sibling records.
+      await this._pipeline.removeRecursive(provider, joinRelativePath(stateDirectory, entry));
+    }
+  }
+
+  private async _deleteProjectDirectory(input: {
+    provider: FileSystemProvider;
+    directoryPath: string;
+    manifest: Uint8Array<ArrayBuffer>;
+    identity: Uint8Array<ArrayBuffer>;
+  }): Promise<void> {
+    const { provider, directoryPath, manifest, identity } = input;
+    const manifestPath = joinRelativePath(directoryPath, 'tau.json');
+    const identityPath = joinRelativePath(directoryPath, projectIdentityPath);
+    const stateDirectory = joinRelativePath(directoryPath, '.tau');
+    await this._clearProjectDirectoryContents(provider, directoryPath);
     try {
+      await provider.unlink(identityPath);
+      await provider.rmdir(stateDirectory);
+      await provider.unlink(manifestPath);
       await provider.rmdir(directoryPath);
     } catch (error) {
       try {
-        if ((await provider.exists(directoryPath)) && !(await provider.exists(manifestPath))) {
-          await provider.writeFile(manifestPath, manifest);
+        if (await provider.exists(directoryPath)) {
+          if (!(await provider.exists(identityPath))) {
+            await provider.writeFile(identityPath, identity);
+          }
+          if (!(await provider.exists(manifestPath))) {
+            await provider.writeFile(manifestPath, manifest);
+          }
         }
       } catch {
-        // Best effort only: preserve the original directory-removal failure.
+        // Preserve the original removal failure; durable journal remains for retry.
       }
       throw error;
     }

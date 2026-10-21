@@ -10,6 +10,7 @@ import { zipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as TauHost from '@taucad/host';
 import type * as RuntimeHostNode from '@taucad/runtime/host/node';
+import { projectManifestSchemaUrl } from '@taucad/types';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import { connectMachineChannel } from '@taucad/runtime/machine';
 import type { MachineArtifactReference, MachineCandidate, MachineChannelClient } from '@taucad/runtime/machine';
@@ -147,11 +148,22 @@ const artifactFor = (
   selectedMember: 'Metadata/plate_1.gcode',
 });
 
-/** A project folder whose `tau.json` names it. */
+/** An admitted project with an authored manifest and host-owned identity. */
 const writeProject = async (root: string, name: string, id: string): Promise<string> => {
   const project = join(root, name);
   await mkdir(project, { recursive: true });
-  await writeFile(join(project, 'tau.json'), JSON.stringify({ id }));
+  await writeFile(
+    join(project, 'tau.json'),
+    JSON.stringify({
+      $schema: projectManifestSchemaUrl,
+      name,
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.ts' } },
+    }),
+  );
+  await mkdir(join(project, '.tau'));
+  await writeFile(join(project, '.tau/project.json'), JSON.stringify({ version: 1, projectId: id }));
   return project;
 };
 

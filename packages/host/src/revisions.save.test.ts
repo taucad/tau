@@ -10,7 +10,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
@@ -20,12 +20,8 @@ import type { RevisionPort } from '@taucad/revisions';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 
 import { hostRevisionActor } from '#revision-actor.js';
-import {
-  createProjectRevisionPort,
-  createProjectRevisions,
-  openProjectRevisions,
-  requireRevisionToolchain,
-} from '#revisions.js';
+import { createProjectRevisionPort, openProjectRevisions, requireRevisionToolchain } from '#revisions.js';
+import { openNodeProjectFileSystem, resolveNodeProjectIdentity } from '#project-identity.js';
 import type { RevisionSaveOutcome } from '#index.js';
 
 const roots: string[] = [];
@@ -53,15 +49,19 @@ const git = (repository: string, args: readonly string[]): string =>
 /**
  * One project with one revision on `main`, offered to a bare remote named `tau`.
  *
+ * @param legacy - Whether the fixture retains a project ID in the legacy manifest.
  * @param includeChat - Whether the remote also advertises a browser chat.
  * @returns The bare remote, and the project's id on it.
  */
-const remoteWithOneRevision = async (includeChat = false): Promise<Readonly<{ bare: string; projectId: string }>> => {
+const remoteWithOneRevision = async (
+  legacy = false,
+  includeChat = false,
+): Promise<Readonly<{ bare: string; projectId: string }>> => {
   const bare = await directory('remote');
   const first = await directory('first');
   process.env['TAU_CONFIG_DIR'] = await directory('config');
   execFileSync('git', ['init', '--bare', '--initial-branch=main', bare], { stdio: 'ignore' });
-  const projectId = 'project-save';
+  const projectId = 'proj_SSSSSSSSSSSSSSSSSSSSS';
   const port = createProjectRevisionPort({ workspaceRoot: first, projectId });
   await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
   await port.setHead('main');
@@ -69,7 +69,10 @@ const remoteWithOneRevision = async (includeChat = false): Promise<Readonly<{ ba
     parents: [],
     tree: new ImmutableRevisionTree([
       ['part.ts', 'export const part = 1;\n'],
-      ['tau.json', `${JSON.stringify({ id: projectId, name: 'Save' })}\n`],
+      [
+        'tau.json',
+        `${JSON.stringify({ $schema: legacy ? 'https://tau.new/schemas/tau-schema-v1.json' : 'https://tau.new/schemas/tau-v1.json', ...(legacy ? { id: projectId } : {}), name: 'Save', description: '', tags: [], assets: { main: { entryPath: 'part.ts' } } })}\n`,
+      ],
     ]),
     provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 26) },
     summary: { generated: 'First device' },
@@ -98,9 +101,9 @@ const remoteWithOneRevision = async (includeChat = false): Promise<Readonly<{ ba
 
 describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
   it('should clone project files and remote chat records through the terminal verbs', async () => {
-    const { bare, projectId } = await remoteWithOneRevision(true);
+    const { bare, projectId } = await remoteWithOneRevision(false, true);
     const second = await directory('with-chat');
-    const opener = openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    const opener = await openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
     try {
       expect(await opener.openFromRemote()).toMatchObject({ status: 'opened' });
       expect(await readFile(join(second, 'part.ts'), 'utf8')).toBe('export const part = 1;\n');
@@ -116,10 +119,56 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     }
   }, 120_000);
 
+  it('preserves a backed-up legacy ID and historical Git bytes on first pull', async () => {
+    const { bare, projectId } = await remoteWithOneRevision(true);
+    const head = git(bare, ['rev-parse', 'refs/heads/main']);
+    const original = git(bare, ['show', `${head}:tau.json`]);
+    const second = await directory('legacy-cloud');
+    const revisions = await openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    try {
+      expect(await revisions.openFromRemote()).toMatchObject({ status: 'opened' });
+      expect(JSON.parse(await readFile(join(second, '.tau/project.json'), 'utf8'))).toEqual({ version: 1, projectId });
+      const current: unknown = JSON.parse(await readFile(join(second, 'tau.json'), 'utf8'));
+      expect(current).toMatchObject({ $schema: 'https://tau.new/schemas/tau-v1.json' });
+      expect(current).not.toHaveProperty('id');
+      expect(git(bare, ['rev-parse', 'refs/heads/main'])).toBe(head);
+      expect(git(bare, ['show', `${head}:tau.json`])).toBe(original);
+      expect(git(second, ['show', `${head}:tau.json`])).toBe(original);
+    } finally {
+      await revisions.close();
+    }
+  }, 120_000);
+
+  it('refuses a CLI mutation while another native host owns the project and succeeds after release', async () => {
+    process.env['TAU_CONFIG_DIR'] = await directory('config');
+    const workspaceRoot = await directory('owned');
+    const owner = await openNodeProjectFileSystem(workspaceRoot);
+    await owner.open(workspaceRoot).writeFile('main.scad', 'cube(1);\n');
+    const revisions = await openProjectRevisions({ workspaceRoot });
+    try {
+      expect(await revisions.save()).toEqual({
+        status: 'refused',
+        reason: 'This filesystem authority already has a writer.',
+      });
+      expect(await readFile(join(workspaceRoot, 'main.scad'), 'utf8')).toBe('cube(1);\n');
+      await expect(readFile(join(workspaceRoot, '.gitignore'))).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(readFile(join(workspaceRoot, '.git/HEAD'))).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await revisions.close();
+      await owner.close();
+    }
+    const reopened = await openProjectRevisions({ workspaceRoot });
+    try {
+      expect(await reopened.save()).toMatchObject({ status: 'saved' });
+    } finally {
+      await reopened.close();
+    }
+  }, 120_000);
+
   it('records the files as a revision by the person running it, and pushes it to the remote', async () => {
     const { bare, projectId } = await remoteWithOneRevision();
     const second = await directory('second');
-    const opener = openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    const opener = await openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
     try {
       expect(await opener.openFromRemote()).toMatchObject({ status: 'opened' });
     } finally {
@@ -128,7 +177,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
 
     /* A fresh process's verbs, as `tau revisions save` opens them. */
     await writeFile(join(second, 'bracket.ts'), 'export const bracket = 2;\n');
-    const revisions = openProjectRevisions({ workspaceRoot: second, projectId });
+    const revisions = await openProjectRevisions({ workspaceRoot: second, projectId });
     let outcome: RevisionSaveOutcome;
     try {
       outcome = await revisions.save();
@@ -152,7 +201,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
   it('saves nothing when the files already are the head’s revision', async () => {
     const { bare, projectId } = await remoteWithOneRevision();
     const second = await directory('unchanged');
-    const revisions = openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    const revisions = await openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
     try {
       expect(await revisions.openFromRemote()).toMatchObject({ status: 'opened' });
       const before = git(bare, ['rev-parse', 'refs/heads/main']);
@@ -164,10 +213,10 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     }
   }, 120_000);
 
-  it('names the project by its tau.json id, not by the directory it was opened in (W15 F2)', async () => {
+  it('names the project by its durable identity across later CLI opens (W15 F2)', async () => {
     const { bare, projectId } = await remoteWithOneRevision();
     const second = await directory('named-otherwise');
-    const opener = openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    const opener = await openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
     try {
       expect(await opener.openFromRemote()).toMatchObject({ status: 'opened' });
     } finally {
@@ -176,7 +225,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
 
     /* A later terminal in the same directory passes no id, as the CLI does. */
     const asked: string[] = [];
-    const revisions = openProjectRevisions({
+    const revisions = await openProjectRevisions({
       workspaceRoot: second,
       remoteUrl: (id) => {
         asked.push(id);
@@ -191,64 +240,36 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     expect(asked).toEqual([projectId]);
   }, 120_000);
 
-  it('resolves one id for `tau serve` and `tau revisions save`, and the directory name for a malformed tau.json id (RV-W15)', async () => {
+  it('resolves one durable id for native admission and CLI revisions', async () => {
     process.env['TAU_CONFIG_DIR'] = await directory('config');
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    /**
-     * The id each entry resolves in a directory named otherwise, with no id passed, as the CLI and the daemon do.
-     *
-     * @param manifestId - What `tau.json` says.
-     * @returns The directory's name, the id `save`'s verbs ask a remote for, and the id `serve`'s connect wrote.
-     */
-    const resolved = async (manifestId: string) => {
-      const workspaceRoot = await directory('named-otherwise');
-      await writeFile(join(workspaceRoot, 'tau.json'), `${JSON.stringify({ id: manifestId })}\n`);
-      const asked: string[] = [];
-      const verbs = openProjectRevisions({
-        workspaceRoot,
-        remoteUrl: (id) => {
-          asked.push(id);
-          return undefined;
-        },
-      });
-      try {
-        await verbs.openFromRemote();
-      } finally {
-        await verbs.close();
-      }
-      const served = createProjectRevisions({ workspaceRoot, apiBaseUrl: 'http://127.0.0.1:9' });
-      /* Read as soon as it is written: the connect that follows fails against
-       * no API, and git's remotes list is the record only until then. */
-      const connectedId = async (): Promise<string | undefined> =>
-        /\/v1\/git\/(?<id>[^\s/]+)\.git/u.exec(
-          await readFile(join(workspaceRoot, '.git', 'config'), 'utf8').catch(() => ''),
-        )?.groups?.['id'];
-      let serve: string | undefined;
-      try {
-        await served.channel.request({ command: 'connectRemote', kind: 'tau' });
-        await vi.waitFor(
-          async () => {
-            serve = await connectedId();
-            expect(serve).toBeDefined();
-          },
-          { timeout: 10_000, interval: 5 },
-        );
-      } finally {
-        await served.release();
-      }
-      return { directory: basename(workspaceRoot), save: asked, serve };
-    };
-
-    const named = await resolved('proj-manifest');
-    expect(named.save).toEqual(['proj-manifest']);
-    expect(named.serve).toBe('proj-manifest');
-
-    const malformed = await resolved('../x');
-    expect(malformed.save).toEqual([malformed.directory]);
-    expect(malformed.serve).toBe(malformed.directory);
-    /* Said once for the directory, though both entries resolved it. */
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
+    const workspaceRoot = await directory('named-otherwise');
+    await writeFile(
+      join(workspaceRoot, 'tau.json'),
+      JSON.stringify({
+        $schema: 'https://tau.new/schemas/tau-v1.json',
+        name: 'Save',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      }),
+    );
+    const projectId = await resolveNodeProjectIdentity({ workspaceRoot, bootstrap: true });
+    expect(projectId).toMatch(/^proj_[A-Za-z0-9]{21}$/u);
+    const asked: string[] = [];
+    const verbs = await openProjectRevisions({
+      workspaceRoot,
+      remoteUrl: (id) => {
+        asked.push(id);
+        return undefined;
+      },
+    });
+    try {
+      await verbs.openFromRemote();
+    } finally {
+      await verbs.close();
+    }
+    expect(asked).toEqual([projectId]);
+    expect(await resolveNodeProjectIdentity({ workspaceRoot, bootstrap: true })).toBe(projectId);
   }, 120_000);
 
   /**
@@ -295,7 +316,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
       };
       return realSetTimeout(once, 0);
     }) as typeof setTimeout);
-    const revisions = openProjectRevisions({ workspaceRoot, projectId, port });
+    const revisions = await openProjectRevisions({ workspaceRoot, projectId, port });
     try {
       return await revisions.save();
     } finally {
@@ -310,7 +331,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
   it('says a push that did not answer in time is unknown, not failed (RV-W15)', async () => {
     const { bare, projectId } = await remoteWithOneRevision();
     const second = await directory('push-timeout');
-    const opener = openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
+    const opener = await openProjectRevisions({ workspaceRoot: second, projectId, remoteUrl: () => bare });
     try {
       expect(await opener.openFromRemote()).toMatchObject({ status: 'opened' });
     } finally {
@@ -337,7 +358,7 @@ describe.runIf(gitToolchainOnPath)('save on a disk host', () => {
     process.env['TAU_CONFIG_DIR'] = await directory('config');
     execFileSync('git', ['init', '--quiet', '--initial-branch=main', workspaceRoot]);
     await writeFile(join(workspaceRoot, 'part.ts'), 'export const part = 1;\n');
-    const revisions = openProjectRevisions({ workspaceRoot, projectId: 'project-local' });
+    const revisions = await openProjectRevisions({ workspaceRoot, projectId: 'proj_LLLLLLLLLLLLLLLLLLLLL' });
     try {
       const outcome = await revisions.save();
 

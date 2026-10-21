@@ -36,7 +36,7 @@ const seedFiles = Object.fromEntries([
   [entryPath, { content: encode(replicadModel) }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
-const createSeedProject = (): Omit<ProjectManifest, '$schema' | 'id'> => ({
+const createSeedProject = (): Omit<ProjectManifest, '$schema'> => ({
   name: 'viewer context menu e2e',
   description: 'Deterministic local seed for the chat viewer right-click context menu.',
   tags: ['e2e', 'replicad'],

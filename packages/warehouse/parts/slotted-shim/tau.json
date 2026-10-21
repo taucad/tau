@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_0VmxulgvyXn7ORx9iE9xf",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted shim",
   "description": "Slotted shim with a modeled opening and editable section dimensions.",
   "tags": [

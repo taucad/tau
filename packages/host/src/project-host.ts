@@ -235,7 +235,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     checkoutMutation: fileSystem.mutate,
     /* AC15: the person this machine belongs to, as Git already knows them. */
     actor: hostRevisionActor(),
-    ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+    projectId: options.projectId,
     ...(options.checkoutsDirectory === undefined ? {} : { checkoutsDirectory: options.checkoutsDirectory }),
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.apiBaseUrl === undefined ? {} : { apiBaseUrl: options.apiBaseUrl }),
@@ -255,7 +255,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     ...(options.geospecRunner === undefined ? {} : { geospecRunner: options.geospecRunner }),
     /* The machine tools, over a facet this host already serves; a job names the project by its id. */
     ...(options.machines === undefined ? {} : { machines: options.machines }),
-    ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+    projectId: options.projectId,
     /* `prepare_kernel` (D7, D37): offered to Tau's agent and, through the host-local MCP endpoint, to ACP agents. */
     ...(options.prepareKernel === undefined ? {} : { prepareKernel: options.prepareKernel }),
     ...(options.preparableKernels === undefined ? {} : { preparableKernels: options.preparableKernels }),
@@ -467,6 +467,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
  *
  * const project = createProjectHost({
  *   workspaceRoot: '/work/bracket',
+ *   projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA',
  *   fileSystem,
  *   runtimeClient,
  *   systemPrompt: 'You are Tau.',

@@ -14,6 +14,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
+import { parseProjectIdentityBytes } from '@taucad/project-core/identity';
 import { tauRemoteUrl } from '@taucad/revisions';
 import workbenchBundles from '@taucad/workbench/agent/resources.js';
 import { defineConfiguration } from '@taucad/runtime/schema';
@@ -947,7 +948,18 @@ describe('startHostDaemon', () => {
     const events: HostDaemonEvent[] = [];
     const agentOptions = await agentOptionsIn(temporaryDirectory);
     const projectId = 'proj_000000000000000000001';
-    await writeFile(join(agentOptions.workspaceRoot, 'tau.json'), JSON.stringify({ id: projectId }));
+    await mkdir(join(agentOptions.workspaceRoot, '.tau'), { recursive: true });
+    await writeFile(join(agentOptions.workspaceRoot, '.tau/project.json'), JSON.stringify({ version: 1, projectId }));
+    await writeFile(
+      join(agentOptions.workspaceRoot, 'tau.json'),
+      JSON.stringify({
+        $schema: 'https://tau.new/schemas/tau-v1.json',
+        name: 'Test',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.scad' } },
+      }),
+    );
     machineRuntimeSpy.mockClear();
     const daemon = startHostDaemon({
       relayUrl: new URL('http://127.0.0.1:1'),
@@ -1041,7 +1053,7 @@ describe('startHostDaemon', () => {
     const candidateArtifacts = join(
       temporaryDirectory,
       'checkouts',
-      'workspace',
+      projectId,
       'candidate-1',
       '.tau',
       'artifacts',
@@ -1765,7 +1777,7 @@ describe('startHostDaemon', () => {
       let advertisedConfig: string | undefined;
       const relay = await startRelay({
         onRequest(pathname) {
-          if (pathname === '/v1/git/workspace.git/info/refs') {
+          if (pathname.startsWith('/v1/git/proj_') && pathname.endsWith('.git/info/refs')) {
             advertisedConfig = readFileSync(configPath, 'utf8');
           }
         },
@@ -1782,7 +1794,10 @@ describe('startHostDaemon', () => {
         await project!.channel.request({ command: 'connectRemote', kind: 'tau' });
 
         // Observe the recorded URL before the fixture's refusal makes the actor remove it.
-        const remoteUrl = tauRemoteUrl(relay.url.origin, 'workspace');
+        const identity = parseProjectIdentityBytes(
+          new Uint8Array(await readFile(join(temporaryDirectory, 'workspace', '.tau/project.json'))),
+        );
+        const remoteUrl = tauRemoteUrl(relay.url.origin, identity.projectId);
         await expect.poll(() => advertisedConfig, { timeout: 10_000 }).toContain(remoteUrl);
         await expect.poll(async () => readFile(configPath, 'utf8'), { timeout: 10_000 }).not.toContain(remoteUrl);
       } finally {

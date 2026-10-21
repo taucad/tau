@@ -944,7 +944,18 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
   const printProject = async (name: string): Promise<string> => {
     const folder = join(scratch, name);
     await mkdir(folder, { recursive: true });
-    await writeFile(join(folder, 'tau.json'), JSON.stringify({ id: projectId }));
+    await mkdir(join(folder, '.tau'), { recursive: true });
+    await writeFile(join(folder, '.tau/project.json'), JSON.stringify({ version: 1, projectId }));
+    await writeFile(
+      join(folder, 'tau.json'),
+      JSON.stringify({
+        $schema: 'https://tau.new/schemas/tau-v1.json',
+        name: 'Print',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'plate.ts' } },
+      }),
+    );
     await writeFile(join(folder, 'plate.ts'), files.plate['plate.ts']);
     return folder;
   };

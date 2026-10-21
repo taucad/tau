@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_FH3owiJsjtCPmycx--Xww",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Hex standoff",
   "description": "Hex standoff with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

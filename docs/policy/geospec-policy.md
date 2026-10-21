@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, compiled native/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-10-09'
+updated: '2026-10-19'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
@@ -353,7 +353,7 @@ for (const cell of grid) open[cell] = classify(cell.center) === 'out';
 
 ## 18. Do Heavy Geometry In The Compiled Engine, Minimizing Boundary Crossings
 
-Perform heavy geometry in the compiled engine (`@taucad/geospec-engine-native`). Its Rust core owns analysis, proof computation and Manifold Rust CSG; OCCT operations stay inside its private C++ bridge. Treat JS/Python↔engine crossings as a first-order cost. A matcher's engine entry point accepts a whole claim or claim batch and returns complete verdicts in coarse calls named by the engineering question (§1), not per-point or per-pair host queries. Minimize crossing count and marshalled bytes. Intermediate geometry stays in engine-owned Rust/C++ memory, including BRep-to-CSG transfer.
+Perform heavy geometry in the compiled engine (`geospec-engine`, built in taucad/geospec). Its Rust core owns analysis, proof computation and Manifold Rust CSG; OCCT operations stay inside its private C++ bridge. Treat JS/Python↔engine crossings as a first-order cost. A matcher's engine entry point accepts a whole claim or claim batch and returns complete verdicts in coarse calls named by the engineering question (§1), not per-point or per-pair host queries. Minimize crossing count and marshalled bytes. Intermediate geometry stays in engine-owned Rust/C++ memory, including BRep-to-CSG transfer.
 
 **Why**: Boundary crossings and serialization dominate the cost of fine-grained native APIs; one `proveX(...)` call keeps the algorithm and its intermediate geometry where they belong.
 

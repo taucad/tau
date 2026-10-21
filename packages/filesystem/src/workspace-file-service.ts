@@ -1224,6 +1224,7 @@ export class WorkspaceFileService {
 
   /** Release all resources: watches, providers, caches, and event bus. */
   public dispose(): void {
+    this._projectDirectories.dispose();
     this._externalChanges.dispose();
     this._filePool?.clear();
     this._filePool = undefined;

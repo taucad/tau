@@ -97,9 +97,17 @@
       ],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node --import @oxc-node/core/register ../../scripts/src/wait-for-url.ts http://localhost:3001 && node --env-file=../ui/.env scripts/run-electron-vite.mts dev",
+        "command": "node --import @oxc-node/core/register ../../scripts/src/wait-for-url.ts http://localhost:3001 && node --import @oxc-node/core/register --env-file=../ui/.env scripts/run-electron-vite.mts dev",
         "env": {
           "ELECTRON_RENDERER_URL": "http://localhost:3001"
+        }
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "ELECTRON_RENDERER_URL": "http://localhost:3001",
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto"
+          }
         }
       }
     },
@@ -117,9 +125,17 @@
       ],
       "options": {
         "cwd": "{projectRoot}",
-        "command": "node --env-file=../ui/.env scripts/run-electron-vite.mts preview --skipBuild",
+        "command": "node --import @oxc-node/core/register --env-file=../ui/.env scripts/run-electron-vite.mts preview --skipBuild",
         "env": {
           "NODE_ENV": "production"
+        }
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "NODE_ENV": "production",
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto"
+          }
         }
       }
     },
@@ -171,6 +187,14 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts"
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto",
+            "TAU_DESKTOP_CHANNEL": "staging"
+          }
+        }
       }
     },
     "package-macos-release": {
@@ -194,6 +218,9 @@
       "configurations": {
         "staging": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release --skip-notarization"
+        },
+        "staging-notarized": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
       }
     },
@@ -271,6 +298,9 @@
       "configurations": {
         "staging": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release --skip-notarization"
+        },
+        "staging-notarized": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-macos-package.mts --release"
         }
       }
     },
@@ -341,6 +371,14 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts"
+      },
+      "configurations": {
+        "local": {
+          "env": {
+            "TAU_LOCAL_CODESIGN_IDENTITY": "auto",
+            "TAU_DESKTOP_CHANNEL": "staging"
+          }
+        }
       }
     },
     "package-macos-release-intel": {
@@ -359,6 +397,9 @@
       "configurations": {
         "staging": {
           "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release --skip-notarization"
+        },
+        "staging-notarized": {
+          "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --release"
         }
       }
     },
@@ -374,6 +415,270 @@
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
+      }
+    },
+    "test-macos-dmg": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/macos-dmg.test.mts"
+      }
+    },
+    "test-appimage-transaction": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/appimage-transaction.test.mts"
+      }
+    },
+    "make-windows-installer": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-windows.mts"
+      }
+    },
+    "make-linux-deb": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-linux-deb.mts"
+      }
+    },
+    "make-appimage": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-appimage.mts"
+      }
+    },
+    "test-linux-apt-package": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/linux-apt-package.test.mts"
+      }
+    },
+    "test-appimage-package": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/appimage-package.test.mts"
+      }
+    },
+    "test-route-publication": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-route-publication.test.mts"
+      }
+    },
+    "test-windows-package": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/windows-package.test.mts"
+      }
+    },
+    "installer-candidate": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-installer-candidate.mts"
+      }
+    },
+    "test-installer-candidate": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-installer-candidate.test.mts"
+      }
+    },
+    "test-route-transport": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/publish-desktop-routes.test.mts"
+      }
+    },
+    "test-publication-authority": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-publication-authority.test.mts"
+      }
+    },
+    "test-receipt-provenance": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-receipt-provenance.test.mts"
+      }
+    },
+    "test-first-download": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/verify-appimage-download.test.mts"
+      }
+    },
+    "test-linux-apt-repository": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/linux-apt-repository.test.mts"
+      }
+    },
+    "test-apt-publication": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-apt-publication.test.mts"
+      }
+    },
+    "test-apt-enrollment": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/configure-linux-apt.test.mts"
+      }
+    },
+    "fetch-installer-candidate": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/fetch-desktop-installer-candidate.mts"
+      }
+    },
+    "route-workflow": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-route-workflow.mts"
+      }
+    },
+    "test-apt-renewal": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/renew-desktop-apt.test.mts"
+      }
+    },
+    "qualify-installed-route": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualify-desktop-route.mts"
+      }
+    },
+    "collect-qualification-rows": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/collect-qualification-rows.mts"
+      }
+    },
+    "cleanup-qualification-trust": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/cleanup-qualification-trust.mts"
+      }
+    },
+    "test-qualification-tls": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-tls.test.mts"
+      }
+    },
+    "test-qualification-probe-process": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-probe-process.test.mts"
+      }
+    },
+    "test-qualification-mirror": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register --test apps/desktop/scripts/qualification-mirror.test.mts"
+      }
+    },
+    "test-qualification-macos": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-macos.test.mts"
+      }
+    },
+    "test-collect-qualification-rows": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/collect-qualification-rows.test.mts"
+      }
+    },
+    "test-qualification-apt-mirror": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-apt-mirror.test.mts"
+      }
+    },
+    "test-qualification-metadata": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-metadata.test.mts"
+      }
+    },
+    "test-qualification-evidence": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-evidence.test.mts"
+      }
+    },
+    "test-qualification-apt-snapshot": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-apt-snapshot.test.mts"
+      }
+    },
+    "qualification-apt-snapshot": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-apt-snapshot.mts"
+      }
+    },
+    "test-qualification-windows": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-windows.test.mts"
+      }
+    },
+    "test-qualification-linux": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-linux.test.mts"
       }
     }
   }

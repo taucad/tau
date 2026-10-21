@@ -40,7 +40,7 @@ const authoredFiles = (root: string): string[] =>
     .filter((path) => path && !excludedTrees.some((directory) => inTree(path, directory)))
     .map((path) => resolve(root, path))
     .filter(
-      (path) => existsSync(path) && (lstatSync(path).isFile() || ['AGENTS.md', 'CLAUDE.md'].includes(basename(path))),
+      (path) => existsSync(path) && (lstatSync(path).isFile() || /^(?:agents|claude)\.md$/iu.test(basename(path))),
     )
     .sort();
 
@@ -132,10 +132,6 @@ const validateBoundary = (path: string, root: string, report: (path: string, det
   if (fileBytes > limit) {
     report(path, `${fileBytes} bytes exceeds the ${limit}-byte instruction budget`);
   }
-  const adapter = resolve(dirname(path), 'CLAUDE.md');
-  if (!existsSync(adapter) || !lstatSync(adapter).isFile() || readFileSync(adapter, 'utf8') !== '@AGENTS.md\n') {
-    report(adapter, 'expected only @AGENTS.md and a newline');
-  }
   let chainBytes = existsSync(resolve(root, 'AGENTS.md')) ? readFileSync(resolve(root, 'AGENTS.md')).length : 0;
   for (let directory = dirname(path); directory !== root; directory = dirname(directory)) {
     const ancestor = resolve(directory, 'AGENTS.md');
@@ -224,10 +220,8 @@ export const validateAgentConfig = (root: string): AgentConfigResult => {
     maximumChainBytes = Math.max(maximumChainBytes, validateBoundary(path, root, report));
   }
 
-  for (const path of files.filter((file) => basename(file) === 'CLAUDE.md')) {
-    if (!existsSync(resolve(dirname(path), 'AGENTS.md'))) {
-      report(path, 'orphan import adapter has no canonical AGENTS.md');
-    }
+  for (const path of authored.filter((file) => /^claude\.md(?:__tmpl__)?$/iu.test(basename(file)))) {
+    report(path, 'retired instruction adapter; use AGENTS.md directly');
   }
 
   for (const path of skills) {

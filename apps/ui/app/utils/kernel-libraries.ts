@@ -16,6 +16,8 @@ export const kernelLibraries: Partial<Record<KernelProvider, Readonly<Record<str
   picovoxel: { picovoxel: '0.1.0' },
   smlib: { '@classcad/smlibwasm': '0.3.4' },
   tscircuit: {
+    // The connectivity-map floating Biome range can select releases before their platform binaries exist.
+    '@biomejs/biome': '2.5.15',
     tscircuit: 'npm:@tscircuit/core@0.0.1844',
     '@tscircuit/core': '0.0.1844',
     '@tscircuit/props': '0.0.646',

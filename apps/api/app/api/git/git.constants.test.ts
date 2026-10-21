@@ -179,6 +179,28 @@ describe('Tau Hosted Remote constants', () => {
     await rm(hookDirectory, { recursive: true, force: true });
   });
 
+  it.each([104_857_600, 104_857_601])(
+    'should enforce the inclusive 100 MiB Git blob ceiling for %i bytes',
+    async (size) => {
+      const repository = await hookRepository();
+      const directory = await mkdtemp(path.join(tmpdir(), 'tau-file-limit-'));
+      onTestFinished(async () => {
+        await repository.dispose();
+        await rm(directory, { recursive: true, force: true });
+      });
+      const file = path.join(directory, 'compressible.bin');
+      await writeFile(file, Buffer.alloc(size));
+      const oid = await repository.git('hash-object', '-w', file);
+      await repository.git('update-index', '--add', '--cacheinfo', '100644', oid, 'compressible.bin');
+      const commit = await repository.commit([repository.base], false);
+      const outcome = await repository.push(`${repository.base} ${commit} refs/heads/main`);
+      expect(outcome.code, outcome.stderr).toBe(size === 104_857_600 ? 0 : 1);
+      if (size > 104_857_600) {
+        expect(outcome.stderr).toContain('100 MiB');
+      }
+    },
+  );
+
   it('accepts only the pushable ref namespaces (A39), as the installed hook itself', async () => {
     /* The hook reads what a new ref points at, so its tip is a real commit. */
     const repository = await hookRepository();

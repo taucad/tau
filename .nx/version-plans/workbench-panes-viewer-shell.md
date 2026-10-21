@@ -1,0 +1,7 @@
+---
+workbench-panes: minor
+---
+
+`@taucad/workbench-panes` adds the viewer shell that the Tau app and the agent plugin viewer will both draw, so their chrome cannot drift. `shell/viewer-stage` (`ViewerStage`) draws the focusable canvas region, the hover label, the status pill or a `RuntimeErrorOverlay` failure and the bottom controls slot; the host draws its canvas through `renderCanvas`, which receives the region as `eventSource` and as the view cube's `gizmoContainer`. `component-menu/use-viewer-part-menu` (`useViewerPartMenu`) owns the canvas part menu: a right press within 4 px opens it and a longer one pans, Shift+F10 or the Menu key opens it for the selected part, a new model closes it, the selected part comes from the model interaction machine, and the stage's `decoratePartMenu` adds host-only data such as thumbnails. `shell/viewer-status` (`ViewerStatusPill`), `shell/viewer-header-actions` (`ViewerHeaderActions`: leading slot, Share and Export folding to icons below `@xl/viewer`, then a hairline and a trailing control) and `components/workbench-tab` (`WorkbenchTab`: glyph, fading title, close glyph and full-title tooltip, as a complete tab or as content inside a dockview tab) complete it. None of them loads dockview at runtime.
+
+`PaneLane` draws its tabs with `WorkbenchTab`, so they shrink, fade and scroll exactly as the app's dock tabs do; a tab's full title is its tooltip, and its close glyph is a pointer target rather than a second focusable button (Delete and Backspace close the focused tab).

@@ -2,7 +2,7 @@ import { useCallback, useSyncExternalStore } from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { slicingPreferences, slicingPreferencesSchema } from '@taucad/slicer/preferences';
 import type { SlicingPreferences } from '@taucad/slicer/preferences';
-import type { ConfigurationManifestV1 } from '@taucad/runtime/configuration';
+import type { ConfigurationManifestV1 } from '@taucad/runtime/schema';
 import type { MachineProvider } from '@taucad/runtime/machine';
 import type {
   MachineSettingsRecord,

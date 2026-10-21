@@ -90,7 +90,7 @@ export async function bootstrapRemoteRevisionStore(input: RemoteBootstrapInput):
   input.signal?.throwIfAborted();
   await input.port.init({ author: input.author, createSetupFiles: false });
   await input.port.setRemote(input.remote);
-  const advertised = await input.port.listRemoteRefs(input.remote.name);
+  const advertised = await input.port.listRemoteRefs(input.remote.name, { signal: input.signal });
   const advertisedTarget = advertised.find((ref) => ref.name === `${headRefPrefix}${targetBranch}`)?.head;
   const expectedTarget = input.sourceRef === `${headRefPrefix}${targetBranch}` ? input.sourceHead : undefined;
   if (advertisedTarget !== expectedTarget) {

@@ -1,9 +1,10 @@
+import { projectManifestSchemaUrl, serializeProjectManifest, projectToManifest } from '@taucad/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type * as Revisions from '@taucad/revisions';
 import { bootstrapRemoteRevisionStore, largeObjectThresholdBytes } from '@taucad/revisions';
 import type * as GithubConnections from '#lib/github-connections.js';
 import { githubConnections } from '#lib/github-connections.js';
-import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
+import { prepareLinkedGithubImport, readLinkedGithubManifest } from '#lib/github-linked-import.js';
 import { setRevisionSessionUser } from '#lib/revision-actor.js';
 
 vi.mock('#lib/github-connections.js', () => ({
@@ -46,6 +47,27 @@ const selection: Parameters<typeof prepareLinkedGithubImport>[0]['selection'] = 
   branch: { name: 'main', head: 'a'.repeat(40) },
   files: [],
 };
+
+describe('readLinkedGithubManifest', () => {
+  it('should convert an exact legacy declaration without retaining its source identity', () => {
+    const manifest = projectToManifest({
+      name: 'Legacy',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.scad' } },
+    });
+    const legacy = new TextEncoder().encode(
+      JSON.stringify({
+        ...manifest,
+        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+        id: 'proj_123456789012345678901',
+      }),
+    );
+    expect(readLinkedGithubManifest(legacy)).toEqual({ success: true, data: manifest });
+    expect(readLinkedGithubManifest(serializeProjectManifest(manifest))).toEqual({ success: true, data: manifest });
+    expect(manifest.$schema).toBe(projectManifestSchemaUrl);
+  });
+});
 
 describe('prepareLinkedGithubImport', () => {
   it('refuses a large ordinary Git blob before fetching or rewriting repository history', async () => {

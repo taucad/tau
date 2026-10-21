@@ -145,7 +145,8 @@ export const imageTranscoder = defineTranscoder({
   // persisted export caches keep serving images from the previous renderer.
   // 12.0.0 = scale-independent ambient occlusion normals.
   // 13.0.0 = nanoraster 0.7: sections are never refused; open cut outlines are drawn in red.
-  version: '13.0.0',
+  // 13.0.1 = nanoraster 0.7.1: hidden edges ending on a face boundary no longer show past it.
+  version: '13.0.1',
   edges,
 
   async initialize() {

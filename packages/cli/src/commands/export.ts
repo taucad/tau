@@ -180,7 +180,7 @@ export const exportCommand = defineCommand({
     const sourcePath = relative(projectRoot, inputPath).split(sep).join('/');
     // A native kernel binds to its sealed closure itself, reading the payload store's launch index, and refuses with
     // KERNEL_NOT_PREPARED until it is prepared; nothing is downloaded.
-    authorizeCliZooProxy(process.env);
+    await authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot: process.cwd(),
       plugin: args.plugin,

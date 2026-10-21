@@ -18,8 +18,9 @@ import { readFileSync, watch as watchDirectory } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { rm, writeFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
-import { basename, join, sep } from 'node:path';
+import { join, sep } from 'node:path';
 import { z } from 'zod';
+import { resolveNodeProjectIdentity, openNodeProjectFileSystem } from '#project-identity.js';
 
 import { jsonValueSchema } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
@@ -201,8 +202,8 @@ export type ProjectRevisionsOptions = Pick<ActorOptions<AnyActorLogic>, 'clock' 
   readonly useFileSystem?: UseCheckoutFileSystem | undefined;
   /** Native linked-checkout mutations under the embedding host's writer authority. */
   readonly checkoutMutation?: NativeGitCheckoutOptions['withMutationAuthority'];
-  /** Defaults to the workspace root's directory name. */
-  readonly projectId?: string | undefined;
+  /** Established identity supplied by the host's shared project identity lifecycle. */
+  readonly projectId: string;
   /** Host-private parent for linked Git worktrees; defaults to Tau's config directory. */
   readonly checkoutsDirectory?: string | undefined;
   /**
@@ -431,14 +432,14 @@ const hostDeviceId = `${hostname()}:${userInfo().username}`;
  * import { createProjectRevisionPort } from '@taucad/host';
  * import { readRevisionLog } from '@taucad/revisions';
  *
- * const port = createProjectRevisionPort({ workspaceRoot: '/srv/project' });
+ * const port = createProjectRevisionPort({ workspaceRoot: '/srv/project', projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
  * const rows = await readRevisionLog(port, { limit: 5 });
  * ```
  */
 export const createProjectRevisionPort = (
   options: Readonly<{
     workspaceRoot: string;
-    projectId?: string | undefined;
+    projectId: string;
     checkoutsDirectory?: string | undefined;
     gitExecutable?: string | undefined;
     /** Native linked-checkout mutations under the embedding host's writer authority. */
@@ -453,7 +454,7 @@ export const createProjectRevisionPort = (
     remoteCredential?: (() => NativeGitRemoteCredential | undefined) | undefined;
   }>,
 ): RevisionPort => {
-  const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
+  const { projectId } = options;
   return createNativeGitRevisionPort({
     repositoryPath: options.workspaceRoot,
     checkouts: {
@@ -497,7 +498,7 @@ const registryAnswered = async (actor: ProjectRevisionsActor): Promise<void> => 
  * import { createProjectRevisions } from '@taucad/host';
  *
  * declare const toolRegistry: ToolRegistry;
- * const revisions = createProjectRevisions({ workspaceRoot: '/srv/project' });
+ * const revisions = createProjectRevisions({ workspaceRoot: '/srv/project', projectId: 'proj_AAAAAAAAAAAAAAAAAAAAA' });
  * const launcher = createAgentLauncher({
  *   chats: createNodeChatStore({ workspaceRoot: '/srv/project' }),
  *   modelTransport: createGatewayModelTransport({ baseUrl: 'https://api.tau.new/' }),
@@ -512,7 +513,7 @@ const registryAnswered = async (actor: ProjectRevisionsActor): Promise<void> => 
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's actor tree; every half reads the same five values.
 export const createProjectRevisions = (options: ProjectRevisionsOptions): ProjectRevisions => {
-  const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
+  const { projectId } = options;
   const { apiBaseUrl } = options;
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
   let channelWriteCredential: NativeGitRemoteCredential | undefined;
@@ -1173,18 +1174,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      *
      * The same seam the browser worker's `release` uses, because it is the same
      * question: has the close revision reached the remote, or at least the
-     * record? A quit that does not wait leaves a revision nothing knows is
-     * unsent; after the bound, `.git/sync-pending` is the guarantee
-     * and the next open retries it (D28, AC21). The bound is rule 9's quiesce,
-     * which outlasts the open pull it may be waiting on.
+     * record? Only a confirmed `.git/sync-pending` write lets the next open
+     * retry it (D28, AC21). A persistence failure or unfinished local apply
+     * refuses close and keeps this root available for recovery.
      */
     try {
       await awaitSyncSettled(actor);
-    } catch {
-      /* RV-W2b #2: only a refused cut keeps the project. A sync that failed
-       * (a damaged copy, revoked access) or ran out its bound has already
-       * written `.git/sync-pending`, and the Sync region keeps its refusal; a
-       * close that threw here would never let the project go (D28). */
+    } catch (error) {
+      refused ??= error instanceof Error ? error : new Error(String(error));
     }
     if (refused !== undefined) {
       throw refused;
@@ -1800,13 +1797,13 @@ export type RevisionDiscardOutcome =
   | Readonly<{ status: 'refused'; branch: string; reason: string }>;
 
 /**
- * Read one string field of the project's `tau.json`: the id the stream watch and the connect URL use, or the name a disk host registers with Tau Cloud.
+ * Read the authored project name a disk host registers with Tau Cloud.
  *
  * @param workspaceRoot - Project directory containing `tau.json`.
- * @param field - `id` or `name`.
+ * @param field - The declaration's name.
  * @returns The trimmed value, or `undefined` when none is usable.
  */
-const readManifestField = (workspaceRoot: string, field: 'id' | 'name'): string | undefined => {
+const readManifestField = (workspaceRoot: string, field: 'name'): string | undefined => {
   try {
     const manifest = JSON.parse(readFileSync(join(workspaceRoot, 'tau.json'), 'utf8')) as Readonly<
       Record<string, unknown>
@@ -1816,35 +1813,6 @@ const readManifestField = (workspaceRoot: string, field: 'id' | 'name'): string 
   } catch {
     return undefined;
   }
-};
-
-/* Directories already warned about, so a malformed id is said once per process. */
-const malformedManifestIds = new Set<string>();
-
-/**
- * The id a project watches, connects and keeps its checkouts under: the caller's, else `tau.json`'s `id` (W15 F2), else the directory's name.
- *
- * Every entry resolves it here, so `tau serve`, `tau revisions save` and a
- * bare port agree. A manifest id outside `[\w-]` is ignored: it names a URL
- * path and a directory, so `../x` must never reach either.
- *
- * @param workspaceRoot - Project directory containing `tau.json`.
- * @param projectId - The caller's id, which wins when given.
- * @returns The project id.
- */
-const resolveProjectId = (workspaceRoot: string, projectId: string | undefined): string => {
-  if (projectId !== undefined) {
-    return projectId;
-  }
-  const manifestId = readManifestField(workspaceRoot, 'id');
-  if (manifestId !== undefined && /^[\w-]+$/u.test(manifestId)) {
-    return manifestId;
-  }
-  if (manifestId !== undefined && !malformedManifestIds.has(workspaceRoot)) {
-    malformedManifestIds.add(workspaceRoot);
-    console.warn(`tau.json id ${JSON.stringify(manifestId)} is not a project id; using the directory name.`);
-  }
-  return basename(workspaceRoot);
 };
 
 /** What a `publish` did, or why it did not (S32, S42). @public */
@@ -1932,7 +1900,7 @@ export type ProjectRevisionVerbs = {
  * the same three the Revisions pane renders and the agent's read-only tool
  * returns — and the write verbs drive the same machines the page drives, so a
  * `tau revisions switch` and a click in the pane are one implementation reached
- * two ways. Nothing is started until a write verb needs it.
+ * two ways. Admission resolves durable identity; the revision actor starts when a write verb needs it.
  *
  * @param options - The project directory, and a port for a caller that has one.
  * @returns The verbs, and the `close` that stops what they started.
@@ -1942,7 +1910,7 @@ export type ProjectRevisionVerbs = {
  * ```typescript
  * import { openProjectRevisions } from '@taucad/host';
  *
- * const revisions = openProjectRevisions({ workspaceRoot: process.cwd() });
+ * const revisions = await openProjectRevisions({ workspaceRoot: process.cwd() });
  * try {
  *   for (const row of await revisions.log({ limit: 10 })) {
  *     console.log(row.revisionNumber, row.summary);
@@ -1953,7 +1921,7 @@ export type ProjectRevisionVerbs = {
  * ```
  */
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's verbs; every verb reads the same port and the same lazily started tree.
-export const openProjectRevisions = (
+export const openProjectRevisions = async (
   options: Readonly<{
     workspaceRoot: string;
     projectId?: string | undefined;
@@ -1978,8 +1946,20 @@ export const openProjectRevisions = (
     publishPublication?: ((input: PublishPublicationActorInput) => Promise<PublishPublicationActorOutput>) | undefined;
   }> &
     Pick<ActorOptions<AnyActorLogic>, 'clock' | 'inspect' | 'onRejectedEvent'>,
-): ProjectRevisionVerbs => {
-  const projectId = resolveProjectId(options.workspaceRoot, options.projectId);
+): Promise<ProjectRevisionVerbs> => {
+  const authority = await openNodeProjectFileSystem(options.workspaceRoot);
+  let projectId: string;
+  try {
+    projectId = (await resolveNodeProjectIdentity({
+      workspaceRoot: options.workspaceRoot,
+      bootstrap: true,
+      ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+      filesystem: authority.open(options.workspaceRoot),
+    }))!;
+  } catch (error) {
+    await authority.close();
+    throw error;
+  }
   const { apiBaseUrl, apiToken } = options;
   const remoteUrl =
     options.remoteUrl ?? (apiBaseUrl === undefined ? undefined : (id: string) => tauRemoteUrl(apiBaseUrl, id));
@@ -2003,7 +1983,7 @@ export const openProjectRevisions = (
             },
           );
         };
-  const port =
+  const nativePort =
     options.port ??
     createProjectRevisionPort({
       workspaceRoot: options.workspaceRoot,
@@ -2022,17 +2002,34 @@ export const openProjectRevisions = (
           }),
       ...(options.remoteCredential === undefined ? {} : { remoteCredential: options.remoteCredential }),
     });
+  const port: RevisionPort = {
+    ...nativePort,
+    // Native Git initialization can write setup files before any provider mutation.
+    init: async (input) => {
+      await authority.admitMutation();
+      await nativePort.init(input);
+    },
+    tag: async (input) => {
+      await authority.admitMutation();
+      return nativePort.tag(input);
+    },
+    deleteTag: async (name) => {
+      await authority.admitMutation();
+      await nativePort.deleteTag(name);
+    },
+  };
   let tree: ReturnType<typeof createProjectRevisionsActor> | undefined;
 
   /* Started on the first write verb only: `log`, `diff` and `describe` ask the
    * store directly, and a read must never create a repository, retire a lease or
-   * mint anything. */
+   * mint a revision. */
   const started = async (): Promise<NonNullable<typeof tree>> => {
     if (tree === undefined) {
       tree = createProjectRevisionsActor({
         port,
         projectId,
-        filesystem: (checkout) => new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
+        deviceId: () => hostDeviceId,
+        filesystem: (checkout) => authority.open(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         ...(options.clock === undefined ? {} : { clock: options.clock }),
         ...(options.inspect === undefined ? {} : { inspect: options.inspect }),
         ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
@@ -2216,7 +2213,8 @@ export const openProjectRevisions = (
     const checkoutId = actor.getSnapshot().context.liveCheckoutId;
     const scheduler = actor.getSnapshot().children.sync;
     if (checkoutId === undefined || scheduler === undefined) {
-      return Object.freeze({ status: 'refused', reason: 'This project has no files Tau can record yet.' });
+      const reason = actor.getSnapshot().children.checkouts?.getSnapshot().context.reason;
+      return Object.freeze({ status: 'refused', reason: reason ?? 'This project has no files Tau can record yet.' });
     }
     const requestId = randomUUID();
     const cut = await answered<
@@ -2439,13 +2437,14 @@ export const openProjectRevisions = (
     close: async () => {
       const running = tree;
       tree = undefined;
-      if (running === undefined) {
-        return;
+      try {
+        if (running !== undefined) {
+          running.actor.stop();
+          await running.settled();
+        }
+      } finally {
+        await authority.close();
       }
-      running.actor.stop();
-      /* Stopping the tree cancels nothing already in flight; the store's own
-       * creation outlives it. */
-      await running.settled();
     },
   };
 };

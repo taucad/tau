@@ -10,6 +10,7 @@ import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/re
 import { errorCategory, idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { isRecord } from '@taucad/utils/schema';
+import { isNotFound } from '#db/attachment-store.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
@@ -66,6 +67,9 @@ const recordPath = (projectId: string, chatId: string): string =>
   `${chatDirectory(projectId, chatId)}/${chatRecordFileName}`;
 
 const chatsDirectory = (projectId: string): string => `/projects/${projectId}/.tau/chats`;
+
+/** The directories a chat holds: other devices' segments, and attachments. Every other entry is a file. */
+const purgedDirectories: ReadonlySet<string> = new Set(['events', 'attachments']);
 
 /** What a chat directory holding only a log reads as, until its record lands. */
 const placeholderRecord = (projectId: string, chatId: string): Chat => ({
@@ -355,6 +359,61 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   };
 
   /**
+   * Remove this device's own session log, refusing when a writer holds it.
+   *
+   * @param projectId - The chat's project.
+   * @param chatId - The chat being deleted permanently.
+   * @throws Error when the log is there and cannot be removed: the chat is
+   *   still running or open somewhere on this device.
+   */
+  const removeOwnLog = async (projectId: string, chatId: string): Promise<void> => {
+    try {
+      await options.client.unlink(`${chatDirectory(projectId, chatId)}/${chatLogFileName}`);
+    } catch (error) {
+      if (!isNotFound(error)) {
+        throw new Error(
+          'Could not delete this chat permanently while it is still running or open in another tab. Close it and try again.',
+          { cause: error },
+        );
+      }
+    }
+  };
+
+  /**
+   * Remove every entry of a purged chat's directory except `chat.json`: other
+   * devices' logs, attachments (user uploads, agent media and captures) and any
+   * writer's lock. Idempotent.
+   *
+   * @param projectId - The chat's project.
+   * @param chatId - The purged chat.
+   */
+  const removeChatBytes = async (projectId: string, chatId: string): Promise<void> => {
+    const directory = chatDirectory(projectId, chatId);
+    let names: string[];
+    try {
+      names = await options.client.readdir(directory);
+    } catch (error) {
+      if (isNotFound(error)) {
+        return;
+      }
+      throw error;
+    }
+    for (const name of names.filter((entry) => entry !== chatRecordFileName)) {
+      const path = `${directory}/${name}`;
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- one entry at a time, so a failure names it.
+        await (purgedDirectories.has(name)
+          ? options.client.rmdir(path, { recursive: true })
+          : options.client.unlink(path));
+      } catch (error) {
+        if (!isNotFound(error)) {
+          throw error;
+        }
+      }
+    }
+  };
+
+  /**
    * Tombstone a chat and reclaim its composer record. The record goes even when
    * the chat was already tombstoned — by another device, or a repeated delete —
    * because this device's record travels nowhere and nothing else removes it.
@@ -455,15 +514,45 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       await tombstone(chatId);
     },
 
+    /* OQ2: a permanent delete removes the chat's bytes and keeps its record as
+     * the tombstone. `purgedAt` is what travels and what every device then
+     * acts on (chat-ref sync removes the bytes there too); an absent directory
+     * would read as a chat that had not arrived yet.
+     *
+     * This device's own log goes first, before anything is decided: a writer
+     * that still holds it (an OPFS sync access handle) refuses the removal, and
+     * the purge is refused whole, the chat still archived and retryable. Once
+     * the tombstone is written, every writer is fenced by it (the agent host
+     * refuses to open or append to a purged chat), so what remains can go. A
+     * purge of an already purged chat sweeps again, which is how anything a
+     * writer left behind is collected. */
     purgeChat: async (chatId) => {
-      const purged = await patch(chatId, (chat) => {
-        if (chat.deletedAt === undefined) {
-          throw new Error('Only archived chats can be deleted permanently.');
+      const projectId = await mutex.run(chatId, async () => {
+        const located = await locate(chatId);
+        if (located === undefined) {
+          return undefined;
         }
-        chat.purgedAt = Date.now();
-        return true;
+        const record = await readRecord(located, chatId);
+        const existing = record ?? (await readChatDirectory(located, chatId));
+        if (existing === undefined) {
+          return located;
+        }
+        if (existing.purgedAt === undefined) {
+          if (existing.deletedAt === undefined) {
+            throw new Error('Only archived chats can be deleted permanently.');
+          }
+          await removeOwnLog(located, chatId);
+          const now = Date.now();
+          await writeRecord(located, {
+            ...existing,
+            messages: [],
+            purgedAt: now,
+            updatedAt: now,
+          });
+        }
+        await removeChatBytes(located, chatId);
+        return located;
       });
-      const projectId = purged?.resourceId ?? (await locate(chatId));
       if (projectId !== undefined) {
         await removeComposerRecord(projectId, chatId);
       }

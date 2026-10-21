@@ -86,13 +86,15 @@ export type HostBridge = Readonly<{
    */
   callTool(name: string, args: Readonly<Record<string, unknown>>): Promise<unknown>;
   /**
-   * Hand the person's reference to the conversation (E8) along the view's
-   * {@link ChatRoute}: as model context, its text with the structured
-   * references as `structuredContent`; as a message or on the clipboard, its text.
+   * Hand the person's reference to the conversation (E8) along the view's {@link ChatRoute}. Model context keeps only
+   * the last update, so that route sends everything added so far, its text with the structured references as
+   * `structuredContent`; a message or the clipboard carries the new reference's text alone.
    *
+   * @param reference - What the person just added.
+   * @param added - Everything added from the shown model, the new reference included; the reference alone by default.
    * @returns The route it took.
    */
-  addToChat(reference: ChatReference): Promise<ChatRoute>;
+  addToChat(reference: ChatReference, added?: ChatReference): Promise<ChatRoute>;
   requestFullscreen(): Promise<void>;
 }>;
 
@@ -335,12 +337,14 @@ const connectMcpApp = async (): Promise<HostBridge> => {
       return () => listeners.delete(listener);
     },
     callTool,
-    async addToChat({ text, references }) {
+    async addToChat(reference, added = reference) {
       const route = chatRouteOf(app.getHostCapabilities());
+      const { text } = reference;
       if (route === 'context') {
+        /* Each update replaces the last one the host holds (ext-apps `updateModelContext`), so it carries the whole set. */
         await app.updateModelContext({
-          content: [{ type: 'text', text }],
-          ...(references.length === 0 ? {} : { structuredContent: { references } }),
+          content: [{ type: 'text', text: added.text }],
+          ...(added.references.length === 0 ? {} : { structuredContent: { references: added.references } }),
         });
       } else if (route === 'message') {
         const { isError } = await app.sendMessage({ role: 'user', content: [{ type: 'text', text }] });

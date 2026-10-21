@@ -12,20 +12,22 @@
  *   backup; `desktop --remove` takes it out.
  * - `preview --sha <commit>` installs a pkg.pr.new preview into Claude Code: the plugin from a scratch catalog and the
  *   CLI with npm, so nothing reads the checkout.
- * - `doctor [--smoke] [--project <folder>] [--plugin <folder>]` starts the launcher as each host would and checks the
- *   server answers, lists the expected tools and serves the viewer page; `--smoke` also builds, tests, screenshots and
- *   shows a block. `--plugin` names an installed plugin folder, such as a pkg.pr.new preview in `node_modules`, in
- *   place of this one; it then finds its CLI as a host would (`TAU_CLI`, then `tau` on `PATH`).
+ * - `doctor [--smoke] [--project <folder>] [--plugin <folder>]` runs the folder's built `dist/doctor.mjs`, the
+ *   diagnostic users run from an installed plugin; `--smoke` then starts the launcher as a host would and builds, tests,
+ *   screenshots and shows a block in `--project` (a scratch block by default). `--plugin` names an installed plugin
+ *   folder, such as a pkg.pr.new preview in `node_modules`, in place of this one; it then finds its CLI as a host
+ *   would (`TAU_CLI`, then a `tau` of its version, then `npx`).
  *
  * @module
  */
-import { spawn, spawnSync } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+
+import { appHostInitialize, connect } from '#doctor-probe.js';
 
 /** The plugin folder: `packages/agent-plugin`. */
 export const pluginRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -36,21 +38,14 @@ export const devMarketplace = 'tau-dev';
 /** The server name `desktop` writes, so it never replaces an installed `tau` entry. */
 export const desktopServerName = 'tau-dev';
 
-/** The tools every host gets from `tau mcp`. */
-export const expectedTools = [
-  'evaluate_model',
-  'test_model',
-  'screenshot',
-  'export_model',
-  'arrange_workbench',
-  'get_parameters',
-  'apply_parameter_operation',
-  'show_model',
-  'view_state',
-] as const;
-
 /** Files a build leaves in the plugin folder; without them a host loads a plugin that starts nothing. */
-export const builtFiles = ['dist/launch.mjs', 'dist-app/app.html', 'skills/tau/SKILL.md', '.dev/cli.json'] as const;
+export const builtFiles = [
+  'dist/launch.mjs',
+  'dist/doctor.mjs',
+  'dist-app/app.html',
+  'skills/tau/SKILL.md',
+  '.dev/cli.json',
+] as const;
 
 /**
  * The built files a plugin folder lacks.
@@ -346,93 +341,6 @@ const preview = (sha: string | undefined): void => {
   log('claude plugin marketplace remove tau-preview, npm uninstall --global @taucad/cli.');
 };
 
-/** Milliseconds one request may wait for its answer: a cold first call boots a kernel, but a silent server fails. */
-export const requestTimeout = 180_000;
-
-/**
- * A JSON-RPC session with the launcher over its stdio.
- *
- * @param root - The plugin folder whose `dist/launch.mjs` starts the server.
- * @param args - The launcher's arguments.
- * @param timeout - Milliseconds each request may wait before it fails with the server's last stderr.
- * @returns The server process and a request function.
- */
-export const connect = (
-  root: string,
-  args: readonly string[],
-  timeout = requestTimeout,
-): { child: ChildProcessWithoutNullStreams; request: (method: string, params: unknown) => Promise<unknown> } => {
-  const child = spawn(process.execPath, [join(root, 'dist', 'launch.mjs'), ...args], {
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
-  let buffer = '';
-  let nextId = 1;
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (chunk: string) => {
-    buffer += chunk;
-    let newline = buffer.indexOf('\n');
-    while (newline !== -1) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-      newline = buffer.indexOf('\n');
-      if (line === '') {
-        continue;
-      }
-      const message = JSON.parse(line) as { id?: number; result?: unknown; error?: { message: string } };
-      const waiter = message.id === undefined ? undefined : pending.get(message.id);
-      if (waiter !== undefined && message.id !== undefined) {
-        pending.delete(message.id);
-        if (message.error === undefined) {
-          waiter.resolve(message.result);
-        } else {
-          waiter.reject(new Error(message.error.message));
-        }
-      }
-    }
-  });
-  let stderr = '';
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (chunk: string) => {
-    stderr = (stderr + chunk).slice(-4000);
-  });
-  child.once('exit', (code) => {
-    for (const waiter of pending.values()) {
-      waiter.reject(new Error(`the server exited with ${String(code)}:\n${stderr}`));
-    }
-    pending.clear();
-  });
-  const request = async (method: string, params: unknown): Promise<unknown> =>
-    new Promise((resolve, reject) => {
-      const id = nextId++;
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`${method} got no answer in ${String(timeout / 1000)} s:\n${stderr}`));
-      }, timeout);
-      pending.set(id, {
-        resolve: (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        reject: (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      });
-      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
-    });
-  return { child, request };
-};
-
-/** The `initialize` capabilities Claude Desktop sends, so the server offers the viewer page. */
-const appHost = {
-  clientInfo: { name: 'claude-ai', version: '0.1.0' },
-  capabilities: {
-    roots: { listChanged: true },
-    extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } },
-  },
-};
-
 const smokeProject = (): string => {
   const folder = mkdtempSync(join(tmpdir(), 'tau-plugin-doctor-'));
   writeFileSync(join(folder, 'tau.json'), `${JSON.stringify({ id: 'plugin-doctor' })}\n`);
@@ -452,79 +360,49 @@ type ToolResult = { readonly isError?: boolean; readonly content?: ReadonlyArray
 const doctor = async (smoke: boolean, project: string | undefined, plugin: string | undefined): Promise<void> => {
   const root = plugin === undefined ? pluginRoot : resolve(plugin);
   requireBuild(root);
-  log(`ok  plugin folder ${root}`);
-  const major = Number.parseInt(process.versions.node, 10);
-  log(`${major >= 24 ? 'ok' : 'FAIL'}  Node.js ${process.versions.node} (the CLI needs 24 or later)`);
-  for (const host of ['claude', 'codex'] as const) {
-    const version = spawnSync(host, ['--version'], { encoding: 'utf8', shell: process.platform === 'win32' });
-    log(
-      `${version.status === 0 ? 'ok' : '--'}  ${host} ${version.status === 0 ? version.stdout.trim() : 'not on PATH'}`,
-    );
+  /* The shipped diagnostic, as a user runs it from an installed plugin folder. */
+  const status = spawnSync(process.execPath, [join(root, 'dist', 'doctor.mjs')], { stdio: 'inherit' }).status ?? 1;
+  if (status !== 0) {
+    fail(`dist/doctor.mjs exited with ${String(status)}`);
+  }
+  if (!smoke) {
+    return;
   }
   const folder = project === undefined ? smokeProject() : resolve(project);
   const { child, request } = connect(root, ['--project', folder]);
   const problems: string[] = [];
   try {
-    const started = Date.now();
-    await request('initialize', { protocolVersion: '2025-06-18', ...appHost });
+    await request('initialize', appHostInitialize);
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
-    log(`ok  initialize answered in ${String(Date.now() - started)} ms`);
-    const { tools } = (await request('tools/list', {})) as { tools: Array<{ name: string }> };
-    const names = new Set(tools.map((tool) => tool.name));
-    const missing = expectedTools.filter((name) => !names.has(name));
-    log(
-      `${missing.length === 0 ? 'ok' : 'FAIL'}  ${String(names.size)} tools${missing.length === 0 ? '' : `, missing ${missing.join(', ')}`}`,
-    );
-    if (missing.length > 0) {
-      problems.push(`missing tools: ${missing.join(', ')}`);
-    }
-    const { resources } = (await request('resources/list', {})) as { resources: Array<{ uri: string }> };
-    const page = resources.find((resource) => resource.uri.startsWith('ui://tau/'));
-    if (page === undefined) {
-      problems.push('no ui://tau/ viewer page resource');
-      log('FAIL  no viewer page resource (ui://tau/…)');
-    } else {
-      const { contents } = (await request('resources/read', { uri: page.uri })) as {
-        contents: Array<{ text?: string; mimeType?: string }>;
-      };
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ['evaluate_model', { targetFile: 'main.ts' }],
+      ['test_model', {}],
+      ['screenshot', { targetFile: 'main.ts' }],
+      ['export_model', { targetFile: 'main.ts', to: 'step' }],
+      ['get_parameters', { targetFile: 'main.ts' }],
+      ['show_model', { targetFile: 'main.ts' }],
+    ];
+    for (const [name, args] of calls) {
+      const callStarted = Date.now();
+      // oxlint-disable-next-line no-await-in-loop -- One model at a time, as an agent calls them.
+      const result = (await request('tools/call', { name, arguments: args })) as ToolResult;
+      const text = result.content?.find((item) => item.type === 'text')?.text ?? '';
+      const kinds = [...new Set(result.content?.map((item) => item.type))].join('+');
       log(
-        `ok  viewer page ${page.uri} (${String(contents[0]?.text?.length ?? 0)} characters, ${contents[0]?.mimeType ?? '?'})`,
+        `${result.isError === true ? 'FAIL' : 'ok'}  ${name} in ${String(Date.now() - callStarted)} ms (${kinds}) ${text.split('\n')[0]?.slice(0, 100) ?? ''}`,
       );
-    }
-    if (smoke) {
-      const calls: Array<[string, Record<string, unknown>]> = [
-        ['evaluate_model', { targetFile: 'main.ts' }],
-        ['test_model', {}],
-        ['screenshot', { targetFile: 'main.ts' }],
-        ['export_model', { targetFile: 'main.ts', to: 'step' }],
-        ['get_parameters', { targetFile: 'main.ts' }],
-        ['show_model', { targetFile: 'main.ts' }],
-      ];
-      for (const [name, args] of calls) {
-        const callStarted = Date.now();
-        // oxlint-disable-next-line no-await-in-loop -- One model at a time, as an agent calls them.
-        const result = (await request('tools/call', { name, arguments: args })) as ToolResult;
-        const text = result.content?.find((item) => item.type === 'text')?.text ?? '';
-        const kinds = [...new Set(result.content?.map((item) => item.type))].join('+');
-        log(
-          `${result.isError === true ? 'FAIL' : 'ok'}  ${name} in ${String(Date.now() - callStarted)} ms (${kinds}) ${text.split('\n')[0]?.slice(0, 100) ?? ''}`,
-        );
-        if (result.isError === true) {
-          problems.push(`${name}: ${text.slice(0, 400)}`);
-        }
+      if (result.isError === true) {
+        problems.push(`${name}: ${text.slice(0, 400)}`);
       }
-      log(`Smoke project: ${folder}`);
     }
+    log(`Smoke project: ${folder}`);
   } finally {
     child.kill('SIGTERM');
-    if (project === undefined && !smoke) {
-      rmSync(folder, { recursive: true, force: true });
-    }
   }
   if (problems.length > 0) {
     fail(`doctor found ${String(problems.length)} problem(s):\n${problems.join('\n')}`);
   }
-  log('The plugin folder serves every tool and the viewer page.');
+  log('The smoke calls passed.');
 };
 
 const main = async (): Promise<void> => {

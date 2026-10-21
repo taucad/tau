@@ -449,3 +449,34 @@ describe('removing a linked checkout', () => {
     expect(afterRetry.map((checkout) => checkout.id)).not.toContain(linked.id);
   });
 });
+
+describe('advertisement cancellation', () => {
+  it('should forward cancellation to the advertisement request and refuse an already stopped request', async () => {
+    const entered = Promise.withResolvers<AbortSignal | undefined>();
+    const http: RevisionHttpClient = {
+      request: async ({ signal }) => {
+        if (!(signal instanceof AbortSignal)) {
+          throw new Error('Discovery did not forward an AbortSignal.');
+        }
+        entered.resolve(signal);
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => {
+              reject(signal.reason instanceof Error ? signal.reason : new Error('Discovery stopped.'));
+            },
+            { once: true },
+          );
+        });
+      },
+    };
+    const port = await storeWithRemote(http, 'tau');
+    const controller = new AbortController();
+    const pending = port.listRemoteRefs('tau', { signal: controller.signal });
+    const rejected = expect(pending).rejects.toThrow();
+    expect(await entered.promise).toBe(controller.signal);
+    controller.abort();
+    await rejected;
+    await expect(port.listRemoteRefs('tau', { signal: AbortSignal.abort() })).rejects.toThrow();
+  });
+});

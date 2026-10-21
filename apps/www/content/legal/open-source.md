@@ -18,7 +18,7 @@ Tau makes use of, and is based in part on, facilities provided by the **Open CAS
 OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these
 components:
 
-- The GeoSpec engine (`geospec-engine` 0.2.1), built from OCCT upstream
+- The GeoSpec engine (`geospec-engine` 0.3.1), built from OCCT upstream
   revision `3d097a0328e71b826377d4814ab05ec3c3d23871` ([source](https://github.com/taucad/geospec))
 - libcascade 3.1.0 ([source](https://github.com/taucad/opencascade.js))
 - occt-import-js 0.0.23 ([source](https://github.com/kovacsv/occt-import-js))
@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 751 packages, with the license each declares.
+The web and desktop apps include the following 763 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -336,6 +336,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [buffer](https://github.com/feross/buffer) | 6.0.3 | MIT |
 | [buffer-equal-constant-time](https://github.com/goinstant/buffer-equal-constant-time) | 1.0.1 | BSD-3-Clause |
 | [buffer-from](https://github.com/LinusU/buffer-from) | 1.1.2 | MIT |
+| [builder-util-runtime](https://github.com/electron-userland/electron-builder) | 9.7.0 | MIT |
 | [bundle-name](https://github.com/sindresorhus/bundle-name) | 4.1.1 | MIT |
 | [bytes](https://github.com/visionmedia/bytes.js) | 3.1.2 | MIT |
 | [call-bind](https://github.com/ljharb/call-bind) | 1.0.9 | MIT |
@@ -419,6 +420,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ecdsa-sig-formatter](https://github.com/Brightspace/node-ecdsa-sig-formatter) | 1.0.11 | Apache-2.0 |
 | [ee-first](https://github.com/jonathanong/ee-first) | 1.1.1 | MIT |
 | [ejs](https://github.com/mde/ejs) | 5.0.1 | Apache-2.0 |
+| [electron-updater](https://github.com/electron-userland/electron-builder) | 6.8.11 | MIT |
 | [embla-carousel](https://github.com/davidjerleke/embla-carousel) | 8.6.0 | MIT |
 | [embla-carousel-react](https://github.com/davidjerleke/embla-carousel) | 8.6.0 | MIT |
 | [embla-carousel-reactive-utils](https://github.com/davidjerleke/embla-carousel) | 8.6.0 | MIT |
@@ -463,12 +465,14 @@ Their copyright notices and full license texts ship inside each package and are 
 | [formdata-polyfill](https://jimmywarting@github.com/jimmywarting/FormData) | 4.0.10 | MIT |
 | [forwarded](https://github.com/jshttp/forwarded) | 0.2.0 | MIT |
 | [fresh](https://github.com/jshttp/fresh) | 2.0.0 | MIT |
+| [fs-extra](https://github.com/jprichardson/node-fs-extra) | 10.1.0 | MIT |
 | [function-bind](https://github.com/Raynos/function-bind) | 1.1.2 | MIT |
 | [gaxios](https://github.com/googleapis/google-cloud-node) | 7.3.1 | Apache-2.0 |
 | [gcp-metadata](https://github.com/googleapis/google-cloud-node-core) | 8.1.2 | Apache-2.0 |
-| [geospec-engine](https://github.com/taucad/geospec) | 0.2.1 | Apache-2.0 |
-| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.2.1 | Apache-2.0 |
-| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.2.1 | Apache-2.0 |
+| [geospec-engine](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
+| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
+| [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
+| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
 | [get-intrinsic](https://github.com/ljharb/get-intrinsic) | 1.3.0 | MIT |
 | [get-nonce](https://github.com/theKashey/get-nonce) | 1.0.1 | MIT |
 | [get-proto](https://github.com/ljharb/get-proto) | 1.0.1 | MIT |
@@ -533,18 +537,22 @@ Their copyright notices and full license texts ship inside each package and are 
 | [json-schema-traverse](https://github.com/epoberezkin/json-schema-traverse) | 1.0.0 | MIT |
 | [json-schema-typed](https://github.com/RemyRylan/json-schema-typed) | 8.0.2 | BSD-2-Clause |
 | [jsonfile](https://github.com/jprichardson/node-jsonfile) | 2.4.0 | MIT |
+| [jsonfile](https://github.com/jprichardson/node-jsonfile) | 6.2.1 | MIT |
 | [jsonpointer](https://github.com/janl/node-jsonpointer) | 5.0.1 | MIT |
 | [jszip](https://github.com/Stuk/jszip) | 3.10.2 | (MIT OR GPL-3.0-or-later) |
 | [jwa](https://github.com/brianloveswords/node-jwa) | 2.0.1 | MIT |
 | [jws](https://github.com/brianloveswords/node-jws) | 4.0.1 | MIT |
 | [ktx-parse](https://github.com/donmccurdy/ktx-parse) | 1.1.0 | MIT |
 | [kysely](https://github.com/kysely-org/kysely) | 0.29.6 | MIT |
+| [lazy-val](https://github.com/develar/lazy-val) | 1.0.5 | MIT |
 | [libassimp](https://github.com/taucad/libassimp) | 0.3.0 | Apache-2.0 |
 | [libassimp-{platform}](https://github.com/taucad/libassimp) | 0.3.0 | Apache-2.0 |
 | [libcascade](https://github.com/taucad/opencascade.js) | 3.1.0 | LGPL-2.1-only WITH Open-CASCADE-Exception-1.0 |
 | [libphonenumber-js](https://gitlab.com/catamphetamine/libphonenumber-js) | 1.13.15 | MIT |
 | [lie](https://github.com/calvinmetcalf/lie) | 3.3.0 | MIT |
+| [lodash.escaperegexp](https://github.com/lodash/lodash) | 4.1.2 | MIT |
 | [lodash.get](https://github.com/lodash/lodash) | 4.4.2 | MIT |
+| [lodash.isequal](https://github.com/lodash/lodash) | 4.5.0 | MIT |
 | [long](https://github.com/dcodeIO/long.js) | 5.3.2 | Apache-2.0 |
 | [lru-cache](https://github.com/isaacs/node-lru-cache) | 10.4.3 | ISC |
 | [lucide-react](https://github.com/lucide-icons/lucide) | 0.552.0 | ISC |
@@ -579,8 +587,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ms](https://github.com/vercel/ms) | 2.1.3 | MIT |
 | [n8ao](https://github.com/N8python/n8ao) | 1.10.2 | ISC |
 | [nanoid](https://github.com/ai/nanoid) | 5.1.16 | MIT |
-| [nanoraster](https://github.com/taucad/nanoraster) | 0.7.0 | Apache-2.0 |
-| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.7.0 | Apache-2.0 |
+| [nanoraster](https://github.com/taucad/nanoraster) | 0.7.1 | Apache-2.0 |
+| [nanoraster-{platform}](https://github.com/taucad/nanoraster) | 0.7.1 | Apache-2.0 |
 | [nanostores](https://github.com/nanostores/nanostores) | 1.5.5 | MIT |
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.1.1 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |
@@ -670,8 +678,10 @@ Their copyright notices and full license texts ship inside each package and are 
 | [safe-regex](https://github.com/davisjam/safe-regex) | 2.1.1 | MIT |
 | [safer-buffer](https://github.com/ChALkeR/safer-buffer) | 2.1.2 | MIT |
 | [sax](https://github.com/isaacs/sax-js) | 1.1.6 | ISC |
+| [sax](https://github.com/isaacs/sax-js) | 1.6.1 | BlueOak-1.0.0 |
 | [saxes](https://github.com/lddubeau/saxes) | 6.0.0 | ISC |
 | [secure-json-parse](https://github.com/fastify/secure-json-parse) | 4.1.1 | BSD-3-Clause |
+| [semver](https://github.com/npm/node-semver) | 7.7.4 | ISC |
 | [semver](https://github.com/npm/node-semver) | 7.8.5 | ISC |
 | [send](https://github.com/pillarjs/send) | 1.2.1 | MIT |
 | [serve-static](https://github.com/expressjs/serve-static) | 2.2.1 | MIT |
@@ -718,6 +728,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [three-stdlib](https://github.com/pmndrs/three-stdlib) | 2.36.1 | MIT |
 | [tiny-inflate](https://github.com/devongovett/tiny-inflate) | 1.0.3 | MIT |
 | [tiny-invariant](https://github.com/alexreardon/tiny-invariant) | 1.3.3 | MIT |
+| [tiny-typed-emitter](https://github.com/binier/tiny-typed-emitter) | 2.1.0 | MIT |
 | [to-buffer](https://github.com/browserify/to-buffer) | 1.2.2 | MIT |
 | [toidentifier](https://github.com/component/toidentifier) | 1.0.1 | MIT |
 | [trim-lines](https://github.com/wooorm/trim-lines) | 3.0.1 | MIT |
@@ -744,6 +755,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [unist-util-stringify-position](https://github.com/syntax-tree/unist-util-stringify-position) | 4.0.0 | MIT |
 | [unist-util-visit](https://github.com/syntax-tree/unist-util-visit) | 5.1.0 | MIT |
 | [unist-util-visit-parents](https://github.com/syntax-tree/unist-util-visit-parents) | 6.0.2 | MIT |
+| [universalify](https://github.com/RyanZim/universalify) | 2.0.1 | MIT |
 | [unpipe](https://github.com/stream-utils/unpipe) | 1.0.0 | MIT |
 | [uqr](https://github.com/unjs/uqr) | 0.1.3 | MIT |
 | [use-callback-ref](https://github.com/theKashey/use-callback-ref/) | 1.3.3 | MIT |
@@ -797,7 +809,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 |-----------|---------|---------|
 | @babel/runtime | 7.29.10 | MIT |
 | @flatten-js/core | 1.6.14 | MIT |
-| @jscad/modeling | 2.13.0 | MIT |
 | @lume/kiwi | 0.4.4 | BSD-3-Clause |
 | @resvg/resvg-wasm | 2.6.2 | MPL-2.0 |
 | @thednp/dommatrix | 3.1.2 | MIT |
@@ -818,17 +829,13 @@ The circuit kernel bundles the following components. Their full license texts ac
 | @tscircuit/math-utils | 0.0.38 | MIT |
 | @tscircuit/miniflex | 0.0.4 | MIT |
 | @tscircuit/mm | 0.0.8 | MIT |
-| @tscircuit/mm | 0.0.9 | MIT |
-| @tscircuit/modelprinter | 0.0.2 | MIT |
 | @tscircuit/props | 0.0.646 | MIT |
 | @tscircuit/schematic-trace-solver | 0.0.184 | MIT |
 | @tscircuit/solver-utils | 0.0.19 | MIT |
 | @tscircuit/solver-utils | 0.0.21 | MIT |
 | @tscircuit/soup-util | 0.0.41 | MIT |
-| base64-js | 1.5.1 | MIT |
 | boolbase | 1.0.0 | ISC |
 | bpc-graph | 0.0.67 | MIT |
-| buffer | 6.0.3 | MIT |
 | calculate-cell-boundaries | 0.0.19 | MIT |
 | calculate-elbow | 0.0.12 | MIT |
 | calculate-elbow | 0.0.13 | MIT |
@@ -838,7 +845,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | circuit-json-to-bpc | 0.0.14 | MIT |
 | circuit-json-to-connectivity-map | 0.0.22 | MIT |
 | circuit-json-to-connectivity-map | 0.0.30 | MIT |
-| circuit-json-to-gltf | 0.0.123 | MIT |
 | circuit-json-to-readable-netlist | 0.0.17 | MIT |
 | circuit-json-to-spice | 0.0.46 | MIT |
 | circuit-to-svg | 0.0.413 | ISC, license text pending |
@@ -851,7 +857,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | domelementtype | 2.3.0 | BSD-2-Clause |
 | domhandler | 5.0.3 | BSD-2-Clause |
 | domutils | 3.2.2 | BSD-2-Clause |
-| earcut | 3.2.4 | ISC |
 | entities | 4.5.0 | BSD-2-Clause |
 | fast-png | 8.0.0 | MIT |
 | fflate | 0.8.3 | MIT |
@@ -862,12 +867,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | format-si-unit | 0.0.14 | MIT |
 | graphics-debug | 0.0.99 | no SPDX field, license text pending |
 | graphics-debug | 0.0.100 | no SPDX field, license text pending |
-| ieee754 | 1.2.1 | BSD-3-Clause |
 | iobuffer | 6.0.1 | MIT |
-| jscad-electronics | 0.0.159 | MIT |
-| jscad-planner | 0.0.13 | MIT |
-| jscad-planner | 0.0.14 | MIT |
-| jscad-to-gltf | 0.0.5 | MIT |
 | minicssgrid | 0.0.9 | MIT |
 | ms | 2.1.3 | MIT |
 | nanoid | 5.1.16 | MIT |
@@ -886,7 +886,6 @@ The circuit kernel bundles the following components. Their full license texts ac
 | spicey | 0.0.14 | MIT |
 | svg-path-commander | 2.3.3 | MIT |
 | svgson | 5.3.1 | MIT |
-| three | 0.184.0 | MIT |
 | transformation-matrix | 2.16.1 | MIT |
 | transformation-matrix | 3.1.0 | MIT |
 

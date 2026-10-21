@@ -53,6 +53,8 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
   public readonly capabilities: ProviderCapabilities;
 
   private _db: IDBDatabase | undefined;
+  /** Requests admitted in one microtask share a transaction, never a byte cache. */
+  private _readTransaction: IDBTransaction | undefined;
   private readonly _dbName: string;
 
   /** In-memory path index: tracks all file paths for O(1) existence/readdir. */
@@ -848,7 +850,18 @@ export class DirectIdbProvider extends AbstractFileSystemProvider {
 
   private async _idbGet(key: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
     return new Promise((resolve, reject) => {
-      const tx = this._db!.transaction(storeName, 'readonly');
+      let tx = this._readTransaction;
+      if (tx === undefined) {
+        tx = this._db!.transaction(storeName, 'readonly');
+        this._readTransaction = tx;
+        // Keep admission synchronous, preserving ordering against mutations.
+        // A later microtask gets a fresh transaction and current durable bytes.
+        queueMicrotask(() => {
+          if (this._readTransaction === tx) {
+            this._readTransaction = undefined;
+          }
+        });
+      }
       const store = tx.objectStore(storeName);
       const request = store.get(toStoragePath(key));
 

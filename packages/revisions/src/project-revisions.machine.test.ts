@@ -81,6 +81,7 @@ import { unansweredEvents, unreachedStates } from '@taucad/xstate-testing/paths'
  *     the restoring checkout waits for it, the open question included (A2, M4);
  *     `restore` hears the selection's line, again when a live switch moves it (M1)
  * 32  the projection names its line: `unknown`, `unborn`, `branch` (D3)
+ * 34  a second conflict on the same line refreshes resolution children without repeating its announcement (D14/D55)
  * 33  W5b, RV-W5b: a conflicted turn retires its lease through the registry and
  *     the parked scheduler resumes (F1); a scheduler cut naming an unknown
  *     checkout is answered at once (F8); a stale registry lease over a dirty
@@ -2585,6 +2586,38 @@ describe('projectRevisionsMachine', () => {
     harness.actor.stop();
   });
 
+  it('refreshes a second conflict on the same line without repeating the announcement (D14/D55)', async () => {
+    const harness = start();
+    await readyRegistry(harness, [live]);
+    harness.promises.settle('readPending', { output: { version: 1, entries: [] } });
+    await flush();
+    harness.promises.settle('readSyncRemote', { output: { remote: 'tau' } });
+    await flush();
+    harness.promises.settle('syncFetch', {
+      output: { leases: {}, integration: 'diverged' },
+    });
+    await flush();
+    const conflict = { status: 'conflicted', branch: conflictLine, into: 'main', paths: ['enclosure.ts'] } as const;
+    harness.promises.settle('syncMerge', { output: conflict });
+    await flush();
+    await readyRegistry(harness, [live], [undecided]);
+    expect(Object.keys(harness.actor.getSnapshot().context.resolutionRefs)).toEqual(['rev-conflict']);
+
+    harness.actor.send({ type: 'syncNow' });
+    await flush();
+    harness.promises.settle('syncFetch', {
+      output: { leases: {}, integration: 'diverged' },
+    });
+    await flush();
+    harness.promises.settle('syncMerge', { output: conflict });
+    await flush();
+    expect(harness.promises.inputsFor('listCheckouts')).toHaveLength(3);
+    await readyRegistry(harness, [live], [undecided, { ...undecided, revisionId: 'rev-conflict-2' }]);
+    expect(Object.keys(harness.actor.getSnapshot().context.resolutionRefs)).toEqual(['rev-conflict', 'rev-conflict-2']);
+    expect(harness.emitted.filter((event) => event.type === 'mergeConflicted')).toHaveLength(1);
+    harness.actor.stop();
+  });
+
   it('re-emits a request to have a chat resolve one', async () => {
     const harness = start();
 
@@ -2773,6 +2806,7 @@ describe('projectRevisionsMachine', () => {
       { type: 'syncNow', pushId: 'push-1' },
       { type: 'pushSettled', pushId: 'push-1', outcome: 'backedUp' },
       { type: 'resolution', revisionId: 'rev-conflict', event: { type: 'keepMine', path: 'enclosure.ts' } },
+      { type: 'conflictsChanged' },
       { type: 'mergeConflicted', branch: 'agent/b', into: 'main', paths: ['enclosure.ts'] },
       { type: 'branchMerged', branch: 'agent/b', into: 'main', revisionId: 'rev-2' },
       { type: 'remoteConnected', kind: 'tau', url: 'https://api.tau.new/git/p1', name: 'tau' },

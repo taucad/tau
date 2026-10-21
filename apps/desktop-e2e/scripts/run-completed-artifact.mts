@@ -427,11 +427,6 @@ const main = async (): Promise<void> => {
             BILLING_DATABASE_URL: databaseUrl,
             BILLING_ENVIRONMENT: 'development',
             TAU_E2E_PROVIDER_STUB_URL: `http://127.0.0.1:${String(providerPort)}`,
-            BILLING_PROVIDER_ACCOUNTS: JSON.stringify({
-              anthropic: 'desktop-e2e-anthropic',
-              openai: 'desktop-e2e-openai',
-              vertexai: 'desktop-e2e-vertexai',
-            }),
           }
         : {}),
       TAU_E2E_DESKTOP_EXECUTABLE: executable,
@@ -527,7 +522,7 @@ const main = async (): Promise<void> => {
       'src/desktop-measurement-exact.spec.ts',
       'src/desktop-thumbnail-lifecycle.spec.ts',
       'src/desktop-native-payload.spec.ts',
-      'src/desktop-store-seed.spec.ts',
+      'src/desktop-first-use-download.spec.ts',
       'src/desktop-community-preview.spec.ts',
       'src/filesystem-projection-live.spec.ts',
       'src/filesystem-projection-metadata.spec.ts',

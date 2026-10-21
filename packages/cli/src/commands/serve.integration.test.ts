@@ -314,7 +314,7 @@ const projectFiles = {
     '',
   ].join('\n'),
   'main.cs': 'using PicoGK;\n\npublic static class Model {}\n',
-  'tau.json': `${JSON.stringify({ id: 'proj_servenative0001', name: 'serve native' })}\n`,
+  'tau.json': `${JSON.stringify({ $schema: 'https://tau.new/schemas/tau-v1.json', name: 'serve native', description: '', tags: [], assets: { main: { entryPath: 'main.scad' } } })}\n`,
 };
 
 const workspaceIn = async (root: string): Promise<string> => {
@@ -697,7 +697,7 @@ describe.runIf(nativeDarwin)('tau serve native kernels on darwin-arm64 (W11 tier
       await writeFile(join(workspace, 'main.cs'), egressCheckedCsharp(canary.port));
       await writeFile(
         join(workspace, 'tau.json'),
-        `${JSON.stringify({ id: 'proj_servenative0002', name: 'serve native darwin' })}\n`,
+        `${JSON.stringify({ $schema: 'https://tau.new/schemas/tau-v1.json', name: 'serve native darwin', description: '', tags: [], assets: { main: { entryPath: 'main.scad' } } })}\n`,
       );
       const script: ToolCall[] = [
         { name: 'evaluate_model', input: { targetFile: 'main.py' } },

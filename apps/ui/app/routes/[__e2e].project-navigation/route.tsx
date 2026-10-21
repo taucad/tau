@@ -25,7 +25,7 @@ export default function main() {
 }
 `;
 
-const createManifest = (name: string, entryPath: string): Omit<ProjectManifest, '$schema' | 'id'> => ({
+const createManifest = (name: string, entryPath: string): Omit<ProjectManifest, '$schema'> => ({
   name,
   description: 'Deterministic project-navigation lifecycle fixture.',
   tags: ['e2e', 'navigation'],

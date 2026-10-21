@@ -29,6 +29,23 @@ await daemon.close();
 
 `@taucad/host/runtime-host` exports `serveHostRuntime()` for the supervised child. The host always binds `127.0.0.1:0` and requires the random parent-supplied bearer token on every upgrade.
 
+## Project identity and native writes
+
+`tau.json` is an id-free authored declaration using `https://tau.new/schemas/tau-v1.json`.
+Native admission generates `.tau/project.json` once and retains its identity across later opens.
+A validated prerelease manifest is converted in the current working tree while keeping its existing project ID;
+historical Git objects and cloud repository IDs are preserved.
+
+`openProjectRevisions()` is asynchronous. The synchronous `createProjectRevisions()`,
+`createProjectRevisionPort()`, and `createProjectHost()` constructors require an already resolved `projectId`.
+Explicitly serving an empty folder creates its identity without creating `tau.json`.
+
+Native mutations use one exclusive filesystem writer. A CLI mutation against a workspace already owned
+by a running daemon is refused with “This filesystem authority already has a writer.” Stop that daemon
+before retrying the CLI mutation. After admission, read-only revision queries do not claim the writer;
+opening a new root can still initialize its identity sidecar. Sharing an existing daemon's transport
+with standalone CLI commands is a separate capability.
+
 ## Credentials and lifecycle
 
 The durable device credential is written atomically with mode `0600` under the platform Tau config directory (`TAU_CONFIG_DIR` overrides it). Only its SHA-256 hash is stored by the API. Browser sessions and route grants are short-lived, route-bound, and one-use. Revocation closes the control connection and all live data routes.

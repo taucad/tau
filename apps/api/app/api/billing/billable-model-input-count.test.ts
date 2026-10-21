@@ -32,7 +32,6 @@ const body = {
 const capability: InputCountCapability = {
   qualification: 'controlled-local-zero',
   environment: 'development',
-  credentialAccount: 'fixture-account',
   sourceRevision: 'fixture-count-contract-v1',
   url: 'http://127.0.0.1:43199/v1/responses/input_tokens',
 };
@@ -42,7 +41,6 @@ const request = (overrides: Partial<CountInput> = {}): CountInput => ({
   maximumInput: 1_000_000n,
   capability,
   environment: 'development',
-  credentialAccount: 'fixture-account',
   signal: new AbortController().signal,
   ...overrides,
 });
@@ -59,7 +57,6 @@ const forgeCapability = (values: Record<string, string>): InputCountCapability =
 const supplierCapability: InputCountCapability = {
   qualification: 'openai-input-tokens-v1',
   environment: 'prod-us',
-  credentialAccount: 'fixture-account',
   sourceRevision: 'openai-input-tokens-v1:2026-09-12',
   url: 'https://api.openai.com/v1/responses/input_tokens',
   apiKey: 'fixture-openai-key',
@@ -75,8 +72,6 @@ const invalidCapabilities: ReadonlyArray<readonly [string, Partial<CountInput>]>
   ['production', { environment: 'prod-us' }],
   ['forged qualification', { capability: forgeCapability({ qualification: 'unqualified' }) }],
   ['forged capability environment', { capability: forgeCapability({ environment: 'prod-us' }) }],
-  ['empty capability account', { capability: { ...capability, credentialAccount: '' }, credentialAccount: '' }],
-  ['credential mismatch', { credentialAccount: 'other' }],
   ['non-loopback URL', { capability: { ...capability, url: 'https://api.openai.com/v1/responses/input_tokens' } }],
   ['query-bearing URL', { capability: { ...capability, url: `${capability.url}?credential=forbidden` } }],
   ['wrong path', { capability: { ...capability, url: 'http://127.0.0.1:43199/v1/responses' } }],
@@ -128,10 +123,9 @@ describe('countBillableModelInput', () => {
       expect(JSON.parse(captured)).toEqual(projected);
       expect(captured).not.toContain('max_output_tokens');
       expect(evidence).toEqual({
-        version: 'openai-input-count-v1',
+        version: 'openai-input-count-v2',
         sourceRevision: capability.sourceRevision,
         environment: 'development',
-        credentialAccount: 'fixture-account',
         modelId: model,
         createRequestDigest: sha256(JSON.stringify(createBody)),
         countRequestDigest: sha256(JSON.stringify(projected)),

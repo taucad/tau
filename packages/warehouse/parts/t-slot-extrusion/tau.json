@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_AeC2MVcmpnOAcOylk3ls0",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Four-slot extrusion",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [

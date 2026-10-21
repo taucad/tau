@@ -1,8 +1,18 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { revisionId } from '#algorithms/index.js';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import type { RevisionPort } from '#revision-port.js';
 import { createChatEffects } from '#chat-effects.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
+
+const roots: string[] = [];
+afterAll(async () => {
+  await Promise.all(roots.map(async (root) => rm(root, { recursive: true, force: true })));
+});
 
 const setup = async () => {
   const filesystem = await createMemoryProvider();
@@ -66,5 +76,52 @@ describe('explicit record push refusals', () => {
     const { push, effects } = await setup();
     push.mockResolvedValue({ refs: [{ name, head: undefined, status: 'rejected', reason: 'fetch first' }] });
     await expect(effects.pushRecordSet(input)).resolves.toBeUndefined();
+  });
+});
+
+describe('chat recovery cancellation', () => {
+  it('forwards cancellation to recovery fetch and stops before projection or replay', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-chat-abort-'));
+    roots.push(root);
+    const filesystem = new NodeFsProvider(root);
+    const base = createIsomorphicGitRevisionPort({ filesystem });
+    const controller = new AbortController();
+    const fetch = vi.fn<RevisionPort['fetch']>(async ({ signal }) => {
+      expect(signal).toBe(controller.signal);
+      controller.abort();
+      return { refs: [] };
+    });
+    const readRef = vi.fn<RevisionPort['readRef']>();
+    const push = vi.fn<RevisionPort['push']>();
+    const port = {
+      ...base,
+      fetch,
+      readRef,
+      push,
+      listRemoteRefs: async () => [{ name, head: revisionId('a'.repeat(40)) }],
+    };
+    const effects = createChatEffects({
+      port,
+      recordsFileSystem: async () => filesystem,
+      deviceId: () => 'device',
+      actor: undefined,
+      onChatsProjected: undefined,
+      recordDevices: { deviceFor: async () => 'device', ownDevices: async () => new Set(['device']) },
+      actorId: 'actor',
+      now: () => 0,
+    });
+    await expect(
+      effects.replayRejectedChat({
+        chatId: 'example',
+        name,
+        remote: 'origin',
+        signal: controller.signal,
+        syncChats: true,
+        refusal: 'fetch first',
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(readRef).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
   });
 });

@@ -47,7 +47,7 @@ describe('workspace generator skill parity', () => {
       expect(skill).toContain(`\`${role}\``);
       expect(schema).toContain(`"${role}"`);
     }
-    for (const subpath of ['@taucad/runtime/job', '@taucad/runtime/machine', '@taucad/runtime/configuration']) {
+    for (const subpath of ['@taucad/runtime/job', '@taucad/runtime/machine', '@taucad/runtime/schema']) {
       expect(skill).toContain(subpath);
     }
     expect(skill).toMatch(/not\s+the four-role CAD executor/u);

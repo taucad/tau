@@ -11,7 +11,7 @@ Tau project manifest schema and parsing
 ## Why this package?
 
 - One schema and parser authority for Tau v1 `tau.json` manifests.
-- Explicit parsing for identified projects and adoption before assigning an ID.
+- Strict authored declarations without identity; shared injected XState identity lifecycle.
 - Browser-safe ESM exports using Zod, `TextEncoder`, and `TextDecoder`.
 
 ## Install
@@ -29,7 +29,6 @@ Zod is the shared schema peer; use Zod 4. The schema/parser API does not require
 import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/project-core';
 
 const manifest = projectToManifest({
-  id: 'proj_0123456789ABCDEFGHIJK',
   name: 'Bracket',
   description: 'A mounting bracket',
   tags: ['bracket'],
@@ -48,22 +47,48 @@ console.log(result.data.assets.main.entryPath); // main.ts
 
 ## API
 
-All exports are available from `@taucad/project-core`.
+Manifest exports are available from `@taucad/project-core`. Identity lifecycle APIs are available from `@taucad/project-core/identity`; importing only the manifest entry does not load XState.
 
-| Exports                                                                                          | Purpose                                                                           |
-| ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| `projectManifestSchema`, `projectIdSchema`, `projectRelativePathSchema`                          | Validate manifest fields with Zod.                                                |
-| `projectManifestSchemaUrl`, `projectManifestMaxBytes`                                            | Canonical v1 schema URL and encoded-byte limit.                                   |
-| `parseProjectManifestBytes`                                                                      | Parse bytes into an identified manifest or a structured issue.                    |
-| `parseAdoptableProjectManifestBytes`                                                             | Parse the manifest while relaxing only its ID for explicit adoption.              |
-| `projectToManifest`                                                                              | Select durable manifest fields from a project view.                               |
-| `serializeProjectManifest`                                                                       | Validate and encode the manifest as formatted JSON bytes with a trailing newline. |
-| `ProjectManifest`, `AdoptableProjectManifest`                                                    | Validated manifest types.                                                         |
-| `ProjectManifestParseIssue`, `ProjectManifestParseResult`, `AdoptableProjectManifestParseResult` | Parser issue and result types.                                                    |
+| Exports                                                                 | Purpose                                                                             |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `projectManifestSchema`, `projectIdSchema`, `projectRelativePathSchema` | Validate manifest fields with Zod.                                                  |
+| `projectManifestSchemaUrl`, `projectManifestMaxBytes`                   | Canonical v1 schema URL and encoded-byte limit.                                     |
+| `parseProjectManifestBytes`                                             | Parse bytes into an authored manifest or a structured issue.                        |
+| `convertLegacyProjectManifestBytes`                                     | Convert only the previous prerelease contract, retaining its project ID separately. |
+| `projectToManifest`                                                     | Select durable manifest fields from a project view.                                 |
+| `serializeProjectManifest`                                              | Validate and encode the manifest as formatted JSON bytes with a trailing newline.   |
+| `ProjectManifest`                                                       | Validated manifest types.                                                           |
+| `ProjectManifestParseIssue`, `ProjectManifestParseResult`               | Parser issue and result types.                                                      |
 
 Private Tau consumers forward these exports to this authority rather than defining another schema.
 Parsing validates the supplied manifest bytes. It does not obtain source files, establish export or
 provider identity, generate IDs, or execute geometry.
+
+## Generated identity
+
+The authored manifest uses `https://tau.new/schemas/tau-v1.json` and rejects `id`.
+Tau stores `{ "version": 1, "projectId": "proj_…" }` in generated `.tau/project.json`.
+This record is excluded from authored snapshots and agent edits.
+
+`createProjectIdentityActor` returns an unstarted one-shot actor. Supply typed
+`readIdentity`, `mintIdentity`, and `initializeIdentity` actors. Initialization must
+atomically create the absent record or return the winning existing record. A trusted
+cloud or converted legacy ID is passed as `preferredProjectId`; disagreements return
+`conflict`. Read-only lookup returns `missing` without generating an identity.
+
+`createProjectIdentityResolver` returns `{ actor, resolve, invalidate }`. Start the
+actor once per storage authority and stop it at teardown. It coalesces matching
+requests and caches only successful durable identities (default 1024 entries, maximum
+4096; at most 64 active resolution children). Hosts must invalidate on identity-file
+changes, directory replacement, root revocation and reconnect. Send `clear` on the
+actor to invalidate the whole authority. Ownership-sensitive operations use `fresh`.
+Stopping or invalidating settles pending callers with a failure so they can retry.
+
+`createProjectManifestConversionActor` orders `establishIdentity` before
+`replaceManifest`. The host retains original and converted bytes in actor closures,
+and its replacement actor must compare the original bytes under the storage authority.
+An identity failure or mismatch never replaces the manifest. Historical Git objects
+remain untouched; conversion writes only the current authored revision.
 
 ## Environment
 

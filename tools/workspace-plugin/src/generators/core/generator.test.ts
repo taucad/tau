@@ -86,7 +86,7 @@ describe('core generator', () => {
     expect(instructions).toContain('../../../.agents/skills/create-core/SKILL.md');
     expect(instructions).toContain('../../../docs/policy/workspace-project-policy.md');
     expect(instructions).not.toMatch(/<%|__tmpl__/);
-    expect(readText(tree, `${root}/CLAUDE.md`)).toBe('@AGENTS.md\n');
+    expect(tree.exists(`${root}/CLAUDE.md`)).toBe(false);
   });
 
   it('requires a scoped package name and published placement', async () => {

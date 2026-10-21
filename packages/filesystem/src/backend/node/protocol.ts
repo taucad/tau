@@ -15,8 +15,8 @@ import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 
-/** Wire version. Version 5 adds authoritative head stat; version 6 carries watch events in batches. @public */
-export const nodeFsProtocolVersion = 6;
+/** Wire version. Version 7 carries directory entry kinds without per-child stat requests. @public */
+export const nodeFsProtocolVersion = 7;
 
 /**
  * Most watch events one frame carries. The host sends what one native callback reported as one frame, so a bulk
@@ -145,6 +145,7 @@ export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   checkedWriteRequestSchema,
   checkedDeleteRequestSchema,
   z.object({ ...rooted, op: z.literal('readdir'), path: z.string() }),
+  z.object({ ...rooted, op: z.literal('readdirEntries'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('readdirHeadWithStats'), path: z.string() }),
   z.object({ ...rooted, op: z.literal('stat'), path: z.string() }),
@@ -225,6 +226,7 @@ export const nodeFsResultSchemas = {
   writeFileChecked: checkedWriteResultSchema,
   deleteFileChecked: checkedWriteResultSchema,
   readdir: z.array(z.string()),
+  readdirEntries: z.array(z.object({ name: z.string(), kind: z.enum(['file', 'dir']) })),
   readdirWithStats: z.array(z.object({ name: z.string() }).and(fileStatSchema)),
   readdirHeadWithStats: z.array(z.object({ name: z.string() }).and(headFileStatSchema)),
   stat: fileStatSchema,

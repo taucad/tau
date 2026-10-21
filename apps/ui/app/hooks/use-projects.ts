@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import type { ProjectManifest } from '@taucad/types';
+import type { Project } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreatedProject } from '#hooks/use-project-manager.js';
@@ -148,7 +148,7 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
   );
 
   const handleAdoptProject = useCallback(
-    async (locator: ProjectLocator): Promise<ProjectManifest> => {
+    async (locator: ProjectLocator): Promise<Project> => {
       const adopted = await adoptProject(locator);
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       return adopted;

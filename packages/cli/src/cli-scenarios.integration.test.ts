@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
+import { projectManifestSchemaUrl } from '@taucad/types';
 import { validateGlbData } from '@taucad/runtime-testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
@@ -220,7 +221,16 @@ beforeAll(async () => {
   await mkdir(join(scratch, 'config'), { recursive: true });
   const project = join(scratch, 'project');
   await mkdir(project);
-  await writeFile(join(project, 'tau.json'), '{}\n');
+  await writeFile(
+    join(project, 'tau.json'),
+    JSON.stringify({
+      $schema: projectManifestSchemaUrl,
+      name: 'CLI scenarios',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.ts' } },
+    }),
+  );
   await writeFile(join(project, 'main.ts'), replicadBox);
   await writeFile(join(project, 'main.py'), build123dBox);
   await writeFile(join(project, 'main.cs'), picogkSphere);

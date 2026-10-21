@@ -77,7 +77,7 @@ export function useProjectUrl(projectId: string | undefined): string {
 
 /**
  * Keep the address bar on the open project's canonical URL (D8). A directory
- * renamed outside Tau changes the slug but not the `tau.json` id, so discovery
+ * renamed outside Tau changes the slug but not the established project ID, so discovery
  * re-points the config and the next listing refresh lands here.
  *
  * @param projectId - The open project, once resolved.

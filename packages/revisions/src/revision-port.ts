@@ -281,13 +281,10 @@ export type RevisionFetchInput = Readonly<{
    */
   refs?: readonly string[];
   /**
-   * Abandon this fetch when it fires (S24, F16's 10 s).
+   * Abandon this fetch when the caller cancels or its transfer budget expires.
    *
-   * The open pull is the one operation with a deadline of its own, and a bound
-   * the *caller* holds is the only one that can end the socket rather than just
-   * the caller's wait. Honoured by the engines that can: the browser leg passes
-   * it to every request the fetch makes; a leg that spawns `git` leaves the
-   * process to its own transport timeouts (W13 review 2 P36).
+   * Browser transports pass it to their requests. Native Git terminates the
+   * command process group, including its LFS child, when the signal fires.
    */
   signal?: AbortSignal;
   /** Maximum aggregate response-body bytes accepted by this fetch. */
@@ -353,6 +350,8 @@ export type RevisionPushRef = Readonly<{
  * @public
  */
 export type RevisionPushInput = Readonly<{
+  /** Cancel byte transfers and prevent subsequent ref publication. */
+  signal?: AbortSignal;
   remote: string;
   /** Refuse a changed destination; pin every transfer to this approved URL. */
   repositoryUrl?: string;
@@ -564,7 +563,10 @@ export type RevisionPort = Readonly<{
    * it would be once recorded under that name, and writes nothing: how
    * *Change backup* checks a new remote before it replaces the old one (R2).
    */
-  listRemoteRefs(remote: string | RevisionRemoteAddress): Promise<readonly RemoteRef[]>;
+  listRemoteRefs(
+    remote: string | RevisionRemoteAddress,
+    options?: Readonly<{ signal?: AbortSignal }>,
+  ): Promise<readonly RemoteRef[]>;
   /** Bring the remote's refs into `refs/remotes/<remote>/…`; never moves a branch. */
   fetch(input: RevisionFetchInput): Promise<RevisionFetchResult>;
   /** Offer refs to the remote and report each one's outcome. */

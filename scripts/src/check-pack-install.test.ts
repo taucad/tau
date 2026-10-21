@@ -340,15 +340,17 @@ describe('tarballManifest', () => {
       const result = spawnSync('npm', ['pack', '--silent', '--pack-destination', directory], {
         cwd: packageDirectory,
         encoding: 'utf8',
+        // This is a real npm process; CI has taken over eight seconds under parallel load.
+        timeout: 20_000,
       });
-      expect(result.status, result.stderr).toBe(0);
+      expect(result.status, result.error?.message ?? result.stderr).toBe(0);
       const manifest = tarballManifest(readFileSync(join(directory, result.stdout.trim())));
 
       expect(manifest).toMatchObject({ name: '@taucad/example', version: '1.2.3', dependencies: { zod: '^4.4.3' } });
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
 
 describe('isToleratedImportFailure', () => {

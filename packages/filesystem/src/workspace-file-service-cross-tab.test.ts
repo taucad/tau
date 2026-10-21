@@ -1,3 +1,4 @@
+import { projectIdentityPath, serializeProjectIdentity } from '@taucad/project-core/identity';
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -339,13 +340,16 @@ describe('WorkspaceFileService cross-tab authority delivery', () => {
       `${directory}/tau.json`,
       serializeProjectManifest(
         projectToManifest({
-          id: projectId,
           name: 'Delete Me',
           description: '',
           tags: [],
           assets: { main: { entryPath: 'main.ts' } },
         }),
       ),
+    );
+    await writer.provider.writeFile(
+      `${directory}/${projectIdentityPath}`,
+      serializeProjectIdentity({ version: 1, projectId }),
     );
     await writer.provider.writeFile(`${directory}/main.ts`, new TextEncoder().encode('export default {};'));
 

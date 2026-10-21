@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_IVkC5hYxnpT0dysKEG1pp",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted adjustment plate",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [

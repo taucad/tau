@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { desktopDeepLink } from '#lib/desktop-deep-link.js';
+import { desktopDeepLink, selectDesktopScheme } from '#lib/desktop-deep-link.js';
 
 describe('desktopDeepLink', () => {
   it.each([
@@ -55,5 +55,32 @@ describe('desktopDeepLink', () => {
   it('accepts a fragment at the share limit and refuses one character more', () => {
     expect(desktopDeepLink(`/s/direct#${'a'.repeat(524_288)}`)).toBeDefined();
     expect(desktopDeepLink(`/s/direct#${'a'.repeat(524_289)}`)).toBeUndefined();
+  });
+});
+
+describe('desktop protocol channel selection', () => {
+  it.each(
+    [
+      ['https://taucad.dev', 'Win32', '', 'tau-staging'],
+      ['https://taucad.dev', 'Linux x86_64', '', 'tau-staging'],
+      ['https://taucad.dev', 'MacIntel', '', 'tau'],
+      ['https://tau.new', 'Win32', '', 'tau'],
+      ['https://preview.example', 'Linux x86_64', '', 'tau'],
+      ['https://taucad.dev.evil.example', 'Win32', '', 'tau'],
+      ['https://taucad.dev', 'Linux', 'Android', 'tau'],
+      ['https://taucad.dev', '', '', 'tau'],
+    ].map(([frontendUrl = '', platform = '', userAgent = '', expected = '']) => ({
+      frontendUrl,
+      platform,
+      userAgent,
+      expected,
+    })),
+  )('routes $frontendUrl on $platform ($userAgent) to $expected', ({ frontendUrl, platform, userAgent, expected }) => {
+    const scheme = selectDesktopScheme({ frontendUrl, platform, userAgent });
+    expect(scheme).toBe(expected);
+    expect(desktopDeepLink('/s/direct#e=1&k=abc', scheme)).toBe(`${expected}://s/direct#e=1&k=abc`);
+    expect(desktopDeepLink('/invitations/token', scheme)).toBe(`${expected}://invitations/token`);
+    expect(desktopDeepLink('/import/github.com/taucad/tau', scheme)).toBe(`${expected}://i/github.com/taucad/tau`);
+    expect(desktopDeepLink('/import/github.com/taucad/tau?ref=branch', scheme)).toBeUndefined();
   });
 });

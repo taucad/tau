@@ -550,6 +550,9 @@ describe('@taucad/mcp', () => {
         tauMcpToolDefinitions[toolName.evaluateModel].description,
       );
       expect(client.getInstructions()).not.toContain(toolName.testModel);
+      expect(client.getInstructions()).toContain(
+        'A static part is done when evaluate_model is ready and its summary bounds and componentCount fit the brief. A moving assembly also needs',
+      );
     } finally {
       await client.close();
     }

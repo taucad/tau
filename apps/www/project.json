@@ -20,6 +20,9 @@
         },
         {
           "env": "WWW_ANALYTICS_ENDPOINT"
+        },
+        {
+          "env": "WWW_INSTALLER_CATALOG"
         }
       ],
       "outputs": ["{projectRoot}/build", "{projectRoot}/.netlify"],
@@ -56,9 +59,17 @@
         "command": "tsgo --project apps/www/tsconfig.json --noEmit"
       }
     },
+    "test-download-browser": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "apps/www",
+        "command": "pnpm exec vitest run --config vitest.downloads.config.ts"
+      }
+    },
     "verify-browser": {
       "executor": "nx:run-commands",
-      "dependsOn": ["build"],
+      "dependsOn": ["build", "test-download-browser"],
       "options": {
         "command": "node apps/www/scripts/verify-browser.ts"
       }

@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-10-16'
+updated: '2026-10-19'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -31,13 +31,19 @@ The fixed release group is every `tag:type:package` project that is not private:
 | `@taucad/units`           | Portable unit parsing, conversion, and quantity semantics |
 | `@taucad/cli`             | Headless CAD export CLI                                   |
 | `@taucad/react`           | React bindings for the runtime                            |
-| `geospec`                 | GeoSpec authoring contract and CLI-facing specification   |
-| `@taucad/geospec-engine`  | GeoSpec CLI and Node worker-pool host                     |
+| `geospec`                 | GeoSpec authoring contract; leaves at W4b                 |
+| `@taucad/geospec-engine`  | GeoSpec CLI host; removed by W2                           |
 | `@taucad/openrscad`       | OpenRSCAD runtime plugin                                  |
 | `packages/plugins/*`      | Publishable runtime capability toolkits                   |
 | `packages/core/*`         | Publishable shared implementation packages                |
 
 The following private libraries are outside the fixed Nx release group: `@taucad/events`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/types`, and `@taucad/utils`. All six are runtime bundle candidates. `@taucad/filesystem` and `@taucad/rpc` publish separately and remain external runtime dependencies; RPC is also an `@taucad/agent-host` dependency (host-agnostic R3, W4 SC-S4). The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
+
+### GeoSpec Engine Train
+
+The native GeoSpec engine is not in this train. `geospec-engine` on npm and PyPI and its `geospec-engine-<platform>` NAPI packages are built, versioned and published by `taucad/geospec` on its own semver train: Version Plans there, a `next` prerelease for every `main` commit, `latest` from its bot-owned release pull request, and npm OIDC trusted publishing from that repository's `ci.yml` with environment `npm-publish`. Tau consumes it by the `geospec-engine` catalog pin and never adds it to this repository's `nx release` configuration.
+
+Two GeoSpec packages stay in this train for now. `geospec` remains a Tau package, published by Tau's `publish.yml`, until the stage-2 move (W4b) takes it to `taucad/geospec`; this policy is amended again when it leaves. `@taucad/geospec-engine` stays until the GeoSpec seam consolidation (W2) removes it; it is then deprecated on npm by the operator and no longer published.
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference remains an implementation library with no public runtime veneer or subpath. `@taucad/units` owns the portable public units API.
 
@@ -219,7 +225,7 @@ The closeout Decision Register has settled the former C1/C5/C6 and OQ2/OQ4/OQ7 b
 1. Runtime may bundle six private implementation libraries: events, fs-bridge, JSON Schema, memory, types, and utils. `@taucad/filesystem`, `@taucad/rpc`, and `@taucad/units` publish separately and remain external.
 2. `@taucad/runtime/types` is the public runtime-contract type surface. JSON Schema inference has no public veneer or runtime subpath; `@taucad/units` owns portable unit parsing, conversion, and quantity semantics.
 3. Concrete backend dependencies are owned by their plugin packages; runtime does not depend on them.
-4. `@taucad/geospec-engine` publishes after runtime and `geospec`.
+4. `@taucad/geospec-engine` publishes after runtime and `geospec` until W2 removes it. The native `geospec-engine` publishes from `taucad/geospec` on its own train and is not part of this sequence.
 5. `nanoraster@0.2.0` and its three platform packages replace the deleted `@taucad/render` package.
 6. Telemetry is private application infrastructure and does not participate in the train.
 7. Candidate-only build, test, typecheck, lint, package, license, surface, documentation, and pack/install gates must pass before the release tag is pushed.
@@ -317,3 +323,4 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 | 2026-10 | Drop the production approval for the UI and API         | The approval came hours after the merge and added no information; staging rehearsal, rollback and fix-forward for migrations are the controls instead     |
 | 2026-10 | Draft-first immutable application releases              | Immutable releases accept assets only before publication; the fixed `desktop-feed` release is retired because installed apps read the R2 feed (DEL-20)    |
 | 2026-10 | Pre-1.0 plans and a promotion script for the npm train  | The beta trains bypass version plans and leave `latest` on placeholders and a fork; `major` plans would have released the group as 1.0.0 (charter D28)    |
+| 2026-10 | GeoSpec engine on its own train in `taucad/geospec`     | GeoSpec charter D15: the native engine releases on its own semver and `next` cadence; `geospec` stays until W4b and `@taucad/geospec-engine` until W2     |

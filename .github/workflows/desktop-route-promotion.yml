@@ -1,0 +1,132 @@
+name: Qualified desktop installer publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options: [staging, production]
+        required: true
+      operation:
+        type: choice
+        options: [promote-routes, renew-routes]
+        required: true
+      tag:
+        description: Exact candidate tag (promotion only)
+        type: string
+      candidate-run-id:
+        description: Successful trusted installer candidate run (promotion only)
+        type: string
+      ci-run-id:
+        description: Trusted native qualification run (W9, promotion only)
+        type: string
+      vm-run-id:
+        description: Trusted operator VM acceptance run (W10, promotion only)
+        type: string
+      manifest-sha256:
+        description: Reviewed canonical manifest digest (promotion only)
+        type: string
+  schedule:
+    - cron: '17 3 * * *'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publication:
+    if: github.ref == 'refs/heads/main' && vars.DESKTOP_INSTALLER_PUBLICATION == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ github.event_name == 'schedule' && fromJSON('["staging","production"]') || fromJSON(format('["{0}"]', inputs.channel)) }}
+    # The same lock covers promotion, renewal and recovery, across all runs.
+    concurrency:
+      group: desktop-installer-publication-${{ matrix.channel }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: ${{ (github.event_name == 'schedule' || inputs.operation == 'renew-routes') && 'desktop-installer-renewal' || 'desktop-installers' }}-${{ matrix.channel }}
+      deployment: false
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      pnpm_config_verify_deps_before_run: error
+      NX_NO_CLOUD: 'true'
+      GH_TOKEN: ${{ github.token }}
+      TAU_ENABLE_INSTALLER_PROMOTION: ${{ vars.DESKTOP_INSTALLER_PUBLICATION }}
+      DESKTOP_ASSETS_DIR: out/desktop/installer-publication
+      DESKTOP_R2_BUCKET: ${{ vars.DESKTOP_R2_BUCKET }}
+      DESKTOP_R2_ENDPOINT: ${{ vars.DESKTOP_R2_ENDPOINT }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.DESKTOP_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DESKTOP_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
+      TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
+      TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate-run-id }}
+      TAU_ROUTE_CI_RUN_ID: ${{ inputs.ci-run-id }}
+      TAU_ROUTE_VM_RUN_ID: ${{ inputs.vm-run-id }}
+    steps:
+      - name: Select requested channel
+        id: selected
+        env:
+          REQUESTED: ${{ inputs.channel }}
+          CHANNEL: ${{ matrix.channel }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = schedule ] || [ "$REQUESTED" = "$CHANNEL" ]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        if: steps.selected.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+        if: steps.selected.outputs.run == 'true'
+      - name: Load protected signing inputs
+        if: steps.selected.outputs.run == 'true'
+        env:
+          APPIMAGE_PRIVATE_KEY: ${{ secrets.TAU_APPIMAGE_PRIVATE_KEY }}
+          APPIMAGE_PUBLIC_KEYS: ${{ vars.TAU_APPIMAGE_PUBLIC_KEYS }}
+          APT_PRIVATE_KEY_BASE64: ${{ secrets.TAU_APT_PRIVATE_KEY_BASE64 }}
+          ROUTE_TRUST: ${{ vars.TAU_ROUTE_TRUST }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p "$RUNNER_TEMP/desktop-signing" out/desktop
+          printf '%s' "$APPIMAGE_PRIVATE_KEY" > "$RUNNER_TEMP/desktop-signing/appimage.pem"
+          printf '%s' "$APPIMAGE_PUBLIC_KEYS" > "$RUNNER_TEMP/desktop-signing/public-keys.json"
+          printf '%s' "$ROUTE_TRUST" > "$RUNNER_TEMP/desktop-signing/route-trust.json"
+          mkdir -m 700 "$RUNNER_TEMP/desktop-signing/gnupg"
+          if [ -n "$APT_PRIVATE_KEY_BASE64" ]; then
+            printf '%s' "$APT_PRIVATE_KEY_BASE64" | base64 --decode | gpg --homedir "$RUNNER_TEMP/desktop-signing/gnupg" --batch --import
+          fi
+          {
+            echo "TAU_APPIMAGE_PRIVATE_KEY_FILE=$RUNNER_TEMP/desktop-signing/appimage.pem"
+            echo "TAU_APPIMAGE_PUBLIC_KEYS_FILE=$RUNNER_TEMP/desktop-signing/public-keys.json"
+            echo "TAU_ROUTE_TRUST_FILE=$RUNNER_TEMP/desktop-signing/route-trust.json"
+            echo "TAU_APT_GNUPGHOME=$RUNNER_TEMP/desktop-signing/gnupg"
+            echo "TAU_UPDATE_ISSUED_AT=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          } >> "$GITHUB_ENV"
+      - name: Retrieve qualified candidate or completed metadata
+        if: steps.selected.outputs.run == 'true'
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          REQUESTED_OPERATION: ${{ inputs.operation }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          APPROVED_DIGEST: ${{ inputs.manifest-sha256 }}
+        run: pnpm nx run desktop:route-workflow --args=prepare
+      - name: Publish or renew under the shared channel lock
+        if: steps.selected.outputs.run == 'true'
+        run: pnpm nx run desktop:publish --args="$TAU_ROUTE_OPERATION"
+      - name: Clean ephemeral signing files
+        if: always() && steps.selected.outputs.run == 'true'
+        run: rm -rf "$RUNNER_TEMP/desktop-signing"
+      - name: Report failed metadata renewal or publication
+        if: failure() && steps.selected.outputs.run == 'true'
+        run: |
+          echo '::error::Desktop installer metadata publication failed. Check the last completed receipt and recover the same candidate before seven-day descriptor/APT validity expires.'
+          echo 'Public promotion remains unqualified unless every pointer has a completed readback receipt. Follow the desktop release handbook.' >> "$GITHUB_STEP_SUMMARY"

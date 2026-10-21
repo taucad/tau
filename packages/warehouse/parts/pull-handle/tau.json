@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_dyvfTbE9BMhPjtAy3S5eW",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Loop pull handle",
   "description": "Editable hand-operated component with shaped gripping surfaces and an actual hub opening where applicable.",
   "tags": [

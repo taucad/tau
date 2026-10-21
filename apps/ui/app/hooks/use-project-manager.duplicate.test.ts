@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { renderHook, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6,23 +7,23 @@ import type { ReactNode } from 'react';
 import { createElement } from 'react';
 import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { Project, ProjectManifest } from '@taucad/types';
 import type { PendingProjectOperation, PendingProjectStorage } from '#types/pending-project-operation.types.js';
 
-const sourceProject: ProjectManifest = projectToManifest({
+const sourceProject: Project = createProjectFixture({
   id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
   name: 'Source',
   description: '',
   tags: [],
   assets: { main: { entryPath: 'main.ts' } },
 });
-const duplicateProject: ProjectManifest = projectToManifest({
+const duplicateProject: Project = createProjectFixture({
   ...sourceProject,
   id: 'proj_ccccccccccccccccccccc',
   name: 'Source (Copy)',
 });
 const operationId = 'req_bbbbbbbbbbbbbbbbbbbbb';
-let lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
+let lastManifest = serializeProjectManifest(projectToManifest(createProjectFixture(sourceProject)));
 const phases: string[] = [];
 
 /**
@@ -32,7 +33,7 @@ const phases: string[] = [];
 const mockReadDuplicateProjectFiles = vi.fn(
   async (): Promise<Record<string, Uint8Array<ArrayBuffer>>> => ({
     'main.ts': new Uint8Array([1]),
-    'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
+    'tau.json': serializeProjectManifest(projectToManifest(createProjectFixture(sourceProject))),
   }),
 );
 const mockSyncProjectRoots = vi.fn(async () => {
@@ -121,13 +122,15 @@ const pendingDuplicate: Extract<PendingProjectOperation, { kind: 'duplicate' }> 
   backend: 'indexeddb',
   providerBasePath: '/source-copy',
   sourceProjectId: sourceProject.id,
-  manifest: duplicateProject,
+  projectId: duplicateProject.id,
+  manifest: projectToManifest(duplicateProject),
   library: { projectId: duplicateProject.id, lastActivityAt: 3 },
   files: { 'main.ts': { content: new Uint8Array([1]) } },
   chats: [],
 };
 type PrepareDuplicateInput = {
-  readonly sourceManifest: ProjectManifest;
+  readonly sourceProjectId: string;
+  readonly targetProjectId: string;
   readonly targetManifest: ProjectManifest;
   readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
   readonly storage: PendingProjectStorage;
@@ -204,7 +207,7 @@ describe('useProjectManager.duplicateProject', () => {
       },
     });
     phases.length = 0;
-    lastManifest = serializeProjectManifest(projectToManifest(sourceProject));
+    lastManifest = serializeProjectManifest(projectToManifest(createProjectFixture(sourceProject)));
     mockGetProjectFileSystemConfig.mockResolvedValue({
       projectId: sourceProject.id,
       backend: 'indexeddb',
@@ -218,7 +221,7 @@ describe('useProjectManager.duplicateProject', () => {
     await act(async () => result.current.duplicateProject(sourceProject.id));
 
     const duplicateInput = mockDuplicate.mock.calls[0]?.[0];
-    expect(duplicateInput?.sourceManifest).toEqual(sourceProject);
+    expect(duplicateInput?.sourceProjectId).toEqual(sourceProject.id);
     expect(duplicateInput?.targetManifest.name).toBe('Source (Copy)');
     expect(duplicateInput?.files).toEqual({ 'main.ts': { content: new Uint8Array([1]) } });
     expect(duplicateInput?.storage).toMatchObject({ backend: 'indexeddb' });
@@ -227,7 +230,8 @@ describe('useProjectManager.duplicateProject', () => {
       providerBasePath: pendingDuplicate.providerBasePath,
       scope: { backend: 'indexeddb' },
       files: pendingDuplicate.files,
-      manifest: serializeProjectManifest(duplicateProject),
+      projectId: duplicateProject.id,
+      manifest: serializeProjectManifest(projectToManifest(duplicateProject)),
       /* The attempt hands its bytes over: the bridge transfers them instead of copying the import. */
       [consumableBytes]: true,
     });
@@ -241,7 +245,7 @@ describe('useProjectManager.duplicateProject', () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
     await act(async () => result.current.duplicateProject(sourceProject.id));
 
-    const targetId = mockDuplicate.mock.calls[0]?.[0].targetManifest.id ?? '';
+    const targetId = mockDuplicate.mock.calls[0]?.[0].targetProjectId ?? '';
     expect(tauCloudIntent.get(targetId)).toBe('default');
     expect(tauCloudIntent.get(sourceProject.id)).toBeUndefined();
   });
@@ -252,7 +256,7 @@ describe('useProjectManager.duplicateProject', () => {
     const entries = new Uint8Array([4]);
     mockReadDuplicateProjectFiles.mockResolvedValueOnce({
       'main.ts': new Uint8Array([1]),
-      'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
+      'tau.json': serializeProjectManifest(projectToManifest(createProjectFixture(sourceProject))),
       '.tau/workbench/layout.json': layout,
       '.tau/workbench/views/v-abc12345.json': view,
       '.tau/workbench/entries.json': entries,
@@ -268,7 +272,7 @@ describe('useProjectManager.duplicateProject', () => {
       '.tau/workbench/entries.json': { content: entries },
     });
     expect(mockCommitPendingProjectDirectory).toHaveBeenCalledWith(
-      expect.objectContaining({ manifest: serializeProjectManifest(duplicateProject) }),
+      expect.objectContaining({ manifest: serializeProjectManifest(projectToManifest(duplicateProject)) }),
     );
   });
 
@@ -278,7 +282,7 @@ describe('useProjectManager.duplicateProject', () => {
      * chats under a foreign resource id, and its thumbnail (ZIP follow-up F-2). */
     mockReadDuplicateProjectFiles.mockResolvedValueOnce({
       'main.ts': new Uint8Array([1]),
-      'tau.json': serializeProjectManifest(projectToManifest(sourceProject)),
+      'tau.json': serializeProjectManifest(projectToManifest(createProjectFixture(sourceProject))),
     });
 
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -308,7 +312,7 @@ describe('useProjectManager.duplicateProject', () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
     await act(async () => result.current.duplicateProject(sourceProject.id));
     const duplicateInput = mockDuplicate.mock.calls[0]?.[0];
-    expect(duplicateInput?.sourceManifest).toEqual(sourceProject);
+    expect(duplicateInput?.sourceProjectId).toEqual(sourceProject.id);
     expect(duplicateInput?.targetManifest.name).toBe('Source (Copy)');
     expect(duplicateInput?.files).toEqual({ 'main.ts': { content: new Uint8Array([1]) } });
     expect(duplicateInput?.storage).toMatchObject({

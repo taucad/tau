@@ -44,9 +44,14 @@ const nativeEngineLoads = await import('geospec-engine/node').then(
 
 type ProbeOutcome = { readonly offered: boolean; readonly isError: boolean; readonly content: unknown };
 
-const probe = async (workspaceRoot: string, testNamePattern: string): Promise<ProbeOutcome> => {
+const probe = async (
+  workspaceRoot: string,
+  testNamePattern: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ProbeOutcome> => {
   const child = spawn(process.execPath, [tsxCliPath, probePath, workspaceRoot, testNamePattern], {
     cwd: repoRoot,
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const chunks: string[] = [];
@@ -86,4 +91,26 @@ describe.skipIf(!nativeEngineLoads)('test_model over the attached runtime (needs
       accounting: { selected: 1, passed: 1, failed: 0, inconclusive: 0 },
     });
   });
+});
+
+describe('test_model without a loadable native binding', () => {
+  it(
+    'should not offer test_model when the engine resolves but its addon does not load (F-B3)',
+    { timeout: 120_000 },
+    async () => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-geospec-'));
+      roots.push(workspaceRoot);
+      await cp(benchVise, workspaceRoot, { recursive: true });
+
+      /* The NAPI-RS loader takes this path instead of the platform package, so the binding fails to load exactly as
+       * it does on a platform with no prebuilt addon, while every GeoSpec module still resolves. */
+      const outcome = await probe(workspaceRoot, 'R10 Frame:', {
+        ...process.env,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- The NAPI-RS loader's environment variable.
+        NAPI_RS_NATIVE_LIBRARY_PATH: join(workspaceRoot, 'missing-geospec-engine.node'),
+      });
+
+      expect(outcome.offered).toBe(false);
+    },
+  );
 });

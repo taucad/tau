@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LoaderFunctionArgs, MetaFunction } from 'react-router';
 import { useLoaderData, useLocation, useParams } from 'react-router';
-import { getActiveGroupValues, parameterEntryPath, parseProjectManifestBytes } from '@taucad/types';
+import {
+  getActiveGroupValues,
+  parameterEntryPath,
+  parseProjectManifestBytes,
+  convertLegacyProjectManifestBytes,
+  serializeProjectManifest,
+} from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import { findBuiltinProject } from '#lib/builtin-projects.js';
 import { sharePasswordLimits } from '@taucad/share/artifact';
@@ -57,15 +63,16 @@ const snapshotRole = (path: string, entryPath: string): ShareSnapshotFileRole =>
 };
 
 const collectOpenedSnapshot = async (
-  artifact: ShareOpenedArtifact,
+  files: Readonly<Record<string, Readonly<{ content: Uint8Array<ArrayBuffer> }>>>,
   entryPath: string,
 ): Promise<ShareProjectSnapshot> => ({
   entryPath,
   files: await Promise.all(
-    artifact.files.map(async (file) => ({
+    Object.entries(files).map(async ([path, file]) => ({
       ...file,
+      path,
       sha256: await sha256(file.content),
-      role: snapshotRole(file.path, entryPath),
+      role: snapshotRole(path, entryPath),
     })),
   ),
   warnings: [],
@@ -87,12 +94,12 @@ export const resolvePortableArtifact = (
     return undefined;
   }
   const parsed = parseProjectManifestBytes(manifestFile.content);
-  if (!parsed.success || !artifact.files.some(({ path }) => path === parsed.data.assets.main.entryPath)) {
+  const legacy = parsed.success ? undefined : convertLegacyProjectManifestBytes(manifestFile.content);
+  const manifest = parsed.success ? parsed.data : legacy?.success ? legacy.data.manifest : undefined;
+  if (!manifest || !artifact.files.some(({ path }) => path === manifest.assets.main.entryPath)) {
     return undefined;
   }
-  const parameterFile = artifact.files.find(
-    ({ path }) => path === parameterEntryPath(parsed.data.assets.main.entryPath),
-  );
+  const parameterFile = artifact.files.find(({ path }) => path === parameterEntryPath(manifest.assets.main.entryPath));
   let parameters: Record<string, unknown> = {};
   let parameterDiagnostic: string | undefined;
   if (parameterFile) {
@@ -104,10 +111,17 @@ export const resolvePortableArtifact = (
     }
   }
   return {
-    manifest: parsed.data,
+    manifest,
     parameters,
     parameterDiagnostic,
-    files: Object.fromEntries(artifact.files.map((file) => [file.path, { content: file.content }])),
+    files: Object.fromEntries(
+      artifact.files.map((file) => [
+        file.path,
+        {
+          content: file.path === 'tau.json' && legacy?.success ? serializeProjectManifest(manifest) : file.content,
+        },
+      ]),
+    ),
   };
 };
 
@@ -357,7 +371,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
   }
 
   const publication: ParsedPublication = {
-    id: resolved.manifest.id,
+    id: `share:${slug}`,
     title: resolved.manifest.name,
     description: resolved.manifest.description,
     visibility: 'private',
@@ -398,7 +412,7 @@ export const PortableShareSurface = (): React.JSX.Element => {
           <GithubGistManagement
             locator={parseShareSlug(slug)}
             protection={protection}
-            collectSnapshot={async () => collectOpenedSnapshot(artifact, publication.entryPath)}
+            collectSnapshot={async () => collectOpenedSnapshot(resolved.files, publication.entryPath)}
             onRepublished={(url) => {
               globalThis.location.assign(url);
             }}

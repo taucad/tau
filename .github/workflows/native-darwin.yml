@@ -176,10 +176,13 @@ jobs:
           PROJECTS: ${{ needs.plan.outputs.projects }}
           TAU_TEST_FRAME_LOG_DIR: ${{ runner.temp }}/native-darwin-frames
           TAU_GOLDEN_SUMMARY_FILE: ${{ runner.temp }}/golden-receipts.md
+          # Declaration bundling exceeds Node 24's default 2 GiB heap on this runner.
+          # One Nx task at a time keeps the 4 GiB heaps from competing on the 7 GiB host.
+          NODE_OPTIONS: --max-old-space-size=4096
         run: |
           printf '%s\n' '| Closure | Target | treeIntegrity | Golden | Files | Result |' '| --- | --- | --- | --- | ---: | --- |' \
             > "$TAU_GOLDEN_SUMMARY_FILE"
-          pnpm nx run-many -t test:native-darwin --projects "$PROJECTS" --parallel=2 --outputStyle=static
+          pnpm nx run-many -t test:native-darwin --projects "$PROJECTS" --parallel=1 --outputStyle=static
 
       - name: Publish the golden receipts
         if: always()

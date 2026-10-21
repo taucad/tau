@@ -36,12 +36,13 @@ Name the project folder in the launcher's arguments:
 }
 ```
 
-Start a new thread or session after installing: the tools appear there, not in the current one. The plugin is not in the Anthropic or OpenAI plugin directories; install it from the `taucad/marketplace` catalog.
+Start a new thread or session after installing: the tools appear only there. The plugin is not in the Anthropic or OpenAI plugin directories; install it from the `taucad/marketplace` catalog.
 
 ## Check
 
-- Claude Code: `claude plugin list` shows `tau@taucad` enabled; `claude mcp list` shows `plugin:tau:tau … ✔ Connected`.
-- Codex: `codex plugin list` shows `tau@taucad  installed, enabled`.
+- Claude Code: `claude plugin list` shows `tau@taucad` enabled.
+- Codex: `codex plugin list --marketplace taucad` shows `tau@taucad  installed, enabled`.
+- In the project, `node <plugin folder>/dist/doctor.mjs` checks the launcher and CLI.
 
 Troubleshooting, kernel choice and what to tell the user are in the [agent guide](https://taucad.dev/llms.txt).
 

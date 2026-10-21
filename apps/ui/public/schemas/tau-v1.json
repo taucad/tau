@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://tau.new/schemas/tau-v1.json"
+    },
+    "name": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 10000
+    },
+    "tags": {
+      "maxItems": 64,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 100
+      }
+    },
+    "assets": {
+      "type": "object",
+      "properties": {
+        "main": {
+          "type": "object",
+          "properties": {
+            "entryPath": {
+              "type": "string",
+              "maxLength": 2048
+            },
+            "thumbnail": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          },
+          "required": ["entryPath"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["main"],
+      "additionalProperties": false
+    },
+    "syncChats": {
+      "description": "Whether this project's chats sync with its remotes. Absent means on; false keeps the project files-only, and no refs/tau/chats/* is written for it.",
+      "type": "boolean"
+    },
+    "syncLargeExports": {
+      "description": "Whether generated exports and evidence sync on refs/tau/evidence/exports. Absent means off.",
+      "type": "boolean"
+    }
+  },
+  "required": ["$schema", "name", "description", "tags", "assets"],
+  "additionalProperties": false,
+  "$id": "https://tau.new/schemas/tau-v1.json",
+  "title": "Tau Project Manifest v1"
+}

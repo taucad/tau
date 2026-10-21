@@ -37,7 +37,6 @@ const capabilitySchema = z.discriminatedUnion('qualification', [
     .object({
       qualification: z.literal('controlled-local-zero'),
       environment: z.literal('development'),
-      credentialAccount: z.string().min(1),
       sourceRevision: z.string().min(1),
       url: z.string().min(1),
     })
@@ -46,7 +45,6 @@ const capabilitySchema = z.discriminatedUnion('qualification', [
     .object({
       qualification: z.literal('openai-input-tokens-v1'),
       environment: financialEnvironmentSchema,
-      credentialAccount: z.string().min(1),
       sourceRevision: z.string().min(1),
       url: z.string().min(1),
       /** Supplier credential for the count call. Never digested, persisted or logged. */
@@ -69,7 +67,6 @@ type CountInput = {
   readonly maximumInput: bigint;
   readonly capability: InputCountCapability;
   readonly environment: BillingEnvironment;
-  readonly credentialAccount: string;
   readonly signal: AbortSignal;
   readonly fetchOnce?: typeof fetch;
 };
@@ -78,12 +75,7 @@ const digest = (serialized: string): string => `sha256:${createHash('sha256').up
 
 const assertCapability = (input: CountInput): { url: URL; capability: InputCountCapability } => {
   const parsed = capabilitySchema.safeParse(input.capability);
-  if (
-    !parsed.success ||
-    input.credentialAccount.length === 0 ||
-    parsed.data.credentialAccount !== input.credentialAccount ||
-    parsed.data.environment !== input.environment
-  ) {
+  if (!parsed.success || parsed.data.environment !== input.environment) {
     throw new Error('Input count capability does not match the invocation scope.');
   }
   const capability = parsed.data;
@@ -179,10 +171,9 @@ export const countBillableModelInput = async (input: CountInput): Promise<InputC
     throw new Error('Input count exceeds the qualified maximum.');
   }
   return {
-    version: 'openai-input-count-v1',
+    version: 'openai-input-count-v2',
     sourceRevision: capability.sourceRevision,
     environment: input.environment,
-    credentialAccount: input.credentialAccount,
     modelId: parsed.data.model,
     createRequestDigest: digest(createJson),
     countRequestDigest: digest(countJson),

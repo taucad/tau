@@ -16,40 +16,78 @@ import { FuseV1Options } from '@electron/fuses';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Operational signing helper under test.
+import { selectLocalSigningIdentity } from './local-signing.mjs';
 
-assert.deepEqual(parseMacosPackageMode([]), { release: false, unsigned: false, zip: false, notarize: false });
-assert.deepEqual(parseMacosPackageMode(['--release']), { release: true, unsigned: false, zip: true, notarize: true });
+const developmentFingerprint = 'A'.repeat(40);
+const signingListing = `1) ${developmentFingerprint} "Apple Development: Test Developer (TEST)"\n2) ${'B'.repeat(40)} "Developer ID Application: Test (TEAM)"`;
+for (const selection of ['auto', developmentFingerprint.toLowerCase(), 'Apple Development: Test Developer (TEST)']) {
+  assert.equal(selectLocalSigningIdentity(selection, signingListing), developmentFingerprint);
+}
+for (const selection of ['', '-', 'missing', 'B'.repeat(40)]) {
+  assert.throws(() => selectLocalSigningIdentity(selection, signingListing), /exactly one matching Apple Development/u);
+}
+assert.throws(() => selectLocalSigningIdentity('auto', ''), /exactly one matching/u);
+assert.throws(
+  () =>
+    selectLocalSigningIdentity('auto', `${signingListing}\n3) ${'C'.repeat(40)} "Apple Development: Other (OTHER)"`),
+  /exactly one matching/u,
+);
+
+assert.deepEqual(parseMacosPackageMode([]), {
+  release: false,
+  unsigned: false,
+  zip: false,
+  dmg: false,
+  notarize: false,
+});
+assert.deepEqual(parseMacosPackageMode(['--release']), {
+  release: true,
+  unsigned: false,
+  zip: true,
+  dmg: false,
+  notarize: true,
+});
 assert.deepEqual(parseMacosPackageMode(['--unsigned']), {
   release: false,
   unsigned: true,
   zip: false,
+  dmg: false,
   notarize: false,
 });
 assert.deepEqual(parseMacosPackageMode(['--unsigned', '--zip']), {
   release: false,
   unsigned: true,
   zip: true,
+  dmg: false,
   notarize: false,
 });
-assert.deepEqual(parseMacosPackageMode(['--zip']), { release: false, unsigned: false, zip: true, notarize: false });
+assert.deepEqual(parseMacosPackageMode(['--zip']), {
+  release: false,
+  unsigned: false,
+  zip: true,
+  dmg: false,
+  notarize: false,
+});
 assert.throws(() => parseMacosPackageMode(['--release', '--unsigned']), {
   name: 'TypeError',
   message: '--release and --unsigned cannot be used together',
 });
 assert.throws(() => parseMacosPackageMode(['--zipped']), {
   name: 'TypeError',
-  message: 'Usage: <script> [--release | --unsigned] [--zip] [--skip-notarization]',
+  message: 'Usage: <script> [--release | --unsigned] [--zip] [--dmg] [--skip-notarization]',
 });
 console.log('✓ macOS package modes are mutually exclusive, and only release zips unless --zip is passed');
 
 const packageSource = readFileSync(new URL('package-macos.mts', import.meta.url), 'utf8');
-const licenceGate = packageSource.indexOf('if (zip) {');
-assert.ok(licenceGate > packageSource.indexOf('const { release, unsigned, zip, notarize: shouldNotarize }'));
+const licenceGate = packageSource.indexOf('if (zip || dmg) {');
+const modeParse = packageSource.indexOf('parseMacosPackageMode(');
+assert.ok(modeParse !== -1 && licenceGate !== -1 && licenceGate > modeParse);
 assert.ok(
-  packageSource.slice(licenceGate).startsWith(`if (zip) {
+  packageSource.slice(licenceGate).startsWith(`if (zip || dmg) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')],`),
 );
-assert.ok(licenceGate < packageSource.indexOf('let geospecAssemblyInput'));
+assert.ok(licenceGate < packageSource.indexOf('const runtimePackages = await resolveRuntimePackages'));
 
 /* Security assessment 2026-10 desktop F-3: the hardening fuses are on in every mode,
  * RunAsNode is never touched (ACP adapters need it), and only a release refuses --inspect. */
@@ -68,6 +106,7 @@ assert.deepEqual(parseMacosPackageMode(['--release', '--skip-notarization'], 'st
   release: true,
   unsigned: false,
   zip: true,
+  dmg: false,
   notarize: false,
 });
 for (const [args, channel] of [
@@ -85,3 +124,18 @@ assert.equal(macosPackageArchitecture('darwin', 'arm64'), 'arm64');
 assert.equal(macosPackageArchitecture('darwin', 'x64'), 'x64');
 assert.throws(() => macosPackageArchitecture('linux', 'x64'));
 assert.throws(() => macosPackageArchitecture('darwin', 'ia32'));
+
+assert.deepEqual(parseMacosPackageMode(['--dmg']), {
+  release: false,
+  unsigned: false,
+  zip: false,
+  dmg: true,
+  notarize: false,
+});
+assert.deepEqual(parseMacosPackageMode(['--release', '--dmg']), {
+  release: true,
+  unsigned: false,
+  zip: true,
+  dmg: true,
+  notarize: true,
+});

@@ -775,7 +775,11 @@ export class ExternalChangeIngest {
       return false;
     }
     const [, child, ...deeper] = path.split('/').filter(Boolean);
-    return child === undefined || (deeper.length === 0 && child === 'tau.json');
+    return (
+      child === undefined ||
+      (deeper.length === 0 && (child === 'tau.json' || child === '.tau')) ||
+      (child === '.tau' && deeper.length === 1 && deeper[0] === 'project.json')
+    );
   }
 
   private async _createExternalSnapshot(state: ObservedExternalRoot, providerBasePath?: string): Promise<string> {
@@ -846,17 +850,38 @@ export class ExternalChangeIngest {
         if (child.kind === 'file') {
           return fileRow(name, name, child);
         }
-        try {
-          // Project discovery only depends on the immediate directory and its manifest.
-          const manifestHandle = await child.getFileHandle('tau.json');
-          const manifest = await manifestHandle.getFile();
-          return [name, `${name}/tau.json\0file\0${manifest.size}\0${manifest.lastModified}`];
-        } catch (error) {
-          if (!isNotFoundError(error)) {
-            throw error;
-          }
-          return [name, undefined];
-        }
+        // Discovery depends on both declarations and generated identity, including unmounted projects.
+        const declarationRows = await Promise.all([
+          (async () => {
+            try {
+              const [, row] = await fileRow(name, `${name}/tau.json`, await child.getFileHandle('tau.json'));
+              return row;
+            } catch (error) {
+              if (!isNotFoundError(error)) {
+                throw error;
+              }
+              return undefined;
+            }
+          })(),
+          (async () => {
+            try {
+              const control = await child.getDirectoryHandle('.tau');
+              const [, row] = await fileRow(
+                name,
+                `${name}/.tau/project.json`,
+                await control.getFileHandle('project.json'),
+              );
+              return row;
+            } catch (error) {
+              if (!isNotFoundError(error)) {
+                throw error;
+              }
+              return undefined;
+            }
+          })(),
+        ]);
+        const presentRows = declarationRows.filter((row) => row !== undefined);
+        return [name, presentRows.length === 0 ? undefined : presentRows.join('\n')];
       });
       for (const [name, child] of entries) {
         if (child.kind === 'file') {

@@ -26,8 +26,7 @@ import {
   verifyDesktopClosure,
 } from '#tau/native-kernels.js';
 
-const refusal =
-  'The @taucad/build123d closure in this app differs from its receipt (python/bin/python3); reinstall Tau.';
+const refusal = 'Tau could not open its payload store at /tmp/tau/payloads: EACCES: permission denied';
 
 const refusedFrame = {
   type: 'tau:native-kernels',
@@ -88,7 +87,7 @@ describe('desktop native kernels', () => {
     });
   });
 
-  it('should look up a kernel the frame does not name in the store main seeded', async () => {
+  it('should look up a kernel the frame does not name in the store main read', async () => {
     const fallback = vi.fn(
       async (_request: NativeClosureRequest): Promise<NativeClosureAnswer> => ({
         status: 'unavailable',
@@ -108,6 +107,30 @@ describe('desktop native kernels', () => {
 
     expect(answer).toMatchObject({ status: 'unavailable', reason: 'unsupported-target' });
     expect(fallback).toHaveBeenCalledOnce();
+  });
+
+  it('should bind a kernel prepared after launch on its next request, reading the store each time', async () => {
+    const prepared = nativeKernelsFixture({ picogk: true }).kernels[1]!.closure!;
+    let ready = false;
+    const fallback = vi.fn(
+      async (_request: NativeClosureRequest): Promise<NativeClosureAnswer> =>
+        ready
+          ? { status: 'ready', closures: { runtime: prepared } }
+          : { status: 'unavailable', reason: 'not-prepared', byteLength: 57_677_884 },
+    );
+    const resolve = desktopClosureResolver(nativeKernelsFixture({ picogk: false }), fallback);
+    const request = {
+      package: '@taucad/picogk',
+      kernel: 'picogk',
+      dependencies: ['runtime'],
+      deployment: picogkNative,
+    };
+
+    await expect(resolve(request)).resolves.toMatchObject({ status: 'unavailable', reason: 'not-prepared' });
+    ready = true;
+
+    await expect(resolve(request)).resolves.toEqual({ status: 'ready', closures: { runtime: prepared } });
+    expect(fallback).toHaveBeenCalledTimes(2);
   });
 
   it('should answer describe, render and export of a file whose kernel has no closure with main refusal', async () => {

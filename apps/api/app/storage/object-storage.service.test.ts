@@ -278,8 +278,10 @@ describe('ObjectStorageService', () => {
       }
     });
 
-    it('should enforce SHA-256 on a private presigned artifact upload', async () => {
+    it('should prevent a signed upload from replacing verified bytes with different content', async () => {
       const payload = randomPayload(37);
+      const wrong = new Uint8Array(payload);
+      wrong[0] = (wrong[0]! + 1) % 256;
       const key = `jobs/test/sha256/${sha256HexFromBytes(payload)}`;
       const checksum = createHash('sha256').update(payload).digest('base64');
       const uploadUrl = await service.presignPut({
@@ -291,17 +293,31 @@ describe('ObjectStorageService', () => {
         expiresInSeconds: 60,
         tier: 'private',
       });
-
-      try {
+      // R2 ignores a query-hoisted checksum; the checksum must be a signed header.
+      const signed = new URL(uploadUrl);
+      expect(signed.searchParams.get('X-Amz-SignedHeaders')?.split(';')).toContain('x-amz-checksum-sha256');
+      expect(signed.searchParams.has('x-amz-checksum-sha256')).toBe(false);
+      const put = async (body: Uint8Array<ArrayBuffer>, includeChecksum = true): Promise<number> => {
         const response = await fetch(uploadUrl, {
           method: 'PUT',
           headers: {
             'content-type': 'application/octet-stream',
-            'x-amz-checksum-sha256': checksum,
+            ...(includeChecksum ? { 'x-amz-checksum-sha256': checksum } : {}),
           },
-          body: payload,
+          body,
         });
-        expect(response.ok).toBe(true);
+        await response.body?.cancel();
+        return response.status;
+      };
+      try {
+        expect(await put(wrong)).toBeGreaterThanOrEqual(400);
+        expect(await put(payload)).toBe(200);
+        expect(await put(payload, false)).toBeGreaterThanOrEqual(400);
+        const statuses = await Promise.all([put(payload), put(wrong), put(payload)]);
+        expect(statuses[0]).toBe(200);
+        expect(statuses[1]).toBeGreaterThanOrEqual(400);
+        expect(statuses[2]).toBe(200);
+        expect(await put(wrong)).toBeGreaterThanOrEqual(400);
         const stored = await service.getBlob({ namespace: 'blobs', key, tier: 'private' });
         await expect(collectReadable(stored.body)).resolves.toStrictEqual(payload);
       } finally {

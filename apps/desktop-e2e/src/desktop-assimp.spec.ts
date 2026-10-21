@@ -414,13 +414,19 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         },
         { clientUrl, entryPath: lifecycleModelEntry, projectRoot, rendererUrl },
       );
+      /* The replacement spare is the one new utility that stays. The page can open an ephemeral client of its own
+       * meanwhile (a project thumbnail), which forks outside the pool and exits once it has rendered, so wait for that
+       * rather than taking the first sample. */
       let replacementSparePid: number | undefined;
       await expect
-        .poll(async () => {
-          const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
-          replacementSparePid = added.length === 1 ? added[0] : undefined;
-          return added.length;
-        })
+        .poll(
+          async () => {
+            const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
+            replacementSparePid = added.length === 1 ? added[0] : undefined;
+            return added.length;
+          },
+          { timeout: 60_000 },
+        )
         .toBe(1);
 
       fifoWriter = await openPendingFifoWriter(lifecycleBlockedMaterialPath);

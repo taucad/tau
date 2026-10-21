@@ -46,6 +46,12 @@ const digest = async (path: string): Promise<string> => {
 };
 const main = async (): Promise<void> => {
   const operation = process.argv[2];
+  if (operation && ['prepare-routes', 'mirror-routes', 'promote-routes', 'renew-routes'].includes(operation)) {
+    // oxlint-disable-next-line no-restricted-imports -- New routes remain an explicit opt-in publication owner.
+    const { publishDesktopRoutes } = await import('./publish-desktop-routes.mjs');
+    await publishDesktopRoutes(operation);
+    return;
+  }
   if (!['prepare', 'mirror', 'promote'].includes(operation ?? '')) {
     throw new Error('Expected prepare, mirror or promote');
   }

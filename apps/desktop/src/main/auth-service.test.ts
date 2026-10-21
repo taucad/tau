@@ -60,6 +60,15 @@ describe('createAuthService — custody', () => {
 });
 
 describe('createAuthService — the tau://auth/callback handoff', () => {
+  it('carries the staging scheme alongside the pending nonce', async () => {
+    const openExternal = vi.fn(async () => undefined);
+    const service = await signedInService(baseOptions({ openExternal, callbackScheme: 'tau-staging' }));
+    const [openedUrl] = openExternal.mock.calls[0] as unknown as [string];
+    const handoff = new URL(new URL(openedUrl).searchParams.get('redirectTo')!, 'https://example.test');
+    expect(handoff.searchParams.get('scheme')).toBe('tau-staging');
+    expect(handoff.searchParams.get('state')).toMatch(/^[\w-]{8,128}$/u);
+    service.dispose();
+  });
   it('opens the system browser at the documented sign-in URL, naming no port', async () => {
     const openExternal = vi.fn(async () => undefined);
     const options = baseOptions({ openExternal });

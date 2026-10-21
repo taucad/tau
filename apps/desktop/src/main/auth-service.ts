@@ -51,6 +51,8 @@ export type AuthServiceOptions = {
   readonly apiUrl: string;
   /** `TAU_FRONTEND_URL`, without a trailing slash. */
   readonly frontendUrl: string;
+  /** Registered app scheme; staging Windows/Linux installs do not claim the production scheme. */
+  readonly callbackScheme?: 'tau' | 'tau-staging';
   /** `app.getPath('userData')`. */
   readonly userDataPath: string;
   /** Electron's `safeStorage`. */
@@ -316,7 +318,8 @@ export const createAuthService = (options: AuthServiceOptions): AuthService => {
       try {
         /* The redirect target is nested inside `redirectTo`, so it is encoded
          * once as a whole — the sign-in page hands it back verbatim after auth. */
-        const handoff = `/auth/desktop?state=${state}`;
+        const scheme = options.callbackScheme === 'tau-staging' ? '&scheme=tau-staging' : '';
+        const handoff = `/auth/desktop?state=${state}${scheme}`;
         await options.openExternal(`${options.frontendUrl}/auth/sign-in?redirectTo=${encodeURIComponent(handoff)}`);
       } catch (error) {
         settlePending(error instanceof Error ? error : new Error(String(error)));

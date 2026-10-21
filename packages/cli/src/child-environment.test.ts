@@ -27,7 +27,7 @@ const agentEnvironment = (): NodeJS.ProcessEnv => {
     'AWS_SECRET_ACCESS_KEY',
     'NODE_OPTIONS',
     'TAU_HOST_AGENT_TOKEN',
-    'TAU_API_TOKEN',
+    'TAU_AUTH_TOKEN',
     'TAU_VIEWER_PAGE',
   ]) {
     environment[name] = `placeholder-${name}`;

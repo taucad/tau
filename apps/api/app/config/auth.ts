@@ -4,6 +4,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { apiKey } from '@better-auth/api-key';
 import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import postgres from 'postgres';
+import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
 import { tokenLifetimeSeconds } from '#email/email-copy.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
 
@@ -38,6 +39,7 @@ export const staticAuthConfig = {
     // the Electron main process exchanges for a bearer session over loopback.
     // Reuses the existing `verification` table — no schema change.
     oneTimeToken({ storeToken: 'hashed' }),
+    cliDeviceAuthorization('https://tau.new'),
     // `bearer()` stays LAST: its after-hook reads the `set-cookie` every earlier
     // plugin may have written and re-emits it as `set-auth-token`.
     bearer(),

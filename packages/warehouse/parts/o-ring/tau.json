@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_yFNc4uXTVfZBU0F1fU1gl",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "O-ring",
   "description": "Circular-section toroidal O-ring in its undeformed free state.",
   "tags": [

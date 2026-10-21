@@ -76,10 +76,10 @@ const account = (): RevisionUserActor => {
  *
  * @example <caption>A host that records the person running it</caption>
  * ```typescript
- * import { createProjectRevisions, hostRevisionActor } from '@taucad/host';
+ * import { hostRevisionActor } from '@taucad/host';
  *
- * const workspaceRoot = '/Users/ada/projects/bracket';
- * const revisions = createProjectRevisions({ workspaceRoot, actor: hostRevisionActor() });
+ * const actor = hostRevisionActor();
+ * const person = actor({ runId: undefined, trigger: 'save' });
  * ```
  */
 export const hostRevisionActor = (): ((

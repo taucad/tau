@@ -259,3 +259,29 @@ diff --git a/src/materials/nodes/manager/NodeMaterialObserver.js b/src/materials
  
  			return true;
  
+diff --git a/src/renderers/webgl/WebGLTextures.js b/src/renderers/webgl/WebGLTextures.js
+--- a/src/renderers/webgl/WebGLTextures.js
++++ b/src/renderers/webgl/WebGLTextures.js
+@@ -420,7 +420,8 @@
+ 
+ 		if ( renderTarget.isWebGLCubeRenderTarget ) {
+ 
+-			for ( let i = 0; i < 6; i ++ ) {
++			// A retired renderer may already have cleared its framebuffer properties.
++			for ( let i = 0; renderTargetProperties.__webglFramebuffer !== undefined && i < 6; i ++ ) {
+ 
+ 				if ( Array.isArray( renderTargetProperties.__webglFramebuffer[ i ] ) ) {
+ 
+diff --git a/build/three.module.js b/build/three.module.js
+--- a/build/three.module.js
++++ b/build/three.module.js
+@@ -11412,7 +11412,8 @@
+ 
+ 		if ( renderTarget.isWebGLCubeRenderTarget ) {
+ 
+-			for ( let i = 0; i < 6; i ++ ) {
++			// A retired renderer may already have cleared its framebuffer properties.
++			for ( let i = 0; renderTargetProperties.__webglFramebuffer !== undefined && i < 6; i ++ ) {
+ 
+ 				if ( Array.isArray( renderTargetProperties.__webglFramebuffer[ i ] ) ) {
+ 

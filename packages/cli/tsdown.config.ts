@@ -22,6 +22,7 @@ const cliExternals: Array<RegExp | string> = [
   'esbuild-wasm',
   '@taulabs/openrscad-engine',
   'jszip',
+  '@napi-rs/keyring',
 ];
 
 const baseConfig: UserConfig = {

@@ -396,9 +396,10 @@ const viewerBridgeStates = async (page: Page): Promise<ViewerBridgeState[]> =>
  * bridge in an error state — the same guarantee for the viewport under test.
  *
  * @param page - The renderer page.
+ * @param timeout - How long the render may take.
  * @returns Nothing.
  */
-export const expectGeometryFramed = async (page: Page): Promise<void> => {
+export const expectGeometryFramed = async (page: Page, timeout = 120_000): Promise<void> => {
   try {
     await expect
       .poll(
@@ -406,7 +407,7 @@ export const expectGeometryFramed = async (page: Page): Promise<void> => {
           const states = await viewerBridgeStates(page);
           return states.some((state) => state.framed) && states.every((state) => state.actorError === undefined);
         },
-        { timeout: 120_000 },
+        { timeout },
       )
       .toBe(true);
   } catch (error) {

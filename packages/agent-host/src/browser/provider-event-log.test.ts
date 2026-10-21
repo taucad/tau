@@ -4,7 +4,8 @@ import { FileSystemAccessProvider } from '@taucad/filesystem/backend';
 import { createMockRootHandle } from '../../../filesystem/src/testing/mock-handle-factory.js';
 /* oxlint-enable no-restricted-imports */
 import { describe, expect, it, vi } from 'vitest';
-import { createProviderEventLog } from '#browser.js';
+import { createBrowserChatStore, createProviderEventLog } from '#browser.js';
+import { chatStoreBinding } from '#launchers/chat-store.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const event = (sequence: number): AgentLogEvent => ({
@@ -246,5 +247,66 @@ describe('createProviderEventLog', () => {
     await expect(log.append(event(0))).rejects.toThrow('injected append refusal');
     await expect(log.append(event(0))).resolves.toMatchObject({ appended: true });
     await log.close();
+  });
+});
+
+/*
+ * OQ2: the provider leg of the browser chat store is fenced by a permanent
+ * delete's tombstone like the Node one: no writer opens, appends or attaches
+ * into a purged chat, so the provider never recreates what the purge removed.
+ */
+describe('createBrowserChatStore (provider) and a permanent delete', () => {
+  const recordPath = '.tau/chats/chat/chat.json';
+  const record = (purged: boolean): Uint8Array<ArrayBuffer> =>
+    new TextEncoder().encode(
+      JSON.stringify({
+        id: 'chat',
+        name: 'Chat',
+        deletedAt: 2,
+        ...(purged ? { purgedAt: 3 } : {}),
+      }),
+    );
+  const bindingOver = (fileSystem: ReturnType<typeof createFileSystem>['fileSystem']) =>
+    chatStoreBinding(
+      createBrowserChatStore({
+        projectId: 'project',
+        tabId: 'tab',
+        build: 'build',
+        log: { kind: 'provider', fileSystem },
+      }),
+    );
+
+  it('refuses to open a purged chat’s writer and writes nothing', async () => {
+    const { files, fileSystem } = createFileSystem({
+      [recordPath]: record(true),
+    });
+
+    await expect(bindingOver(fileSystem).openWriter('chat')).rejects.toMatchObject({ code: 'LOG_FENCED' });
+
+    expect([...files.keys()]).toEqual([recordPath]);
+  });
+
+  it('fences an open writer’s next append and attachment once the chat is purged', async () => {
+    const { files, fileSystem } = createFileSystem({
+      [recordPath]: record(false),
+    });
+    const binding = bindingOver(fileSystem);
+    const writer = await binding.openWriter('chat');
+    await writer.append(event(0));
+
+    files.set(recordPath, record(true));
+    for (const path of [...files.keys()].filter((path) => path !== recordPath)) {
+      files.delete(path);
+    }
+
+    await expect(writer.append(event(1))).rejects.toMatchObject({
+      code: 'LOG_FENCED',
+    });
+    await expect(
+      binding.attachments.write!('chat', `attachments/${'a'.repeat(64)}.png`, new Uint8Array([1])),
+    ).rejects.toMatchObject({ code: 'LOG_FENCED' });
+    await writer.close();
+
+    expect([...files.keys()]).toEqual([recordPath]);
   });
 });

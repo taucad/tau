@@ -14,6 +14,7 @@ import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 import type {
+  DirectoryEntry,
   ExternalChangeFact,
   FileMode,
   FileReadStreamOptions,
@@ -383,6 +384,17 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
   public async readdir(path: string): Promise<string[]> {
     this._assertRootedPath(path);
     return this._channel.request({ root: this._root, op: 'readdir', path });
+  }
+
+  /**
+   * Read native child kinds in one request, without a stat request per child.
+   *
+   * @param path - Root-relative directory path.
+   * @returns Admitted children with file or directory kinds.
+   */
+  public async readdirEntries(path: string): Promise<DirectoryEntry[]> {
+    this._assertRootedPath(path);
+    return this._channel.request({ root: this._root, op: 'readdirEntries', path });
   }
 
   /**

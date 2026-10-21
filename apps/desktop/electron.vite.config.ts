@@ -79,6 +79,7 @@ export const desktopExternalizedDependencies = [
   /* Resolves its vendored seccomp/srt-win helpers relative to its own module file. */
   '@anthropic-ai/sandbox-runtime',
   '@taulabs/openrscad-engine',
+  'electron-updater',
   'esbuild',
   'geospec-engine',
   'libassimp',

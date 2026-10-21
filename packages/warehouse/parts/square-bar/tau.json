@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_ISIkV9SJx8rG-xnbrcWeW",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Rectangular bar",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [

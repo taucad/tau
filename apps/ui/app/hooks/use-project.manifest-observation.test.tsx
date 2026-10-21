@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -78,7 +79,7 @@ vi.mock('#lib/compute-reuse-preference.js', () => ({ useComputeReuseMode: () => 
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 
 it('should show manifest observation closure and retry without rewriting the healthy manifest', async () => {
-  const project = projectToManifest({
+  const project = createProjectFixture({
     id: 'proj_123456789012345678901',
     name: 'Watch health',
     description: '',
@@ -86,7 +87,7 @@ it('should show manifest observation closure and retry without rewriting the hea
     assets: { main: { entryPath: 'main.ts' } },
   });
   Object.assign(fixture.actor.getSnapshot().context, { project });
-  fixture.readFile.mockResolvedValue(serializeProjectManifest(project));
+  fixture.readFile.mockResolvedValue(serializeProjectManifest(projectToManifest(project)));
   const closed = Promise.withResolvers<void>();
   fixture.watchReady
     .mockReturnValueOnce({ ready: Promise.resolve(), closed: closed.promise, dispose: vi.fn() })
@@ -141,7 +142,7 @@ it('should show manifest observation closure and retry without rewriting the hea
 });
 
 it('reloads the physical project manifest after held retry without accepting its cached predecessor', async () => {
-  const project = projectToManifest({
+  const project = createProjectFixture({
     id: 'proj_123456789012345678901',
     name: 'Cached project',
     description: '',
@@ -151,7 +152,7 @@ it('reloads the physical project manifest after held retry without accepting its
   Object.assign(fixture.actor.getSnapshot().context, { project, manifestIssue: undefined });
   fixture.actor.send.mockClear();
   const provider = new MemoryProvider();
-  const oldBytes = serializeProjectManifest(project);
+  const oldBytes = serializeProjectManifest(projectToManifest(project));
   await provider.writeFile('tau.json', oldBytes);
   const paths = new WorkspacePathResolver('/project');
   const proxy = mock<ComposedViewClient>();
@@ -215,7 +216,7 @@ it('reloads the physical project manifest after held retry without accepting its
     act(() => {
       screen.getByRole('button', { name: 'Retry physical manifest' }).click();
     });
-    const freshBytes = serializeProjectManifest({ ...project, name: 'Physical project changed' });
+    const freshBytes = serializeProjectManifest(projectToManifest({ ...project, name: 'Physical project changed' }));
     await provider.writeFile('tau.json', freshBytes);
     expect(await provider.readFile('tau.json')).toEqual(freshBytes);
     expect(await content.resolveBytes('tau.json')).toEqual(oldBytes);
@@ -235,7 +236,7 @@ it('reloads the physical project manifest after held retry without accepting its
 });
 
 it('should attempt every registered record and report every refusal on direct project close', async () => {
-  const project = projectToManifest({
+  const project = createProjectFixture({
     id: 'proj_123456789012345678901',
     name: 'Close records',
     description: '',
@@ -243,7 +244,7 @@ it('should attempt every registered record and report every refusal on direct pr
     assets: { main: { entryPath: 'main.ts' } },
   });
   Object.assign(fixture.actor.getSnapshot().context, { project });
-  fixture.readFile.mockResolvedValue(serializeProjectManifest(project));
+  fixture.readFile.mockResolvedValue(serializeProjectManifest(projectToManifest(project)));
   let current: ReturnType<typeof useProject> | undefined;
   function Probe(): undefined {
     current = useProject();

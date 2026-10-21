@@ -1,4 +1,4 @@
-// Fixtures of the desktop's native-kernel tests: the frame main posts once the payload store is seeded, naming
+// Fixtures of the desktop's native-kernel tests: the frame main posts once it has read the payload store, naming
 // closures whose launch-index rows the kernel option mappers accept. Nothing on disk backs them.
 import type { ReceiptFile } from '@taucad/runtime/preparation/node';
 

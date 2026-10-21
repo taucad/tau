@@ -16,7 +16,7 @@
  */
 
 import fs from 'node:fs/promises';
-import type { Stats } from 'node:fs';
+import type { Dirent, Stats } from 'node:fs';
 import { realpathSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -27,6 +27,7 @@ import { mapConcurrent, statConcurrency } from '#concurrency.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
 import type {
+  DirectoryEntry,
   FileMode,
   FileReadStreamOptions,
   FileStatOptions,
@@ -267,26 +268,30 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
   }
 
   public async readdir(path_: string): Promise<string[]> {
-    this._assertRootedPath(path_);
-    const canonical = assertRootedPath(path_);
-    const entries = await fs.readdir(await this._resolve(path_), { withFileTypes: true });
-    /* An in-flight `_atomicWrite` parks `.<name>.<pid>.<uuid>.tmp` beside its
-     * target for a few milliseconds. It is provider bookkeeping, not content:
-     * a walker that lists it and then `stat`s it after the rename loses the
-     * whole snapshot to ENOENT (seen by the desktop e2e's workspace admission
-     * racing a parameter write). Keep it out of every listing. */
-    const rows = entries.filter((entry) => !inFlightTemporaryName.test(entry.name));
-    /* A link this provider will not serve is out of the listing for the same
-     * reason: `_resolve` refuses it below, and a row every walker then `stat`s
-     * would cost the caller the whole snapshot. Only link rows are probed — an
-     * ordinary directory pays one `readdir` exactly as before — and they are
-     * probed from the same bounded pool as the stats beside them: each probe is
-     * an `lstat` walk plus a `realpath`, and a pnpm `node_modules` is thousands
-     * of rows. */
-    const refused = await mapConcurrent(rows, statConcurrency, async (entry) =>
-      entry.isSymbolicLink() ? this._refusesLaunderedLink(canonical, entry.name) : false,
-    );
-    return rows.filter((_, index) => refused[index] !== true).map(({ name }) => name);
+    const entries = await this._admittedDirectoryEntries(path_);
+    return entries.map(({ name }) => name);
+  }
+
+  /**
+   * List child kinds directly from native directory entries. Only symlinks and
+   * entries whose native kind is unknown require a confined target stat.
+   *
+   * @param path_ - Root-relative directory path.
+   * @returns Admitted children with file or directory kinds.
+   */
+  public async readdirEntries(path_: string): Promise<DirectoryEntry[]> {
+    const entries = await this._admittedDirectoryEntries(path_);
+    return mapConcurrent(entries, statConcurrency, async (entry): Promise<DirectoryEntry> => {
+      if (entry.isDirectory()) {
+        return { name: entry.name, kind: 'dir' };
+      }
+      if (entry.isFile()) {
+        return { name: entry.name, kind: 'file' };
+      }
+      const target = await this._resolve(joinRooted(path_, entry.name));
+      const stats = await fs.stat(target);
+      return { name: entry.name, kind: stats.isDirectory() ? 'dir' : 'file' };
+    });
   }
 
   /**
@@ -826,6 +831,26 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
         candidate = parent;
       }
     }
+  }
+
+  /**
+   * Preserve the same temporary-file and symlink admission for every listing.
+   *
+   * @param rootedPath - Root-relative directory path.
+   * @returns Native entries that every listing may expose.
+   */
+  private async _admittedDirectoryEntries(rootedPath: string): Promise<Dirent[]> {
+    this._assertRootedPath(rootedPath);
+    const canonical = assertRootedPath(rootedPath);
+    const entries = await fs.readdir(await this._resolve(rootedPath), { withFileTypes: true });
+    // Atomic-write staging files may disappear before a caller can inspect them.
+    const rows = entries.filter((entry) => !inFlightTemporaryName.test(entry.name));
+    // Refused links must not poison the rest of the listing. Bound the probes
+    // because dependency trees can contain thousands of symlinks.
+    const refused = await mapConcurrent(rows, statConcurrency, async (entry) =>
+      entry.isSymbolicLink() ? this._refusesLaunderedLink(canonical, entry.name) : false,
+    );
+    return rows.filter((_, index) => refused[index] !== true);
   }
 
   /**

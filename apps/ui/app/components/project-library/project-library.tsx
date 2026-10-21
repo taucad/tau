@@ -21,9 +21,8 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import type { VisibilityState, SortingState } from '@tanstack/react-table';
-import type { ProjectLocator } from '@taucad/filesystem';
+import type { ProjectLocator, ProjectDiscoveryIssue } from '@taucad/filesystem';
 import { describeProjectManifestIssue } from '@taucad/types';
-import type { ProjectManifestParseIssue } from '@taucad/types';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import { createColumns } from '#components/project-library/columns.js';
@@ -119,7 +118,7 @@ const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
     case 'adoption-required': {
       return conflict.issue.code === 'manifest-missing'
         ? 'tau.json is missing. Adopt writes a new one so this folder opens as a project again.'
-        : 'This project needs a Tau identity before it can be opened.';
+        : 'This folder needs a valid tau.json before it can be opened.';
     }
     case 'duplicate-id': {
       return 'This copied project shares an identity with another directory. Choose which folder Tau opens.';
@@ -129,6 +128,15 @@ const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
     }
     case 'invalid': {
       switch (conflict.issue.code) {
+        case 'identity-conflict': {
+          return 'This folder’s saved identity disagrees with its existing project. Resolve the conflict before opening it.';
+        }
+        case 'identity-invalid': {
+          return 'This folder’s saved project identity is damaged. Restore its project metadata before opening it.';
+        }
+        case 'identity-unavailable': {
+          return 'Tau could not save this folder’s project identity. Check folder access and try again.';
+        }
         case 'manifest-unreadable': {
           return 'This project directory could not be read.';
         }
@@ -149,7 +157,14 @@ const conflictSummary = (conflict: ProjectDiscoveryConflict): string => {
 const maxIssueLines = 4;
 
 /** The exact manifest defects, so a person or an agent can fix the right key. */
-function ManifestIssueLines({ issue }: { readonly issue: ProjectManifestParseIssue }): React.JSX.Element {
+function ManifestIssueLines({ issue }: { readonly issue: ProjectDiscoveryIssue }): React.JSX.Element | undefined {
+  if (
+    issue.code === 'identity-conflict' ||
+    issue.code === 'identity-invalid' ||
+    issue.code === 'identity-unavailable'
+  ) {
+    return undefined;
+  }
   const lines = [...new Set(describeProjectManifestIssue(issue))];
   return (
     <ul className='mt-1 space-y-0.5 font-mono text-xs text-muted-foreground'>
@@ -577,7 +592,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
                     size='sm'
                     variant='outline'
                     onClick={async () =>
-                      handleChooseDirectory(conflict.locator, conflict.manifest.id, conflict.manifest.name)
+                      handleChooseDirectory(conflict.locator, conflict.projectId, conflict.manifest.name)
                     }
                   >
                     Use this folder

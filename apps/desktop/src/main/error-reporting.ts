@@ -22,11 +22,14 @@ export const scrubDesktopEvent = (event: ErrorEvent): ErrorEvent => {
   return event;
 };
 
-if (tauSentryDsn) {
-  Sentry.init({
-    dsn: tauSentryDsn,
-    environment: 'production',
-    sendDefaultPii: false,
-    beforeSend: scrubDesktopEvent,
-  });
-}
+/** Start crash reporting after profile selection and pristine qualification admission, before any windows or utilities. */
+export const initializeDesktopErrorReporting = (): void => {
+  if (tauSentryDsn) {
+    Sentry.init({
+      dsn: tauSentryDsn,
+      environment: 'production',
+      sendDefaultPii: false,
+      beforeSend: scrubDesktopEvent,
+    });
+  }
+};

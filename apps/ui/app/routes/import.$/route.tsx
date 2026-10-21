@@ -17,6 +17,8 @@ import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
+import { useProjects } from '#hooks/use-projects.js';
+import { withNamedLock } from '#hooks/use-cloud-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
@@ -52,7 +54,7 @@ import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { GithubRepositoryPicker, useGithubConnectionAvailable } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
-import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
+import { prepareLinkedGithubImport, readLinkedGithubManifest } from '#lib/github-linked-import.js';
 import { GithubRequestError } from '#lib/github-connections.js';
 import { githubNoreplyAuthor, githubProjectBinding } from '#lib/github-project-binding.js';
 import { shareOrigin } from '#lib/share-origin.js';
@@ -199,6 +201,7 @@ export default function ImportRoute(): React.JSX.Element {
   const [arrivalRepository] = useState({ owner, repo });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const { projects: heldProjects, isLoading: heldProjectsLoading } = useProjects({ includeDeleted: true });
   const presentLocationError = useProjectCreationLocationError();
   const [linkedSelection, setLinkedSelection] = useState<GithubRepositorySelection>();
   const [linkedMainFile, setLinkedMainFile] = useState('');
@@ -348,16 +351,27 @@ export default function ImportRoute(): React.JSX.Element {
   );
   const linkedMainFileSupported = supportedKernelExtensions.some((extension) => linkedMainFile.endsWith(extension));
   const linkedManifest = useMemo(
-    () => (linkedSelection?.manifest === undefined ? undefined : parseProjectManifestBytes(linkedSelection.manifest)),
+    () => (linkedSelection?.manifest === undefined ? undefined : readLinkedGithubManifest(linkedSelection.manifest)),
     [linkedSelection],
   );
-  /* D19: a tau.json id already on this device can only be opened, never imported twice. */
-  const linkedManifestId = linkedManifest?.success === true ? linkedManifest.data.id : undefined;
-  const linkedExisting = useProjectSlugs(linkedManifestId);
-  const linkedExistingBlocks = linkedManifestId !== undefined && linkedExisting.status !== 'not-found';
+  // Repository bindings survive declaration edits and no longer depend on authored IDs.
+  const linkedProjectId = useMemo(
+    () =>
+      linkedSelection === undefined
+        ? undefined
+        : heldProjects.find(
+            (project) => githubProjectBinding.get(project.id)?.repositoryId === linkedSelection.repository.id,
+          )?.id,
+    [heldProjects, linkedSelection],
+  );
+  const linkedExisting = useProjectSlugs(linkedProjectId);
+  const linkedExistingBlocks =
+    heldProjectsLoading || (linkedProjectId !== undefined && linkedExisting.status !== 'not-found');
   const linkedNeedsSetup =
     linkedSelection !== undefined &&
     (linkedSelection.branch.head === undefined ||
+      linkedSelection.manifest === undefined ||
+      !parseProjectManifestBytes(linkedSelection.manifest).success ||
       linkedManifest?.success !== true ||
       linkedManifest.data.assets.main.entryPath !== linkedMainFile ||
       (linkedManifest.data.syncChats !== false) !== linkedSyncChats);
@@ -547,7 +561,7 @@ export default function ImportRoute(): React.JSX.Element {
   );
 
   const reviewLinkedRepository = useCallback((selection: GithubRepositorySelection): void => {
-    const manifest = selection.manifest === undefined ? undefined : parseProjectManifestBytes(selection.manifest);
+    const manifest = selection.manifest === undefined ? undefined : readLinkedGithubManifest(selection.manifest);
     const paths = selection.files.map((file) => file.path);
     const supportedPaths = paths.filter((path) =>
       supportedKernelExtensions.some((extension) => path.endsWith(extension)),
@@ -583,57 +597,74 @@ export default function ImportRoute(): React.JSX.Element {
     setLinkedError(undefined);
     setLinkedRefusal(undefined);
     try {
-      const parsed =
-        linkedSelection.manifest === undefined ? undefined : parseProjectManifestBytes(linkedSelection.manifest);
-      const imported = parsed?.success === true ? parsed.data : undefined;
-      const projectId = imported?.id ?? generatePrefixedId(idPrefix.project);
-      const projectData =
-        imported === undefined
-          ? {
-              name: linkedSelection.repository.fullName,
-              description:
-                linkedSelection.repository.description ?? `Imported from ${linkedSelection.repository.htmlUrl}`,
-              tags: [],
-              assets: { main: { entryPath: linkedMainFile } },
-              ...(linkedSyncChats ? {} : { syncChats: false }),
-            }
-          : {
-              name: imported.name,
-              description: imported.description,
-              tags: imported.tags,
-              assets: { ...imported.assets, main: { ...imported.assets.main, entryPath: linkedMainFile } },
-              ...(linkedSyncChats ? {} : { syncChats: false }),
-              ...(imported.syncLargeExports === undefined ? {} : { syncLargeExports: imported.syncLargeExports }),
-            };
-      const preserveManifest =
-        parsed?.success === true &&
-        parsed.data.assets.main.entryPath === linkedMainFile &&
-        (parsed.data.syncChats !== false) === linkedSyncChats;
-      const prepared = await prepareLinkedGithubImport({
-        selection: linkedSelection,
-        targetBranch: linkedTargetBranch,
-        manifest:
-          preserveManifest && linkedSelection.manifest !== undefined
+      await withNamedLock(`tau:github-import:${String(linkedSelection.repository.id)}`, async () => {
+        const held = await projectManager.getProjects({ includeDeleted: true });
+        const existing = held.find(
+          (project) => githubProjectBinding.get(project.projectId)?.repositoryId === linkedSelection.repository.id,
+        );
+        if (existing !== undefined) {
+          if (existing.library.deletedAt !== undefined) {
+            throw new Error('Restore this project from Trash before opening it.');
+          }
+          if (existing.slugs === undefined) {
+            throw new Error('Reconnect this project’s workspace before opening it.');
+          }
+          await navigate(projectUrl(existing.slugs));
+          return;
+        }
+        const parsed =
+          linkedSelection.manifest === undefined ? undefined : readLinkedGithubManifest(linkedSelection.manifest);
+        const imported = parsed?.success === true ? parsed.data : undefined;
+        const projectId = generatePrefixedId(idPrefix.project);
+        const projectData =
+          imported === undefined
+            ? {
+                name: linkedSelection.repository.fullName,
+                description:
+                  linkedSelection.repository.description ?? `Imported from ${linkedSelection.repository.htmlUrl}`,
+                tags: [],
+                assets: { main: { entryPath: linkedMainFile } },
+                ...(linkedSyncChats ? {} : { syncChats: false }),
+              }
+            : {
+                name: imported.name,
+                description: imported.description,
+                tags: imported.tags,
+                assets: { ...imported.assets, main: { ...imported.assets.main, entryPath: linkedMainFile } },
+                ...(linkedSyncChats ? {} : { syncChats: false }),
+                ...(imported.syncLargeExports === undefined ? {} : { syncLargeExports: imported.syncLargeExports }),
+              };
+        const preserveManifest =
+          linkedSelection.manifest !== undefined &&
+          parseProjectManifestBytes(linkedSelection.manifest).success &&
+          parsed?.success === true &&
+          parsed.data.assets.main.entryPath === linkedMainFile &&
+          (parsed.data.syncChats !== false) === linkedSyncChats;
+        const prepared = await prepareLinkedGithubImport({
+          selection: linkedSelection,
+          targetBranch: linkedTargetBranch,
+          manifest: preserveManifest
             ? linkedSelection.manifest
-            : serializeProjectManifest(projectToManifest({ ...projectData, id: projectId })),
-        mainFile: linkedMainFile,
+            : serializeProjectManifest(projectToManifest(projectData)),
+          mainFile: linkedMainFile,
+        });
+        const created = await projectManager.createProject({
+          id: projectId,
+          project: projectData,
+          files: prepared.files,
+          chat: false,
+        });
+        githubProjectBinding.set(created.id, {
+          connectionId: linkedSelection.connection.id,
+          repositoryId: linkedSelection.repository.id,
+          repositoryUrl: linkedSelection.repository.cloneUrl,
+          generation: prepared.generation,
+          author: githubNoreplyAuthor(linkedSelection.connection.subject, linkedSelection.connection.login),
+        });
+        /* Busy until the route leaves: the listing now holds the project this import
+         * just wrote, and the review must not call it "already a project" (R12). */
+        await navigate(projectUrl(created.slugs));
       });
-      const created = await projectManager.createProject({
-        id: projectId,
-        project: projectData,
-        files: prepared.files,
-        chat: false,
-      });
-      githubProjectBinding.set(created.id, {
-        connectionId: linkedSelection.connection.id,
-        repositoryId: linkedSelection.repository.id,
-        repositoryUrl: linkedSelection.repository.cloneUrl,
-        generation: prepared.generation,
-        author: githubNoreplyAuthor(linkedSelection.connection.subject, linkedSelection.connection.login),
-      });
-      /* Busy until the route leaves: the listing now holds the project this import
-       * just wrote, and the review must not call it "already a project" (R12). */
-      void navigate(projectUrl(created.slugs));
     } catch (error) {
       presentLocationError(error);
       setLinkedRefusal(linkedImportRefusal(error, linkedTargetBranch, linkedSelection));
@@ -1176,7 +1207,7 @@ export default function ImportRoute(): React.JSX.Element {
                     </dl>
                   </>
                 )}
-                {!linkedBusy && linkedExisting.status === 'resolved' && linkedManifestId !== undefined ? (
+                {!linkedBusy && linkedExisting.status === 'resolved' && linkedProjectId !== undefined ? (
                   <>
                     <span aria-hidden className='max-md:hidden' />
                     <div role='alert' className='flex flex-wrap items-center gap-3 text-sm'>

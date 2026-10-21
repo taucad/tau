@@ -225,7 +225,7 @@ const queryRow = {
   invocation: { ...row.invocation, capability: 'analyzeBrep', arguments: [], payload: null },
 };
 
-for (const status of ['passed', 'failed']) {
+for (const status of ['passed', 'refused']) {
   void test(`should accept an independently ${status} positive query report without an assertion error`, async () => {
     const input = { ...queryRow, expected: { ...expected, status } };
     const captured = await run(input, true, status);
@@ -242,10 +242,11 @@ for (const status of ['passed', 'failed']) {
   });
 }
 
-const failedQuery = { ...queryRow, expected: { ...expected, status: 'failed' } };
+// A query asserts nothing: evidence it cannot read or decide refuses (GEOSPEC_UNSUPPORTED_EVIDENCE and kin).
+const refusedQuery = { ...queryRow, expected: { ...expected, status: 'refused' } };
 
 void test('should reject the wrong query verdict while preserving both reports', async () => {
-  const captured = await run(failedQuery, true, 'passed');
+  const captured = await run(refusedQuery, true, 'passed');
   assert.equal(captured.passed, false);
   assert.equal(captured.comparison.status, false);
   assert.equal(captured.comparison.errorClass, true);
@@ -255,26 +256,29 @@ void test('should reject the wrong query verdict while preserving both reports',
   assert.equal(captured.cleanup.closeCalled, true);
 });
 
-void test('should reject an assertion error for a normally returned failed query report', async () => {
-  const captured = await run(failedQuery, true, { status: 'failed', publicFailure: 'structured' });
+void test('should reject an assertion error for a normally returned refused query report', async () => {
+  const captured = await run(refusedQuery, true, { status: 'refused', publicFailure: 'structured' });
   assert.equal(captured.passed, false);
   assert.equal(captured.comparison.status, true);
   assert.equal(captured.comparison.errorClass, false);
   assert.equal(captured.public.error.name, 'GeoSpecAssertionError');
-  assert.equal(captured.public.canonicalResultUtf8, result('failed'));
+  assert.equal(captured.public.canonicalResultUtf8, result('refused'));
   assert.equal(captured.cleanup.released, true);
   assert.equal(captured.cleanup.closeCalled, true);
 });
 
-void test('should keep nullable failed authority restricted to the matching public error contract', async () => {
+void test('should keep nullable failed and refused authority restricted to the matching public error contract', async () => {
   const inputs = [
-    { ...row, expected: failedQuery.expected },
-    { ...failedQuery, invocation: { ...failedQuery.invocation, polarity: 'negative' } },
-    { ...failedQuery, expected: failedRow.expected },
+    { ...row, expected: refusedQuery.expected },
+    { ...row, expected: { ...expected, status: 'failed' } },
+    { ...refusedQuery, invocation: { ...refusedQuery.invocation, polarity: 'negative' } },
+    { ...refusedQuery, expected: failedRow.expected },
+    // A query never answers failed, so a failed query authority is not admitted.
+    { ...queryRow, expected: { ...expected, status: 'failed' } },
   ];
   await Promise.all(
     inputs.map(async (input) => {
-      const captured = await run(input, true, 'failed');
+      const captured = await run(input, true, input.expected.status);
       assert.equal(captured.passed, false);
       assert.equal(captured.runtimeFailure.phase, 'expected-authority');
       assert.equal(captured.runtimeFailure.name, 'Error');
@@ -291,15 +295,23 @@ void test('should keep nullable failed authority restricted to the matching publ
   assert.equal(matcher.public.canonicalResultUtf8, result('failed'));
 });
 
-void test('should accept failed query warmups on both routes without weakening matcher warmups', async () => {
-  const input = { ...failedQuery, warmup: { expectedStatus: 'failed', invocation: queryRow.invocation } };
-  const captured = await run(input, true, 'failed');
+void test('should accept refused query warmups on both routes without weakening matcher warmups', async () => {
+  const input = { ...refusedQuery, warmup: { expectedStatus: 'refused', invocation: queryRow.invocation } };
+  const captured = await run(input, true, 'refused');
   assert.equal(captured.passed, true);
   for (const route of [captured.warmup.direct, captured.warmup.public]) {
     assert.equal(route.succeeded, true);
     assert.equal(route.error, null);
-    assert.equal(route.report.canonicalResultUtf8, result('failed'));
+    assert.equal(route.report.canonicalResultUtf8, result('refused'));
   }
+  const failedWarmup = await run(
+    { ...refusedQuery, warmup: { expectedStatus: 'failed', invocation: queryRow.invocation } },
+    true,
+    'failed',
+  );
+  assert.equal(failedWarmup.passed, false);
+  assert.equal(failedWarmup.warmup.direct.succeeded, false);
+  assert.equal(failedWarmup.runtimeFailure.phase, 'warmup-direct');
   const matcher = await run(
     { ...failedRow, warmup: { expectedStatus: 'failed', invocation: row.invocation } },
     true,

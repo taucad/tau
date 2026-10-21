@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_745bI61qDqgr1lDNrzw6A",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Motor mounting plate",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [

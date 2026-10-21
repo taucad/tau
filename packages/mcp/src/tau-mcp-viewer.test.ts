@@ -4,7 +4,12 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { ClientCapabilities } from '@modelcontextprotocol/sdk/types.js';
 import { createTauMcpServer } from '#tau-mcp.js';
 import type { TauMcpViewer } from '#tau-mcp-viewer.js';
-import { resolveTauViewerPresentation, tauViewerResourceUri, tauViewerToolName } from '#viewer-protocol.js';
+import {
+  resolveTauViewerPresentation,
+  tauViewerAcceptedViewFields,
+  tauViewerResourceUri,
+  tauViewerToolName,
+} from '#viewer-protocol.js';
 import type { TauViewerModel, TauViewerViewState } from '#viewer-protocol.js';
 
 const uiExtension = { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } };
@@ -168,6 +173,9 @@ describe('Tau MCP viewer', () => {
     expect(instructions).toMatch(/^Use your native filesystem/u);
     expect(instructions.slice(instructions.indexOf('Tau CLI 0.1.0-')).length).toBeLessThanOrEqual(250);
     expect(instructions.length).toBeLessThan(2048);
+    expect(instructions.slice(0, instructions.indexOf(' Tau CLI 0.1.0-'))).toMatchInlineSnapshot(
+      `"Use your native filesystem and shell tools to inspect and edit the current Tau project. Use your native skill loader for the Tau skills available in this session. For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools. Before editing geometry, create or update executable GeoSpec tests for the requested requirements. After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view. A static part is done when evaluate_model is ready, its summary bounds and componentCount fit the brief, and the whole test_model suite reports runStatus passed; inconclusive, unsupported and not-run requirements are undecided, not passed. A moving assembly also needs evaluate_model mechanism declared and admitted, and a file the person asked for its export_model validation (a watertight mesh, the expected STEP solids); name the case you met when reporting done. For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request. When the person should look at a model, call show_model on its source after evaluate_model succeeds: the Tau viewer shows the source with its parameters and mechanism, or returns a link to share; showing an exported file shows that file only. A reference like @cad[main.ts#component:node-1] names a part: the model file before # and the component id after it; when no reference reaches you, view_state lists the parts the person selected and added to chat with those ids, which show_model select and arrange_workbench also take."`,
+    );
   });
 
   it('should give a text host show_model and view_state, returning a loopback link', async () => {
@@ -203,6 +211,26 @@ describe('Tau MCP viewer', () => {
     expect(lost.content).toEqual([
       { type: 'text', text: 'Showing src/bracket.ts in the Tau viewer.\nThis GLB carries no mechanism.' },
     ]);
+    await client.close();
+  });
+
+  it('should end the text with the hint naming the source of a shown export', async () => {
+    const viewer = createViewer();
+    const hint =
+      'a.step is an export of main.ts, drawn as exported. Call show_model with targetFile main.ts to show the source with its parameters and mechanism.';
+    vi.mocked(viewer.show).mockResolvedValueOnce({
+      model,
+      mechanism: { preserved: false, joints: 0, animations: [] },
+      hint,
+    });
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const result = await client.callTool({ name: 'show_model', arguments: { targetFile: 'a.step' } });
+
+    expect(result.content).toEqual([
+      { type: 'text', text: `Showing src/bracket.ts in the Tau viewer.\nThis GLB carries no mechanism.\n${hint}` },
+    ]);
+    expect(result.structuredContent).toMatchObject({ hint });
     await client.close();
   });
 
@@ -361,6 +389,54 @@ describe('Tau MCP viewer', () => {
     ]);
     const captured = await client.callTool({ name: 'view_state', arguments: { capture: true } });
     expect(captured.content).toContainEqual({ type: 'image', data: 'cG5n', mimeType: 'image/png' });
+    await client.close();
+  });
+
+  it('should list the parts the person added to chat, by name and component id', async () => {
+    const added: TauViewerViewState = {
+      ...view,
+      references: [
+        { componentId: 'component:arm', label: 'Arm', kind: 'part' },
+        { componentId: 'component:bolt', label: 'Bolt', kind: 'part' },
+      ],
+    };
+    let reported = added;
+    const viewer = { ...createViewer(), viewState: async () => ({ view: reported }) };
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const result = await client.callTool({ name: 'view_state', arguments: {} });
+    const [block] = result.content as Array<{ type: 'text'; text: string }>;
+    expect(block?.text.split('\n').slice(1, 3)).toEqual([
+      'Selected: Arm (component:arm).',
+      'Added to chat: Arm (component:arm), Bolt (component:bolt).',
+    ]);
+    expect(result.structuredContent).toEqual({ view: added });
+
+    reported = { ...view, references: [] };
+    const none = await client.callTool({ name: 'view_state', arguments: {} });
+    expect((none.content as Array<{ text: string }>)[0]?.text).toContain('Added to chat: none.');
+    await client.close();
+  });
+
+  it('should take every view field it lists as accepted, and reject any other', async () => {
+    const client = await connect(clients.claudeDesktop);
+    const sync = async (extra: Readonly<Record<string, unknown>>) =>
+      client.callTool({
+        name: 'app_sync',
+        arguments: { pageId: 'page-0001', version: 0, follow: true, wait: false, view: { ...view, ...extra } },
+      });
+
+    const values: Readonly<Record<(typeof tauViewerAcceptedViewFields)[number], unknown>> = {
+      references: [{ componentId: 'component:arm', label: 'Arm', kind: 'part' }],
+    };
+    for (const field of tauViewerAcceptedViewFields) {
+      // oxlint-disable-next-line no-await-in-loop -- one field at a time.
+      const taken = await sync({ [field]: values[field] });
+      expect(taken.isError).toBeFalsy();
+    }
+    /* What an older server does with a field it does not take: the whole sync fails, hence the guard. */
+    const rejected = await sync({ playback: { playing: true } });
+    expect(rejected.isError).toBe(true);
     await client.close();
   });
 

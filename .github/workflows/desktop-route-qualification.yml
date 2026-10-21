@@ -1,0 +1,167 @@
+name: Desktop installed route qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Exact candidate channel; all three candidates must agree
+        required: true
+        type: choice
+        options: [staging, production]
+      candidate_a:
+        description: Successful trusted installer-candidate run for baseline A
+        required: true
+        type: string
+      candidate_b:
+        description: Successful trusted installer-candidate run for explicit update B
+        required: true
+        type: string
+      candidate_c:
+        description: Successful trusted installer-candidate run for latest update C at this exact main source
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-route-qualification-${{ inputs.channel }}
+  cancel-in-progress: false
+
+env:
+  NX_NO_CLOUD: 'true'
+  pnpm_config_verify_deps_before_run: error
+
+jobs:
+  admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Fail closed when qualification has not been enabled by its operator
+        env:
+          QUALIFICATION_ENABLED: ${{ vars.DESKTOP_ROUTE_QUALIFICATION_ENABLED }}
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ] || [ "$QUALIFICATION_ENABLED" != true ]; then
+            echo '::error::Qualification not run: requires protected main and explicit operator enablement.'
+            exit 1
+          fi
+  installed:
+    needs: admission
+    environment: desktop-qualification-${{ inputs.channel }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - id: macos-zip-arm64
+            route: macos-zip
+            host: '["macos-26"]'
+          - id: macos-dmg-arm64
+            route: macos-dmg
+            host: '["macos-26"]'
+          - id: macos-zip-x64
+            route: macos-zip
+            host: '["macos-26-intel"]'
+          - id: macos-dmg-x64
+            route: macos-dmg
+            host: '["macos-26-intel"]'
+          - id: windows-nsis-x64
+            route: windows-nsis
+            host: '["windows-2025"]'
+          - id: ubuntu-apt-x11
+            route: linux-apt
+            host: '["self-hosted", "linux", "x64", "tau-disposable-ubuntu2404-x11"]'
+          - id: ubuntu-appimage-x11
+            route: linux-appimage
+            host: '["self-hosted", "linux", "x64", "tau-disposable-ubuntu2404-x11"]'
+          - id: debian-apt-x11
+            route: linux-apt
+            host: '["self-hosted", "linux", "x64", "tau-disposable-debian13-x11"]'
+          - id: debian-appimage-x11
+            route: linux-appimage
+            host: '["self-hosted", "linux", "x64", "tau-disposable-debian13-x11"]'
+    runs-on: ${{ fromJSON(matrix.host) }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAU_QUALIFICATION_DISPOSABLE_HOST: '1'
+      TAU_QUALIFICATION_DIRECTORY: ${{ github.workspace }}/out/route-qualification
+      TAU_QUALIFICATION_ROUTE: ${{ matrix.route }}
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
+      TAU_QUALIFICATION_RUN_A: ${{ inputs.candidate_a }}
+      TAU_QUALIFICATION_RUN_B: ${{ inputs.candidate_b }}
+      TAU_QUALIFICATION_RUN_C: ${{ inputs.candidate_c }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
+      TAU_APPIMAGE_PUBLIC_KEYS: ${{ vars.TAU_APPIMAGE_PUBLIC_KEYS }}
+      TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
+      TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
+      TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - name: Run installed shipping renderer, explicit update and latest-feed update
+        run: pnpm nx run desktop:qualify-installed-route
+      - name: Remove only this run's temporary TLS trust even after failure
+        if: always()
+        run: pnpm nx run desktop:cleanup-qualification-trust
+      - name: Preserve diagnostic observations without private TLS keys or app profile contents
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-route-diagnostics-${{ matrix.id }}
+          path: |
+            out/route-qualification/qualification-*.json
+            out/route-qualification/renderer-*.json
+            out/route-qualification/renderer-*.png
+            out/route-qualification/mirror-trust.json
+          if-no-files-found: warn
+      - name: Keep passed row separate until every required host succeeds
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-route-row-${{ matrix.id }}
+          path: out/route-qualification/route-receipts.json
+          if-no-files-found: error
+
+  receipts:
+    needs: installed
+    environment: desktop-qualification-${{ inputs.channel }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAU_INSTALLER_CANDIDATE_RUN_ID: ${{ inputs.candidate_c }}
+      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/qualification-candidate
+      TAU_QUALIFICATION_CHANNEL: ${{ inputs.channel }}
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
+      TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
+      TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
+      TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - name: Re-admit the exact final candidate
+        run: pnpm nx run desktop:fetch-installer-candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: desktop-route-row-*
+          path: out/qualification-rows
+      - name: Require every native row and bind all receipts to final source
+        run: pnpm nx run desktop:collect-qualification-rows
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-route-host-matrix
+          path: out/qualification-receipts/host-matrix.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-route-ci-receipts
+          path: out/qualification-receipts/route-receipts.json
+          if-no-files-found: error

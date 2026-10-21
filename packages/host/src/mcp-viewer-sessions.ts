@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type { TauMcpViewerFailure } from '@taucad/mcp';
+import { tauViewerAcceptedViewFields } from '@taucad/mcp/viewer-protocol';
 import type {
   TauViewerCaptureReplyInput,
   TauViewerImage,
@@ -136,6 +137,7 @@ export const createMcpViewerSessions = (options: McpViewerSessionsOptions = {}):
     const show = unseen(page, input);
     return {
       version,
+      accepts: tauViewerAcceptedViewFields,
       ...(show === undefined ? {} : { show }),
       ...(requestId === undefined ? {} : { capture: { requestId } }),
     };

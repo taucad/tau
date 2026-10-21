@@ -124,6 +124,11 @@ const harnessPaths = [
   'f1-public-a1/vitest.config.mjs',
   'fixtures/read-fixture.mjs',
   'fixtures/manifest.json',
+  'installed-cli/cli.test.mjs',
+  'installed-cli/box-project/box-exporter.mjs',
+  'installed-cli/box-project/box.geospec.ts',
+  'installed-cli/box-project/geospec.config.mjs',
+  'installed-cli/box-project/part.box',
 ];
 
 const prepare = async (fault?: Fault) => {

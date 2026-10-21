@@ -2,8 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ToolCallError, connectHost } from '#app/host-bridge.js';
 
-const { callServerTool } = vi.hoisted(() => ({
+const { callServerTool, host } = vi.hoisted(() => ({
   callServerTool: vi.fn<(params: Readonly<{ name: string }>) => Promise<CallToolResult>>(),
+  /* What the frame's host declares and receives. */
+  host: {
+    capabilities: undefined as Readonly<Record<string, unknown>> | undefined,
+    updateModelContext: vi.fn(async (_params: unknown) => ({})),
+    sendMessage: vi.fn(async (_params: unknown) => ({})),
+  },
 }));
 
 /* The frame's host, reduced to what the bridge asks of it; a tool result opened the page, so it shows nothing itself. */
@@ -11,11 +17,13 @@ vi.mock('@modelcontextprotocol/ext-apps', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match ext-apps' exported class name.
   App: class {
     public readonly callServerTool = callServerTool;
+    public readonly updateModelContext = host.updateModelContext;
+    public readonly sendMessage = host.sendMessage;
     public readonly addEventListener = vi.fn();
     public readonly connect = vi.fn(async () => undefined);
     public readonly getHostContext = () => ({ toolInfo: { id: 1 } });
     public readonly getHostVersion = () => undefined;
-    public readonly getHostCapabilities = () => undefined;
+    public readonly getHostCapabilities = () => host.capabilities;
   },
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Match ext-apps' exported class name.
   PostMessageTransport: class {
@@ -47,6 +55,9 @@ describe('connectHost', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     callServerTool.mockReset();
+    host.capabilities = undefined;
+    host.updateModelContext.mockClear();
+    host.sendMessage.mockClear();
   });
 
   describe('on the loopback page', () => {
@@ -136,6 +147,48 @@ describe('connectHost', () => {
 
       await expect(call).rejects.toThrow(ToolCallError);
       await expect(call).rejects.toMatchObject({ code, message: reason, cause: rejection });
+    });
+
+    describe('Add to chat', () => {
+      const added = { text: 'Sun gear in Gear @cad[gear.ts#component:sun]', references: [] };
+      const all = {
+        text: 'Sun gear, Carrier in Gear @cad[gear.ts#component:sun] @cad[gear.ts#component:carrier]',
+        references: [],
+      };
+
+      it('should hand model context everything added, since each update replaces the last', async () => {
+        vi.stubGlobal('window', {});
+        vi.stubGlobal('parent', {});
+        host.capabilities = { updateModelContext: { text: {} }, message: { text: {} } };
+        const bridge = await connectHost();
+
+        await expect(bridge.addToChat(added, all)).resolves.toBe('context');
+        expect(host.updateModelContext).toHaveBeenCalledWith({ content: [{ type: 'text', text: all.text }] });
+        expect(host.sendMessage).not.toHaveBeenCalled();
+      });
+
+      it('should send only the new reference as a message', async () => {
+        vi.stubGlobal('window', {});
+        vi.stubGlobal('parent', {});
+        host.capabilities = { message: { text: {} } };
+        const bridge = await connectHost();
+
+        await expect(bridge.addToChat(added, all)).resolves.toBe('message');
+        expect(host.sendMessage).toHaveBeenCalledWith({ role: 'user', content: [{ type: 'text', text: added.text }] });
+      });
+
+      it('should copy only the new reference on a frame host that declares neither route (D10)', async () => {
+        vi.stubGlobal('window', {});
+        vi.stubGlobal('parent', {});
+        const writeText = vi.fn(async (_text: string) => undefined);
+        vi.stubGlobal('navigator', { clipboard: { writeText } });
+        host.capabilities = { serverTools: {} };
+        const bridge = await connectHost();
+
+        await expect(bridge.addToChat(added, all)).resolves.toBe('clipboard');
+        expect(writeText).toHaveBeenCalledWith(added.text);
+        expect(host.updateModelContext).not.toHaveBeenCalled();
+      });
     });
   });
 });

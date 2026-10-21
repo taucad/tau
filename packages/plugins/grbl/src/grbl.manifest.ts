@@ -8,7 +8,7 @@
  * @module
  */
 
-import { quantity } from '@taucad/runtime/configuration/zod';
+import { quantity } from '@taucad/runtime/schema/zod';
 import { defineMachineAction, machineJogHold, standardMachineAction } from '@taucad/runtime/machine';
 import type {
   MachineActionDefinition,

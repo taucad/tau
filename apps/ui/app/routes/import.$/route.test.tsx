@@ -1,3 +1,4 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,8 @@ import { GithubRequestError } from '#lib/github-connections.js';
 import type { getGitHubClient } from '#lib/github-api.js';
 import type { ImportWorkerRequest, ImportWorkerResponse } from '#workers/import.worker.js';
 import ImportRoute from '#routes/import.$/route.js';
+import { githubProjectBinding } from '#lib/github-project-binding.js';
+import type * as LinkedImportModule from '#lib/github-linked-import.js';
 import type * as ReactRouterModule from 'react-router';
 
 type GitHubApiClient = ReturnType<typeof getGitHubClient>;
@@ -112,7 +115,12 @@ vi.mock('#lib/github-api.js', () => ({
     getAuthHeaders: () => ({}),
   }),
 }));
-vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => ({ createProject: projects.create }) }));
+vi.mock('#hooks/use-projects.js', () => ({
+  useProjects: () => ({ projects: [...slugs.byId.keys()].map((id) => ({ id })) }),
+}));
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({ createProject: projects.create, getProjects: async () => [] }),
+}));
 vi.mock('#hooks/use-project-creation-location-error.js', () => ({ useProjectCreationLocationError: () => vi.fn() }));
 vi.mock('#hooks/use-project-slug-route.js', () => ({
   useProjectSlugs: (projectId: string | undefined) => {
@@ -125,7 +133,10 @@ vi.mock('#components/desktop/open-in-desktop.js', () => ({
 }));
 vi.mock('#routes/import.$/suggested-clones.js', () => ({ SuggestedClones: () => undefined }));
 vi.mock('#routes/import.$/upload-card.js', () => ({ UploadCard: () => undefined }));
-vi.mock('#lib/github-linked-import.js', () => ({ prepareLinkedGithubImport: linkedImport.prepare }));
+vi.mock('#lib/github-linked-import.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof LinkedImportModule>()),
+  prepareLinkedGithubImport: linkedImport.prepare,
+}));
 vi.mock('#components/github/github-repository-picker.js', () => ({
   useGithubConnectionAvailable: () => picker.available,
   GithubRepositoryPicker: ({
@@ -150,13 +161,15 @@ vi.mock('#components/github/github-repository-picker.js', () => ({
 }));
 
 const manifest = serializeProjectManifest(
-  projectToManifest({
-    id: existingProjectId,
-    name: 'Part',
-    description: '',
-    tags: [],
-    assets: { main: { entryPath: 'main.scad' } },
-  }),
+  projectToManifest(
+    createProjectFixture({
+      id: existingProjectId,
+      name: 'Part',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.scad' } },
+    }),
+  ),
 );
 const selection = {
   connection: { id: 'connection-1', subject: 7, login: 'octo', generation: 1 },
@@ -207,6 +220,7 @@ describe('ImportRoute GitHub card', () => {
     vi.clearAllMocks();
     picker.available = true;
     slugs.byId.clear();
+    localStorage.clear();
     picked.selection = selection;
   });
 
@@ -230,6 +244,12 @@ describe('ImportRoute GitHub card', () => {
 
   it('should offer to open a repository that is already a project instead of importing it again', async () => {
     slugs.byId.set(existingProjectId, { workspaceSlug: 'home', projectSlug: 'part' });
+    githubProjectBinding.set(existingProjectId, {
+      connectionId: '00000000-0000-4000-8000-000000000001',
+      repositoryId: selection.repository.id,
+      repositoryUrl: selection.repository.cloneUrl,
+      generation: 1,
+    });
     await renderImport();
 
     await userEvent.click(screen.getByRole('button', { name: 'Pick linked repository' }));
@@ -613,6 +633,41 @@ describe('ImportRoute GitHub card', () => {
     },
   );
 
+  it('should give a legacy linked repository a fresh local identity and canonical setup declaration', async () => {
+    const user = userEvent.setup();
+    const sourceId = 'proj_123456789012345678901';
+    const source = JSON.parse(new TextDecoder().decode(manifest)) as Record<string, unknown>;
+    const legacyBytes = new TextEncoder().encode(
+      JSON.stringify({
+        ...source,
+        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+        id: sourceId,
+      }),
+    );
+    picked.selection = {
+      ...selection,
+      manifest: legacyBytes,
+      connection: { ...selection.connection, id: '00000000-0000-4000-8000-000000000001' },
+    };
+    linkedImport.prepare.mockResolvedValueOnce({ files: {}, generation: 1 });
+    projects.create.mockImplementationOnce(async ({ id }: { id: string }) => ({
+      id,
+      slugs: { workspaceSlug: 'home', projectSlug: 'part' },
+    }));
+    await renderImport();
+    await user.click(screen.getByRole('button', { name: 'Pick linked repository' }));
+    await user.click(screen.getByRole('button', { name: 'Import and link' }));
+    await waitFor(() => {
+      expect(projects.create).toHaveBeenCalled();
+    });
+    const created = projects.create.mock.calls[0]?.[0] as { id: string };
+    expect(created.id).toMatch(/^proj_[A-Za-z0-9]{21}$/u);
+    expect(created.id).not.toBe(sourceId);
+    const prepared = linkedImport.prepare.mock.calls[0]?.[0] as { manifest: Uint8Array<ArrayBuffer> };
+    expect(JSON.parse(new TextDecoder().decode(prepared.manifest))).toEqual(source);
+    expect(JSON.parse(new TextDecoder().decode(legacyBytes))).toMatchObject({ id: sourceId });
+  });
+
   it('should not call the project this import just wrote already a project on this device (R12)', async () => {
     const user = userEvent.setup();
     /* The project binding stores the connection, whose id is a UUID. */
@@ -633,7 +688,9 @@ describe('ImportRoute GitHub card', () => {
     await user.click(screen.getByRole('button', { name: 'Import and link' }));
 
     await waitFor(() => {
-      expect(projects.create).toHaveBeenCalledWith(expect.objectContaining({ id: existingProjectId }));
+      expect(projects.create).toHaveBeenCalled();
+      const created = projects.create.mock.calls[0]?.[0] as { id: string };
+      expect(created.id).toMatch(/^proj_[A-Za-z0-9]{21}$/u);
     });
     expect(await screen.findByRole('button', { name: 'Importing and linking…' })).toBeDisabled();
     expect(screen.queryByText('This repository is already a project on this device.')).not.toBeInTheDocument();

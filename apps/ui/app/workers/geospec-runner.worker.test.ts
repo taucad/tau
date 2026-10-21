@@ -33,6 +33,23 @@ const workerMocks = vi.hoisted(() => {
     open: vi.fn<(input: { source: { path: string }; parameters?: Record<string, unknown> }) => typeof document>(),
     terminate: vi.fn(),
   };
+  // A delegating stand-in for the agent-tools exporter: the worker test owns the wiring, not the Runtime routing.
+  const tauClientExporter = vi.fn(async ({ client }: { client: typeof runtimeClient }) => ({
+    id: 'tau',
+    extensions: ['ts', 'scad'],
+    capabilities: { formats: ['glb'] },
+    async export(request: { file: string; format: string; parameters?: Record<string, unknown> }) {
+      const opened = client.open({
+        source: { path: request.file },
+        ...(request.parameters === undefined ? {} : { parameters: request.parameters }),
+      });
+      try {
+        return await opened.export(request.format, { options: {} });
+      } finally {
+        opened.close();
+      }
+    },
+  }));
   const runner = {
     run: vi.fn(),
     close: vi.fn(),
@@ -52,6 +69,7 @@ const workerMocks = vi.hoisted(() => {
   return {
     fsProxy,
     runtimeClient,
+    tauClientExporter,
     document,
     runner,
     geoSpecModelLoadErrorClass: MockGeoSpecModelLoadError,
@@ -68,6 +86,10 @@ const workerMocks = vi.hoisted(() => {
 
 vi.mock('@taucad/runtime/client', () => ({
   createRuntimeClient: workerMocks.createRuntimeClient,
+}));
+
+vi.mock('@taucad/agent-tools/geospec/exporter', () => ({
+  tauClientExporter: workerMocks.tauClientExporter,
 }));
 
 vi.mock('@taucad/fs-bridge', () => ({
@@ -402,12 +424,11 @@ describe('geospec-runner.worker', () => {
     workerMocks.document.export.mockResolvedValue({ success: true });
     workerMocks.runner.run.mockImplementation(async () => {
       const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
-        model: { runtime: typeof workerMocks.runtimeClient };
+        model: { exporters: Array<Awaited<ReturnType<typeof workerMocks.tauClientExporter>>> };
       };
-      expect(runnerOptions.model.runtime).toBe(workerMocks.runtimeClient);
-      const document = runnerOptions.model.runtime.open({ source: { path: 'main.ts' }, parameters: { height: 42 } });
-      await document.export('glb', { options: {} });
-      document.close();
+      expect(workerMocks.tauClientExporter).toHaveBeenLastCalledWith({ client: workerMocks.runtimeClient });
+      const [exporter] = runnerOptions.model.exporters;
+      await exporter?.export({ file: 'main.ts', format: 'glb', parameters: { height: 42 } });
       return successfulRunnerResult();
     });
     workerMocks.runner.close.mockResolvedValue(undefined);
@@ -908,14 +929,14 @@ describe('geospec-runner.worker', () => {
     workerMocks.document.export.mockRejectedValue(fatalError);
     workerMocks.runner.run.mockImplementation(async () => {
       const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
-        model: { runtime: typeof workerMocks.runtimeClient };
+        model: { exporters: Array<Awaited<ReturnType<typeof workerMocks.tauClientExporter>>> };
       };
-      await expect(
-        runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
-      ).rejects.toBe(fatalError);
-      await expect(
-        runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
-      ).rejects.toBe(fatalError);
+      await expect(runnerOptions.model.exporters[0]?.export({ file: 'main.scad', format: 'glb' })).rejects.toBe(
+        fatalError,
+      );
+      await expect(runnerOptions.model.exporters[0]?.export({ file: 'main.scad', format: 'glb' })).rejects.toBe(
+        fatalError,
+      );
       return successfulRunnerResult();
     });
     workerMocks.runner.close.mockResolvedValue(undefined);
@@ -1137,20 +1158,18 @@ describe('geospec-runner.worker', () => {
     workerMocks.runner.run
       .mockImplementationOnce(async () => {
         const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
-          model: { runtime: typeof workerMocks.runtimeClient };
+          model: { exporters: Array<Awaited<ReturnType<typeof workerMocks.tauClientExporter>>> };
         };
-        await expect(
-          runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
-        ).rejects.toBe(fatalError);
+        await expect(runnerOptions.model.exporters[0]?.export({ file: 'main.scad', format: 'glb' })).rejects.toBe(
+          fatalError,
+        );
         return successfulRunnerResult();
       })
       .mockImplementationOnce(async () => {
         const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
-          model: { runtime: typeof workerMocks.runtimeClient };
+          model: { exporters: Array<Awaited<ReturnType<typeof workerMocks.tauClientExporter>>> };
         };
-        await expect(
-          runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
-        ).resolves.toEqual({
+        await expect(runnerOptions.model.exporters[0]?.export({ file: 'main.scad', format: 'glb' })).resolves.toEqual({
           success: true,
         });
         return successfulRunnerResult();

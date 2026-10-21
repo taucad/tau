@@ -107,23 +107,27 @@ jobs:
           sha: ${{ github.sha }}
           github-token: ${{ github.token }}
 
-      # `ui:sourcemaps` uploads with the PostHog CLI key. The Netlify site's own
-      # copy is a secret variable, which a CLI build from Actions cannot read, so
-      # HCP also writes it to this environment (tau-cloud `stacks/repo/tau`).
-      # Only a value that is set is exported: an empty one would hide the site's.
-      - name: Hand the PostHog CLI key to the build
+      # GitHub environment credentials are the sole source for UI source maps.
+      # Validate the pair before Netlify resolves its site environment. Missing or
+      # malformed staging credentials disable uploading; they never fall back.
+      - name: Validate the PostHog source-map credentials
+        id: posthog
         env:
           TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
           ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
           set -euo pipefail
-          if [ -n "$TOKEN" ] && [ -n "$ENV_ID" ]; then
-            {
-              echo "POSTHOG_CLI_TOKEN=$TOKEN"
-              echo "POSTHOG_CLI_ENV_ID=$ENV_ID"
-            } >> "$GITHUB_ENV"
+          if [[ "$TOKEN" =~ ^phx_[A-Za-z0-9_-]+$ ]] && [[ "$ENV_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::POSTHOG_CLI_TOKEN or POSTHOG_CLI_ENV_ID is not set on this environment; the build uses the site's variables."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            message="Configure a PostHog personal API key and numeric project ID in tau-repo: posthog_cli_token_$ENVIRONMENT and posthog_cli_env_id_$ENVIRONMENT, then apply the reviewed plan. Netlify credentials are not used."
+            if [ "$ENVIRONMENT" = production ]; then
+              echo "::error::$message"
+              exit 1
+            fi
+            echo "::warning::$message Source-map upload is disabled for this staging build."
           fi
 
       # The CLI resolves the site base (`apps/ui`) and then joins the workspace
@@ -165,6 +169,11 @@ jobs:
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
           # Only production needs its PostHog source maps to deploy.
           TAU_SOURCEMAPS_OPTIONAL: ${{ inputs.environment != 'production' }}
+          TAU_SOURCEMAPS_ENABLED: ${{ steps.posthog.outputs.enabled }}
+          # Netlify site variables outrank process variables. Map these distinct
+          # GitHub-owned inputs only at the upload command, after that merge.
+          TAU_POSTHOG_CLI_TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
+          TAU_POSTHOG_CLI_ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

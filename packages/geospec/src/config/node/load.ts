@@ -1,4 +1,5 @@
 import { realpath, stat } from 'node:fs/promises';
+import { registerHooks } from 'node:module';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveGeoSpecConfig } from '#config/validate.js';
@@ -18,10 +19,48 @@ const existingFile = async (path: string): Promise<boolean> => {
   }
 };
 
+const configSpecifier = 'geospec/config';
+
+/**
+ * Import a config file, resolving `geospec/config` to this copy when the project cannot, so a
+ * config that imports `defineConfig` needs no install of its own (`npx geospec run`).
+ *
+ * @param configPath - The real config path.
+ * @returns The module's default export.
+ */
+const importConfig = async (configPath: string): Promise<unknown> => {
+  const fallback = import.meta.resolve(configSpecifier);
+  const hooks = registerHooks({
+    resolve(specifier, context, nextResolve) {
+      try {
+        return nextResolve(specifier, context);
+      } catch (error) {
+        if (
+          specifier === configSpecifier &&
+          error !== null &&
+          typeof error === 'object' &&
+          'code' in error &&
+          error.code === 'ERR_MODULE_NOT_FOUND'
+        ) {
+          return { url: fallback, shortCircuit: true };
+        }
+        throw error;
+      }
+    },
+  });
+  try {
+    const imported = (await import(pathToFileURL(configPath).href)) as { default?: unknown };
+    return imported.default;
+  } finally {
+    hooks.deregister();
+  }
+};
+
 /**
  * Load one trusted project config using Node's native module loader.
  *
- * Explicit selection or exactly one geospec.config.js/.mjs/.ts/.mts is allowed.
+ * Explicit selection or exactly one geospec.config.js/.mjs/.ts/.mts is allowed. A config's
+ * `geospec/config` import resolves to this copy when the project has no install of its own.
  * TypeScript must use erasable syntax; JSON imports use standard attributes.
  * Executable config/imports are trusted developer code, not sandboxed code.
  * Node's same-process module cache is unchanged: load once per run and use a
@@ -62,6 +101,5 @@ export const loadGeoSpecConfig = async (options: LoadGeoSpecConfigOptions): Prom
   if (!entry.isFile()) {
     throw new TypeError('GeoSpec configPath must select a file.');
   }
-  const imported = (await import(pathToFileURL(configPath).href)) as { default?: unknown };
-  return { configPath, options: resolveGeoSpecConfig(imported.default, options.overrides) };
+  return { configPath, options: resolveGeoSpecConfig(await importConfig(configPath), options.overrides) };
 };

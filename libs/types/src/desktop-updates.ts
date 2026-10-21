@@ -3,6 +3,7 @@ export type DesktopUpdateSnapshot = {
   readonly revision: number;
   readonly requestId: number;
   readonly phase:
+    | 'system-managed'
     | 'disabled'
     | 'checking'
     | 'current'
@@ -17,6 +18,10 @@ export type DesktopUpdateSnapshot = {
   readonly channel: 'staging' | 'production';
   readonly version?: string;
   readonly releasePage?: string;
+  /** Whether an already downloaded update also installs on ordinary quit (macOS only). */
+  readonly installOnQuit?: boolean;
+  /** Main-owned status for system policy and installation failures. */
+  readonly detail?: string;
 };
 
 /** Fixed IPC routes; the renderer cannot select update feeds or install paths. */

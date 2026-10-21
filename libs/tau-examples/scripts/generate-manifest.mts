@@ -164,7 +164,6 @@ function scanBuiltinFiles(directory: string, prefix = ''): string[] {
 }
 
 function scanBuiltins(entries: readonly ManifestEntry[]): BuiltinEntry[] {
-  const ids = new Set<string>();
   const locators = new Set<string>();
   const builtins: BuiltinEntry[] = [];
   for (const entry of entries) {
@@ -178,13 +177,9 @@ function scanBuiltins(entries: readonly ManifestEntry[]): BuiltinEntry[] {
     }
     const manifest = projectManifestSchema.parse(JSON.parse(readFileSync(manifestPath, 'utf8')));
     const locator = `${entry.kernel}.${entry.name}`;
-    if (ids.has(manifest.id)) {
-      throw new Error(`Duplicate builtin project id: ${manifest.id}`);
-    }
     if (locators.has(locator)) {
       throw new Error(`Duplicate builtin locator: ${locator}`);
     }
-    ids.add(manifest.id);
     locators.add(locator);
     const files = scanBuiltinFiles(directory);
     const requiredPaths = [manifest.assets.main.entryPath, manifest.assets.main.thumbnail].filter(

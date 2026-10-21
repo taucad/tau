@@ -37,6 +37,7 @@ import {
   createProjectRevisionsActor as createProjectRevisionsActorUntracked,
   createRevisionActors as createRevisionActorsUntracked,
   describeTurnRelease,
+  awaitSyncSettled,
   revisionTreeId,
   syncQuiesceMilliseconds,
 } from '#revision-effects.js';
@@ -208,10 +209,465 @@ const run = async <Output>(actor: unknown, input: unknown): Promise<Output> =>
   });
 
 describe('lifecycle bounds', () => {
-  it('nests every inner bound strictly inside the wait that awaits it (rule 9)', () => {
-    expect(syncPullDeadlineMilliseconds).toBeLessThan(syncQuiesceMilliseconds);
+  it('keeps close bounded independently of active background transfers (rule 9)', () => {
+    expect(syncQuiesceMilliseconds).toBe(12_000);
+    expect(syncQuiesceMilliseconds).toBeLessThan(syncPullDeadlineMilliseconds);
   });
 });
+
+describe('close cancels background transfers', () => {
+  it.each([
+    { persistence: 'persisted', operation: 'discovery' },
+    { persistence: 'persisted', operation: 'fetch' },
+    { persistence: 'stalled', operation: 'fetch' },
+    { persistence: 'persisted', operation: 'push' },
+    { persistence: 'stalled', operation: 'push' },
+  ])('waits for a $persistence durable retry record after aborting $operation', async ({ persistence, operation }) => {
+    const context = await fixture();
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'local']]),
+      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      summary: { generated: 'Local work' },
+    });
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+    await context.port.setHead('main');
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const releaseWrite = Promise.withResolvers<void>();
+    let writing = false;
+    let aborted = false;
+    let fetching = false;
+    let attempts = 0;
+    const { filesystem } = context;
+    const writeFile = filesystem.writeFile.bind(filesystem);
+    vi.spyOn(filesystem, 'writeFile').mockImplementation(async (path, content) => {
+      if (path.startsWith('.git/sync-pending')) {
+        writing = true;
+        await releaseWrite.promise;
+      }
+      await writeFile(path, content);
+    });
+    const transfer = async ({ signal }: Readonly<{ signal?: AbortSignal }>): Promise<never> => {
+      fetching = true;
+      attempts += 1;
+      return new Promise((_resolve, reject) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            reject(new Error('Transfer cancelled.'));
+          },
+          { once: true },
+        );
+      });
+    };
+    const { actor } = createProjectRevisionsActor({
+      port: {
+        ...context.port,
+        listRemoteRefs: async (_remote, options) =>
+          operation === 'discovery'
+            ? transfer({ signal: options?.signal })
+            : operation === 'fetch'
+              ? [{ name: 'refs/heads/main', head: revisionId('remote-head') }]
+              : [],
+        fetch: transfer,
+        push: transfer,
+      },
+      projectId: 'project-1',
+      filesystem: async () => filesystem,
+    });
+    actor.start();
+    try {
+      await vi.waitFor(() => {
+        expect(fetching).toBe(true);
+      });
+      let settled = false;
+      const quiesce = (async () => {
+        await awaitSyncSettled(actor, persistence === 'stalled' ? 100 : 2100);
+        settled = true;
+      })();
+      const result =
+        persistence === 'stalled'
+          ? expect(quiesce).rejects.toThrow('close deadline')
+          : expect(quiesce).resolves.toBeUndefined();
+      await vi.waitFor(() => {
+        expect(aborted).toBe(true);
+      });
+      await vi.waitFor(() => {
+        expect(writing).toBe(true);
+      });
+      expect(settled).toBe(false);
+      if (persistence === 'persisted') {
+        releaseWrite.resolve();
+      }
+      await result;
+      expect(actor.getSnapshot().status).toBe('active');
+      expect(actor.getSnapshot().children.sync?.getSnapshot().context.quiescing).toBe(false);
+      if (persistence === 'stalled') {
+        releaseWrite.resolve();
+        await vi.waitFor(() => {
+          expect(selectRevisionStatus(actor.getSnapshot()).sync.state).toBe('queued');
+        });
+        await expect(awaitSyncSettled(actor)).resolves.toBeUndefined();
+        actor.send({ type: 'syncNow' });
+        await vi.waitFor(() => {
+          expect(attempts).toBe(2);
+        });
+      }
+      if (persistence === 'persisted') {
+        expect(JSON.parse(await context.filesystem.readFile('.git/sync-pending', 'utf8'))).toMatchObject({
+          entries: [expect.objectContaining({ ref: 'refs/heads/main' })],
+        });
+      }
+    } finally {
+      releaseWrite.resolve();
+      actor.stop();
+    }
+  });
+});
+
+describe('close distinguishes remote refusal from failed local persistence', () => {
+  it.each([
+    { operation: 'pull', persistence: 'written' },
+    { operation: 'pull', persistence: 'rejected' },
+    { operation: 'push', persistence: 'written' },
+    { operation: 'push', persistence: 'rejected' },
+  ])('allows $operation refusal only with a $persistence retry record', async ({ operation, persistence }) => {
+    const context = await fixture();
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['main.ts', 'local']]),
+      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      summary: { generated: 'Local' },
+    });
+    let head = revisionId(receipt.commitId);
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head });
+    await context.port.setHead('main');
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const write = Promise.withResolvers<void>();
+    let writing = false;
+    let rejectWrite = persistence === 'rejected';
+    let transient = false;
+    const { filesystem } = context;
+    const writeFile = filesystem.writeFile.bind(filesystem);
+    vi.spyOn(filesystem, 'writeFile').mockImplementation(async (path, content) => {
+      if (path.startsWith('.git/sync-pending')) {
+        writing = true;
+        await write.promise;
+        if (rejectWrite) {
+          throw new Error('Retry record disk failure.');
+        }
+      }
+      await writeFile(path, content);
+    });
+    const refused = new RevisionPortError('REMOTE_DAMAGED', 'Remote repository is damaged.');
+    const { actor } = createProjectRevisionsActor({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () => {
+          if (transient) {
+            throw new RevisionPortError('REMOTE_UNAVAILABLE', 'Temporarily unavailable.');
+          }
+          if (operation === 'pull') {
+            throw refused;
+          }
+          return [];
+        },
+        push: async () => {
+          throw refused;
+        },
+      },
+      projectId: 'project-1',
+      filesystem: () => filesystem,
+    });
+    const mint = async (): Promise<void> => {
+      const next = await context.port.writeRevision({
+        parents: [head],
+        tree: new ImmutableRevisionTree([['main.ts', `${head} changed`]]),
+        provenance: { source: 'user', actorId: 'ada', createdAt: 2 },
+        summary: { generated: 'Close work' },
+      });
+      const before = head;
+      head = revisionId(next.commitId);
+      await context.port.updateRef({ name: 'main', expectedHead: before, head });
+      actor.send({
+        type: 'sync',
+        event: { type: 'revisionMinted', checkoutId: 'live', branch: 'main', trigger: 'close', revisionId: head },
+      });
+    };
+    actor.start();
+    try {
+      if (operation === 'pull') {
+        await vi.waitFor(() => {
+          expect(selectRevisionStatus(actor.getSnapshot()).sync.state).toBe('failed');
+        });
+        await mint();
+      }
+      await vi.waitFor(() => {
+        expect(writing).toBe(true);
+      });
+      const closing = (async () => {
+        try {
+          await awaitSyncSettled(actor);
+          return undefined;
+        } catch (error) {
+          return asError(error);
+        }
+      })();
+      write.resolve();
+      const outcome = await closing;
+      if (persistence === 'written') {
+        expect(outcome).toBeUndefined();
+        expect(JSON.parse(await filesystem.readFile('.git/sync-pending', 'utf8'))).toMatchObject({
+          entries: [expect.objectContaining({ ref: 'refs/heads/main', head })],
+        });
+        expect(selectRevisionStatus(actor.getSnapshot()).sync).toMatchObject({ state: 'failed', reason: 'damaged' });
+      } else {
+        expect(outcome).toBeInstanceOf(Error);
+        expect(outcome?.message).toContain('Retry record disk failure');
+        expect(actor.getSnapshot().status).toBe('active');
+        transient = true;
+        actor.send({ type: 'syncNow' });
+        await vi.waitFor(() => {
+          expect(selectRevisionStatus(actor.getSnapshot()).sync.state).toBe('queued');
+        });
+        await expect(awaitSyncSettled(actor)).rejects.toThrow('Retry record disk failure');
+        transient = false;
+        actor.send({ type: 'syncNow' });
+        await vi.waitFor(() => {
+          expect(selectRevisionStatus(actor.getSnapshot()).sync.state).toBe('failed');
+        });
+        rejectWrite = false;
+        await mint();
+        await expect(awaitSyncSettled(actor)).resolves.toBeUndefined();
+        expect(actor.getSnapshot().children.sync?.getSnapshot().context.queueWriteError).toBeUndefined();
+        expect(JSON.parse(await filesystem.readFile('.git/sync-pending', 'utf8'))).toMatchObject({
+          entries: [expect.objectContaining({ ref: 'refs/heads/main', head })],
+        });
+      }
+    } finally {
+      write.resolve();
+      actor.stop();
+    }
+  });
+});
+
+it('does not restart transport when a correlated request races successful close completion', async () => {
+  const context = await fixture();
+  await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+  const receipt = await context.port.writeRevision({
+    parents: [],
+    tree: new ImmutableRevisionTree([['main.ts', 'local']]),
+    provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+    summary: { generated: 'Local' },
+  });
+  const head = revisionId(receipt.commitId);
+  await context.port.updateRef({ name: 'main', expectedHead: undefined, head });
+  await context.port.setHead('main');
+  await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+  const discover = Promise.withResolvers<void>();
+  let discovering = false;
+  let pushes = 0;
+  const { actor } = createProjectRevisionsActor({
+    port: {
+      ...context.port,
+      listRemoteRefs: async () => {
+        discovering = true;
+        await discover.promise;
+        return [];
+      },
+      push: async () => {
+        pushes += 1;
+        return { refs: [{ name: 'refs/heads/main', status: 'updated', head }] };
+      },
+    },
+    projectId: 'project-1',
+    filesystem: () => context.filesystem,
+  });
+  actor.start();
+  let injected = false;
+  const subscription = actor.subscribe((snapshot) => {
+    const scheduler = snapshot.children.sync?.getSnapshot();
+    if (!injected && scheduler?.matches('backedUp') && scheduler.context.quiescing) {
+      injected = true;
+      actor.send({ type: 'sync', event: { type: 'syncNow', pushId: 'late-publish' } });
+    }
+  });
+  try {
+    await vi.waitFor(() => {
+      expect(discovering).toBe(true);
+    });
+    const scheduler = actor.getSnapshot().children.sync;
+    const outcomes: string[] = [];
+    scheduler?.on('pushSettled', (event) => {
+      if (event.pushId === 'late-publish') {
+        outcomes.push(event.outcome);
+      }
+    });
+    const closing = awaitSyncSettled(actor);
+    discover.resolve();
+    await closing;
+    expect(injected).toBe(true);
+    expect(pushes).toBe(1);
+    expect(outcomes).toEqual(['queued']);
+    expect(actor.getSnapshot().children.sync?.getSnapshot().matches('backedUp')).toBe(true);
+  } finally {
+    subscription.unsubscribe();
+    discover.resolve();
+    actor.stop();
+  }
+});
+
+it('refuses to cancel a directly composed root without transport ownership', async () => {
+  const context = await fixture();
+  await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+  await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+  let fetching = false;
+  let aborted = false;
+  const created = createProjectRevisionsActor({
+    port: {
+      ...context.port,
+      listRemoteRefs: async (_remote, options) => {
+        fetching = true;
+        return new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            'abort',
+            () => {
+              aborted = true;
+              reject(new Error('Stopped.'));
+            },
+            { once: true },
+          );
+        });
+      },
+    },
+    projectId: 'project-1',
+    filesystem: () => context.filesystem,
+  });
+  const actor = createActor(created.actor.logic, { input: { projectId: 'project-1' } });
+  actor.start();
+  try {
+    await vi.waitFor(() => {
+      expect(fetching).toBe(true);
+    });
+    await expect(awaitSyncSettled(actor, 100)).rejects.toThrow('directly composed root');
+    expect(aborted).toBe(false);
+    expect(actor.getSnapshot().status).toBe('active');
+    expect(actor.getSnapshot().children.sync?.getSnapshot().context.quiescing).toBe(false);
+  } finally {
+    actor.stop();
+  }
+});
+
+it.each(['live', 'linked'])(
+  'close preserves a delayed %s checkout apply after transport grace expires',
+  async (kind) => {
+    const context = await fixture({ 'tau.json': '{}', 'main.ts': 'base' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const baseTree = await captureRevisionTree(context.filesystem, { exclude: (path) => !classify(path).versioned });
+    const base = await context.port.writeRevision({
+      parents: [],
+      tree: baseTree,
+      provenance: { source: 'user', actorId: 'ada', createdAt: 1 },
+      summary: { generated: 'Base' },
+    });
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(base.commitId) });
+    await context.port.setHead('main');
+    const remote = await context.port.writeRevision({
+      parents: [revisionId(base.commitId)],
+      tree: new ImmutableRevisionTree(
+        baseTree
+          .entries()
+          .map((entry) => [entry.path, entry.path === 'main.ts' ? 'remote' : entry.content, entry.mode]),
+      ),
+      provenance: { source: 'user', actorId: 'ada', createdAt: 2 },
+      summary: { generated: 'Remote' },
+    });
+    const head = revisionId(remote.commitId);
+    const branch = kind === 'linked' ? 'feature' : 'main';
+    const linked =
+      kind === 'linked' ? await context.port.addCheckout?.({ branch, from: revisionId(base.commitId) }) : undefined;
+    const appliedFilesystem = linked === undefined ? context.filesystem : await context.actorFilesystem(linked);
+    await context.port.updateRef({ name: `refs/remotes/tau/${branch}`, expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
+    const apply = Promise.withResolvers<void>();
+    let reading = false;
+    let pushed = false;
+    const { actor } = createProjectRevisionsActor({
+      port: {
+        ...context.port,
+        listRemoteRefs: async () =>
+          kind === 'linked'
+            ? [
+                { name: 'refs/heads/main', head: revisionId(base.commitId) },
+                { name: 'refs/heads/feature', head },
+              ]
+            : [{ name: 'refs/heads/main', head }],
+        fetch: async () => ({ refs: [{ name: 'refs/remotes/tau/main', head }] }),
+        readTree: async (id) => {
+          if (id === head) {
+            reading = true;
+            await apply.promise;
+          }
+          return context.port.readTree(id);
+        },
+        push: async ({ signal }) => {
+          pushed = true;
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener(
+              'abort',
+              () => {
+                reject(new Error('Transfer cancelled.'));
+              },
+              { once: true },
+            );
+          });
+        },
+      },
+      projectId: 'project-1',
+      filesystem: async (checkout) => context.actorFilesystem(checkout),
+    });
+    actor.start();
+    try {
+      await vi.waitFor(() => {
+        expect(reading).toBe(true);
+      });
+      actor.send({ type: 'sync', event: { type: 'close' } });
+      vi.useFakeTimers();
+      const quiesce = awaitSyncSettled(actor, 2100);
+      const result = expect(quiesce).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(100);
+      expect(
+        actor
+          .getSnapshot()
+          .children.sync?.getSnapshot()
+          .matches({ opening: kind === 'linked' ? 'fetching' : 'fastForwarding' }),
+      ).toBe(true);
+      actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 2, refs: [] } });
+      actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
+      apply.resolve();
+      /* Disk work runs on real I/O; only the already-expired grace used fake time. */
+      vi.useRealTimers();
+      await result;
+      expect(pushed).toBe(false);
+      expect(actor.getSnapshot().children.sync?.getSnapshot().context.error).toBe(
+        'Closing stopped the transfer; this project will try again.',
+      );
+      expect(await appliedFilesystem.readFile('main.ts', 'utf8')).toBe('remote');
+      expect(await context.port.readRef(branch)).toBe(head);
+      expect(actor.getSnapshot().children.sync?.getSnapshot().context.leases[`refs/heads/${branch}`]).toBe(head);
+      expect(JSON.parse(await context.filesystem.readFile('.git/sync-pending', 'utf8'))).toMatchObject({
+        entries: [expect.objectContaining({ ref: 'refs/heads/main' })],
+      });
+    } finally {
+      vi.useRealTimers();
+      apply.resolve();
+      actor.stop();
+    }
+  },
+);
 
 /* D18: the Sync region's figure comes from the host, for Tau Cloud only. */
 describe('reading remote storage', () => {
@@ -1193,6 +1649,15 @@ describe('the checkout registry', () => {
 
 for (const actorSet of actorSets) {
   describe.runIf(actorSet.enabled)(`revision ingress safety — ${actorSet.name}`, () => {
+    const scaffold = {
+      $schema: 'https://tau.new/schemas/tau-v1.json',
+      name: 'Remote',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.scad' } },
+    };
+    const remoteManifest = `${JSON.stringify(scaffold)}\n`;
+    const editedManifest = `${JSON.stringify({ ...scaffold, description: 'mine' })}\n`;
     const synchronized = async () => {
       const context = await fixture({ 'main.ts': 'base\n' }, (filesystem) => filesystem, {
         actorSet: actorSet.name,
@@ -1235,7 +1700,7 @@ for (const actorSet of actorSets) {
         const remoteReceipt = await context.port.writeRevision({
           parents: [],
           tree: new ImmutableRevisionTree([
-            ['tau.json', '{"id":"project-1"}\n'],
+            ['tau.json', remoteManifest],
             ['main.scad', 'cube(1);\n'],
           ]),
           provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
@@ -1247,7 +1712,7 @@ for (const actorSet of actorSets) {
       };
 
       /* The opener's `tau.json` is the remote's own: nothing here is work, so the pull lands as is. */
-      const opened = await unborn('{"id":"project-1"}\n');
+      const opened = await unborn(remoteManifest);
       await expect(run(opened.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toStrictEqual({
         checkoutId: 'live',
         revisionId: opened.remote,
@@ -1257,24 +1722,22 @@ for (const actorSet of actorSets) {
       expect(await opened.filesystem.readFile('main.scad', 'utf8')).toBe('cube(1);\n');
 
       /* A file the remote holds differently is still work: minted first (rule 6), never overwritten. */
-      const edited = await unborn('{"id":"project-1","name":"mine"}\n');
+      const edited = await unborn(editedManifest);
       await expect(run(edited.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
         status: 'held',
         hold: 'dirty',
         revisionId: edited.remote,
       });
       expect(await edited.port.readRef('main')).toBeUndefined();
-      expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1","name":"mine"}\n');
+      expect(await edited.filesystem.readFile('tau.json', 'utf8')).toBe(editedManifest);
 
       /* The placeholder a cloud open writes is setup, not work: the remote's manifest replaces it (e921b3d96). */
-      const placeholder = await unborn(
-        `${JSON.stringify({ id: 'project-1', name: 'Remote', description: '', tags: [], assets: { main: { entryPath: 'main.scad' } } })}\n`,
-      );
+      const placeholder = await unborn(`${JSON.stringify(scaffold)}\n`);
       await expect(run(placeholder.actors.sync.fastForward, { remote: 'tau', branch: 'main' })).resolves.toMatchObject({
         checkoutId: 'live',
         revisionId: placeholder.remote,
       });
-      expect(await placeholder.filesystem.readFile('tau.json', 'utf8')).toBe('{"id":"project-1"}\n');
+      expect(await placeholder.filesystem.readFile('tau.json', 'utf8')).toBe(remoteManifest);
     }, 30_000);
 
     /* W13c + W13d: the same rule for a cut taken before that pull lands (a close, a hidden tab), or before any fetch. */
@@ -1289,7 +1752,7 @@ for (const actorSet of actorSets) {
         const remoteReceipt = await context.port.writeRevision({
           parents: [],
           tree: new ImmutableRevisionTree([
-            ['tau.json', '{"id":"project-1"}\n'],
+            ['tau.json', remoteManifest],
             ['main.scad', 'cube(1);\n'],
           ]),
           provenance: { source: 'user', actorId: 'grace', createdAt: Date.UTC(2026, 8, 13) },
@@ -1308,27 +1771,25 @@ for (const actorSet of actorSets) {
         });
       };
 
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' })).resolves.toMatchObject({ nothingToSave: true });
+      await expect(unbornCut({ 'tau.json': remoteManifest })).resolves.toMatchObject({ nothingToSave: true });
       /* Work the remote does not hold is still work: the cut is an ordinary one. */
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1","name":"mine"}\n' })).resolves.not.toHaveProperty(
-        'nothingToSave',
-      );
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n', 'notes.md': 'mine\n' })).resolves.not.toHaveProperty(
+      await expect(unbornCut({ 'tau.json': editedManifest })).resolves.not.toHaveProperty('nothingToSave');
+      await expect(unbornCut({ 'tau.json': remoteManifest, 'notes.md': 'mine\n' })).resolves.not.toHaveProperty(
         'nothingToSave',
       );
       /* W13d: never fetched — a fresh device opened offline — the opener's own manifest is setup too… */
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1","name":"mine"}\n' }, false)).resolves.toMatchObject({
+      await expect(unbornCut({ 'tau.json': editedManifest }, false)).resolves.toMatchObject({
         nothingToSave: true,
       });
-      /* …but not another project's manifest, nor any other file. */
+      /* …but not an invalid declaration, nor any other file. */
       await expect(unbornCut({ 'tau.json': '{"id":"project-2"}\n' }, false)).resolves.not.toHaveProperty(
         'nothingToSave',
       );
-      await expect(
-        unbornCut({ 'tau.json': '{"id":"project-1"}\n', 'notes.md': 'mine\n' }, false),
-      ).resolves.not.toHaveProperty('nothingToSave');
+      await expect(unbornCut({ 'tau.json': remoteManifest, 'notes.md': 'mine\n' }, false)).resolves.not.toHaveProperty(
+        'nothingToSave',
+      );
       /* No remote, no pull to merge a root into: an unborn line's first cut is an ordinary one. */
-      await expect(unbornCut({ 'tau.json': '{"id":"project-1"}\n' }, false, false)).resolves.not.toHaveProperty(
+      await expect(unbornCut({ 'tau.json': remoteManifest }, false, false)).resolves.not.toHaveProperty(
         'nothingToSave',
       );
     }, 30_000);
@@ -2586,7 +3047,7 @@ describe('independent sync record failures', () => {
   );
 
   /* W13d: this device's own push, echoed back by the stream, brings nothing new. */
-  it('fetches nothing when every advertised tip is the one already tracked, as after its own push', async () => {
+  it('hydrates matching tracking tips once per session, retries failure, and then skips unchanged echoes', async () => {
     const context = await fixture({ 'main.ts': 'base\n' });
     await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const receipt = await context.port.writeRevision({
@@ -2597,7 +3058,9 @@ describe('independent sync record failures', () => {
     });
     const head = revisionId(receipt.commitId);
     await context.port.updateRef({ name: 'refs/remotes/tau/main', expectedHead: undefined, head });
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-1.git' });
     let advertisedHead = head;
+    let failNext = true;
     const requested: Array<readonly string[] | undefined> = [];
     const actors = createRevisionActors({
       port: {
@@ -2605,6 +3068,10 @@ describe('independent sync record failures', () => {
         listRemoteRefs: async () => [{ name: 'refs/heads/main', head: advertisedHead }],
         fetch: async (input) => {
           requested.push(input.refs);
+          if (failNext) {
+            failNext = false;
+            throw new RevisionPortError('INVALID_TRANSPORT', 'LFS transfer failed.');
+          }
           return { refs: [] };
         },
       },
@@ -2612,13 +3079,30 @@ describe('independent sync record failures', () => {
       filesystem: () => context.filesystem,
     });
 
+    await expect(
+      run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 }),
+    ).rejects.toThrow('LFS transfer failed');
     await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
-    expect(requested).toEqual([]);
+    expect(requested).toEqual([['refs/heads/main'], ['refs/heads/main']]);
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(requested).toHaveLength(2);
 
-    /* Another device's move is still fetched. */
-    advertisedHead = revisionId('0'.repeat(39) + '1');
+    /* The same name and tips on a changed destination are not that proof. */
+    await context.port.setRemote({ name: 'tau', url: 'https://api.taucad.dev/v1/git/project-2.git' });
     await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
-    expect(requested).toEqual([['refs/heads/main']]);
+    expect(requested).toHaveLength(3);
+
+    /* A failed new transfer invalidates even the former successful proof. */
+    advertisedHead = revisionId('0'.repeat(39) + '1');
+    failNext = true;
+    await expect(
+      run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 }),
+    ).rejects.toThrow('LFS transfer failed');
+    advertisedHead = head;
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(requested).toHaveLength(5);
+    await run(actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 10_000 });
+    expect(requested).toHaveLength(5);
   }, 30_000);
 
   it('retains a differing local export before adopting and re-offering the fetched value', async () => {

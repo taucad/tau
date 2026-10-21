@@ -31,9 +31,9 @@ import { availableParallelism, cpus, freemem, hostname, platform, release, total
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import process from 'node:process';
-import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
-import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
+import { createExampleGeoSpecExporter } from '@taucad/tau-examples/runtime';
 import { createGeoSpecNativeModelLoader, createNativeGeoSpecRunner } from 'geospec/runner/native';
 import type { GeoSpecNativeLoadModelOptions, ManagedGeoSpecNativeModelLoader } from 'geospec/runner/native';
 import type { GeoSpecRunner, GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
@@ -47,7 +47,6 @@ type Sample = {
   iteration: number;
   wallDurationMs: number;
   result: GeoSpecRunnerResult;
-  forensic: Array<Extract<GeoSpecRunnerEvent, { type: 'forensic' }>>;
   shards: Array<Extract<GeoSpecRunnerEvent, { type: 'file-complete' }>>;
   observations: ModelObservation[];
 };
@@ -99,12 +98,13 @@ const median = (values: readonly number[]): number => {
   return sorted.length % 2 === 0 ? (sorted[middle - 1]! + sorted[middle]!) / 2 : sorted[middle]!;
 };
 
-const createRunner = (observations: Map<string, ModelObservation>): GeoSpecRunner => {
+const createRunner = async (observations: Map<string, ModelObservation>): Promise<GeoSpecRunner> => {
   const engine = new Engine();
+  const exporter = await createExampleGeoSpecExporter(examplesRoot);
   const baseLoader = createGeoSpecNativeModelLoader({
     engine,
     projectPath: examplesSource,
-    runtime: async () => createExampleGeoSpecRuntimeClient(examplesRoot),
+    exporters: [exporter],
   });
   const nativeModelLoader: ManagedGeoSpecNativeModelLoader = Object.assign(
     async (options: GeoSpecNativeLoadModelOptions) => {
@@ -141,16 +141,13 @@ const createRunner = (observations: Map<string, ModelObservation>): GeoSpecRunne
 const runSample = async (options: { iteration: number; expectedModels: number }): Promise<Sample> => {
   const started = performance.now();
   const observations = new Map<string, ModelObservation>();
-  const runner = createRunner(observations);
-  const forensic: Sample['forensic'] = [];
+  const runner = await createRunner(observations);
   const shards: Sample['shards'] = [];
-  runner.on('forensic', (event) => forensic.push(event));
   runner.on('file-complete', (event) => shards.push(event));
   let sample: Sample | undefined;
   try {
     const result = await runner.run({
       files: [specFile],
-      forensic: true,
       testTimeout: 300_000,
       ...(examplePattern ? { testNamePattern: examplePattern } : {}),
     });
@@ -182,7 +179,6 @@ const runSample = async (options: { iteration: number; expectedModels: number })
       iteration: options.iteration,
       wallDurationMs,
       result,
-      forensic,
       shards,
       observations: [...observations.values()],
     };
@@ -198,10 +194,6 @@ const runSample = async (options: { iteration: number; expectedModels: number })
 const summarize = (samples: readonly Sample[]): Record<string, unknown> => {
   if (samples.length === 0) {
     return {};
-  }
-  const forensicTotals = new Map<string, number>();
-  for (const event of samples.flatMap(({ forensic }) => forensic)) {
-    forensicTotals.set(event.name, (forensicTotals.get(event.name) ?? 0) + event.value);
   }
   const tests = samples.flatMap(({ result }) =>
     result.files.flatMap(({ result: fileResult }) =>
@@ -221,7 +213,6 @@ const summarize = (samples: readonly Sample[]): Record<string, unknown> => {
       medianDurationMs: median(durations),
       spread: Math.max(...durations) - Math.min(...durations),
       slowestTests: tests.sort((left, right) => right.durationMs - left.durationMs).slice(0, 10),
-      forensicTotals: Object.fromEntries([...forensicTotals].sort(([left], [right]) => left.localeCompare(right))),
       shardDurations: samples.flatMap(({ shards }) => shards.map(({ durationMs }) => durationMs ?? 0)),
     },
   };

@@ -325,8 +325,13 @@ describe('startPayloadMirror', () => {
     );
 
     expect(receipt.closureIntegrity).toBe(closure.closureIntegrity);
-    expect(mirror.requests.filter(({ path }) => path.startsWith('blobs/'))).toEqual(
-      closure.payloads.map(({ sha256 }) => ({ method: 'GET', path: `blobs/sha256/${sha256}`, status: 200 })),
+    /* Payloads download concurrently, so the mirror sees them in any order. */
+    const byPath = (left: { readonly path: string }, right: { readonly path: string }): number =>
+      left.path.localeCompare(right.path);
+    expect(mirror.requests.filter(({ path }) => path.startsWith('blobs/')).toSorted(byPath)).toEqual(
+      closure.payloads
+        .map(({ sha256 }) => ({ method: 'GET', path: `blobs/sha256/${sha256}`, status: 200 }))
+        .toSorted(byPath),
     );
     expect(registry.calls).toEqual([]);
   });

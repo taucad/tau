@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { render, renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, QueryObserver, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -19,7 +20,7 @@ import { rootedPathOf } from '@taucad/fs-client/rooted-content-client';
 import type { useFileManager } from '#hooks/use-file-manager.js';
 import { consumableBytes } from '@taucad/fs-bridge';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
-import type { ProjectManifest } from '@taucad/types';
+import type { Project, ProjectManifest } from '@taucad/types';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { FileManagerProxy } from '#machines/file-manager.machine.types.js';
@@ -32,7 +33,7 @@ import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { storedRef } from '#utils/attachment.test-utils.js';
 
-const fakeProject: ProjectManifest = projectToManifest({
+const fakeProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   name: 'Test Project',
   description: '',
@@ -44,7 +45,7 @@ const fakeLocator: ProjectLocator = {
   storageRootKey: 'opfs:origin',
   relativeDirectory: 'test-project',
 };
-const unrelatedProject: ProjectManifest = projectToManifest({
+const unrelatedProject: Project = createProjectFixture({
   id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
   name: 'Unrelated Project',
   description: '',
@@ -61,7 +62,8 @@ const validProjectDiscovery: ProjectDiscoveryResult = {
   entries: [
     {
       status: 'valid',
-      manifest: fakeProject,
+      projectId: fakeProject.id,
+      manifest: projectToManifest(fakeProject),
       locator: fakeLocator,
     },
   ],
@@ -79,11 +81,18 @@ const liveWorkspaceLocator: ProjectLocator = {
 };
 const liveWorkspaceDiscovery: ProjectDiscoveryResult = {
   roots: [{ status: 'complete', root: liveWorkspaceRoot }],
-  entries: [{ status: 'valid', manifest: fakeProject, locator: liveWorkspaceLocator }],
+  entries: [
+    {
+      status: 'valid',
+      projectId: fakeProject.id,
+      manifest: projectToManifest(fakeProject),
+      locator: liveWorkspaceLocator,
+    },
+  ],
 };
 const operationId = 'req_aaaaaaaaaaaaaaaaaaaaa';
 const phaseOrder: string[] = [];
-let manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
+let manifestBytes = serializeProjectManifest(projectToManifest(createProjectFixture(fakeProject)));
 
 const mockWriteFiles = vi.fn(async () => {
   phaseOrder.push('files');
@@ -134,7 +143,10 @@ const mockCommitPendingProjectDirectory = vi.fn<FileManagerProxy['commitPendingP
   return { status: 'committed' } as const;
 });
 const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>(async () => ({ roots: [], entries: [] }));
-const mockAdoptProjectDirectory = vi.fn<FileManagerProxy['adoptProjectDirectory']>(async () => fakeProject);
+const mockAdoptProjectDirectory = vi.fn<FileManagerProxy['adoptProjectDirectory']>(async () => ({
+  projectId: fakeProject.id,
+  manifest: projectToManifest(fakeProject),
+}));
 
 /** Worker change-channel double: one live subscription per event channel. */
 type WorkerChangeSubscription = {
@@ -373,7 +385,8 @@ const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
   kind: 'create',
   backend: 'opfs',
   providerBasePath: 'test-project',
-  manifest: fakeProject,
+  projectId: fakeProject.id,
+  manifest: projectToManifest(fakeProject),
   library: { projectId: fakeProject.id, lastActivityAt: 10 },
   files: { 'main.ts': { content: new Uint8Array([1, 2, 3]) } },
   chat: {
@@ -407,6 +420,7 @@ const pendingPermanentDelete: Extract<PendingProjectOperation, { kind: 'permanen
 
 type PrepareProjectCreationInput = {
   readonly manifest: ProjectManifest;
+  readonly projectId: string;
   readonly attachmentSource?: string;
   readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'>;
   readonly editorState?: unknown;
@@ -623,7 +637,7 @@ describe('useProjectManager.createProject', () => {
     });
     attachmentFiles.clear();
     phaseOrder.length = 0;
-    manifestBytes = serializeProjectManifest(projectToManifest(fakeProject));
+    manifestBytes = serializeProjectManifest(projectToManifest(createProjectFixture(fakeProject)));
     mockIsFileSystemAccessSupported = false;
     mockPickerBackend = 'webaccess';
     mockGetWorkspaceMetadata.mockResolvedValue(undefined);
@@ -786,7 +800,8 @@ describe('useProjectManager.createProject', () => {
     });
     expect(queryClient.getQueryData<ProjectListing>(['projects'])?.projects).toEqual([
       expect.objectContaining({
-        manifest: fakeProject,
+        projectId: fakeProject.id,
+        manifest: projectToManifest(fakeProject),
         slugs: { workspaceSlug: 'workshop', projectSlug: 'test-project' },
       }),
     ]);
@@ -804,7 +819,9 @@ describe('useProjectManager.createProject', () => {
     };
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'node', path: nodeWorkspacePath } }],
-      entries: [{ status: 'valid', manifest: fakeProject, locator: nodeLocator }],
+      entries: [
+        { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: nodeLocator },
+      ],
     });
     mockListWorkspaces.mockResolvedValue([
       { workspaceId: 'wsp_node', name: 'Workshop', slug: 'workshop', path: nodeWorkspacePath },
@@ -845,8 +862,13 @@ describe('useProjectManager.createProject', () => {
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }, ...liveWorkspaceDiscovery.roots],
       entries: [
-        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
-        { status: 'valid', manifest: unrelatedProject, locator: liveWorkspaceLocator },
+        { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: fakeLocator },
+        {
+          status: 'valid',
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
+          locator: liveWorkspaceLocator,
+        },
       ],
     });
     mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live', name: 'Workshop', slug: 'workshop' }]);
@@ -885,8 +907,13 @@ describe('useProjectManager.createProject', () => {
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }, ...liveWorkspaceDiscovery.roots],
       entries: [
-        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
-        { status: 'valid', manifest: unrelatedProject, locator: liveWorkspaceLocator },
+        { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: fakeLocator },
+        {
+          status: 'valid',
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
+          locator: liveWorkspaceLocator,
+        },
       ],
     });
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -1040,12 +1067,14 @@ describe('useProjectManager.createProject', () => {
       entries: [
         {
           status: 'duplicate-id',
-          manifest: fakeProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
           locator: fakeLocator,
         },
         {
           status: 'duplicate-id',
-          manifest: fakeProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
           locator: duplicateLocator,
         },
       ],
@@ -1091,7 +1120,14 @@ describe('useProjectManager.createProject', () => {
 
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
       projects: [],
-      conflicts: [{ status: 'route-blocked', manifest: fakeProject, locator: fakeLocator }],
+      conflicts: [
+        {
+          status: 'route-blocked',
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator: fakeLocator,
+        },
+      ],
     });
     expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
@@ -1118,7 +1154,7 @@ describe('useProjectManager.createProject', () => {
 
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
       projects: [],
-      conflicts: [{ status: 'route-blocked', manifest: fakeProject }],
+      conflicts: [{ status: 'route-blocked', projectId: fakeProject.id, manifest: projectToManifest(fakeProject) }],
     });
     expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
@@ -1138,7 +1174,7 @@ describe('useProjectManager.createProject', () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
-      projects: [{ manifest: fakeProject }],
+      projects: [{ projectId: fakeProject.id, manifest: projectToManifest(fakeProject) }],
       conflicts: [],
     });
     expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
@@ -1158,7 +1194,8 @@ describe('useProjectManager.createProject', () => {
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
       projects: [
         {
-          manifest: fakeProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
           workspaceName: 'Workshop',
           slugs: { workspaceSlug: 'workshop', projectSlug: 'test-project' },
         },
@@ -1181,13 +1218,19 @@ describe('useProjectManager.createProject', () => {
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
       entries: [
-        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
+        { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: fakeLocator },
         {
           status: 'valid',
-          manifest: fakeProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
           locator: { ...fakeLocator, relativeDirectory: 'copy' },
         },
-        { status: 'valid', manifest: unrelatedProject, locator: unrelatedLocator },
+        {
+          status: 'valid',
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
+          locator: unrelatedLocator,
+        },
       ],
     });
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -1215,15 +1258,32 @@ describe('useProjectManager.createProject', () => {
       mockListProjectManifests.mockResolvedValue({
         roots: [{ status: 'complete', root: { backend: 'opfs' } }],
         entries: [
-          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
-          { status: 'duplicate-id', manifest: fakeProject, locator: copyLocator },
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: fakeLocator,
+          },
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: copyLocator,
+          },
         ],
       });
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
       await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({ status: 'ready' });
       const listing = await result.current.getProjectListing();
-      expect(listing.conflicts).toEqual([{ status: 'duplicate-id', manifest: fakeProject, locator: copyLocator }]);
+      expect(listing.conflicts).toEqual([
+        {
+          status: 'duplicate-id',
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator: copyLocator,
+        },
+      ]);
     });
 
     it('rebinds a duplicated id to the folder a person chooses and writes no project file', async () => {
@@ -1231,8 +1291,18 @@ describe('useProjectManager.createProject', () => {
       mockListProjectManifests.mockResolvedValue({
         roots: [{ status: 'complete', root: { backend: 'opfs' } }],
         entries: [
-          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
-          { status: 'duplicate-id', manifest: fakeProject, locator: copyLocator },
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: fakeLocator,
+          },
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: copyLocator,
+          },
         ],
       });
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -1294,7 +1364,12 @@ describe('useProjectManager.createProject', () => {
             locator: fakeLocator,
             issue: { code: 'manifest-missing' },
           },
-          { status: 'valid', manifest: fakeProject, locator: copyLocator },
+          {
+            status: 'valid',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: copyLocator,
+          },
         ],
       });
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -1319,7 +1394,7 @@ describe('useProjectManager.createProject', () => {
       await expect(result.current.repairProject(fakeProject.id)).resolves.toEqual(fakeProject);
       expect(mockWriteFile).toHaveBeenCalledExactlyOnceWith(
         `/projects/${fakeProject.id}/tau.json`,
-        serializeProjectManifest(fakeProject),
+        serializeProjectManifest(projectToManifest(fakeProject)),
       );
     });
 
@@ -1333,6 +1408,27 @@ describe('useProjectManager.createProject', () => {
       await expect(result.current.repairProject(fakeProject.id)).rejects.toThrow('not valid JSON');
       expect(mockWriteFile).not.toHaveBeenCalled();
     });
+  });
+
+  it('should refuse an established route when its generated identity conflicts', async () => {
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: fakeLocator.relativeDirectory,
+    });
+    mockListProjectManifests.mockResolvedValue({
+      roots: [{ status: 'complete', root: { backend: 'opfs' } }],
+      entries: [
+        {
+          status: 'invalid',
+          locator: fakeLocator,
+          issue: { code: 'identity-conflict', expectedProjectId: fakeProject.id, actualProjectId: unrelatedProject.id },
+        },
+      ],
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toEqual({ status: 'conflict' });
+    expect(mockDeleteProjectResources).not.toHaveBeenCalled();
   });
 
   it('keeps a config whose directory is discovered but unreadable', async () => {
@@ -1565,7 +1661,12 @@ describe('useProjectManager.createProject', () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     queryClient.setQueryData<ProjectListing>(['projects'], {
       projects: [
-        { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
+        {
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          library: { projectId: fakeProject.id, lastActivityAt: 1 },
+          locator: fakeLocator,
+        },
       ],
       conflicts: [],
       recoveries: [],
@@ -1616,7 +1717,12 @@ describe('useProjectManager.createProject', () => {
       const { wrapper, queryClient } = createInspectableWrapper();
       const listing: ProjectListing = {
         projects: [
-          { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
+          {
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            library: { projectId: fakeProject.id, lastActivityAt: 1 },
+            locator: fakeLocator,
+          },
         ],
         conflicts: [],
         recoveries: [],
@@ -1683,9 +1789,15 @@ describe('useProjectManager.createProject', () => {
       const { wrapper, queryClient } = createInspectableWrapper();
       queryClient.setQueryData<ProjectListing>(['projects'], {
         projects: [
-          { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
           {
-            manifest: unrelatedProject,
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            library: { projectId: fakeProject.id, lastActivityAt: 1 },
+            locator: fakeLocator,
+          },
+          {
+            projectId: unrelatedProject.id,
+            manifest: projectToManifest(unrelatedProject),
             library: { projectId: unrelatedProject.id, lastActivityAt: 1 },
             locator: unrelatedLocator,
           },
@@ -1753,9 +1865,15 @@ describe('useProjectManager.createProject', () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     queryClient.setQueryData<ProjectListing>(['projects'], {
       projects: [
-        { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
         {
-          manifest: unrelatedProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          library: { projectId: fakeProject.id, lastActivityAt: 1 },
+          locator: fakeLocator,
+        },
+        {
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
           library: { projectId: unrelatedProject.id, lastActivityAt: 1 },
           locator: unrelatedLocator,
         },
@@ -1856,9 +1974,15 @@ describe('useProjectManager.createProject', () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     queryClient.setQueryData<ProjectListing>(['projects'], {
       projects: [
-        { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
         {
-          manifest: unrelatedProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          library: { projectId: fakeProject.id, lastActivityAt: 1 },
+          locator: fakeLocator,
+        },
+        {
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
           library: { projectId: unrelatedProject.id, lastActivityAt: 1 },
           locator: unrelatedLocator,
         },
@@ -1970,7 +2094,12 @@ describe('useProjectManager.createProject', () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     queryClient.setQueryData<ProjectListing>(['projects'], {
       projects: [
-        { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
+        {
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          library: { projectId: fakeProject.id, lastActivityAt: 1 },
+          locator: fakeLocator,
+        },
       ],
       conflicts: [],
       recoveries: [],
@@ -2007,7 +2136,12 @@ describe('useProjectManager.createProject', () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     queryClient.setQueryData<ProjectListing>(['projects'], {
       projects: [
-        { manifest: fakeProject, library: { projectId: fakeProject.id, lastActivityAt: 1 }, locator: fakeLocator },
+        {
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          library: { projectId: fakeProject.id, lastActivityAt: 1 },
+          locator: fakeLocator,
+        },
       ],
       conflicts: [],
       recoveries: [],
@@ -2111,8 +2245,13 @@ describe('useProjectManager.createProject', () => {
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
       entries: [
-        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
-        { status: 'valid', manifest: unrelatedProject, locator: unrelatedLocator },
+        { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: fakeLocator },
+        {
+          status: 'valid',
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
+          locator: unrelatedLocator,
+        },
       ],
     });
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -2131,7 +2270,8 @@ describe('useProjectManager.createProject', () => {
         const projectId = `proj_${String(index).padStart(21, '0')}`;
         return {
           status: 'valid',
-          manifest: { ...fakeProject, id: projectId, name: `Project ${index}` },
+          projectId,
+          manifest: projectToManifest({ ...fakeProject, id: projectId, name: `Project ${index}` }),
           locator: {
             backend: 'opfs',
             storageRootKey: 'opfs:origin',
@@ -2151,7 +2291,7 @@ describe('useProjectManager.createProject', () => {
       }
     });
     mockGetProjectLibraryStates.mockResolvedValueOnce(
-      entries.map(({ manifest }) => ({ projectId: manifest.id, lastActivityAt: 10 })),
+      entries.map(({ projectId }) => ({ projectId, lastActivityAt: 10 })),
     );
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -2161,7 +2301,7 @@ describe('useProjectManager.createProject', () => {
     expect(mockApplyProjectFileSystemConfigChanges).toHaveBeenCalledOnce();
     const [changes] = mockApplyProjectFileSystemConfigChanges.mock.calls[0]!;
     expect(changes.deletes).toEqual([]);
-    expect(changes.upserts.some(({ projectId }) => projectId === entries[0]!.manifest.id)).toBe(true);
+    expect(changes.upserts.some(({ projectId }) => projectId === entries[0]!.projectId)).toBe(true);
     expect(mockSyncProjectRoots).toHaveBeenCalledOnce();
     expect(mockGetProjectLibraryStates).toHaveBeenCalledOnce();
     expect(mockCreateProjectLibraryStates).not.toHaveBeenCalled();
@@ -2183,7 +2323,14 @@ describe('useProjectManager.createProject', () => {
         { status: 'complete', root: { backend: 'opfs' } },
         { status: 'complete', root: liveWorkspaceRoot },
       ],
-      entries: [{ status: 'valid', manifest: fakeProject, locator: liveWorkspaceLocator }],
+      entries: [
+        {
+          status: 'valid',
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator: liveWorkspaceLocator,
+        },
+      ],
     });
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -2353,7 +2500,7 @@ describe('useProjectManager.createProject', () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
-      projects: [{ manifest: fakeProject }],
+      projects: [{ projectId: fakeProject.id, manifest: projectToManifest(fakeProject) }],
       conflicts: [],
     });
     await expect(result.current.getProjectRouteAccess(fakeProject.id)).resolves.toMatchObject({
@@ -2381,10 +2528,16 @@ describe('useProjectManager.createProject', () => {
       next: {
         roots: validProjectDiscovery.roots,
         entries: [
-          { status: 'duplicate-id', manifest: fakeProject, locator: fakeLocator },
           {
             status: 'duplicate-id',
-            manifest: fakeProject,
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: fakeLocator,
+          },
+          {
+            status: 'duplicate-id',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
             locator: { ...fakeLocator, relativeDirectory: 'test-project-copy' },
           },
         ],
@@ -2442,7 +2595,7 @@ describe('useProjectManager.createProject', () => {
         ...pendingCreate,
         files: {
           ...pendingCreate.files,
-          'tau.json': { content: serializeProjectManifest(fakeProject) },
+          'tau.json': { content: serializeProjectManifest(projectToManifest(fakeProject)) },
         },
       },
     ]);
@@ -2452,7 +2605,8 @@ describe('useProjectManager.createProject', () => {
         ...validProjectDiscovery.entries,
         {
           status: 'valid',
-          manifest: unrelatedProject,
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
           locator: unrelatedLocator,
         },
       ],
@@ -2468,7 +2622,7 @@ describe('useProjectManager.createProject', () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
-      projects: [{ manifest: unrelatedProject }],
+      projects: [{ projectId: unrelatedProject.id, manifest: projectToManifest(unrelatedProject) }],
       conflicts: [],
       recoveries: [{ projectId: fakeProject.id, status: 'recovering' }],
     });
@@ -2604,7 +2758,8 @@ describe('useProjectManager.createProject', () => {
       providerBasePath: pendingCreate.providerBasePath,
       scope: { backend: 'opfs' },
       files: pendingCreate.files,
-      manifest: serializeProjectManifest(fakeProject),
+      projectId: fakeProject.id,
+      manifest: serializeProjectManifest(projectToManifest(fakeProject)),
       /* The attempt hands its bytes over: the bridge transfers them instead of copying the import. */
       [consumableBytes]: true,
     });
@@ -2696,7 +2851,7 @@ describe('useProjectManager.createProject', () => {
     expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
     const published = queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects;
     expect(published).toHaveLength(1);
-    expect(published?.[0]?.manifest.id).toBe(created?.id);
+    expect(published?.[0]?.projectId).toBe(created?.id);
     expect(published?.[0]?.slugs).toEqual({ workspaceSlug: 'home', projectSlug: 'test-project' });
   });
 
@@ -2771,16 +2926,23 @@ describe('useProjectManager.createProject', () => {
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
       entries: [
-        { status: 'valid', manifest: fakeProject, locator: { ...fakeLocator, relativeDirectory: 'Test-Project' } },
         {
           status: 'valid',
-          manifest: unrelatedProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator: { ...fakeLocator, relativeDirectory: 'Test-Project' },
+        },
+        {
+          status: 'valid',
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
           locator: { ...fakeLocator, relativeDirectory: 'test-project-1' },
         },
         // A directory in another storage root cannot collide.
         {
           status: 'valid',
-          manifest: fakeProject,
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
           locator: { ...liveWorkspaceLocator, relativeDirectory: 'test-project-2' },
         },
       ],
@@ -3143,7 +3305,7 @@ describe('useProjectManager.createProject', () => {
       }),
     );
 
-    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id).toBe('proj_ccccccccccccccccccccc');
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].projectId).toBe('proj_ccccccccccccccccccccc');
   });
 
   /* D19 (W11 a2): a project born with no remote backs up by default; one
@@ -3159,7 +3321,7 @@ describe('useProjectManager.createProject', () => {
 
     await act(async () => result.current.createProject({ ...options, location: { kind: 'home' } }));
 
-    const createdId = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id ?? '';
+    const createdId = mockPrepareProjectCreation.mock.calls.at(-1)?.[0].projectId ?? '';
     expect(tauCloudIntent.get(createdId)).toBe('default');
   });
 
@@ -3256,7 +3418,7 @@ describe('useProjectManager.createProject', () => {
       expect(mockDeleteProjectResources).toHaveBeenCalledWith(orphanedId);
       expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith(orphanedId);
       expect(mockDeleteProjectResources).toHaveBeenCalledTimes(1);
-      expect(mockPrepareProjectCreation.mock.calls.map(([input]) => input.manifest.id)).toEqual([orphanedId]);
+      expect(mockPrepareProjectCreation.mock.calls.map(([input]) => input.projectId)).toEqual([orphanedId]);
     });
 
     it('should keep refusing while any file of the project is left', async () => {
@@ -3283,7 +3445,14 @@ describe('useProjectManager.createProject', () => {
       mockReadScopedShallowDirectory.mockImplementation(listings({ '/': [] }));
       mockListProjectManifests.mockResolvedValue({
         roots: [{ status: 'complete', root: liveWorkspaceRoot }],
-        entries: [{ status: 'valid', manifest: { ...fakeProject, id: orphanedId }, locator: liveWorkspaceLocator }],
+        entries: [
+          {
+            status: 'valid',
+            projectId: orphanedId,
+            manifest: projectToManifest({ ...fakeProject, id: orphanedId }),
+            locator: liveWorkspaceLocator,
+          },
+        ],
       });
       const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
@@ -3300,7 +3469,7 @@ describe('useProjectManager.createProject', () => {
     const id = 'proj_ccccccccccccccccccccc';
     /* The route config exists once a creation of that id has been prepared. */
     mockGetProjectFileSystemConfig.mockImplementation(async (projectId: string) =>
-      mockPrepareProjectCreation.mock.calls.some(([input]) => input.manifest.id === projectId)
+      mockPrepareProjectCreation.mock.calls.some(([input]) => input.projectId === projectId)
         ? { projectId, backend: 'opfs', providerBasePath: 'already-here' }
         : undefined,
     );
@@ -3313,7 +3482,7 @@ describe('useProjectManager.createProject', () => {
     expect(outcomes.map((outcome) => outcome.status).toSorted()).toEqual(['fulfilled', 'rejected']);
     const refused = outcomes.find((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
     expect(refused?.reason).toEqual(new Error(`That project is already on this device: ${id}`));
-    expect(mockPrepareProjectCreation.mock.calls.filter(([input]) => input.manifest.id === id)).toHaveLength(1);
+    expect(mockPrepareProjectCreation.mock.calls.filter(([input]) => input.projectId === id)).toHaveLength(1);
   });
 
   /* Defect R2: a reload mid-creation leaves the id's directory committed and its
@@ -3703,7 +3872,9 @@ describe('useProjectManager.createProject', () => {
     });
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
-      entries: [{ status: 'valid', manifest: fakeProject, locator: movedLocator }],
+      entries: [
+        { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: movedLocator },
+      ],
     });
     mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([movedPending]);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -3749,8 +3920,13 @@ describe('useProjectManager.createProject', () => {
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
       entries: [
-        { status: 'valid', manifest: fakeProject, locator: fakeLocator },
-        { status: 'duplicate-id', manifest: fakeProject, locator: duplicateLocator },
+        { status: 'valid', projectId: fakeProject.id, manifest: projectToManifest(fakeProject), locator: fakeLocator },
+        {
+          status: 'duplicate-id',
+          projectId: fakeProject.id,
+          manifest: projectToManifest(fakeProject),
+          locator: duplicateLocator,
+        },
       ],
     });
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -3776,7 +3952,14 @@ describe('useProjectManager.createProject', () => {
       .mockResolvedValueOnce(validProjectDiscovery)
       .mockResolvedValueOnce({
         roots: [{ status: 'complete', root: { backend: 'opfs' } }],
-        entries: [{ status: 'valid', manifest: fakeProject, locator: movedLocator }],
+        entries: [
+          {
+            status: 'valid',
+            projectId: fakeProject.id,
+            manifest: projectToManifest(fakeProject),
+            locator: movedLocator,
+          },
+        ],
       });
     mockPermanentlyDeleteProjectDirectory.mockResolvedValueOnce({ status: 'absent' });
     mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
@@ -3800,7 +3983,7 @@ describe('useProjectManager.createProject', () => {
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
-      projects: [{ manifest: fakeProject }],
+      projects: [{ projectId: fakeProject.id, manifest: projectToManifest(fakeProject) }],
     });
 
     expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
@@ -3846,12 +4029,19 @@ describe('useProjectManager.createProject', () => {
     // The pending operation's directory already holds a different project.
     mockListProjectManifests.mockResolvedValue({
       roots: [{ status: 'complete', root: { backend: 'opfs' } }],
-      entries: [{ status: 'valid', manifest: unrelatedProject, locator: { ...fakeLocator } }],
+      entries: [
+        {
+          status: 'valid',
+          projectId: unrelatedProject.id,
+          manifest: projectToManifest(unrelatedProject),
+          locator: { ...fakeLocator },
+        },
+      ],
     });
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
 
     await expect(result.current.getProjectListing()).resolves.toMatchObject({
-      projects: [{ manifest: unrelatedProject }],
+      projects: [{ projectId: unrelatedProject.id, manifest: projectToManifest(unrelatedProject) }],
     });
   });
 

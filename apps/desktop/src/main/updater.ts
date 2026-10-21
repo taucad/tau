@@ -161,12 +161,16 @@ export type DesktopUpdaterOptions = {
   readonly installForProbe?: boolean;
   /** Finish the same save/quiesce path as normal quit before Squirrel can close any window. */
   readonly prepareToRestart: () => Promise<boolean>;
+  /** Installer routes commit after save/quiesce and before destructive teardown. */
+  readonly prepareToInstall?: (commit: () => void | Promise<void>) => Promise<boolean>;
   readonly openExternal: (url: string) => Promise<void>;
   readonly log: (level: 'info' | 'warn' | 'error', event: string, detail?: unknown) => void;
   /** Milliseconds, defaults to setInterval. */
   readonly schedule?: (callback: () => void, checkInterval: number) => unknown;
   /** Diagnostic selector in the installed channel; never an arbitrary URL. */
   readonly candidateTag?: string;
+  /** Diagnostic constraint; selects no URL and cannot bypass the shipping feed or signature checks. */
+  readonly expectedUpdate?: { readonly tag: string; readonly version: string; readonly sourceCommit: string };
 };
 
 export type DesktopUpdater = {
@@ -189,7 +193,14 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
     }
     feedUrl = `${releaseBaseUrl(options.candidateTag, origin)}/desktop-update-${platform}-${arch}.json`;
   }
-  let snapshot: DesktopUpdateSnapshot = { revision: 0, requestId: 0, phase: 'checking', currentVersion, channel };
+  let snapshot: DesktopUpdateSnapshot = {
+    revision: 0,
+    requestId: 0,
+    phase: 'checking',
+    currentVersion,
+    channel,
+    installOnQuit: platform === 'darwin',
+  };
   const publish = (phase: DesktopUpdateSnapshot['phase']): void => {
     snapshot = { ...snapshot, revision: snapshot.revision + 1, phase };
     options.onState?.(snapshot);
@@ -264,7 +275,7 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
       status = `Tau ${offered?.version ?? ''} is ready. Restart to install.`;
       log('info', 'updater.downloaded', { version: offered?.version });
       publish('ready');
-      if (options.installForProbe && options.candidateTag) {
+      if (options.installForProbe && (options.candidateTag !== undefined || options.expectedUpdate !== undefined)) {
         void install();
       }
     });
@@ -289,6 +300,12 @@ export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpda
         snapshot = { ...snapshot, version: undefined, releasePage: undefined };
         publish('current');
         return undefined;
+      }
+      if (
+        options.expectedUpdate &&
+        (update.version !== options.expectedUpdate.version || update.tag !== options.expectedUpdate.tag)
+      ) {
+        throw new Error('Qualification update differs from the expected release');
       }
       if (update.version === offered?.version) {
         publish('available');

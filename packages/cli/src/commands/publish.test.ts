@@ -56,7 +56,7 @@ describe('publishCommand', () => {
     openProjectRevisions.mockReset();
     openProjectRevisions.mockReturnValue({ publish, close });
     vi.stubEnv('TAU_API_URL', 'https://api.tau.new');
-    vi.stubEnv('TAU_API_TOKEN', 'session-token');
+    vi.stubEnv('TAU_AUTH_TOKEN', 'session-token');
   });
 
   afterEach(async () => {
@@ -128,21 +128,21 @@ describe('publishCommand', () => {
     });
   });
 
-  it('refuses without an API to publish to, before opening anything', async () => {
-    vi.stubEnv('TAU_API_URL', '');
+  it('refuses an unsafe API origin before opening anything', async () => {
+    vi.stubEnv('TAU_API_URL', 'http://insecure.example.test');
 
     await expect(runCommand(publishCommand, { rawArgs: ['v1', '--project', project] })).rejects.toMatchObject({
-      code: 'NO_API_URL',
-      exit: exitCodes.refused,
+      code: 'INVALID_API_URL',
+      exit: exitCodes.usage,
     });
     expect(openProjectRevisions).not.toHaveBeenCalled();
   });
 
   it('refuses without a session token', async () => {
-    vi.stubEnv('TAU_API_TOKEN', '');
+    vi.stubEnv('TAU_AUTH_TOKEN', '');
 
     await expect(runCommand(publishCommand, { rawArgs: ['v1', '--project', project] })).rejects.toMatchObject({
-      code: 'NO_API_TOKEN',
+      code: 'NO_AUTH_TOKEN',
       exit: exitCodes.refused,
     });
   });

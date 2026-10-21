@@ -99,6 +99,17 @@ describe('Vitest Browser test-runner ownership', () => {
     expect(supportRunnerImport.test("import { expect, test } from './support/test';")).toBe(true);
   });
 
+  it('keeps installed qualification behind disposable renderer-only loopback admission', () => {
+    const source = readFileSync(resolve(root, 'apps/desktop-e2e/scripts/qualification-renderer.mts'), 'utf8');
+    const guard = source.indexOf("process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'] !== '1'");
+    const connect = source.indexOf('chromium.connectOverCDP(`http://127.0.0.1:');
+
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(connect).toBeGreaterThan(guard);
+    expect(source).toContain("join(profile, 'DevToolsActivePort')");
+    expect(source).not.toMatch(/_electron|electron\.launch|--inspect/u);
+  });
+
   it('confines the direct browser driver and install command to privileged boundaries', () => {
     const allowedDriverFiles = new Set([
       '.agents/skills/audit-ui/scripts/axe-audit.mjs',
@@ -107,6 +118,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // The staging billing harness pays a hosted Stripe Checkout in headless Chromium, which Browser Mode cannot
       // host; its specs reach the driver only through this module.
       'apps/billing-e2e/src/support/checkout.ts',
+      // Installed release qualification attaches only to an explicitly disposable Electron renderer over loopback
+      // CDP. Browser Mode cannot own the installed app across native installer/relaunch cycles.
+      'apps/desktop-e2e/scripts/qualification-renderer.mts',
       'apps/desktop-e2e/src/desktop-assimp.spec.ts',
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
@@ -119,7 +133,6 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-main-editor-kernels.spec.ts',
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
       'apps/desktop-e2e/src/desktop-print-dry-run.spec.ts',
-      'apps/desktop-e2e/src/desktop-store-seed.spec.ts',
       'apps/desktop-e2e/src/desktop-voice.spec.ts',
       // Native projection scenarios and the launch-helper test stay inside the Electron driver boundary.
       'apps/desktop-e2e/src/filesystem-projection-observation.spec.ts',

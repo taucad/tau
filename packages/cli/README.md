@@ -47,11 +47,11 @@ Neither command downloads anything: native kernels come from the payload store t
 ## Plugins
 
 The CLI ships every first-party plugin. Zoo (KCL) computes geometry through Tau's Zoo proxy, so it
-needs a Tau session: set `TAU_API_TOKEN` (and `TAU_API_URL` or `TAU_WEBSOCKET_URL` for another Tau
+needs a Tau session: run `tau auth login`, or set `TAU_AUTH_TOKEN` (and `TAU_API_URL` or `TAU_WEBSOCKET_URL` for another Tau
 API; the default is `https://api.tau.new`). Without it a KCL export fails with a sign-in diagnostic.
 
 ```bash
-TAU_API_TOKEN=<session token> tau export bracket.kcl --ext=glb
+TAU_AUTH_TOKEN=<session token> tau export bracket.kcl --ext=glb
 ```
 
 Add any third-party plugin with repeatable `--plugin`, resolved from the invoking project:
@@ -143,7 +143,7 @@ tau serve --relay=https://api.tau.new --trust-projects --plugin @example/tau-plu
 
 The first launch prints a pairing URL and code. `--max-sessions` defaults to `1`.
 
-With `TAU_API_TOKEN` set, the daemon trades it for a short-lived Zoo-scoped token and sends only that to its runtime child, so project code never sees the session.
+With a saved login or `TAU_AUTH_TOKEN` set, the daemon trades it for a short-lived Zoo-scoped token and sends only that to its runtime child, so project code never sees the session.
 
 For local Tau development, keep a hot-reloading Host attached to its own terminal pane:
 
@@ -217,3 +217,29 @@ tau tui chat-1 --from=42                   # resume from a cursor
 `q` and `c` are commands only while the prompt is empty, so a prompt cannot begin with either letter. Everything the daemon reports — the operation it performed and the state it reached — is printed verbatim; this view never names an outcome the host did not.
 
 There is no mouse, no colour requirement and no cursor trickery: every row is plain text and every action has a key. Off a terminal — a pipe, a CI job, or `--plain` — `tau tui` refuses with `TUI_NOT_A_TTY` and exit code 3, writes nothing to stdout, and names `tau agent tail <chat> --jsonl` instead.
+
+## Sign in to Tau Cloud
+
+Local CAD commands need no account. Cloud projects, backups, publishing and paid services use an account session:
+
+```bash
+tau auth login
+tau auth status
+tau auth logout
+```
+
+Login opens a browser. Check the displayed code and account before approving. `--no-browser` prints the link for a browser on another device. `--json` produces a result without credentials; instructions still go to stderr. Login creates a separate session: logout leaves your browser signed in.
+
+The OS credential store holds one login per API origin (macOS Keychain, Windows Credential Manager, or Linux Secret Service). There is no plaintext fallback. An unavailable store does not block local CAD; unlock it for account commands. `TAU_AUTH_TOKEN` overrides saved login for automation. Unset it before login/logout. The former environment-variable name is not accepted.
+
+Choose staging explicitly for **every** command:
+
+```bash
+export TAU_API_URL=https://api.taucad.dev
+tau auth login
+tau auth status
+# Run the cloud operation against a disposable staging project.
+tau auth logout
+```
+
+Without `TAU_API_URL`, the default is `https://api.tau.new`. HTTPS is required except for loopback development. Saved sessions are never sent to a different `TAU_WEBSOCKET_URL` origin; custom socket deployments need an explicit environment credential. Login requests expire after ten minutes; sessions follow the API’s seven-day session policy. Reauthenticate when expired. Logout requires a reachable API and retains the credential if revocation cannot be confirmed. If a process or network fails during the final exchange, review and revoke the orphaned session in Tau’s account security settings before trying again.

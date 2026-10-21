@@ -1,14 +1,19 @@
 import { runGeoSpecModule } from '#runner/run-geospec-module.js';
 import type {
   GeoSpecRunner,
+  GeoSpecRunnerAccounting,
   GeoSpecRunnerEvent,
   GeoSpecRunnerOptions,
   GeoSpecRunnerResult,
   GeoSpecRunnerRunOptions,
-} from '#runner/worker/index.js';
-import { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/index.js';
-import type { GeoSpecModuleBundleCache, GeoSpecTestCase, GeoSpecRunResult } from '#runner/types.js';
-import type { GeoSpecRunnerAccounting } from '#runner/worker/runner-types.js';
+} from '#runner/worker/runner-types.js';
+import { createNoMatchingGeoSpecTestsIssue } from '#runner/worker/no-matching-tests-issue.js';
+import type {
+  GeoSpecModuleBundleCache,
+  GeoSpecTestCase,
+  GeoSpecRunResult,
+  RunGeoSpecModuleOptions,
+} from '#runner/types.js';
 import type { VmIssue } from '@taucad/esbuild/vm';
 
 const createRunnerClosedIssue = (): VmIssue => ({
@@ -58,6 +63,84 @@ export const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: n
     }
   }
   return { passed, failed };
+};
+
+/** A run-level issue, as a runner aggregate reports it. */
+export type RunnerIssue = VmIssue;
+
+/**
+ * Fold one file's module result into a running aggregate.
+ *
+ * Shared with the pool so a sharded run and a serial run count identically:
+ * a file that failed to execute at all is ONE failure, and a file that ran
+ * contributes its non-skipped test outcomes.
+ *
+ * @internal
+ * @param totals - The running totals, mutated in place.
+ * @param result - One file's module result.
+ */
+export const accumulateFileResult = (
+  totals: { passed: number; failed: number; selectedTests: number },
+  result: GeoSpecRunResult,
+): void => {
+  if (!result.success) {
+    totals.failed += 1;
+    return;
+  }
+  totals.selectedTests += result.tests.length;
+  const counts = countRunnerTests(result.tests);
+  totals.passed += counts.passed;
+  totals.failed += counts.failed;
+};
+
+/** Options for {@link executeGeoSpecFile}. */
+export type ExecuteGeoSpecFileOptions = {
+  /** Shared runner dependencies. */
+  runner: GeoSpecRunnerOptions;
+  /** Project-rooted GeoSpec file. */
+  file: string;
+  /** Test name filter. */
+  testNamePattern?: string | RegExp;
+  /** Per-test timeout in milliseconds. */
+  testTimeout?: number;
+  /** Per-run native work-unit limit, overriding the runner's assertion options. */
+  workUnitLimit?: number;
+  /** Collect test names without running them. */
+  collectOnly?: boolean;
+  /** Bundle cache reused across files. */
+  bundleCache?: GeoSpecModuleBundleCache;
+  /** Observer of per-test lifecycle events. */
+  onTestEvent?: RunGeoSpecModuleOptions['onTestEvent'];
+};
+
+/**
+ * Execute one GeoSpec file through the VM.
+ *
+ * Every runner host (serial, pool worker, list-only collection) funnels
+ * through this one call so a shard result is byte-comparable to the serial
+ * result for the same file.
+ *
+ * @internal
+ * @param options - Runner options and the file.
+ * @returns The module result.
+ */
+export const executeGeoSpecFile = async (options: ExecuteGeoSpecFileOptions): Promise<GeoSpecRunResult> => {
+  const { runner, file } = options;
+  return runGeoSpecModule({
+    filesystem: runner.filesystem,
+    entryPath: file,
+    ...(options.testNamePattern === undefined ? {} : { testNamePattern: options.testNamePattern }),
+    ...(options.testTimeout === undefined ? {} : { testTimeout: options.testTimeout }),
+    ...(options.onTestEvent === undefined ? {} : { onTestEvent: options.onTestEvent }),
+    nativeAssertions:
+      options.workUnitLimit === undefined
+        ? runner.nativeAssertions
+        : { ...runner.nativeAssertions, workUnitLimit: options.workUnitLimit },
+    ...(runner.nativeModelLoader ? { nativeModelLoader: runner.nativeModelLoader } : {}),
+    ...(runner.builtinModules ? { builtinModules: runner.builtinModules } : {}),
+    ...(options.bundleCache ? { bundleCache: options.bundleCache } : {}),
+    ...(options.collectOnly === true ? { collectOnly: true } : {}),
+  });
 };
 
 /**
@@ -149,13 +232,12 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         emit({ type: 'file-start', file });
         const fileStartedAt = performance.now();
         // oxlint-disable-next-line no-await-in-loop -- Within one worker, CAD tests run serially for deterministic evidence and bounded runtime pressure; the pool runner (R3) parallelizes across workers.
-        const result: GeoSpecRunResult = await runGeoSpecModule({
-          filesystem: options.filesystem,
-          entryPath: file,
-          testNamePattern: runOptions.testNamePattern,
-          testTimeout: runOptions.testTimeout,
-          matcherWallBackstop: runOptions.matcherWallBackstop,
-          forensic: runOptions.forensic,
+        const result: GeoSpecRunResult = await executeGeoSpecFile({
+          runner: options,
+          file,
+          ...(runOptions.testNamePattern === undefined ? {} : { testNamePattern: runOptions.testNamePattern }),
+          ...(runOptions.testTimeout === undefined ? {} : { testTimeout: runOptions.testTimeout }),
+          ...(runOptions.workUnitLimit === undefined ? {} : { workUnitLimit: runOptions.workUnitLimit }),
           onTestEvent: (event) => {
             emit(
               event.type === 'test-start'
@@ -172,12 +254,6 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
             );
           },
           bundleCache,
-          nativeAssertions:
-            runOptions.workUnitLimit === undefined
-              ? options.nativeAssertions
-              : { ...options.nativeAssertions, workUnitLimit: runOptions.workUnitLimit },
-          ...(options.nativeModelLoader ? { nativeModelLoader: options.nativeModelLoader } : {}),
-          ...(options.builtinModules ? { builtinModules: options.builtinModules } : {}),
         }).catch(
           (error: unknown): GeoSpecRunResult => ({
             success: false,
@@ -248,14 +324,9 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           }
         }
 
-        if (result.success) {
-          selectedTests += result.tests.length;
-          const counts = countRunnerTests(result.tests);
-          passed += counts.passed;
-          failed += counts.failed;
-        } else {
-          failed += 1;
-        }
+        const totals = { passed, failed, selectedTests };
+        accumulateFileResult(totals, result);
+        ({ passed, failed, selectedTests } = totals);
 
         if (runOptions.bail === true && (!complete || failed > 0)) {
           issues.push(createRunnerBailIssue(file));

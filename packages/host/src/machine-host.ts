@@ -48,7 +48,17 @@ import type {
   NodeMachineSerialDriver,
 } from '@taucad/runtime/host/node';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
-import { projectManifestMaxBytes } from '@taucad/types';
+import {
+  createProjectIdentityActor,
+  parseProjectIdentityBytes,
+  projectIdentityPath,
+} from '@taucad/project-core/identity';
+import type {
+  ProjectIdentityRecord,
+  ProjectIdentityLocation,
+  InitializeProjectIdentityInput,
+} from '@taucad/project-core/identity';
+import { createAsyncLogic, toPromise } from 'xstate';
 import { z } from 'zod';
 
 import { captureRtspsStill, findFfmpeg } from '#rtsps-still.js';
@@ -187,8 +197,6 @@ const certificatePem = (raw: Uint8Array<ArrayBuffer>): string =>
     .replaceAll(/(.{64})/gu, '$1\n')}\n-----END CERTIFICATE-----\n`;
 
 /* Only the id: every other field may be one a stricter reader refuses. */
-const manifestIdSchema = z.object({ id: z.string() });
-
 const identitySchema = z.strictObject({
   v: z.literal(1),
   hostId: z.string().min(1).max(256),
@@ -224,12 +232,11 @@ export const openMachineHostIdentity = async (directory: string): Promise<Machin
 };
 
 /**
- * The `tau.json` id of the project a directory holds, read the way a machine
- * host names a job's project: a bounded read of that one field, so
- * a manifest another rule would refuse still names its project.
+ * The durable identity of an admitted directory, including an empty bootstrapped workspace.
+ * This lookup does not establish discoverability or initialize metadata.
  *
  * @param project - The project directory's files, e.g. a `NodeFsProviderClient` rooted at it.
- * @returns The id, or `undefined` when the directory holds no readable manifest.
+ * @returns The id, or `undefined` when no valid durable identity can be read.
  * @public
  */
 export const readProjectId = async (
@@ -239,14 +246,36 @@ export const readProjectId = async (
   }>,
 ): Promise<string | undefined> => {
   try {
-    const { size } = await project.stat('tau.json');
-    if (size > projectManifestMaxBytes) {
-      return undefined;
-    }
-    const manifest = manifestIdSchema.safeParse(
-      JSON.parse(new TextDecoder().decode(await project.readFile('tau.json'))),
-    );
-    return manifest.success ? manifest.data.id : undefined;
+    const actor = createProjectIdentityActor({
+      input: { locationKey: 'mounted-project', mode: 'read' },
+      actors: {
+        readIdentity: createAsyncLogic<ProjectIdentityRecord | undefined, ProjectIdentityLocation>({
+          run: async ({ signal }) => {
+            const { size } = await project.stat(projectIdentityPath);
+            signal.throwIfAborted();
+            if (size > 1024) {
+              throw new Error('Project identity record exceeds 1024 bytes.');
+            }
+            const bytes = await project.readFile(projectIdentityPath);
+            signal.throwIfAborted();
+            return parseProjectIdentityBytes(bytes);
+          },
+        }),
+        mintIdentity: createAsyncLogic<string, ProjectIdentityLocation>({
+          run: async () => {
+            throw new Error('Read-only identity lookup cannot generate identity.');
+          },
+        }),
+        initializeIdentity: createAsyncLogic<ProjectIdentityRecord, InitializeProjectIdentityInput>({
+          run: async () => {
+            throw new Error('Read-only identity lookup cannot persist identity.');
+          },
+        }),
+      },
+    });
+    actor.start();
+    const result = await toPromise(actor);
+    return result.status === 'resolved' ? result.projectId : undefined;
   } catch {
     return undefined;
   }

@@ -21,7 +21,7 @@
  *
  * Usage: node scripts/src/check-standalone-project.ts --ecosystem <npm|pypi|nuget|none|kcl> [--kernel <id>] [--work <dir>]
  * Environment: the ecosystem's tools on PATH (node and npm; uv; the .NET 10 SDK; openscad; zoo). KCL needs
- *   ZOO_TOKEN (the Zoo CLI) and TAU_API_TOKEN (Tau's export through its Zoo proxy).
+ *   ZOO_TOKEN (the Zoo CLI) and TAU_AUTH_TOKEN (Tau's export through its Zoo proxy).
  * Exit codes: 0 when every row matches Tau's export; 1 when a row fails; 2 on a usage error.
  */
 
@@ -128,7 +128,7 @@ export const standaloneRows: Readonly<Record<string, StandaloneRow>> = {
     run: ['zoo', 'kcl', 'export', '--output-format=stl', 'main.kcl', 'native'],
     // The Zoo CLI names the file it writes into the output directory.
     output: 'native/',
-    credentials: ['ZOO_TOKEN', 'TAU_API_TOKEN'],
+    credentials: ['ZOO_TOKEN', 'TAU_AUTH_TOKEN'],
   },
 };
 

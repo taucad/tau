@@ -88,18 +88,8 @@ export type GeoSpecRunnerEvent =
       workerMemoryBytes?: number;
     }
   | { type: 'run-complete'; result: GeoSpecRunnerResult }
-  | GeoSpecForensicEvent
   | { type: 'abort'; reason?: string }
   | { type: 'close' };
-
-/** One structured forensic measurement emitted by a runner. @public */
-export type GeoSpecForensicEvent = {
-  type: 'forensic';
-  name: string;
-  value: number;
-  unit: 'milliseconds' | 'count';
-  shardId?: number;
-};
 
 /**
  * Options accepted by a GeoSpec worker-style runner run.
@@ -113,16 +103,12 @@ export type GeoSpecRunnerRunOptions = {
   testNamePattern?: string | RegExp;
   /** Timeout for each async test callback, in milliseconds. */
   testTimeout?: number;
-  /** Non-verdict matcher wall backstop. Milliseconds. */
-  matcherWallBackstop?: number;
   /**
    * Engine work-unit budget for this run's claims, replacing the runner's
    * `nativeAssertions.workUnitLimit`. A `loadModel` or `expectGeo` budget still
    * wins for its own claims.
    */
   workUnitLimit?: number;
-  /** Emit structured forensic measurements for this run. */
-  forensic?: boolean;
   /**
    * Stop after the first failing file (R1). Interactive fail-fast only —
    * never the default for reward runs, which want the complete red set.

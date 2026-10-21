@@ -87,7 +87,8 @@ export const parseDesktopPackageArguments = (
  * What this package leaves out, one line each, for the script to print.
  * @param plan - The selected package.
  * @param present - Whether a prepared git payload exists for the target.
- * @returns Human-readable omissions; never empty, since GeoSpec native and PicoGK ship on macOS only.
+ * @returns Human-readable omissions; never empty, since GeoSpec native ships on macOS only. No native kernel closure is an
+ *   omission: no package ships one, and the app downloads each on first use where its manifest declares the host.
  */
 export const desktopPackageOmissions = (
   plan: DesktopPackagePlan,
@@ -95,8 +96,6 @@ export const desktopPackageOmissions = (
 ): readonly string[] => [
   'GeoSpec native engine (geospec-engine): its npm package ships a native binding for darwin-arm64 only, ' +
     'so the geometry utility (AP242 measurement, native GeoSpec checks) cannot start in this package.',
-  'PicoGK closure (resources/payloads): its tau-plugin.json declares a darwin-arm64 runtime only, ' +
-    'and its voxel natives are built on Darwin arm64 only (upstream publishes no Linux natives).',
   ...(present.git
     ? []
     : [

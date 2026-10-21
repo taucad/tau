@@ -1,3 +1,4 @@
+import { useDesktopScheme } from '#hooks/use-desktop-scheme.js';
 import { useFeature } from '#flags/use-feature.js';
 import { MachinesDisabled } from '#components/machines/machines-disabled.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -215,6 +216,7 @@ function ConnectedMachines({ client }: { readonly client: MachineClient }): Reac
   );
 }
 export default function MachinesRoute(): React.JSX.Element {
+  const scheme = useDesktopScheme();
   const machines = useMachinesFacet();
   const enabled = useFeature('machines');
   if (!enabled) {
@@ -231,7 +233,7 @@ export default function MachinesRoute(): React.JSX.Element {
         description='The desktop app connects to machines on this computer. Your project files stay available here.'
       >
         <Button asChild>
-          <a href='tau://machines'>Open Tau desktop</a>
+          <a href={`${scheme}://machines`}>Open Tau desktop</a>
         </Button>
       </PanelEmptyState>
     </div>

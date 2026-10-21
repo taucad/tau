@@ -1,5 +1,8 @@
 import { formatStorageLimit } from '@taucad/billing';
 
+/** Inclusive project-file ceiling, shared by Git and LFS admission on every client. */
+export const projectFileLimitBytes = 100 * 1024 * 1024;
+
 /**
  * Server-side constants of the Tau Hosted Remote (architecture A16/A24/A39,
  * charter D15/D16, blueprint S25/S35/S36/S49).
@@ -430,6 +433,30 @@ arriving_files() {
     | head -n 10 \\
     | awk '{ rest = $0; sub(/^[^ ]+ /, "", rest); printf "Tau:   %s (%s bytes)\\n", rest, $1 }' >&2 || true
 }
+
+# Admission measures each uncompressed blob, not just the compressed pack.
+# Object IDs avoid treating newlines or spaces in filenames as size records.
+if [ -n "$arriving" ]; then
+  objects=$(git rev-list --objects --no-object-names $arriving --not --all) || {
+    echo "Tau: could not check individual file sizes. Try again." >&2
+    exit 1
+  }
+  if [ -n "$objects" ]; then
+    sizes=$(printf '%s\\n' "$objects" | git cat-file --batch-check='%(objecttype) %(objectsize)') || {
+      echo "Tau: could not check individual file sizes. Try again." >&2
+      exit 1
+    }
+    if ! printf '%s\\n' "$sizes" | awk '
+      NF != 2 || $2 !~ /^[0-9]+$/ { invalid = 1 }
+      $1 == "blob" && $2 > ${projectFileLimitBytes} { oversized = 1 }
+      END { exit (invalid || oversized) ? 1 : 0 }
+    '; then
+      echo "Tau: individual project files must be 100 MiB or smaller; this push could not satisfy that limit." >&2
+      arriving_files
+      exit 1
+    fi
+  fi
+fi
 
 remaining="\${TAU_GIT_QUOTA_REMAINING_BYTES:-}"
 ceiling="\${TAU_GIT_CEILING_REMAINING_BYTES:-}"

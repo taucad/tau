@@ -24,6 +24,7 @@ import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js'
 import { tauPathPolicy } from '#path-registry.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { NodeFsProvider } from '#backend/node/provider.js';
+import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { streamChunkSize } from '#backend/stream-utils.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import { nodeFsProtocolVersion, nodeFsResultSchemas } from '#backend/node/protocol.js';
@@ -156,10 +157,35 @@ describe('node filesystem client/host round trip', () => {
     expect(Buffer.from(await provider.readFile('large.bin')).equals(bytes)).toBe(true);
   });
 
+  it('should enumerate entry kinds across the port without per-child stat calls', async () => {
+    const { root, provider } = connect();
+    mkdirSync(join(root, 'project'));
+    writeFileSync(join(root, 'notes.txt'), 'notes');
+    const stat = vi.spyOn(provider, 'stat');
+    try {
+      const entries = await readDirectoryEntries(provider, '');
+      expect(entries.sort((left, right) => left.name.localeCompare(right.name))).toEqual([
+        { name: 'notes.txt', kind: 'file' },
+        { name: 'project', kind: 'dir' },
+      ]);
+      expect(stat).not.toHaveBeenCalled();
+    } finally {
+      stat.mockRestore();
+    }
+  });
+
   it('keeps exact and head wire validators distinct', () => {
     const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' }];
     expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(false);
     expect(nodeFsResultSchemas.readdirHeadWithStats.safeParse(row).success).toBe(true);
+  });
+
+  it('should reject malformed directory entry kinds at the wire boundary', () => {
+    expect(nodeFsResultSchemas.readdirEntries.safeParse([{ name: 'project', kind: 'directory' }]).success).toBe(false);
+    expect(nodeFsResultSchemas.readdirEntries.safeParse([{ name: 'project' }]).success).toBe(false);
+    expect(nodeFsResultSchemas.readdirEntries.parse([{ name: 'project', kind: 'dir' }])).toEqual([
+      { name: 'project', kind: 'dir' },
+    ]);
   });
 
   it('transports head-only metadata without weakening exact listing', async () => {
@@ -977,6 +1003,11 @@ describe('node filesystem client/host round trip', () => {
     expect(entries).toContain('.keep');
     expect(entries).toContain('notes.tmp');
     expect(entries.filter((name) => name.endsWith('.tmp'))).toEqual(['notes.tmp']);
+    const entriesWithKinds = await provider.readdirEntries('');
+    expect(entriesWithKinds.sort((left, right) => left.name.localeCompare(right.name))).toEqual([
+      { name: '.keep', kind: 'file' },
+      { name: 'notes.tmp', kind: 'file' },
+    ]);
   });
 
   it('carries errno codes across the port', async () => {

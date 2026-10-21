@@ -54,6 +54,16 @@ describe('parseDesktopHandoffTarget', () => {
 });
 
 describe('buildDesktopCallbackUrl', () => {
+  it('admits only explicit channel schemes and binds the existing state', () => {
+    const target = parseDesktopHandoffTarget('?state=abcd1234efgh&scheme=tau-staging');
+    expect(target).toEqual({ state: 'abcd1234efgh', scheme: 'tau-staging' });
+    expect(buildDesktopCallbackUrl(target!, 'ott-value')).toBe(
+      'tau-staging://auth/callback?ott=ott-value&state=abcd1234efgh',
+    );
+    for (const scheme of ['https', 'evil', 'tau%3A%2F%2Fevil', 'tau&scheme=tau-staging']) {
+      expect(parseDesktopHandoffTarget(`?state=abcd1234efgh&scheme=${scheme}`)).toBeUndefined();
+    }
+  });
   it('targets the app scheme and echoes the state alongside the token', () => {
     expect(buildDesktopCallbackUrl({ state: 'abcd1234efgh' }, 'ott-value')).toBe(
       'tau://auth/callback?ott=ott-value&state=abcd1234efgh',

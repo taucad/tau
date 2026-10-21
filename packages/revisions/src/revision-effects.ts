@@ -24,6 +24,7 @@
  * turn actor (RM-R14), never an epoch sweep (W8 TS-S7, TS-R13).
  */
 
+import { parseProjectManifestBytes } from '@taucad/project-core';
 import { ResourceQueue } from '@taucad/filesystem';
 import { randomUuid } from '@taucad/utils/id';
 import { walk } from '@taucad/filesystem/content-ops';
@@ -38,6 +39,11 @@ import {
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
+import {
+  prepareProjectManifest,
+  validateLegacyProjectIdentity,
+  verifyPreparedProjectManifest,
+} from '#project-manifest-conversion.js';
 import { caseCollisions } from '#case-collisions.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
@@ -128,7 +134,7 @@ import { createSyncQueue } from '#sync-queue.js';
 import { createOpsLog, opsRefName, opsRefPrefix, undoCandidates } from '#ops-ref.js';
 import { restoreMachine } from '#restore.machine.js';
 import { readRevisionLog } from '#revision-verbs.js';
-import { syncMachine, syncPullDeadlineMilliseconds } from '#sync.machine.js';
+import { syncMachine } from '#sync.machine.js';
 import {
   generatedGitattributesContent,
   generatedGitattributesPath,
@@ -605,6 +611,11 @@ const holdsNoWork = (files: ImmutableRevisionTree, arriving: ImmutableRevisionTr
         sameBytes(content, arriving?.get(path)) || sameBytes(content, generatedSetupTree.get(path)),
     );
 
+type TransferControl = Readonly<{ cancel: () => void; release: () => void }>;
+/* The actor factory binds the effect owner's transport control to its root.
+ * Directly composed roots have no such authority and cannot claim cancellation. */
+const transferControls = new WeakMap<RevisionActors | ProjectRevisionsActor, TransferControl>();
+
 /**
  * Build one project's actor implementations over a port and its checkouts.
  *
@@ -634,6 +645,36 @@ const holdsNoWork = (files: ImmutableRevisionTree, arriving: ImmutableRevisionTr
 // oxlint-disable-next-line eslint/max-lines-per-function -- one closure over one project's port; splitting it would thread the same six values through every half.
 export const createRevisionActors = (options: RevisionActorsOptions): RevisionActors => {
   const { filesystem, projectId } = options;
+  const transfers = new Set<AbortController>();
+  let transfersStopped = false;
+  const control: TransferControl = {
+    cancel: () => {
+      transfersStopped = true;
+      for (const transfer of transfers) {
+        transfer.abort(new Error('Closing stopped the transfer; this project will try again.'));
+      }
+    },
+    release: () => {
+      transfersStopped = false;
+    },
+  };
+  const transport = async <Output>(
+    signal: AbortSignal | undefined,
+    run: (signal: AbortSignal) => Promise<Output>,
+  ): Promise<Output> => {
+    const controller = new AbortController();
+    const combined = signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]);
+    transfers.add(controller);
+    try {
+      if (transfersStopped) {
+        controller.abort(new Error('Closing stopped the transfer; this project will try again.'));
+      }
+      combined.throwIfAborted();
+      return await run(combined);
+    } finally {
+      transfers.delete(controller);
+    }
+  };
   /*
    * Every head this closure moves goes through one `updateRef`, so that is where
    * the operation log is written (D15, rule 10): queued after the move settles
@@ -651,6 +692,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   let loggedOperation: Promise<void> = Promise.resolve();
   const port: RevisionPort = Object.freeze({
     ...options.port,
+    listRemoteRefs: async (
+      remote: Parameters<RevisionPort['listRemoteRefs']>[0],
+      input?: Parameters<RevisionPort['listRemoteRefs']>[1],
+    ) => transport(input?.signal, async (signal) => options.port.listRemoteRefs(remote, { ...input, signal })),
+    fetch: async (input: Parameters<RevisionPort['fetch']>[0]) =>
+      transport(input.signal, async (signal) => options.port.fetch({ ...input, signal })),
+    push: async (input: Parameters<RevisionPort['push']>[0]) =>
+      transport(input.signal, async (signal) => options.port.push({ ...input, signal })),
     /* A revision this host writes with two parents is a merge — a merge, a
      * sync's auto-merge, a conflict decision — which *Undo* never reaches past
      * (D15). A cut's own kind, recorded after this, replaces it. */
@@ -983,25 +1032,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const holdsOnlyUnfetchedScaffold = async (files: ImmutableRevisionTree): Promise<boolean> => {
     const manifest = files.get('tau.json');
     const [remote] = await port.listRemotes();
-    if (manifest === undefined || remote === undefined) {
+    if (manifest === undefined || remote === undefined || !parseProjectManifestBytes(manifest).success) {
       return false;
     }
-    try {
-      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed manifest is `unknown` until read.
-      const { id } = JSON.parse(new TextDecoder().decode(manifest)) as Readonly<{ id?: unknown }>;
-      if (id !== options.projectId) {
-        return false;
-      }
-    } catch {
-      return false;
-    }
+    // This checkout's identity comes from its established host binding; the manifest is authored content.
     const fetched = await port.listRefs(`refs/remotes/${remote.name}`);
     return fetched.length === 0 && holdsNoWork(files, new ImmutableRevisionTree([['tau.json', manifest]]));
   };
 
   /**
    * Whether `tau.json` is the placeholder a Tau Cloud open writes before its
-   * first pull (`cloudProjectStub`): this project's id, the remote's name, and
+   * first pull (`cloudProjectStub`): the remote's name and
    * otherwise the stub's defaults. Setup like the generated files: the remote's
    * own manifest replaces it (e921b3d96). Any other edit is work (rule 6).
    *
@@ -1021,11 +1062,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
       return false;
     }
-    const { $schema, id, name, description, tags, assets, ...rest } = parsed as Readonly<Record<string, unknown>>;
+    const { $schema, name, description, tags, assets, ...rest } = parsed as Readonly<Record<string, unknown>>;
     return (
       Object.keys(rest).length === 0 &&
       ($schema === undefined || typeof $schema === 'string') &&
-      id === options.projectId &&
       typeof name === 'string' &&
       description === '' &&
       Array.isArray(tags) &&
@@ -1252,7 +1292,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     return record?.treeId;
   };
 
-  const { equalEntry, entryOf, materializeTree } = createApplyTreeEffects({
+  const {
+    equalEntry,
+    entryOf,
+    materializeTree: applyMaterializedTree,
+  } = createApplyTreeEffects({
     useFileSystem,
     capture,
     onApplyingTree: options.onApplyingTree,
@@ -1261,7 +1305,32 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     checkoutTreeId,
     temporarySibling,
     unlinkIfPresent,
+    prepareTarget: async (place, target, signal) => {
+      const expected = target.get('tau.json');
+      if (expected === undefined) {
+        return { tree: target };
+      }
+      const prepared = await useFileSystem(place, async (filesystem) =>
+        prepareProjectManifest({ filesystem, projectId: options.projectId, expected, signal }),
+      );
+      if (prepared === undefined) {
+        return { tree: target };
+      }
+      return {
+        tree: new ImmutableRevisionTree(
+          target
+            .entries()
+            .map((entry) => [entry.path, entry.path === 'tau.json' ? prepared.bytes : entry.content, entry.mode]),
+        ),
+        verify: async () =>
+          useFileSystem(place, async (filesystem) => verifyPreparedProjectManifest(filesystem, prepared, signal)),
+      };
+    },
   });
+  const materializeTree: typeof applyMaterializedTree = async (place, target, materialization) => {
+    validateLegacyProjectIdentity(target.get('tau.json'), options.projectId);
+    return applyMaterializedTree(place, target, materialization);
+  };
 
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
@@ -1292,6 +1361,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     } catch {
       return { syncChats: true, syncLargeExports: false };
     }
+  };
+
+  /* Persisted tracking refs do not prove a prior process finished LFS hydration.
+   * Keep only this session's latest successful remote/tip set, bounded by the
+   * selected refs. The first pull re-establishes hydration without reading trees. */
+  let hydratedTips: Readonly<{ identity: string; heads: ReadonlyMap<string, string> }> | undefined;
+  const remoteIdentity = async (name: string): Promise<string | undefined> => {
+    const remotes = await port.listRemotes();
+    const remote = remotes.find((entry) => entry.name === name);
+    return remote === undefined
+      ? undefined
+      : JSON.stringify([remote.name, remote.url, remote.kind, remote.provider, remote.repositoryId, remote.fetchOnly]);
   };
 
   const evidenceRefName = 'refs/tau/evidence/exports';
@@ -1546,6 +1627,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       outcome: SyncRefOutcome;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
     }>,
   ): Promise<SyncRefOutcome | undefined> => {
@@ -1566,6 +1648,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       name,
       remote: input.remote,
       repositoryUrl: input.repositoryUrl,
+      signal: input.signal,
       leases: input.leases,
       offered: new Map([[name, String(head)]]),
     });
@@ -2692,7 +2775,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     };
   };
 
-  return {
+  const actors: RevisionActors = {
     settled,
     turns: {
       leases: readLeases,
@@ -3756,8 +3839,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * project's branch. Everything after this is `sync.machine`'s debounce.
        */
       initialSync: fromAuthorityPromise<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>(
-        async ({ input }) => {
-          await port.fetch({ remote: input.remote });
+        async ({ input, signal }) => {
+          await port.fetch({ remote: input.remote, signal });
           const remotes = await port.listRemotes();
           const configured = remotes.find((remote) => remote.name === input.remote);
           if (configured?.fetchOnly === true || configured?.provider === 'github') {
@@ -3777,6 +3860,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                * remote's own fast-forward rule is the right refusal. W13's pushes
                * carry `expected` (A32). */
               return await port.push({
+                signal,
                 remote: input.remote,
                 refs: [{ name: `refs/heads/${branch}` }],
                 atomic: true,
@@ -3863,10 +3947,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * tag landed without its history names a revision the remote cannot
        * resolve, and the materializer would then have nothing to read.
        */
-      push: fromAuthorityPromise<PublishPushActorOutput, PublishPushActorInput>(async ({ input }) => {
+      push: fromAuthorityPromise<PublishPushActorOutput, PublishPushActorInput>(async ({ input, signal }) => {
         await ensureStore();
         const remote = await publishRemote();
         const result = await port.push({
+          signal,
           remote,
           atomic: true,
           refs: [
@@ -4045,6 +4130,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               port.push({
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
+                signal,
                 atomic: true,
                 refs: offeredHistory.map((name) => offerOf(name, input.leases)),
               });
@@ -4080,6 +4166,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 retryRejected: input.explicit !== true,
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
+                signal,
                 leases: input.leases,
                 offered: localHeads,
               })
@@ -4095,6 +4182,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                   name,
                   remote: input.remote,
                   repositoryUrl: input.repositoryUrl,
+                  signal,
                   leases: input.leases,
                   offered: localHeads,
                 })
@@ -4117,6 +4205,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 outcome,
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
+                signal,
                 leases: input.leases,
               })) ?? outcome,
             );
@@ -4137,6 +4226,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               name,
               remote: input.remote,
               repositoryUrl: input.repositoryUrl,
+              signal,
               syncChats,
               refusal: outcome.reason,
             });
@@ -4196,11 +4286,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * The deadline is a signal the port carries, so it ends the request and
          * not only this host's wait (review 2 P36).
          *
-         * ponytail: honoured by the leg that speaks HTTP itself. A leg that
-         * spawns `git` leaves the process to its own transport timeouts — the
-         * machine still leaves `opening` on the deadline either way, so the
-         * difference is a socket held open on a host that has stopped waiting.
-         * Upgrade path: a signal through `runGitCommand` to the child process.
+         * Both HTTP and native Git carry cancellation to the transport;
+         * native process groups also terminate any Git LFS descendants.
          */
         const abort = AbortSignal.any([signal, AbortSignal.timeout(input.deadlineMilliseconds)]);
         const deadline = new Promise<never>((_resolve, reject) => {
@@ -4208,7 +4295,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             reject(new RevisionPortError('INVALID_TRANSPORT', 'The remote did not answer in time.'));
           });
         });
-        const advertised = await Promise.race([port.listRemoteRefs(input.remote), deadline]);
+        const advertised = await Promise.race([port.listRemoteRefs(input.remote, { signal: abort }), deadline]);
         signal.throwIfAborted();
         const [localBranchesBefore, trackingBefore, places] = await Promise.all([
           port.listRefs('refs/heads'),
@@ -4231,17 +4318,32 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               !name.startsWith(`${chatRefPrefix}/`) &&
               !name.startsWith('refs/tau/evidence/'),
           );
-        /* Nothing new — this device's own push, echoed back by the stream,
-         * included (W13d): every wanted tip is the one already tracked, so the
-         * fetch is skipped and the tracked refs stand for what it would bring. */
+        /* Skip unchanged tips only after this effect session completed a fetch
+         * for them. Older clients could publish tracking refs before LFS failed;
+         * the first pull repairs that cache through the normal bounded fetch. */
         const trackedByName = new Map(trackingBefore.map((entry) => [entry.name, entry]));
         const advertisedHeads = new Map(advertised.map((entry) => [entry.name, String(entry.head)]));
         const current = wanted.flatMap((name) => {
           const tracked = trackedByName.get(remoteTrackingRef(input.remote, name));
           return tracked !== undefined && String(tracked.head) === advertisedHeads.get(name) ? [tracked] : [];
         });
-        if (wanted.length > 0 && current.length !== wanted.length) {
+        const identity = await remoteIdentity(input.remote);
+        const hydrated =
+          identity !== undefined &&
+          hydratedTips?.identity === identity &&
+          wanted.every((name) => hydratedTips?.heads.get(name) === advertisedHeads.get(name));
+        if (wanted.length > 0 && (current.length !== wanted.length || !hydrated)) {
+          hydratedTips = undefined;
           await Promise.race([port.fetch({ remote: input.remote, signal: abort, refs: wanted }), deadline]);
+          abort.throwIfAborted();
+          const finalIdentity = await remoteIdentity(input.remote);
+          abort.throwIfAborted();
+          if (identity !== undefined && finalIdentity === identity) {
+            hydratedTips = {
+              identity,
+              heads: new Map(wanted.map((name) => [name, advertisedHeads.get(name) ?? ''])),
+            };
+          }
         }
         signal.throwIfAborted();
         if (!syncLargeExports && (await fetchedProjectSyncsLargeExports(input.remote, input.branch))) {
@@ -4772,6 +4874,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       }),
     },
   };
+  transferControls.set(actors, control);
+  return actors;
 };
 
 /**
@@ -4865,6 +4969,10 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
       ...(options.onRejectedEvent === undefined ? {} : { onRejectedEvent: options.onRejectedEvent }),
     },
   );
+  const control = transferControls.get(actors);
+  if (control !== undefined) {
+    transferControls.set(actor, control);
+  }
   /* RM-S14: a host hears of the placement after the base is minted, and of a refusal that followed the record. */
   actor.on('turnPlaced', (event) => {
     options.onPlacement?.({ runId: event.key.runId, status: 'leased', checkoutId: event.checkoutId ?? '' });
@@ -4911,24 +5019,21 @@ export const createProjectRevisionsActor = (options: ProjectRevisionActorOptions
   };
 };
 
-/* How far each wait outlasts the bound it awaits, so the inner reason always lands first (rule 9). */
-/* How long an open pull waits for the stream's tail (W5b a1b): one tail read is a zero-wait GET, well inside the pull's 10 s deadline. */
+/* The stream tail is a zero-wait GET; do not let it hold the active pull. */
 const streamTailWaitMilliseconds = 2000;
 const nestedBoundMarginMilliseconds = 2000;
+const closeTransferMilliseconds = 10_000;
 
 /**
  * How long a host waits for the scheduler before it lets a project go.
  *
- * Rule 9 nests it strictly outside the open pull's deadline
- * (`syncPullDeadlineMilliseconds`): a close that lands while the pull is still
- * running waits for the pull to settle or be abandoned, and then hears the
- * scheduler's own outcome. A quit still cannot hang on a remote that stopped
- * answering, and a revision this host could not push is a record in
- * `.git/sync-pending` that the next open retries (D28).
+ * Close allows ten seconds for active network work, then aborts it and waits
+ * two more seconds for the durable retry record. Failed or stalled persistence
+ * refuses close. This budget is independent of active background transfers.
  *
  * @public
  */
-export const syncQuiesceMilliseconds = syncPullDeadlineMilliseconds + nestedBoundMarginMilliseconds;
+export const syncQuiesceMilliseconds = closeTransferMilliseconds + nestedBoundMarginMilliseconds;
 
 /* What the scheduler looks like when it owes this host nothing more. */
 const settledSyncStates = new Set<SyncFacet['state']>(['manual', 'noRemote', 'backedUp', 'queued', 'conflicted']);
@@ -5032,10 +5137,29 @@ export const awaitSyncSettled = async (
     if (snapshot.status !== 'active') {
       return new Error('Revision backup stopped before it settled.');
     }
+    const scheduler = snapshot.children.sync?.getSnapshot();
     if (sync.state === 'failed') {
-      return new Error(sync.error ?? 'Revision backup failed before its retry could be recorded.');
+      /* A terminal remote refusal stays visible after its durable retry record
+       * lands. Local persistence failure is different: closing would lose work. */
+      if (scheduler?.matches({ failed: 'recording' })) {
+        return 'waiting';
+      }
+      if (scheduler?.context.queueWriteError !== undefined) {
+        return new Error(scheduler.context.queueWriteError);
+      }
+      return scheduler !== undefined && (scheduler.matches({ failed: 'settled' }) || scheduler.matches('manual'))
+        ? 'settled'
+        : new Error(sync.error ?? 'Revision backup failed before its retry could be recorded.');
     }
-    return settledSyncStates.has(sync.state) ? 'settled' : 'waiting';
+    if (scheduler?.matches({ conflicted: 'offering' })) {
+      return 'waiting';
+    }
+    if (settledSyncStates.has(sync.state)) {
+      return scheduler?.context.queueWriteError === undefined
+        ? 'settled'
+        : new Error(scheduler.context.queueWriteError);
+    }
+    return 'waiting';
   };
   const initial = inspect();
   if (initial instanceof Error) {
@@ -5045,22 +5169,40 @@ export const awaitSyncSettled = async (
     return;
   }
   const quiesced = Promise.withResolvers<void>();
-  const subscription = actor.subscribe(() => {
+  const control = transferControls.get(actor);
+  actor.send({ type: 'sync', event: { type: 'quiesce', phase: 'hold' } });
+  const inspectCompletion = (): void => {
     const outcome = inspect();
     if (outcome instanceof Error) {
       quiesced.reject(outcome);
     } else if (outcome === 'settled') {
       quiesced.resolve();
     }
-  });
+  };
+  const subscription = actor.subscribe(inspectCompletion);
+  const cancel = setTimeout(
+    () => {
+      if (control === undefined) {
+        quiesced.reject(new Error('Revision backup cannot cancel transports owned by a directly composed root.'));
+        return;
+      }
+      actor.send({ type: 'sync', event: { type: 'quiesce', phase: 'cancel' } });
+      control.cancel();
+    },
+    Math.max(0, timeoutMilliseconds - nestedBoundMarginMilliseconds),
+  );
   const bound = setTimeout(() => {
     quiesced.reject(new Error('Revision backup did not settle before the close deadline.'));
   }, timeoutMilliseconds);
+  inspectCompletion();
   try {
     await quiesced.promise;
   } finally {
     clearTimeout(bound);
+    clearTimeout(cancel);
     subscription.unsubscribe();
+    control?.release();
+    actor.send({ type: 'sync', event: { type: 'quiesce', phase: 'release' } });
   }
 };
 

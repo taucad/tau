@@ -13,7 +13,7 @@ const caseKind = 'supplier_invoice_total_mismatch';
 const unsignedIntegerString = z.string().regex(/^(0|[1-9][0-9]{0,38})$/u);
 
 /**
- * The confirmed provider invoice total for one provider credential and period.
+ * The confirmed provider invoice total for one provider and period.
  *
  * A local metered cost and a confirmed invoice cost stay separate, and
  * aggregate-only provider evidence stays aggregate. The total is therefore an
@@ -23,10 +23,9 @@ const unsignedIntegerString = z.string().regex(/^(0|[1-9][0-9]{0,38})$/u);
  */
 export const operatorSupplierInvoiceSchema = z
   .object({
-    version: z.literal('operator-supplier-invoice-total-v1'),
+    version: z.literal('operator-supplier-invoice-total-v2'),
     environment: financialEnvironmentSchema,
     provider: z.string().min(1).max(200),
-    credentialAccount: z.string().min(1).max(200),
     periodStart: z.iso.datetime({ offset: true }),
     periodEnd: z.iso.datetime({ offset: true }),
     currency: z.literal('usd'),
@@ -44,17 +43,17 @@ export type OperatorSupplierInvoice = z.infer<typeof operatorSupplierInvoiceSche
 
 export type SupplierInvoiceReconciliation = {
   readonly status: 'matched' | 'mismatched';
-  /** Sum of the supplier cost written on each settled operation's receipt for this provider credential. */
+  /** Sum of the supplier cost written on each settled operation's receipt for this provider. */
   readonly localEstimatePicoUsd: string;
   readonly confirmedTotalPicoUsd: string;
   readonly differencePicoUsd: string;
-  /** Terminal operations of this provider credential whose usage falls in the period. */
+  /** Terminal operations of this provider whose usage falls in the period. */
   readonly operations: number;
   /** Of those, operations whose receipt carries no supplier cost and says why (a cut stream or an unpriced dimension). */
   readonly unpricedOperations: number;
   /** Of those, receipts terminalized before migration 0049 added the supplier cost, so they carry neither column. */
   readonly legacyOperations: number;
-  /** Terminal operations in the period that name no provider or no invocation, so no credential can claim them. */
+  /** Terminal operations in the period that name no provider, so no provider can claim them. */
   readonly unattributedOperations: number;
 };
 
@@ -90,8 +89,7 @@ export class BillingSupplierReconciliationService {
     if (invoice.environment !== this.config.environment || periodStart >= periodEnd) {
       throw new ConflictException('invalid_supplier_invoice');
     }
-    const attributed = sql`${creditOperation.providerId} = ${invoice.provider}
-      AND ${creditOperation.invocation}->>'credentialAccount' = ${invoice.credentialAccount}`;
+    const attributed = eq(creditOperation.providerId, invoice.provider);
     // One bounded aggregate per operator-invoked period. The cost on each receipt is already
     // ceiled to pico-USD, so the meter carries at most one pico-USD of rounding per operation,
     // which belongs inside the operator's tolerance rather than in a reallocation.
@@ -106,9 +104,7 @@ export class BillingSupplierReconciliationService {
           sql`case when ${attributed} and ${creditOperation.supplierCostPicoUsd} is null
             and ${creditOperation.supplierCostUnpricedReason} is null then 1 end`,
         ),
-        unattributed: count(
-          sql`case when ${creditOperation.providerId} is null or ${creditOperation.invocation} is null then 1 end`,
-        ),
+        unattributed: count(sql`case when ${creditOperation.providerId} is null then 1 end`),
       })
       .from(creditOperation)
       .where(
@@ -122,7 +118,7 @@ export class BillingSupplierReconciliationService {
     const metered = BigInt(totals?.metered ?? '0');
     const confirmed = BigInt(invoice.confirmedTotalPicoUsd);
     const difference = metered > confirmed ? metered - confirmed : confirmed - metered;
-    const dedupeKey = `${invoice.provider}:${invoice.credentialAccount}:${invoice.periodStart}/${invoice.periodEnd}`;
+    const dedupeKey = `provider-period-v1:${invoice.provider}:${periodStart.toISOString()}/${periodEnd.toISOString()}`;
     const result: SupplierInvoiceReconciliation = {
       status: difference > BigInt(invoice.tolerancePicoUsd) ? 'mismatched' : 'matched',
       localEstimatePicoUsd: metered.toString(),
@@ -134,11 +130,10 @@ export class BillingSupplierReconciliationService {
       unattributedOperations: totals?.unattributed ?? 0,
     };
     const evidence = {
-      version: 'supplier-invoice-reconciliation-v2',
+      version: 'supplier-invoice-reconciliation-v3',
       provider: invoice.provider,
-      credentialAccount: invoice.credentialAccount,
-      periodStart: invoice.periodStart,
-      periodEnd: invoice.periodEnd,
+      periodStart: periodStart.toISOString(),
+      periodEnd: periodEnd.toISOString(),
       currency: invoice.currency,
       tolerancePicoUsd: invoice.tolerancePicoUsd,
       invoiceSource: invoice.source,

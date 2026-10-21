@@ -1,3 +1,5 @@
+import { convertLegacyProjectManifestBytes, parseProjectManifestBytes } from '@taucad/types';
+import type { ProjectManifestParseResult } from '@taucad/types';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { revisionId } from '@taucad/revisions/algorithms';
 import {
@@ -12,6 +14,16 @@ import { ENV } from '#environment.config.js';
 import { githubConnections } from '#lib/github-connections.js';
 import { githubNoreplyAuthor } from '#lib/github-project-binding.js';
 import { getRevisionSessionUser } from '#lib/revision-actor.js';
+
+/** Read a declaration for a new Git import; legacy identity never becomes the new local binding. */
+export const readLinkedGithubManifest = (bytes: Uint8Array<ArrayBuffer>): ProjectManifestParseResult => {
+  const parsed = parseProjectManifestBytes(bytes);
+  if (parsed.success) {
+    return parsed;
+  }
+  const converted = convertLegacyProjectManifestBytes(bytes);
+  return converted.success ? { success: true, data: converted.data.manifest } : parsed;
+};
 
 export type LinkedGithubImport = Readonly<{
   files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;

@@ -64,7 +64,7 @@ export const openTarget = async (target: string | undefined, cwd: string): Promi
  * @param url - What to open.
  * @returns Whether the opener started.
  */
-const launch = async (url: string): Promise<boolean> => {
+export const launch = async (url: string): Promise<boolean> => {
   const [command, ...prefix] =
     process.platform === 'darwin'
       ? ['open']

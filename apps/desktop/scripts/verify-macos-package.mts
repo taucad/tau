@@ -37,12 +37,16 @@ import { picogkRuntimeManifestSchema } from '@taucad/picogk';
 import type { ClosureReceipt } from '@taucad/runtime/preparation/node';
 
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
+import { desktopArtifactName } from '#shared/desktop-release.js';
 import { isQuickLookEnabled } from '#shared/quick-look.js';
+import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Shared install container verifier.
+import { verifyMacosDmg } from './macos-dmg.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts share their packaging contract.
-import { desktopPackageChannel, desktopPackageVersion } from './runtime-stage.mjs';
+import { desktopPackageChannel, desktopPackageVersion, prepareNativeClosures } from './runtime-stage.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
@@ -56,6 +60,7 @@ const extensionTemporaryRoot = resolve(tmpdir(), 'tau-quick-look');
 const {
   release,
   unsigned,
+  dmg,
   notarize: shouldNotarize,
 } = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
 const { computeClosureIntegrity, parsePluginDeployment, reverifyClosure, targetKey } =
@@ -483,17 +488,27 @@ Library.Go(1f, () =>
   rmSync(picoGkProbe, { recursive: true, force: true });
 };
 
-/** The native kernel closures this app ships for seeding the payload store (charter W6 phase 1). */
+/** A native kernel closure this app downloads on first use, prepared here as the app prepares it. */
 type ShippedClosure = { readonly root: string; readonly receipt: ClosureReceipt };
 
 /**
- * The sealed closures under `Contents/Resources/payloads/closures/sha256`: exactly one per dependency each native
- * package's `tau-plugin.json` declares for this target, each named by the pins it declares, every file matching its
- * receipt, and build123d's tree equal to its golden receipt (I9), so the app seeds the closure `tau prepare` would.
+ * The closures the app downloads on first use (desktop first-use download blueprint, DS-1): the app ships none under
+ * `Contents/Resources/payloads`, and preparing them here, from the same pins and seal steps as the app, yields exactly
+ * one per dependency each native package's `tau-plugin.json` declares for this target, each named by the pins it
+ * declares, every file matching its receipt, and build123d's tree equal to its golden receipt (I9).
+ * @param store - A scratch directory the closures are prepared in.
  * @returns The closure of each package.
  */
-const verifyNativeClosures = async (): Promise<ReadonlyMap<string, ShippedClosure>> => {
-  const closuresRoot = resolve(appPath, 'Contents/Resources/payloads/closures/sha256');
+const verifyNativeClosures = async (store: string): Promise<ReadonlyMap<string, ShippedClosure>> => {
+  if (existsSync(resolve(appPath, 'Contents/Resources/payloads'))) {
+    throw new Error('The app ships native kernel payloads; it downloads them on first use instead.');
+  }
+  /* From the package files the app ships, as main prepares them, so a missing worker fails here rather than on first use. */
+  const prepared = await prepareNativeClosures({
+    target: `darwin-${architecture}`,
+    workRoot: store,
+    deployments: preparableNativeDeployments({ packaged: true, resourcesPath: resolve(appPath, 'Contents/Resources') }),
+  });
   const expected = new Map<string, { readonly package: string; readonly dependency: string }>();
   for (const name of ['@taucad/smlibpy', '@taucad/build123d', '@taucad/picogk']) {
     const manifestPath = resolve(workspaceRoot, `packages/plugins/${name.slice('@taucad/'.length)}/tau-plugin.json`);
@@ -508,10 +523,10 @@ const verifyNativeClosures = async (): Promise<ReadonlyMap<string, ShippedClosur
       }
     }
   }
-  const shipped = existsSync(closuresRoot) ? readdirSync(closuresRoot).toSorted() : [];
+  const shipped = prepared.map(({ root }) => basename(root)).toSorted();
   if (JSON.stringify(shipped) !== JSON.stringify([...expected.keys()].toSorted())) {
     throw new Error(
-      `The app ships the closures ${shipped.join(', ') || 'none'}; the manifests pin ${[...expected.keys()].join(', ')} for darwin-${architecture}.`,
+      `Preparation sealed the closures ${shipped.join(', ') || 'none'}; the manifests pin ${[...expected.keys()].join(', ')} for darwin-${architecture}.`,
     );
   }
   const golden = JSON.parse(
@@ -519,18 +534,18 @@ const verifyNativeClosures = async (): Promise<ReadonlyMap<string, ShippedClosur
   ) as Readonly<Record<string, { readonly treeIntegrity: string }>>;
   const closures = new Map<string, ShippedClosure>();
   for (const [key, { package: name, dependency }] of expected) {
-    const root = resolve(closuresRoot, key);
+    const { root } = prepared.find((closure) => basename(closure.root) === key)!;
     const receipt = JSON.parse(readFileSync(resolve(root, 'receipt.json'), 'utf8')) as ClosureReceipt;
     // oxlint-disable-next-line no-await-in-loop -- seconds per closure, one at a time
     const damaged = await reverifyClosure(root, AbortSignal.timeout(600_000));
     if (receipt.package !== name || receipt.dependency !== dependency || damaged === undefined || damaged.length > 0) {
       throw new Error(
-        `The shipped ${name} closure differs from its receipt: ${(damaged ?? ['receipt.json']).slice(0, 5).join(', ')}`,
+        `The prepared ${name} closure differs from its receipt: ${(damaged ?? ['receipt.json']).slice(0, 5).join(', ')}`,
       );
     }
     if (name === '@taucad/build123d' && receipt.treeIntegrity !== golden[`darwin-${architecture}`]?.treeIntegrity) {
       throw new Error(
-        `The shipped build123d closure's treeIntegrity ${receipt.treeIntegrity} is not its golden receipt's.`,
+        `The prepared build123d closure's treeIntegrity ${receipt.treeIntegrity} is not its golden receipt's.`,
       );
     }
     closures.set(name, { root, receipt });
@@ -615,6 +630,29 @@ if (release) {
 if (shouldNotarize) {
   run('xcrun', ['stapler', 'validate', appPath]);
   run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
+}
+
+if (dmg) {
+  await verifyMacosDmg({
+    appPath,
+    dmgPath: resolve(
+      outputRoot,
+      desktopArtifactName({
+        kind: 'macos-dmg',
+        channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
+        version: desktopPackageVersion(
+          (JSON.parse(readFileSync(resolve(desktopRoot, 'package.json'), 'utf8')) as { version: string }).version,
+        ),
+        arch: architecture,
+      }),
+    ),
+    trust: {
+      signed: release || process.env['TAU_LOCAL_CODESIGN_IDENTITY'] !== undefined,
+      notarized: shouldNotarize,
+      developerId: release,
+      team: release ? process.env['APPLE_TEAM_ID'] : undefined,
+    },
+  });
 }
 
 /* The sandbox runtime's Linux and Windows helpers stay out of the macOS package (runtime-stage.mts). */
@@ -763,18 +801,12 @@ if (
 }
 
 let machObjectCount = 0;
-const payloadsRoot = resolve(appPath, 'Contents/Resources/payloads');
 for (const path of filesUnder(appPath)) {
   if (!isMachObject(path)) {
     continue;
   }
   const architectures = run('lipo', ['-archs', path]).trim().split(/\s+/u).sort();
-  /* A sealed closure ships its files as its receipt records them, so a universal file keeps every slice. */
-  if (
-    path.startsWith(`${payloadsRoot}/`)
-      ? !architectures.includes(machArchitecture)
-      : architectures.join(' ') !== machArchitecture
-  ) {
+  if (architectures.join(' ') !== machArchitecture) {
     throw new Error(`${path} is not ${machArchitecture}-only: ${architectures.join(', ')}`);
   }
   machObjectCount += 1;
@@ -793,7 +825,11 @@ for (const [fuse, enabled] of Object.entries(macosPackageFuses({ release }))) {
   }
 }
 
-const nativeClosures = await verifyNativeClosures();
+const closureStore = mkdtempSync(resolve(tmpdir(), 'tau-desktop-closures-'));
+process.once('exit', () => {
+  rmSync(closureStore, { recursive: true, force: true });
+});
+const nativeClosures = await verifyNativeClosures(closureStore);
 const picoGkClosure = nativeClosures.get('@taucad/picogk');
 if (picoGkClosure !== undefined) {
   const layer = resolve(picoGkClosure.root, 'tau-worker');
@@ -807,7 +843,7 @@ if (picoGkClosure !== undefined) {
   );
   probePicoGkWorker(
     [resolve(picoGkClosure.root, 'dotnet/dotnet'), resolve(layer, 'Tau.PicoGK.Worker.dll')],
-    'shipped PicoGK closure launched through the dotnet muxer',
+    'downloaded PicoGK closure launched through the dotnet muxer',
   );
 }
 if (architecture === 'arm64') {
@@ -833,7 +869,7 @@ if (!unsigned) {
 }
 const build123dClosure = nativeClosures.get('@taucad/build123d');
 if (build123dClosure === undefined) {
-  throw new Error('The app ships no build123d closure.');
+  throw new Error('Preparation sealed no build123d closure.');
 }
 const python = resolve(build123dClosure.root, 'python/bin/python3');
 run(

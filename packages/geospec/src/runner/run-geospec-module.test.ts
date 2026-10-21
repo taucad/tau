@@ -405,11 +405,10 @@ describe('runGeoSpecModule', () => {
   });
 
   it('should execute an authored module through the VM geospec builtin', async () => {
-    const result = await runModule(
+    const result = await runModule([
       [
-        [
-          'spec.geospec.ts',
-          `
+        'spec.geospec.ts',
+        `
         import { describe, it, test, expectGeo } from 'geospec';
         describe('suite', () => {
           it('passes', () => { expectGeo(undefined); });
@@ -418,10 +417,8 @@ describe('runGeoSpecModule', () => {
           describe.skip('skipped suite');
         });
       `,
-        ],
       ],
-      { matcherWallBackstop: 1000, forensic: false },
-    );
+    ]);
 
     expect(result.success).toBe(true);
     expect(result.success && result.passed).toBe(true);

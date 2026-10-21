@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_3mENsTKP0vxZya-qACIJr",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Angle profile",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [

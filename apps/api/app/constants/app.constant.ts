@@ -32,6 +32,9 @@ export const loggingRedactPaths = [
   'res.headers["set-cookie"]',
   'res.headers["set-auth-token"]',
   'req.body.token',
+  'req.body.device_code',
+  'req.body.userCode',
+  'res.body.access_token',
   'req.body.refreshToken',
   'req.body.email',
   'req.body.password',
@@ -41,6 +44,7 @@ export const redactionCensor = '**REDACTED**';
 
 // OAuth callbacks carry a single-use `code` and `state` in the query; request logs keep only these paths.
 export const loggingRedactQueryPaths: readonly RegExp[] = [
+  /^\/v1\/auth\/device\/?$/iu,
   /^\/v1\/github\/callback\/?$/iu,
   /^\/v1\/auth\/callback\/[^/]+\/?$/iu,
 ];

@@ -88,7 +88,7 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
             runtimePort,
             runtimeConfig: run.runtimeConfig,
           });
-          const unsubscribers = (['run-start', 'file-start', 'forensic', 'abort', 'close'] as const).map((type) =>
+          const unsubscribers = (['run-start', 'file-start', 'abort', 'close'] as const).map((type) =>
             current.runner!.on(type, (event) => {
               options.post({
                 type: 'geometry-event',

@@ -1,0 +1,22 @@
+// The plugin viewer page before it drew the shared stage, header actions and tab (viewer-page.tsx).
+import { FileCode2 } from 'lucide-react';
+import { PaneAction } from '@taucad/workbench-panes/components/pane-action';
+import { workbenchPanes } from '@taucad/workbench-panes/registry/pane-registry';
+import { useViewerComponentMenu } from '#app/sources/component-menu.jsx';
+
+export const PageHeader = ({ path, onOpenPane }: { path: string; onOpenPane: (pane: string) => void }) => (
+  <div className='flex h-9 items-center'>
+    <div title={path}>
+      <FileCode2 aria-hidden className='size-3.5' />
+      <span className='truncate'>{path}</span>
+    </div>
+    <PaneAction
+      icon={workbenchPanes.export.icon}
+      label='Export'
+      tooltip='Open exporter'
+      onClick={() => {
+        onOpenPane('export');
+      }}
+    />
+  </div>
+);

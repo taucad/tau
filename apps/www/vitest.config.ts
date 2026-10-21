@@ -5,5 +5,6 @@ export default defineConfig({
     name: 'www',
     environment: 'node',
     include: ['tests/**/*.test.{ts,tsx}'],
+    exclude: ['tests/**/*.browser.test.ts'],
   },
 });

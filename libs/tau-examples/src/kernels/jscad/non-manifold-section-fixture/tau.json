@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_fxgUGmBaByeuYKLLnCAi4",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Non-Manifold Section Fixture",
   "description": "A deterministic one-mesh, non-booleaned pair of touching solids for section-view cap recovery regression testing.",
   "tags": ["3d-printing", "parametric", "jscad"],

@@ -27,7 +27,7 @@ import { tauViewerReadLimit, tauViewerToolName } from '@taucad/mcp/viewer-protoc
 import { readModelRange, snapshotModelFile } from '#mcp-viewer-read.js';
 import type { ModelFileIdentity } from '#mcp-viewer-read.js';
 import { createMcpViewerSessions } from '#mcp-viewer-sessions.js';
-import { createDirectShare, createOpenInTauLink } from '#mcp-viewer-share.js';
+import { createDirectShare } from '#mcp-viewer-share.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import {
   viewerExportFormatsInputSchema,
@@ -47,6 +47,7 @@ import type {
   TauViewerShowResult,
 } from '@taucad/mcp/viewer-protocol';
 import { readGlbMechanism } from '@taucad/agent-tools/runtime';
+import { slugifyTargetFile } from '@taucad/chat/rpc';
 
 /** The page's own formats by extension; every other file is a CAD source the runtime renders (blueprint D3). */
 const drawnFormats: Readonly<Record<string, TauViewerMimeType>> = {
@@ -112,8 +113,12 @@ export type LocalMcpViewerOptions = Readonly<{
   snapshotSource?: SourceSnapshotter | undefined;
   /** The Export pane's handlers; without them the page offers no Export pane tools. */
   export?: McpViewerExport | undefined;
-  /** The project folder one call works in. */
-  rootOf(meta: Readonly<Record<string, unknown>> | undefined): string;
+  /** The folder a call works in when it names none and its conversation has shown no model: the server's start folder. */
+  workspaceRoot: string;
+  /**
+   * The project folder one call names, if any: Codex's thread folder on the agent's own calls, or the launcher's pin.
+   */
+  namedRoot(meta: Readonly<Record<string, unknown>> | undefined): string | undefined;
   /**
    * Render one CAD source to GLB under `.tau/artifacts` through the registry's `export_model`, with its CAD topology
    * wherever the route carries it, so the page can show the components and the mechanism.
@@ -145,6 +150,12 @@ export const loopbackHostTools: ReadonlySet<string> = new Set([
 /** A viewer port plus the loopback server it may have started. */
 export type LocalMcpViewer = TauMcpViewer &
   Readonly<{
+    /**
+     * The project folder one call works in: the folder it names, else the project of the model its conversation
+     * showed last, else the server's start folder. Codex names the folder only on the agent's own calls; a call the
+     * viewer page makes through the host carries the conversation alone.
+     */
+    rootOf(meta: Readonly<Record<string, unknown>> | undefined): string;
     /** Stop the loopback server, if one runs. */
     close(): Promise<void>;
   }>;
@@ -236,32 +247,60 @@ const renderableFiles = async (root: string): Promise<string[]> => {
   return found;
 };
 
-/** Where `export_model` writes a source's GLB: `.tau/artifacts/<toolCallId>__<stem>.glb`. */
+/** Where `export_model` writes each export: `.tau/artifacts/<toolCallId>__<slugged targetFile>-<format>/<file>`. */
 const artifactsFolder = '.tau/artifacts/';
 
 /**
- * The source a GLB was exported from, when the project says so plainly: a source beside it with the same name, or,
- * for an export under `.tau/artifacts`, the one renderable source in the project with that name. A GLB that matches
- * no source, or several, has none: it is shown as itself, without parameters.
+ * Whether an export folder under `.tau/artifacts` was written for a source, by the name `writeArtifactSet` gave it.
+ *
+ * @param folder - The export's folder name.
+ * @param source - A project-relative source path.
+ * @returns `true` when the folder ends with that source's slug and a format.
+ */
+const isExportFolderOf = (folder: string, source: string): boolean => {
+  const marker = `__${slugifyTargetFile(source)}-`;
+  const at = folder.lastIndexOf(marker);
+  return at > 0 && /^[^_]+$/u.test(folder.slice(at + marker.length));
+};
+
+/**
+ * The source a shown file was exported from, when the project says so plainly: for an export under
+ * `.tau/artifacts`, the one CAD source its folder was named for; otherwise, for a GLB, a source beside it with the
+ * same name. A file that matches no source, or several, has none.
  *
  * @param root - The project folder.
- * @param glbPath - The GLB's project-relative path.
+ * @param path - The shown file's project-relative path.
  * @returns The source's project-relative path.
  */
-const exportedSourceOf = async (root: string, glbPath: string): Promise<string | undefined> => {
-  const stem = basename(glbPath, extname(glbPath));
-  const isExport = glbPath.startsWith(artifactsFolder);
-  const wanted = isExport ? stem.replace(/^.*__/u, '') : stem;
-  const folder = isExport ? undefined : posix(join(glbPath, '..'));
+const exportedSourceOf = async (root: string, path: string): Promise<string | undefined> => {
+  const isExport = path.startsWith(artifactsFolder);
+  if (!isExport && extname(path).toLowerCase() !== '.glb') {
+    return undefined;
+  }
+  const folder = isExport ? path.slice(artifactsFolder.length).split('/')[0]! : posix(join(path, '..'));
+  const stem = basename(path, extname(path));
   const files = await renderableFiles(root);
   const candidates = files.filter(
-    (path) =>
-      sourceExtensions.has(extname(path).toLowerCase()) &&
-      basename(path, extname(path)) === wanted &&
-      (folder === undefined || posix(join(path, '..')) === folder),
+    (source) =>
+      sourceExtensions.has(extname(source).toLowerCase()) &&
+      source !== path &&
+      (isExport
+        ? isExportFolderOf(folder, source)
+        : basename(source, extname(source)) === stem && posix(join(source, '..')) === folder),
   );
   return candidates.length === 1 ? candidates[0] : undefined;
 };
+
+/**
+ * What `show_model` tells the agent about a shown export: the viewer draws that file only, and its source is what
+ * carries the current parameters and mechanism (LRP-10, D6).
+ *
+ * @param path - The shown file's project-relative path.
+ * @param source - The source it was exported from.
+ * @returns One sentence.
+ */
+const exportHint = (path: string, source: string): string =>
+  `${path} is an export of ${source}, drawn as exported. Call show_model with targetFile ${source} to show the source with its parameters and mechanism.`;
 
 /** The title a file shows under: its name without the extension. */
 const titleOf = (path: string): string => basename(path, extname(path));
@@ -351,6 +390,21 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     scope === undefined ? root : `${root}\0${scope}`;
   /** The conversation of each show call, for a page that names the call it was opened with. */
   const conversationByCall = new Map<string, string>();
+  /** The project of the model each conversation showed last, for the calls its pages make. */
+  const conversationRoot = new Map<string, string>();
+  const rootOf = (meta: Readonly<Record<string, unknown>> | undefined): string => {
+    const scope = conversationOf(meta);
+    return (
+      options.namedRoot(meta) ??
+      (scope === undefined ? undefined : conversationRoot.get(scope)) ??
+      options.workspaceRoot
+    );
+  };
+  /** The shown model a page's call names by `modelId`; its project is where the call runs. */
+  const linkedModel = (args: unknown): Shown | undefined => {
+    const modelId = typeof args === 'object' && args !== null ? (args as { modelId?: unknown }).modelId : undefined;
+    return typeof modelId === 'string' ? shown.get(modelId) : undefined;
+  };
   const token = randomBytes(24).toString('base64url');
   const sessions = createMcpViewerSessions(options.sessions);
   const workbench = createMcpViewerWorkbench(options.workbench);
@@ -435,13 +489,12 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     }
     const relativePath = posix(relative(root, absolute));
     const isDrawn = extname(absolute).toLowerCase() in drawnFormats;
+    /* An export names its source, so the agent hears that the page draws the file as exported (LRP-10). */
+    const exportedFrom = renderedFrom.get(absolute) ?? (await exportedSourceOf(root, relativePath));
     let described: Pick<TauViewerShowResult, 'model' | 'mechanism'> | TauMcpViewerFailure;
     if (isDrawn) {
       /* A GLB the agent exported still has its source's parameters, kinematics and exports (viewer parity V8). */
-      const sourceFile =
-        extname(absolute).toLowerCase() === '.glb'
-          ? (renderedFrom.get(absolute) ?? (await exportedSourceOf(root, relativePath)))
-          : undefined;
+      const sourceFile = extname(absolute).toLowerCase() === '.glb' ? exportedFrom : undefined;
       described = await describe(root, absolute, sourceFile);
     } else {
       const exists = await stat(absolute).then(
@@ -476,6 +529,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     const scope = conversationOf(callOptions.meta);
     lastShown.set(lastShownKey(root, scope), model.sourceFile ?? model.path);
     if (scope !== undefined) {
+      conversationRoot.set(scope, root);
       conversationByCall.set(callOptions.toolCallId, scope);
       for (const call of conversationByCall.keys()) {
         if (conversationByCall.size <= rememberedCalls) {
@@ -488,6 +542,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     const result: TauViewerShowResult = {
       model,
       ...(described.mechanism === undefined ? {} : { mechanism: described.mechanism }),
+      ...(exportedFrom === undefined ? {} : { hint: exportHint(relativePath, exportedFrom) }),
       ...(url === undefined ? {} : { viewerUrl: url }),
       ...(select === undefined || select.length === 0 ? {} : { select }),
     };
@@ -534,7 +589,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
         description,
         inputSchema,
         call: async (args: Readonly<Record<string, unknown>>, callOptions: TauMcpViewerCallOptions) =>
-          (await inRoot(options.rootOf(callOptions.meta), args, callOptions.signal)) as
+          (await inRoot(linkedModel(args)?.root ?? rootOf(callOptions.meta), args, callOptions.signal)) as
             | Readonly<Record<string, unknown>>
             | TauMcpViewerFailure,
       },
@@ -568,8 +623,9 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
   const port: LocalMcpViewer = {
     page: options.page,
     pageTools: pageTools.map(({ tool }) => tool),
+    rootOf,
     async show(input, callOptions) {
-      const root = options.rootOf(callOptions.meta);
+      const root = rootOf(callOptions.meta);
       const target =
         input.targetFile ??
         lastShown.get(lastShownKey(root, conversationOf(callOptions.meta))) ??
@@ -583,10 +639,10 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       return showPath(root, { path: target, select: input.select }, callOptions);
     },
     async open(input, callOptions) {
-      return showPath(options.rootOf(callOptions.meta), { path: input.path }, callOptions);
+      return showPath(rootOf(callOptions.meta), { path: input.path }, callOptions);
     },
     async browse(callOptions) {
-      return browseIn(options.rootOf(callOptions.meta));
+      return browseIn(rootOf(callOptions.meta));
     },
     async read(input) {
       const entry = shown.get(input.modelId);
@@ -634,14 +690,12 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       const entry = shown.get(input.modelId);
       return entry === undefined
         ? failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.')
-        : input.kind === 'github'
-          ? createOpenInTauLink({ root: entry.root, entryPath: entry.model.sourceFile ?? entry.model.path })
-          : createDirectShare({
-              root: entry.root,
-              entryPath: entry.model.sourceFile ?? entry.model.path,
-              snapshotSource: options.snapshotSource,
-              signal: callOptions.signal,
-            });
+        : createDirectShare({
+            root: entry.root,
+            entryPath: entry.model.sourceFile ?? entry.model.path,
+            snapshotSource: options.snapshotSource,
+            signal: callOptions.signal,
+          });
     },
     async close() {
       sessions.close();
@@ -672,10 +726,6 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
    * (the server's start folder is not the conversation's project), and the
    * model was already rendered. */
   const loopbackCall = { toolCallId: 'loopback', presentation: 'text' } as const;
-  const linkedModel = (args: unknown): Shown | undefined => {
-    const modelId = typeof args === 'object' && args !== null ? (args as { modelId?: unknown }).modelId : undefined;
-    return typeof modelId === 'string' ? shown.get(modelId) : undefined;
-  };
   const unlinked = (): TauMcpViewerFailure =>
     failure('UNKNOWN_MODEL', 'This link names no model this session showed; show it again.');
 

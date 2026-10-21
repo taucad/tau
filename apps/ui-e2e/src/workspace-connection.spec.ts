@@ -64,12 +64,18 @@ const seedWorkspace = async (workspaceName = fixture, count = projectCount): Pro
       const workspace = await root.getDirectoryHandle(workspaceName, { create: true });
       const seedProject = async (index: number): Promise<void> => {
         const directory = await workspace.getDirectoryHandle(`project-${index}`, { create: true });
+        const metadata = await directory.getDirectoryHandle('.tau', { create: true });
+        const identity = await metadata.getFileHandle('project.json', { create: true });
+        const identityWriter = await identity.createWritable();
+        await identityWriter.write(
+          JSON.stringify({ version: 1, projectId: `proj_${index.toString(36).padStart(21, '0')}` }),
+        );
+        await identityWriter.close();
         const manifest = await directory.getFileHandle('tau.json', { create: true });
         const writable = await manifest.createWritable();
         await writable.write(
           JSON.stringify({
-            $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-            id: `proj_${index.toString(36).padStart(21, '0')}`,
+            $schema: 'https://tau.new/schemas/tau-v1.json',
             name: `Connection Fixture ${index}`,
             description: '',
             tags: [],

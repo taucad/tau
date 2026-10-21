@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, renderHook, screen, within } from '@testing-library/react';
+import { fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { ContextMenu, ContextMenuTrigger } from '@taucad/ui/components/context-menu';
@@ -416,6 +417,37 @@ describe('model component action menu', () => {
       componentId,
       source: 'viewer',
     });
+  });
+
+  it("should name the chat item by the host's route and hand it the same reference", async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node, 'src/main.ts')}
+        node={node}
+        graphicsRef={createSpyGraphicsRef()}
+        unitId={unitId}
+        source='viewer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        actionButtonClassName='size-5'
+        opacity={1}
+        actions={{ ...allActions, addToChatLabel: 'Copy reference' }}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    expect(screen.queryByRole('menuitem', { name: 'Add to chat' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: 'Copy reference' }));
+
+    expect(mocks.addToChat).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: 'src/main.ts', componentId }),
+      expect.objectContaining({ node, unitId }),
+    );
   });
 
   it('should render the same action surface for coordinate-anchored viewer menus', async () => {
@@ -891,5 +923,127 @@ describe('model component action menu', () => {
 
     rerender({ target: { unitId: liveUnitId, componentId: 'missing' } });
     expect(result.current).toBeUndefined();
+  });
+});
+
+describe('the viewer menu from the keyboard (VUI-6)', () => {
+  /**
+   * The viewer menu as a host opens it from a key: open, on its first item, handing focus back to a canvas region.
+   *
+   * @returns The canvas region the menu returns focus to.
+   */
+  function renderKeyOpenedMenu(): HTMLElement {
+    const node = createNode();
+    const data = {
+      manifest: createManifest(node, 'src/main.ts'),
+      node,
+      graphicsRef: createSpyGraphicsRef(),
+      unitId,
+      source: 'viewer',
+      isFocused: false,
+      isIsolated: false,
+      hasHiddenComponents: false,
+      hasOpacityOverrides: false,
+      opacity: 1,
+      actions: allActions,
+    } as const;
+    function Host(): React.JSX.Element {
+      const [isOpen, setIsOpen] = useState(true);
+      return (
+        <>
+          <section aria-label='Model viewer' tabIndex={0} />
+          <ViewerModelComponentActionMenu
+            shouldFocusFirstItem
+            isOpen={isOpen}
+            point={{ clientX: 120, clientY: 160 }}
+            data={data}
+            returnFocusTo={() => screen.getByRole('region', { name: 'Model viewer' })}
+            onOpenChange={setIsOpen}
+          />
+        </>
+      );
+    }
+    render(<Host />);
+    return screen.getByRole('region', { name: 'Model viewer' });
+  }
+
+  it('should start on the first item and move focus between enabled items with the arrow keys, Home and End', async () => {
+    const user = userEvent.setup();
+    renderKeyOpenedMenu();
+    // The first item is the part's own row, which discloses its material, as in the Model pane's menus.
+    const partRow = screen.getByRole('menuitem', { name: /^Planetary housing/u });
+
+    expect(document.activeElement).toBe(partRow);
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Focus on part' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Add to chat' }));
+    await user.keyboard('{ArrowUp}');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Focus on part' }));
+    await user.keyboard('{End}');
+    // "Show all" and "Reset opacity" are disabled with nothing hidden and no overrides, so the last enabled item is
+    // "Isolate", and ArrowDown stays there.
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Isolate' }));
+    await user.keyboard('{ArrowDown}');
+    expect(document.activeElement).toBe(screen.getByRole('menuitem', { name: 'Isolate' }));
+    await user.keyboard('{Home}');
+    expect(document.activeElement).toBe(partRow);
+  });
+
+  it('should run the focused item with Enter', async () => {
+    const user = userEvent.setup();
+    renderKeyOpenedMenu();
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}');
+
+    expect(mocks.addToChat).toHaveBeenCalledWith(
+      expect.objectContaining({ filePath: 'src/main.ts', componentId }),
+      expect.objectContaining({ unitId }),
+    );
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  });
+
+  it('should close on Escape and hand focus back to the canvas region', async () => {
+    const user = userEvent.setup();
+    const region = renderKeyOpenedMenu();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(region);
+    });
+  });
+
+  it('should open the same items from a trigger that draws the part name', async () => {
+    const user = userEvent.setup();
+    const node = createNode();
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node, 'src/main.ts')}
+        node={node}
+        graphicsRef={createSpyGraphicsRef()}
+        unitId={unitId}
+        source='viewer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        actionButtonClassName='h-6'
+        opacity={1}
+        actions={allActions}
+      >
+        {node.name}
+      </ModelComponentActionDropdown>,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Actions for Planetary housing' });
+    expect(trigger).toHaveTextContent('Planetary housing');
+    trigger.focus();
+    await user.keyboard('{Enter}');
+
+    const menu = screen.getByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: 'Reveal in Explorer' })).toBeInTheDocument();
+    expect(within(menu).getByRole('menuitem', { name: 'Add to chat' })).toBeInTheDocument();
   });
 });

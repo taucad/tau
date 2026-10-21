@@ -43,8 +43,10 @@ test('native Fix with AI reads current rooted bytes after an external filesystem
     await selectChatModel(page, gatewayFixtureModelName);
     if (manualEnabled) {
       const root = join(session.homeRoot, slug);
-      const manifest = JSON.parse(await readFile(join(root, 'tau.json'), 'utf8')) as { id: string };
-      const checkoutRoot = join(session.homeRoot, '.tau/checkouts', manifest.id);
+      const identityRecord = JSON.parse(await readFile(join(root, '.tau/project.json'), 'utf8')) as {
+        projectId: string;
+      };
+      const checkoutRoot = join(session.homeRoot, '.tau/checkouts', identityRecord.projectId);
       const identity = await page.evaluate(installOneShotManualControls);
       const sourceSha256 = createHash('sha256')
         .update(await readFile(new URL('filesystem-projection-one-shot.spec.ts', import.meta.url)))

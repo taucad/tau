@@ -14,7 +14,6 @@ import { BillingPaymentsService } from '#api/billing/billing-payments.service.js
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { resolveBillingCollection } from '#api/billing/billing-collection.js';
-import { fundedGatewayProviderIds, isGatewayProviderConfigured } from '#api/providers/provider-gateway.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { EmailModule } from '#email/email.module.js';
 import { EmailService } from '#email/email.service.js';
@@ -264,18 +263,6 @@ const providerUpstreamFetch =
       inject: [ConfigService],
       useFactory(config: ConfigService<Environment, true>): CodeOwnedBillableModelQualificationResolver {
         registerBillableModelMeterContracts();
-        const accounts = config.get('BILLING_PROVIDER_ACCOUNTS', { infer: true });
-        const credentialAccounts = new Map(Object.entries(accounts));
-        // A funded route with a provider key but no billing account can never settle; refuse to start
-        // rather than advertise its models and answer every call with an error.
-        const unaccounted = fundedGatewayProviderIds.filter(
-          (provider) => isGatewayProviderConfigured(config, provider) && !credentialAccounts.has(provider),
-        );
-        if (unaccounted.length > 0) {
-          throw new Error(
-            `BILLING_PROVIDER_ACCOUNTS has no entry for configured provider(s): ${unaccounted.join(', ')}`,
-          );
-        }
         const upstream = config.get('TAU_LLM_PROVIDER_UPSTREAM_URL', { infer: true });
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         return new CodeOwnedBillableModelQualificationResolver({
@@ -283,13 +270,11 @@ const providerUpstreamFetch =
             config,
             upstream === undefined ? undefined : providerUpstreamFetch(upstream),
           ),
-          credentialAccounts,
           // Configuration alone selects exact counting; an unresolved environment supplies none.
           inputCounters: createBillableModelInputCounters({
             enabled: environment.success && config.get('BILLING_EXACT_INPUT_COUNT', { infer: true }),
             environment: environment.success ? environment.data : 'development',
             apiKey: config.get('OPENAI_API_KEY', { infer: true }),
-            credentialAccount: credentialAccounts.get('openai'),
           }),
           executionTimeout: config.get('BILLING_INVOCATION_DEADLINE', { infer: true }),
         });

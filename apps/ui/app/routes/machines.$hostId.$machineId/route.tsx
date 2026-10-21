@@ -1,3 +1,4 @@
+import { useDesktopScheme } from '#hooks/use-desktop-scheme.js';
 import { useFeature } from '#flags/use-feature.js';
 import { MachinesDisabled } from '#components/machines/machines-disabled.js';
 import { useCallback, useMemo } from 'react';
@@ -42,6 +43,7 @@ function ConnectedMachine({
   readonly hostId: string;
   readonly machineId: string;
 }): React.JSX.Element {
+  const scheme = useDesktopScheme();
   const directory = useMachineDirectory(client);
   const entry =
     directory.snapshot?.cursor.hostId === hostId
@@ -89,11 +91,11 @@ function ConnectedMachine({
         <CopyButton
           size='sm'
           variant='outline'
-          getText={() => machineDeepLink({ hostId, machineId })}
+          getText={() => machineDeepLink({ hostId, machineId }, scheme)}
           readyToCopyText='Copy machine link'
         />
-        <a className='text-xs break-all underline select-text' href={machineDeepLink({ hostId, machineId })}>
-          {machineDeepLink({ hostId, machineId })}
+        <a className='text-xs break-all underline select-text' href={machineDeepLink({ hostId, machineId }, scheme)}>
+          {machineDeepLink({ hostId, machineId }, scheme)}
         </a>
       </div>
       {directory.error ? (
@@ -144,6 +146,7 @@ function ConnectedMachine({
   );
 }
 export default function MachineRoute(): React.JSX.Element {
+  const scheme = useDesktopScheme();
   const { hostId = '', machineId = '' } = useParams();
   const machines = useMachinesFacet();
   const enabled = useFeature('machines');
@@ -169,7 +172,7 @@ export default function MachineRoute(): React.JSX.Element {
         description='This browser cannot connect to the machine host.'
       >
         <Button asChild>
-          <a href={machineDeepLink({ hostId, machineId })}>Open Tau desktop</a>
+          <a href={machineDeepLink({ hostId, machineId }, scheme)}>Open Tau desktop</a>
         </Button>
       </PanelEmptyState>
     </div>

@@ -392,7 +392,6 @@ assertTieredRoutesAreFunded(tieredValuations.keys());
 
 export type BillableModelQualificationDependencies = {
   adapters: ReadonlyMap<string, BillableModelProviderAdapter>;
-  credentialAccounts: ReadonlyMap<string, string>;
   /** Explicit route selection; production supplies none until count liability is qualified. */
   inputCounters?: ReadonlyMap<string, InputCountCapability | undefined>;
   /** Milliseconds. */
@@ -529,8 +528,7 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
       ? { version: 'joint-input-v1', quantity: maximumInput.toString() }
       : undefined;
     const adapter = this.dependencies.adapters.get(selected.routeId);
-    const credentialAccount = this.dependencies.credentialAccounts.get(selected.providerId);
-    if (!adapter || !credentialAccount) {
+    if (!adapter) {
       // Deployment fault, not a client one: the caller may retry once the provider is configured.
       throw new LlmGatewayError(
         HttpStatus.SERVICE_UNAVAILABLE,
@@ -572,7 +570,7 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
         contractVersion:
           selected.validThrough === undefined ? 'model-route-v1' : `model-route-v1:through:${selected.validThrough}`,
         supplierRatesValidUntil: selected.validThrough ?? null,
-        credentialAccount,
+
         supplierRates: pinned.rates.map((rateEntry) => ({
           dimension: rateEntry.dimension,
           tier: rateEntry.tier,

@@ -1,3 +1,4 @@
+import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import { randomUUID } from 'node:crypto';
@@ -15,7 +16,7 @@ import { installBrowserHost } from '#main/browser-host.js';
  * work — kernels, disk, the agent host — lives in the utilities.
  */
 
-import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { totalmem } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -109,8 +110,14 @@ import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
-import type { DesktopUpdater } from '#main/updater.js';
+import { initializeDesktopErrorReporting } from '#main/error-reporting.js';
+import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
+import { parseDesktopInstallation } from '#main/update-identity.js';
+import { z } from 'zod';
+import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
+import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
 import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
@@ -144,7 +151,7 @@ protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
 
 /* A packaged build ignores endpoint, renderer, client-root, executable-path and
  * `TAU_E2E_*` overrides unless it was packaged to honour them (ad-hoc and
- * unsigned e2e packages; never a release). Scrubbed before anything below
+ * certificate-signed or unsigned development packages; never a release). Scrubbed before anything below
  * reads `process.env`, so every later read and every child sees the result. */
 const environmentLocked = app.isPackaged && !packagedOverridesEnabled(app.getAppPath());
 if (environmentLocked) {
@@ -155,7 +162,10 @@ if (environmentLocked) {
 const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
 app.setName(desktopChannel === 'staging' ? 'Tau Staging' : 'Tau');
 if (desktopChannel === 'staging') {
-  app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  // Development acceptance runs may explicitly isolate their profile; releases retain the channel profile.
+  if (environmentLocked || !app.commandLine.hasSwitch('user-data-dir')) {
+    app.setPath('userData', join(app.getPath('appData'), 'Tau Staging'));
+  }
   app.setPath('sessionData', app.getPath('userData'));
 }
 const otaProbe = prepareOtaProbe({
@@ -166,6 +176,68 @@ const otaProbe = prepareOtaProbe({
   channel: desktopChannel,
   packaged: app.isPackaged,
 });
+const routeQualification = (() => {
+  if (
+    !process.argv.some((value) => value.startsWith('--tau-route-qualification=')) &&
+    !existsSync(join(app.getPath('userData'), 'route-qualification.state.json'))
+  ) {
+    return undefined;
+  }
+  if (otaProbe) {
+    throw new Error('Only one installed update probe may run at a time');
+  }
+  const metadata = z
+    .object({ version: z.string(), tauDesktop: z.object({ sourceCommit: z.string() }) })
+    .parse(JSON.parse(readFileSync(join(app.getAppPath(), 'package.json'), 'utf8')));
+  const installation =
+    process.platform === 'darwin'
+      ? undefined
+      : parseDesktopInstallation(
+          JSON.parse(readFileSync(join(process.resourcesPath, 'desktop-installation.json'), 'utf8')),
+          { platform: process.platform, arch: process.arch, channel: desktopChannel, version: app.getVersion() },
+        );
+  if (
+    metadata.version !== app.getVersion() ||
+    (installation && installation.sourceCommit !== metadata.tauDesktop.sourceCommit)
+  ) {
+    throw new Error('Qualification package and installed marker source differ');
+  }
+  const route = installation?.route ?? 'macos-zip';
+  const installedPath =
+    route === 'linux-appimage'
+      ? process.env['APPIMAGE']
+      : route === 'linux-apt'
+        ? desktopChannel === 'staging'
+          ? '/usr/bin/tau-staging'
+          : '/usr/bin/tau'
+        : process.platform === 'darwin'
+          ? app.getAppPath()
+          : process.execPath;
+  if (!installedPath) {
+    throw new Error('Qualification AppImage outer executable is missing');
+  }
+  return prepareRouteQualificationProbe({
+    arguments: process.argv,
+    profile: app.getPath('userData'),
+    defaultProfile: join(app.getPath('appData'), app.getName()),
+    packaged: app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+    channel: desktopChannel,
+    version: app.getVersion(),
+    sourceCommit: metadata.tauDesktop.sourceCommit,
+    route,
+    installedPath,
+    mirrorOrigin: process.env['TAU_DESKTOP_UPDATE_FEED'],
+  });
+})();
+if (routeQualification) {
+  process.env['TAU_DESKTOP_UPDATE_FEED'] = routeQualification.mirrorOrigin;
+  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
+  app.commandLine.appendSwitch('remote-debugging-port', '0');
+}
+// Crashpad may create profile files, so initialize only after the pristine probe admission above.
+initializeDesktopErrorReporting();
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* Packaged executable launches skip Playwright's readiness loader. Hold window
@@ -253,7 +325,8 @@ app.on('open-url', (event, url) => {
   receiveDeepLink(url);
 });
 /* Windows and Linux hand the link to the process as an argument instead. */
-const launchDeepLink = deepLinkArgument(process.argv.slice(1));
+const desktopScheme = process.platform !== 'darwin' && desktopChannel === 'staging' ? 'tau-staging:' : 'tau:';
+const launchDeepLink = deepLinkArgument(process.argv.slice(1), desktopScheme);
 if (launchDeepLink !== undefined) {
   receiveDeepLink(launchDeepLink);
 }
@@ -382,7 +455,7 @@ const askRendererToQuiesce = async (
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
 app.on('second-instance', (_event, argv) => {
   enqueueOpenFiles(argv.slice(1));
-  const link = deepLinkArgument(argv.slice(1));
+  const link = deepLinkArgument(argv.slice(1), desktopScheme);
   if (link !== undefined) {
     receiveDeepLink(link);
   }
@@ -395,12 +468,12 @@ process.title = 'Tau';
  * as the handler; on macOS `CFBundleURLTypes` in the packaged bundle is what
  * counts and this call is a no-op for a development run. */
 if (process.defaultApp && process.argv.length >= 2) {
-  app.setAsDefaultProtocolClient('tau', process.execPath, [resolve(process.argv[1]!)]);
+  app.setAsDefaultProtocolClient(desktopScheme.slice(0, -1), process.execPath, [resolve(process.argv[1]!)]);
 } else {
-  app.setAsDefaultProtocolClient('tau');
+  app.setAsDefaultProtocolClient(desktopScheme.slice(0, -1));
 }
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.taucad.tau');
+  app.setAppUserModelId(desktopChannel === 'staging' ? 'com.taucad.tau.staging' : 'com.taucad.tau');
 }
 
 process.on('uncaughtException', (error) => {
@@ -494,6 +567,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   let quitting = false;
 
   const auth = createAuthService({
+    callbackScheme: desktopScheme === 'tau-staging:' ? 'tau-staging' : 'tau',
     apiUrl: environment['TAU_API_URL']!.replace(/\/$/u, ''),
     frontendUrl: environment['TAU_FRONTEND_URL']!.replace(/\/$/u, ''),
     userDataPath: app.getPath('userData'),
@@ -761,13 +835,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * for it: the fork and its module graph are ~176 ms the person would
    * otherwise wait for with a project already on screen (W-L03-4). */
   runtimeMain.prewarm();
-  /* W6 (D10, D24): seed the shared payload store from the closures this app ships, then tell the kernel utilities
-   * which sealed closure each native kernel runs from; a utility composes its runtime once that frame arrives. The
-   * staging channel keeps its own store beside its own config. Collected at startup (D21). */
+  /* W6: tell the kernel utilities which sealed closure each prepared native kernel runs from; a utility composes its
+   * runtime once that frame arrives, and reads the store for every other kernel, which main prepares on first use
+   * (`nativeKernels` below). The staging channel keeps its own store beside its own config. Collected at startup (D21). */
+  const nativeStorePath = desktopChannel === 'staging' ? join(tauConfigDirectory, 'payloads') : defaultPayloadStore();
   const nativeStoreAbort = new AbortController();
   const nativeStore = startNativeStore({
-    store: desktopChannel === 'staging' ? join(tauConfigDirectory, 'payloads') : defaultPayloadStore(),
-    bundle: app.isPackaged ? join(process.resourcesPath, 'payloads') : undefined,
+    store: nativeStorePath,
     hostPath: app.getPath('exe'),
     environment: process.env,
     post: (frame) => {
@@ -777,6 +851,25 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log(level, event, detail);
     },
     signal: nativeStoreAbort.signal,
+  });
+  /* First-use download (W6 phase 2): the app ships no kernel closure, so a native kernel refuses with
+   * `KERNEL_NOT_PREPARED` until the viewer, or the agent's `prepare_kernel` in the services utility, asks main to
+   * prepare it here. Every window sees every download's progress. */
+  const nativeKernels = createDesktopKernelPreparer({
+    store: nativeStorePath,
+    hostPath: app.getPath('exe'),
+    environment: process.env,
+    deployments: preparableNativeDeployments({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+    onProgress: (progress) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && isTrustedSender(window.webContents.mainFrame, origins)) {
+          window.webContents.send(desktopNativeKernelChannels.progress, progress);
+        }
+      }
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
   });
 
   const geometry = createGeometryBroker({
@@ -846,6 +939,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     createChannel: () => new MessageChannelMain(),
     connectRuntime: (context) => runtimeMain.connect({ purpose: 'main-process-client', context }),
     connectGeometry: (input) => geometry.connectSuite(input),
+    prepareNativeKernel: async (kernel, onProgress) => nativeKernels.prepare(kernel, onProgress),
     revokeGeometry: () => {
       geometry.revokeUnauthorized();
     },
@@ -1081,6 +1175,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * @returns The descriptors, empty when discovery failed.
    */
   const discoverExternalAgents = async (): Promise<readonly ExternalAgentDescriptor[]> => {
+    const baseConfig = {
+      gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
+      systemPrompt: desktopAgentSystemPrompt,
+      tauApiUrl: environment['TAU_API_URL']!,
+      tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+    };
     try {
       const acp = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 1500 });
       log.log('info', 'agent-host.external-agents', {
@@ -1090,10 +1190,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       services.post({
         type: 'agentHost',
         config: {
-          gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
-          systemPrompt: desktopAgentSystemPrompt,
-          tauApiUrl: environment['TAU_API_URL']!,
-          tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+          ...baseConfig,
           externalAgents: acp.agents,
         },
       });
@@ -1103,6 +1200,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return externalAgentDescriptors(acp);
     } catch (error) {
       log.log('error', 'agent-host.external-agents-failed', { message: String(error) });
+      // Optional CLI discovery cannot leave the project's history and gateway unconfigured.
+      services.post({ type: 'agentHost', config: baseConfig });
       return [];
     }
   };
@@ -1165,6 +1264,19 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     const updater = await updaterReady.promise;
     await updater.download();
+  });
+
+  ipcMain.handle(desktopNativeKernelChannels.prepare, async (event, kernel: unknown) => {
+    if (!trusted(event.senderFrame) || typeof kernel !== 'string') {
+      throw new Error('Untrusted kernel preparation request');
+    }
+    return nativeKernels.prepare(kernel);
+  });
+  ipcMain.handle(desktopNativeKernelChannels.cancel, async (event, kernel: unknown) => {
+    if (!trusted(event.senderFrame) || typeof kernel !== 'string') {
+      throw new Error('Untrusted kernel preparation request');
+    }
+    nativeKernels.cancel(kernel);
   });
 
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
@@ -1615,7 +1727,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       return;
     }
     try {
-      const link = parseDeepLink(value);
+      const link = parseDeepLink(value, desktopScheme);
       if (link === undefined) {
         /* A custom scheme has no ownership proof, so a link that is not one of
          * the links the app publishes is another application's, or an attempt. */
@@ -1675,6 +1787,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
   };
 
   let shutdownComplete = false;
+  let installFailed = false;
+  let installBeforeExit: (() => void | Promise<void>) | undefined;
   const shutdownDriver = createCallbackLogic<EventObject, ShutdownDriverInput>(({ input, sendBack }) => {
     let active = true;
     const { context, stage } = input;
@@ -1815,13 +1929,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
           case 'recoveryReview': {
             const { response } = await dialog.showMessageBox({
               type: 'warning',
-              buttons: ['Retry recovery', 'Quit anyway'],
+              buttons: installFailed ? ['Retry recovery'] : ['Retry recovery', 'Quit anyway'],
               defaultId: 0,
               cancelId: 0,
               message: 'Tau is waiting to restore your workspace.',
               detail: context.error ?? 'Pending saves must settle before the workspace can reopen.',
             });
-            done(response === 1 ? 'force' : 'retry');
+            done(response === 1 && !installFailed ? 'force' : 'retry');
             break;
           }
           case 'cancelling':
@@ -1845,6 +1959,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
             break;
           }
           case 'exiting': {
+            const install = installBeforeExit;
+            installBeforeExit = undefined;
+            try {
+              await install?.();
+            } catch (error) {
+              installFailed = true;
+              throw error;
+            }
             try {
               showOpenFileImport = undefined;
               for (const controller of quickLookControllers.values()) {
@@ -1869,6 +1991,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
             zooProxyToken.dispose();
             nativeStoreAbort.abort();
             await nativeStore;
+            await nativeKernels.dispose();
             try {
               runtimeMain.dispose();
             } catch (error) {
@@ -1932,7 +2055,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     event.preventDefault();
     pendingQuit ??= quitWhenReady();
   });
-  if (otaProbe) {
+  let qualificationInstall = false;
+  if (otaProbe !== undefined || routeQualification !== undefined) {
     const window = BrowserWindow.getAllWindows()[0];
     if (!window) {
       throw new Error('OTA probe has no renderer window');
@@ -1954,10 +2078,35 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (!ready) {
       throw new Error('OTA renderer did not become ready with its save handler');
     }
-    otaProbe.complete();
+    otaProbe?.complete();
+    if (routeQualification) {
+      const command = await routeQualification.complete(() => ({
+        rendererPid: window.webContents.getOSProcessId(),
+        children: app.getAppMetrics().map((metric) => ({ pid: metric.pid, type: metric.type })),
+      }));
+      qualificationInstall = command.installForProbe;
+    }
   }
   /* Start only once the shared shutdown owner and normal application startup are ready. */
-  const updater = startDesktopUpdater({
+  const prepareToInstall = async (commit: () => void | Promise<void>): Promise<boolean> => {
+    if (shutdownComplete || shutdownPending !== undefined || installBeforeExit !== undefined) {
+      return false;
+    }
+    let committed = false;
+    installFailed = false;
+    installBeforeExit = async () => {
+      await commit();
+      committed = true;
+    };
+    try {
+      return (await prepareToQuit('restart')) && committed;
+    } finally {
+      installBeforeExit = undefined;
+      installFailed = false;
+    }
+  };
+  const updaterOptions: DesktopUpdaterOptions = {
+    prepareToInstall,
     platform: process.platform,
     arch: process.arch,
     currentVersion: app.getVersion(),
@@ -1967,6 +2116,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     autoUpdater,
     prepareToRestart: async () => prepareToQuit('restart'),
     ...(otaProbe ? { candidateTag: otaProbe.candidateTag } : {}),
+    ...(routeQualification?.candidateTag ? { candidateTag: routeQualification.candidateTag } : {}),
+    ...(routeQualification?.expectedUpdate ? { expectedUpdate: routeQualification.expectedUpdate } : {}),
     fetchJson: async (url) => {
       const response = await net.fetch(url);
       if (!response.ok) {
@@ -1974,7 +2125,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       }
       return response.json() as Promise<unknown>;
     },
-    installForProbe: otaProbe !== undefined,
+    installForProbe: otaProbe !== undefined || qualificationInstall,
     onState: (snapshot) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed() && trusted(window.webContents.mainFrame)) {
@@ -1986,7 +2137,54 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
-  });
+  };
+  let platformUpdater;
+  if (process.platform !== 'darwin' && app.isPackaged) {
+    const { startPlatformUpdater } = await import('#main/update-platform.js');
+    try {
+      platformUpdater = await startPlatformUpdater({
+        ...updaterOptions,
+        prepareToInstall,
+        confirmHealthy: async () => {
+          const deadline = Date.now() + 30_000;
+          while (Date.now() < deadline) {
+            const window = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
+            if (!window) {
+              return false;
+            }
+            // oxlint-disable-next-line no-await-in-loop -- Startup acknowledgement waits for the real renderer save registration.
+            const ready: unknown = await window.webContents.executeJavaScript(
+              'location.protocol === "app:" && location.host === "tau" && document.querySelector("main") !== null && globalThis.tau?.quit?.isReady() === true',
+            );
+            if (ready === true) {
+              return true;
+            }
+            // oxlint-disable-next-line no-await-in-loop -- Poll the renderer only until the bounded startup deadline.
+            await sleep(250);
+          }
+          return false;
+        },
+      });
+    } catch (error) {
+      log.log('error', 'updater.installed-route-invalid', { message: String(error) });
+      const { startPlatformUpdateController } = await import('#main/update-controller.js');
+      platformUpdater = startPlatformUpdateController(
+        { ...updaterOptions, prepareToInstall },
+        {
+          systemManaged: false,
+          check: async () => {
+            throw error;
+          },
+          download: async () => undefined,
+          prepare: async () => {
+            throw error;
+          },
+          finish: () => undefined,
+        },
+      );
+    }
+  }
+  const updater = platformUpdater ?? startDesktopUpdater(updaterOptions);
 
   updaterReady.resolve(updater);
   const checkForUpdates = async (): Promise<void> => {

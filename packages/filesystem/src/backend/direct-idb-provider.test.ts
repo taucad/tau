@@ -43,6 +43,56 @@ describe('DirectIdbProvider', () => {
   // ---------------------------------------------------------------------------
 
   describe('writeFile + readFile round-trip', () => {
+    it('should share one readonly transaction for concurrent reads without retaining stale bytes', async () => {
+      await provider.writeFile('tau.json', 'declaration');
+      await provider.writeFile('.tau/project.json', 'identity');
+      const transaction = vi.spyOn(IDBDatabase.prototype, 'transaction');
+
+      await expect(
+        Promise.all([provider.readFile('tau.json', 'utf8'), provider.readFile('.tau/project.json', 'utf8')]),
+      ).resolves.toEqual(['declaration', 'identity']);
+      expect(transaction).toHaveBeenCalledTimes(1);
+      expect(transaction).toHaveBeenCalledWith('files', 'readonly');
+
+      await provider.writeFile('tau.json', 'updated declaration');
+      await expect(provider.readFile('tau.json', 'utf8')).resolves.toBe('updated declaration');
+    });
+
+    it('should reject every aborted read and admit fresh reads after the failed transaction', async () => {
+      await provider.writeFile('first.txt', 'first');
+      await provider.writeFile('second.txt', 'second');
+      const { get } = IDBObjectStore.prototype;
+      const failure = vi
+        .spyOn(IDBObjectStore.prototype, 'get')
+        .mockImplementationOnce(function (this: IDBObjectStore, key) {
+          const request = get.call(this, key);
+          this.transaction.abort();
+          return request;
+        });
+      const results = await Promise.allSettled([
+        provider.readFile('first.txt', 'utf8'),
+        provider.readFile('second.txt', 'utf8'),
+      ]);
+      expect(results).toMatchObject([
+        { status: 'rejected', reason: { name: 'AbortError' } },
+        { status: 'rejected', reason: { name: 'InvalidStateError' } },
+      ]);
+      failure.mockRestore();
+      await expect(provider.readFile('first.txt', 'utf8')).resolves.toBe('first');
+      await expect(provider.readFile('second.txt', 'utf8')).resolves.toBe('second');
+    });
+
+    it('should finish admitted reads when closed and reject new reads until reopened', async () => {
+      await provider.writeFile('first.txt', 'first');
+      await provider.writeFile('second.txt', 'second');
+      const admitted = Promise.all([provider.readFile('first.txt', 'utf8'), provider.readFile('second.txt', 'utf8')]);
+      provider.dispose();
+      await expect(admitted).resolves.toEqual(['first', 'second']);
+      await expect(provider.readFile('first.txt')).rejects.toThrow('not initialized');
+      await provider.initialize();
+      await expect(provider.readFile('first.txt', 'utf8')).resolves.toBe('first');
+    });
+
     it('should round-trip a string via utf8 encoding', async () => {
       await provider.writeFile('hello.txt', 'world');
       const content = await provider.readFile('hello.txt', 'utf8');

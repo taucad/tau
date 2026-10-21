@@ -64,13 +64,14 @@ export function DesktopUpdateControl({
   const { phase } = snapshot;
   const busy = phase === 'saving' || phase === 'restarting' || phase === 'checking';
   const failed = phase === 'error' || phase === 'restart-blocked' || actionFailed;
-  const quiet = phase === 'current' || phase === 'checking' || phase === 'disabled';
+  const quiet = phase === 'current' || phase === 'checking' || phase === 'disabled' || phase === 'system-managed';
   if (quiet && !open) {
     return undefined;
   }
   const title = actionFailed
     ? 'Couldn’t complete the request'
     : {
+        'system-managed': 'Updates managed by APT',
         disabled: 'Updates unavailable',
         checking: 'Checking for updates',
         current: 'You’re up to date',
@@ -84,18 +85,23 @@ export function DesktopUpdateControl({
       }[phase];
   const detail = actionFailed
     ? 'Try again. Your current session is still open.'
-    : {
+    : (snapshot.detail ??
+      {
+        'system-managed': 'Your administrator manages updates through APT.',
         disabled: 'Automatic updates are disabled for this build.',
         checking: 'Looking for the latest version of Tau.',
         current: 'You have the latest version.',
         downloading: 'Keep working. We’ll let you know here when it’s ready.',
-        ready: 'Saves your work, then restarts. Otherwise, installs when you quit Tau.',
+        ready:
+          snapshot.installOnQuit === false
+            ? 'Saves your work, then restarts to install. Quitting normally leaves the update for later.'
+            : 'Saves your work, then restarts. Otherwise, installs when you quit Tau.',
         available: 'Download the latest version. Your session will stay open.',
         error: 'We’ll retry automatically. Your work is unaffected.',
         saving: 'Saving your work before restarting…',
         'restart-blocked': 'Tau stayed open. Finish saving or reviewing active machines, then try again.',
         restarting: 'Reopening your workspace…',
-      }[phase];
+      }[phase]);
   const Icon = failed
     ? ShieldAlert
     : busy || phase === 'downloading'
@@ -170,7 +176,9 @@ export function DesktopUpdateControl({
               {phase !== 'downloading' && phase !== 'disabled' ? (
                 <Button
                   size='xs'
-                  variant={phase === 'error' || phase === 'current' ? 'outline' : 'default'}
+                  variant={
+                    phase === 'error' || phase === 'current' || phase === 'system-managed' ? 'outline' : 'default'
+                  }
                   disabled={busy}
                   onClick={() => {
                     void act();
@@ -185,7 +193,7 @@ export function DesktopUpdateControl({
                         ? 'Retry restart'
                         : phase === 'available'
                           ? 'Download'
-                          : phase === 'current'
+                          : phase === 'current' || phase === 'system-managed'
                             ? 'Check again'
                             : 'Retry'}
                 </Button>

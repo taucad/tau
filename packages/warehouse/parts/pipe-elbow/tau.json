@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_zxUdyJ9KrzwkeCFpG1w9d",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Swept pipe elbow",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [

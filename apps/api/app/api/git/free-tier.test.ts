@@ -132,7 +132,7 @@ describe('free tier on the Hosted Remote (D16)', () => {
 describe('quota refusal (D17)', () => {
   const overflowing = [
     { oid: oid('a'), size: 4096 },
-    { oid: oid('b'), size: 600 * 1024 ** 2 },
+    { oid: oid('b'), size: 100 * 1024 ** 2 },
     { oid: oid('c'), size: 90 * 1024 ** 2 },
   ];
 

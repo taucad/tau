@@ -4,14 +4,15 @@ export type MacosPackageMode = {
   readonly release: boolean;
   readonly unsigned: boolean;
   readonly zip: boolean;
+  readonly dmg: boolean;
   readonly notarize: boolean;
 };
 
-const flags = new Set(['--release', '--unsigned', '--zip', '--skip-notarization']);
+const flags = new Set(['--release', '--unsigned', '--zip', '--dmg', '--skip-notarization']);
 
 export const parseMacosPackageMode = (arguments_: readonly string[], channel = 'production'): MacosPackageMode => {
   if (arguments_.some((argument) => !flags.has(argument))) {
-    throw new TypeError('Usage: <script> [--release | --unsigned] [--zip] [--skip-notarization]');
+    throw new TypeError('Usage: <script> [--release | --unsigned] [--zip] [--dmg] [--skip-notarization]');
   }
   const release = arguments_.includes('--release');
   const unsigned = arguments_.includes('--unsigned');
@@ -23,7 +24,13 @@ export const parseMacosPackageMode = (arguments_: readonly string[], channel = '
     throw new TypeError('--skip-notarization requires --release and the staging channel');
   }
   // The distribution archive is release output; any other mode writes it only on request.
-  return { release, unsigned, zip: release || arguments_.includes('--zip'), notarize: release && !skipNotarization };
+  return {
+    release,
+    unsigned,
+    zip: release || arguments_.includes('--zip'),
+    dmg: arguments_.includes('--dmg'),
+    notarize: release && !skipNotarization,
+  };
 };
 
 /**

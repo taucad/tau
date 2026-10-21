@@ -120,8 +120,12 @@ const collectDefaultPluginImportLocations = (sourceFile: ts.SourceFile): readonl
   return locations;
 };
 
+// Each scan parses every runtime and plugin source file: 3.7 s on a quiet machine, so the
+// default 5 s timeout fails it under the release gate's parallel load.
+const sourceScanTimeout = 30_000;
+
 describe('Tau-owned plugin export surface', () => {
-  it('should keep first-party plugin implementation modules named-only', () => {
+  it('should keep first-party plugin implementation modules named-only', { timeout: sourceScanTimeout }, () => {
     const defaultExports = pluginSourceRoots
       .flatMap((root) => collectSourceFiles(root))
       .flatMap((path) => collectDefaultExportLocations(readSourceFile(path)));
@@ -129,7 +133,7 @@ describe('Tau-owned plugin export surface', () => {
     expect(defaultExports).toEqual([]);
   });
 
-  it('should not default-import Tau-owned plugin modules from source files', () => {
+  it('should not default-import Tau-owned plugin modules from source files', { timeout: sourceScanTimeout }, () => {
     const defaultImports = sourceRoots
       .flatMap((root) => collectSourceFiles(root))
       .flatMap((path) => collectDefaultPluginImportLocations(readSourceFile(path)));

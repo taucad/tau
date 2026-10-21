@@ -62,7 +62,6 @@ it('uses the installed SDK for native text/image input and the actual UI stream 
   const owner = mock<ModelInvocationService>();
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map([['openai-gpt-5.6-luna', mock<BillableModelProviderAdapter>()]]),
-    credentialAccounts: new Map([['openai', 'fixture']]),
     executionTimeout: 1000,
   });
   let captured: ModelInvocationIntent | undefined;

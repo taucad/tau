@@ -1,4 +1,4 @@
-import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
+import type { Project, ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 
@@ -17,6 +17,7 @@ export type ProjectLibraryState = {
  * is absent only when the owning workspace row has vanished mid-listing.
  */
 export type ProjectLibraryEntry = {
+  readonly projectId: string;
   readonly manifest: ProjectManifest;
   readonly library: ProjectLibraryState;
   readonly locator: ProjectLocator;
@@ -27,7 +28,7 @@ export type ProjectLibraryEntry = {
 };
 
 /** Flat presentation projection used by local library and recents components. */
-export type ProjectListItem = ProjectManifest & {
+export type ProjectListItem = Project & {
   readonly lastActivityAt: number;
   readonly deletedAt?: number;
   readonly locator: ProjectLocator;
@@ -39,6 +40,7 @@ export type ProjectListItem = ProjectManifest & {
 
 export const projectLibraryEntryToListItem = (entry: ProjectLibraryEntry): ProjectListItem => ({
   ...entry.manifest,
+  id: entry.projectId,
   lastActivityAt: entry.library.lastActivityAt,
   ...(entry.library.deletedAt === undefined ? {} : { deletedAt: entry.library.deletedAt }),
   locator: entry.locator,

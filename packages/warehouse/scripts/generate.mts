@@ -1,5 +1,4 @@
 /* oxlint-disable eslint/no-await-in-loop -- Process one project at a time to bound native memory and preserve deterministic corpus ordering. */
-import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { readDefinitions, packageRoot } from '#scripts/definitions.js';
@@ -76,10 +75,8 @@ const catalog: string[] = [];
 for (const { part, directory } of entries) {
   assertDefinition(part);
   const root = join(packageRoot, 'parts', part.id);
-  const projectId = 'proj_' + createHash('sha256').update(`warehouse.${part.id}`).digest('base64url').slice(0, 21);
   const manifest = {
-    $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-    id: projectId,
+    $schema: 'https://tau.new/schemas/tau-v1.json',
     name: part.name,
     description: part.description,
     tags: [part.category, 'parametric', 'replicad', 'warehouse'],

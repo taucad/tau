@@ -227,3 +227,17 @@ describe('machine identity links', () => {
     expect(parseDeepLink(value)).toBeUndefined();
   });
 });
+
+describe('channel-specific desktop protocols', () => {
+  it('accepts staging links only for the staging owner while preserving tau defaults', () => {
+    const staging = 'tau-staging://auth/callback?ott=token&state=abcdefgh';
+    expect(parseDeepLink(staging)).toBeUndefined();
+    expect(parseDeepLink(staging, 'tau-staging:')).toEqual({
+      kind: 'auth-callback',
+      oneTimeToken: 'token',
+      state: 'abcdefgh',
+    });
+    expect(parseDeepLink(staging.replace('tau-staging:', 'tau:'), 'tau-staging:')).toBeUndefined();
+    expect(deepLinkArgument(['tau://machines', staging], 'tau-staging:')).toBe(staging);
+  });
+});

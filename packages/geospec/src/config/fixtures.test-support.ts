@@ -15,7 +15,6 @@ export const createConfigFixture = async (extensions: readonly string[] = []): P
   await mkdir(cache, { recursive: true });
   const projectPath = await mkdtemp(join(cache, 'ordinary-'));
   await writeFile(join(projectPath, 'package.json'), '{"type":"module"}\n');
-  await copyFile(new URL('__fixtures__/tau.json', import.meta.url), join(projectPath, 'tau.json'));
   await Promise.all(
     extensions.map(async (extension) => {
       const name = `geospec.config.${extension}`;

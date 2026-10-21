@@ -6,8 +6,13 @@ import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
-import { ModelComponentActionDropdown } from '#components/geometry/cad/model-component-action-menu.js';
-import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
+import type { ModelComponentActionMenuData } from '#components/geometry/cad/model-component-action-menu.js';
+import {
+  ModelComponentActionDropdown,
+  useModelComponentMenuActions,
+} from '#components/geometry/cad/model-component-action-menu.js';
+import { ViewerModelComponentActionMenu as PackageViewerModelComponentActionMenu } from '@taucad/workbench-panes/component-menu/viewer-component-action-menu';
+import type { ViewerModelComponentActionMenuPoint } from '@taucad/workbench-panes/component-menu/viewer-component-action-menu';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 
 const mocks = vi.hoisted(() => ({
@@ -108,6 +113,20 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+/** The viewer's coordinate-anchored part menu with the app's verbs, as the viewer's shared part menu draws it. */
+function ViewerModelComponentActionMenu({
+  data,
+  ...properties
+}: {
+  readonly data: ModelComponentActionMenuData | undefined;
+  readonly point: ViewerModelComponentActionMenuPoint | undefined;
+  readonly isOpen: boolean;
+  readonly onOpenChange: (isOpen: boolean) => void;
+}): React.JSX.Element {
+  const actions = useModelComponentMenuActions();
+  return <PackageViewerModelComponentActionMenu {...properties} data={data ? { ...data, actions } : undefined} />;
+}
 
 describe('model component action menu (app adapter)', () => {
   it('heads the menu with the material swatch only and opens a part preview from the first item', async () => {

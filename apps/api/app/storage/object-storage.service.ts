@@ -1,3 +1,4 @@
+import { addAbortSignal } from 'node:stream';
 import type { Readable } from 'node:stream';
 import {
   AbortMultipartUploadCommand,
@@ -92,8 +93,9 @@ export type ObjectStorageServiceContract = {
     key: string;
     range?: { start: number; end: number };
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ body: Readable; contentType: string; etag: string; contentLength?: number }>;
-  headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<
+  headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier; signal?: AbortSignal }): Promise<
     | {
         contentType: string;
         size: number;
@@ -387,6 +389,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     key: string;
     range?: { start: number; end: number };
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ body: Readable; contentType: string; etag: string; contentLength?: number }> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
@@ -396,21 +399,31 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         ...(args.range ? { Range: `bytes=${String(args.range.start)}-${String(args.range.end)}` } : {}),
       }),
+      { abortSignal: args.signal },
     );
 
     if (!response.Body || !(typeof response.Body === 'object' && 'pipe' in response.Body)) {
       throw new Error('S3 GetObject returned empty body');
     }
 
+    const body = response.Body as Readable;
+    if (args.signal !== undefined) {
+      addAbortSignal(args.signal, body);
+    }
     return {
-      body: response.Body as Readable,
+      body,
       contentType: response.ContentType ?? 'application/octet-stream',
       etag: response.ETag?.replaceAll('"', '') ?? '',
       ...(response.ContentLength === undefined ? {} : { contentLength: Number(response.ContentLength) }),
     };
   }
 
-  public async headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<
+  public async headBlob(args: {
+    namespace: StorageNamespace;
+    key: string;
+    tier?: StorageTier;
+    signal?: AbortSignal;
+  }): Promise<
     | {
         contentType: string;
         size: number;
@@ -427,6 +440,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           Bucket: this.resolveBucket(args.tier),
           Key: resolvedKey,
         }),
+        { abortSignal: args.signal },
       );
 
       return {
@@ -825,7 +839,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   }
 
   private async presign(command: unknown, expiresIn: number): Promise<string> {
-    return getSignedUrl(this.signingClient, command as Parameters<typeof getSignedUrl>[1], { expiresIn });
+    return getSignedUrl(this.signingClient, command as Parameters<typeof getSignedUrl>[1], {
+      expiresIn,
+      // R2 validates the checksum header, but ignores a query-hoisted checksum.
+      // Signing the header also prevents a still-valid URL from replacing verified bytes.
+      unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+    });
   }
 
   /**

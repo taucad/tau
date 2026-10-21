@@ -92,7 +92,6 @@ const adapters = createBillableModelProviderAdapters(transportConfig, async (_ur
 );
 const resolver = new CodeOwnedBillableModelQualificationResolver({
   adapters,
-  credentialAccounts: new Map([['openai', 'fixture-openai-account']]),
   executionTimeout: 60_000,
   ...(command.exactCount
     ? {
@@ -102,7 +101,6 @@ const resolver = new CodeOwnedBillableModelQualificationResolver({
             {
               qualification: 'controlled-local-zero',
               environment: 'development',
-              credentialAccount: 'fixture-openai-account',
               sourceRevision: 'c05-controlled-child',
               url: `${command.providerUrl}/v1/responses/input_tokens`,
             },

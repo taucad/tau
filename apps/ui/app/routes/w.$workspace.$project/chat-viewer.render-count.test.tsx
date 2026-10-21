@@ -11,6 +11,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { createActor, setup, types } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, SnapshotFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
@@ -211,7 +212,11 @@ function renderViewer(): { readonly cad: ActorRefFrom<typeof cadLikeMachine> } {
   const cad = createActor(cadLikeMachine).start();
   actors.cad = cad as unknown as ActorRefFrom<typeof cadMachine>;
   actors.graphics = createActor(graphicsLikeMachine).start();
-  render(<ChatViewer viewId='view-1' entryPath={entryPath} panelApi={panelApi} />);
+  render(
+    <KeyboardProvider>
+      <ChatViewer viewId='view-1' entryPath={entryPath} panelApi={panelApi} />
+    </KeyboardProvider>,
+  );
   expect(screen.getByTestId('cad-viewer-canvas')).toBeInTheDocument();
   expect(renders.canvas).toEqual([
     { hash: undefined, revision: 0 },

@@ -61,11 +61,11 @@ export type SyncMachineInput = Readonly<{
   maxRetryMilliseconds?: number;
   /** Review 3 F16's 3 s: how long the row says `Checking…`. */
   pullRenderMilliseconds?: number;
-  /** Review 3 F16's 10 s: when the pull is abandoned outright. */
+  /** Active background pull deadline. Defaults to 15 minutes. */
   pullDeadlineMilliseconds?: number;
   /** Whether this host starts believing it is online. Defaults to `true`. */
   online?: boolean;
-  /** How long one push may hold the network before it is abandoned and retried (A12). Defaults to 60 s. */
+  /** How long one push may hold the network before it is abandoned and retried (A12). Defaults to 15 minutes. */
   pushDeadlineMilliseconds?: number;
 }>;
 
@@ -104,6 +104,8 @@ type SyncMachineContextFields = Readonly<{
   retryAfterMilliseconds: number | undefined;
   /** Whether the last settle was retryable, fatal, or fine. */
   failure: 'none' | 'retry' | 'fatal';
+  /** A local retry-record write failed; only a successful write clears it. */
+  queueWriteError: string | undefined;
   /** Set while the open pull is still inside its first window (F16's 3 s). */
   withinPullWindow: boolean;
   /** Memory-only acknowledgement, rebuilt by a successful pull after restart. */
@@ -155,6 +157,10 @@ type SyncMachineContextFields = Readonly<{
    * and the state that finishes the current effect fetches for it.
    */
   pendingFetch: boolean;
+  /** Holds new background work while the host waits for close. */
+  quiescing: boolean;
+  /** Transport cancellation was requested; local reconciliation still completes. */
+  transportStopped: boolean;
   /** A lease retired since the current pull started, so a hold it hit may already be gone (rule 9). */
   leaseSettled: boolean;
   /** The checkout an apply left alone, and which the `merge` cut or the lease wait is about (D12). */
@@ -246,6 +252,8 @@ export type SyncMachineEvent =
   | Readonly<{ type: 'open' }>
   /** The host is going away: flush while there is still a `then` to run. */
   | Readonly<{ type: 'close' }>
+  /** Hold background triggers, then cancel transports, or release a refused close. */
+  | Readonly<{ type: 'quiesce'; phase: 'hold' | 'cancel' | 'release' }>
   | Readonly<{ type: 'remoteConnected'; remote: string; automaticPush?: boolean }>
   | Readonly<{ type: 'remoteDisconnected' }>
   | Readonly<{ type: 'online' }>
@@ -483,19 +491,16 @@ const defaultMaxRetryMilliseconds = 300_000;
 const defaultPullRenderMilliseconds = 3000;
 
 /**
- * When the open pull is abandoned outright: policy rule 9's 10 s.
- *
- * The innermost bound of the close path. Rule 9 nests every lifecycle bound
- * strictly inside the wait that awaits it, so the close-path sync quiesce in
- * `revision-effects.ts` is derived from this value and exceeds it; otherwise a
- * pull outlives the wait above it and the person reads that wait's generic
- * sentence instead of the pull's own (L2-F9).
+ * The finite budget for an active background pull: policy rule 9's 15 minutes.
+ * Local rendering remains bounded to 3 seconds. Close cancels active network
+ * work within its separate quiesce budget; it never waits this long.
  *
  * @public
  */
-export const syncPullDeadlineMilliseconds = 10_000;
+export const syncPullDeadlineMilliseconds = 15 * 60_000;
 
-const defaultPushDeadlineMilliseconds = 60_000;
+const defaultPushDeadlineMilliseconds = syncPullDeadlineMilliseconds;
+const mintDeadlineMilliseconds = 10_000;
 
 /*
  * The refusals no amount of waiting will satisfy (N2).
@@ -869,6 +874,13 @@ const answerPushes = (
   }
 };
 
+/* A close cannot promise a new push. Answer the request without retaining a
+ * wake-up that could restart transport as the successful close releases its hold. */
+const holdPushRequest = (context: SyncMachineContext, event: Readonly<{ pushId?: string }>, enq: SyncEnqueue) => {
+  answerPushes(context, enq, { pushIds: event.pushId === undefined ? [] : [event.pushId], outcome: 'queued' });
+  return {};
+};
+
 /*
  * A push settled into a state that pushes again on its own (`backedUp`, `queued`,
  * `awaitingLease`): answer what it carried, and carry the requests that arrived during it.
@@ -889,15 +901,18 @@ const carry = (context: SyncMachineContext, event: Readonly<{ pushId?: string }>
   event.pushId === undefined ? {} : { pushIds: [...context.pushIds, event.pushId] };
 
 /* `pushing` and `recording` hold a push built before this request: the push after it answers (W15 F1). */
-const deferPush = ({
-  context,
-  event,
-}: Readonly<{ context: SyncMachineContext; event: Readonly<{ pushId?: string }> }>) => ({
-  context: {
-    pendingMint: true,
-    nextPushIds: event.pushId === undefined ? context.nextPushIds : [...context.nextPushIds, event.pushId],
-  },
-});
+const deferPush = (
+  { context, event }: Readonly<{ context: SyncMachineContext; event: Readonly<{ pushId?: string }> }>,
+  enq: SyncEnqueue,
+) =>
+  context.quiescing
+    ? holdPushRequest(context, event, enq)
+    : {
+        context: {
+          pendingMint: true,
+          nextPushIds: event.pushId === undefined ? context.nextPushIds : [...context.nextPushIds, event.pushId],
+        },
+      };
 
 /**
  * A conflict line the remote refused or could not take; the line stays owed or offered (MC-R8: a named effect).
@@ -1021,6 +1036,27 @@ const thrownOutcome = (error: unknown): SyncAttemptOutcome => {
   return why === 'offline' ? 'offline' : why === 'quota' ? 'quota_refused' : isFatal(error) ? 'error' : 'retry';
 };
 
+/* A cancelled pull may already have applied linked checkouts. Preserve that
+ * result and write the retry record only after its effect returns. */
+const closeRetry = (context: SyncMachineContext): SyncContextPatch => {
+  const why = 'Closing stopped the transfer; this project will try again.';
+  return {
+    pendingFetch: false,
+    pendingFlush: false,
+    pendingMint: false,
+    failure: 'retry',
+    error: why,
+    reason: 'unknown',
+    pending: nextPending({
+      pending: context.pending,
+      outcomes: throwFailures(context, why),
+      leases: context.leases,
+      remote: context.remote,
+      now: Date.now(),
+    }),
+  };
+};
+
 const pullFailed = (error: unknown) => {
   const failure: SyncContextPatch = {
     chats: 'failed',
@@ -1124,6 +1160,7 @@ const syncMachineDefinition = setup({
       ),
     pullRenderWindow: ({ context }) => context.pullRenderMilliseconds,
     pullDeadline: ({ context }) => context.pullDeadlineMilliseconds,
+    mintDeadline: () => mintDeadlineMilliseconds,
     /* A12: the network edge of a push, not a peer bound (RM-R3). */
     pushDeadline: ({ context }) => context.pushDeadlineMilliseconds,
   },
@@ -1135,7 +1172,7 @@ const syncMachineDefinition = setup({
   },
 }).createMachine({
   id: 'sync',
-  version: '3',
+  version: '6',
   context: ({ input }) => ({
     projectId: input.projectId,
     branch: input.branch ?? defaultBranch,
@@ -1152,6 +1189,7 @@ const syncMachineDefinition = setup({
     attempt: 0,
     retryAfterMilliseconds: undefined,
     failure: 'none',
+    queueWriteError: undefined,
     withinPullWindow: false,
     hasAppliedRemote: false,
     chats: 'unknown',
@@ -1163,6 +1201,8 @@ const syncMachineDefinition = setup({
     ahead: false,
     conflictRef: undefined,
     pendingFetch: false,
+    quiescing: false,
+    transportStopped: false,
     leaseSettled: false,
     heldCheckoutId: undefined,
     mintRepulled: false,
@@ -1192,6 +1232,22 @@ const syncMachineDefinition = setup({
   /* Connectivity and the remote are facts about the host, not about which state
    * the scheduler is in, so they are handled once at the root. */
   on: {
+    quiesce: ({ context, event, value }) => {
+      if (event.phase === 'release') {
+        return {
+          ...(value === 'queued' ? { target: '.queued', reenter: true } : {}),
+          context: { quiescing: false, transportStopped: false, pendingFetch: false, pendingFlush: false },
+        };
+      }
+      return {
+        context: {
+          quiescing: true,
+          transportStopped: event.phase === 'cancel' || context.transportStopped,
+          pendingFetch: false,
+          pendingFlush: false,
+        },
+      };
+    },
     online: { context: { online: true } },
     offline: { context: { online: false } },
     /* The fallback, not an override: a state with its own `revisionMinted`
@@ -1202,7 +1258,7 @@ const syncMachineDefinition = setup({
     recordsChanged: { context: { pendingMint: true } },
     /* The same fallback for a remote move (D13): a busy state remembers it and
      * the state that finishes fetches. The idle states fetch at once. */
-    remoteMoved: { context: { pendingFetch: true } },
+    remoteMoved: { context: ({ context }) => ({ pendingFetch: !context.quiescing }) },
     /* The stream is only the wake-up channel (RV-W5b F5): a refusal of it is
      * not a refusal of the repository — a repository-scoped credential is
      * refused on every non-git route by design (I10). So it pulls, as a move
@@ -1234,7 +1290,8 @@ const syncMachineDefinition = setup({
      * those states answers it: `opening` by pushing (or by the settle its
      * failure edges make), `noRemote` at once. `pushing` and `recording`
      * defer it to the next push instead (W15 F1). */
-    syncNow: { context: ({ context, event }) => carry(context, event) },
+    syncNow: ({ context, event }, enq) =>
+      context.quiescing ? holdPushRequest(context, event, enq) : { context: carry(context, event) },
     pushNow: ({ context, event }, enq) => {
       answerPushes(context, enq, { pushIds: [event.pushId], outcome: 'failed' });
       return {};
@@ -1314,19 +1371,15 @@ const syncMachineDefinition = setup({
     pushFailed: {
       target: '.recording',
       context: ({ context, event }) => ({
+        pendingFetch: false,
+        pendingFlush: false,
+        pendingMint: false,
         failure: 'retry',
         error: event.reason,
         reason: 'unknown',
         pending: nextPending({
           pending: context.pending,
-          outcomes: [
-            {
-              name: historyRefOf(context.branch),
-              status: 'rejected',
-              head: context.localHead,
-              reason: event.reason,
-            },
-          ],
+          outcomes: throwFailures(context, event.reason),
           leases: context.leases,
           remote: context.remote,
           now: Date.now(),
@@ -1390,6 +1443,9 @@ const syncMachineDefinition = setup({
       on: {
         /* With no remote to push to, the request is answered at once (RM-R11). */
         syncNow: ({ context, event }, enq) => {
+          if (context.quiescing) {
+            return holdPushRequest(context, event, enq);
+          }
           if (event.remote !== undefined) {
             return { target: 'pushing', context: { ...carry(context, event), remote: event.remote } };
           }
@@ -1516,7 +1572,9 @@ const syncMachineDefinition = setup({
             },
             onError: ({ context, event }, enq) => {
               reportPullAttempt(context, enq, thrownOutcome(event.error));
-              return pullFailed(event.error);
+              return context.transportStopped
+                ? { target: '#sync.recording', context: closeRetry(context) }
+                : pullFailed(event.error);
             },
           },
         },
@@ -1564,6 +1622,10 @@ const syncMachineDefinition = setup({
                   into: event.output.into,
                   paths: event.output.paths,
                 });
+              } else if (context.parentRef !== undefined) {
+                /* The same line can now contain another decision (D14). Re-read
+                 * its records without repeating D55's user-facing announcement. */
+                enq.sendTo(context.parentRef, { type: 'conflictsChanged' });
               }
               return { target: '#sync.conflicted', context: conflict };
             },
@@ -1610,6 +1672,9 @@ const syncMachineDefinition = setup({
         done: { type: 'final' },
       },
       onDone: ({ context, guards }) => {
+        if (context.transportStopped) {
+          return { target: 'recording', context: closeRetry(context) };
+        }
         if (!context.automaticPush) {
           return { target: 'manual' };
         }
@@ -1666,10 +1731,13 @@ const syncMachineDefinition = setup({
                 },
               },
         syncNow: ({ context, event }, enq) => {
+          if (context.quiescing) {
+            return holdPushRequest(context, event, enq);
+          }
           answerPushes(context, enq, { pushIds: event.pushId === undefined ? [] : [event.pushId], outcome: 'queued' });
           return { target: 'opening' };
         },
-        remoteMoved: { target: 'opening' },
+        remoteMoved: ({ context }) => (context.quiescing ? {} : { target: 'opening' }),
         remoteConnected: { target: 'reading' },
         close: () => ({}),
       },
@@ -1696,6 +1764,9 @@ const syncMachineDefinition = setup({
        * Unless it was a `close` or `hidden` cut, which is the one trigger that
        * cannot afford a window: the document is unloading (C17). */
       always: ({ context }) => {
+        if (context.quiescing) {
+          return context.pendingMint ? { target: 'recording', context: closeRetry(context) } : undefined;
+        }
         if (!context.automaticPush) {
           return { target: 'manual' };
         }
@@ -1711,13 +1782,21 @@ const syncMachineDefinition = setup({
         return context.pendingMint ? { target: 'pending' } : undefined;
       },
       on: {
-        remoteMoved: { target: 'opening' },
+        remoteMoved: ({ context }) => (context.quiescing ? {} : { target: 'opening' }),
         revisionMinted: ({ context, event }) => ({
-          target: flushesNow(event.trigger) ? 'pushing' : 'pending',
-          context: rememberHead(context, event),
+          target: context.quiescing ? 'recording' : flushesNow(event.trigger) ? 'pushing' : 'pending',
+          context: context.quiescing
+            ? closeRetry({ ...context, ...rememberHead(context, event) })
+            : rememberHead(context, event),
         }),
-        syncNow: { target: 'pushing', context: ({ context, event }) => carry(context, event) },
-        close: { target: 'pushing' },
+        syncNow: ({ context, event }, enq) =>
+          context.quiescing
+            ? holdPushRequest(context, event, enq)
+            : {
+                target: 'pushing',
+                context: carry(context, event),
+              },
+        close: ({ context }) => (context.quiescing ? {} : { target: 'pushing' }),
         remoteConnected: {
           target: 'opening',
           context: ({ event }) => ({
@@ -1737,9 +1816,15 @@ const syncMachineDefinition = setup({
       after: { syncMaxWait: { target: 'pushing' } },
       on: {
         /* Pull first: the remembered mint is pushed by the pull's own exit, under the lease it takes. */
-        remoteMoved: { target: 'opening' },
-        syncNow: { target: 'pushing', context: ({ context, event }) => carry(context, event) },
-        close: { target: 'pushing' },
+        remoteMoved: ({ context }) => (context.quiescing ? {} : { target: 'opening' }),
+        syncNow: ({ context, event }, enq) =>
+          context.quiescing
+            ? holdPushRequest(context, event, enq)
+            : {
+                target: 'pushing',
+                context: carry(context, event),
+              },
+        close: ({ context }) => (context.quiescing ? {} : { target: 'pushing' }),
       },
       initial: 'debouncing',
       states: {
@@ -1865,6 +1950,7 @@ const syncMachineDefinition = setup({
           return {
             target: 'recording',
             context: {
+              ...(context.quiescing ? { pendingMint: false, pendingFlush: false, pendingFetch: false } : {}),
               failure: isFatal(event.error) ? 'fatal' : 'retry',
               /* A rate limit is the remote pacing this host, not this host
                * failing: it waits the remote's wait and keeps its doubling (W13d). */
@@ -1891,12 +1977,9 @@ const syncMachineDefinition = setup({
         syncNow: deferPush,
       },
       /*
-       * A12: a push that holds the network past its deadline is abandoned. The
-       * machine stops waiting; the socket itself is not ended, because
-       * `port.push` takes no abort signal yet (a guide amendment owed). Nothing
-       * is lost if it lands late: every ref carries its lease and the record
-       * still owes it, so the next push reports it up to date. The retry is
-       * `queued`'s backoff.
+       * A push past its deadline aborts its invoked effect and the port's
+       * HTTP request or native process group. Its unacknowledged refs remain
+       * owed until the durable retry record has been written.
        */
       after: {
         pushDeadline: ({ context }, enq) => {
@@ -1952,17 +2035,19 @@ const syncMachineDefinition = setup({
          * backoff. A genuine divergence still arrives through `merging`.
          */
         /* The state it lands in answers every push it carried (RM-R11). */
-        onDone: ({ context }) =>
-          context.failure === 'fatal'
-            ? { target: 'failed' }
-            : context.failure === 'retry'
-              ? { target: 'queued' }
-              : { target: 'backedUp' },
+        onDone: ({ context }) => ({
+          target: context.failure === 'fatal' ? 'failed' : context.failure === 'retry' ? 'queued' : 'backedUp',
+          context: { queueWriteError: undefined },
+        }),
         /* A queue that cannot be written is the one failure this machine cannot
          * retry its way out of: nothing would remember what is owed. */
         onError: {
           target: 'failed',
-          context: ({ event }) => ({ error: reason(event.error), reason: 'unknown' }),
+          context: ({ event }) => ({
+            error: reason(event.error),
+            reason: 'unknown',
+            queueWriteError: reason(event.error),
+          }),
         },
       },
     },
@@ -1979,6 +2064,9 @@ const syncMachineDefinition = setup({
        * work already queued (policy rule 19, L2-F6): the backoff's `opening`
        * pushes it once the pull lands. */
       always: ({ context }) => {
+        if (context.quiescing) {
+          return context.pendingMint ? { target: 'recording', context: closeRetry(context) } : undefined;
+        }
         if (!context.automaticPush) {
           return { target: 'manual' };
         }
@@ -1997,25 +2085,34 @@ const syncMachineDefinition = setup({
       },
       after: {
         /* Offline, the backoff waits for `online` instead: answered, and nothing changes (MC-R16). */
-        syncBackoff: ({ context, guards }) => (guards.isOnline(context) ? { target: 'opening' } : {}),
+        syncBackoff: ({ context, guards }) =>
+          !context.quiescing && guards.isOnline(context) ? { target: 'opening' } : {},
       },
       on: {
         remoteMoved: ({ context }) =>
-          context.online && context.retryAfterMilliseconds === undefined
+          !context.quiescing && context.online && context.retryAfterMilliseconds === undefined
             ? { target: 'opening' }
-            : { context: { pendingFetch: true } },
+            : { context: { pendingFetch: !context.quiescing } },
         /* The patch is here as well as at the root because a state's own
          * handler is the one that runs: without it `opening` would read the
          * stale `online` and bounce straight back. */
-        online: { target: 'opening', context: { online: true } },
+        online: ({ context }) => ({ ...(context.quiescing ? {} : { target: 'opening' }), context: { online: true } }),
         /* Only the unloading triggers pre-empt the backoff; the root remembers
          * every other mint for the retry that is already scheduled. */
         revisionMinted: ({ context, event }) =>
-          flushesNow(event.trigger)
-            ? { target: 'pushing', context: rememberHead(context, event) }
-            : { context: rememberHead(context, event) },
-        syncNow: { target: 'opening', context: ({ context, event }) => carry(context, event) },
-        close: { target: 'pushing' },
+          context.quiescing
+            ? { target: 'recording', context: closeRetry({ ...context, ...rememberHead(context, event) }) }
+            : flushesNow(event.trigger)
+              ? { target: 'pushing', context: rememberHead(context, event) }
+              : { context: rememberHead(context, event) },
+        syncNow: ({ context, event }, enq) =>
+          context.quiescing
+            ? holdPushRequest(context, event, enq)
+            : {
+                target: 'opening',
+                context: carry(context, event),
+              },
+        close: ({ context }) => (context.quiescing ? {} : { target: 'pushing' }),
         remoteConnected: {
           target: 'opening',
           context: ({ event }) => ({
@@ -2033,8 +2130,8 @@ const syncMachineDefinition = setup({
      *
      * The checkout actor is the only minter, so this asks the root for a
      * `merge` cut and waits for the answer to that request; then the pull runs
-     * again and composes a clean checkout. The pull's own deadline bounds the
-     * wait, because a close waits on this machine (rule 9).
+     * again and composes a clean checkout. The independent local-cut deadline
+     * bounds this wait, because a close waits on this machine (rule 9).
      */
     minting: {
       entry: ({ context }, enq) => {
@@ -2060,7 +2157,7 @@ const syncMachineDefinition = setup({
         return { context: { cutCount, requestId } };
       },
       after: {
-        pullDeadline: mintRefused('Your changes could not be saved before synchronizing; this project will try again.'),
+        mintDeadline: mintRefused('Your changes could not be saved before synchronizing; this project will try again.'),
       },
       on: {
         revisionMinted: ({ context, event }) =>
@@ -2104,18 +2201,23 @@ const syncMachineDefinition = setup({
         /* Remembered, not dropped (RV-W5b F7): whichever way the park ends —
          * the lease, a close's push, a keepalive's acknowledgement — the state
          * that settles pulls again. */
-        remoteMoved: { context: { pendingFetch: true } },
+        remoteMoved: { context: ({ context }) => ({ pendingFetch: !context.quiescing }) },
         /* Pushing now would be refused: the remote moved past this device. */
         syncNow: ({ context, event }, enq) => {
+          if (context.quiescing) {
+            return holdPushRequest(context, event, enq);
+          }
           answerPushes(context, enq, { pushIds: event.pushId === undefined ? [] : [event.pushId], outcome: 'queued' });
           return {};
         },
         /* An unloading document still records what it owes (C17). */
         revisionMinted: ({ context, event }) =>
-          flushesNow(event.trigger)
-            ? { target: 'pushing', context: rememberHead(context, event) }
-            : { context: rememberHead(context, event) },
-        close: { target: 'pushing' },
+          context.quiescing
+            ? { target: 'recording', context: closeRetry({ ...context, ...rememberHead(context, event) }) }
+            : flushesNow(event.trigger)
+              ? { target: 'pushing', context: rememberHead(context, event) }
+              : { context: rememberHead(context, event) },
+        close: ({ context }) => (context.quiescing ? {} : { target: 'pushing' }),
         open: { target: 'opening' },
         remoteConnected: {
           target: 'opening',
@@ -2198,15 +2300,22 @@ const syncMachineDefinition = setup({
         /* Recorded here and not on the remote yet: `Needs your decision` stays, and the backoff pulls again. */
         owed: {
           after: {
-            syncBackoff: ({ context, guards }) => (guards.isOnline(context) ? { target: '#sync.opening' } : {}),
+            syncBackoff: ({ context, guards }) =>
+              !context.quiescing && guards.isOnline(context) ? { target: '#sync.opening' } : {},
           },
         },
         offered: {},
       },
       on: {
-        remoteMoved: { target: 'opening' },
-        syncNow: { target: 'opening', context: ({ context, event }) => carry(context, event) },
-        online: { target: 'opening', context: { online: true } },
+        remoteMoved: ({ context }) => (context.quiescing ? {} : { target: 'opening' }),
+        syncNow: ({ context, event }, enq) =>
+          context.quiescing
+            ? holdPushRequest(context, event, enq)
+            : {
+                target: 'opening',
+                context: carry(context, event),
+              },
+        online: ({ context }) => ({ ...(context.quiescing ? {} : { target: 'opening' }), context: { online: true } }),
         remoteConnected: {
           target: 'opening',
           context: ({ event }) => ({
@@ -2249,7 +2358,13 @@ const syncMachineDefinition = setup({
     failed: {
       entry: ({ context }, enq) => ({ context: settleEveryPush(context, enq, 'failed') }),
       on: {
-        syncNow: { target: 'opening', context: ({ context, event }) => carry(context, event) },
+        syncNow: ({ context, event }, enq) =>
+          context.quiescing
+            ? holdPushRequest(context, event, enq)
+            : {
+                target: 'opening',
+                context: carry(context, event),
+              },
         remoteConnected: {
           target: 'opening',
           context: ({ event }) => ({
@@ -2297,11 +2412,11 @@ const syncMachineDefinition = setup({
               projectId: context.projectId,
               record: { version: 1, entries: context.pending },
             }),
-            onDone: { target: 'settled' },
+            onDone: { target: 'settled', context: { queueWriteError: undefined } },
             /* The refusal stays the row's reason; the next settle that records rewrites the queue. */
             onError: ({ event }, enq) => {
               enq(reportQueueWriteFailure, event.error);
-              return { target: 'settled' };
+              return { target: 'settled', context: { queueWriteError: reason(event.error) } };
             },
           },
         },

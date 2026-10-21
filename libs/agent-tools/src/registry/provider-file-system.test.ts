@@ -579,7 +579,6 @@ describe('createProviderRpcFileSystem', () => {
    * model now reads the defect as a tool error and can correct itself. */
   describe('tau.json', () => {
     const manifest = projectToManifest({
-      id: 'proj_0123456789ABCDEFGHIJK',
       name: 'Relief',
       description: '',
       tags: [],
@@ -591,7 +590,7 @@ describe('createProviderRpcFileSystem', () => {
       await provider.writeFile('tau.json', serializeProjectManifest(manifest));
     });
 
-    it('accepts a valid edit that keeps the project identity', async () => {
+    it('accepts a valid id-free declaration edit', async () => {
       const fileSystem = fileSystemFor();
 
       await fileSystem.writeFile('tau.json', text({ ...manifest, name: 'Renamed' }));
@@ -617,7 +616,7 @@ describe('createProviderRpcFileSystem', () => {
       });
       await expect(
         fileSystem.writeFile('tau.json', text({ ...manifest, id: 'proj_zzzzzzzzzzzzzzzzzzzzz' })),
-      ).rejects.toThrow(`tau.json must keep the project id ${manifest.id}.`);
+      ).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
       await expect(fileSystem.deleteFile('tau.json')).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
 
       expect(decoder.decode(await provider.readFile('tau.json'))).toBe(before);

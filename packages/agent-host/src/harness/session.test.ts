@@ -301,6 +301,69 @@ describe('screenshot captures as chat attachments (D-UI-04)', () => {
   });
 });
 
+describe('machine camera stills as chat attachments (D-UI-04 WP5)', () => {
+  it('stores a JPEG still and restores it for the model', async () => {
+    const jpegBytes: Uint8Array<ArrayBuffer> = new Uint8Array([255, 216, 255, 224, 0, 16, 74, 70]);
+    const jpegHash = createHash('sha256').update(jpegBytes).digest('hex');
+    const still = {
+      machineId: 'printer-1',
+      byteLength: jpegBytes.byteLength,
+      images: [{ view: 'printer-1', dataUrl: `data:image/jpeg;base64,${base64(jpegBytes)}` }],
+    };
+    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+    const attachments: AttachmentReader & { read: ReturnType<typeof vi.fn> } = {
+      read: vi.fn(async (_chatId: string, path: string) => files.get(path)),
+      write: async (_chatId, path, bytes) => {
+        files.set(path, bytes);
+      },
+    };
+    const requests: ModelStreamRequest[] = [];
+    const transport: ModelTransport = {
+      funding: { type: 'unfunded' },
+      async *stream(request) {
+        requests.push(structuredClone(request));
+        if (requests.length === 1) {
+          yield { type: 'tool-input', toolCallId: 'call-1', toolName: 'capture_machine_still', input: {} };
+          yield { type: 'completed', stopReason: 'toolUse' };
+          return;
+        }
+        yield { type: 'text-delta', text: 'the bed is clear' };
+        yield { type: 'completed', stopReason: 'stop' };
+      },
+    };
+    const file = createMemoryEventLogFile();
+    const session = await createAgentSession({
+      chatId: 'chat-1',
+      runId: 'run-1',
+      leaderEpoch: 'epoch-1',
+      systemPrompt: 'system',
+      model: { id: 'stub', contextWindow: 200_000, providerKind: 'anthropic' },
+      modelTransport: transport,
+      toolRegistry: {
+        list: () => [{ name: 'capture_machine_still', description: 'Still.', inputSchema: { type: 'object' } }],
+        invoke: async () => ({ content: structuredClone(still), isError: false }),
+      },
+      eventLog: await file.open(),
+      attachments,
+    });
+
+    await session.prompt({ id: 'user-1', role: 'user', content: 'is the bed clear?' });
+
+    expect(files.get(`attachments/${jpegHash}.jpg`)).toEqual(jpegBytes);
+    const log = await file.open();
+    expect(JSON.stringify(await log.read())).not.toContain(base64(jpegBytes));
+    expect(attachments.read).toHaveBeenCalledWith('chat-1', `attachments/${jpegHash}.jpg`);
+    // Restored, the still reaches the model as an image, exactly as an inline still did (older images are elided).
+    expect(requests[1]?.messages.find((message) => message.role === 'tool-output')?.content).toEqual([
+      expect.objectContaining({
+        type: 'text',
+        text: expect.stringMatching(/^Captured 1 screenshot\(s\)\./u) as string,
+      }),
+      { type: 'text', text: '[screenshot image - previously captured]' },
+    ]);
+  });
+});
+
 describe('start-of-turn compaction refusal', () => {
   /*
    * A chat whose durable history is one message too large to evict cannot be

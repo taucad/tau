@@ -1,7 +1,7 @@
 [
   {
-    "name": "Revisions ES module outputs",
+    "name": "Revisions ES module outputs \u2014 atomic LFS hydration and bounded durable close; measured 108425 bytes brotli on macOS, 2026-10-21",
     "path": "dist/**/*.mjs",
-    "limit": "106 kB"
+    "limit": "108.6 kB"
   }
 ]

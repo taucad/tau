@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_YTXH0JhzAUdNWY_L6rKrV",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Enclosure base",
   "description": "Uniform-wall open electronics enclosure base; external dimensions and wall are editable.",
   "tags": [

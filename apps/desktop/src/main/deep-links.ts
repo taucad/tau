@@ -160,7 +160,10 @@ const hostHandOff = (path: string, parameters: URLSearchParams): DeepLink | unde
  * @param value - Whatever `open-url` or `process.argv` handed the shell.
  * @returns The admitted link, or `undefined` — which the caller refuses and logs.
  */
-export const parseDeepLink = (value: string): DeepLink | undefined => {
+export const parseDeepLink = (
+  value: string,
+  scheme: 'tau:' | 'tau-staging:' = deepLinkScheme,
+): DeepLink | undefined => {
   if (value.length > linkMaxCharacters) {
     return undefined;
   }
@@ -174,7 +177,7 @@ export const parseDeepLink = (value: string): DeepLink | undefined => {
    * an authority a hand-written link uses to make a host read as something
    * else. The host itself is compared verbatim, so `tau://Invitations/…` — which
    * an opaque host parser does *not* lower-case — is refused too. */
-  if (url.protocol !== deepLinkScheme || url.username !== '' || url.password !== '' || url.port !== '') {
+  if (url.protocol !== scheme || url.username !== '' || url.password !== '' || url.port !== '') {
     return undefined;
   }
   const path = url.pathname.split('/');
@@ -227,5 +230,7 @@ export const parseDeepLink = (value: string): DeepLink | undefined => {
  * @param argv - Command-line arguments, without the executable.
  * @returns The argument, or `undefined` when none names the scheme.
  */
-export const deepLinkArgument = (argv: readonly string[]): string | undefined =>
-  argv.find((value) => value.slice(0, deepLinkScheme.length).toLowerCase() === deepLinkScheme);
+export const deepLinkArgument = (
+  argv: readonly string[],
+  scheme: 'tau:' | 'tau-staging:' = deepLinkScheme,
+): string | undefined => argv.find((value) => value.slice(0, scheme.length).toLowerCase() === scheme);

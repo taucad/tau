@@ -4,7 +4,6 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
-import type { GeometryComponentReference } from '@taucad/types';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
 import { ExportPane } from '@taucad/workbench-panes/export/export-pane';
@@ -34,8 +33,6 @@ type WorkbenchLaneProps = Readonly<{
   /** The shown model; the panes show nothing until there is one. */
   model: TauViewerModel | undefined;
   graphicsRef: GraphicsRef;
-  /** The component selected in the Model pane, or `undefined` when cleared. */
-  onSelect: (reference: GeometryComponentReference | undefined) => void;
   /** Show the model again after a parameter edit is written. */
   onParametersWritten: () => void;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
@@ -44,6 +41,8 @@ type WorkbenchLaneProps = Readonly<{
   componentActions: ModelSource['componentActions'];
   /** Opens a pane when the part menu asks for one. */
   openPaneRequest: Readonly<{ pane: WorkbenchPaneId; requestId: number }> | undefined;
+  /** The page's workbench toggle, at the end of the lane's tabs in the page's one top row. */
+  headerEnd: React.ReactNode;
 }>;
 
 /**
@@ -56,11 +55,11 @@ export function WorkbenchLane({
   bridge,
   model,
   graphicsRef,
-  onSelect,
   onParametersWritten,
   reveal,
   componentActions,
   openPaneRequest,
+  headerEnd,
 }: WorkbenchLaneProps): React.JSX.Element {
   /* The page shows one model: its one unit is the source when it has one, else the drawn file. */
   const entryPath = model === undefined ? undefined : (model.sourceFile ?? model.path);
@@ -92,12 +91,12 @@ export function WorkbenchLane({
       useUnits: () => units,
       parameters,
       kinematics: { ...createKinematicsSource(bridge), subscribeReveal: reveal.subscribeKinematics },
-      model: createModelSource(bridge, { onSelect, componentActions, reveal: reveal.model }),
+      model: createModelSource(bridge, { componentActions, reveal: reveal.model }),
       ...(model === undefined
         ? {}
         : { export: createExportSource(bridge, model), share: createShareSource(bridge, model) }),
     }),
-    [bridge, componentActions, model, onSelect, parameters, reveal, units],
+    [bridge, componentActions, model, parameters, reveal, units],
   );
 
   return (
@@ -106,6 +105,7 @@ export function WorkbenchLane({
         panes={offeredPanes}
         initialOpen={openingPanes}
         openRequest={openPaneRequest}
+        headerEnd={headerEnd}
         renderPane={(pane) => {
           switch (pane) {
             case 'parameters': {

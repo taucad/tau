@@ -582,6 +582,20 @@ export class GitRepositoryService {
             },
           });
       }
+      if (requested.length > 0) {
+        await transaction
+          .update(projectGitLfsObject)
+          .set({ lastRequestedAt: new Date(), unreachableAt: null })
+          .where(
+            and(
+              eq(projectGitLfsObject.projectId, args.access.projectId),
+              inArray(
+                projectGitLfsObject.oid,
+                requested.map((object) => object.oid),
+              ),
+            ),
+          );
+      }
       const novelOids = new Set(novel.map((object) => object.oid));
       return {
         status: 'reserved',
@@ -598,7 +612,9 @@ export class GitRepositoryService {
     access: GitAccess;
     oid: string;
     size: number;
-  }): Promise<'finalized' | 'already-finalized' | 'unreserved'> {
+    /** Short identity re-check under the retirement lock, after hashing outside the transaction. */
+    verifyContent: () => Promise<boolean>;
+  }): Promise<'finalized' | 'already-finalized' | 'unreserved' | 'invalid'> {
     return this.databaseService.database.transaction(async (transaction) => {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
       const rows = await transaction
@@ -614,14 +630,14 @@ export class GitRepositoryService {
       if (row === undefined || row.size !== args.size) {
         return 'unreserved';
       }
-      if (row.finalizedAt !== null) {
-        return 'already-finalized';
+      if (!(await args.verifyContent())) {
+        return 'invalid';
       }
       await transaction
         .update(projectGitLfsObject)
-        .set({ finalizedAt: new Date() })
+        .set({ finalizedAt: row.finalizedAt ?? new Date(), unreachableAt: null })
         .where(and(eq(projectGitLfsObject.projectId, args.access.projectId), eq(projectGitLfsObject.oid, args.oid)));
-      return 'finalized';
+      return row.finalizedAt === null ? 'finalized' : 'already-finalized';
     });
   }
 

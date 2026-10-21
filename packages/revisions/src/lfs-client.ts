@@ -80,6 +80,8 @@ export type LfsClientOptions = Readonly<{
   fetch?: typeof globalThis.fetch;
   /** The remote's name, so a batch refusal is classified exactly as the git leg's (D53). */
   remote?: string;
+  /** Optional remote-specific per-file upload ceiling. Omit to defer to the remote. */
+  maximumUploadBytes?: number;
 }>;
 
 /** What one upload offers the remote. @public */
@@ -130,7 +132,6 @@ const batchActionSchema = z
       date === undefined ? Infinity : Date.parse(date),
     ),
   }));
-const maximumUploadBytes = 100 * 1024 * 1024;
 const transferAttempts = 3;
 const retryable = (status: number): boolean => status === 429 || status >= 500;
 const expired = (action: BatchAction): boolean => (action.expiresAt ?? Infinity) <= Date.now() + 5000;
@@ -453,8 +454,9 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
   return Object.freeze({
     upload: async ({ pointers, read, signal }: LfsUploadInput): Promise<readonly string[]> => {
       signal?.throwIfAborted();
-      if (pointers.some(({ size }) => size > maximumUploadBytes)) {
-        throw new Error('Individual project files must be 100 MiB or smaller.');
+      const { maximumUploadBytes } = options;
+      if (maximumUploadBytes !== undefined && pointers.some(({ size }) => size > maximumUploadBytes)) {
+        throw new Error(`Individual project files must be ${String(maximumUploadBytes / 1024 / 1024)} MiB or smaller.`);
       }
       if (pointers.length === 0) {
         return Object.freeze([]);

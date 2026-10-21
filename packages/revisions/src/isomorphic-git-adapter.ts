@@ -813,7 +813,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           url: remote.url,
           http: options.http,
           remote: remote.name,
-          ...(remote.kind === 'tau' ? { fetch: globalThis.fetch.bind(globalThis) } : {}),
+          ...(remote.kind === 'tau'
+            ? { fetch: globalThis.fetch.bind(globalThis), maximumUploadBytes: 100 * 1024 * 1024 }
+            : {}),
         });
   };
 

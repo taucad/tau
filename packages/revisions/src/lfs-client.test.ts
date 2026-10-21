@@ -130,7 +130,12 @@ describe('bounded private transfers', () => {
     });
     const read = vi.fn(async () => boundaryBytes);
     await expect(
-      createLfsClient({ url: 'https://api.tau.test/git', http: { request }, fetch: transfer }).upload({
+      createLfsClient({
+        url: 'https://api.tau.test/git',
+        http: { request },
+        fetch: transfer,
+        maximumUploadBytes: 104_857_600,
+      }).upload({
         pointers: [boundary],
         read,
       }),
@@ -143,12 +148,23 @@ describe('bounded private transfers', () => {
     const request = vi.fn<RevisionHttpClient['request']>();
     const read = vi.fn(async () => bytes);
     await expect(
-      createLfsClient({ url: 'https://api.tau.test/git', http: { request } }).upload({
+      createLfsClient({ url: 'https://api.tau.test/git', http: { request }, maximumUploadBytes: 104_857_600 }).upload({
         pointers: [{ ...pointer, size: 104_857_601 }],
         read,
       }),
     ).rejects.toThrow('100 MiB');
     expect(request).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('defers external-remote size admission to its batch endpoint', async () => {
+    const large = { ...pointer, size: 104_857_601 };
+    const request = vi.fn<RevisionHttpClient['request']>().mockResolvedValue(batchResponse([large]));
+    const read = vi.fn(async () => bytes);
+    await expect(
+      createLfsClient({ url: 'https://github.com/a/b.git', http: { request } }).upload({ pointers: [large], read }),
+    ).resolves.toEqual([]);
+    expect(request).toHaveBeenCalledOnce();
     expect(read).not.toHaveBeenCalled();
   });
 

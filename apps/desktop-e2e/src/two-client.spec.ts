@@ -2868,14 +2868,24 @@ describe('backup by default and one library', () => {
       await third.page.keyboard.press('Escape');
 
       await searchLibrary(third.page, { projectsUrl, name });
-      const localCard = localLibraryCard(third.page, name);
+      let reservedRoot: string | undefined;
       await expect
-        .poll(async () => localCard.locator('[data-slot="on-tau-cloud"]').count(), {
-          message: 'D20: materialized without a click',
-          timeout: 120_000,
-        })
-        .toBe(1);
-      expect(await cloudOnlyLibraryCard(third.page, name).count()).toBe(0);
+        .poll(
+          async () => {
+            const roots = readdirSync(third.homeRoot, { withFileTypes: true })
+              .filter((entry) => entry.isDirectory())
+              .map((entry) => join(third.homeRoot, entry.name));
+            const ids = await Promise.all(roots.map(async (root) => localProjectId(root)));
+            reservedRoot = roots.find((_, index) => ids[index] === projectId);
+            return reservedRoot;
+          },
+          { message: 'D20: reserve the remote identity without a click', timeout: 120_000 },
+        )
+        .toBeDefined();
+      // A reserved stub stays in the cloud presentation until its first pull supplies the files.
+      const cloudCard = cloudOnlyLibraryCard(third.page, name);
+      await expect.poll(async () => cloudCard.count(), { timeout: 60_000 }).toBe(1);
+      expect(await localLibraryCard(third.page, name).count()).toBe(0);
 
       /* The first open connects and pulls because the copy is marked for it. */
       await expect
@@ -2884,9 +2894,10 @@ describe('backup by default and one library', () => {
           timeout: 60_000,
         })
         .toBe('open');
-      await localCard.getByRole('link', { name: `Open ${name}`, exact: true }).click();
+      await cloudCard.getByRole('button', { name: `Open ${name}`, exact: true }).click();
       await expect.poll(async () => third.page.url(), { timeout: 120_000 }).toMatch(/\/w\//u);
       const root = join(third.homeRoot, projectSlug(third.page));
+      expect(root, 'D20: opening reuses the reserved project').toBe(reservedRoot);
       expect(await localProjectId(root)).toBe(projectId);
       const remote = required(await gitHead(await tauRepository(projectId)), 'D20: Tau Cloud has no head.');
       await expect

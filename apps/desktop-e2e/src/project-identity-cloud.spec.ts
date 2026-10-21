@@ -3,11 +3,13 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import process from 'node:process';
 import { afterAll, beforeAll, expect, it } from 'vitest';
-import type { Page } from 'playwright';
 import { desktopE2EApiUrl } from '#support/config.js';
+import { historyRows, restoreFromHistory, revisionStatus } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient, openCloudOnlyProject, uploadFileInPage } from '#support/two-client/browser-client.js';
+import type { BrowserClient } from '#support/two-client/browser-client.js';
 import { cliRecord, runCli } from '#support/two-client/cli-client.js';
 import {
   basicAuthorization,
@@ -24,6 +26,7 @@ import type { UiServer } from '#support/two-client/ui-server.js';
 
 const schema = 'https://tau.new/schemas/tau-v1.json';
 const legacySchema = 'https://tau.new/schemas/tau-schema-v1.json';
+const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
 const account = tauTestAccount('identity-acceptance');
 let token = '';
 let owner: TauCloudOwnerIds | undefined;
@@ -44,7 +47,7 @@ const declaration = (name: string, legacyId?: string): string =>
   });
 
 /** Read actual OPFS bytes, independently of the application's in-memory identity. */
-const browserFile = async (page: Page, slug: string, path: string): Promise<string> =>
+const browserFile = async (page: BrowserClient['page'], slug: string, path: string): Promise<string> =>
   page.evaluate(
     async ({ slug, path }) => {
       let directory = await navigator.storage.getDirectory();
@@ -185,6 +188,17 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
     await expect
       .poll(async () => browserFile(browser.page, slug, 'main.scad'), { timeout: 120_000 })
       .toBe('cube(7);\n');
+    await browser.page
+      .getByRole('button', { name: /^Open Revisions\./u })
+      .first()
+      .click();
+    await expect
+      .poll(async () => browser.page.getByRole('region', { name: 'Sync', exact: true }).first().textContent(), {
+        timeout: 120_000,
+      })
+      .toContain('Backed up');
+    // Admission converts the working declaration; that edit need not already be saved.
+    expect(await revisionStatus(browser.page).textContent()).not.toContain('Needs your decision');
     expect(JSON.parse(await browserFile(browser.page, slug, '.tau/project.json'))).toEqual({ version: 1, projectId });
     expect(JSON.parse(await browserFile(browser.page, slug, 'tau.json'))).not.toHaveProperty('id');
 
@@ -201,21 +215,45 @@ it('should preserve a legacy cloud identity through browser and CLI sync without
       .poll(async () => browserFile(browser.page, slug, 'terminal.scad'), { timeout: 120_000 })
       .toBe('sphere(3);\n');
     await uploadFileInPage(browser.page, 'browser.scad', new TextEncoder().encode('cylinder(h=2,r=1);\n'));
-    await browser.page.keyboard.press('Control+s');
-    const peer = join(root, 'peer');
+    const beforeSave = await browserFile(browser.page, slug, '.git/refs/heads/main');
+    await browser.page.keyboard.press(`${modifier}+KeyS`);
     await expect
-      .poll(
-        async () => {
-          await rm(peer, { recursive: true, force: true });
-          const result = await runCli(['clone', projectId, '--into', peer, '--json'], token);
-          return result.code === 0 ? readFile(join(peer, 'browser.scad'), 'utf8').catch(() => '') : '';
-        },
-        { timeout: 120_000, interval: 2000 },
-      )
-      .toBe('cylinder(h=2,r=1);\n');
+      .poll(async () => browserFile(browser.page, slug, '.git/refs/heads/main'), { timeout: 120_000 })
+      .not.toBe(beforeSave);
+    await browser.page
+      .getByRole('button', { name: /^Open Revisions\./u })
+      .first()
+      .click();
+    await expect
+      .poll(async () => revisionStatus(browser.page).textContent(), { timeout: 120_000 })
+      .toBe('Saved · Backed up');
+    const peer = join(root, 'peer');
+    const returned = await runCli(['clone', projectId, '--into', peer, '--json'], token);
+    expect(returned.code, `${returned.stdout}\n${returned.stderr}`).toBe(0);
+    expect(await readFile(join(peer, 'browser.scad'), 'utf8')).toBe('cylinder(h=2,r=1);\n');
     expect(JSON.parse(await readFile(join(peer, '.tau/project.json'), 'utf8'))).toEqual({ version: 1, projectId });
     expect(await git(peer, ['show', `${historicalHead}:tau.json`])).toBe(legacyBytes);
     expect(await git(peer, ['ls-tree', '-r', '--name-only', 'HEAD'])).not.toContain('.tau/project.json');
+
+    await restoreFromHistory(browser.page, browser.page.getByRole('button', { name: /^Rev 1 · /u }).first(), (n) =>
+      historyRows(browser.page)
+        .filter({ hasText: 'Current' })
+        .filter({ hasText: `Restored Rev ${n}` }),
+    );
+    await expect
+      .poll(async () => revisionStatus(browser.page).textContent(), { timeout: 120_000 })
+      .toBe('Saved · Backed up');
+    expect(JSON.parse(await browserFile(browser.page, slug, '.tau/project.json'))).toEqual({ version: 1, projectId });
+    expect(JSON.parse(await browserFile(browser.page, slug, 'tau.json'))).not.toHaveProperty('id');
+    const restored = join(root, 'restored');
+    const restoredClone = await runCli(['clone', projectId, '--into', restored, '--json'], token);
+    expect(restoredClone.code, `${restoredClone.stdout}\n${restoredClone.stderr}`).toBe(0);
+    expect(await readFile(join(restored, 'main.scad'), 'utf8')).toBe('cube(7);\n');
+    expect(JSON.parse(await readFile(join(restored, 'tau.json'), 'utf8'))).not.toHaveProperty('id');
+    expect(JSON.parse(await readFile(join(restored, '.tau/project.json'), 'utf8'))).toEqual({ version: 1, projectId });
+    await expect(readFile(join(restored, 'browser.scad'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(join(restored, 'terminal.scad'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await git(restored, ['show', `${historicalHead}:tau.json`])).toBe(legacyBytes);
   } catch (error) {
     await browser.capture('identity-cloud');
     throw error;

@@ -84,6 +84,8 @@ it.runIf(process.platform === 'darwin')(
       expect(original.projectId).toMatch(/^proj_[\dA-Za-z]{21}$/u);
       await session.page.getByRole('button', { name: 'Actions for Authored identity', exact: true }).click();
       await session.page.getByRole('menuitem', { name: 'Duplicate', exact: true }).click();
+      // Identity is reserved before files are copied; the UI reports the completed transaction.
+      await session.page.getByText('Duplicated Authored identity', { exact: true }).waitFor({ timeout: 60_000 });
       await expect
         .poll(
           async () => {
@@ -109,6 +111,15 @@ it.runIf(process.platform === 'darwin')(
       expect(duplicateIdentity.projectId).not.toBe(original.projectId);
       expect(await readFile(join(duplicateRoot, 'main.scad'), 'utf8')).toBe(source);
       expect(JSON.parse(await readFile(join(duplicateRoot, 'tau.json'), 'utf8'))).not.toHaveProperty('id');
+      await session.close();
+      session = await launchDesktopApp({ token: 'offline-identity-acceptance', profileRoot, preserveProfile: true });
+      await session.page.goto('app://tau/projects');
+      await session.page.getByRole('link', { name: 'Open Authored identity (Copy)', exact: true }).click();
+      await session.page.waitForURL(/\/w\//u);
+      expect(await readIdentity(duplicateRoot)).toEqual(duplicateIdentity);
+      expect(await readIdentity(root)).toEqual(original);
+      expect(await readFile(join(duplicateRoot, 'main.scad'), 'utf8')).toBe(source);
+      expect(await readFile(join(root, 'main.scad'), 'utf8')).toBe(source);
     } catch (error) {
       await session?.capture('identity-authored');
       throw error;

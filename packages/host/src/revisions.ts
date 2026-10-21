@@ -1174,18 +1174,14 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      *
      * The same seam the browser worker's `release` uses, because it is the same
      * question: has the close revision reached the remote, or at least the
-     * record? A quit that does not wait leaves a revision nothing knows is
-     * unsent; after the bound, `.git/sync-pending` is the guarantee
-     * and the next open retries it (D28, AC21). The bound is rule 9's quiesce,
-     * which outlasts the open pull it may be waiting on.
+     * record? Only a confirmed `.git/sync-pending` write lets the next open
+     * retry it (D28, AC21). A persistence failure or unfinished local apply
+     * refuses close and keeps this root available for recovery.
      */
     try {
       await awaitSyncSettled(actor);
-    } catch {
-      /* RV-W2b #2: only a refused cut keeps the project. A sync that failed
-       * (a damaged copy, revoked access) or ran out its bound has already
-       * written `.git/sync-pending`, and the Sync region keeps its refusal; a
-       * close that threw here would never let the project go (D28). */
+    } catch (error) {
+      refused ??= error instanceof Error ? error : new Error(String(error));
     }
     if (refused !== undefined) {
       throw refused;

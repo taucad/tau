@@ -280,6 +280,8 @@ export const requireRenderedOrder = async (
 export const launchBrowserClient = async (options: {
   readonly oneTimeToken: string;
   readonly disableWebSecurity?: boolean | undefined;
+  /** Fault-injection specs block workers so Playwright owns their intercepted requests. */
+  readonly serviceWorkers?: 'allow' | 'block';
 }): Promise<BrowserClient> => {
   const browser = await chromium.launch({
     args: [
@@ -300,6 +302,7 @@ export const launchBrowserClient = async (options: {
    * viewport that makes the two clients comparable. */
   const context = await browser.newContext({
     baseURL: desktopE2EFrontendUrl,
+    serviceWorkers: options.serviceWorkers ?? 'allow',
     viewport: { width: 1600, height: 1000 },
   });
   context.setDefaultTimeout(60_000);

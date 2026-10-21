@@ -92,7 +92,10 @@ const seed = async (label: string, plan: 'free' | 'pro'): Promise<Seeded> => {
   if (plan === 'pro') {
     await seedProPlan(owner);
   }
-  const client = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+  // Playwright recommends blocking service workers when intercepting requests. Mixing them
+  // here can abort startup chunks after navigation, before the refusal assertion even runs.
+  // Ordinary identity/browser clients retain workers; this fixture owns the fault-injected wire.
+  const client = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer), serviceWorkers: 'block' });
   return { email: account.email, bearer, owner, client };
 };
 

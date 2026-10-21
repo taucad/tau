@@ -299,7 +299,12 @@ const present = async (
           if (!match?.[1] || !match[2]) {
             throw new Error('Tau screenshot returned an invalid image data URL.');
           }
-          return { ...echo, ...(await context.save(match[2], match[1])), mimeType: match[1], dataUrl };
+          return {
+            ...echo,
+            ...(await context.save(match[2], match[1])),
+            mimeType: match[1],
+            dataUrl,
+          };
         }),
       );
       return {
@@ -411,7 +416,12 @@ const cadToolsOf = (registry: ToolRegistry): readonly TauMcpToolName[] => {
  */
 const routeCall = (
   call: TauMcpHostCall,
-): { readonly tool: HostMcpAllowedTool; readonly args: Readonly<Record<string, unknown>> } | TauMcpRpcFailure => {
+):
+  | {
+      readonly tool: HostMcpAllowedTool;
+      readonly args: Readonly<Record<string, unknown>>;
+    }
+  | TauMcpRpcFailure => {
   if ('rpcName' in call) {
     // Export RPCs carry call identity in args; the tool registry takes it
     // from invocation metadata and adds it after strict input validation.
@@ -423,7 +433,10 @@ const routeCall = (
   }
   const tool = hostMcpAllowedTools.find((name) => name === call.toolName);
   if (tool === undefined) {
-    return { errorCode: 'TOOL_NOT_ALLOWED', message: `${call.toolName} is not in this capability's grant.` };
+    return {
+      errorCode: 'TOOL_NOT_ALLOWED',
+      message: `${call.toolName} is not in this capability's grant.`,
+    };
   }
   return { tool, args: call.args };
 };
@@ -635,7 +648,11 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
   const authorityKey = (claims: HostMcpCapabilityClaims): string =>
     `sha256:${createHash('sha256')
       .update(
-        JSON.stringify({ chatId: claims.chatId, sessionKey: claims.sessionKey, allowedTools: claims.allowedTools }),
+        JSON.stringify({
+          chatId: claims.chatId,
+          sessionKey: claims.sessionKey,
+          allowedTools: claims.allowedTools,
+        }),
       )
       .digest('hex')}`;
 
@@ -670,10 +687,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       dispatchOptions: Parameters<TauMcpDispatch>[1],
     ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
       if (!claims.allowedTools.includes(tool)) {
-        return { errorCode: 'TOOL_NOT_ALLOWED', message: `${tool} is not in this capability's grant.` };
+        return {
+          errorCode: 'TOOL_NOT_ALLOWED',
+          message: `${tool} is not in this capability's grant.`,
+        };
       }
       if (!binding || binding.signal.aborted) {
-        return { errorCode: 'MCP_RUN_INACTIVE', message: 'This ACP session has no active Tau turn.' };
+        return {
+          errorCode: 'MCP_RUN_INACTIVE',
+          message: 'This ACP session has no active Tau turn.',
+        };
       }
       const pending = options.registry.invoke({
         toolCallId: dispatchOptions.toolCallId,
@@ -703,7 +726,12 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         return await present(
           {
             save: async (data, mimeType) =>
-              saveChatAttachment({ workspaceRoot: options.workspaceRoot, chatId: claims.chatId, data, mimeType }),
+              saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data,
+                mimeType,
+              }),
             signals: [signal, binding.signal],
           },
           tool,
@@ -720,9 +748,13 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
   };
 
   const refuse = (response: ServerResponse, status: number, message: string): void => {
-    response
-      .writeHead(status, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32_000, message }, id: null }));
+    response.writeHead(status, { 'content-type': 'application/json' }).end(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32_000, message },
+        id: null,
+      }),
+    );
   };
 
   return {
@@ -839,8 +871,8 @@ export type LocalHostMcpOptions = {
    */
   readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime>) | undefined;
   /**
-   * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page's direct
-   * link packs every project file git does not ignore.
+   * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page offers no
+   * direct link.
    */
   readonly snapshotSource?: SourceSnapshotter | undefined;
   /** The serving CLI and how it was started: the `initialize` instructions name it, and every `test_model` answer carries it as `runtime`. */
@@ -966,7 +998,12 @@ export const serveLocalHostMcp = async (
     if ('errorCode' in route) {
       return route;
     }
-    const result = await invokeIn({ workspaceRoot, tool: route.tool, args: route.args, call: dispatchOptions });
+    const result = await invokeIn({
+      workspaceRoot,
+      tool: route.tool,
+      args: route.args,
+      call: dispatchOptions,
+    });
     const presented = await present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch(
       (error: unknown) => hostFault(route.tool, error),
     );
@@ -992,11 +1029,20 @@ export const serveLocalHostMcp = async (
             const glbContent =
               options.runtimeClient === undefined
                 ? undefined
-                : await shownModelContent({ runtimeFor: options.runtimeClient, root, targetFile, signal });
+                : await shownModelContent({
+                    runtimeFor: options.runtimeClient,
+                    root,
+                    targetFile,
+                    signal,
+                  });
             const result = await invokeIn({
               workspaceRoot: root,
               tool: toolName.exportModel,
-              args: { targetFile, to: 'glb', ...(glbContent === undefined ? {} : { content: glbContent }) },
+              args: {
+                targetFile,
+                to: 'glb',
+                ...(glbContent === undefined ? {} : { content: glbContent }),
+              },
               call: { toolCallId, signal },
             });
             const content: JsonObject = isJsonObject(result.content) ? result.content : {};
@@ -1018,10 +1064,17 @@ export const serveLocalHostMcp = async (
           snapshotSource: options.snapshotSource,
           ...(options.runtimeClient === undefined
             ? {}
-            : { export: createMcpViewerExport({ runtimeFor: options.runtimeClient }) }),
+            : {
+                export: createMcpViewerExport({
+                  runtimeFor: options.runtimeClient,
+                }),
+              }),
           /* The loopback page's panes reach the same host tools an MCP App page reaches through `tools/call`. */
           hostCall: async ({ root, call, signal }) =>
-            dispatchIn(root, call, { toolCallId: `loopback:${randomUUID()}`, signal }),
+            dispatchIn(root, call, {
+              toolCallId: `loopback:${randomUUID()}`,
+              signal,
+            }),
         });
   const cadTools = cadToolsOf(options.registry);
   const server = await serveTauMcpStdio(

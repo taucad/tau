@@ -2,7 +2,7 @@ import { betterAuth } from 'better-auth';
 import type { BetterAuthOptions } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { apiKey } from '@better-auth/api-key';
-import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
+import { bearer, genericOAuth, magicLink, oneTimeToken } from 'better-auth/plugins';
 import postgres from 'postgres';
 import { tokenLifetimeSeconds } from '#email/email-copy.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -38,6 +38,9 @@ export const staticAuthConfig = {
     // the Electron main process exchanges for a bearer session over loopback.
     // Reuses the existing `verification` table — no schema change.
     oneTimeToken({ storeToken: 'hashed' }),
+    // OIDC providers without a built-in Better Auth provider (Sign in with ChatGPT). No schema of its own;
+    // the runtime config fills in the providers that are configured.
+    genericOAuth({ config: [] }),
     // `bearer()` stays LAST: its after-hook reads the `set-cookie` every earlier
     // plugin may have written and re-emits it as `set-auth-token`.
     bearer(),

@@ -1,8 +1,7 @@
 'use client';
 
-import { getProviderName } from '@better-auth-ui/core';
-import { providerIcons, useAccountInfo, useAuth, useLinkSocial, useUnlinkAccount } from '@better-auth-ui/react';
-import type { Account, SocialProvider } from 'better-auth';
+import { useAccountInfo, useAuth, useLinkSocial, useUnlinkAccount } from '@better-auth-ui/react';
+import type { Account } from 'better-auth';
 import { Link2, Link2Off, Plug } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -21,10 +20,12 @@ import { Card, CardContent } from '@taucad/ui/components/card';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Spinner } from '#components/ui/spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { getSocialProviderDisplay } from '#components/auth/social-providers.js';
 
 export type LinkedAccountProps = {
   account?: Account;
-  provider: SocialProvider;
+  /** Better Auth provider id, built-in or registered by the API (such as `chatgpt`). */
+  provider: string;
 };
 
 /**
@@ -37,7 +38,7 @@ export type LinkedAccountProps = {
  * @param accountLabel - The linked account's email or name, once known.
  * @returns The confirmation's description.
  */
-const getUnlinkConsequence = (providerName: string, provider: SocialProvider, accountLabel?: string): string => {
+const getUnlinkConsequence = (providerName: string, provider: string, accountLabel?: string): string => {
   const signIn = `You will no longer be able to sign in to Tau with ${providerName}${accountLabel ? ` (${accountLabel})` : ''}.`;
   return provider === 'github'
     ? `${signIn} This also disconnects Gist sharing in Tau. Existing Gists and repository connections remain. Your authorization on GitHub is not revoked.`
@@ -62,8 +63,7 @@ export function LinkedAccount({ account, provider }: LinkedAccountProps): React.
     },
   });
 
-  const ProviderIcon = providerIcons[provider];
-  const providerName = getProviderName(provider);
+  const { name: providerName, Icon: ProviderIcon } = getSocialProviderDisplay(provider);
 
   const displayName = accountInfo ? (accountInfo.user.email ?? accountInfo.user.name) : account?.accountId;
   const unlinkLabel = localization.settings.unlinkProvider.replace('{{provider}}', providerName);

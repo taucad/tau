@@ -91,4 +91,13 @@ describe('LinkedAccount', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(authState.unlinkAccount).not.toHaveBeenCalled();
   });
+
+  it('should name ChatGPT and link it by its registered provider id', async () => {
+    render(<LinkedAccount provider='chatgpt' />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Link your ChatGPT account' }));
+
+    expect(screen.getByText('ChatGPT')).toBeInTheDocument();
+    expect(authState.linkSocial).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ provider: 'chatgpt' }));
+  });
 });

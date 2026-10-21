@@ -8,7 +8,7 @@ import { DiscoveryModule, DiscoveryService, HttpAdapterHost, MetadataScanner } f
 import { betterAuth } from 'better-auth';
 import type { FastifyReply as Reply, FastifyRequest as Request } from 'fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
-import { getBetterAuthConfig } from '#config/better-auth.config.js';
+import { getBetterAuthConfig, resolveChatgptProvider } from '#config/better-auth.config.js';
 import { authInstanceKey, hookKey, beforeHookKey, afterHookKey } from '#constants/auth.constant.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { DatabaseService } from '#database/database.service.js';
@@ -48,8 +48,16 @@ export class AuthModule implements NestModule, OnModuleInit {
             cloudHosts: HostsService,
             closure: BillingAccountClosureService,
           ): Promise<AuthInstance> {
+            const chatgptProvider = await resolveChatgptProvider(configService);
             return betterAuth(
-              getBetterAuthConfig({ databaseService, configService, emailService, cloudHosts, closure }),
+              getBetterAuthConfig({
+                databaseService,
+                configService,
+                emailService,
+                cloudHosts,
+                closure,
+                chatgptProvider,
+              }),
             );
           },
           inject: [DatabaseService, ConfigService, EmailService, HostsService, BillingAccountClosureService],
@@ -63,7 +71,10 @@ export class AuthModule implements NestModule, OnModuleInit {
             emailService: EmailService,
             cloudHosts: HostsService,
           ): Promise<AuthInstance> {
-            return betterAuth(getBetterAuthConfig({ databaseService, configService, emailService, cloudHosts }));
+            const chatgptProvider = await resolveChatgptProvider(configService);
+            return betterAuth(
+              getBetterAuthConfig({ databaseService, configService, emailService, cloudHosts, chatgptProvider }),
+            );
           },
           inject: [DatabaseService, ConfigService, EmailService, HostsService],
         };

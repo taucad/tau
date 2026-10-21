@@ -1,19 +1,20 @@
 'use client';
 
 import type React from 'react';
-import { authMutationKeys, getProviderName } from '@better-auth-ui/core';
-import { providerIcons, useAuth, useSignInSocial } from '@better-auth-ui/react';
+import { authMutationKeys } from '@better-auth-ui/core';
+import { useAuth, useSignInSocial } from '@better-auth-ui/react';
 import { useIsMutating } from '@tanstack/react-query';
-import type { SocialProvider } from 'better-auth/social-providers';
 import type { ComponentProps } from 'react';
 
 import { Button } from '@taucad/ui/components/button';
 import { Spinner } from '#components/ui/spinner.js';
+import { getSocialProviderDisplay } from '#components/auth/social-providers.js';
 
 export type ProviderButtonProps = {
-  provider: SocialProvider;
-  activeProvider?: SocialProvider;
-  onActiveProviderChange: (provider?: SocialProvider) => void;
+  /** Better Auth provider id, built-in or registered by the API (such as `chatgpt`). */
+  provider: string;
+  activeProvider?: string;
+  onActiveProviderChange: (provider?: string) => void;
   display?: 'full' | 'name' | 'icon';
 } & Omit<ComponentProps<typeof Button>, 'onClick' | 'children' | 'disabled'>;
 
@@ -42,7 +43,7 @@ export function ProviderButton({
     },
   });
 
-  const ProviderIcon = providerIcons[provider] as React.ComponentType<React.ComponentPropsWithRef<'svg'>> | undefined;
+  const { name: providerName, Icon: ProviderIcon } = getSocialProviderDisplay(provider);
 
   const signInMutating = useIsMutating({
     mutationKey: authMutationKeys.signIn.all,
@@ -64,15 +65,15 @@ export function ProviderButton({
         signInSocial({ provider, callbackURL });
       }}
       {...props}
-      aria-label={getProviderName(provider)}
+      aria-label={providerName}
       aria-busy={isActiveProvider}
     >
       {isActiveProvider ? <Spinner /> : ProviderIcon ? <ProviderIcon /> : null}
 
       {display === 'full'
-        ? localization.auth.continueWith.replace('{{provider}}', getProviderName(provider))
+        ? localization.auth.continueWith.replace('{{provider}}', providerName)
         : display === 'name'
-          ? getProviderName(provider)
+          ? providerName
           : null}
     </Button>
   );

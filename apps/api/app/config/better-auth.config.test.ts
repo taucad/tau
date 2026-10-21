@@ -387,7 +387,7 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('pins the same plugin order in both lockstep plugin lists', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth.js');
-    const expected = ['api-key', 'magic-link', 'one-time-token', 'bearer'];
+    const expected = ['api-key', 'magic-link', 'one-time-token', 'generic-oauth', 'bearer'];
 
     expect(config.plugins?.map((plugin) => plugin.id)).toEqual(expected);
     expect(staticAuthConfig.plugins.map((plugin) => plugin.id)).toEqual(expected);

@@ -12,6 +12,7 @@ import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
 import { hasWebsitePreference, setEntryPreference } from '#lib/entry-preference.js';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { getSocialProviders } from '#components/auth/social-providers.js';
 
 /**
  * The auth surface Electron's preload exposes to the renderer (batch A, item
@@ -274,7 +275,7 @@ export function AuthConfigProvider({ children }: { readonly children: React.Reac
       }}
       Link={AuthConfigLink}
       plugins={[magicLinkPlugin(), apiKeyPlugin()]}
-      socialProviders={['github', 'google']}
+      socialProviders={getSocialProviders(ENV.TAU_CHATGPT_SIGN_IN_ENABLED)}
       redirectTo='/'
       baseURL={ENV.TAU_FRONTEND_URL}
     >

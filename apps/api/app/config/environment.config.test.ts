@@ -516,6 +516,28 @@ describe('environmentSchema', () => {
     }
   });
 
+  it('should refuse a ChatGPT client secret without its client id', () => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      CHATGPT_CLIENT_ID: undefined,
+      CHATGPT_CLIENT_SECRET: 'chatgpt-secret',
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((issue) => issue.path.join('.'))).toContain('CHATGPT_CLIENT_ID');
+  });
+
+  it('should treat the empty ChatGPT values of a copied .env.example as unconfigured', () => {
+    const result = environmentSchema.safeParse({
+      ...baseEnvironment(),
+      CHATGPT_CLIENT_ID: '',
+      CHATGPT_CLIENT_SECRET: '',
+    });
+
+    expect(result.error?.issues).toBeUndefined();
+    expect(result.data).toMatchObject({ CHATGPT_CLIENT_ID: undefined, CHATGPT_CLIENT_SECRET: undefined });
+  });
+
   it('should treat the empty GitHub repository App values of a copied .env.example as unconfigured', () => {
     const result = environmentSchema.safeParse({
       ...baseEnvironment(),

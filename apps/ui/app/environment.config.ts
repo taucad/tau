@@ -11,6 +11,13 @@ import { isDesktopTarget } from '#lib/build-target.js';
 
 type RawEnvironment = Record<string, string | undefined>;
 
+/** An opt-in flag: `'1'` or `'true'` (any case) is `true`; unset or anything else is `false`. */
+const optionalBooleanFlag = () =>
+  z
+    .string()
+    .optional()
+    .transform((value) => (value === undefined ? false : /^(1|true)$/i.test(value)));
+
 const toOriginOrRaw = (value: string | undefined): string | undefined => {
   if (!value) {
     return undefined;
@@ -77,11 +84,13 @@ const environmentSchema = z.preprocess(
      * strings `'1'` and `'true'` (case-insensitive) — anything else
      * resolves to `false`.
      */
-    TAU_DEBUG: z
-      .string()
-      .optional()
-      .transform((value) => (value === undefined ? false : /^(1|true)$/i.test(value)))
-      .describe('Enable in-app debug surfaces (debug panel, inspectors). Default false.'),
+    TAU_DEBUG: optionalBooleanFlag().describe('Enable in-app debug surfaces (debug panel, inspectors). Default false.'),
+    /**
+     * Offer "Continue with ChatGPT". Set only where the API has an OpenAI client (`CHATGPT_CLIENT_ID`): OpenAI
+     * issues one per deployment, and a button without it fails at the provider. Tau Cloud sets both from one
+     * HCP pair. Accepts `'1'`/`'true'`; anything else is `false`.
+     */
+    TAU_CHATGPT_SIGN_IN_ENABLED: optionalBooleanFlag().describe('Show Sign in with ChatGPT. Default false.'),
     /**
      * Let *Connect* accept a private or loopback `http://` git address (P50).
      *
@@ -92,11 +101,9 @@ const environmentSchema = z.preprocess(
      * posture travels over the wire. Accepts `'1'`/`'true'`; anything else is
      * `false`.
      */
-    TAU_GIT_REMOTE_ALLOW_PRIVATE: z
-      .string()
-      .optional()
-      .transform((value) => (value === undefined ? false : /^(1|true)$/i.test(value)))
-      .describe('Accept private/loopback http git remotes in Connect. Default false.'),
+    TAU_GIT_REMOTE_ALLOW_PRIVATE: optionalBooleanFlag().describe(
+      'Accept private/loopback http git remotes in Connect. Default false.',
+    ),
     /**
      * The managed acquisition profile (`TAU_ACQUISITION`). `locked` keeps the editor's type acquisition to the static
      * types, with no request. Only unset, empty or `open` is `open`; any other value is `locked`, so a typo never
@@ -159,6 +166,7 @@ const baseClientEnvironmentKeys = [
   'TAU_DEBUG',
   'TAU_MACHINES_ENABLED',
   'TAU_GIT_REMOTE_ALLOW_PRIVATE',
+  'TAU_CHATGPT_SIGN_IN_ENABLED',
   'TAU_ACQUISITION',
   'NODE_ENV',
   'POSTHOG_API_HOST',

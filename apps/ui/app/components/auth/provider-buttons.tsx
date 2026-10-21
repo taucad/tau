@@ -2,7 +2,6 @@ import { getProviderId } from '@better-auth-ui/core';
 import { useAuth } from '@better-auth-ui/react';
 import { useMemo, useState } from 'react';
 import type React from 'react';
-import type { SocialProvider } from 'better-auth/social-providers';
 
 import { cn } from '@taucad/ui/utils/cn';
 import { ProviderButton } from '#components/auth/provider-button.js';
@@ -21,7 +20,7 @@ export type SocialLayout = 'auto' | 'horizontal' | 'vertical' | 'grid';
  */
 export function ProviderButtons({ socialLayout = 'auto' }: ProviderButtonsProps): React.JSX.Element {
   const { socialProviders } = useAuth();
-  const [activeProvider, setActiveProvider] = useState<SocialProvider | undefined>();
+  const [activeProvider, setActiveProvider] = useState<string | undefined>();
 
   const resolvedSocialLayout = useMemo(() => {
     if (socialLayout === 'auto') {

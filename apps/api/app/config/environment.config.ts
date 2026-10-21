@@ -127,6 +127,10 @@ const environmentSchemaBase = z.object({
   GITHUB_REPOSITORY_CONNECTION_KEY_VERSION: z.coerce.number().int().positive().default(1),
   GOOGLE_CLIENT_ID: z.string().optional(),
   GOOGLE_CLIENT_SECRET: z.string().optional(),
+  // Sign in with ChatGPT. OpenAI issues the client (`oaiapp_…`); unset or empty leaves the provider unregistered.
+  // A confidential client also has a secret; a public client has none and relies on PKCE alone.
+  CHATGPT_CLIENT_ID: unsetWhenEmpty(z.string().optional()),
+  CHATGPT_CLIENT_SECRET: unsetWhenEmpty(z.string().optional()),
 
   // Email delivery
   RESEND_API_KEY: z.string().default(''),
@@ -312,6 +316,14 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
         });
       }
     }
+  }
+
+  if (data.CHATGPT_CLIENT_SECRET !== undefined && data.CHATGPT_CLIENT_ID === undefined) {
+    context.addIssue({
+      code: 'custom',
+      message: 'CHATGPT_CLIENT_ID is required when CHATGPT_CLIENT_SECRET is set',
+      path: ['CHATGPT_CLIENT_ID'],
+    });
   }
 
   if (data.TAU_CLOUD_ENABLED) {

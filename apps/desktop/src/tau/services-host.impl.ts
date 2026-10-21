@@ -43,6 +43,7 @@ import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import {
+  acpModelProbeTimeout,
   completeMachineBinding,
   createMachineSecretStore,
   createNodeMachineRuntime,
@@ -100,11 +101,11 @@ const agentSessionKey = 'tau-agent';
 /**
  * How long a connection waits for main's `agentHost` frame. Milliseconds.
  *
- * Main's CLI probe runs on 1.5 s and its model probe on 5 s, and the frame is
- * posted once both settle — so this is the same 10 s the utility already gives
- * main to answer a runtime-port request, with room over the slower probe.
+ * Main posts this frame after the parallel CLI and model probes settle. The
+ * model probe owns the longer budget; leave five seconds for cleanup and IPC
+ * instead of expiring a valid discovery before its own deadline.
  */
-const agentHostConfigTimeout = 10_000;
+const agentHostConfigTimeout = acpModelProbeTimeout + 5000;
 
 /**
  * Compose the rejection a refused runtime-port request settles with.

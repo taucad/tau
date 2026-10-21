@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
+import { toast } from '#components/ui/sonner.js';
 
 const state = vi.hoisted(() => ({
   paths: ['/Users/tester/Documents/Tau Workspace'],
@@ -11,6 +13,8 @@ const state = vi.hoisted(() => ({
   sync: vi.fn(async () => undefined),
   refreshCatalog: vi.fn(async () => undefined),
   connect: vi.fn(),
+  retry: vi.fn(),
+  connection: vi.fn<() => WorkspaceConnectionState>(),
   changed: undefined as (() => void) | undefined,
 }));
 const workspace = {
@@ -40,7 +44,8 @@ vi.mock('#hooks/use-project-manager.js', () => ({
     assertWorkspaceMutationAllowed: state.checkPending,
     refreshWorkspaceCatalog: state.refreshCatalog,
     connectWorkspace: state.connect,
-    workspaceConnection: { phase: 'idle' },
+    retryWorkspaceConnection: state.retry,
+    workspaceConnection: state.connection(),
   }),
 }));
 vi.mock('#utils/workspace-telemetry.utils.js', () => ({
@@ -56,6 +61,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('TAU_TARGET', 'desktop');
   state.paths = [workspace.path];
+  state.connection.mockReturnValue({ phase: 'idle' });
+  state.retry.mockReset();
   state.disconnect.mockImplementation(async (path) => {
     state.paths = state.paths.filter((candidate) => candidate !== path);
   });
@@ -69,6 +76,66 @@ afterEach(() => {
 });
 
 describe('WorkspaceConnections on desktop', () => {
+  it('should clear the connection error and refresh the workspace after a successful retry', async () => {
+    state.paths = [];
+    state.connect.mockRejectedValueOnce(new Error('Could not load workspace projects.'));
+    const { rerender } = render(<WorkspaceConnections />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reconnect' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not load workspace projects.');
+    state.connection.mockReturnValue({
+      phase: 'failed',
+      operationId: 'connect-workspace',
+      workspace,
+      failedPhase: 'discovering',
+      message: 'Could not load workspace projects.',
+      retry: 'resume',
+    });
+    rerender(<WorkspaceConnections />);
+    state.retry.mockImplementation(async () => {
+      state.paths = [workspace.path];
+      state.connection.mockReturnValue({ phase: 'idle' });
+      return { workspace, minted: false, projectCount: 0 };
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByRole('button', { name: 'Disconnect workspace' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+    expect(state.retry).toHaveBeenCalledOnce();
+  });
+
+  it.each(['cancelled', 'failed'] as const)(
+    'should keep the workspace disconnected when a retry is %s',
+    async (outcome) => {
+      state.paths = [];
+      state.connection.mockReturnValue({
+        phase: 'failed',
+        operationId: 'connect-workspace',
+        workspace,
+        failedPhase: 'registering',
+        message: 'Could not save workspace access.',
+        retry: 'pick-again',
+      });
+      if (outcome === 'failed') {
+        state.retry.mockRejectedValueOnce(new Error('Folder is unavailable.'));
+      }
+      render(<WorkspaceConnections />);
+      await screen.findByRole('button', { name: 'Reconnect' });
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Choose folder again' }));
+      });
+
+      expect(screen.getByRole('button', { name: 'Reconnect' })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'Disconnect workspace' })).not.toBeInTheDocument();
+      expect(toast.success).not.toHaveBeenCalled();
+      if (outcome === 'failed') {
+        expect(screen.getByRole('alert')).toHaveTextContent('Folder is unavailable.');
+      }
+    },
+  );
+
   it('should disconnect and reconnect the same named workspace through the shared controls', async () => {
     render(<WorkspaceConnections />);
     expect(screen.getByText('Workspaces')).toBeInTheDocument();

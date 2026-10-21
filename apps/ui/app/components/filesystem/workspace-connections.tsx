@@ -286,11 +286,18 @@ export function WorkspaceConnections({
         : undefined;
   const handleRetryWorkspace = useCallback(async (): Promise<void> => {
     try {
-      await projectManager.retryWorkspaceConnection();
-    } catch {
+      const connected = await projectManager.retryWorkspaceConnection();
+      if (connected === undefined) {
+        return;
+      }
+      await reloadRows();
+      setErrorMessage(undefined);
+      setMessage(undefined);
+    } catch (error) {
       toast.error('Failed to connect workspace.');
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to connect workspace.');
     }
-  }, [projectManager]);
+  }, [projectManager, reloadRows]);
   const connectionLabel =
     workspaceConnection.phase === 'registering'
       ? 'Saving access to this folder'

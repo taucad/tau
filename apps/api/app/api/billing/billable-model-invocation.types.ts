@@ -25,7 +25,6 @@ export type BillableInvocationIntent = ModelInvocationIntent & {
 
 export type InvocationMetadata = {
   contractVersion: string;
-  credentialAccount: string;
   supplierRates: ReadonlyArray<{
     dimension: string;
     // oxlint-disable-next-line typescript/no-restricted-types -- financial meter tiers use explicit null

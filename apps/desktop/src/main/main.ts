@@ -1,3 +1,4 @@
+import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import { isMachinesFeatureEnabled, machinesDisabledMessage } from '@taucad/types/constants';
 import { randomUUID } from 'node:crypto';
@@ -111,6 +112,8 @@ import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import type { DesktopUpdater } from '#main/updater.js';
 import { startDesktopUpdater } from '#main/updater.js';
+import { preparableNativeDeployments } from '#tau/desktop-native-deployments.js';
+import { createDesktopKernelPreparer } from '#tau/native-preparation.js';
 import { desktopNativeKernelIds, startNativeStore } from '#tau/native-store.js';
 import {
   appIconThemeChannel,
@@ -760,13 +763,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * for it: the fork and its module graph are ~176 ms the person would
    * otherwise wait for with a project already on screen (W-L03-4). */
   runtimeMain.prewarm();
-  /* W6 (D10, D24): seed the shared payload store from the closures this app ships, then tell the kernel utilities
-   * which sealed closure each native kernel runs from; a utility composes its runtime once that frame arrives. The
-   * staging channel keeps its own store beside its own config. Collected at startup (D21). */
+  /* W6: tell the kernel utilities which sealed closure each prepared native kernel runs from; a utility composes its
+   * runtime once that frame arrives, and reads the store for every other kernel, which main prepares on first use
+   * (`nativeKernels` below). The staging channel keeps its own store beside its own config. Collected at startup (D21). */
+  const nativeStorePath = desktopChannel === 'staging' ? join(tauConfigDirectory, 'payloads') : defaultPayloadStore();
   const nativeStoreAbort = new AbortController();
   const nativeStore = startNativeStore({
-    store: desktopChannel === 'staging' ? join(tauConfigDirectory, 'payloads') : defaultPayloadStore(),
-    bundle: app.isPackaged ? join(process.resourcesPath, 'payloads') : undefined,
+    store: nativeStorePath,
     hostPath: app.getPath('exe'),
     environment: process.env,
     post: (frame) => {
@@ -776,6 +779,25 @@ const bootstrapElectronApp = async (): Promise<void> => {
       log.log(level, event, detail);
     },
     signal: nativeStoreAbort.signal,
+  });
+  /* First-use download (W6 phase 2): the app ships no kernel closure, so a native kernel refuses with
+   * `KERNEL_NOT_PREPARED` until the viewer, or the agent's `prepare_kernel` in the services utility, asks main to
+   * prepare it here. Every window sees every download's progress. */
+  const nativeKernels = createDesktopKernelPreparer({
+    store: nativeStorePath,
+    hostPath: app.getPath('exe'),
+    environment: process.env,
+    deployments: preparableNativeDeployments({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+    onProgress: (progress) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed() && isTrustedSender(window.webContents.mainFrame, origins)) {
+          window.webContents.send(desktopNativeKernelChannels.progress, progress);
+        }
+      }
+    },
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
   });
 
   const geometry = createGeometryBroker({
@@ -845,6 +867,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     createChannel: () => new MessageChannelMain(),
     connectRuntime: (context) => runtimeMain.connect({ purpose: 'main-process-client', context }),
     connectGeometry: (input) => geometry.connectSuite(input),
+    prepareNativeKernel: async (kernel, onProgress) => nativeKernels.prepare(kernel, onProgress),
     revokeGeometry: () => {
       geometry.revokeUnauthorized();
     },
@@ -1164,6 +1187,19 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     const updater = await updaterReady.promise;
     await updater.download();
+  });
+
+  ipcMain.handle(desktopNativeKernelChannels.prepare, async (event, kernel: unknown) => {
+    if (!trusted(event.senderFrame) || typeof kernel !== 'string') {
+      throw new Error('Untrusted kernel preparation request');
+    }
+    return nativeKernels.prepare(kernel);
+  });
+  ipcMain.handle(desktopNativeKernelChannels.cancel, async (event, kernel: unknown) => {
+    if (!trusted(event.senderFrame) || typeof kernel !== 'string') {
+      throw new Error('Untrusted kernel preparation request');
+    }
+    nativeKernels.cancel(kernel);
   });
 
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
@@ -1837,6 +1873,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
             zooProxyToken.dispose();
             nativeStoreAbort.abort();
             await nativeStore;
+            await nativeKernels.dispose();
             try {
               runtimeMain.dispose();
             } catch (error) {

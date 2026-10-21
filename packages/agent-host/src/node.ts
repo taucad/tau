@@ -15,7 +15,13 @@ import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
-import { createChatStore, requireChatPathSegment } from '#launchers/chat-store.js';
+import {
+  chatRecordFileName,
+  createChatStore,
+  isPurgedChatRecord,
+  purgedChatError,
+  requireChatPathSegment,
+} from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
 import { createNodeLeadership } from '#launchers/node/node-leadership.js';
 
@@ -129,8 +135,35 @@ export const createNodeAttachmentReader = (workspaceRoot: string): AttachmentRea
       throw error;
     }
   },
-  write: async (chatId, path, bytes) => publishAttachment(join(workspaceRoot, writablePath(chatId, path)), bytes),
+  write: async (chatId, path, bytes) => {
+    const absolutePath = join(workspaceRoot, writablePath(chatId, path));
+    /* Every Node writer of chat media (captures, ACP media, host results) comes through here, so the purge fence does. */
+    if (await isNodeChatPurged(workspaceRoot, chatId)) {
+      throw purgedChatError(chatId);
+    }
+    await publishAttachment(absolutePath, bytes);
+  },
 });
+
+/**
+ * Whether a chat's record on the Node filesystem carries a permanent delete's tombstone (OQ2).
+ *
+ * @param workspaceRoot - Absolute root whose `.tau/chats` holds each chat.
+ * @param chatId - The chat.
+ * @returns `true` when its `chat.json` carries `purgedAt`; `false` with no record.
+ */
+const isNodeChatPurged = async (workspaceRoot: string, chatId: string): Promise<boolean> =>
+  isPurgedChatRecord(
+    await readFile(
+      join(workspaceRoot, '.tau', 'chats', requireChatPathSegment(chatId), chatRecordFileName),
+      'utf8',
+    ).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }),
+  );
 
 /** Node event-log options. @public */
 export type NodeEventLogOptions = {
@@ -456,6 +489,7 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
     durability: 'exclusive-append',
     attachments: createNodeAttachmentReader(options.workspaceRoot),
     readBytes: async (chatId) => readIfPresent(filePath(chatId)),
+    purged: async (chatId) => isNodeChatPurged(options.workspaceRoot, chatId),
     observeBytes: async (chatId, { signal, onChange, onError }) => {
       const key = Symbol(chatId);
       subscriptions.set(key, { path: relative(options.workspaceRoot, filePath(chatId)), onChange, onError });

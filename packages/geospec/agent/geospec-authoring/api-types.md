@@ -1,6 +1,6 @@
 # geospec — Types
 
-67 top-level symbols. Signatures are verbatim typescript.
+66 top-level symbols. Signatures are verbatim typescript.
 
 // A model admitted by one live GeoSpec host scope
 GeoSpecSubject: {
@@ -648,7 +648,7 @@ GeoSpecProductStructureExpectation: {
   count?: GeoSpecNumericExpectation
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
-// Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for `contact`/`clearance`, analytic fact comparison for `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`, exact solid classification for `containment`/`insertion`, and exact boolean common volume for `interference` (positive volume outside the `minVolume`/`maxVolume` allowance band fails).
+// Remarks: Each kind admits narrow geometry and refuses outside it, never falling back to an estimate (D3). On STEP, `clearance`, `contact`, `insertion` and `interference` take complete box-shaped occurrences (`insertion` also a Cartesian `axis`); `coaxial`, `concentric`, `coplanar`, `parallel`, `perpendicular` and `angle` take one analytic face, axis or plane per endpoint; `containment` takes closed solids. On glTF/GLB, `body` endpoints admit `contact`, `clearance`, `containment` and `interference` over closed shells. Shared volume for `interference` must lie in `[minVolume, maxVolume]`.
 GeoSpecSpatialRelationshipExpectation: {
     id?: string;
     kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference';
@@ -1739,88 +1739,6 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
   parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
-  stepStreaming?: StepStreamingMode
-
-  // Whether STEP loading should also produce mesh evidence
-  mesh?: boolean
-
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance?: number
-
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees?: number
-
-  // Default work-unit budget for every claim on this subject
-  workUnitLimit?: number
-
-// Direct geometry-source model load options
-LoadModelSourceOptions: {
-    /** Geometry bytes, path, browser file/blob, or in-memory mesh buffer. */
-    source: MeshSource | StepSource;
-    /** Named external resources consumed alongside the direct geometry bytes. */
-    resources?: ReadonlyArray<{
-        readonly name: string;
-        readonly source: MeshSource | StepSource;
-    }>;
-    /**
-     * Project-relative folder a path `source` and each resource path resolve in. Omitted, they resolve against the
-     * project root. Recorded in the load evidence.
-     */
-    rootDir?: string;
-    /** Source geometry format. Defaults to `glb`. */
-    format?: GeoSpecModelFormat;
-    /** Source path recorded in provenance. */
-    path?: string;
-    /** Human-readable source name recorded in provenance. */
-    name?: string;
-    /** Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization. */
-    sourceUnit?: GeoSpecUnit;
-    /** Explicit parameters recorded in provenance. */
-    parameters?: Record<string, unknown>;
-    /** STEP reader strategy used for STEP sources. */
-    stepStreaming?: StepStreamingMode;
-    /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
-    mesh?: boolean;
-    /** Linear tolerance used while meshing exact BRep evidence. */
-    meshLinearTolerance?: number;
-    /** Angular tolerance in degrees used while meshing exact BRep evidence. */
-    meshAngularToleranceDegrees?: number;
-    /**
-     * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
-     * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
-     */
-    workUnitLimit?: number;
-}
-
-  // Geometry bytes, path, browser file/blob, or in-memory mesh buffer
-  source: MeshSource | StepSource
-
-  // Named external resources consumed alongside the direct geometry bytes
-  resources?: ReadonlyArray<{
-          readonly name: string;
-          readonly source: MeshSource | StepSource;
-      }>
-
-  // Project-relative folder a path `source` and each resource path resolve in
-  rootDir?: string
-
-  // Source geometry format
-  format?: GeoSpecModelFormat
-
-  // Source path recorded in provenance
-  path?: string
-
-  // Human-readable source name recorded in provenance
-  name?: string
-
-  // Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization
-  sourceUnit?: GeoSpecUnit
-
-  // Explicit parameters recorded in provenance
-  parameters?: Record<string, unknown>
-
-  // STEP reader strategy used for STEP sources
   stepStreaming?: StepStreamingMode
 
   // Whether STEP loading should also produce mesh evidence

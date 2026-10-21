@@ -673,12 +673,18 @@ export class UnknownNativeKernelError extends Error {
  * Open the preparation host a long-lived process prepares native kernels through: the deployments with their seal
  * steps, the payload store and the managed profile, with the process's unrestricted `fetch` unless one is given.
  * Verified payloads persist, so a cancelled or failed call leaves the next one only the remainder to download.
- * @param input - The deployments, the payload store, the managed profile and, for tests, the transport.
+ * @param input - The deployments, the payload store, the managed profile, the installation whose link records what it
+ *   prepares (the running script by default; a packaged app names its executable, since its `argv[1]` is no path) and,
+ *   for tests, the transport.
  * @returns The preparation and its disposal.
  * @public
  */
 export const openNativePreparation = (
-  input: NativeStoreInput & { readonly deployments: readonly NativeKernelDeployment[]; readonly fetch?: typeof fetch },
+  input: NativeStoreInput & {
+    readonly deployments: readonly NativeKernelDeployment[];
+    readonly hostPath?: string;
+    readonly fetch?: typeof fetch;
+  },
 ): NativePreparation => {
   let opened: Promise<{ host: PreparationHost; plugins: readonly PreparationPlugin[] }> | undefined;
   const open = async () => {
@@ -689,6 +695,7 @@ export const openNativePreparation = (
       plugins,
       store: input.store,
       ...(indicators === undefined ? {} : { indicators }),
+      ...(input.hostPath === undefined ? {} : { hostPath: input.hostPath }),
       ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
       ...(managed.mirror === undefined ? {} : { mirror: managed.mirror }),
       ...(managed.seed === undefined ? {} : { seed: managed.seed }),

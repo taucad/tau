@@ -18,14 +18,9 @@
     "scripts/coverage-source-policy.test.mts",
     "scripts/generate-provenance.mjs",
     "tsdown.config.ts",
-    "src/cli/cli.test.ts",
-    "src/cli/cli.ts",
     "src/cli/main.ts",
-    "src/cli/node-host-selection.test.ts",
-    "src/cli/node-host.test.ts",
-    "src/cli/node-host.ts",
-    "src/cli/wire-value.test.ts",
-    "src/cli/wire-value.ts",
+    "src/model/default-exporter.test.ts",
+    "src/model/default-exporter.ts",
     "src/model/default-runtime.test.ts",
     "src/model/default-runtime.ts",
     "src/doctrine-ceilings.test.ts",
@@ -33,8 +28,6 @@
     "src/provenance-script.test.ts",
     "src/runner/node/native-pool-runner.test.ts",
     "src/runner/node/native-pool-runner.ts",
-    "src/runner/node/native-pool-worker-entry.test.ts",
-    "src/runner/node/native-pool-worker-entry.ts",
     "src/runner/node/node-vm-filesystem.ts"
   ]
 }

@@ -56,7 +56,20 @@ export function selectNativeTargetExpectations(expectations, campaign, { backend
   return statuses;
 }
 
-/** Project only the reviewed current identities after the original byte authority is verified. @internal */
+/**
+ * Ruling QUERY-EVIDENCE-REFUSAL-01 (2026-10-19): a query whose selector cannot resolve lacks the evidence it
+ * reads, so it refuses instead of failing. These are the only campaign rows the ruling moves; each keeps its code.
+ * Mirrors the engine's own M3 campaign projection.
+ * @internal
+ */
+export const QUERY_EVIDENCE_REFUSALS = Object.freeze([
+  'selector/packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/manifest.json#selectors[0]',
+  'selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[0]',
+  'selector/packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/manifest.json#selectors[2]',
+  'selector/packages/geospec-engine/fixtures/selector/unnamed-import/manifest.json#selectors[0]',
+]);
+
+/** Project only the reviewed current identities and rulings after the original byte authority is verified. @internal */
 export function projectCurrentM3Campaign(campaign) {
   assert.equal(campaign.numericProfile, 'geospec-demand-v5');
   assert.deepEqual(campaign.definitions.f1, {
@@ -69,6 +82,7 @@ export function projectCurrentM3Campaign(campaign) {
   const current = '"numericProfile":"geospec-demand-v6"';
   const definition = 'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350';
   let plates = 0;
+  let refusals = 0;
   const rows = campaign.rows.map((row) => {
     const plan = row.expected.canonicalPlan;
     const key = plan.canonicalUtf8 === undefined ? 'derivationUtf8' : 'canonicalUtf8';
@@ -84,9 +98,17 @@ export function projectCurrentM3Campaign(campaign) {
       plates += 1;
       expected.verifierSourceHash = definition;
     }
+    if (QUERY_EVIDENCE_REFUSALS.includes(row.id)) {
+      assert.equal(row.capability, 'inspectGeometry', `${row.id}: query evidence refusal`);
+      assert.equal(row.polarity, 'positive', `${row.id}: query polarity`);
+      assert.equal(row.expected.status, 'failed', `${row.id}: superseded status`);
+      refusals += 1;
+      expected.status = 'refused';
+    }
     return { ...row, expected };
   });
   assert.equal(plates, 12);
+  assert.equal(refusals, QUERY_EVIDENCE_REFUSALS.length);
   return {
     ...campaign,
     numericProfile: 'geospec-demand-v6',

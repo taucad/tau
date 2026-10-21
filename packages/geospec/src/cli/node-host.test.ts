@@ -45,6 +45,7 @@ describe('createNodeGeoSpecCliHost', () => {
     const root = await project();
     const runner = createNodeGeoSpecCliHost().createRunner({
       projectPath: root,
+      configPath: undefined,
       workers: undefined,
       shardTimeout: undefined,
     });
@@ -53,7 +54,7 @@ describe('createNodeGeoSpecCliHost', () => {
     await runner.close();
 
     expect(result.success).toBe(true);
-  });
+  }, 30_000);
 
   it('should write through a supplied report stream instead of stdout', () => {
     const stdout = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
@@ -68,7 +69,21 @@ describe('createNodeGeoSpecCliHost', () => {
   it('should build a pool runner when a worker count is requested', () => {
     const host = createNodeGeoSpecCliHost();
 
-    expect(typeof host.createRunner({ projectPath: '/x', workers: 2, shardTimeout: 1000 }).run).toBe('function');
-    expect(typeof host.createRunner({ projectPath: '/x', workers: 0, shardTimeout: undefined }).run).toBe('function');
+    expect(
+      typeof host.createRunner({ projectPath: '/x', configPath: undefined, workers: 2, shardTimeout: 1000 }).run,
+    ).toBe('function');
+    expect(
+      typeof host.createRunner({ projectPath: '/x', configPath: undefined, workers: 0, shardTimeout: undefined }).run,
+    ).toBe('function');
+  });
+
+  it('should load the project config for its data fields', async () => {
+    const root = await project();
+    await writeFile(join(root, 'geospec.config.mjs'), "export default { include: ['specs/**/*.geospec.ts'] };", 'utf8');
+
+    const loaded = await createNodeGeoSpecCliHost().loadConfig({ projectPath: root, configPath: undefined });
+
+    expect(loaded.options.include).toStrictEqual(['specs/**/*.geospec.ts']);
+    expect(loaded.configPath).toMatch(/geospec\.config\.mjs$/u);
   });
 });

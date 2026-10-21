@@ -813,7 +813,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           url: remote.url,
           http: options.http,
           remote: remote.name,
-          ...(remote.kind === 'tau' ? { fetch: globalThis.fetch.bind(globalThis) } : {}),
+          ...(remote.kind === 'tau'
+            ? { fetch: globalThis.fetch.bind(globalThis), maximumUploadBytes: 100 * 1024 * 1024 }
+            : {}),
         });
   };
 
@@ -835,9 +837,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     if (await filesystem.exists(file)) {
       return filesystem.readFile(file);
     }
-    /* One download per object, not per path: `readTree` smudges every entry in
-     * parallel, and a tree that uses the same object twice would otherwise pull
-     * it twice. The map holds the in-flight promise, so the second caller waits
+    /* One download per object across concurrent tree readers. The map holds the in-flight promise, so the second caller waits
      * on the first request rather than starting its own. */
     const inFlight = downloads.get(pointer.oid);
     if (inFlight !== undefined) {
@@ -1355,15 +1355,15 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         return undefined;
       }
       const paths = await flatTree(commit.tree);
-      const entries = await Promise.all(
-        [...paths].map(async ([path, { oid, mode }]): Promise<RevisionTreeInput> => {
-          const { blob } = await readBlob({ fs, cache: objectCache(), gitdir, oid });
-          /* Smudged above the engine, never inside it (S49): the tree holds the
-           * pointer and every caller — the user, the agent, a restore — sees
-           * the bytes. */
-          return [path, await smudged(new Uint8Array(blob)), mode as FileMode];
-        }),
-      );
+      const entries: RevisionTreeInput[] = [];
+      // The returned tree retains its contents; transient transfer buffers must not fan out as well.
+      for (const [path, { oid, mode }] of paths) {
+        // oxlint-disable-next-line no-await-in-loop -- resolve one file before admitting the next transfer.
+        const { blob } = await readBlob({ fs, cache: objectCache(), gitdir, oid });
+        // oxlint-disable-next-line no-await-in-loop -- only one LFS transfer per tree read is active.
+        const content = await smudged(new Uint8Array(blob));
+        entries.push([path, content, mode as FileMode]);
+      }
       return new ImmutableRevisionTree(entries);
     },
 
@@ -1831,7 +1831,8 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
      * @returns One result per offered ref, in the order offered.
      */
     push: async (input: RevisionPushInput): Promise<RevisionPushResult> => {
-      const http = boundBy(requireHttp());
+      input.signal?.throwIfAborted();
+      const http = boundBy(requireHttp(), input.signal);
       if (input.refs.length === 0) {
         throw new RevisionPortError('INVALID_TRANSPORT', 'push requires at least one ref.');
       }
@@ -1889,6 +1890,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
         const pointers = await offeredPointers(ordered);
         try {
           await client.upload({
+            signal: input.signal,
             pointers: [...pointers].map(([oid, { size }]) => ({ oid, size })),
             read: async (oid) => localLfsObject(oid, pointers.get(oid)?.path),
           });
@@ -1902,6 +1904,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           throw error;
         }
       }
+      input.signal?.throwIfAborted();
       const atomic = input.atomic === true;
       const { results, commands } = await planPush(ordered, advertised, atomic);
       if (commands.length > 0) {

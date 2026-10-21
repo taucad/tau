@@ -51,7 +51,10 @@ export const dueCondition = (now: Date, window: number): SQL | undefined =>
     lte(projectGitLfsObject.unreachableAt, new Date(now.getTime() - window)),
     and(
       isNull(projectGitLfsObject.finalizedAt),
-      lte(projectGitLfsObject.createdAt, new Date(now.getTime() - abandonedReservationWindowMilliseconds)),
+      lte(
+        sql`coalesce(${projectGitLfsObject.lastRequestedAt}, ${projectGitLfsObject.createdAt})`,
+        new Date(now.getTime() - abandonedReservationWindowMilliseconds).toISOString(),
+      ),
     ),
   );
 
@@ -127,6 +130,7 @@ export const retireLfsObjects = async (
         unreachableAt: projectGitLfsObject.unreachableAt,
         finalizedAt: projectGitLfsObject.finalizedAt,
         createdAt: projectGitLfsObject.createdAt,
+        lastRequestedAt: projectGitLfsObject.lastRequestedAt,
       })
       .from(projectGitLfsObject)
       .where(
@@ -146,7 +150,8 @@ export const retireLfsObjects = async (
       (row) =>
         (row.unreachableAt !== null && row.unreachableAt.getTime() <= args.now.getTime() - window) ||
         (row.finalizedAt === null &&
-          row.createdAt.getTime() <= args.now.getTime() - abandonedReservationWindowMilliseconds),
+          (row.lastRequestedAt ?? row.createdAt).getTime() <=
+            args.now.getTime() - abandonedReservationWindowMilliseconds),
     );
     if (due.length === 0) {
       return { retired: [] };

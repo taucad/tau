@@ -7,7 +7,6 @@ The committed, adversarial STEP fixture corpus and its manifests — the red/gre
 ```
 fixtures/
   README.md                # this file
-  xde/                     # SB1's hand-authored reader fixtures (established there)
   contact/                 # contact.* family — one directory per fixture
   clearance/               # clearance.* family
   mate/                    # mate.* family

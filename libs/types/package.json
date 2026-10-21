@@ -16,6 +16,7 @@
     "./constants": "./src/constants/index.ts",
     "./constants/id": "./src/constants/id.constants.ts",
     "./browser": "./src/browser.ts",
+    "./desktop-native-kernels": "./src/desktop-native-kernels.ts",
     "./desktop-updates": "./src/desktop-updates.ts"
   },
   "imports": {

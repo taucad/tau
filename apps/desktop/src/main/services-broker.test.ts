@@ -11,6 +11,7 @@ import {
   ServicesQuiescingError,
 } from '#main/services-broker.js';
 import type { ServicesBrokerOptions } from '#main/services-broker.js';
+import type { DesktopKernelPreparation, DesktopKernelProgress } from '@taucad/types/desktop-native-kernels';
 
 type Spawned = {
   postMessage: ReturnType<typeof vi.fn>;
@@ -82,6 +83,15 @@ const brokerHarness = () => {
     ) => ({ id: 'geometry' }),
   );
   const revokeGeometry = vi.fn();
+  const prepareNativeKernel = vi.fn(
+    async (
+      kernel: string,
+      onProgress: (progress: DesktopKernelProgress) => void,
+    ): Promise<DesktopKernelPreparation> => {
+      onProgress({ kernel, progress: 5, total: 10, message: 'Downloading' });
+      return { status: 'ready', kernel, byteLength: 10 };
+    },
+  );
   const options = {
     utilityEntry: '/dist/main/chunks/services-host.js',
     env: { PATH: '/usr/bin' },
@@ -97,6 +107,7 @@ const brokerHarness = () => {
     connectRuntime,
     connectGeometry,
     revokeGeometry,
+    prepareNativeKernel,
     log,
   } as unknown as ServicesBrokerOptions;
   return {
@@ -107,6 +118,7 @@ const brokerHarness = () => {
     revokeGeometry,
     fork,
     log,
+    prepareNativeKernel,
     runtimeExits,
     spawns,
   };
@@ -117,6 +129,28 @@ describe('createServicesBroker', () => {
     expect(servicesConcerns).toContain('runtimeFileSystem');
     expect(servicesConcerns).not.toContain('exactMeasurement');
     expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost', 'exactMeasurement', 'machines']);
+  });
+
+  it("prepares a kernel for the agent's prepare_kernel and answers with its progress and outcome", async () => {
+    const { broker, prepareNativeKernel, spawns } = brokerHarness();
+    broker.connect('agentHost', { workspaceRoot: '/projects/widget', projectId: 'widget', computeMode: 'memory' });
+    const utility = spawns[0]!;
+
+    utility.message({ type: 'native-kernel-prepare', requestId: 'prepare-1', kernel: 'build123d' });
+
+    await vi.waitFor(() => {
+      expect(utility.posted).toContainEqual({
+        type: 'native-kernel-prepared',
+        requestId: 'prepare-1',
+        outcome: { status: 'ready', kernel: 'build123d', byteLength: 10 },
+      });
+    });
+    expect(prepareNativeKernel).toHaveBeenCalledWith('build123d', expect.any(Function));
+    expect(utility.posted).toContainEqual({
+      type: 'native-kernel-progress',
+      requestId: 'prepare-1',
+      progress: { kernel: 'build123d', progress: 5, total: 10, message: 'Downloading' },
+    });
   });
 
   it('grants geometry runner ports only for registered project roots', () => {

@@ -1582,7 +1582,6 @@ const fundedInvocation = (fixture: Fixture, key: string): QualifiedAdmissionInpu
   surface: 'gateway',
   invocation: {
     contractVersion: 'controlled-v1',
-    credentialAccount: 'controlled-account',
     supplierRatesValidUntil: null,
     executionTimeout: 300_000,
     supplierRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' }],
@@ -2868,9 +2867,6 @@ describe('post-hoc supplier metering', () => {
           },
         ],
       ),
-    ),
-    credentialAccounts: new Map(
-      ['anthropic', 'openai', 'vertexai', 'together'].map((provider) => [provider, `${provider}-metering`]),
     ),
     executionTimeout: 300_000,
   });

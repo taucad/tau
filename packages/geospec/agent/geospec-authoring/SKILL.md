@@ -490,6 +490,7 @@ To read any other signature, find its name in `api-index.md`, which lists all 36
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants
 - `api-types.md` — Types
+- `api-types-2.md` — Types (2)
 - `api-classes.md` — Classes
 
 Read ranges, not whole files. Never copy a reference into a source file.

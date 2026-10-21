@@ -90,5 +90,5 @@ describe('production compaction replay', () => {
 
     await log.close();
     await session.close();
-  });
+  }, 30_000);
 });

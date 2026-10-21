@@ -99,7 +99,9 @@ export type MinimumDistanceResult =
  * selectors are serialized by the shared protocol serializer.
  *
  * An explicit claimId leaves the automatic sequence unchanged. Queries return
- * full reports, including failed/refused reports, without assertion errors.
+ * full reports without assertion errors. A query asserts nothing, so it never
+ * fails: one whose evidence is missing or cannot decide returns a refused
+ * report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`.
  * @public
  */
 export type GeoSpecQueryOptions = {

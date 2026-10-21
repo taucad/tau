@@ -7,6 +7,7 @@ import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { gatewayFixtureFinalText, gatewayFixtureModelName, startGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
+import { expectFirstNativeRender, firstNativeRenderMilliseconds } from '#support/prepared-kernels.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
@@ -73,6 +74,8 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       const sourcePath = await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.cs' });
       await expect.poll(() => readFileSync(sourcePath, 'utf8'), { timeout: 120_000 }).toBe(source);
       await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
+      // On a cold cache the PicoGK kernel downloads on first use before the turbofan renders.
+      await expectFirstNativeRender(page);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 180_000);
       await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0, 180_000);
 
@@ -261,5 +264,5 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       throw error;
     }
   },
-  900_000,
+  900_000 + firstNativeRenderMilliseconds,
 );

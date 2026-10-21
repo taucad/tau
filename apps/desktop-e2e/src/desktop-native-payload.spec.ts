@@ -68,7 +68,7 @@ test('[completed-artifact] loads native esbuild and nanoraster inside an Electro
   const utilityEntry = join(runRoot, 'native-payload-probe.mjs');
   const fixture = await readFile(join(workspaceRoot, 'packages/plugins/gltf/src/fixtures/cube.glb'));
   /* APFS clones through BSD `cp -c`, as `copyTree` in apps/desktop/scripts/runtime-closure.mts does:
-   * `fs.cp` with COPYFILE_FICLONE byte-copies the whole 1.3 GB bundle on macOS. */
+   * `fs.cp` with COPYFILE_FICLONE byte-copies the whole app bundle on macOS. */
   await promisify(execFile)('/bin/cp', ['-c', '-R', `${sourceApp}/`, app]);
 
   const asarRoot = join(app, 'Contents/Resources/app.asar/node_modules');

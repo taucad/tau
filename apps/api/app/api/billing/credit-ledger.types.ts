@@ -1,8 +1,7 @@
 export type InputCountEvidence = {
-  version: 'openai-input-count-v1';
+  version: 'openai-input-count-v2';
   sourceRevision: string;
   environment: BillingEnvironment;
-  credentialAccount: string;
   modelId: string;
   createRequestDigest: string;
   countRequestDigest: string;
@@ -10,6 +9,14 @@ export type InputCountEvidence = {
   /** Liability of the count call itself: the controlled loopback stub, or the supplier's counter. */
   liability: 'controlled-local-zero' | 'openai-input-tokens-v1';
 };
+
+/** Read boundary for immutable pre-removal receipts; new admissions accept only v2. */
+export type PersistedInputCountEvidence =
+  | InputCountEvidence
+  | (Omit<InputCountEvidence, 'version'> & {
+      version: 'openai-input-count-v1';
+      credentialAccount: string;
+    });
 
 export type SupplierValuation = {
   version: 'supplier-valuation-v1';
@@ -65,7 +72,6 @@ export type QualifiedAdmissionInput = {
   executionDeadline?: Date;
   invocation?: {
     contractVersion: string;
-    credentialAccount: string;
     // oxlint-disable-next-line typescript/no-restricted-types -- null explicitly denotes an undated supplier tariff
     supplierRatesValidUntil: string | null;
     supplierRates: Array<{

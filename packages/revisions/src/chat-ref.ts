@@ -261,6 +261,64 @@ const readdirOrEmpty = async (filesystem: FileSystemProvider, path: string): Pro
 };
 
 /**
+ * Whether a `chat.json` is a permanent delete's tombstone.
+ *
+ * `purgedAt` only ever settles (it is an earliest field, and a tombstone is
+ * never cleared), so a record that carries it on any device is the answer for
+ * every device: the chat's logs and attachments are gone, and only this record
+ * travels (OQ2).
+ *
+ * @param bytes - A `chat.json`, or `undefined` for none.
+ * @returns `true` when the record carries a numeric `purgedAt`.
+ */
+const isPurgedRecord = (bytes: Uint8Array<ArrayBuffer> | undefined): boolean =>
+  bytes !== undefined && typeof parseRecordFields(bytes)?.['purgedAt'] === 'number';
+
+const removeEntry = async (filesystem: FileSystemProvider, path: string): Promise<void> => {
+  let stat: Awaited<ReturnType<FileSystemProvider['stat']>>;
+  try {
+    stat = await filesystem.stat(path);
+  } catch (error) {
+    if (isNotFound(error)) {
+      return;
+    }
+    throw error;
+  }
+  if (stat.type === 'dir') {
+    for (const name of await readdirOrEmpty(filesystem, path)) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- a directory is emptied before it is removed.
+      await removeEntry(filesystem, `${path}/${name}`);
+    }
+    await filesystem.rmdir(path);
+    return;
+  }
+  await filesystem.unlink(path);
+};
+
+/**
+ * Remove everything in a purged chat's directory except its record.
+ *
+ * The record is the tombstone every device and every later fetch reconciles
+ * against; the logs, attachments and any writer's lock beside it are the bytes
+ * a permanent delete promises are gone. Idempotent, so every path that sees a
+ * purged record can call it again.
+ *
+ * @param filesystem - The checkout holding `.tau/chats/**`.
+ * @param chatId - The chat whose record carries `purgedAt`.
+ * @returns Whether anything was removed.
+ */
+const removePurgedChatBytes = async (filesystem: FileSystemProvider, chatId: string): Promise<boolean> => {
+  const directory = chatRecordsPath(chatId);
+  const names = await readdirOrEmpty(filesystem, directory);
+  const leftovers = names.filter((name) => name !== chatRecordFileName);
+  for (const name of leftovers) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- few entries, removed one at a time so a failure names one.
+    await removeEntry(filesystem, `${directory}/${name}`);
+  }
+  return leftovers.length > 0;
+};
+
+/**
  * This device's view of one chat directory, in the ref's own spelling.
  *
  * `events.jsonl` becomes `events/<deviceId>.jsonl`; every segment already on
@@ -274,6 +332,11 @@ const readdirOrEmpty = async (filesystem: FileSystemProvider, path: string): Pro
  */
 const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: string }>): Promise<ChatTreeEntries> => {
   const directory = chatRecordsPath(input.chatId);
+  const record = await readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`);
+  if (record !== undefined && isPurgedRecord(record)) {
+    /* A permanent delete records its tombstone alone (OQ2). */
+    return [[chatRecordFileName, withoutLocalFields(record)]];
+  }
   const [segmentNames, attachmentNames] = await Promise.all([
     readdirOrEmpty(input.filesystem, `${directory}/events`),
     readdirOrEmpty(input.filesystem, `${directory}/attachments`),
@@ -285,9 +348,7 @@ const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: strin
   const attachments = attachmentNames.filter((name) => chatAttachmentPattern.test(`attachments/${name}`));
   const read = await Promise.all([
     /* This device's checkout binding and failure never travel (RV-W7 #3). */
-    readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`).then(
-      (bytes) => [chatRecordFileName, bytes === undefined ? undefined : withoutLocalFields(bytes)] as const,
-    ),
+    [chatRecordFileName, record === undefined ? undefined : withoutLocalFields(record)] as const,
     readFileOrUndefined(input.filesystem, `${directory}/${chatLogFileName}`).then(
       (bytes) => [chatSegmentPath(input.deviceId), bytes] as const,
     ),
@@ -324,6 +385,16 @@ const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: strin
  * @returns The tree to record.
  */
 const unionTree = (base: ImmutableRevisionTree | undefined, local: ChatTreeEntries): ImmutableRevisionTree => {
+  /* A purge on either side is the chat's answer: the tombstone alone, never
+   * the logs or attachments the base still carried (OQ2). This device's record
+   * when it is the purged one; else the base's, which a live local record must
+   * not overwrite into a resurrection. */
+  const localRecord = local.find(([path]) => path === chatRecordFileName)?.[1];
+  const baseRecord = base?.get(chatRecordFileName);
+  const tombstone = isPurgedRecord(localRecord) ? localRecord : isPurgedRecord(baseRecord) ? baseRecord : undefined;
+  if (tombstone !== undefined) {
+    return new ImmutableRevisionTree([[chatRecordFileName, tombstone]]);
+  }
   const files = new Map<string, RevisionTreeInput>();
   for (const entry of base?.entries() ?? []) {
     files.set(entry.path, [entry.path, entry.content, entry.mode]);
@@ -765,7 +836,12 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
   if (base !== undefined) {
     assertChatTree(base);
   }
-  const tree = unionTree(base, await localChatEntries(input));
+  const local = await localChatEntries(input);
+  if (isPurgedRecord(local.find(([path]) => path === chatRecordFileName)?.[1])) {
+    /* Whatever a writer left after this device's purge goes before the tombstone is recorded. */
+    await removePurgedChatBytes(input.filesystem, input.chatId);
+  }
+  const tree = unionTree(base, local);
   const unchanged = Object.freeze({
     chatId: input.chatId,
     ref,
@@ -825,6 +901,41 @@ const recordUnion = async (input: ReplayChatSegmentInput, tree: ImmutableRevisio
 };
 
 /**
+ * The record a projection writes, and whether the chat is purged.
+ *
+ * A purge on either side is authoritative (OQ2): it settles the record even
+ * where another field conflicts, and the projection then writes no log or
+ * attachment and removes this device's.
+ *
+ * @param local - This device's `chat.json`.
+ * @param bases - Each known ancestor's `chat.json`.
+ * @param incoming - The fetched `chat.json`.
+ * @returns The record to write (or none), a conflict to report after the
+ *   segments are written, and whether the chat is purged.
+ * @throws Error when reconciling fails for any reason but a record conflict.
+ */
+const projectedRecord = (
+  local: Uint8Array<ArrayBuffer> | undefined,
+  bases: ReadonlyArray<Uint8Array<ArrayBuffer> | undefined>,
+  incoming: Uint8Array<ArrayBuffer> | undefined,
+): Readonly<{ metadata?: Uint8Array<ArrayBuffer>; conflict?: RevisionPortError; purged: boolean }> => {
+  const purged = isPurgedRecord(local) || isPurgedRecord(incoming);
+  try {
+    const metadata = reconcileMetadata(local, bases, incoming);
+    return metadata === undefined ? { purged } : { metadata, purged };
+  } catch (error) {
+    if (!(error instanceof RevisionPortError)) {
+      throw error;
+    }
+    if (!purged) {
+      return { conflict: error, purged };
+    }
+    const tombstone = isPurgedRecord(incoming) ? incoming : local;
+    return tombstone === undefined ? { purged } : { metadata: tombstone, purged };
+  }
+};
+
+/**
  * Write every fetched chat ref's tree into the checkout's `.tau/chats/**`.
  *
  * The *fetch path* writes the projection (A39): a client reads chats from
@@ -863,34 +974,32 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
     /* A record conflict never withholds the other device's log (CH1): the
      * segments and attachments are written either way, the record only when it
      * reconciled, and the conflict is reported after them. */
-    let metadata: Uint8Array<ArrayBuffer> | undefined;
-    let conflict: RevisionPortError | undefined;
-    try {
-      metadata = reconcileMetadata(
-        localRecord,
-        [base?.get(chatRecordFileName), own?.get(chatRecordFileName)],
-        incomingRecord,
-      );
-    } catch (error) {
-      if (!(error instanceof RevisionPortError)) {
-        throw error;
-      }
-      conflict = error;
-    }
-    const changed = await writeEntries({
+    const { metadata, conflict, purged } = projectedRecord(
+      localRecord,
+      [base?.get(chatRecordFileName), own?.get(chatRecordFileName)],
+      incomingRecord,
+    );
+    const written = await writeEntries({
       filesystem: input.filesystem,
       directory,
       entries: [
-        ...tree
-          .entries()
-          .filter(
-            (entry) =>
-              !isOwnSegment(input, entry.path) && entry.path !== chatLogFileName && entry.path !== chatRecordFileName,
-          ),
+        ...(purged
+          ? []
+          : tree
+              .entries()
+              .filter(
+                (entry) =>
+                  !isOwnSegment(input, entry.path) &&
+                  entry.path !== chatLogFileName &&
+                  entry.path !== chatRecordFileName,
+              )),
         ...(metadata === undefined ? [] : [{ path: chatRecordFileName, content: metadata }]),
       ],
       signal: input.signal,
     });
+    input.signal?.throwIfAborted();
+    const removed = purged && (await removePurgedChatBytes(input.filesystem, chatId));
+    const changed = written || removed;
     if (changed) {
       input.onWritten?.(chatId);
     }

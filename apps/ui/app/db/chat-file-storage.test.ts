@@ -2,11 +2,15 @@ import { KeyedMutex } from '#db/keyed-mutex.js';
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for the library-row tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, it, expect, beforeEach } from 'vitest';
 import type { Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import { errorCategory } from '@taucad/types/constants';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import type { ChatStoreClient } from '#db/chat-file-storage.js';
@@ -34,7 +38,14 @@ const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(2
  * a provider speaks rooted ones, which is the one translation the real client
  * does for us — so the fixture does it here and nothing else is faked.
  */
-const createStoreWithFiles = (): {
+const createStoreWithFiles = (
+  options: {
+    /** The backing store: the browser's in-memory stand-in by default, or a Node disk for the desktop's. */
+    readonly provider?: () => Promise<FileSystemProvider>;
+    /** Paths an open writer holds, whose removal fails as OPFS's does under a sync access handle. */
+    readonly held?: ReadonlySet<string>;
+  } = {},
+): {
   store: ReturnType<typeof createChatFileStore>;
   reopen: (projectIds?: () => Promise<string[]>) => ReturnType<typeof createChatFileStore>;
   reads: string[];
@@ -42,11 +53,12 @@ const createStoreWithFiles = (): {
   write: (path: string, content: string) => Promise<void>;
   exists: (path: string) => Promise<boolean>;
   directoriesRead: string[];
+  list: (path: string) => Promise<string[]>;
 } => {
   const mutex = new KeyedMutex<string>();
   let filesystem: FileSystemProvider | undefined;
   const provider = async (): Promise<FileSystemProvider> => {
-    filesystem ??= await createMemoryProvider();
+    filesystem ??= await (options.provider ?? createMemoryProvider)();
     return filesystem;
   };
   const rooted = (path: string): string => path.replace(/^\/+/u, '');
@@ -100,6 +112,9 @@ const createStoreWithFiles = (): {
       return filesystem.exists(rooted(path));
     },
     unlink: async (path) => {
+      if (options.held?.has(path) === true) {
+        throw new DOMException('The file is locked by an open access handle.', 'NoModificationAllowedError');
+      }
       const filesystem = await provider();
       await filesystem.unlink(rooted(path));
     },
@@ -133,10 +148,118 @@ const createStoreWithFiles = (): {
       const provided = await provider();
       return provided.exists(rooted(path));
     },
+    list: async (path) => {
+      const provided = await provider();
+      const names = await provided.readdir(rooted(path));
+      return names.toSorted();
+    },
   };
 };
 
 const createStore = (): ChatStorage => createStoreWithFiles().store;
+
+/*
+ * OQ2: *Delete permanently* removes the chat's bytes. The record keeps
+ * `purgedAt` as the tombstone sync reconciles against; the logs, attachments
+ * and any lock beside it go, on the browser's store and on the desktop's Node
+ * disk alike (one store, two backends).
+ */
+const nodeRoots: string[] = [];
+afterAll(async () => {
+  await Promise.all(nodeRoots.map(async (root) => rm(root, { force: true, recursive: true })));
+});
+
+describe.each([
+  ['browser', undefined],
+  [
+    'desktop (Node disk)',
+    async (): Promise<FileSystemProvider> => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-chat-purge-'));
+      nodeRoots.push(root);
+      return new NodeFsProvider(root);
+    },
+  ],
+] as const)('chat file store — permanent delete removes the chat’s bytes (%s)', (_store, provider) => {
+  const projectId = 'proj_purge';
+  const chatFile = (chatId: string, path: string): string => `/projects/${projectId}/.tau/chats/${chatId}/${path}`;
+  const imagePath = `attachments/${'a1'.repeat(32)}.png`;
+  const capturePath = `attachments/${'c3'.repeat(32)}.webp`;
+
+  const seedChat = async (files: ReturnType<typeof createStoreWithFiles>, name: string): Promise<Chat> => {
+    const chat = await files.store.createChat(projectId, {
+      name,
+      messages: [],
+    });
+    await files.write(chatFile(chat.id, 'events.jsonl'), '{"sequence":0}\n');
+    await files.write(chatFile(chat.id, 'events/device-b.jsonl'), '{"sequence":0}\n');
+    await files.write(chatFile(chat.id, imagePath), 'image');
+    await files.write(chatFile(chat.id, capturePath), 'capture');
+    await files.write(chatFile(chat.id, 'events.jsonl.lock'), '1\n');
+    return chat;
+  };
+
+  it('keeps the record as the tombstone and removes logs, attachments and locks', async () => {
+    const files = createStoreWithFiles({ provider });
+    const chat = await seedChat(files, 'Purged');
+    const kept = await seedChat(files, 'Kept');
+    /* Another chat's composer draft and its draft-stage attachment are that chat's alone. */
+    const keptDraft = `/.tau/composers/chats/${projectId}/${kept.id}/attachments/${'d4'.repeat(32)}.png`;
+    await files.write(keptDraft, 'draft');
+    await files.store.softDeleteChat(chat.id);
+
+    await files.store.purgeChat(chat.id);
+
+    const directory = `/projects/${projectId}/.tau/chats/${chat.id}`;
+    await expect(files.list(directory)).resolves.toEqual(['chat.json']);
+    const tombstone: unknown = JSON.parse(await files.read(chatFile(chat.id, 'chat.json')));
+    expect(tombstone).toHaveProperty('deletedAt', expect.any(Number));
+    expect(tombstone).toHaveProperty('purgedAt', expect.any(Number));
+    await expect(files.list(`/projects/${projectId}/.tau/chats/${kept.id}`)).resolves.toEqual([
+      'attachments',
+      'chat.json',
+      'events',
+      'events.jsonl',
+      'events.jsonl.lock',
+    ]);
+    await expect(files.exists(keptDraft)).resolves.toBe(true);
+  });
+
+  it('refuses while a writer holds the log, leaving the chat archived and whole, then deletes on retry', async () => {
+    const held = new Set<string>();
+    const files = createStoreWithFiles({ provider, held });
+    const chat = await seedChat(files, 'Open');
+    await files.store.softDeleteChat(chat.id);
+    held.add(chatFile(chat.id, 'events.jsonl'));
+
+    await expect(files.store.purgeChat(chat.id)).rejects.toThrow('still running or open');
+
+    const archived = JSON.parse(await files.read(chatFile(chat.id, 'chat.json'))) as Record<string, unknown>;
+    expect(archived).toHaveProperty('deletedAt', expect.any(Number));
+    expect(archived).not.toHaveProperty('purgedAt');
+    await expect(files.exists(chatFile(chat.id, capturePath))).resolves.toBe(true);
+    await expect(
+      files.store.getChatRecordsForResource(projectId, {
+        includeDeleted: true,
+      }),
+    ).resolves.toEqual([expect.objectContaining({ id: chat.id })]);
+
+    held.clear();
+    await files.store.purgeChat(chat.id);
+    await expect(files.list(`/projects/${projectId}/.tau/chats/${chat.id}`)).resolves.toEqual(['chat.json']);
+  });
+
+  it('sweeps what a fenced writer left when the purge runs again', async () => {
+    const files = createStoreWithFiles({ provider });
+    const chat = await seedChat(files, 'Leftover');
+    await files.store.softDeleteChat(chat.id);
+    await files.store.purgeChat(chat.id);
+    await files.write(chatFile(chat.id, 'events.jsonl'), '{"sequence":1}\n');
+
+    await files.store.purgeChat(chat.id);
+
+    await expect(files.list(`/projects/${projectId}/.tau/chats/${chat.id}`)).resolves.toEqual(['chat.json']);
+  });
+});
 
 describe('chat file store — irreversible archive deletion', () => {
   it('excludes purged chats from every list and direct open, retaining a durable tombstone after reload', async () => {

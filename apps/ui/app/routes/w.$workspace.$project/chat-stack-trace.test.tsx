@@ -4,17 +4,27 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { KernelIssue } from '@taucad/runtime';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
+import type { DesktopKernelPreparation, DesktopNativeKernelBridge } from '@taucad/types/desktop-native-kernels';
 
-const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockReadFile, mockSetChatOpen } = vi.hoisted(
-  () => ({
-    mockCreateChat: vi.fn(),
-    mockSubmit: vi.fn(),
-    mockSetFocusedChatId: vi.fn(),
-    mockEditorSend: vi.fn(),
-    mockReadFile: vi.fn(),
-    mockSetChatOpen: vi.fn(),
-  }),
-);
+const {
+  mockCreateChat,
+  mockSubmit,
+  mockSetFocusedChatId,
+  mockEditorSend,
+  mockReadFile,
+  mockSetChatOpen,
+  mockCadSend,
+  mockNativeKernels,
+} = vi.hoisted(() => ({
+  mockCreateChat: vi.fn(),
+  mockSubmit: vi.fn(),
+  mockSetFocusedChatId: vi.fn(),
+  mockEditorSend: vi.fn(),
+  mockReadFile: vi.fn(),
+  mockSetChatOpen: vi.fn(),
+  mockCadSend: vi.fn(),
+  mockNativeKernels: { current: undefined as DesktopNativeKernelBridge | undefined },
+}));
 
 const editorSnapshot = { context: { focusedChatId: 'chat-test' } };
 const editorRef = {
@@ -50,7 +60,7 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 vi.mock('#hooks/use-cad.js', () => ({
-  useCad: () => (mockHasCadActor ? { id: mockCadId } : undefined),
+  useCad: () => (mockHasCadActor ? { id: mockCadId, send: mockCadSend } : undefined),
   useCadSelector: <S,>(selector: (state: unknown) => S, defaultValue: S): S =>
     mockHasCadActor
       ? selector({
@@ -63,6 +73,10 @@ vi.mock('#hooks/use-cad.js', () => ({
           hasTag: (tag: string) => mockCadTags.has(tag),
         })
       : defaultValue,
+}));
+
+vi.mock('#filesystem/desktop-bridge.js', () => ({
+  desktopNativeKernels: () => mockNativeKernels.current,
 }));
 
 vi.mock('#hooks/use-chats.js', () => ({
@@ -335,6 +349,49 @@ describe('ViewerIssues — disclosure', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Saved view “drawing” is unavailable');
     fireEvent.click(screen.getByRole('button', { name: 'Use default view' }));
     expect(onAct).toHaveBeenCalledOnce();
+  });
+
+  it('downloads a kernel the desktop has not prepared in place of its refusal, then renders again', async () => {
+    const outcome = Promise.withResolvers<DesktopKernelPreparation>();
+    const cancel = vi.fn(async () => undefined);
+    mockNativeKernels.current = {
+      prepare: vi.fn(async () => outcome.promise),
+      cancel,
+      subscribe: () => () => undefined,
+    };
+    mockLatestGeometryOutcome = 'failure';
+    mockKernelIssues = new Map([
+      [
+        'main.scad',
+        [
+          {
+            message: 'The build123d kernel is not prepared.',
+            severity: 'error',
+            type: 'runtime',
+            code: 'KERNEL_NOT_PREPARED',
+            details: { kernel: 'build123d', package: '@taucad/build123d', extension: '.py', byteLength: 314_572_800 },
+          },
+        ],
+      ],
+    ]);
+    try {
+      render(<ViewerIssuesHost />);
+
+      const status = await screen.findByRole('status');
+      expect(status).toHaveTextContent('Downloading the build123d kernel runtime (300.0 MB).');
+      expect(screen.queryByText('The build123d kernel is not prepared.')).toBeNull();
+      expect(screen.getByRole('progressbar', { name: 'Download progress' })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(cancel).toHaveBeenCalledWith('build123d');
+
+      outcome.resolve({ status: 'ready', kernel: 'build123d', byteLength: 314_572_800 });
+      await waitFor(() => {
+        expect(mockCadSend).toHaveBeenCalledWith({ type: 'initializeModel', entryPath: 'main.scad' });
+      });
+    } finally {
+      mockNativeKernels.current = undefined;
+      mockLatestGeometryOutcome = undefined;
+    }
   });
 });
 

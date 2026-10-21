@@ -44,16 +44,21 @@ export type DesktopChannel = 'production' | 'staging';
 
 const channelClientEnvironment = {
   production: {
+    TAU_S3_ENDPOINT: 'https://271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
     TAU_API_URL: 'https://api.tau.new',
     TAU_WEBSOCKET_URL: 'wss://api.tau.new',
     TAU_FRONTEND_URL: 'https://tau.new',
   },
   staging: {
+    TAU_S3_ENDPOINT: 'https://271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
     TAU_API_URL: 'https://api.taucad.dev',
     TAU_WEBSOCKET_URL: 'wss://api.taucad.dev',
     TAU_FRONTEND_URL: 'https://taucad.dev',
   },
-} as const satisfies Record<DesktopChannel, Record<(typeof requiredClientEnvironmentNames)[number], string>>;
+} as const satisfies Record<
+  DesktopChannel,
+  Record<(typeof requiredClientEnvironmentNames)[number] | 'TAU_S3_ENDPOINT', string>
+>;
 
 /** PostHog hosts for the renderer's analytics, matching `apps/ui`'s web defaults. */
 const desktopAnalyticsHosts = {
@@ -166,9 +171,9 @@ export const desktopEnvironment = (
     stripPackagedOverrides(environment);
   }
   const defaults = channelClientEnvironment[options.channel ?? 'production'];
-  for (const name of requiredClientEnvironmentNames) {
+  for (const [name, value] of Object.entries(defaults)) {
     if (!environment[name]?.trim()) {
-      environment[name] = defaults[name];
+      environment[name] = value;
     }
   }
   /* Analytics need a project key; a build without one (local, unsigned) leaves them out entirely. */

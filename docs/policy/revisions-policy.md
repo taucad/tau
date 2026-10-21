@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-10-14'
+updated: '2026-10-19'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -236,6 +236,8 @@ Make durable state copy-ready instead of snapshotted. Write objects once under k
 Store the readable checkout projection at `.tau/chats/<chatId>/chat.json` plus `events/<device>.jsonl`, one segment per record device (rule 10), and sent attachments at `attachments/<64 hex>.<jpg|png|webp|gif|pdf>`; derive messages from the log. Store `refs/tau/chats/<chatId>` as an orphan-parented chain whose closed trees carry exactly the chat record, per-device segments and those content-addressed attachment blobs (`assertChatTree` in `packages/revisions/src/chat-ref.ts` refuses any other entry). Record a chat ref with `WriteRevisionInput.largeObjects: false`: its tree is stored verbatim as plain blobs and never cleaned into LFS pointers, because a closed tree cannot carry the `.gitattributes` a pointer needs and attachments are capped (4 MiB images, 20 MiB PDFs) where plain git carries them on any remote. Every other writer keeps the default `true`. Write local chat records and refs through protected host writers and revision object plumbing. When materializing records received from a remote, only the fetch path writes the checkout projection through the host-owned record authority.
 
 Validate a complete fetched chat tree before writing any record. Admit the chat metadata and foreign per-device segments only; never overwrite the local root append log, this device's segment, or newer local metadata. Combine stale-parent record refs without projecting their old bytes back onto the checkout. Isolate every record preparation, transport, and replay failure so it cannot block authored history or a sibling record ref.
+
+Treat a `chat.json` carrying `purgedAt` as a permanent delete's tombstone on every device. Record a purged chat's ref tree as that record alone, whatever its base tree carried; when either side of a projection is purged, write only the record (the purge settles a conflict on any other field), write no segment or attachment, and remove the chat's local logs and attachments. Fence the chat's log and attachment writers by the same record, so no host reopens, appends to or attaches into a purged chat. Never express a purge by deleting `chat.json`: an absent record reads as a chat that has not arrived yet.
 
 Use the project's remote as the only chat sync plane. Include chats when a remote is connected unless the per-project **Sync chats** toggle is off. Never add a chat database table, chat endpoint, second sync transport, or IndexedDB chat authority.
 

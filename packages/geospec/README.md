@@ -68,14 +68,47 @@ qualification, and filtered requirements remain outside the demonstrated scope.
 
 ### Runner configuration
 
-Install [`@taucad/geospec-engine`](../geospec-engine) for its `geospec` CLI or
-Node worker pool. To embed a serial runner, pass a compiled engine to
-`createNativeGeoSpecRunner` from `geospec/runner/native`; it builds the native
-model loader and releases every admitted subject after each run. These use the
-same compiled composition. Other embeddings must qualify their actual binding,
-input representation and supported domain; shared authoring syntax alone does
-not establish verdict equivalence. The CLI's flags and pool options are
-documented in that package's README.
+The `geospec` bin runs a project's specs on the compiled engine from
+[`geospec-engine`](https://github.com/taucad/geospec/tree/main/packages/geospec-engine):
+the native addon when this platform has one, else its WASM build. Models that
+are not STEP or GLB come from the `exporters` the project's `geospec.config.*`
+declares, imported once in each pool worker; without one, such a load refuses
+with `GEOSPEC_EXPORTER_MISSING`.
+
+```bash
+geospec run .
+geospec run . --include "parts/**/*.geospec.ts"
+geospec run . --file main.geospec.ts --test-name-pattern volume
+geospec run . --workers            # worker pool, auto-sized
+geospec run . --workers 4 --shard-timeout 600000
+geospec run . --config ci.geospec.config.ts
+geospec run . --json
+```
+
+| Flag                                    | Meaning                                                                                                   |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--file <path>`                         | GeoSpec file or directory root; repeatable. Empty input discovers from the project root.                  |
+| `--include <glob>` / `--exclude <glob>` | Vitest-style file globs; repeatable. Include defaults to `**/*.geospec.{ts,js}`.                          |
+| `-t`, `--test-name-pattern <re>`        | JavaScript regular expression matched against the full `suite > test` name.                               |
+| `--test-timeout <ms>`                   | Timeout for each async test callback.                                                                     |
+| `--workers [n]`                         | Run in a worker pool. Default is one; omit the count after the flag to request available CPU parallelism. |
+| `--shard-timeout <ms>`                  | Per-shard **non-verdict** watchdog. Off by default.                                                       |
+| `--bail`                                | Stop after the first red file. Interactive use only — a reward run wants the complete red set.            |
+| `--config <path>`                       | The `geospec.config.*` to use instead of the one in the project root.                                     |
+| `--json`                                | Print exactly one JSON result document on stdout and nothing else.                                        |
+
+A flag replaces the config field of the same name. **The exit code is the
+verdict.** `0` only when the run succeeded; any failure, any run-level issue,
+and an empty selection are all `1`.
+
+To embed the pool, use `createGeoSpecNodePoolRunner` from `geospec/runner/node`;
+each worker owns one engine and its own exporters, and live subjects never
+cross worker boundaries. To run serially in this process, pass an engine from
+`createNodeGeoSpecEngine` to `createNativeGeoSpecRunner` from
+`geospec/runner/native`; it builds the native model loader and releases every
+admitted subject after each run. Other embeddings must qualify their actual
+binding, input representation and supported domain; shared authoring syntax
+alone does not establish verdict equivalence.
 
 The filters below are the shared vocabulary of the CLI, the embedded runners
 and the Tau `test_model` tool:

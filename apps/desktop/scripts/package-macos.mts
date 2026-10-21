@@ -3,8 +3,8 @@
 /**
  * Purpose: Assemble and verify Tau macOS packages, with signing/notarization selected explicitly.
  * Why: Quick Look extensions must enter Contents/PlugIns before one inside-out signing pass.
- * Environment: macOS, Xcode tools, built desktop/UI artifacts and the installed `geospec-engine` pin; network (or
- * TAU_PAYLOAD_DIR / TAU_PAYLOAD_MIRROR) for the native kernel closures it seals and ships under Resources/payloads;
+ * Environment: macOS, Xcode tools, built desktop/UI artifacts and the installed `geospec-engine` pin (the app ships no
+ * native kernel closure: it downloads each on first use);
  * TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE names that engine version's source/relink archive (required for an arm64 --release);
  * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT; optional TAU_DESKTOP_CHANNEL (production, the default, or staging);
  * Apple credentials only for --release; --unsigned skips all package signing.
@@ -41,7 +41,7 @@ import {
   excludesBuildDiagnostics,
   resolveRuntimePackages,
   runtimeAsarOptions,
-  stageNativePayloads,
+  stageNativePackageFiles,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -311,6 +311,7 @@ await Promise.all([
 ]);
 await Promise.all([
   copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
+  stageNativePackageFiles(resources),
   cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
   /* The legal pages live on the website; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */
@@ -333,20 +334,6 @@ await Promise.all([
 ]);
 console.log(`Retained ${machArchitecture} slices in ${String(await thinOtherSlices(appPath))} bundled Mach-O files`);
 
-/* The native kernels' sealed closures, in the store's own layout, which the app seeds its payload store from by
- * clonefile on first launch (charter W6 phase 1, D10, D24, ruling X30). Staged after thinning and excluded from
- * signing below: they ship byte for byte as their receipts record them, so nothing rewrites a digest after signing. */
-const nativeClosures = await stageNativePayloads({
-  target,
-  payloadsRoot: resolve(resources, 'payloads'),
-  workRoot: resolve(outputRoot, 'native-payloads'),
-});
-for (const closure of nativeClosures) {
-  console.log(
-    `Staged ${closure.package} ${closure.dependency}: ${closure.closureIntegrity}, tree ${closure.treeIntegrity}, ${String(closure.fileCount)} files`,
-  );
-}
-
 /* Before the first signature: flipping rewrites the Electron Framework binary.
  * An unsigned arm64 binary must keep a valid ad-hoc signature to launch at all. */
 await flipFuses(appPath, {
@@ -366,10 +353,8 @@ if (!unsigned) {
     preEmbedProvisioningProfile: false,
     strictVerify: true,
     batchCodesignCalls: true,
-    /* Sealed native closures are verified by digest, never signed (I3); the git payload's code is signed. */
-    ignore: (path) =>
-      path.includes('/Contents/Resources/payloads/') ||
-      (path.includes('/Contents/Resources/git/') && !isMachObject(path)),
+    /* The git payload's code is signed, its other files are not. */
+    ignore: (path) => path.includes('/Contents/Resources/git/') && !isMachObject(path),
     optionsForFile: (path) => ({
       ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))
         ? { entitlements: adhocAppEntitlements }

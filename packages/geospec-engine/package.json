@@ -1,13 +1,13 @@
 {
   "name": "@taucad/geospec-engine",
   "version": "0.1.0-beta.8",
-  "description": "GeoSpec CLI and Node worker-pool host for the compiled GeoSpec engine",
+  "description": "Compatibility package: the geospec CLI and Node pool with Tau's default exporter, until it is removed",
   "type": "module",
   "sideEffects": [
     "./src/cli/main.ts",
     "./dist/cli/main.mjs",
-    "./src/runner/node/native-pool-worker-entry.ts",
-    "./dist/runner/node/native-pool-worker-entry.mjs"
+    "./src/model/default-exporter.ts",
+    "./dist/model/default-exporter.mjs"
   ],
   "private": false,
   "repository": {
@@ -32,7 +32,7 @@
     "typescript"
   ],
   "bin": {
-    "geospec": "./dist/cli/main.mjs"
+    "tau-geospec": "./dist/cli/main.mjs"
   },
   "author": "Richard Fontein",
   "license": "Apache-2.0",

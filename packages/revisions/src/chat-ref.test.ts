@@ -492,6 +492,230 @@ describe.each([
     expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toHaveProperty('purgedAt', 18);
   });
 
+  /*
+   * OQ2: a permanent delete removes the chat's bytes. The record carrying
+   * `purgedAt` is the tombstone and the only entry that survives; an arriving
+   * purge removes this device's logs and attachments, and a later projection
+   * of a head that still carries them never writes them back.
+   */
+  const recordHead = async (
+    record: Record<string, unknown>,
+    extra: ReadonlyArray<readonly [string, string | Uint8Array<ArrayBuffer>]> = [],
+  ): Promise<RevisionId> => {
+    const written = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['chat.json', JSON.stringify(record)], ...extra]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Purge record' },
+    });
+    return revisionId(written.commitId);
+  };
+
+  const chatEntries = async (target: FileSystemProvider, id: string): Promise<readonly string[]> => {
+    const list = async (path: string): Promise<string[]> => {
+      try {
+        const names = await target.readdir(`${chatRecordsPath(id)}${path}`);
+        const nested = await Promise.all(
+          names.map(async (name) => {
+            const stat = await target.stat(`${chatRecordsPath(id)}${path}/${name}`);
+            return stat.type === 'dir' ? list(`${path}/${name}`) : [`${path}/${name}`.slice(1)];
+          }),
+        );
+        return nested.flat();
+      } catch {
+        return [];
+      }
+    };
+    const entries = await list('');
+    return entries.toSorted();
+  };
+
+  it.runIf(enabled)('removes this device’s logs and attachments when a purged record arrives', async () => {
+    const id = `purge_arrives_${_engine}`;
+    const target = await createMemoryProvider();
+    await writeChatFiles(
+      target,
+      {
+        'chat.json': JSON.stringify({
+          id,
+          name: 'Chat',
+          createdAt: 1,
+          updatedAt: 10,
+          deletedAt: 5,
+        }),
+        'events.jsonl': 'B0\n',
+        [chatSegmentPath('device-c')]: 'C0\n',
+        'events.jsonl.lock': '1\n',
+      },
+      id,
+    );
+    await target.writeFile(`${chatRecordsPath(id)}/${imagePath}`, imageBytes);
+    const head = await recordHead(
+      {
+        id,
+        name: 'Chat',
+        createdAt: 1,
+        updatedAt: 20,
+        deletedAt: 5,
+        purgedAt: 20,
+      },
+      [
+        [chatSegmentPath('device-a'), 'A0\n'],
+        [documentPath, documentBytes],
+      ],
+    );
+
+    await expect(
+      projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-b',
+        refs: [{ name: chatRefName(id), head }],
+      }),
+    ).resolves.toEqual([id]);
+
+    expect(await chatEntries(target, id)).toEqual(['chat.json']);
+    expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toHaveProperty('purgedAt', 20);
+  });
+
+  it.runIf(enabled)(
+    'never writes a purged chat’s logs or attachments back from a head that still has them',
+    async () => {
+      const id = `purge_stays_${_engine}`;
+      const target = await createMemoryProvider();
+      await writeChatFiles(
+        target,
+        {
+          'chat.json': JSON.stringify({
+            id,
+            name: 'Chat',
+            createdAt: 1,
+            updatedAt: 20,
+            deletedAt: 5,
+            purgedAt: 20,
+          }),
+        },
+        id,
+      );
+      /* Another device's head from before it heard of the purge: a live record, its segment and an attachment. */
+      const stale = await recordHead({ id, name: 'Chat', createdAt: 1, updatedAt: 30, deletedAt: 5 }, [
+        [chatSegmentPath('device-a'), 'A0\nA1\n'],
+        [imagePath, imageBytes],
+      ]);
+
+      await projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-b',
+        refs: [{ name: chatRefName(id), head: stale }],
+      });
+
+      expect(await chatEntries(target, id)).toEqual(['chat.json']);
+      expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toHaveProperty('purgedAt', 20);
+    },
+  );
+
+  it.runIf(enabled)('lets a purge win over a record conflict on another field', async () => {
+    const id = `purge_conflict_${_engine}`;
+    const { target, project } = await twoSidedRecord(id, {
+      base: { id, name: 'Chat', updatedAt: 10, deletedAt: 5 },
+      incoming: {
+        id,
+        name: 'Remote name',
+        updatedAt: 20,
+        deletedAt: 5,
+        purgedAt: 20,
+      },
+      local: { id, name: 'Local name', updatedAt: 12, deletedAt: 5 },
+    });
+
+    await expect(project()).resolves.toEqual([id]);
+
+    expect(await chatEntries(target, id)).toEqual(['chat.json']);
+    expect(JSON.parse((await readChatFile(target, 'chat.json', id)) ?? '{}')).toMatchObject({
+      name: 'Remote name',
+      purgedAt: 20,
+    });
+  });
+
+  it.runIf(enabled)('records a purged chat as its record alone, whatever the base tree carried', async () => {
+    const id = `purge_records_${_engine}`;
+    const purged = {
+      id,
+      name: 'Chat',
+      createdAt: 1,
+      updatedAt: 20,
+      deletedAt: 5,
+      purgedAt: 20,
+    };
+    const base = await recordHead({ id, name: 'Chat', createdAt: 1, updatedAt: 10, deletedAt: 5 }, [
+      [chatSegmentPath('device-a'), 'A0\n'],
+      [imagePath, imageBytes],
+    ]);
+    /* A leftover this device's purge could not remove yet (a writer held it). */
+    await writeChatFiles(harness.checkout, { 'chat.json': JSON.stringify(purged), 'events.jsonl': 'B0\n' }, id);
+    await harness.checkout.writeFile(`${chatRecordsPath(id)}/${documentPath}`, documentBytes);
+
+    const replayed = await replayChatSegment({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-b',
+      chatId: id,
+      syncChats: true,
+      actorId,
+      now,
+      onto: base,
+    });
+
+    expect(replayed.status).toBe('updated');
+    const tree = await harness.port.readTree(replayed.head!);
+    expect(tree?.entries().map((entry) => entry.path)).toEqual(['chat.json']);
+    expect(JSON.parse(decoder.decode(tree?.get('chat.json')))).toStrictEqual(purged);
+    expect(await chatEntries(harness.checkout, id)).toEqual(['chat.json']);
+  });
+
+  it.runIf(enabled)('keeps a fetched purge when this device replays a live record onto it', async () => {
+    const id = `purge_onto_${_engine}`;
+    const purged = {
+      id,
+      name: 'Chat',
+      createdAt: 1,
+      updatedAt: 20,
+      deletedAt: 5,
+      purgedAt: 20,
+    };
+    const base = await recordHead(purged);
+    await writeChatFiles(
+      harness.checkout,
+      {
+        'chat.json': JSON.stringify({
+          id,
+          name: 'Chat',
+          createdAt: 1,
+          updatedAt: 30,
+          deletedAt: 5,
+        }),
+        'events.jsonl': 'B1\n',
+      },
+      id,
+    );
+
+    const replayed = await replayChatSegment({
+      port: harness.port,
+      filesystem: harness.checkout,
+      deviceId: 'device-b',
+      chatId: id,
+      syncChats: true,
+      actorId,
+      now,
+      onto: base,
+    });
+
+    const tree = await harness.port.readTree(replayed.head!);
+    expect(tree?.entries().map((entry) => entry.path)).toEqual(['chat.json']);
+    expect(JSON.parse(decoder.decode(tree?.get('chat.json')))).toHaveProperty('purgedAt', 20);
+  });
+
   it.runIf(enabled)('merges timestamps both devices moved and writes the other device’s log (CH1 a)', async () => {
     const id = `timestamps_${_engine}`;
     const { target, project } = await twoSidedRecord(id, {
@@ -1185,6 +1409,136 @@ describe.runIf(gitToolchainOnPath)('two devices, two stores, one remote', () => 
     expect(onB?.get(imagePath)).toEqual(imageBytes);
     expect(onB?.get(documentPath)).toEqual(documentBytes);
     await expect(stat(join(root, 'device-b-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 180_000);
+
+  /*
+   * OQ2 end to end: device A deletes the chat permanently; device B syncs and
+   * its logs and attachments go; B's own late append, its push and A's next
+   * fetch never bring any of them back.
+   */
+  it('removes the chat’s bytes on the other device and keeps them gone', async () => {
+    const purgedId = 'chat_purged_two_devices';
+    const writePurgedOn = async (harness: Harness, deviceId: string): ReturnType<typeof writeChatRef> =>
+      writeChatRef({
+        port: harness.port,
+        filesystem: harness.checkout,
+        deviceId,
+        chatId: purgedId,
+        syncChats: true,
+        actorId,
+        now,
+        remote: 'origin',
+      });
+    const receive = async (harness: Harness, deviceId: string): Promise<RevisionId> => {
+      const fetched = await harness.port.fetch({
+        remote: 'origin',
+        refs: [chatRefName(purgedId)],
+      });
+      await projectChats({
+        port: harness.port,
+        filesystem: harness.checkout,
+        deviceId,
+        refs: fetched.refs,
+      });
+      return fetched.refs[0]!.head;
+    };
+    const entriesOf = async (harness: Harness): Promise<readonly string[]> => {
+      const directory = chatRecordsPath(purgedId);
+      const names = await harness.checkout.readdir(directory);
+      const nested = await Promise.all(
+        names.map(async (name) => {
+          const entry = await harness.checkout.stat(`${directory}/${name}`);
+          if (entry.type !== 'dir') {
+            return [name];
+          }
+          const children = await harness.checkout.readdir(`${directory}/${name}`);
+          return children.map((child) => `${name}/${child}`);
+        }),
+      );
+      return nested.flat().toSorted();
+    };
+    const treePaths = async (
+      harness: Harness,
+      head: RevisionId | undefined,
+    ): Promise<readonly string[] | undefined> => {
+      const tree = await harness.port.readTree(head!);
+      return tree?.entries().map((entry) => entry.path);
+    };
+    const record = {
+      id: purgedId,
+      name: 'Chat',
+      createdAt: 1,
+      updatedAt: 10,
+      deletedAt: 5,
+    };
+
+    /* Both devices hold the chat: A's log and image, B's log, each other's segment. */
+    await writeChatFiles(deviceA.checkout, { 'chat.json': JSON.stringify(record), 'events.jsonl': 'A0\n' }, purgedId);
+    await deviceA.checkout.writeFile(`${chatRecordsPath(purgedId)}/${imagePath}`, imageBytes);
+    const fromA = await writePurgedOn(deviceA, 'device-a');
+    await deviceA.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(purgedId) }],
+    });
+    await receive(deviceB, 'device-b');
+    await writeChatFiles(deviceB.checkout, { 'events.jsonl': 'B0\n' }, purgedId);
+    const fromB = await writePurgedOn(deviceB, 'device-b');
+    await deviceB.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(purgedId), expected: fromA.head }],
+    });
+    await receive(deviceA, 'device-a');
+    expect(await entriesOf(deviceB)).toEqual([imagePath, 'chat.json', 'events.jsonl', 'events/device-a.jsonl']);
+
+    /* A deletes it permanently: the record keeps `purgedAt` and A's bytes go. */
+    const purged = { ...record, updatedAt: 20, purgedAt: 20 };
+    await writeChatFiles(deviceA.checkout, { 'chat.json': JSON.stringify(purged) }, purgedId);
+    const purgedHeadA = await writePurgedOn(deviceA, 'device-a');
+    expect(await treePaths(deviceA, purgedHeadA.head)).toEqual(['chat.json']);
+    const pushedPurge = await deviceA.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(purgedId), expected: fromB.head }],
+    });
+    expect(pushedPurge.refs[0]?.status).toBe('updated');
+    expect(await entriesOf(deviceA)).toEqual(['chat.json']);
+
+    /* B appended before it heard: its push is refused, the fetch removes its bytes, the replay ships the record alone. */
+    await writeChatFiles(deviceB.checkout, { 'events.jsonl': 'B0\nB1\n' }, purgedId);
+    const late = await writePurgedOn(deviceB, 'device-b');
+    const refused = await deviceB.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(purgedId), expected: fromB.head }],
+    });
+    expect(refused.refs[0]?.status).toBe('rejected');
+    const remoteHead = await receive(deviceB, 'device-b');
+    expect(await entriesOf(deviceB)).toEqual(['chat.json']);
+    expect(JSON.parse((await readChatFile(deviceB.checkout, 'chat.json', purgedId)) ?? '{}')).toHaveProperty(
+      'purgedAt',
+      20,
+    );
+    const replayed = await replayChatSegment({
+      port: deviceB.port,
+      filesystem: deviceB.checkout,
+      deviceId: 'device-b',
+      chatId: purgedId,
+      syncChats: true,
+      actorId,
+      now,
+      onto: remoteHead,
+    });
+    expect(late.head).not.toBe(replayed.head);
+    expect(await treePaths(deviceB, replayed.head)).toEqual(['chat.json']);
+    await deviceB.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(purgedId), expected: remoteHead }],
+    });
+
+    /* And they stay gone on both devices after another round. */
+    await receive(deviceA, 'device-a');
+    await writePurgedOn(deviceA, 'device-a');
+    await receive(deviceB, 'device-b');
+    expect(await entriesOf(deviceA)).toEqual(['chat.json']);
+    expect(await entriesOf(deviceB)).toEqual(['chat.json']);
   }, 180_000);
 });
 

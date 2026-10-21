@@ -21,6 +21,7 @@ import type { DesktopSession } from '#support/desktop-app.js';
 import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
 import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
+import { firstNativeRenderMilliseconds } from '#support/prepared-kernels.js';
 import { historyRows, restoreFromHistory } from '#support/revisions-pane.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
@@ -789,7 +790,11 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
         .join('\n');
       expect(brokenSource.match(/Edge\.make_bezier\(\[/gu)).toHaveLength(2);
       writeFileSync(sourcePath, brokenSource, 'utf8');
-      await expectVisible(page.getByText(/At least two control points must be provided/u), 120_000);
+      // On a cold cache the viewer may still be downloading the Build123d kernel on first use.
+      await expectVisible(
+        page.getByText(/At least two control points must be provided/u),
+        firstNativeRenderMilliseconds,
+      );
 
       const completedBefore = (readLog(eventsPath).match(/"state":"completed"/gu) ?? []).length;
       await sendPrompt(
@@ -908,7 +913,7 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       throw error;
     }
   },
-  900_000,
+  900_000 + firstNativeRenderMilliseconds,
 );
 
 test.skipIf(!codexAvailable || !packaged || process.env['TAU_E2E_ACP_KINEMATICS'] !== 'true')(

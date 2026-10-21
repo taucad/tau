@@ -27,12 +27,6 @@ const developmentPolicy = (): ReturnType<typeof composeTariff>['policy'] => {
  * development tariff so the reserve promise is asserted end to end. */
 const resolver = new CodeOwnedBillableModelQualificationResolver({
   adapters: new Map(billableModelRouteIds.map((routeId) => [routeId, mock<BillableModelProviderAdapter>()])),
-  credentialAccounts: new Map(
-    ['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai'].map((provider) => [
-      provider,
-      `${provider}-primary`,
-    ]),
-  ),
   executionTimeout: 30_000,
 });
 

@@ -4,12 +4,11 @@
  * Purpose: Assemble an unsigned Tau desktop package and its distribution archive for Linux x64 or Windows x64.
  * Why: CI publishes development builds for every desktop platform; only macOS is signed and notarized.
  * Environment: the matching host (no cross-builds): ubuntu-24.04 for linux-x64, windows-2025 for win32-x64;
- * built desktop/UI artifacts; network access for Electron Packager's Electron download and the native kernel
- * closures (or TAU_PAYLOAD_DIR / TAU_PAYLOAD_MIRROR); on Linux the native sandbox (Bubblewrap), which seals them;
+ * built desktop/UI artifacts; network access for Electron Packager's Electron download;
  * optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT (default apps/desktop/package-out); optional TAU_DESKTOP_CHANNEL
  * (production, the default, or staging).
- * Payloads: the sealed Build123d closure ships on linux-x64 under resources/payloads, which the app seeds its payload
- * store from (charter W6); none ships on win32-x64, where native kernels do not run. git ships on linux-x64 when
+ * Payloads: no native kernel closure ships; the app downloads each one the first time a model needs it (desktop
+ * first-use download blueprint, DS-1). git ships on linux-x64 when
  * prepare-git has built it, and
  * never on win32-x64 (prepare-git compiles kernel.org source, which is not how git ships on Windows). PicoGK
  * and the GeoSpec native engine ship on darwin-arm64 only: the desktop enables PicoGK there alone, its voxel
@@ -45,7 +44,7 @@ import {
   excludesBuildDiagnostics,
   resolveRuntimePackages,
   runtimeAsarOptions,
-  stageNativePayloads,
+  stageNativePackageFiles,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -126,14 +125,10 @@ const resources = resolve(appRoot, 'resources');
 await mkdir(resolve(resources, 'branding'), { recursive: true });
 await Promise.all([
   copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
+  stageNativePackageFiles(resources),
   ...plan.branding.map(async (name) =>
     cp(resolve(desktopRoot, 'resources', name), resolve(resources, 'branding', name)),
   ),
-  stageNativePayloads({
-    target: plan.target,
-    payloadsRoot: resolve(resources, 'payloads'),
-    workRoot: resolve(outputRoot, 'native-payloads'),
-  }),
   ...(shipsGit
     ? [
         copyTree(gitResourceRoot, resolve(resources, 'git', plan.target)),

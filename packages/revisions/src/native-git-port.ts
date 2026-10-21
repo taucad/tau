@@ -1745,6 +1745,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * files, rather than the disk leg quietly succeeding through git-lfs's
        * own transfer while the browser leg fails (A15, W12 review R3).
        */
+      input.signal?.throwIfAborted();
       const configuredRemotes = await port.listRemotes();
       const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
       // Pin the destination before any asynchronous preparation; never honor a different pushurl.
@@ -1788,6 +1789,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       } else if (large.length > 0) {
         const transfer = await run(['lfs', 'push', '--', destination, ...input.refs.map((ref) => ref.name)], {
           env,
+          signal: input.signal,
           remote: input.remote,
         });
         if (transfer.exitCode !== 0) {
@@ -1808,6 +1810,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * leases "must not exist". A ref whose lease is stale comes back as one
        * `!` row and the remote ref is not touched — never a plain `--force`,
        * which would overwrite whatever moved. */
+      input.signal?.throwIfAborted();
       const leases = input.refs
         .filter((ref) => 'expected' in ref)
         .map((ref) => `--force-with-lease=${ref.remoteName ?? ref.name}:${ref.expected ?? ''}`);
@@ -1834,7 +1837,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           destination,
           ...input.refs.map((ref) => `${ref.name}:${ref.remoteName ?? ref.name}`),
         ],
-        { env, remote: input.remote },
+        { env, remote: input.remote, signal: input.signal },
       );
       const stdout = textDecoder.decode(result.stdout);
       const stderr = textDecoder.decode(result.stderr);

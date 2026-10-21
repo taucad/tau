@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -271,7 +271,12 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
           run({
             execute: async (): Promise<void> => undefined,
             update: () => ({
-              set: () => ({ where: () => ({ returning: async (): Promise<unknown[]> => [] }) }),
+              set: () => ({
+                where: () => ({
+                  returning: async (): Promise<unknown[]> =>
+                    [...lfsRows].filter(([, row]) => row.finalized).map(([oid]) => ({ oid })),
+                }),
+              }),
             }),
           }),
       },
@@ -399,10 +404,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
         objects: objects.map((object) => ({ ...object, finalized: lfsRows.get(object.oid)?.finalized ?? false })),
       };
     });
-    vi.spyOn(repositories, 'finalizeLfsObject').mockImplementation(async ({ oid, size }) => {
+    vi.spyOn(repositories, 'finalizeLfsObject').mockImplementation(async ({ oid, size, verifyContent }) => {
       const row = lfsRows.get(oid);
       if (row === undefined || row.size !== size) {
         return 'unreserved';
+      }
+      if (!(await verifyContent())) {
+        return 'invalid';
       }
       if (row.finalized) {
         return 'already-finalized';
@@ -814,7 +822,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       transfer: string;
-      objects: Array<{ oid: string; actions?: { upload?: { href: string }; verify?: { href: string } } }>;
+      objects: Array<{
+        oid: string;
+        actions?: { upload?: { href: string; header?: Record<string, string> }; verify?: { href: string } };
+      }>;
     };
     expect(body.transfer).toBe('basic');
     const action = body.objects[0]?.actions?.upload;
@@ -823,7 +834,7 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(action?.href).toContain(`/tenants/${tenantLfsObjectKey(ownerId, projectId, oid)}?`);
     expect(body.objects[0]?.actions?.verify?.href).toContain('/info/lfs/objects/verify');
 
-    const stored = await fetch(action?.href ?? '', { method: 'PUT', body: bytes });
+    const stored = await fetch(action?.href ?? '', { method: 'PUT', body: bytes, headers: action?.header });
     expect(stored.ok, `presigned PUT failed: ${String(stored.status)}`).toBe(true);
     const verified = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
       method: 'POST',
@@ -839,6 +850,39 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     state.lfsBytes = 0;
     lfsRows.delete(oid);
   }, 60_000);
+
+  it('round-trips exactly 100 MiB through stock Git LFS and refuses one byte over', async () => {
+    const clone = path.join(workspace, 'lfs-boundary');
+    await gitOk(['clone', remoteUrl, clone], workspace);
+    await gitOk(['lfs', 'install', '--local'], clone);
+    await gitOk(['lfs', 'track', '*.bin'], clone);
+    const bytes = new Uint8Array(104_857_600);
+    const oid = createHash('sha256').update(bytes).digest('hex');
+    await writeFile(path.join(clone, 'boundary.bin'), bytes);
+    await gitOk(['add', '.gitattributes', 'boundary.bin'], clone);
+    await gitOk(['commit', '-m', 'boundary fixture'], clone);
+    try {
+      await gitOk(['lfs', 'push', '--object-id', 'origin', oid], clone);
+      expect(lfsRows.get(oid)).toEqual({ size: bytes.byteLength, finalized: true });
+      await rm(path.join(clone, '.git', 'lfs', 'objects'), { recursive: true, force: true });
+      await gitOk(['lfs', 'fetch', '--all', 'origin'], clone);
+      const fetched = await readFile(path.join(clone, '.git', 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4), oid));
+      expect(fetched.byteLength).toBe(bytes.byteLength);
+      expect(createHash('sha256').update(fetched).digest('hex')).toBe(oid);
+
+      const oversized = new Uint8Array(104_857_601);
+      const oversizedOid = createHash('sha256').update(oversized).digest('hex');
+      await writeFile(path.join(clone, 'oversized.bin'), oversized);
+      await gitOk(['add', 'oversized.bin'], clone);
+      const refused = await runGit(['lfs', 'push', '--object-id', 'origin', oversizedOid], clone);
+      expect(refused.code).not.toBe(0);
+      expect(refused.stderr).toContain('100 MiB');
+      expect(lfsRows.has(oversizedOid)).toBe(false);
+    } finally {
+      state.lfsBytes = 0;
+      lfsRows.delete(oid);
+    }
+  }, 120_000);
 
   it('refuses an over-quota LFS batch with 413 and the file list', async () => {
     state.storageBytes = 10 * 1024 ** 3 - 1024;

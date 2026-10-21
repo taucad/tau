@@ -62,7 +62,7 @@ type BrowserRow = {
     publicApi: string;
   };
   subjectHash: string;
-  warmup?: { expectedStatus: 'failed' | 'passed'; invocation: Invocation };
+  warmup?: { expectedStatus: 'failed' | 'passed' | 'refused'; invocation: Invocation };
 };
 
 type Metadata = {
@@ -368,15 +368,14 @@ const runWarmup = async (
       diagnostics: [...report.diagnostics],
       status: report.status,
     };
-    // Queries return failed reports normally; failed matchers throw their structured report.
+    // A query asserts nothing: it passes or returns its refused report normally. Failed matchers throw their report.
     result.succeeded =
       report.status === setup.expectedStatus &&
       firstResult(result.report.canonicalResultUtf8).status === setup.expectedStatus &&
       ((setup.expectedStatus === 'passed' && result.error === null) ||
-        (setup.expectedStatus === 'failed' &&
-          (queryCapabilities.has(setup.invocation.capability as GeoSpecQueryCapability)
-            ? setup.invocation.polarity === 'positive' && result.error === null
-            : result.error?.assertionError === true)));
+        (queryCapabilities.has(setup.invocation.capability as GeoSpecQueryCapability)
+          ? setup.expectedStatus === 'refused' && setup.invocation.polarity === 'positive' && result.error === null
+          : setup.expectedStatus === 'failed' && result.error?.assertionError === true));
   } catch (error) {
     result.error = errorRecord(error);
   }
@@ -402,10 +401,9 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
         row.protocolControl !== undefined ||
         !(
           (row.expected.status === 'passed' && row.expected.error === null) ||
-          (row.expected.status === 'failed' &&
-            (queryCapabilities.has(row.invocation.capability as GeoSpecQueryCapability)
-              ? row.invocation.polarity === 'positive' && row.expected.error === null
-              : row.expected.error?.name === 'GeoSpecAssertionError'))
+          (queryCapabilities.has(row.invocation.capability as GeoSpecQueryCapability)
+            ? row.expected.status === 'refused' && row.invocation.polarity === 'positive' && row.expected.error === null
+            : row.expected.status === 'failed' && row.expected.error?.name === 'GeoSpecAssertionError')
         ) ||
         !/^[\da-f]{64}$/.test(row.subjectHash) ||
         !row.expected.bytes?.canonicalClaimUtf8 ||

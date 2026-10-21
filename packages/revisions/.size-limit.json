@@ -1,7 +1,7 @@
 [
   {
-    "name": "Revisions ES module outputs",
+    "name": "Revisions ES module outputs \u2014 identity conversion, repeated conflict refresh and chat purge; measured 107.332 kB brotli on macOS and CI, 2026-10-21",
     "path": "dist/**/*.mjs",
-    "limit": "107 kB"
+    "limit": "107.5 kB"
   }
 ]

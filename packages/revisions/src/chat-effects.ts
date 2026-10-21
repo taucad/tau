@@ -71,6 +71,7 @@ export const createChatEffects = (
       name: string;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -88,6 +89,7 @@ export const createChatEffects = (
       retryRejected?: boolean;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -104,6 +106,7 @@ export const createChatEffects = (
       name: string;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       syncChats: boolean;
       refusal: string | undefined;
     }>,
@@ -262,6 +265,7 @@ export const createChatEffects = (
       name: string;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -277,6 +281,7 @@ export const createChatEffects = (
       const pushed = await port.push({
         remote: input.remote,
         repositoryUrl: input.repositoryUrl,
+        signal: input.signal,
         refs: [offerOf(input.name, input.leases)],
       });
       const [entry] = pushed.refs;
@@ -292,6 +297,7 @@ export const createChatEffects = (
             : outcomeOf(entry, input.offered),
       };
     } catch (error) {
+      input.signal?.throwIfAborted();
       if (rateLimited(error)) {
         throw error;
       }
@@ -333,6 +339,7 @@ export const createChatEffects = (
       retryRejected?: boolean;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
@@ -341,6 +348,7 @@ export const createChatEffects = (
       const pushed = await port.push({
         remote: input.remote,
         repositoryUrl: input.repositoryUrl,
+        signal: input.signal,
         refs: input.names.map((name) => offerOf(name, input.leases)),
       });
       const outcomes = new Map(pushed.refs.map((entry) => [entry.name, outcomeOf(entry, input.offered)]));
@@ -359,6 +367,7 @@ export const createChatEffects = (
       }
       return pushed.refs.every((entry) => entry.status === 'rejected') ? undefined : outcomes;
     } catch (error) {
+      input.signal?.throwIfAborted();
       if (rateLimited(error)) {
         throw error;
       }
@@ -396,6 +405,7 @@ export const createChatEffects = (
       name: string;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       syncChats: boolean;
       refusal: string | undefined;
     }>,
@@ -422,7 +432,9 @@ export const createChatEffects = (
         reason: input.refusal ?? 'The remote refused this ref.',
       };
     }
-    const fetched = await port.fetch({ remote: input.remote, refs: [input.name] });
+    input.signal?.throwIfAborted();
+    const fetched = await port.fetch({ remote: input.remote, refs: [input.name], signal: input.signal });
+    input.signal?.throwIfAborted();
     const written: string[] = [];
     try {
       await projectChats({ ...context, refs: fetched.refs, onWritten: (id) => written.push(id) });
@@ -433,6 +445,7 @@ export const createChatEffects = (
       }
     }
     const remoteHead = await port.readRef(remoteTrackingRef(input.remote, input.name));
+    input.signal?.throwIfAborted();
     const person = actor?.({ runId: undefined, trigger: 'save' });
     const replayed = await replayChatSegment({
       ...context,
@@ -443,6 +456,7 @@ export const createChatEffects = (
       now: now(),
       onto: remoteHead,
     });
+    input.signal?.throwIfAborted();
     if (replayed.head === undefined) {
       return { name: input.name, status: 'rejected', head: undefined, reason: 'This chat could not be replayed.' };
     }
@@ -456,6 +470,7 @@ export const createChatEffects = (
     const pushed = await port.push({
       remote: input.remote,
       repositoryUrl: input.repositoryUrl,
+      signal: input.signal,
       refs: [{ name: chatRefName(input.chatId), ...(remoteHead === undefined ? {} : { expected: remoteHead }) }],
     });
     const [entry] = pushed.refs;

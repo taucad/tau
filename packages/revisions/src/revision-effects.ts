@@ -1546,6 +1546,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       outcome: SyncRefOutcome;
       remote: string;
       repositoryUrl?: string;
+      signal?: AbortSignal;
       leases: Readonly<Record<string, string>>;
     }>,
   ): Promise<SyncRefOutcome | undefined> => {
@@ -1566,6 +1567,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       name,
       remote: input.remote,
       repositoryUrl: input.repositoryUrl,
+      signal: input.signal,
       leases: input.leases,
       offered: new Map([[name, String(head)]]),
     });
@@ -3756,8 +3758,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * project's branch. Everything after this is `sync.machine`'s debounce.
        */
       initialSync: fromAuthorityPromise<RemoteInitialSyncActorOutput, RemoteInitialSyncActorInput>(
-        async ({ input }) => {
-          await port.fetch({ remote: input.remote });
+        async ({ input, signal }) => {
+          await port.fetch({ remote: input.remote, signal });
           const remotes = await port.listRemotes();
           const configured = remotes.find((remote) => remote.name === input.remote);
           if (configured?.fetchOnly === true || configured?.provider === 'github') {
@@ -3777,6 +3779,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                * remote's own fast-forward rule is the right refusal. W13's pushes
                * carry `expected` (A32). */
               return await port.push({
+                signal,
                 remote: input.remote,
                 refs: [{ name: `refs/heads/${branch}` }],
                 atomic: true,
@@ -3863,10 +3866,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * tag landed without its history names a revision the remote cannot
        * resolve, and the materializer would then have nothing to read.
        */
-      push: fromAuthorityPromise<PublishPushActorOutput, PublishPushActorInput>(async ({ input }) => {
+      push: fromAuthorityPromise<PublishPushActorOutput, PublishPushActorInput>(async ({ input, signal }) => {
         await ensureStore();
         const remote = await publishRemote();
         const result = await port.push({
+          signal,
           remote,
           atomic: true,
           refs: [
@@ -4045,6 +4049,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               port.push({
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
+                signal,
                 atomic: true,
                 refs: offeredHistory.map((name) => offerOf(name, input.leases)),
               });
@@ -4080,6 +4085,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 retryRejected: input.explicit !== true,
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
+                signal,
                 leases: input.leases,
                 offered: localHeads,
               })
@@ -4095,6 +4101,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                   name,
                   remote: input.remote,
                   repositoryUrl: input.repositoryUrl,
+                  signal,
                   leases: input.leases,
                   offered: localHeads,
                 })
@@ -4117,6 +4124,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                 outcome,
                 remote: input.remote,
                 repositoryUrl: input.repositoryUrl,
+                signal,
                 leases: input.leases,
               })) ?? outcome,
             );
@@ -4137,6 +4145,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
               name,
               remote: input.remote,
               repositoryUrl: input.repositoryUrl,
+              signal,
               syncChats,
               refusal: outcome.reason,
             });

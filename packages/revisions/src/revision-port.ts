@@ -353,6 +353,8 @@ export type RevisionPushRef = Readonly<{
  * @public
  */
 export type RevisionPushInput = Readonly<{
+  /** Cancel byte transfers and prevent subsequent ref publication. */
+  signal?: AbortSignal;
   remote: string;
   /** Refuse a changed destination; pin every transfer to this approved URL. */
   repositoryUrl?: string;

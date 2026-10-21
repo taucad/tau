@@ -808,6 +808,30 @@ describe('useProjectManager.createProject', () => {
     expect(result.current.workspaceConnection).toMatchObject({ phase: 'ready', projectCount: 1 });
   });
 
+  it('should resolve a resumed workspace connection instead of replaying its previous failure', async () => {
+    mockIsFileSystemAccessSupported = true;
+    mockPickerBackend = 'node';
+    mockListWorkspaces.mockResolvedValue([
+      { workspaceId: 'wsp_node', name: 'Workshop', slug: 'workshop', path: nodeWorkspacePath },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    mockSyncProjectRoots.mockRejectedValueOnce(new Error('Workspace mounting failed.'));
+
+    await act(async () => {
+      await expect(result.current.connectWorkspace()).rejects.toThrow('Workspace mounting failed.');
+    });
+    expect(result.current.workspaceConnection).toMatchObject({ phase: 'failed', retry: 'resume' });
+
+    let connected: ConnectedWorkspace | undefined;
+    await act(async () => {
+      connected = await result.current.retryWorkspaceConnection();
+    });
+
+    expect(connected).toMatchObject({ workspace: { workspaceId: 'wsp_node', path: nodeWorkspacePath } });
+    expect(result.current.workspaceConnection.phase).toBe('ready');
+    expect(mockCreateNodeWorkspace).toHaveBeenCalledOnce();
+  });
+
   it('connects a folder picked as an absolute host path', async () => {
     mockIsFileSystemAccessSupported = true;
     mockPickerBackend = 'node';

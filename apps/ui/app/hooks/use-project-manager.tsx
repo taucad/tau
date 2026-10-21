@@ -2686,9 +2686,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         return undefined;
       }
     }
-    const completion = waitForWorkspaceConnection(current.operationId);
     workspaceConnectionRef.send({ type: 'retry' });
-    return completion;
+    return waitForWorkspaceConnection(current.operationId);
   }, [connectWorkspace, waitForWorkspaceConnection, workspaceConnectionRef]);
 
   const getProjects = useCallback(

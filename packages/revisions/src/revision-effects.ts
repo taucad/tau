@@ -5147,7 +5147,7 @@ export const awaitSyncSettled = async (
       if (scheduler?.context.queueWriteError !== undefined) {
         return new Error(scheduler.context.queueWriteError);
       }
-      return scheduler?.matches({ failed: 'settled' }) || scheduler?.matches('manual')
+      return scheduler !== undefined && (scheduler.matches({ failed: 'settled' }) || scheduler.matches('manual'))
         ? 'settled'
         : new Error(sync.error ?? 'Revision backup failed before its retry could be recorded.');
     }

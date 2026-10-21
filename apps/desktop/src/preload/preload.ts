@@ -197,6 +197,7 @@ contextBridge.exposeInMainWorld('tau', {
     disconnect: async (path: string): Promise<void> => {
       const refusal: unknown = await ipcRenderer.invoke(directoryGrantChannels.disconnect, path);
       if (typeof refusal === 'string') {
+        // oxlint-disable-next-line unicorn/prefer-type-error -- A valid response carries a user-facing refusal, not a type failure.
         throw new Error(refusal);
       }
     },

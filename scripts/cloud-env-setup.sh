@@ -143,7 +143,8 @@ install_claude_hook() {
     cat <<'HOOK'
 for checkout in "$workspace" "$workspace"/*/; do
   checkout="${checkout%/}"
-  [[ "$checkout" == "${CLAUDE_PROJECT_DIR:-}" || ! -f "$checkout/scripts/agent-env.sh" ]] && continue
+  # Compare directory identity so symlinked workspace paths do not run the hook twice.
+  [[ "$checkout" -ef "${CLAUDE_PROJECT_DIR:-}" || ! -f "$checkout/scripts/agent-env.sh" ]] && continue
   (cd "$checkout" && bash scripts/agent-env.sh) || printf '[tau-session-start] agent-env failed in %s\n' "$checkout" >&2
 done
 exit 0

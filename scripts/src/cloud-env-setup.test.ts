@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Subprocess environment keys must match the cloud host variables. */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -123,31 +123,38 @@ describe('cloud environment bootstrap on stdin', () => {
     expect(existsSync(join(context.userHome, '.claude'))).toBe(false);
   });
 
-  it('should preserve Claude settings and install one hook that skips the repository-owned hook', () => {
-    const context = fixture();
-    const first = context.checkout('tau');
-    const second = context.checkout('tau-second');
-    const claudeDirectory = join(context.userHome, '.claude');
-    mkdirSync(claudeDirectory);
-    const settingsPath = join(claudeDirectory, 'settings.json');
-    writeFileSync(settingsPath, '{"permissions":{"allow":["Read"]},"hooks":{"SessionStart":[]}}\n');
-    const initial = context.run({ CLAUDE_CODE_REMOTE: 'true' });
-    expect(initial.status, initial.stderr).toBe(0);
-    const settings = readFileSync(settingsPath, 'utf8');
-    expect(settings).toContain('"Read"');
-    const repeat = context.run({ CLAUDE_CODE_REMOTE: 'true' });
-    expect(repeat.status, repeat.stderr).toBe(0);
-    expect(readFileSync(settingsPath, 'utf8')).toBe(settings);
-    expect((settings.match(/tau-session-start\.sh/gu) ?? []).length).toBe(1);
-    const hook = spawnSync('bash', [join(claudeDirectory, 'tau-session-start.sh')], {
-      env: { ...context.environment, CLAUDE_CODE_REMOTE: 'true', CLAUDE_PROJECT_DIR: first },
-      encoding: 'utf8',
-    });
-    expect(hook.status, hook.stderr).toBe(0);
-    expect(readFileSync(join(first, 'calls.txt'), 'utf8')).toBe('setup\nsetup\n');
-    expect(readFileSync(join(second, 'calls.txt'), 'utf8')).toBe('setup\nsetup\nstart\n');
-    expect(existsSync(join(context.userHome, '.profile'))).toBe(false);
-  });
+  it.each(['direct', 'symlink'] as const)(
+    'should preserve Claude settings and skip the repository hook via %s',
+    (pathKind) => {
+      const context = fixture();
+      const first = context.checkout('tau');
+      const second = context.checkout('tau-second');
+      const projectDirectory = pathKind === 'symlink' ? join(context.userHome, 'tau-link') : first;
+      if (pathKind === 'symlink') {
+        symlinkSync(first, projectDirectory, 'dir');
+      }
+      const claudeDirectory = join(context.userHome, '.claude');
+      mkdirSync(claudeDirectory);
+      const settingsPath = join(claudeDirectory, 'settings.json');
+      writeFileSync(settingsPath, '{"permissions":{"allow":["Read"]},"hooks":{"SessionStart":[]}}\n');
+      const initial = context.run({ CLAUDE_CODE_REMOTE: 'true' });
+      expect(initial.status, initial.stderr).toBe(0);
+      const settings = readFileSync(settingsPath, 'utf8');
+      expect(settings).toContain('"Read"');
+      const repeat = context.run({ CLAUDE_CODE_REMOTE: 'true' });
+      expect(repeat.status, repeat.stderr).toBe(0);
+      expect(readFileSync(settingsPath, 'utf8')).toBe(settings);
+      expect((settings.match(/tau-session-start\.sh/gu) ?? []).length).toBe(1);
+      const hook = spawnSync('bash', [join(claudeDirectory, 'tau-session-start.sh')], {
+        env: { ...context.environment, CLAUDE_CODE_REMOTE: 'true', CLAUDE_PROJECT_DIR: projectDirectory },
+        encoding: 'utf8',
+      });
+      expect(hook.status, hook.stderr).toBe(0);
+      expect(readFileSync(join(first, 'calls.txt'), 'utf8')).toBe('setup\nsetup\n');
+      expect(readFileSync(join(second, 'calls.txt'), 'utf8')).toBe('setup\nsetup\nstart\n');
+      expect(existsSync(join(context.userHome, '.profile'))).toBe(false);
+    },
+  );
 
   it('should install the Claude hook before any repositories exist', () => {
     const context = fixture();

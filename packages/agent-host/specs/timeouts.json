@@ -20,6 +20,14 @@
   ],
   "rows": [
     {
+      "id": "STORAGE-LFS-RETRY",
+      "bound": "Abortable LFS transfer recovery backoff: 200 ms then 400 ms, at most three attempts per object",
+      "site": "packages/revisions/src/lfs-client.ts",
+      "token": "signal?.removeEventListener('abort', abort)",
+      "class": "Backoff",
+      "owner": "storage-gateway W15"
+    },
+    {
       "id": "A3",
       "bound": "Checkout idle window",
       "site": "packages/revisions/src/checkout.machine.ts",

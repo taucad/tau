@@ -15,7 +15,7 @@ import {
   subscribeProjectRootConfigurationChanges,
 } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
-import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
 import { directoryPicker, webAccessDirectoryPicker } from '#constants/browser.constants.js';
 import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
@@ -49,11 +49,13 @@ export function WorkspaceConnections({
 
   const reloadRows = useCallback(async (): Promise<void> => {
     try {
-      const workspaces = await listWorkspaces();
+      const savedWorkspaces = await listWorkspaces();
       const grants = isDesktopTarget() ? await desktopBridge()?.directories?.list() : undefined;
       if (isDesktopTarget() && grants === undefined) {
         throw new Error('Workspace management is unavailable. Restart Tau and try again.');
       }
+      const homeRoot = isDesktopTarget() ? nodeHomeRoot() : undefined;
+      const workspaces = savedWorkspaces.filter((workspace) => homeRoot === undefined || workspace.path !== homeRoot);
       const built = await Promise.all(
         workspaces.map(async (workspace): Promise<WorkspaceRow> => {
           if (workspace.path !== undefined) {

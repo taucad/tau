@@ -2,6 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import type { Workspace } from '#filesystem/handle-store.js';
 import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { toast } from '#components/ui/sonner.js';
 
@@ -15,6 +16,8 @@ const state = vi.hoisted(() => ({
   connect: vi.fn(),
   retry: vi.fn(),
   connection: vi.fn<() => WorkspaceConnectionState>(),
+  listWorkspaces: vi.fn<() => Promise<Workspace[]>>(),
+  homeRoot: vi.fn(() => '/Users/tester/Library/Application Support/Tau/home'),
   changed: undefined as (() => void) | undefined,
 }));
 const workspace = {
@@ -25,9 +28,14 @@ const workspace = {
   lastConnectedAt: 1,
 };
 const directories = { list: async () => [...state.paths], disconnect: state.disconnect };
-vi.mock('#filesystem/desktop-bridge.js', () => ({ desktopBridge: () => ({ directories }) }));
+vi.mock('#filesystem/desktop-bridge.js', () => ({
+  desktopBridge: () => ({ directories }),
+  nodeHomeRoot: state.homeRoot,
+}));
 vi.mock('#filesystem/handle-store.js', () => ({
-  listWorkspaces: async () => [workspace],
+  listWorkspaces: state.listWorkspaces,
+  getWorkspace: async () => undefined,
+  listProjectsForWorkspace: async () => [],
   subscribeProjectRootConfigurationChanges: (listener: () => void) => {
     state.changed = listener;
     return () => {
@@ -61,6 +69,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv('TAU_TARGET', 'desktop');
   state.paths = [workspace.path];
+  state.listWorkspaces.mockResolvedValue([workspace]);
   state.connection.mockReturnValue({ phase: 'idle' });
   state.retry.mockReset();
   state.disconnect.mockImplementation(async (path) => {
@@ -75,7 +84,34 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe('WorkspaceConnections on desktop', () => {
+describe('WorkspaceConnections', () => {
+  it('should omit desktop Home from manageable workspaces and location options', async () => {
+    const home = { ...workspace, workspaceId: 'wsp_home', name: 'Home', path: state.homeRoot() };
+    state.listWorkspaces.mockResolvedValue([home, workspace]);
+    const onWorkspacesChange = vi.fn();
+    render(<WorkspaceConnections onWorkspacesChange={onWorkspacesChange} />);
+
+    expect(await screen.findByRole('button', { name: 'Disconnect workspace' })).toBeEnabled();
+    expect(screen.getByText('Tau Workspace')).toBeInTheDocument();
+    expect(screen.queryByText('Home', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reconnect' })).not.toBeInTheDocument();
+    expect(onWorkspacesChange).toHaveBeenLastCalledWith([workspace]);
+  });
+
+  it.each(['desktop', 'web'])('should retain a regular workspace named Home on %s', async (target) => {
+    vi.stubEnv('TAU_TARGET', target);
+    const namedHome = { ...workspace, name: 'Home', path: target === 'desktop' ? workspace.path : undefined };
+    state.listWorkspaces.mockResolvedValue([namedHome]);
+    const onWorkspacesChange = vi.fn();
+    render(<WorkspaceConnections onWorkspacesChange={onWorkspacesChange} />);
+
+    expect(await screen.findByText('Home', { exact: true })).toBeInTheDocument();
+    expect(onWorkspacesChange).toHaveBeenLastCalledWith([namedHome]);
+    if (target === 'web') {
+      expect(state.homeRoot).not.toHaveBeenCalled();
+    }
+  });
+
   it('should clear the connection error and refresh the workspace after a successful retry', async () => {
     state.paths = [];
     state.connect.mockRejectedValueOnce(new Error('Could not load workspace projects.'));

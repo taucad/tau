@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { desktopEnvironment } from '#main/environment.js';
 import { appOrigin } from '#main/app-protocol.js';
 import {
   contentSecurityPolicy,
@@ -80,6 +81,24 @@ describe('contentSecurityPolicy', () => {
   const policy = contentSecurityPolicy(['http://localhost:4000', 'ws://localhost:4001']);
   const directive = (name: string): string =>
     policy.split('; ').find((entry) => entry.startsWith(`${name} `)) ?? `${name} <absent>`;
+
+  it.each(['staging', 'production'] as const)(
+    'should allow only the %s bucket origin for signed transfers',
+    (channel) => {
+      const environment = desktopEnvironment({}, { locked: true, channel });
+      const storage = new URL(environment['TAU_S3_ENDPOINT']!).origin;
+      const sources = contentSecurityPolicy([storage])
+        .split('; ')
+        .find((entry) => entry.startsWith('connect-src '))!
+        .split(' ');
+      const bucket = channel === 'staging' ? 'tau-staging-content-private' : 'tau-prod-content-private';
+      const signedAction = new URL(
+        `https://${bucket}.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com/tenant/object?signature=fixture`,
+      );
+      expect(sources).toContain(signedAction.origin);
+      expect(sources.filter((source) => source.includes('cloudflarestorage.com'))).toEqual([signedAction.origin]);
+    },
+  );
 
   it('starts from deny-all so every directive is an explicit grant', () => {
     expect(policy.startsWith("default-src 'none'; ")).toBe(true);

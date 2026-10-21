@@ -80,7 +80,7 @@ describe('desktopEnvironment', () => {
       { locked: true },
     );
     expect(environment).toEqual({
-      TAU_S3_ENDPOINT: 'https://271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
+      TAU_S3_ENDPOINT: 'https://tau-prod-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
       TAU_API_URL: 'https://api.tau.new',
       TAU_WEBSOCKET_URL: 'wss://api.tau.new',
       TAU_FRONTEND_URL: 'https://tau.new',
@@ -95,7 +95,7 @@ describe('desktopEnvironment', () => {
         { locked: true, channel: 'staging' },
       ),
     ).toEqual({
-      TAU_S3_ENDPOINT: 'https://271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
+      TAU_S3_ENDPOINT: 'https://tau-staging-content-private.271cffba9907a76320b6a4993f756601.r2.cloudflarestorage.com',
       TAU_API_URL: 'https://api.taucad.dev',
       TAU_WEBSOCKET_URL: 'wss://api.taucad.dev',
       TAU_FRONTEND_URL: 'https://taucad.dev',

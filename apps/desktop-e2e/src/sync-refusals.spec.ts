@@ -9,7 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { localDatabaseName } from '@taucad/utils/worktree-database';
-import { desktopE2EApiUrl, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
+import { desktopE2EApiUrl, desktopE2EDesktopCloudEnabled, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
@@ -654,11 +654,10 @@ describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-s
       await openRevisions(b);
       await b.page.keyboard.press(`${modifier}+KeyS`);
       const actions = await refusedRow(b, ownerSentence, 'W8 row 4 desktop');
-      /* ponytail: this tier's desktop UI is the self-host build (ui:build:desktop
-       * without TAU_CLOUD_ENABLED, so canUpgradePlan is false) and offers no
-       * Upgrade; row 2 proves Upgrade on the cloud web build. Filed as quota
-       * here means no retry verb and the strip's quota ask. */
-      expect(actions, 'D17: filed as quota, so no Sync now or Retry').toEqual([]);
+      // Both builds classify quota without retry; only the Cloud build offers a plan action.
+      expect(actions, 'D17: exactly the actions supported by the desktop build').toEqual(
+        desktopE2EDesktopCloudEnabled ? [expect.stringMatching(/Upgrade/u)] : [],
+      );
       await expect
         .poll(async () => revisionStrip(b.page).textContent(), { timeout: 30_000 })
         .toContain('Over your plan');

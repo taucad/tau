@@ -105,12 +105,23 @@ setTimeout(() => app.exit(1), 45000);
   await stat(image);
   const restriction = await readFile('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', 'utf8').catch(() => '0');
   const restricted = restriction.trim() === '1';
+  const operatingSystem = await readFile('/etc/os-release', 'utf8');
+  if (/^ID=ubuntu$/mu.test(operatingSystem)) {
+    assert.equal(restricted, true, 'Ubuntu proof requires its stock namespace restriction');
+  }
+  const refusals: Array<{ path: string; status: number | undefined; signal: string | undefined; stderr: string }> = [];
   const refuse = (path: string): void => {
     const result = spawnSync(path, [`--user-data-dir=${join(root, 'profile')}`], { encoding: 'utf8', timeout: 30_000 });
     assert.ifError(result.error);
     assert.notEqual(result.status, 0);
     assert.ok(!result.stdout.includes('TAU_SANDBOX_PROOF:'));
     assert.match(result.stderr, /sandbox/iu);
+    refusals.push({
+      path,
+      status: result.status ?? undefined,
+      signal: result.signal ?? undefined,
+      stderr: result.stderr,
+    });
   };
   const launch = async (path: string, expectedProfile: string | undefined) => {
     const child = spawn(path, [`--user-data-dir=${join(root, 'profile')}`], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -219,6 +230,8 @@ setTimeout(() => app.exit(1), 45000);
       replaced,
       outsidePathRefused: restricted,
       removedProfileRefused: restricted,
+      refusals,
+      kernelDiagnostics: sudo(['journalctl', '-k', '-n', '120', '--no-pager']),
       publicReleaseQualification: false,
     }),
   );

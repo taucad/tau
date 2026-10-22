@@ -442,3 +442,153 @@ it.each(
     }
   },
 );
+
+/** Independent polygon-area oracle: clip a unit pixel square against both sides of the strip. */
+const stripPixelArea = (normal: readonly [number, number], distance: number, width: number): number => {
+  let polygon = [
+    [-0.5, -0.5],
+    [0.5, -0.5],
+    [0.5, 0.5],
+    [-0.5, 0.5],
+  ];
+  for (const side of [1, -1]) {
+    const signed = (point: number[]): number =>
+      side * (normal[0] * point[0]! + normal[1] * point[1]! + distance) - (side === -1 ? width : 0);
+    const clipped: number[][] = [];
+    for (let index = 0; index < polygon.length; index++) {
+      const a = polygon[index]!;
+      const b = polygon[(index + 1) % polygon.length]!;
+      const da = signed(a);
+      const db = signed(b);
+      if (da <= 0) {
+        clipped.push(a);
+      }
+      if (da <= 0 !== db <= 0) {
+        const fraction = da / (da - db);
+        clipped.push([a[0]! + fraction * (b[0]! - a[0]!), a[1]! + fraction * (b[1]! - a[1]!)]);
+      }
+    }
+    polygon = clipped;
+  }
+  let twiceArea = 0;
+  for (const [index, a] of polygon.entries()) {
+    const b = polygon[(index + 1) % polygon.length]!;
+    twiceArea += a[0]! * b[1]! - a[1]! * b[0]!;
+  }
+  return Math.abs(twiceArea) / 2;
+};
+
+it.each(['webgpu', 'webgl'] as const)(
+  'should give section outlines the BREP square-pixel coverage at 5K on %s',
+  async (backend) => {
+    const { createSectionCapOutlineNodeMaterial } =
+      await import('#graphics/three/materials/section-cap-outline.node.js');
+    const { createSectionCapOutlineFaces, writeSectionCapOutlineCamera } =
+      await import('#graphics/three/materials/section-cap-outline.material.js');
+    const { createSectionStencilCaps } = await import('#graphics/three/utils/section-stencil-caps.js');
+    const caps = createSectionStencilCaps('webgpu');
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    const renderer = await createRenderer('showcase', backend, canvas);
+    const target = new RenderTarget(5120, 2880, { samples: 0, type: UnsignedByteType });
+    target.texture.colorSpace = LinearSRGBColorSpace;
+    const geometry = new PlaneGeometry(10_240, 5760);
+    const faces = createSectionCapOutlineFaces();
+    const cap = createSectionCapOutlineNodeMaterial(faces, 0);
+    const lineMaterial = new Line2NodeMaterial({ color: 0, linewidth: 1, transparent: true });
+    lineMaterial.analyticButtCaps = true;
+    const lineGeometry = new LineGeometry();
+    lineGeometry.setPositions([0, 0, 0, 1, 0, 0]);
+    const line = new Line2(lineGeometry, lineMaterial);
+    const scene = new Scene();
+    scene.background = new Color(0xff_ff_ff);
+    const mesh = new Mesh(geometry, cap);
+    const camera = new OrthographicCamera(-2560, 2560, 1440, -1440, 0.1, 1000);
+    camera.position.z = 100;
+    camera.updateMatrixWorld();
+    renderer.setPixelRatio(2);
+    renderer.setSize(2560, 1440);
+    renderer.toneMapping = NoToneMapping;
+    renderer.outputColorSpace = LinearSRGBColorSpace;
+    renderer.setRenderTarget(target);
+    writeSectionCapOutlineCamera(faces, camera, 2880);
+    faces.settings.set(1, 2);
+    faces.bounds[0]!.set(0, 0, 0, -1);
+    try {
+      expect(renderer.backend).toBeInstanceOf(backend === 'webgpu' ? WebGPUBackend : WebGLBackend);
+      for (const angle of [0, Math.PI / 4, Math.PI / 3]) {
+        for (const phase of [0, 0.25, 0.5]) {
+          const nx = Math.cos(angle);
+          const ny = Math.sin(angle);
+          faces.planes[0]!.set(nx, ny, 0, phase);
+          // The cap band is inside the cut, so its centre is half a stroke inward.
+          const centre = phase - 1;
+          const start = lineGeometry.getAttribute('instanceStart');
+          const end = lineGeometry.getAttribute('instanceEnd');
+          start.setXYZ(0, nx * centre - ny * 5000, ny * centre + nx * 5000, 0);
+          end.setXYZ(0, nx * centre + ny * 5000, ny * centre - nx * 5000, 0);
+          start.needsUpdate = true;
+          end.needsUpdate = true;
+          line.frustumCulled = false;
+          scene.clear();
+          scene.add(mesh);
+          renderer.render(scene, camera);
+          // oxlint-disable-next-line no-await-in-loop -- Read this retained target before the next draw overwrites it.
+          const capPixels = await renderer.readRenderTargetPixelsAsync(target, 2496, 1376, 128, 128);
+          scene.clear();
+          scene.add(line);
+          renderer.render(scene, camera);
+          // oxlint-disable-next-line no-await-in-loop -- Read this retained target before the next draw overwrites it.
+          const edgePixels = await renderer.readRenderTargetPixelsAsync(target, 2496, 1376, 128, 128);
+          scene.clear();
+          renderer.render(scene, camera);
+          const plane = { normal: [nx, ny, 0] as const, constant: phase };
+          // Exercise the actual owner's section mask too: it must retain the fractional footprint.
+          caps.render(renderer, {
+            camera,
+            pieces: [{ cutId: 'coverage', halfSpaces: [plane], faces: [{ cutId: 'coverage', plane, bounds: [] }] }],
+            sources: [{ key: 'plane', ownerKey: 'plane', meshes: [mesh], tintHex: 0xff_ff_ff, edgeHex: 0 }],
+            stripes: { stripeFrequency: 1, stripeWidth: 0 },
+            outlineWidthPixels: 2,
+            viewportHeightPixels: 2880,
+          });
+          // oxlint-disable-next-line no-await-in-loop -- Read this retained target before the next draw overwrites it.
+          const ownedPixels = await renderer.readRenderTargetPixelsAsync(target, 2496, 1376, 128, 128);
+          let maximum = 0;
+          let ink = 0;
+          let oracleError = 0;
+          for (let index = 0; index < capPixels.length; index += 4) {
+            const error = Math.abs(Number(capPixels[index]) - Number(edgePixels[index]));
+            const column = (index / 4) % 128;
+            const row = Math.floor(index / 4 / 128);
+            const x = column - 63.5;
+            const y = backend === 'webgpu' ? 63.5 - row : row - 63.5;
+            const expected = 255 * (1 - stripPixelArea([nx, ny], nx * x + ny * y - phase, 2));
+            oracleError = Math.max(
+              oracleError,
+              Math.abs(Number(capPixels[index]) - expected),
+              Math.abs(Number(edgePixels[index]) - expected),
+              Math.abs(Number(ownedPixels[index]) - expected),
+            );
+            maximum = Math.max(maximum, error);
+            ink += 255 - Number(edgePixels[index]);
+          }
+          expect(ink).toBeGreaterThan(1000);
+          expect(oracleError, `CPU area ${backend}, angle=${angle}, phase=${phase}`).toBeLessThanOrEqual(4);
+          // Same square-pixel area, allowing four linear UNORM8 levels for interpolation/quantization.
+          expect(maximum, `${backend}, angle=${angle}, phase=${phase}`).toBeLessThanOrEqual(4);
+        }
+      }
+    } finally {
+      renderer.setRenderTarget(null);
+      target.dispose();
+      geometry.dispose();
+      lineGeometry.dispose();
+      cap.dispose();
+      caps.dispose();
+      lineMaterial.dispose();
+      renderer.dispose();
+      canvas.remove();
+    }
+  },
+);

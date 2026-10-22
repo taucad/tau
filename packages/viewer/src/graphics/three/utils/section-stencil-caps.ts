@@ -1,5 +1,6 @@
 /* oxlint-disable eslint/no-bitwise -- Stencil references and masks are bit fields. */
 import * as THREE from 'three';
+import type { Node } from 'three/webgpu';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { isSameSectionHalfSpace, resolveSectionFaces, resolveSectionTrimmingPieces } from '#graphics/section-cuts.js';
 import type { SectionFace, SectionHalfSpace, SectionPiece } from '#graphics/section-cuts.js';
@@ -11,7 +12,12 @@ import {
   writeSectionCapOutlineFaces,
 } from '#graphics/three/materials/section-cap-outline.material.js';
 import type { SectionCapOutlineFaces } from '#graphics/three/materials/section-cap-outline.material.js';
-import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
+import {
+  createSectionClip,
+  createSectionClipMask,
+  installSectionClip,
+  writeSectionClip,
+} from '#graphics/three/materials/section-clip.js';
 import type { SectionClip } from '#graphics/three/materials/section-clip.js';
 import {
   applySectionCapStencilPass,
@@ -414,6 +420,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   /** The same faces as {@link outlineFaces}, at the open chains' wider line. */
   const openChainFaces = createSectionCapOutlineFaces();
   const outlineClip = createSectionClip(backend);
+  const outlineMask = outlineClip.backend === 'webgpu' ? createSectionClipMask(outlineClip, 0.5) : undefined;
   const outlineMaterials = new Map<number, THREE.Material>();
   let openChainMaterial: THREE.Material | undefined;
   const stencilMaterials = new Map<SectionStencilPass, THREE.Material>();
@@ -484,11 +491,12 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   };
 
   const createOutlineMaterial = (faces: SectionCapOutlineFaces, color: number): THREE.Material => {
-    const material = own(
-      backend === 'webgpu'
-        ? createSectionCapOutlineNodeMaterial(faces, color)
-        : createSectionCapOutlineMaterial(faces, color),
-    );
+    if (outlineMask) {
+      const material = createSectionCapOutlineNodeMaterial(faces, color);
+      material.maskNode = (material.maskNode as Node<'bool'>).and(outlineMask);
+      return own(material);
+    }
+    const material = own(createSectionCapOutlineMaterial(faces, color));
     installSectionClip(material, outlineClip);
     return material;
   };

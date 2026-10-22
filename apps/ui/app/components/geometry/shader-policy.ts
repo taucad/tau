@@ -78,6 +78,7 @@ export const shaderSites = [
       'packages/viewer/src/graphics/three/materials/section-stencil.material.ts',
       'packages/viewer/src/graphics/three/materials/section-cap-outline.material.ts',
       'packages/viewer/src/graphics/three/materials/section-cap-outline.node.ts',
+      'packages/viewer/src/graphics/three/utils/section-stencil-caps.ts',
     ],
     authoring: ['glsl', 'tsl', 'fixed-function', 'render-pass'],
     backends: ['webgl', 'webgpu'],
@@ -100,6 +101,7 @@ export const shaderSites = [
   },
   {
     id: 'fat-lines',
+    helpers: ['packages/viewer/src/graphics/three/materials/line-coverage.ts'],
     modules: ['packages/viewer/src/graphics/three/materials/line2.material.ts'],
     authoring: ['tsl', 'upstream-fork'],
     backends: ['webgpu'],
@@ -330,6 +332,7 @@ export const shaderEvidence = {
       `${sectionStencilCapsBrowser}::should compile and draw every pass without a shader or pipeline error`,
     ],
     pixels: [
+      'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should give section outlines the BREP square-pixel coverage at 5K',
       `${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`,
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should occlude grid and hidden outlines through actual stencil caps',
       `${sectionStencilCapsBrowser}::should show overlap on exactly the pixels where two owners overlap`,
@@ -419,6 +422,7 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/materials/line2.material.test.ts::emits geometric viewZToLogarithmicDepth',
     ],
     pixels: [
+      'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should give section outlines the BREP square-pixel coverage at 5K',
       'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should preserve long-axis coverage across cached materials and frame formats at 5K',
       `${graphicsBackendEndToEnd}::grid, axes and model shading display the same`,
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should preserve nominal unlit stroke coverage across phases',

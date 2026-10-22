@@ -1,4 +1,5 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`Loop`/`Break` are shader graph factories */
+import { squarePixelStripCoverage } from '#graphics/three/materials/line-coverage.js';
 import { namedUniformArray } from '#graphics/three/materials/named-uniform-array.js';
 import { Color, DoubleSide, WebGPUCoordinateSystem } from 'three';
 import type { PerspectiveCamera, Vector4 } from 'three';
@@ -10,7 +11,6 @@ import {
   cameraNear,
   cameraProjectionMatrix,
   cameraViewMatrix,
-  clamp,
   dFdx,
   dFdy,
   float,
@@ -66,25 +66,23 @@ const outlineNodes = (faces: SectionCapOutlineFaces): SectionCapOutlineNodes => 
       });
       const plane = planes.element(i);
       const bound = bounds.element(i);
-      const slope = length(vec2(dx.dot(plane.xyz), dy.dot(plane.xyz))).toVar();
+      const gradient = vec2(dx.dot(plane.xyz), dy.dot(plane.xyz)).toVar();
+      const slope = length(gradient).toVar();
       const distance = point.dot(plane.xyz).sub(plane.w).toVar();
-      If(
-        slope
-          .greaterThan(pixelWorld.mul(0.02))
-          .and(distance.lessThanEqual(0))
-          .and(point.dot(bound.xyz).sub(bound.w).greaterThanEqual(0)),
-        () => {
-          const pixels = distance.negate().div(slope).toVar();
-          const faceCoverage = clamp(min(pixels.add(0.5), settings.y).sub(max(pixels.sub(0.5), 0)), 0, 1).toVar();
-          If(faceCoverage.greaterThan(0), () => {
-            result.x.assign(max(result.x, faceCoverage));
-            const along = ray.dot(plane.xyz).toVar();
-            If(frontFacing.not().and(along.lessThan(0)), () => {
-              result.y.assign(min(result.y, distance.negate().div(along)));
-            });
+      If(slope.greaterThan(pixelWorld.mul(0.02)).and(point.dot(bound.xyz).sub(bound.w).greaterThanEqual(0)), () => {
+        const pixels = distance.negate().div(slope).toVar();
+        const support = gradient.x.abs().add(gradient.y.abs()).div(slope).mul(0.5).toVar();
+        // These meshes cover whole surfaces; evaluate exact area only inside the strip's pixel footprint.
+        If(pixels.greaterThan(support.negate()).and(pixels.lessThan(settings.y.add(support))), () => {
+          const halfWidth = settings.y.mul(0.5);
+          const faceCoverage = squarePixelStripCoverage(gradient.div(slope), pixels.sub(halfWidth), halfWidth).toVar();
+          result.x.assign(max(result.x, faceCoverage));
+          const along = ray.dot(plane.xyz).toVar();
+          If(faceCoverage.greaterThan(0).and(frontFacing.not()).and(along.lessThan(0)), () => {
+            result.y.assign(min(result.y, distance.negate().div(along)));
           });
-        },
-      );
+        });
+      });
     });
     return result;
   })();

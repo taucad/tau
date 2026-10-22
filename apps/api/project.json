@@ -178,7 +178,11 @@
     },
     "build:billing-command": {
       "executor": "nx:run-commands",
-      "outputs": ["{projectRoot}/dist/billing-command.js", "{projectRoot}/dist/migrations"],
+      "outputs": [
+        "{projectRoot}/dist/billing-command.js",
+        "{projectRoot}/dist/billing-command.js.map",
+        "{projectRoot}/dist/migrations"
+      ],
       "options": {
         "command": "vite build --config vite.billing-command.config.ts",
         "cwd": "{projectRoot}"
@@ -186,7 +190,7 @@
     },
     "build:maintenance-command": {
       "executor": "nx:run-commands",
-      "outputs": ["{projectRoot}/dist/maintenance-command.js"],
+      "outputs": ["{projectRoot}/dist/maintenance-command.js", "{projectRoot}/dist/maintenance-command.js.map"],
       "options": {
         "command": "vite build --config vite.maintenance-command.config.ts",
         "cwd": "{projectRoot}"

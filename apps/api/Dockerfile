@@ -67,6 +67,17 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
     node apps/api/scripts/build-image.mts
 
+# Upload maps from the exact built image before pruning. The token is available
+# only to this BuildKit step, never as an ARG, ENV or runtime image file.
+# Deployment builds opt in; local and PR smoke builds need no hosted credential.
+ARG SENTRY_UPLOAD_ENABLED=false
+RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+    if [ "$SENTRY_UPLOAD_ENABLED" = true ]; then \
+      test -n "$SENTRY_AUTH_TOKEN" && \
+      scripts/node_modules/.bin/sentry-cli sourcemaps inject apps/api/dist && \
+      scripts/node_modules/.bin/sentry-cli sourcemaps upload --validate --wait --org taucad --project tau-api apps/api/dist; \
+    fi
+
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned
 # Peer auto-install is off because the legacy deploy resolves every workspace

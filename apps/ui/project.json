@@ -319,6 +319,8 @@
       "options": {
         "commands": [
           "npx -y @posthog/cli sourcemap inject --directory {projectRoot}/build/client --project tau-ui",
+          "scripts/node_modules/.bin/sentry-cli sourcemaps inject {projectRoot}/build/client",
+          "scripts/node_modules/.bin/sentry-cli sourcemaps upload --validate --wait --org taucad --project tau-ui {projectRoot}/build/client",
           "npx -y @posthog/cli sourcemap upload --directory {projectRoot}/build/client --delete-after"
         ],
         "parallel": false

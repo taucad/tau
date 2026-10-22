@@ -52,6 +52,7 @@ export default defineConfig(({ command, mode }) => {
     cacheDir: '../../node_modules/.vite/apps/api',
     build: {
       outDir: 'dist',
+      sourcemap: 'hidden',
     },
     server: {
       // Vite server configs, for details see [vite doc](https://vitejs.dev/config/#server-host)

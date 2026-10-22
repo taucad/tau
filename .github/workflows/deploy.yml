@@ -118,6 +118,15 @@ jobs:
           username: x
           password: ${{ secrets.FLY_API_TOKEN }}
 
+      - name: Require the Sentry source-map credential
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::Set Sensitive sentry_auth_token in HCP tau-repo and apply its GitHub environment mappings."
+            exit 1
+          fi
+
       - name: Build and push API image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
@@ -129,7 +138,9 @@ jobs:
           # (`deps`/`build`) survive in the cache, not just the final stage.
           cache-from: type=registry,ref=${{ steps.targets.outputs.cache_ref }}
           cache-to: type=registry,ref=${{ steps.targets.outputs.cache_ref }},mode=max
+          build-args: SENTRY_UPLOAD_ENABLED=true
           secrets: |
+            sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
             nx_cloud_token=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
 
       # Each push to `main` runs on its own, so an older run can reach this queue

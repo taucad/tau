@@ -109,7 +109,7 @@ jobs:
 
       # GitHub environment credentials are the sole source for UI source maps.
       # Validate the pair before Netlify resolves its site environment. Missing or
-      # malformed staging credentials disable uploading; they never fall back.
+      # malformed credentials fail before the build; they never fall back.
       - name: Validate the PostHog source-map credentials
         id: posthog
         env:
@@ -123,11 +123,17 @@ jobs:
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
             message="Configure a PostHog personal API key and numeric project ID in tau-repo: posthog_cli_token_$ENVIRONMENT and posthog_cli_env_id_$ENVIRONMENT, then apply the reviewed plan. Netlify credentials are not used."
-            if [ "$ENVIRONMENT" = production ]; then
-              echo "::error::$message"
-              exit 1
-            fi
-            echo "::warning::$message Source-map upload is disabled for this staging build."
+            echo "::error::$message"
+            exit 1
+          fi
+
+      - name: Require the Sentry source-map credential
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::Set Sensitive sentry_auth_token in HCP tau-repo and apply its GitHub environment mappings."
+            exit 1
           fi
 
       # The CLI resolves the site base (`apps/ui`) and then joins the workspace
@@ -167,11 +173,12 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           SITE_ID: ${{ steps.site.outputs.site_id }}
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
-          # Only production needs its PostHog source maps to deploy.
-          TAU_SOURCEMAPS_OPTIONAL: ${{ inputs.environment != 'production' }}
+          # Both environments require successful uploads before deployment.
+          TAU_SOURCEMAPS_OPTIONAL: 'false'
           TAU_SOURCEMAPS_ENABLED: ${{ steps.posthog.outputs.enabled }}
           # Netlify site variables outrank process variables. Map these distinct
           # GitHub-owned inputs only at the upload command, after that merge.
+          TAU_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           TAU_POSTHOG_CLI_TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
           TAU_POSTHOG_CLI_ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
         run: |

@@ -69,6 +69,13 @@ function recordConnectionsForIncarnation(fallback: RecordBridgeOpener, ready: ()
           await ready();
           const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
           const proxy = createFileSystemBridgeProxy((opener ?? fallback)(root, consumer));
+          try {
+            await proxy.ready;
+          } catch (error) {
+            // A failed handshake must not become this root's cached connection.
+            proxy.dispose();
+            throw error;
+          }
           return {
             files: proxy,
             dispose: () => {

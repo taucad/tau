@@ -1166,7 +1166,14 @@ describe('assistant action row', () => {
 
   it('shows Copy, usage and a relative timestamp whose tooltip is the exact time', () => {
     const createdAt = Date.now() - 3 * 60_000;
-    setMessages([{ id: 'msg-a', role: 'assistant', parts: [usagePart({ agent: 'codex' })], metadata: { createdAt } }]);
+    setMessages([
+      {
+        id: 'msg-a',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Done' }, usagePart({ agent: 'codex' })],
+        metadata: { createdAt },
+      },
+    ]);
 
     render(<ChatMessage messageId='msg-a' />);
 
@@ -1201,5 +1208,31 @@ describe('assistant action row', () => {
 
     expect(screen.queryByTestId('chat-message-data-usage')).not.toBeInTheDocument();
     expect(document.querySelector('time')).toBeNull();
+  });
+
+  it('hides the row while an answer has no visible content', () => {
+    setMessages([
+      {
+        id: 'msg-empty',
+        role: 'assistant',
+        parts: [{ type: 'step-start' }, { type: 'text', text: '  ' }],
+        metadata: { createdAt: Date.now() },
+      },
+    ]);
+
+    render(<ChatMessage messageId='msg-empty' />);
+
+    expect(screen.queryByTestId('copy-button')).not.toBeInTheDocument();
+    expect(document.querySelector('time')).toBeNull();
+  });
+
+  it('centres the copy button and timestamp on one line', () => {
+    setMessages([
+      { id: 'msg-c', role: 'assistant', parts: [{ type: 'text', text: 'Hi' }], metadata: { createdAt: Date.now() } },
+    ]);
+
+    render(<ChatMessage messageId='msg-c' />);
+
+    expect(screen.getByTestId('copy-button').parentElement?.className).toContain('items-center');
   });
 });

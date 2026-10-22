@@ -18,13 +18,15 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 0
       - name: Admit the exact verified recovery candidate
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/main
+          [[ "$GITHUB_REF" == refs/tags/desktop-staging@* ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
           tag=desktop-staging@0.1.0-staging.329
           source=3ee03f55070efb22f008a6f41b13f6b14de8eb43
           mkdir -p out/desktop/bootstrap

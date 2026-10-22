@@ -45,6 +45,23 @@ export type AgentHostPlacementRung = 'in-process' | 1 | 2 | 5;
 export const localAgentHostId = (): TauAgentHostId | undefined => (isDesktopTarget ? 'desktop' : undefined);
 
 /**
+ * Why one placement cannot be reached from this build, or `undefined` when it can.
+ *
+ * A chat's placement is persisted with it, so a chat placed on Tau Desktop and
+ * then opened on the web still names `hostId: 'desktop'` — a launcher this
+ * build does not have. It is refused with this reason, never dialled, and never
+ * quietly downgraded to this page's worker.
+ *
+ * @param hostId - The placement's host id, or `undefined` for this page's worker.
+ * @returns The refusal's user-facing reason, or `undefined` when the placement is reachable.
+ * @public
+ */
+export const unreachablePlacementReason = (hostId: TauAgentHostId | undefined): string | undefined =>
+  hostId === 'desktop' && !isDesktopTarget
+    ? 'This chat runs in the Tau desktop app. Open the project there to continue it, or pick another agent.'
+    : undefined;
+
+/**
  * The daemon one execution is placed on, or `undefined` for this page's own
  * worker.
  *

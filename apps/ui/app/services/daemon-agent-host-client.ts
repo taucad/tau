@@ -41,14 +41,19 @@ export const createDaemonAgentHostTransport = (
   };
   const opened = open();
   const channel = async (): Promise<AgentChannelClient> => opened;
+  /* A daemon is configured from its own CLI; there is nothing to initialize —
+   * readiness is just the placement's dial, and its refusal reaches whoever
+   * awaits a command, verbatim (the same shape the worker transport uses). */
+  const ready = (async () => {
+    await opened;
+  })();
+  /* A client closed before anything awaited it still owns this refusal: observe it here so it can never
+   * escape as an unhandled rejection, while every later awaiter still receives it. */
+  // oxlint-disable-next-line promise/prefer-await-to-then -- nothing here may wait on the dial; an unobserved refusal would surface as an unhandled rejection
+  ready.catch(() => undefined);
 
   return {
-    /* A daemon is configured from its own CLI; there is nothing to initialize —
-     * readiness is just the placement's dial, and its refusal reaches whoever
-     * awaits a command, verbatim (the same shape the worker transport uses). */
-    ready: (async () => {
-      await opened;
-    })(),
+    ready,
     execute: async (command, signal) => {
       const next = await channel();
       return next.execute(signal === undefined ? command : { ...command, signal });

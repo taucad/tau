@@ -7,6 +7,12 @@ on:
       - 'apps/desktop/scripts/hosted-linux-*.sh'
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
+
+env:
+  NX_NO_CLOUD: 'true'
+  pnpm_config_verify_deps_before_run: error
 concurrency:
   group: desktop-linux-vm-proof-${{ github.ref }}
   cancel-in-progress: true
@@ -21,6 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
         with:

@@ -8,8 +8,11 @@ import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.j
 import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
 import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
 
-/** Heap threshold: 80% of the 2GB VM allocation */
-const heapThresholdBytes = 2 * 1024 * 1024 * 1024 * 0.8;
+/**
+ * Heap threshold: 80% of the 1 GiB API allocation in both Fly environments.
+ * This is a heap guard, not an RSS limit; review it whenever API VM sizing changes.
+ */
+const heapThresholdBytes = 1024 * 1024 * 1024 * 0.8;
 
 @Controller('health')
 export class HealthController {

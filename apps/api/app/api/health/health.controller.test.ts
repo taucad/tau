@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
@@ -92,6 +93,16 @@ describe('HealthController', () => {
 
       await expect(controller.checkReady()).rejects.toThrow();
     });
+  });
+
+  it.each(['checkLive', 'checkReady'] as const)('refuses %s before heap reaches the 1 GiB VM limit', async (method) => {
+    const usage = process.memoryUsage();
+    const memoryUsage = vi.spyOn(process, 'memoryUsage').mockReturnValue({ ...usage, heapUsed: 900 * 1024 * 1024 });
+    try {
+      await expect(controller[method]()).rejects.toThrow();
+    } finally {
+      memoryUsage.mockRestore();
+    }
   });
 
   describe('GET /health/startup', () => {

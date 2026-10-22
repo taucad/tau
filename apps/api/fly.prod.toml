@@ -148,7 +148,8 @@ processes = ['app', 'billing-operations']
 # bytes, so the number self-corrects and the figure here is not a contract. Raise
 # the rootfs before raising the ceiling.
 [[vm]]
-memory = '2gb'
+# Match the staging API size; retain two serving Machines for rolling releases.
+memory = '1gb'
 cpu_kind = 'shared'
 cpus = 1
 processes = ['app']

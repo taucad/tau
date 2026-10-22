@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry event and breadcrumb fields are SDK wire names. */
 import { describe, expect, it } from 'vitest';
 import type { ErrorEvent } from '@sentry/node';
-import { reportServerError, scrubSentryEvent } from '#telemetry/sentry.js';
+import { getSentryRelease, reportServerError, scrubSentryEvent } from '#telemetry/sentry.js';
 
 describe('scrubSentryEvent', () => {
   it('keeps the method and path and drops the query, headers, cookies, body and user', () => {
@@ -37,5 +37,18 @@ describe('reportServerError', () => {
     expect(() => {
       reportServerError(new Error('boom'), 'req_test');
     }).not.toThrow();
+  });
+});
+
+describe('getSentryRelease', () => {
+  it('should retain the deployed image identity without forbidden registry separators', () => {
+    expect(getSentryRelease('registry.fly.io/tau-api-staging:84b54db3f93976ba720d2e2cd0fead79c657bb1a')).toBe(
+      'tau-api-staging:84b54db3f93976ba720d2e2cd0fead79c657bb1a',
+    );
+    expect(getSentryRelease('registry.fly.io/tau-api@sha256:abcdef')).toBe('tau-api@sha256:abcdef');
+  });
+
+  it('should leave the release unset when no image reference exists', () => {
+    expect(getSentryRelease(undefined)).toBeUndefined();
   });
 });

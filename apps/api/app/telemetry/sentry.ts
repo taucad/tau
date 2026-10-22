@@ -32,13 +32,23 @@ export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
   return event;
 };
 
+/**
+ * Keep the image name and immutable tag/digest without registry path separators,
+ * which Sentry rejects in release identifiers.
+ *
+ * @param imageReference - The Fly deployment image reference, when deployed.
+ * @returns The release identifier, or undefined for local runs without an image.
+ */
+export const getSentryRelease = (imageReference: string | undefined): string | undefined =>
+  imageReference?.split('/').at(-1);
+
 const dsn = process.env['SENTRY_DSN'];
 
 if (dsn) {
   Sentry.init({
     dsn,
     environment: process.env['SENTRY_ENVIRONMENT'] ?? process.env['NODE_ENV'],
-    release: process.env['FLY_IMAGE_REF'],
+    release: getSentryRelease(process.env['FLY_IMAGE_REF']),
     serverName: process.env['FLY_MACHINE_ID'],
     skipOpenTelemetrySetup: true,
     sendDefaultPii: false,

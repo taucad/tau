@@ -483,6 +483,18 @@ describe('dockviewStyleOverrides', () => {
       '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
     );
     expect(dockviewStyleOverrides).toContain(
+      '[@media(hover:hover)]:[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-accent',
+    );
+  });
+
+  it('never makes a tap reveal header actions, so the first tap on a touch screen reaches its button', () => {
+    // WebKit spends a tap whose :hover reveals content on the hover alone: the sidebar toggle needed two taps.
+    expect(dockviewStyleOverrides).toContain(
+      '[@media(hover:hover)]:[&_.dv-groupview:hover_.dv-pane-action]:opacity-100',
+    );
+    expect(dockviewStyleOverrides).toContain('[@media(hover:none)]:[&_.dv-pane-action]:opacity-100');
+    expect(dockviewStyleOverrides.split(/\s+/u)).not.toContain('[&_.dv-groupview:hover_.dv-pane-action]:opacity-100');
+    expect(dockviewStyleOverrides.split(/\s+/u)).not.toContain(
       '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-accent',
     );
   });

@@ -22,28 +22,24 @@ export type PreviewState = {
  */
 export function usePreviewState(): PreviewState {
   const [activeTab, setActiveTab] = useState<PreviewTab>('model');
-  const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
+  // The drawer is open exactly while a panel other than the model is active.
+  const drawerOpen = activeTab !== 'model';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
   const [snapPoint, setSnapPoint] = useState<number | string | null>(mobileDrawerSnapPoints[0]!);
 
-  const handleDrawerChange = (value: boolean): void => {
-    if (!value && activeTab !== 'model') {
-      setActiveTab('model');
-    }
-
-    setDrawerOpen(value);
-  };
-
+  // Every collapse returns the drawer to its first snap point, so the next panel never reopens over the whole model.
   const handleTabChange = (value: string): void => {
     const tab = value as PreviewTab;
     setActiveTab(tab);
 
-    if (!drawerOpen && tab !== 'model') {
-      // When the drawer is closed and the new tab is not the model tab, open the drawer
-      setDrawerOpen(true);
-    } else if (drawerOpen && tab === 'model') {
-      // When the drawer is open and the new tab is the model tab, close the drawer
-      setDrawerOpen(false);
+    if (tab === 'model') {
+      setSnapPoint(mobileDrawerSnapPoints[0]!);
+    }
+  };
+
+  const handleDrawerChange = (value: boolean): void => {
+    if (!value) {
+      handleTabChange('model');
     }
   };
 

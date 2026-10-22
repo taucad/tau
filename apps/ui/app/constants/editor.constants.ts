@@ -63,7 +63,7 @@ export const defaultPanelState = {
     workbenchWidth: 420,
     compactAuxiliary: 'chat',
   },
-  mobileActiveTab: 'chat',
+  mobileActiveTab: 'viewer',
   kernelPaneview: {},
   modelPaneview: {},
   parametersPaneview: {},

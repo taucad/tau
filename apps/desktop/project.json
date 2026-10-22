@@ -715,6 +715,14 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-appimage-sandbox.test.mts",
         "cwd": "."
       }
+    },
+    "test-preload-sandbox": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/preload-sandbox.test.mts",
+        "cwd": "."
+      }
     }
   }
 }

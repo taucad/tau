@@ -116,10 +116,12 @@ export default defineConfig(
       build: {
         sourcemap: 'hidden',
         outDir: 'dist/preload',
-        externalizeDeps: { exclude: ['@taucad/types', 'zod'] },
+        // Sandboxed preloads can require Electron, but cannot resolve application dependencies.
+        externalizeDeps: false,
         lib: {
           entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
-          formats: ['es'],
+          formats: ['cjs'],
+          fileName: () => 'preload.cjs',
         },
       },
     },

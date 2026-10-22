@@ -57,7 +57,7 @@ export function ChatInterfaceNav({ className }: { readonly className?: string })
       enableAnimation={false}
       className={cn(
         'w-full justify-start overflow-x-auto border-t bg-sidebar',
-        'gap-0.25 rounded-t-xl rounded-b-none p-0.5 text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
+        'gap-0.25 rounded-none border-x-0 border-b-0 p-0.5 text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
         className,
       )}
     >

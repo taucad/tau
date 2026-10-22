@@ -23,6 +23,8 @@ describe('editor device defaults', () => {
       workbenchWidth: 420,
       compactAuxiliary: 'chat',
     });
+    // A phone opens on the model alone, with the drawer collapsed, until the person picks a panel.
+    expect(defaultPanelState.mobileActiveTab).toBe('viewer');
     expect(defaultOperationTimeout).toBe(180_000);
     expect(defaultGraphicsSettings.graphicsBackend).toBe('webgl');
   });

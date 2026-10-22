@@ -58,6 +58,9 @@ jobs:
               summary.write('Hosted KVM capability only; no stock guest or signed app tested.\n```json\n' + json.dumps(result) + '\n```\n')
           PYTHON
       - uses: ./.github/actions/setup-nx
+      - name: Actual sandboxed preload bridges
+        if: runner.os != 'Linux'
+        run: pnpm nx run desktop:test-preload-sandbox
       - name: Windows NSIS artifact identity and per-user structure
         if: runner.os == 'Windows'
         shell: bash

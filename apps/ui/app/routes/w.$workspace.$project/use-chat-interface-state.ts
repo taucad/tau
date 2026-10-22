@@ -3,7 +3,6 @@ import { useSelector } from '@xstate/react';
 import type { PaneviewApi } from 'dockview-react';
 import type { chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import { useProject } from '#hooks/use-project.js';
-import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { mobileDrawerSnapPoints } from '#constants/editor.constants.js';
 import type { PaneviewPanelState, PanelState } from '#types/editor.types.js';
 
@@ -34,7 +33,6 @@ export function useChatInterfaceState(): ChatInterfaceState {
   'use no memo';
 
   const { editorRef } = useProject();
-  const isMobile = useIsMobile();
 
   // Defer the mobile drawer until its persisted active surface is available.
   const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
@@ -50,45 +48,38 @@ export function useChatInterfaceState(): ChatInterfaceState {
     [editorRef],
   );
 
-  const [drawerOpen, setDrawerOpen] = useState<boolean>(activeTab !== 'viewer');
+  /* The drawer is open exactly while a panel other than the model is active. Deriving it keeps the
+   * two from drifting apart: a separate flag seeded at mount stayed open on an empty panel when the
+   * persisted Viewer surface was hydrated after the route mounted, and the Model tab could not close
+   * it because selecting the already active tab is not a change. */
+  const drawerOpen = activeTab !== 'viewer';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
   const [snapPoint, setSnapPoint] = useState<number | string | null>(mobileDrawerSnapPoints[0]!);
+  const [wasDrawerOpen, setWasDrawerOpen] = useState(drawerOpen);
 
-  // Opening a non-viewer tab via editor machine (e.g. header Export) must raise the drawer; tab changes
-  // from the bottom nav already sync drawer via handleTabChange.
-  useEffect(() => {
-    if (!isMobile || activeTab === 'viewer' || drawerOpen) {
-      return;
+  // Every collapse, whichever action caused it, returns the drawer to its first snap point, so the next
+  // panel never reopens over the whole viewer.
+  if (wasDrawerOpen !== drawerOpen) {
+    setWasDrawerOpen(drawerOpen);
+    if (!drawerOpen) {
+      setSnapPoint(mobileDrawerSnapPoints[0]!);
     }
-
-    // oxlint-disable-next-line react/set-state-in-effect -- The `use no memo` boundary preserves immediate external-tab drawer synchronization.
-    setDrawerOpen(true);
-  }, [isMobile, activeTab, drawerOpen]);
+  }
 
   const handleDrawerChange = useCallback(
     (value: boolean): void => {
-      if (!value && activeTab !== 'viewer') {
+      if (!value) {
         setActiveTab('viewer');
       }
-
-      setDrawerOpen(value);
     },
-    [activeTab, setActiveTab],
+    [setActiveTab],
   );
 
   const handleTabChange = useCallback(
     (value: string): void => {
       setActiveTab(value as (typeof chatTabs)[number]['id']);
-
-      if (!drawerOpen && value !== 'viewer') {
-        // When the drawer is closed and the new tab is not the model tab, open the drawer
-        setDrawerOpen(true);
-      } else if (drawerOpen && value === 'viewer') {
-        // When the drawer is open and the new tab is the model tab, close the drawer
-        setDrawerOpen(false);
-      }
     },
-    [drawerOpen, setActiveTab],
+    [setActiveTab],
   );
 
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API

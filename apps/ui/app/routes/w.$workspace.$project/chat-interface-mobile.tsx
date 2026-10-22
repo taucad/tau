@@ -120,7 +120,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                   'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
                 )}
                 style={{
-                  height: isViewerTab ? '100dvh' : `calc(${Number(activeSnapPoint)} * 100dvh - var(--spacing)*12)`,
+                  height: `calc(${Number(activeSnapPoint)} * 100dvh - var(--spacing)*12)`,
                 }}
                 onValueChange={handleTabChange}
               >
@@ -136,7 +136,6 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                   <TabsContent enableAnimation={false} value='parameters' className='flex h-full flex-col'>
                     <ChatParameters />
                   </TabsContent>
-                  <TabsContent enableAnimation={false} value='viewer' className='flex h-full flex-col' />
                   <TabsContent enableAnimation={false} value='editor' className='flex h-full flex-col'>
                     <ChatEditorLayout />
                   </TabsContent>

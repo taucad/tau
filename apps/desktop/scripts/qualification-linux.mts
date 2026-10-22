@@ -520,6 +520,12 @@ export const createLinuxAptQualificationDriver = (
     ) {
       throw new Error('APT package database identity differs');
     }
+    if (managedImage && (await lstat('/sys/kernel/security/apparmor').catch(() => undefined))) {
+      const profiles = command('sudo', ['-n', 'cat', '/sys/kernel/security/apparmor/profiles']);
+      if (!profiles.split('\n').includes(`${name} (unconfined)`)) {
+        throw new Error('Managed AppImage profile is not loaded after installation');
+      }
+    }
     const imagePath = join(root, executableName);
     if (
       managedImage &&
@@ -744,6 +750,17 @@ export const createLinuxAptQualificationDriver = (
           }
         }),
       );
+      if (current.route === 'linux-appimage') {
+        if (await lstat(`/etc/apparmor.d/${selector}`).catch(() => undefined)) {
+          throw new Error('Managed AppImage profile file remains after purge');
+        }
+        if (await lstat('/sys/kernel/security/apparmor').catch(() => undefined)) {
+          const profiles = command('sudo', ['-n', 'cat', '/sys/kernel/security/apparmor/profiles']);
+          if (profiles.split('\n').includes(`${selector} (unconfined)`)) {
+            throw new Error('Managed AppImage kernel profile remains after purge');
+          }
+        }
+      }
       await preserve(files);
       lifecycle.removed(files);
     },

@@ -73,6 +73,7 @@ for (const difference of [
 for (const difference of [
   { expired: true },
   { name: 'arbitrary' },
+  { name: 'desktop-linux-ci-receipts' },
   { digest: undefined },
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the external GitHub/AWS wire field exactly.
   { workflow_run: { id: 999, head_sha: manifest.sourceCommit } },

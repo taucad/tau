@@ -109,6 +109,35 @@ assert.deepEqual(
 assert.equal(new Set(admitted.receipts.map(({ route, target }) => `${route}/${target}`)).size, 7);
 assert.deepEqual(collectQualificationRows({ ...complete, rows: [...complete.rows].reverse() }), admitted);
 assert.equal(admitted.hostMatrix.filter(({ receipt }) => receipt.route === 'linux-apt').length, 2);
+// Linux progress is independently complete only with both routes on both distros.
+const linux = {
+  ...fixture(),
+  scope: 'linux',
+  trustIdentities: {
+    'linux-apt': complete.trustIdentities['linux-apt'],
+    'linux-appimage': complete.trustIdentities['linux-appimage'],
+  },
+  rows: complete.rows.filter((row) => row.id.startsWith('ubuntu') || row.id.startsWith('debian')),
+};
+const linuxResult = collectQualificationRows(linux);
+assert.equal(linuxResult.hostMatrix.length, 4);
+assert.equal(linuxResult.receipts.length, 2);
+assert.deepEqual(
+  linuxResult.receipts.map((receipt) => receipt.route),
+  ['linux-apt', 'linux-appimage'],
+);
+assert.throws(() => collectQualificationRows({ ...linux, scope: 'all' }));
+assert.throws(() => collectQualificationRows({ ...linux, scope: 'unknown' }));
+for (const row of linux.rows) {
+  assert.throws(() => collectQualificationRows({ ...linux, rows: linux.rows.filter((other) => other.id !== row.id) }));
+}
+assert.throws(() => collectQualificationRows({ ...linux, rows: [...linux.rows, linux.rows[0]] }));
+assert.throws(() => collectQualificationRows({ ...linux, rows: complete.rows }));
+assert.throws(() => collectQualificationRows({ ...linux, channel: 'production' }));
+assert.throws(() =>
+  collectQualificationRows({ ...linux, trustIdentities: { ...linux.trustIdentities, 'linux-appimage': 'wrong-key' } }),
+);
+assert.throws(() => collectQualificationRows({ ...complete, trustIdentities: linux.trustIdentities }));
 const reject = (change: (value: ReturnType<typeof fixture>) => unknown): void => {
   assert.throws(() => collectQualificationRows(change(fixture())));
 };

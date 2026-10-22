@@ -3,6 +3,12 @@ name: Desktop installer candidate
 on:
   workflow_dispatch:
     inputs:
+      scope:
+        description: All platforms, or Linux-only staging qualification (not public promotion)
+        required: true
+        default: all
+        type: choice
+        options: [all, linux]
       tag:
         description: Existing desktop release tag built by the trusted archive run
         required: true
@@ -21,6 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  TAU_DESKTOP_QUALIFICATION_SCOPE: ${{ inputs.scope }}
   NX_NO_CLOUD: 'true'
   pnpm_config_verify_deps_before_run: error
 
@@ -61,6 +68,7 @@ jobs:
         run: pnpm nx run desktop:installer-candidate --args=preflight
 
   macos:
+    if: inputs.scope != 'linux'
     needs: resolve
     runs-on: macos-26
     timeout-minutes: 90
@@ -173,6 +181,7 @@ jobs:
           rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/AuthKey.p8"
 
   windows:
+    if: inputs.scope != 'linux'
     needs: resolve
     runs-on: windows-2025
     timeout-minutes: 90
@@ -315,6 +324,10 @@ jobs:
           retention-days: 30
 
   candidate:
+    if: >-
+      always() && !cancelled() && needs.resolve.result == 'success' && needs.linux.result == 'success' &&
+      ((inputs.scope == 'linux' && needs.macos.result == 'skipped' && needs.windows.result == 'skipped') ||
+       (inputs.scope != 'linux' && needs.macos.result == 'success' && needs.windows.result == 'success'))
     needs: [resolve, macos, windows, linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -387,7 +400,7 @@ jobs:
           pnpm nx run desktop:qualification-apt-snapshot --args=--prepare
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: desktop-installer-candidate
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-installer-candidate' || 'desktop-installer-candidate' }}
           path: out/installer-candidate/*
           if-no-files-found: error
           retention-days: 30

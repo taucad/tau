@@ -51,6 +51,10 @@ const main = async (): Promise<void> => {
   const operation = process.argv[2];
   const tag = required('DESKTOP_RELEASE_TAG');
   const identity = desktopReleaseIdentity(tag);
+  const scope = z.enum(['all', 'linux']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  if (scope === 'linux' && identity.channel !== 'staging') {
+    throw new Error('Linux-only candidates are staging qualification only');
+  }
   if (operation === 'resolve') {
     if (required('GITHUB_REF') !== 'refs/heads/main') {
       throw new Error('Installer candidate dispatch is main-only');
@@ -106,7 +110,8 @@ const main = async (): Promise<void> => {
     throw new Error('Archive metadata does not bind the exact candidate');
   }
   if (operation === 'preflight') {
-    for (const requiredTarget of ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64']) {
+    const targets = scope === 'linux' ? ['linux-x64'] : ['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'];
+    for (const requiredTarget of targets) {
       const requiredAsset = metadata.assets[requiredTarget];
       if (!requiredAsset) {
         throw new Error(
@@ -120,6 +125,9 @@ const main = async (): Promise<void> => {
   const target = z
     .enum(['darwin-arm64', 'darwin-x64', 'win32-x64', 'linux-x64'])
     .parse(required('DESKTOP_CANDIDATE_TARGET'));
+  if (scope === 'linux' && target !== 'linux-x64') {
+    throw new Error('Linux-only candidates cannot stage another platform');
+  }
   const [platform, arch] = target.split('-');
   const archiveName = desktopArchiveName(platform!, arch!);
   const asset = metadata.assets[target];

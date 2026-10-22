@@ -98,6 +98,22 @@ const main = async (): Promise<void> => {
     const partial = run('preflight', preflight);
     assert.equal(partial.status, 1);
     assert.match(partial.stderr, /Intel Mac enabled and notarization enabled/u);
+    assert.equal(run('resolve', { TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux' }).status, 1);
+    assert.equal(run('resolve', { TAU_DESKTOP_QUALIFICATION_SCOPE: 'unknown' }).status, 1);
+    const linuxMetadata = { ...metadata, tag: 'desktop-staging@0.2.0-staging.3', version: '1.0.3', channel: 'staging' };
+    await writeFile(join(archives, 'download.json'), JSON.stringify(linuxMetadata));
+    const linuxPreflight = {
+      ...preflight,
+      DESKTOP_RELEASE_TAG: linuxMetadata.tag,
+      TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux',
+    };
+    const linuxOnly = run('preflight', linuxPreflight);
+    assert.equal(linuxOnly.status, 0, linuxOnly.stderr);
+    assert.equal(run('preflight', { ...linuxPreflight, TAU_DESKTOP_QUALIFICATION_SCOPE: 'all' }).status, 1);
+    await writeFile(join(archives, 'download.json'), JSON.stringify({ ...linuxMetadata, assets: {} }));
+    assert.equal(run('preflight', linuxPreflight).status, 1);
+    await writeFile(join(archives, 'download.json'), JSON.stringify(metadata));
+
     const full = {
       ...metadata,
       assets: {

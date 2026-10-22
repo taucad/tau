@@ -3,6 +3,12 @@ name: Desktop installed route qualification
 on:
   workflow_dispatch:
     inputs:
+      scope:
+        description: All platforms, or Linux-only staging evidence (not public promotion)
+        required: true
+        default: all
+        type: choice
+        options: [all, linux]
       channel:
         description: Exact candidate channel; all three candidates must agree
         required: true
@@ -30,6 +36,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  TAU_DESKTOP_QUALIFICATION_SCOPE: ${{ inputs.scope }}
   NX_NO_CLOUD: 'true'
   pnpm_config_verify_deps_before_run: error
 
@@ -37,6 +44,8 @@ jobs:
   admission:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.selection.outputs.matrix }}
     steps:
       - name: Fail closed when qualification has not been enabled by its operator
         env:
@@ -46,6 +55,30 @@ jobs:
             echo '::error::Qualification not run: requires protected main and explicit operator enablement.'
             exit 1
           fi
+      - name: Select the complete requested host set
+        id: selection
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const scope = process.env.TAU_DESKTOP_QUALIFICATION_SCOPE;
+          if (!['all', 'linux'].includes(scope) || (scope === 'linux' && process.env.CHANNEL !== 'staging')) throw new Error('Invalid qualification scope/channel');
+          const rows = [
+            {"id": "macos-zip-arm64", "route": "macos-zip", "host": "[\"macos-26\"]"},
+            {"id": "macos-dmg-arm64", "route": "macos-dmg", "host": "[\"macos-26\"]"},
+            {"id": "macos-zip-x64", "route": "macos-zip", "host": "[\"macos-26-intel\"]"},
+            {"id": "macos-dmg-x64", "route": "macos-dmg", "host": "[\"macos-26-intel\"]"},
+            {"id": "windows-nsis-x64", "route": "windows-nsis", "host": "[\"windows-2025\"]"},
+            {"id": "ubuntu-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2404-x11\"]"},
+            {"id": "ubuntu-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-ubuntu2404-x11\"]"},
+            {"id": "debian-apt-x11", "route": "linux-apt", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
+            {"id": "debian-appimage-x11", "route": "linux-appimage", "host": "[\"self-hosted\", \"linux\", \"x64\", \"tau-disposable-debian13-x11\"]"},
+          ];
+          const selected = scope === 'linux' ? rows.filter(row => row.route.startsWith('linux-')) : rows;
+          appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(selected)}\n`);
+          NODE
+
   installed:
     needs: admission
     environment: desktop-qualification-${{ inputs.channel }}
@@ -54,34 +87,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        include:
-          - id: macos-zip-arm64
-            route: macos-zip
-            host: '["macos-26"]'
-          - id: macos-dmg-arm64
-            route: macos-dmg
-            host: '["macos-26"]'
-          - id: macos-zip-x64
-            route: macos-zip
-            host: '["macos-26-intel"]'
-          - id: macos-dmg-x64
-            route: macos-dmg
-            host: '["macos-26-intel"]'
-          - id: windows-nsis-x64
-            route: windows-nsis
-            host: '["windows-2025"]'
-          - id: ubuntu-apt-x11
-            route: linux-apt
-            host: '["self-hosted", "linux", "x64", "tau-disposable-ubuntu2404-x11"]'
-          - id: ubuntu-appimage-x11
-            route: linux-appimage
-            host: '["self-hosted", "linux", "x64", "tau-disposable-ubuntu2404-x11"]'
-          - id: debian-apt-x11
-            route: linux-apt
-            host: '["self-hosted", "linux", "x64", "tau-disposable-debian13-x11"]'
-          - id: debian-appimage-x11
-            route: linux-appimage
-            host: '["self-hosted", "linux", "x64", "tau-disposable-debian13-x11"]'
+        include: ${{ fromJSON(needs.admission.outputs.matrix) }}
     runs-on: ${{ fromJSON(matrix.host) }}
     env:
       GH_TOKEN: ${{ github.token }}
@@ -157,11 +163,11 @@ jobs:
         run: pnpm nx run desktop:collect-qualification-rows
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-route-host-matrix
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-host-matrix' || 'desktop-route-host-matrix' }}
           path: out/qualification-receipts/host-matrix.json
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: desktop-route-ci-receipts
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-ci-receipts' || 'desktop-route-ci-receipts' }}
           path: out/qualification-receipts/route-receipts.json
           if-no-files-found: error

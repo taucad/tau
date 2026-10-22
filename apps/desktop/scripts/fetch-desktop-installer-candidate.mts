@@ -56,7 +56,9 @@ const main = async (): Promise<void> => {
       ),
     })
     .parse(api(`actions/runs/${runId}/artifacts?per_page=100`));
-  const matches = list.artifacts.filter((entry) => entry.name === 'desktop-installer-candidate');
+  const scope = z.enum(['all', 'linux']).parse(process.env['TAU_DESKTOP_QUALIFICATION_SCOPE'] ?? 'all');
+  const name = scope === 'linux' ? 'desktop-linux-installer-candidate' : 'desktop-installer-candidate';
+  const matches = list.artifacts.filter((entry) => entry.name === name);
   const artifact = matches[0];
   if (
     matches.length !== 1 ||

@@ -6,11 +6,15 @@
  */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { build } from 'esbuild';
 import { z } from 'zod';
+// oxlint-disable-next-line no-restricted-imports -- Exercise the shipping APT sandbox integration.
+import { buildLinuxAptPackages } from './linux-apt-package.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Use the same bounded native APT driver as installed qualification.
+import { runQualificationApt } from './qualification-linux.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.env['TAU_QUALIFICATION_DISPOSABLE_VM'], '1');
@@ -18,6 +22,9 @@ assert.ok(process.env['DISPLAY']);
 const output = resolve('out');
 await mkdir(output, { recursive: true });
 const root = await mkdtemp(join(output, 'electron-writer-'));
+// The tooling guest is fresh; never replace an existing user installation.
+await assert.rejects(stat('/opt/tau-staging'), { code: 'ENOENT' });
+let installationStarted = false;
 try {
   await mkdir(join(root, 'profile'));
   await build({
@@ -106,12 +113,33 @@ app.whenReady().then(async () => {
   );
   const require = createRequire(import.meta.url);
   const electron = z.string().parse(require('electron'));
-  const result = spawnSync(electron, [join(root, 'main.cjs')], {
+  // Package the pinned Electron runtime through the shipping producer. Ubuntu needs the
+  // same narrowly scoped AppArmor profile as installed Tau; node_modules has no profile.
+  const appDirectory = join(root, 'app');
+  await cp(dirname(electron), appDirectory, { recursive: true });
+  await rename(join(appDirectory, 'electron'), join(appDirectory, 'Tau'));
+  await mkdir(join(appDirectory, 'resources/branding'), { recursive: true });
+  await cp('apps/desktop/resources/icon.png', join(appDirectory, 'resources/branding/icon.png'));
+  const packages = await buildLinuxAptPackages({
+    appDirectory,
+    outputDirectory: join(root, 'packages'),
+    tag: 'desktop-staging@0.1.0-staging.1',
+    sourceCommit: 'a'.repeat(40),
+    maintainer: 'Tau qualification <qualification@example.invalid>',
+  });
+  installationStarted = true;
+  runQualificationApt('install', [...packages]);
+  const installed = await stat('/opt/tau-staging/releases/1.0.1/Tau');
+  assert.equal(installed.uid, 0);
+  const result = spawnSync('/usr/bin/tau-staging', [join(root, 'main.cjs')], {
     stdio: 'inherit',
     timeout: 90_000,
   });
   assert.ifError(result.error);
   assert.equal(result.status, 0, 'Real Electron utility ownership qualification failed');
 } finally {
+  if (installationStarted) {
+    runQualificationApt('remove', ['tau-staging', 'tau-staging-runtime-1.0.1']);
+  }
   await rm(root, { recursive: true, force: true });
 }

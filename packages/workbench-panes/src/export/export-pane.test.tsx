@@ -20,6 +20,9 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: (): boolean => false,
 }));
 
+// Cmdk scrolls focused items into view; jsdom does not ship `scrollIntoView`.
+globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
+
 const formats: ExportFormatEntry[] = [
   { format: 'glb', fidelity: 'mesh', direct: true, provider: 'replicad' },
   {
@@ -36,6 +39,7 @@ const formats: ExportFormatEntry[] = [
     },
   },
   { format: 'step', fidelity: 'brep', direct: true, provider: 'replicad' },
+  { format: 'ply', fidelity: 'mesh', direct: false, provider: 'replicad+assimp' },
 ];
 
 type SourceOverrides = Partial<Omit<ExportSource, 'useEntry'>> & {
@@ -103,6 +107,34 @@ describe('ExportPane', () => {
     expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('Main');
     const groups = within(screen.getByRole('region', { name: 'Formats' })).getAllByText(/^(BREP|Mesh)$/u);
     expect(groups.map((group) => group.textContent)).toEqual(['BREP', 'Mesh']);
+  });
+
+  it('should keep less common formats behind More formats and toggle them from there', async () => {
+    const { source, exported } = createSource();
+    renderPane(source);
+
+    const region = screen.getByRole('region', { name: 'Formats' });
+    expect(within(region).queryByRole('button', { name: /^ply$/iu })).toBeNull();
+
+    fireEvent.click(within(region).getByRole('button', { name: /More formats/u }));
+    fireEvent.click(await screen.findByRole('option', { name: /ply/iu }));
+    expect(within(region).getByRole('button', { name: /More formats/u })).toHaveTextContent('1 selected');
+    expect(screen.getByRole('option', { name: /ply/iu })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export PLY' }));
+    await waitFor(() => {
+      expect(exported).toHaveBeenCalledWith(expect.objectContaining({ formats: ['ply'] }));
+    });
+  });
+
+  it('should list every format in the grid when none of them is common', () => {
+    const { source } = createSource({
+      entry: { hasGeometry: true, formats: [{ format: 'ply', fidelity: 'mesh', direct: true, provider: 'x' }] },
+    });
+    renderPane(source);
+
+    expect(screen.getByRole('button', { name: /^ply$/iu })).toBeDefined();
+    expect(screen.queryByRole('button', { name: /More formats/u })).toBeNull();
   });
 
   it('should fix the only destination a host offers and export to it', async () => {
@@ -250,6 +282,8 @@ describe('ExportPane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /stl/i }));
     expect(await screen.findByRole('heading', { name: 'STL options' })).toBeDefined();
+    expect(screen.queryByRole('switch', { name: /binary/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /STL options/u }));
     const binary = await screen.findByRole('switch', { name: /binary/i });
     await act(async () => {
       fireEvent.click(binary);

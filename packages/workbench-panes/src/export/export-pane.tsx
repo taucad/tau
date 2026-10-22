@@ -13,6 +13,7 @@ import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
+import { useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { Label } from '@taucad/ui/components/label';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -498,6 +499,70 @@ function FormatButton({
 
 const formatGridCols = 'grid grid-cols-1 gap-1.5 @[10rem]:grid-cols-2 @[16rem]:grid-cols-3';
 
+/** Formats shown in the grid; the rest open from "More formats". */
+const commonExportFormats: ReadonlySet<FileExtension> = new Set<FileExtension>(['step', '3mf', 'glb', 'obj', 'stl']);
+
+const getFormatValue = (entry: ExportFormatEntry): string => entry.format;
+
+function MoreFormatsComboBox({
+  formats,
+  selectedFormats,
+  onToggle,
+  FileIcon: FormatIcon,
+}: {
+  readonly formats: readonly ExportFormatEntry[];
+  readonly selectedFormats: FileExtension[];
+  readonly onToggle: (format: FileExtension) => void;
+  readonly FileIcon: FileIconComponent;
+}) {
+  const isInsideDrawer = useIsInsideDrawer();
+  const groupedItems = useMemo(() => groupExportFormatsByFidelity(formats), [formats]);
+  const selectedCount = formats.filter(({ format }) => selectedFormats.includes(format)).length;
+
+  const renderLabel = useCallback(
+    ({ format }: ExportFormatEntry) => (
+      <span className='flex w-full items-center gap-2'>
+        <FormatIcon filename={`file.${format}`} className='size-3.5 shrink-0' />
+        <span className='shrink-0 uppercase'>{format}</span>
+        <span className='min-w-0 flex-1 truncate text-xs text-muted-foreground'>{getFormatInfo(format)?.name}</span>
+        {selectedFormats.includes(format) ? <Check className='size-3.5 shrink-0' /> : null}
+      </span>
+    ),
+    [FormatIcon, selectedFormats],
+  );
+
+  const getKeywords = useCallback(({ format }: ExportFormatEntry) => {
+    const name = getFormatInfo(format)?.name;
+    return name ? [name] : [];
+  }, []);
+
+  return (
+    <ComboBoxResponsive<ExportFormatEntry>
+      groupedItems={groupedItems}
+      renderLabel={renderLabel}
+      getValue={getFormatValue}
+      getKeywords={getKeywords}
+      title='More formats'
+      description='Choose additional formats to export.'
+      searchPlaceHolder='Filter formats…'
+      isNested={isInsideDrawer}
+      popoverProperties={{ side: 'right', align: 'start', className: 'w-64' }}
+      shouldCloseOnSelect={() => false}
+      onSelect={(format) => {
+        onToggle(format as FileExtension);
+      }}
+    >
+      <Button variant='outline' size='xs' className='w-full justify-between'>
+        <span>More formats</span>
+        <span className='flex items-center gap-1.5 text-muted-foreground'>
+          {selectedCount > 0 ? `${selectedCount} selected` : formats.length}
+          <ChevronRight className='size-3 shrink-0' />
+        </span>
+      </Button>
+    </ComboBoxResponsive>
+  );
+}
+
 function FormatGrid({
   formats,
   selectedFormats,
@@ -509,7 +574,11 @@ function FormatGrid({
   readonly onToggle: (format: FileExtension) => void;
   readonly FileIcon: FileIconComponent;
 }) {
-  const groups = groupExportFormatsByFidelity(formats);
+  const hasCommonFormat = formats.some(({ format }) => commonExportFormats.has(format));
+  // Without any common format to lead with, every format stays in the grid.
+  const isCommon = (format: FileExtension): boolean => !hasCommonFormat || commonExportFormats.has(format);
+  const groups = groupExportFormatsByFidelity(formats.filter(({ format }) => isCommon(format)));
+  const moreFormats = formats.filter(({ format }) => !isCommon(format));
 
   return (
     <TooltipProvider>
@@ -531,6 +600,14 @@ function FormatGrid({
             </div>
           </div>
         ))}
+        {moreFormats.length > 0 ? (
+          <MoreFormatsComboBox
+            formats={moreFormats}
+            selectedFormats={selectedFormats}
+            FileIcon={FormatIcon}
+            onToggle={onToggle}
+          />
+        ) : null}
       </div>
     </TooltipProvider>
   );
@@ -562,7 +639,7 @@ function ExportFormatSettings({
   const isModified = Object.keys(formatContent).length > 0 || Object.keys(formatOptions).length > 0;
 
   return (
-    <Collapsible defaultOpen className='overflow-hidden rounded-lg border border-border bg-background'>
+    <Collapsible className='overflow-hidden rounded-lg border border-border bg-background'>
       <CollapsibleTrigger className='group/collapsible flex h-8 w-full items-center justify-between rounded-lg px-2 text-left transition-colors duration-150 hover:bg-accent data-[state=open]:rounded-b-none data-[state=open]:bg-accent motion-reduce:transition-none'>
         <h3 className='flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground'>
           <FormatIcon filename={`file.${format}`} className='size-3.5 shrink-0' />

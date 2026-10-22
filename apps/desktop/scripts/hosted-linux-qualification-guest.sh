@@ -9,7 +9,7 @@ umask 022
 export PATH="$HOME/node/bin:$PATH"
 [[ "$(id -un)" == tau && "$(id -u)" != 0 && "$(cat /proc/1/comm)" == systemd ]]
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  git git-lfs curl ca-certificates gh unzip python3 openssl gnupg apt-utils unattended-upgrades \
+  git git-lfs curl ca-certificates gh unzip python3 openssl gnupg gpgv apt-utils unattended-upgrades \
   libnss3-tools xdg-utils xdotool wmctrl bubblewrap desktop-file-utils libgtk-3-0t64 libsecret-1-0 libasound2t64 \
   libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 \
   libxdamage1 libxrandr2 libgbm1
@@ -27,7 +27,7 @@ git checkout --detach "$source_sha"
 corepack enable
 pnpm install --frozen-lockfile
 python3 - <<'PYRUN'
-import json, os, pathlib, subprocess, sys, tempfile, zipfile
+import json, os, pathlib, select, subprocess, sys, tempfile, zipfile
 root = pathlib.Path.home() / 'tau'
 config = pathlib.Path.home() / 'qualification-env.json'
 values = json.loads(config.read_text())
@@ -60,6 +60,32 @@ with tempfile.TemporaryDirectory(prefix='tau-zip-preflight-') as scratch:
 print('Guest archive tools and fresh-profile parent ready', flush=True)
 if mode == 'tooling':
     config.unlink()
+    # Real fixture signatures exercise gpgv; no release signing key enters a tooling guest.
+    env['TAU_APT_DISPOSABLE_CONTAINER'] = '1'
+    subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-apt-publication'], cwd=root, env=env, check=True)
+    # Hold the native frontend lock, then release it while the actual driver command waits.
+    # Selecting the already installed CA package version makes this transaction a no-op.
+    version = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'ca-certificates'], text=True)
+    lock = subprocess.Popen(['sudo', '-n', 'python3', '-c',
+        "import fcntl,time; f=open('/var/lib/dpkg/lock-frontend','r+'); fcntl.lockf(f,fcntl.LOCK_EX); print('locked',flush=True); time.sleep(8)"],
+        stdout=subprocess.PIPE, text=True)
+    try:
+        if not select.select([lock.stdout], [], [], 30)[0] or lock.stdout.readline().strip() != 'locked':
+            raise RuntimeError('Could not acquire fixture dpkg lock')
+        result = subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=module', '--eval',
+            "import { runQualificationApt } from './apps/desktop/scripts/qualification-linux.mts'; console.log(runQualificationApt('install', [process.argv[1]]));",
+            'ca-certificates=' + version], cwd=root, env=dict(env, LC_ALL='C'), check=True, timeout=170,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        if 'Waiting for cache lock' not in result.stdout:
+            raise RuntimeError('APT did not observe the held fixture lock: ' + result.stdout)
+        if lock.wait(timeout=10) != 0:
+            raise RuntimeError('Fixture dpkg lock holder failed')
+    finally:
+        if lock.poll() is None:
+            lock.terminate()
+            lock.wait(timeout=10)
+        lock.stdout.close()
+    print('Native APT signature and lock-contention fixtures passed', flush=True)
     result = subprocess.run(['pnpm', 'nx', 'run-many', '-p', 'desktop', '-t', 'test-qualification-linux',
                              'test-qualification-metadata', 'test-qualification-evidence', 'test-qualification-probe-process'], cwd=root, env=env)
     sys.exit(result.returncode)

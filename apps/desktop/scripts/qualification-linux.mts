@@ -38,6 +38,18 @@ const command = (file: string, args: string[]): string => {
   }
   return result.stdout.trim();
 };
+/** Let an existing unattended upgrade finish without disabling it or removing its lock. */
+export const runQualificationApt = (operation: 'install' | 'remove', packages: string[]): string =>
+  command('sudo', [
+    '-n',
+    'apt-get',
+    '-o',
+    'DPkg::Lock::Timeout=120',
+    operation,
+    '--yes',
+    '--no-install-recommends',
+    ...packages,
+  ]);
 const hashFile = async (path: string): Promise<string> => {
   const info = await lstat(path);
   if (!info.isFile() || (await realpath(path)) !== resolve(path)) {
@@ -569,7 +581,7 @@ export const createLinuxAptQualificationDriver = (
       const paths = await Promise.all(
         ['linux-deb-runtime', 'linux-deb-selector'].map(async (kind) => verifyArtifact(candidate, kind)),
       );
-      command('sudo', ['-n', 'apt-get', 'install', '--yes', '--no-install-recommends', ...paths]);
+      runQualificationApt('install', paths);
       installed = true;
       lifecycle.installed();
       return observe(candidate);
@@ -584,7 +596,7 @@ export const createLinuxAptQualificationDriver = (
       const paths = await Promise.all(
         ['linux-deb-runtime', 'linux-deb-selector'].map(async (kind) => verifyArtifact(candidate, kind)),
       );
-      command('sudo', ['-n', 'apt-get', 'install', '--yes', '--no-install-recommends', ...paths]);
+      runQualificationApt('install', paths);
       const observation = await observe(candidate);
       await preserve(files);
       return observation;
@@ -670,13 +682,7 @@ export const createLinuxAptQualificationDriver = (
         throw new Error('No APT installation observed');
       }
       await preserve(files);
-      command('sudo', [
-        '-n',
-        'apt-get',
-        'remove',
-        '--yes',
-        current.manifest.channel === 'staging' ? 'tau-staging' : 'tau',
-      ]);
+      runQualificationApt('remove', [current.manifest.channel === 'staging' ? 'tau-staging' : 'tau']);
       const selector = current.manifest.channel === 'staging' ? 'tau-staging' : 'tau';
       const remaining = command('dpkg-query', [
         '-W',

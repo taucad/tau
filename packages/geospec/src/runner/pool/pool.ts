@@ -176,9 +176,16 @@ const createWorkerChannel = (
   beginInitialization: () => void;
   beginShutdown: () => void;
   exited: () => string | undefined;
+  /** Why the worker can no longer run, keeping the worker's error code. */
+  exitError: () => Error | undefined;
 } => {
   let pending: ((settlement: ShardSettlement) => void) | undefined;
   let exited: string | undefined;
+  let exitedCode: string | undefined;
+  const exitError = (): Error | undefined =>
+    exited === undefined
+      ? undefined
+      : Object.assign(new Error(exited), exitedCode === undefined ? {} : { code: exitedCode });
   let resolveReady: (() => void) | undefined;
   const ready = new Promise<void>((resolve) => {
     resolveReady = resolve;
@@ -230,10 +237,11 @@ const createWorkerChannel = (
       }
       case 'initialization-error': {
         exited = message.message;
+        exitedCode = message.code;
         resolveReady?.();
-        rejectInitialized?.(new Error(message.message));
+        rejectInitialized?.(exitError()!);
         if (shuttingDown) {
-          rejectShutdown?.(new Error(message.message));
+          rejectShutdown?.(exitError()!);
         }
         break;
       }
@@ -256,10 +264,11 @@ const createWorkerChannel = (
   });
 
   handle.onExit((details) => {
-    exited = details.message ?? 'the pool worker exited unexpectedly';
+    // The exit that follows an initialization error does not replace its reason.
+    exited ??= details.message ?? 'the pool worker exited unexpectedly';
     resolveReady?.();
-    rejectInitialized?.(new Error(exited));
-    rejectShutdown?.(new Error(exited));
+    rejectInitialized?.(exitError()!);
+    rejectShutdown?.(exitError()!);
     // Even an expected shutdown exit must settle an active shard: close may
     // have forced termination after the worker missed its cleanup deadline.
     deliver({ type: 'error', message: exited });
@@ -276,6 +285,7 @@ const createWorkerChannel = (
       shuttingDown = true;
     },
     exited: () => exited,
+    exitError,
     settle: async (_shardId: number) =>
       exited === undefined
         ? new Promise<ShardSettlement>((resolve) => {
@@ -501,9 +511,9 @@ export const createGeoSpecPoolRunner = (options: GeoSpecPoolOptions): GeoSpecRun
             throw new Error('GeoSpec pool closed during worker initialization.');
           }
           for (const worker of workers) {
-            const exited = channels.get(worker.handle)!.exited();
+            const exited = channels.get(worker.handle)!.exitError();
             if (exited !== undefined) {
-              throw new Error(exited);
+              throw exited;
             }
           }
           if (options.initializeWorker) {

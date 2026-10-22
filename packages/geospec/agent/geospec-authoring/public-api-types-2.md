@@ -974,6 +974,8 @@ GeoSpecPoolWorkerMessage: {
 } | {
     type: 'initialization-error';
     message: string;
+    /** The failure's error code, such as `ERR_MODULE_NOT_FOUND` for an absent engine. */
+    code?: string;
 } | {
     type: 'file-start';
     shardId: number;

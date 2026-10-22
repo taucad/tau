@@ -356,6 +356,7 @@ describe('native Node pool', () => {
         {
           type: 'initialization-error',
           message: 'Execution permits must be a positive integer including the caller and within the host cap.',
+          code: 'invalid-request',
         },
       ]);
     } finally {

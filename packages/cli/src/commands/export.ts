@@ -66,6 +66,7 @@ const capabilityMissingCodes = new Set(['KERNEL_CAPABILITY_MISSING', 'TRANSCODER
  * tau export model.ts --ext=glb --telemetry=./profile.json
  * tau export model.ts --ext=stl --json
  * tau export model.ts --ext=stl --output=- | wc -c
+ * tau export --file model.ts --format glb --project . --out ./out
  * ```
  */
 export const exportCommand = defineCommand({
@@ -76,13 +77,19 @@ export const exportCommand = defineCommand({
   args: {
     file: {
       type: 'positional',
-      description: 'Input CAD file path (e.g. model.ts)',
-      required: true,
+      description: 'Input CAD file path (e.g. model.ts); required unless --out selects GeoSpec subprocess protocol 1',
+      required: false,
     },
     ext: {
       type: 'string',
       description: 'Target extension; route availability depends on the input source (e.g. glb, stl, step)',
-      required: true,
+      required: false,
+    },
+    out: {
+      type: 'string',
+      description:
+        'Serve GeoSpec subprocess protocol 1 into this directory, with --file, --format and --project (see geospec commandExporter)',
+      required: false,
     },
     output: {
       type: 'string',
@@ -127,7 +134,18 @@ export const exportCommand = defineCommand({
       required: false,
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
+    if (rawArgs.some((argument) => argument === '--out' || argument.startsWith('--out='))) {
+      const { runExportProtocol } = await import('#commands/export-protocol.js');
+      process.exitCode = await runExportProtocol(rawArgs);
+      return;
+    }
+    if (typeof args.file !== 'string' || args.file === '') {
+      throw cliError('ARG_MISSING', 'Missing required positional argument: FILE', exitCodes.usage);
+    }
+    if (typeof args.ext !== 'string' || args.ext === '') {
+      throw cliError('ARG_MISSING', 'Missing required argument: --ext', exitCodes.usage);
+    }
     const output = await createOutput();
     const profileLedger = args.telemetry ? createPhaseLedger() : undefined;
     profileLedger?.checkpoint('process.startup');

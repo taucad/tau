@@ -113,9 +113,11 @@ if (parentPort !== null) {
   try {
     await startGeoSpecNodePoolWorker(parentPort, workerData as GeoSpecNodePoolWorkerOptions);
   } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
     parentPort.postMessage({
       type: 'initialization-error',
       message: error instanceof Error ? error.message : String(error),
+      ...(typeof code === 'string' ? { code } : {}),
     });
     parentPort.close();
   }

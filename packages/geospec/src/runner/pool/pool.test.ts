@@ -630,6 +630,36 @@ describe('createGeoSpecPoolRunner', () => {
     expect(terminated).toStrictEqual([true, true]);
   });
 
+  it('should keep the error code of a worker that cannot load its engine', async () => {
+    const handle: GeoSpecPoolWorkerHandle = {
+      postMessage() {
+        /* The worker failed before it could take work. */
+      },
+      onMessage(next) {
+        queueMicrotask(() => {
+          next({
+            type: 'initialization-error',
+            message: "Cannot find package 'geospec-engine'",
+            code: 'ERR_MODULE_NOT_FOUND',
+          });
+        });
+      },
+      onExit(next) {
+        setTimeout(() => {
+          next({ unexpected: true, message: 'the pool worker exited' });
+        }, 0);
+      },
+      terminate() {
+        /* Nothing is running. */
+      },
+    };
+    const runner = createGeoSpecPoolRunner({ createWorker: () => handle, workers: 1 });
+    await expect(runner.run({ files: ['a.geospec.ts'] })).rejects.toThrow(
+      expect.objectContaining({ code: 'ERR_MODULE_NOT_FOUND', message: "Cannot find package 'geospec-engine'" }),
+    );
+    await runner.close();
+  });
+
   it('should run every shard and report files in DECLARED order', async () => {
     const events: GeoSpecRunnerEvent[] = [];
     const worker = scriptedWorker({

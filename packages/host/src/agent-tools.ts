@@ -58,6 +58,7 @@ import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
 import { runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
+import type { GeoSpecModelExporter } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { Engine as NativeGeoSpecEngine, HostEngineLimits } from 'geospec-engine/node';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -435,6 +436,23 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
   nativeSession = session;
   return session;
 };
+
+/**
+ * Create a GeoSpec model exporter over a Runtime client it owns: the client is created on the first export and
+ * shut down when the exporter closes. `tau test` and `tau export`'s subprocess protocol export through it, the same
+ * route {@link createHostGeoSpecRunner} takes over a borrowed client.
+ *
+ * @param options - The client factory and the file extensions to claim.
+ * @returns The exporter.
+ * @public
+ */
+export const createHostGeoSpecExporter = async (options: {
+  /** The exporter owns what this returns, so it must say how to release it. */
+  readonly client: () => Promise<
+    HostGeoSpecRuntimeClient & (Pick<RuntimeClient, 'shutdown'> | Pick<RuntimeClient, 'terminate'>)
+  >;
+  readonly extensions: readonly string[];
+}): Promise<GeoSpecModelExporter> => tauClientExporter(options);
 
 /**
  * Create the GeoSpec runner for one `test_model` call over the host's existing runtime.

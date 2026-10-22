@@ -46,6 +46,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./geospec": "./src/geospec/index.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -58,6 +59,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./geospec": {
+        "types": "./dist/geospec/index.d.mts",
+        "import": "./dist/geospec/index.mjs",
+        "default": "./dist/geospec/index.mjs"
       },
       "./package.json": "./package.json"
     },

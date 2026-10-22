@@ -1,11 +1,12 @@
 /**
  * `tau test` — run a project's GeoSpec suites headlessly (charter D29, C1 R2).
  *
- * The host already runs GeoSpec for MCP `test_model` with `createHostGeoSpecRunner` over a runtime client; this verb
- * runs that runner over the CLI runtime `tau export` and `tau check` use, so CI can run a project's own tests without
- * an agent. Discovery is GeoSpec's own (`*.geospec.ts` under the project, or the files named). Native kernels bind to
- * their sealed closures in the payload store and nothing is downloaded (I5): a suite over an unprepared `.py` model
- * fails with the kernel's `KERNEL_NOT_PREPARED` refusal and exits 3.
+ * The suites run on GeoSpec's own Node pool, the runner behind `geospec run`, with Tau's exporter
+ * (`@taucad/cli/geospec`) in each worker ahead of any the project's `geospec.config.*` declares, so a Tau project
+ * needs no GeoSpec config. The exporter composes the runtime `tau export` and `tau check` use. Discovery is GeoSpec's
+ * own (`*.geospec.ts` under the project, or the files named). Native kernels bind to their sealed closures in the
+ * payload store and nothing is downloaded (I5): a suite over an unprepared `.py` model fails with the kernel's
+ * `KERNEL_NOT_PREPARED` refusal and exits 3.
  *
  * Exit codes: 0 every selected test passed, 1 a test failed or was left undecided (record status `inconclusive`), 2 an
  * unusable request, 3 nothing ran because the runtime declined (no GeoSpec engine, no suite found, a kernel not
@@ -15,15 +16,36 @@
  */
 import { readdir, stat } from 'node:fs/promises';
 
-import { createHostGeoSpecRunner, formatTestModelHeadline, runStatusFromCounts } from '@taucad/host/agent-tools';
-import type { HostGeoSpecRunner } from '@taucad/host/agent-tools';
-import { createNodeClient } from '@taucad/runtime/node';
+import { formatTestModelHeadline, runStatusFromCounts } from '@taucad/host/agent-tools';
 import { defineCommand } from 'citty';
+import type { GeoSpecRunner } from 'geospec/runner/worker';
 
 import { cliError, createOutput, emit, exitCodes, sanitize } from '#output.js';
 import { resolveProjectRoot } from '#project-root.js';
-import { loadCliRuntime } from '#runtime-options.js';
-import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
+
+/**
+ * The URL of the exporter module each pool worker imports, carrying the composition it rebuilds.
+ *
+ * @internal
+ * @param options - The directory plugins load from, the `--plugin` values and the `--config` module.
+ * @returns The module URL with the options in its query.
+ */
+export const exporterModuleUrl = (
+  options: Readonly<{ pluginRoot: string; plugins: readonly string[]; config?: string | undefined }>,
+): string => {
+  const url = new URL(
+    import.meta.url.endsWith('.ts') ? '../geospec/exporter-module.ts' : './geospec-exporter.mjs',
+    import.meta.url,
+  );
+  url.searchParams.set('pluginRoot', options.pluginRoot);
+  for (const plugin of options.plugins) {
+    url.searchParams.append('plugin', plugin);
+  }
+  if (options.config !== undefined) {
+    url.searchParams.set('config', options.config);
+  }
+  return url.href;
+};
 
 /** One test as the `test` record carries it. */
 export type TestCaseRecord = Readonly<{
@@ -270,33 +292,34 @@ export const testCommand = defineCommand({
       );
     }
 
-    await authorizeCliZooProxy(process.env);
-    const runtime = await loadCliRuntime({
-      projectRoot: process.cwd(),
-      plugin: args.plugin,
-      config: args.config,
-      zooProxyUrl: cliZooProxyUrl(process.env),
+    const { createGeoSpecNodePoolRunner } = await import('geospec/runner/node');
+    const runner: GeoSpecRunner = createGeoSpecNodePoolRunner({
+      projectPath: projectRoot,
+      exporterModules: [
+        exporterModuleUrl({
+          pluginRoot: process.cwd(),
+          plugins: [args.plugin].flat().filter((value): value is string => typeof value === 'string'),
+          config: args.config,
+        }),
+      ],
     });
-    const client = await createNodeClient({ runtime, projectPath: projectRoot });
-    client.on('log', (entry) => {
-      const level = entry.level as 'info' | 'warn' | 'error' | 'debug';
-      if (level in output) {
-        output[level](sanitize(entry.message));
-      }
-    });
-    let runner: HostGeoSpecRunner | undefined;
     const onSignal = (signal: NodeJS.Signals): void => {
-      runner?.abort(`tau test cancelled by ${signal}`);
+      runner.abort(`tau test cancelled by ${signal}`);
       process.exitCode = signal === 'SIGINT' ? exitCodes.interrupted : exitCodes.terminated;
     };
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
     let record: TestRecord;
     try {
+      output.start(`Running ${String(discovery.files.length)} GeoSpec suite(s) in ${projectRoot}`);
+      let result: Awaited<ReturnType<GeoSpecRunner['run']>>;
       try {
-        runner = await createHostGeoSpecRunner(projectRoot, client);
+        result = await runner.run({
+          files: discovery.files,
+          ...(args.testNamePattern === undefined ? {} : { testNamePattern: args.testNamePattern }),
+        });
       } catch (error) {
-        /* The GeoSpec engine is an optional peer of the host; without it nothing can run. */
+        /* The GeoSpec engine is an optional dependency of `geospec`; without it nothing can run. */
         if ((error as NodeJS.ErrnoException).code === 'ERR_MODULE_NOT_FOUND') {
           throw cliError(
             'GEOSPEC_UNAVAILABLE',
@@ -306,20 +329,11 @@ export const testCommand = defineCommand({
         }
         throw error;
       }
-      output.start(`Running ${String(discovery.files.length)} GeoSpec suite(s) in ${projectRoot}`);
-      const result = await runner.run({
-        files: discovery.files,
-        ...(args.testNamePattern === undefined ? {} : { testNamePattern: args.testNamePattern }),
-      });
       record = testRecord(projectRoot, discovery.files, result as RunResult);
     } finally {
       process.off('SIGINT', onSignal);
       process.off('SIGTERM', onSignal);
-      try {
-        await runner?.close();
-      } finally {
-        await client.shutdown();
-      }
+      await runner.close();
     }
 
     if (args.json) {

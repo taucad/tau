@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { exitFor, testRecord, testSummary } from '#commands/test.js';
+import { exitFor, exporterModuleUrl, testRecord, testSummary } from '#commands/test.js';
 
 const test = (name: string, status: string, message?: string) => ({
   name,
@@ -125,5 +125,20 @@ describe('testRecord status', () => {
   it('should record a run with any failed test as failed', () => {
     expect(run(['failed', 'inconclusive'], 1).status).toBe('failed');
     expect(run(['inconclusive'], 1).status).toBe('failed');
+  });
+});
+
+describe('exporterModuleUrl', () => {
+  it("should name the exporter module beside this command, with the run's composition in its query", () => {
+    const url = new URL(exporterModuleUrl({ pluginRoot: '/work', plugins: ['./a.mjs', './b.mjs'], config: './c.mjs' }));
+
+    expect(url.pathname).toMatch(/\/geospec\/exporter-module\.ts$/u);
+    expect(url.searchParams.get('pluginRoot')).toBe('/work');
+    expect(url.searchParams.getAll('plugin')).toEqual(['./a.mjs', './b.mjs']);
+    expect(url.searchParams.get('config')).toBe('./c.mjs');
+  });
+
+  it('should leave out a configuration module the run did not name', () => {
+    expect(new URL(exporterModuleUrl({ pluginRoot: '/work', plugins: [] })).searchParams.has('config')).toBe(false);
   });
 });

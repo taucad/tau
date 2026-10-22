@@ -44,7 +44,12 @@ export type GeoSpecPoolHostMessage =
 export type GeoSpecPoolWorkerMessage =
   | { type: 'ready' }
   | { type: 'initialized' }
-  | { type: 'initialization-error'; message: string }
+  | {
+      type: 'initialization-error';
+      message: string;
+      /** The failure's error code, such as `ERR_MODULE_NOT_FOUND` for an absent engine. */
+      code?: string;
+    }
   | { type: 'file-start'; shardId: number; file: string }
   | { type: 'tests-listed'; shardId: number; file: string; names: string[] }
   | { type: 'list-error'; shardId: number; file: string; message: string }

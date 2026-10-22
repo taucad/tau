@@ -31,8 +31,18 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { relocateLegacyLfsObjects, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
-import { retireDueLfsObjects, retireLfsObjects } from '#api/git/lfs-retirement.js';
+import {
+  retireDueLfsObjects as streamDueLfsObjects,
+  retireLfsObjects as streamLfsObjects,
+} from '#api/git/lfs-retirement.js';
 import { databaseReachable } from '#testing/database-reachable.js';
+
+const retireLfsObjects = async (...args: Parameters<typeof streamLfsObjects>) => {
+  const batches = await Array.fromAsync(streamLfsObjects(...args));
+  return { retired: batches.flatMap((batch) => batch.retired) };
+};
+const retireDueLfsObjects = async (...args: Parameters<typeof streamDueLfsObjects>) =>
+  Array.fromAsync(streamDueLfsObjects(...args));
 
 /**
  * D18: an object is retired only when its unreachable mark is older than the
@@ -255,6 +265,80 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS retirement through
       rmSync(directory, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it('should preserve referenced and renewed later-page objects while draining a backlog and releasing quota exactly once', async () => {
+    const locator = await newProject();
+    const now = new Date();
+    const old = new Date(now.getTime() - retentionWindowMilliseconds - 1);
+    const ids = Array.from({ length: 1500 }, (_, index) => index.toString(16).padStart(64, '0'));
+    const referenced = 'f'.repeat(64);
+    const clientDirectory = newClient();
+    writeFileSync(
+      path.join(clientDirectory, 'part.stl'),
+      `version https://git-lfs.github.com/spec/v1\noid sha256:${referenced}\nsize 1\n`,
+    );
+    commitAll(clientDirectory, 'referenced control');
+    await pushAndCommit(locator, clientDirectory, ['main']);
+    for (let offset = 0; offset < ids.length; offset += 500) {
+      // oxlint-disable-next-line no-await-in-loop -- bounded fixture rows
+      await database
+        .insert(projectGitLfsObject)
+        .values(
+          ids
+            .slice(offset, offset + 500)
+            .map((oid) => ({ projectId: locator.projectId, oid, sizeBytes: 1, createdAt: old, unreachableAt: old })),
+        );
+    }
+    await database
+      .insert(projectGitLfsObject)
+      .values({ projectId: locator.projectId, oid: referenced, sizeBytes: 1, finalizedAt: old, unreachableAt: old });
+    await database.update(projectGit).set({ lfsBytes: 1501 }).where(eq(projectGit.projectId, locator.projectId));
+    const databaseService = new DatabaseService(
+      new ConfigService<Environment, true>(getEnvironment()),
+      mock<PinoLogger>(),
+    );
+    const repositories = new GitRepositoryService(databaseService, mock(), driver, mock(), store, mock(), mock());
+    const access: GitAccess = {
+      ...locator,
+      role: 'owner',
+      callerId: locator.ownerId,
+      remainingBytes: 2048,
+      storageLimitBytes: 4096,
+    };
+    const deleted: string[] = [];
+    const storage = mock<ObjectStorageService>({
+      deleteBlob: async ({ key }) => {
+        deleted.push(key);
+      },
+    });
+    const stream = streamLfsObjects({ ...deps(), storage }, { ...locator, now });
+    try {
+      const first = await stream.next();
+      expect(first.value?.retired).toHaveLength(500);
+      await repositories.reserveLfsObjects({ access, objects: [{ oid: ids[1499]!, size: 1 }] });
+      expect(
+        await repositories.finalizeLfsObject({ access, oid: ids[1498]!, size: 1, verifyContent: async () => true }),
+      ).toBe('finalized');
+      let retired = 500;
+      for await (const batch of stream) {
+        expect(batch.retired.length).toBeLessThanOrEqual(500);
+        retired += batch.retired.length;
+      }
+      expect(retired).toBe(1498);
+      expect(deleted).toHaveLength(1498 * 2);
+      expect(await lfsBytesOf(locator)).toBe(3);
+      const controls = await database.query.projectGitLfsObject.findMany({
+        where: eq(projectGitLfsObject.projectId, locator.projectId),
+      });
+      expect(controls.map((row) => row.oid).sort()).toEqual([ids[1498], ids[1499], referenced]);
+      expect(controls.every((row) => row.unreachableAt === null)).toBe(true);
+      expect(await retireLfsObjects({ ...deps(), storage }, { ...locator, now })).toEqual({ retired: [] });
+      expect(deleted).toHaveLength(1498 * 2);
+    } finally {
+      await stream.return(undefined);
+      await databaseService.onModuleDestroy();
+    }
+  }, 120_000);
 
   it('should delete the object and its row when the window has passed and the walk still misses it', async () => {
     const object = pointerFor('retired large object');

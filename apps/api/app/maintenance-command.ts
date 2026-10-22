@@ -1,7 +1,7 @@
 import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import -- Nest decorators require metadata before service imports
 import process from 'node:process';
 import { ConfigService } from '@nestjs/config';
-import { eq } from 'drizzle-orm';
+import { and, asc, eq, gt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { getEnvironment } from '#config/environment.config.js';
@@ -29,6 +29,18 @@ import type { ScheduledMaintenanceCommand } from '#api/git/maintenance/liveness.
  * whole tenant prefixes and `mark-erasure` opens that window, so both exist
  * only as operator subcommands of a process the request path never starts.
  */
+
+/** Wait for the output sink so backlog outcomes cannot accumulate behind a slow log consumer. */
+const writeLine = async (line: string): Promise<void> =>
+  new Promise((resolve, reject) => {
+    process.stdout.write(`${line}\n`, (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
 
 const usage = `Usage: revisions-maintenance <command>
 
@@ -151,17 +163,19 @@ async function main(): Promise<void> {
   try {
     switch (command) {
       case 'purge': {
-        const outcomes = await pass('purge', async () =>
-          purgeTombstonedTenants({
+        await pass('purge', async () => {
+          for await (const outcome of purgeTombstonedTenants({
             database,
             driver,
-            report,
+            report: writeLine,
             dryRun: args.includes('--dry-run'),
             ...(option(args, 'owner') === undefined ? {} : { ownerIds: [required(args, 'owner')] }),
             ...(option(args, 'confirm') === undefined ? {} : { confirmOwnerId: required(args, 'confirm') }),
-          }),
-        );
-        console.log(JSON.stringify(outcomes));
+          })) {
+            // oxlint-disable-next-line no-await-in-loop -- backpressure bounds backlog output
+            await writeLine(JSON.stringify(outcome));
+          }
+        });
         break;
       }
       case 'restore': {
@@ -182,17 +196,46 @@ async function main(): Promise<void> {
         if (args.includes('--dry-run')) {
           /* The same predicate `retireDueLfsObjects` selects on, imported
              rather than restated: nothing is hydrated and nothing is deleted. */
-          const due = await database
-            .select({ projectId: projectGitLfsObject.projectId, oid: projectGitLfsObject.oid })
-            .from(projectGitLfsObject)
-            .where(dueCondition(now, lfsRetirementWindowMilliseconds));
-          console.log(JSON.stringify(due));
+          let cursor: { projectId: string; oid: string } | undefined;
+          for (;;) {
+            // oxlint-disable-next-line no-await-in-loop -- bounded keyset pages for operator output
+            const due = await database
+              .select({ projectId: projectGitLfsObject.projectId, oid: projectGitLfsObject.oid })
+              .from(projectGitLfsObject)
+              .where(
+                and(
+                  dueCondition(now, lfsRetirementWindowMilliseconds),
+                  cursor === undefined
+                    ? undefined
+                    : or(
+                        gt(projectGitLfsObject.projectId, cursor.projectId),
+                        and(
+                          eq(projectGitLfsObject.projectId, cursor.projectId),
+                          gt(projectGitLfsObject.oid, cursor.oid),
+                        ),
+                      ),
+                ),
+              )
+              .orderBy(asc(projectGitLfsObject.projectId), asc(projectGitLfsObject.oid))
+              .limit(500);
+            if (due.length === 0) {
+              break;
+            }
+            cursor = due.at(-1)!;
+            // oxlint-disable-next-line no-await-in-loop -- backpressure bounds dry-run output
+            await writeLine(JSON.stringify(due));
+          }
           break;
         }
-        const outcomes = await pass('retire-lfs', async () =>
-          retireDueLfsObjects({ database, store: new S3RepositoryStore(driver), storage: driver }, { now }),
-        );
-        console.log(JSON.stringify(outcomes));
+        await pass('retire-lfs', async () => {
+          for await (const outcome of retireDueLfsObjects(
+            { database, store: new S3RepositoryStore(driver), storage: driver },
+            { now },
+          )) {
+            // oxlint-disable-next-line no-await-in-loop -- backpressure bounds backlog output
+            await writeLine(JSON.stringify(outcome));
+          }
+        });
         break;
       }
       case 'collect-blobs': {

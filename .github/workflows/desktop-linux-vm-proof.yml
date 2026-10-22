@@ -1,0 +1,36 @@
+name: Desktop hosted Linux VM proof
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-linux-vm-proof.yml'
+      - 'apps/desktop/scripts/hosted-linux-vm-*.sh'
+permissions:
+  contents: read
+concurrency:
+  group: desktop-linux-vm-proof-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu, debian]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Prove full guest infrastructure without signing credentials
+        env:
+          TAU_VM_DISTRO: ${{ matrix.distro }}
+        run: bash apps/desktop/scripts/hosted-linux-vm-proof.sh
+      - name: Retain infrastructure evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-vm-proof-${{ matrix.distro }}
+          path: out/test-results/hosted-linux-vm/${{ matrix.distro }}/
+          retention-days: 7
+          if-no-files-found: error

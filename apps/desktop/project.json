@@ -680,6 +680,13 @@
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-linux.test.mts"
       }
+    },
+    "hosted-linux-vm-proof": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "bash apps/desktop/scripts/hosted-linux-vm-proof.sh"
+      }
     }
   }
 }

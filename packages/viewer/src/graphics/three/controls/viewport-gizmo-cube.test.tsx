@@ -189,6 +189,10 @@ vi.mock('#graphics/three/utils/gizmo.utils.js', () => ({
   useGizmoResizeSync: () => undefined,
 }));
 
+/** A section plane picker that only records how the cube styles it. */
+const createPickerStub = (setStyle: SectionPlanePicker['setStyle']): SectionPlanePicker =>
+  ({ setStyle }) as unknown as SectionPlanePicker;
+
 describe('ViewportGizmoCube camera retention', () => {
   beforeEach(() => {
     mocks.binding.detach.mockClear();
@@ -296,7 +300,7 @@ describe('ViewportGizmoCube camera retention', () => {
 
   it('should style the section plane picker from its own style, and restyle it with the theme', () => {
     const setStyle = vi.fn<SectionPlanePicker['setStyle']>();
-    const picker = { setStyle } as unknown as SectionPlanePicker;
+    const picker = createPickerStub(setStyle);
     const withPicker = (): React.JSX.Element => (
       <SectionPlanePickerContext.Provider value={picker}>
         <ViewportGizmoCube />

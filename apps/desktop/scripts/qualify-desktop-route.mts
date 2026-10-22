@@ -308,7 +308,8 @@ const main = async (): Promise<void> => {
         [`--tau-route-qualification=${nonce}`],
         {
           env: { ...process.env, TAU_DESKTOP_UPDATE_FEED: transport.origin },
-          stdio: 'ignore',
+          // Keep native loader/FUSE/sandbox startup errors in the disposable Linux job log.
+          stdio: process.platform === 'linux' ? ['ignore', 'ignore', 'inherit'] : 'ignore',
         },
       );
       await new Promise<void>((resolve, reject) => {

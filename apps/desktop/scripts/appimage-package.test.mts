@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { createPackage } from '@electron/asar';
@@ -74,6 +74,20 @@ const main = async (): Promise<void> => {
   });
   assert.equal(launched.status, 0, launched.stderr);
   assert.equal(launched.stdout, 'space argument\n--fixture\n');
+  if (process.env['TAU_QUALIFICATION_DISPOSABLE_VM'] === '1') {
+    assert.ok(!process.env['APPIMAGE_EXTRACT_AND_RUN'], 'Native mount proof must not extract-and-run');
+    const entries = await readdir(output);
+    const images = entries.filter((name) => name.endsWith('.AppImage'));
+    assert.equal(images.length, 1);
+    const mounted = spawnSync(join(output, images[0]!), ['space argument', '--fixture'], {
+      encoding: 'utf8',
+      timeout: 30_000,
+    });
+    assert.ifError(mounted.error);
+    assert.equal(mounted.status, 0, mounted.stderr);
+    assert.equal(mounted.stdout, 'space argument\n--fixture\n');
+    console.log('PASS native FUSE AppImage mount and launcher arguments; no Electron sandbox claim');
+  }
   const assembly: unknown = JSON.parse(await readFile(join(output, 'appimage-assembly.json'), 'utf8'));
   assert.ok(typeof assembly === 'object' && assembly !== null && 'trust' in assembly && assembly.trust === 'test');
   const wrongSource = spawnSync(process.execPath, [...process.execArgv, maker, '--test-trust'], {

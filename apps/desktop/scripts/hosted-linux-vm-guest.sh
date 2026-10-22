@@ -16,7 +16,8 @@ systemd-detect-virt | grep -x kvm
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   xserver-xorg-core xserver-xorg-video-dummy openbox xauth x11-utils x11-apps x11-xserver-utils xclip \
-  dbus-x11 apparmor apparmor-utils libfuse2t64
+  dbus-x11 apparmor apparmor-utils libfuse2t64 fuse3
+command -v fusermount
 sudo aa-status
 [[ "$(cat /sys/module/apparmor/parameters/enabled)" == Y ]]
 sudo grep -E '^CONFIG_(SECCOMP|SECCOMP_FILTER|USER_NS)=y$' "/boot/config-$(uname -r)"

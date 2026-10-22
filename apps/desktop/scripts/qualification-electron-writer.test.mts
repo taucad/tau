@@ -19,6 +19,7 @@ const output = resolve('out');
 await mkdir(output, { recursive: true });
 const root = await mkdtemp(join(output, 'electron-writer-'));
 try {
+  await mkdir(join(root, 'profile'));
   await build({
     entryPoints: ['packages/filesystem/src/backend/node/authority-writer-lock.ts'],
     outfile: join(root, 'authority.cjs'),

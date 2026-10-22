@@ -15,7 +15,7 @@ uname -a
 systemd-detect-virt | grep -x kvm
 sudo env DEBIAN_FRONTEND=noninteractive apt-get update -qq
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  xserver-xorg-core xserver-xorg-video-dummy openbox xauth x11-utils x11-xserver-utils xclip \
+  xserver-xorg-core xserver-xorg-video-dummy openbox xauth x11-utils x11-apps x11-xserver-utils xclip \
   dbus-x11 apparmor apparmor-utils libfuse2t64
 sudo aa-status
 [[ "$(cat /sys/module/apparmor/parameters/enabled)" == Y ]]
@@ -29,7 +29,7 @@ if [[ "$ID" == ubuntu ]]; then
 fi
 # Record the stock policy's decision; do not turn off AppArmor to make unshare pass.
 if unshare -Ur true; then printf 'Unprivileged userns: allowed\n'; else printf 'Unprivileged userns: restricted by stock policy\n'; fi
-sudo systemd-run --unit=tau-proof-timer --on-active=2s /usr/bin/touch /tmp/tau-timer-fired
+sudo systemd-run --unit=tau-proof-timer --on-active=2s --timer-property=AccuracySec=1s /usr/bin/touch /tmp/tau-timer-fired
 for _attempt in $(seq 1 30); do [[ -f /tmp/tau-timer-fired ]] && break; sleep 1; done
 [[ -f /tmp/tau-timer-fired ]]
 sudo journalctl -u tau-proof-timer.service --no-pager
@@ -67,7 +67,7 @@ xdpyinfo >/dev/null
 systemd-run --user --unit=tau-proof-desktop --setenv=DISPLAY=:0 --setenv="XAUTHORITY=$XAUTHORITY" dbus-run-session openbox
 for _attempt in $(seq 1 30); do xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id' && break; sleep 1; done
 xprop -root _NET_SUPPORTING_WM_CHECK | grep 'window id'
-printf 'tau-guest-clipboard' | xclip -selection clipboard
+printf 'tau-guest-clipboard' | xclip -selection clipboard >/dev/null 2>&1
 [[ "$(xclip -selection clipboard -o)" == tau-guest-clipboard ]]
 xwd -root -silent -out /tmp/tau-desktop.xwd
 [[ -s /tmp/tau-desktop.xwd ]]

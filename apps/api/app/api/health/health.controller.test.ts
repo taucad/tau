@@ -1,5 +1,6 @@
 import process from 'node:process';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { TerminusModule } from '@nestjs/terminus';
@@ -8,14 +9,21 @@ import { RedisHealthIndicator } from '#api/health/redis-health.indicator.js';
 import { DatabaseHealthIndicator } from '#api/health/database-health.indicator.js';
 import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
 import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
+import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import { reportReadinessFailure } from '#telemetry/sentry.js';
+
+vi.mock('#telemetry/sentry.js', () => ({ reportReadinessFailure: vi.fn() }));
 
 describe('HealthController', () => {
   let controller: HealthController;
   let redisHealth: RedisHealthIndicator;
   let databaseHealth: DatabaseHealthIndicator;
   let s3Health: S3HealthIndicator;
+  let readinessFailureCount: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
+    readinessFailureCount = vi.fn();
     const module: TestingModule = await Test.createTestingModule({
       imports: [TerminusModule],
       controllers: [HealthController],
@@ -42,6 +50,7 @@ describe('HealthController', () => {
             isHealthy: vi.fn().mockResolvedValue({ git: { status: 'up', git: 'git version 2.55.0' } }),
           },
         },
+        { provide: MetricsService, useValue: { healthReadinessFailures: { add: readinessFailureCount } } },
       ],
     }).compile();
 
@@ -49,6 +58,11 @@ describe('HealthController', () => {
     redisHealth = module.get(RedisHealthIndicator);
     databaseHealth = module.get(DatabaseHealthIndicator);
     s3Health = module.get(S3HealthIndicator);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(reportReadinessFailure).mockClear();
   });
 
   describe('GET /health/live', () => {
@@ -84,6 +98,39 @@ describe('HealthController', () => {
       });
 
       await expect(controller.checkReady()).rejects.toThrow();
+    });
+
+    it('should name each down indicator in a warning, a per-indicator count and a per-indicator report', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      vi.spyOn(redisHealth, 'isHealthy').mockResolvedValue({
+        redis: { status: 'down', message: 'Connection refused', responseTimeMs: 5 },
+      });
+      vi.spyOn(databaseHealth, 'isHealthy').mockResolvedValue({
+        database: { status: 'down', message: 'Response time exceeds 300ms threshold', responseTimeMs: 412 },
+      });
+      const failures = [
+        { indicator: 'redis', message: 'Connection refused', responseTimeMs: 5 },
+        { indicator: 'database', message: 'Response time exceeds 300ms threshold', responseTimeMs: 412 },
+      ];
+
+      const refusal = await controller.checkReady().catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(ReadinessRefusalException);
+      expect((refusal as ReadinessRefusalException).getStatus()).toBe(503);
+      expect((refusal as ReadinessRefusalException).failures).toEqual(failures);
+      expect(warn).toHaveBeenCalledWith({ failures }, 'Readiness refused: dependency check down');
+      expect(readinessFailureCount.mock.calls).toEqual([
+        [1, { 'health.indicator': 'redis' }],
+        [1, { 'health.indicator': 'database' }],
+      ]);
+      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([[failures[0]], [failures[1]]]);
+    });
+
+    it('should not count or report a ready probe', async () => {
+      await controller.checkReady();
+
+      expect(readinessFailureCount).not.toHaveBeenCalled();
+      expect(reportReadinessFailure).not.toHaveBeenCalled();
     });
 
     it('should return error status when S3 is down', async () => {

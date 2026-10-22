@@ -45,5 +45,7 @@ describe('RedisHealthIndicator', () => {
     const result = await indicator.isHealthy();
     expect(result['redis']?.status).toBe('down');
     expect(result['redis']?.['message']).toBe('Connection refused');
+    // A failed probe still says how long it waited, so a timeout reads differently from a refusal.
+    expect(result['redis']?.['responseTimeMs']).toEqual(expect.any(Number));
   });
 });

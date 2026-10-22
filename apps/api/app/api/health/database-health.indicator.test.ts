@@ -39,5 +39,7 @@ describe('DatabaseHealthIndicator', () => {
     const result = await indicator.isHealthy();
     expect(result['database']?.status).toBe('down');
     expect(result['database']?.['message']).toBe('Connection refused');
+    // A failed probe still says how long it waited, so a timeout reads differently from a refusal.
+    expect(result['database']?.['responseTimeMs']).toEqual(expect.any(Number));
   });
 });

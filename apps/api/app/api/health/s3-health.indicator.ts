@@ -46,7 +46,10 @@ export class S3HealthIndicator {
 
       return indicator.up({ responseTimeMs: Math.round(performance.now() - start) });
     } catch (error) {
-      return indicator.down({ message: error instanceof Error ? error.message : String(error) });
+      return indicator.down({
+        responseTimeMs: Math.round(performance.now() - start),
+        message: error instanceof Error ? error.message : String(error),
+      });
     } finally {
       clearTimeout(readinessTimer);
     }

@@ -139,6 +139,11 @@ export class MetricsService {
     description: TauMetrics.redisConnectionState.description,
   });
 
+  public readonly healthReadinessFailures = this.apiMeter.createCounter(TauMetrics.healthReadinessFailures.name, {
+    description: TauMetrics.healthReadinessFailures.description,
+    unit: TauMetrics.healthReadinessFailures.unit,
+  });
+
   public readonly publicationViewsTotal = this.apiMeter.createCounter(TauMetrics.publicationViewsTotal.name, {
     description: TauMetrics.publicationViewsTotal.description,
     unit: TauMetrics.publicationViewsTotal.unit,

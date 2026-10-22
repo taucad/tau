@@ -26,7 +26,10 @@ export class DatabaseHealthIndicator {
 
       return indicator.up({ responseTimeMs });
     } catch (error) {
-      return indicator.down({ message: error instanceof Error ? error.message : String(error) });
+      return indicator.down({
+        responseTimeMs: Math.round(performance.now() - start),
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

@@ -8,9 +8,13 @@ import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
-import { purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
+import { purgeTombstonedTenants as streamTombstonedTenants } from '#api/git/maintenance/purge.js';
+
 import { restoreRepository } from '#api/git/maintenance/restore.js';
 import { assertSingletonProcessGroup, maintenanceProcessGroup } from '#api/git/maintenance/singleton.js';
+
+const purgeTombstonedTenants = async (...args: Parameters<typeof streamTombstonedTenants>) =>
+  Array.fromAsync(streamTombstonedTenants(...args));
 
 /**
  * D21: purge, blob collection and restore run once, in the

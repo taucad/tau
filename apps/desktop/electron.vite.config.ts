@@ -91,6 +91,7 @@ export default defineConfig(
     main: {
       define,
       build: {
+        sourcemap: 'hidden',
         externalizeDeps: {
           exclude: [...bundledWorkspaceDependencies],
           include: [...desktopExternalizedDependencies],
@@ -113,6 +114,7 @@ export default defineConfig(
     preload: {
       define,
       build: {
+        sourcemap: 'hidden',
         outDir: 'dist/preload',
         externalizeDeps: { exclude: ['@taucad/types', 'zod'] },
         lib: {

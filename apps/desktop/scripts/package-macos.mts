@@ -43,6 +43,7 @@ import { createMacosDmg } from './macos-dmg.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyTree } from '@taucad/nx/runtime-closure';
 import { copyGeoSpecEngine, copyGeoSpecSourceRelink } from './runtime-closure.mjs';
+import { uploadDesktopSourceMaps } from './desktop-sourcemaps.mjs';
 import {
   desktopManifestFields,
   desktopPackageChannel,
@@ -292,6 +293,14 @@ await stageRuntimePackages({
     channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
   }),
 });
+
+if (release && process.env['SENTRY_DSN']) {
+  await uploadDesktopSourceMaps(
+    resolve(desktopRoot, 'dist'),
+    resolve(stageRoot, 'dist'),
+    resolve(workspaceRoot, 'scripts/node_modules/.bin/sentry-cli'),
+  );
+}
 
 const packagePaths = await packager({
   dir: stageRoot,

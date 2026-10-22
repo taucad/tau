@@ -66,6 +66,9 @@
         },
         {
           "env": "POSTHOG_CLIENT_KEY"
+        },
+        {
+          "env": "SENTRY_DSN"
         }
       ],
       "dependsOn": [
@@ -687,6 +690,15 @@
       "options": {
         "command": "bash apps/desktop/scripts/hosted-linux-vm.sh"
       }
+    },
+    "test-sourcemaps": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register --test apps/desktop/scripts/desktop-sourcemaps.test.mts"
+      }
+    },
+    "test": {
+      "dependsOn": ["test-sourcemaps"]
     }
   }
 }

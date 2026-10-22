@@ -419,6 +419,7 @@ jobs:
 
       - name: Package and sign; notarize production and requested staging
         env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE: ${{ steps.geospec-kit.outputs.archive }}
         run: |
           config=()

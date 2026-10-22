@@ -180,7 +180,7 @@ export type ObjectStorageServiceContract = {
     tier?: StorageTier;
   }): Promise<ReadonlyArray<{ key: string; size: number; lastModified: Date | undefined }>>;
   publicUrl(args: { namespace: StorageNamespace; key: string }): string;
-  headProbeObject(): Promise<
+  headProbeObject(signal?: AbortSignal): Promise<
     | {
         etag: string;
         size: number;
@@ -189,7 +189,7 @@ export type ObjectStorageServiceContract = {
       }
     | undefined
   >;
-  headPrivateBucket(): Promise<boolean>;
+  headPrivateBucket(signal?: AbortSignal): Promise<boolean>;
 };
 
 /** Maximum keys one `DeleteObjects` request accepts, per the S3 API. */
@@ -787,7 +787,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
    * the `/__health/*` no-store cache rule never interferes with namespace paths.
    * Used only by `S3HealthIndicator`.
    */
-  public async headProbeObject(): Promise<
+  public async headProbeObject(signal?: AbortSignal): Promise<
     | {
         etag: string;
         size: number;
@@ -802,6 +802,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           Bucket: this.bucket,
           Key: storageHealthProbeKey,
         }),
+        { abortSignal: signal },
       );
 
       return {
@@ -825,9 +826,9 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
    * `repos/tau-cloud` private-bucket change fails readiness instead of
    * 500ing on the first private publish.
    */
-  public async headPrivateBucket(): Promise<boolean> {
+  public async headPrivateBucket(signal?: AbortSignal): Promise<boolean> {
     try {
-      await this.client.send(new HeadBucketCommand({ Bucket: this.privateBucket }));
+      await this.client.send(new HeadBucketCommand({ Bucket: this.privateBucket }), { abortSignal: signal });
       return true;
     } catch (error) {
       if (isS3ObjectMissing(error)) {

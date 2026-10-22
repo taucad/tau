@@ -14,9 +14,20 @@ export class S3HealthIndicator {
   public async isHealthy(): Promise<HealthIndicatorResult> {
     const indicator = this.healthIndicatorService.check('s3');
     const start = performance.now();
+    // One shared deadline leaves room for the response within Fly's two-second check.
+    const controller = new AbortController();
+    let readinessTimer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      readinessTimer = setTimeout(() => {
+        const error = new Error('Storage readiness timed out after 1500 ms');
+        controller.abort(error);
+        reject(error);
+      }, 1500);
+    });
+    const { signal } = controller;
 
     try {
-      const result = await this.objectStorage.headProbeObject();
+      const result = await Promise.race([this.objectStorage.headProbeObject(signal), deadline]);
       const responseTimeMs = Math.round(performance.now() - start);
 
       if (result === undefined) {
@@ -25,7 +36,7 @@ export class S3HealthIndicator {
 
       // The private-publication serving path is gated on this bucket existing;
       // fail readiness rather than 500 on the first private publish.
-      const privateBucketReachable = await this.objectStorage.headPrivateBucket();
+      const privateBucketReachable = await Promise.race([this.objectStorage.headPrivateBucket(signal), deadline]);
       if (!privateBucketReachable) {
         return indicator.down({
           responseTimeMs,
@@ -33,13 +44,11 @@ export class S3HealthIndicator {
         });
       }
 
-      if (responseTimeMs > 500) {
-        return indicator.down({ responseTimeMs, message: 'Response time exceeds 500ms threshold' });
-      }
-
-      return indicator.up({ responseTimeMs });
+      return indicator.up({ responseTimeMs: Math.round(performance.now() - start) });
     } catch (error) {
       return indicator.down({ message: error instanceof Error ? error.message : String(error) });
+    } finally {
+      clearTimeout(readinessTimer);
     }
   }
 }

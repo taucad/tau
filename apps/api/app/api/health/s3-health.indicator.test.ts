@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { S3Client, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
 import { HealthIndicatorService } from '@nestjs/terminus';
@@ -30,10 +31,73 @@ describe('S3HealthIndicator', () => {
     indicator = module.get(S3HealthIndicator);
   });
 
-  it('should report up when the probe object exists and responds within threshold', async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('should report up when the probe object and private bucket are reachable', async () => {
     const result = await indicator.isHealthy();
     expect(result['s3']?.status).toBe('up');
     expect(result['s3']).toHaveProperty('responseTimeMs');
+  });
+
+  it('should keep slow successful storage ready and reports the complete probe duration', async () => {
+    vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValueOnce(700).mockReturnValueOnce(1200);
+
+    const result = await indicator.isHealthy();
+
+    expect(result['s3']).toEqual({ status: 'up', responseTimeMs: 1200 });
+    const signal: unknown = mockHeadProbe.mock.calls[0]?.[0];
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(mockHeadPrivateBucket).toHaveBeenCalledWith(signal);
+  });
+
+  it('should bound SDK retry backoff and abort the transport at the shared deadline', async () => {
+    vi.useFakeTimers();
+    const entered = Promise.withResolvers<void>();
+    const settled = vi.fn();
+    const handler = vi.fn(async (_request: unknown, options?: { abortSignal?: AbortSignal }) => {
+      options?.abortSignal?.throwIfAborted();
+      entered.resolve();
+      return { response: { statusCode: 503, headers: { 'retry-after': '5' }, body: new Uint8Array() } };
+    });
+    const client = new S3Client({
+      region: 'auto',
+      credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+      maxAttempts: 2,
+      requestHandler: { handle: handler },
+    });
+    mockHeadPrivateBucket.mockImplementation(async (signal: AbortSignal) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- AWS SDK command fields use PascalCase.
+        await client.send(new HeadObjectCommand({ Bucket: 'test', Key: 'probe' }), { abortSignal: signal });
+      } finally {
+        settled();
+      }
+      return true;
+    });
+
+    try {
+      const pending = indicator.isHealthy();
+      await entered.promise;
+      expect(handler).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(settled).not.toHaveBeenCalled();
+      expect(await pending).toEqual({ s3: { status: 'down', message: 'Storage readiness timed out after 1500 ms' } });
+      const signal: unknown = mockHeadProbe.mock.calls[0]?.[0];
+      expect(signal).toBeInstanceOf(AbortSignal);
+      if (!(signal instanceof AbortSignal)) {
+        throw new Error('Expected transport cancellation signal');
+      }
+      expect(signal.aborted).toBe(true);
+      // The SDK may finish its retry sleep later; its rejection must remain handled.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledTimes(2);
+    } finally {
+      client.destroy();
+    }
   });
 
   it('should report down with message when probe object is missing', async () => {

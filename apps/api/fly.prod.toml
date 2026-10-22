@@ -84,6 +84,13 @@ LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'
 OTEL_EXPORTER_OTLP_COMPRESSION = 'gzip'
+DATABASE_POOL_MAX = '10'
+DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
+DATABASE_IDLE_TIMEOUT_SECONDS = '60'
+DATABASE_STATEMENT_TIMEOUT_MS = '15000'
+DATABASE_LOCK_TIMEOUT_MS = '5000'
+DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
+DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
 # Additional CORS origin for the Netlify default domain of the prod-us site
 # (`taucad-prod-us.netlify.app`). Required for pre-cutover smoke-testing the
 # Netlify deploy before `tau.new` NS authority moves to Cloudflare. After

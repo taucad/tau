@@ -5,6 +5,7 @@ import { createReadStream } from 'node:fs';
 import { lstat, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
+import { linuxDebKinds } from '#shared/linux-installation.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Qualification preparation shares explicit platform and repository contracts. */
 import { readDesktopAptSnapshot } from './desktop-apt-publication.mjs';
@@ -113,7 +114,7 @@ const admitSnapshot = async (options: {
   const archive = join(options.bundleDirectory, 'qualification-apt-snapshot.tar');
   const info = await lstat(archive);
   if (
-    options.candidate.route !== 'linux-apt' ||
+    !['linux-apt', 'linux-appimage'].includes(options.candidate.route) ||
     metadata.tag !== manifest.tag ||
     metadata.channel !== manifest.channel ||
     metadata.version !== manifest.version ||
@@ -146,9 +147,7 @@ const admitSnapshot = async (options: {
   ) {
     throw new Error('APT signed snapshot metadata differs');
   }
-  for (const artifact of manifest.artifacts.filter(
-    (item) => item.kind === 'linux-deb-runtime' || item.kind === 'linux-deb-selector',
-  )) {
+  for (const artifact of manifest.artifacts.filter((item) => linuxDebKinds.some((kind) => item.kind === kind))) {
     if (
       !snapshot.inventory.packages.some(
         (item) =>

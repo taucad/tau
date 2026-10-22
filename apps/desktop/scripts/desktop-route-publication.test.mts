@@ -104,7 +104,12 @@ const windows = createDesktopRouteDescriptor({ manifest, route: 'windows-nsis', 
 assert.equal((windows as { keyId: string }).keyId, 'authenticode');
 const appimage = parseDesktopArtifactManifest({
   ...manifest,
-  artifacts: [wireArtifact('linux-appimage'), wireArtifact('linux-tar')],
+  artifacts: [
+    wireArtifact('linux-appimage'),
+    wireArtifact('linux-appimage-deb-runtime'),
+    wireArtifact('linux-appimage-deb-selector'),
+    wireArtifact('linux-tar'),
+  ],
 });
 const key = generateKeyPairSync('ed25519');
 const privateKey = key.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
@@ -152,6 +157,8 @@ const productionArtifacts = [
   ['linux-deb-runtime', 'linux-x64'],
   ['linux-deb-selector', 'linux-x64'],
   ['linux-appimage', 'linux-x64'],
+  ['linux-appimage-deb-runtime', 'linux-x64'],
+  ['linux-appimage-deb-selector', 'linux-x64'],
 ].map(([kind, target]) => {
   const definition = desktopArtifactKinds[kind as DesktopArtifactKind];
   return {
@@ -183,7 +190,11 @@ const requirements = [
   { route: 'macos-dmg', target: 'darwin-x64', kinds: ['macos-zip', 'macos-dmg'] },
   { route: 'windows-nsis', target: 'win32-x64', kinds: ['windows-nsis'] },
   { route: 'linux-apt', target: 'linux-x64', kinds: ['linux-deb-runtime', 'linux-deb-selector'] },
-  { route: 'linux-appimage', target: 'linux-x64', kinds: ['linux-appimage'] },
+  {
+    route: 'linux-appimage',
+    target: 'linux-x64',
+    kinds: ['linux-appimage', 'linux-appimage-deb-runtime', 'linux-appimage-deb-selector'],
+  },
 ];
 const productionTrust = {
   'macos-zip': 'TEAM',

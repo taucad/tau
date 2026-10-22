@@ -12,11 +12,18 @@ import {
   startPlatformUpdater,
 } from '#main/update-platform.js';
 import type { DesktopUpdateDescriptor } from '#main/update-identity.js';
-const mocks = vi.hoisted(() => ({ fetch: vi.fn(), spawn: vi.fn(), markHealthy: vi.fn(), checkForUpdates: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  fetch: vi.fn(),
+  spawn: vi.fn(),
+  markHealthy: vi.fn(),
+  checkForUpdates: vi.fn(),
+  managed: vi.fn().mockResolvedValue(false),
+}));
 /* eslint-disable @typescript-eslint/naming-convention -- Mirror the upstream constructor export names. */
 // oxlint-disable-next-line typescript/no-extraneous-class -- Mock actual constructor identities used by extends and instanceof.
 vi.mock('electron-updater', () => ({ Provider: class {}, NsisUpdater: class {} }));
 /* eslint-enable @typescript-eslint/naming-convention -- End upstream constructor exports. */
+vi.mock('#main/managed-appimage.js', () => ({ isManagedAppImage: mocks.managed }));
 vi.mock('#main/update-appimage.js', () => ({
   createSafeAppImageUpdater: () => ({
     markHealthy: mocks.markHealthy,
@@ -34,16 +41,26 @@ vi.mock('node:child_process', async (importOriginal) => ({
   ...(await importOriginal<typeof ChildProcess>()),
   spawn: mocks.spawn,
 }));
-afterEach(() => vi.clearAllMocks());
+afterEach(() => {
+  vi.clearAllMocks();
+  mocks.managed.mockResolvedValue(false);
+});
 describe('platform update transport and launch', () => {
-  it.each([false, true])(
-    'observes APT generations with app updates disabled and rejects wrong qualification source=%s',
-    async (wrongSource) => {
+  it.each([
+    { wrongSource: false, managed: false },
+    { wrongSource: true, managed: false },
+    { wrongSource: false, managed: true },
+    { wrongSource: true, managed: true },
+  ])(
+    'observes package-managed generations and rejects wrong qualification source: %j',
+    async ({ wrongSource, managed }) => {
+      mocks.managed.mockResolvedValue(managed);
       const original = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
       Object.defineProperty(process, 'resourcesPath', { value: '/resources', configurable: true });
       const marker = {
         schemaVersion: 1,
-        route: 'linux-apt',
+        route: managed ? 'linux-appimage' : 'linux-apt',
+        ...(managed ? { keys: { fixture: 'fixture public key' } } : {}),
         tag: 'desktop@0.1.0',
         channel: 'production',
         version: '0.1.0',
@@ -63,7 +80,9 @@ describe('platform update transport and launch', () => {
                 : marker,
           ),
         );
-      const resolver = vi.spyOn(files, 'realpath').mockResolvedValue('/opt/tau/releases/0.2.0');
+      const resolver = vi
+        .spyOn(files, 'realpath')
+        .mockResolvedValue(`/opt/tau${managed ? '-appimage' : ''}/releases/0.2.0`);
       try {
         const updater = await startPlatformUpdater({
           platform: 'linux',
@@ -92,6 +111,7 @@ describe('platform update transport and launch', () => {
           expect(updater!.status()).toContain('APT installed');
         }
         expect(mocks.fetch).not.toHaveBeenCalled();
+        expect(mocks.checkForUpdates).not.toHaveBeenCalled();
       } finally {
         reader.mockRestore();
         resolver.mockRestore();

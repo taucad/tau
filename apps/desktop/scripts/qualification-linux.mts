@@ -8,6 +8,8 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { extractFile, uncache } from '@electron/asar';
 import { z } from 'zod';
+import { isManagedAppImage } from '#main/managed-appimage.js';
+import { linuxInstallation } from '#shared/linux-installation.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 /* oxlint-disable no-restricted-imports -- Adjacent qualification and APT snapshot owners provide shared contracts. */
@@ -44,7 +46,7 @@ const command = (file: string, args: string[], inheritOutput = false): string =>
   return inheritOutput ? '' : result.stdout.trim();
 };
 /** Let an existing unattended upgrade finish without disabling it or removing its lock. */
-export const runQualificationApt = (operation: 'install' | 'remove', packages: string[]): void => {
+export const runQualificationApt = (operation: 'install' | 'remove' | 'purge', packages: string[]): void => {
   command(
     'sudo',
     ['-n', 'apt-get', '-o', 'DPkg::Lock::Timeout=120', operation, '--yes', '--no-install-recommends', ...packages],
@@ -189,7 +191,10 @@ const measureSecurity: QualificationPlatformDriver['measureSecurity'] = async (p
         measurements: {
           executableSha256: hash.digest('hex'),
           ...(pid === processes.mainPid
-            ? { mountedAsarSha256: await hashFile(join(dirname(executable), 'resources/app.asar')) }
+            ? {
+                mountedAsarSha256: await hashFile(join(dirname(executable), 'resources/app.asar')),
+                mount: command('findmnt', ['-n', '-o', 'FSTYPE,OPTIONS', '-T', executable]),
+              }
             : {}),
           status: await readFile(`/proc/${pid}/status`, 'utf8'),
           appArmor: await readMeasurement(`/proc/${pid}/attr/current`),
@@ -247,7 +252,7 @@ export const createLinuxAppImageQualificationDriver = (
     if (!artifact || (await hashFile(options.installationPath)) !== artifact.sha256) {
       throw new Error('Stable outer AppImage bytes differ');
     }
-    const scratch = await mkdtemp(join(dirname(options.installationPath), '.qualification-extract-'));
+    const scratch = await mkdtemp(join(tmpdir(), 'tau-qualification-extract-'));
     try {
       const extracted = spawnSync(options.installationPath, ['--appimage-extract'], {
         cwd: scratch,
@@ -426,7 +431,7 @@ finally:
 `,
     JSON.stringify(before ?? null),
   ]);
-  const packageName = candidate.manifest.channel === 'staging' ? 'tau-staging' : 'tau';
+  const { name: packageName } = linuxInstallation(candidate.manifest.channel, candidate.route === 'linux-appimage');
   if (
     !packageLog.includes(`Setting up ${packageName} (${candidate.manifest.version})`) ||
     !packageLog.includes(
@@ -457,14 +462,15 @@ export const createLinuxAptQualificationDriver = (
     repository: AptQualificationRepository,
   ): Promise<void> => {
     const manifest = parseDesktopArtifactManifest(candidate.manifest);
-    if (candidate.route !== 'linux-apt' || repository.channel !== manifest.channel) {
+    if (!['linux-apt', 'linux-appimage'].includes(candidate.route) || repository.channel !== manifest.channel) {
       throw new Error('APT repository channel/route differs');
     }
     const snapshot = await readDesktopAptSnapshot(repository);
     if (Date.parse(snapshot.inventory.validUntil) <= Date.now()) {
       throw new Error('APT qualification snapshot expired');
     }
-    for (const kind of ['linux-deb-runtime', 'linux-deb-selector']) {
+    const { runtimeKind, selectorKind } = linuxInstallation(manifest.channel, candidate.route === 'linux-appimage');
+    for (const kind of [runtimeKind, selectorKind]) {
       const artifact = manifest.artifacts.find((item) => item.kind === kind);
       if (
         !artifact ||
@@ -485,10 +491,11 @@ export const createLinuxAptQualificationDriver = (
   const observe: QualificationPlatformDriver['observe'] = async (candidate) => {
     host();
     const manifest = parseDesktopArtifactManifest(candidate.manifest);
-    if (candidate.route !== 'linux-apt') {
+    if (!['linux-apt', 'linux-appimage'].includes(candidate.route)) {
       throw new Error('Wrong APT route');
     }
-    const name = manifest.channel === 'staging' ? 'tau-staging' : 'tau';
+    const managedImage = candidate.route === 'linux-appimage';
+    const { name, executable: executableName, runtimeKind } = linuxInstallation(manifest.channel, managedImage);
     if (options.installationPath !== `/opt/${name}`) {
       throw new Error('APT installation root differs from channel');
     }
@@ -513,8 +520,19 @@ export const createLinuxAptQualificationDriver = (
     ) {
       throw new Error('APT package database identity differs');
     }
-    const identity = await installedIdentity(candidate, root, options.mode);
-    const expected = await aptQualificationPayloadHashes(candidate);
+    const imagePath = join(root, executableName);
+    if (
+      managedImage &&
+      !(await isManagedAppImage({ path: imagePath, channel: manifest.channel, version: manifest.version }))
+    ) {
+      throw new Error('Managed image ownership was not established');
+    }
+    const identity = managedImage
+      ? await createLinuxAppImageQualificationDriver({ ...options, installationPath: imagePath }).observe(candidate)
+      : await installedIdentity(candidate, root, options.mode);
+    const expected = managedImage
+      ? { executableSha256: identity.executableSha256, asarSha256: identity.asarSha256 }
+      : await aptQualificationPayloadHashes(candidate);
     if (identity.executableSha256 !== expected.executableSha256 || identity.asarSha256 !== expected.asarSha256) {
       throw new Error('Installed APT payload differs from authenticated runtime package');
     }
@@ -526,9 +544,12 @@ export const createLinuxAptQualificationDriver = (
         ...identity.measurements,
         packageDatabase: packages,
         selectedGeneration: root,
-        expectedExecutableSha256: expected.executableSha256,
+        expectedExecutableSha256: managedImage
+          ? identity.measurements['expectedExecutableSha256']!
+          : expected.executableSha256,
+        ...(managedImage ? { managedAppImage: 'true' } : {}),
         expectedAsarSha256: expected.asarSha256,
-        candidateArtifactSha256: manifest.artifacts.find((item) => item.kind === 'linux-deb-runtime')!.sha256,
+        candidateArtifactSha256: manifest.artifacts.find((item) => item.kind === runtimeKind)!.sha256,
       },
     };
   };
@@ -537,7 +558,20 @@ export const createLinuxAptQualificationDriver = (
       throw new Error('Observe installed APT generation first');
     }
     const executable = await readlink(`/proc/${pid}/exe`);
-    const expected = join(options.installationPath, 'releases', current.manifest.version, 'Tau');
+    const managedImage = current.route === 'linux-appimage';
+    const expected = managedImage
+      ? executable
+      : join(options.installationPath, 'releases', current.manifest.version, 'Tau');
+    if (managedImage) {
+      const observation = await observe(current);
+      if (
+        !/^\/tmp\/\.mount_[^/]+\/Tau$/u.test(executable) ||
+        (await hashFile(executable)) !== observation.measurements['expectedExecutableSha256'] ||
+        (await hashFile(join(dirname(executable), 'resources/app.asar'))) !== observation.asarSha256
+      ) {
+        throw new Error('Active mounted image differs from authenticated generation');
+      }
+    }
     if (
       executable !== expected ||
       isAbsolute(resourceRelativePath) ||
@@ -559,7 +593,11 @@ export const createLinuxAptQualificationDriver = (
       if (installed) {
         throw new Error('APT baseline only; subsequent qualification must use actual scheduler');
       }
-      const channelName = candidate.manifest.channel === 'staging' ? 'tau-staging' : 'tau';
+      const {
+        name: channelName,
+        runtimeKind,
+        selectorKind,
+      } = linuxInstallation(candidate.manifest.channel, candidate.route === 'linux-appimage');
       const existingRoot = await lstat(`/opt/${channelName}`).catch((error: unknown) => {
         if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
           return undefined;
@@ -579,9 +617,7 @@ export const createLinuxAptQualificationDriver = (
         );
       }
       await authenticate(candidate, options.repository);
-      const paths = await Promise.all(
-        ['linux-deb-runtime', 'linux-deb-selector'].map(async (kind) => verifyArtifact(candidate, kind)),
-      );
+      const paths = await Promise.all([runtimeKind, selectorKind].map(async (kind) => verifyArtifact(candidate, kind)));
       runQualificationApt('install', paths);
       installed = true;
       lifecycle.installed();
@@ -594,9 +630,11 @@ export const createLinuxAptQualificationDriver = (
       lifecycle.admit(candidate, files);
       await preserve(files);
       await authenticate(candidate, currentRepository);
-      const paths = await Promise.all(
-        ['linux-deb-runtime', 'linux-deb-selector'].map(async (kind) => verifyArtifact(candidate, kind)),
+      const { runtimeKind, selectorKind } = linuxInstallation(
+        candidate.manifest.channel,
+        candidate.route === 'linux-appimage',
       );
+      const paths = await Promise.all([runtimeKind, selectorKind].map(async (kind) => verifyArtifact(candidate, kind)));
       runQualificationApt('install', paths);
       const observation = await observe(candidate);
       await preserve(files);
@@ -683,8 +721,8 @@ export const createLinuxAptQualificationDriver = (
         throw new Error('No APT installation observed');
       }
       await preserve(files);
-      runQualificationApt('remove', [current.manifest.channel === 'staging' ? 'tau-staging' : 'tau']);
-      const selector = current.manifest.channel === 'staging' ? 'tau-staging' : 'tau';
+      const { name: selector } = linuxInstallation(current.manifest.channel, current.route === 'linux-appimage');
+      runQualificationApt(current.route === 'linux-appimage' ? 'purge' : 'remove', [selector]);
       const remaining = command('dpkg-query', [
         '-W',
         // oxlint-disable-next-line no-template-curly-in-string -- dpkg-query owns this format.

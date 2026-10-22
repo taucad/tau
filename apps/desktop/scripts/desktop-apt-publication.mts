@@ -6,6 +6,7 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
+import { linuxDebKinds } from '#shared/linux-installation.js';
 import { parseDesktopArtifactManifest } from '#shared/desktop-release.js';
 // oxlint-disable-next-line no-restricted-imports -- Adjacent packaging script is not an application module alias.
 import { buildLinuxAptRepository } from './linux-apt-repository.mjs';
@@ -35,7 +36,7 @@ const inventorySchema = z.strictObject({
     z.strictObject({
       tag: z.string(),
       sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
-      kind: z.enum(['linux-deb-runtime', 'linux-deb-selector']),
+      kind: z.enum(linuxDebKinds),
       name: z.string(),
       poolPath: z.string(),
       sha256: digestSchema,
@@ -193,16 +194,16 @@ export const prepareDesktopAptPublication = async (
   }
   const packages =
     manifest?.artifacts
-      .filter((item) => item.kind === 'linux-deb-runtime' || item.kind === 'linux-deb-selector')
+      .filter((item) => linuxDebKinds.some((kind) => item.kind === kind))
       .map((item) => ({
         path: join(options.artifactDirectory!, item.name),
         tag: manifest.tag,
         sourceCommit: manifest.sourceCommit,
-        kind: item.kind as 'linux-deb-runtime' | 'linux-deb-selector',
+        kind: z.enum(linuxDebKinds).parse(item.kind),
         sha256: item.sha256,
         size: item.size,
       })) ?? [];
-  if (manifest && packages.length !== 2) {
+  if (manifest && packages.length === 0) {
     throw new Error('APT publication requires both exact candidate packages');
   }
   const built = await buildLinuxAptRepository({

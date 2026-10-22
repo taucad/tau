@@ -6,12 +6,14 @@
  * Exit: nonzero on changed input, incorrect embedded trust or sandbox-disabling launcher.
  */
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { createPackage } from '@electron/asar';
+// oxlint-disable-next-line no-restricted-imports -- Exercise the real managed package producer.
+import { buildLinuxAptPackages } from './linux-apt-package.mjs';
 
 const main = async (): Promise<void> => {
   if (process.platform !== 'linux' || process.arch !== 'x64') {
@@ -28,6 +30,8 @@ const main = async (): Promise<void> => {
   const source = join(fixture, 'source');
   await mkdir(join(input, 'resources'), { recursive: true });
   await mkdir(source);
+  await mkdir(join(input, 'resources/branding'));
+  await copyFile(join(desktopRoot, 'resources/icon.png'), join(input, 'resources/branding/icon.png'));
   await writeFile(
     join(source, 'package.json'),
     JSON.stringify({
@@ -66,6 +70,39 @@ const main = async (): Promise<void> => {
   assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
   assert.deepEqual(await readFile(join(input, 'resources/app.asar')), inputBytes);
   const appDirectory = join(output, 'verification/squashfs-root');
+  const image = join(output, 'Tau-linux-x64.AppImage');
+  const packages = await buildLinuxAptPackages({
+    appDirectory,
+    appImagePath: image,
+    outputDirectory: join(fixture, 'managed'),
+    tag: 'desktop@0.1.0',
+    sourceCommit: 'a'.repeat(40),
+    maintainer: 'Test <test@example.invalid>',
+  });
+  const runtime = join(fixture, 'runtime');
+  const selector = join(fixture, 'selector');
+  execFileSync('dpkg-deb', ['--extract', packages[0]!, runtime]);
+  execFileSync('dpkg-deb', ['--extract', packages[1]!, selector]);
+  assert.deepEqual(
+    await readFile(join(runtime, 'opt/tau-appimage/releases/0.1.0/Tau.AppImage')),
+    await readFile(image),
+  );
+  assert.deepEqual(
+    await readFile(join(runtime, 'opt/tau-appimage/releases/0.1.0/resources/desktop-installation.json')),
+    await readFile(join(appDirectory, 'resources/desktop-installation.json')),
+  );
+  assert.match(
+    await readFile(join(selector, 'etc/apparmor.d/tau-appimage'), 'utf8'),
+    /\/opt\/tau-appimage\/releases\/\*\/Tau\.AppImage/u,
+  );
+  assert.match(
+    execFileSync('dpkg-deb', ['--field', packages[1]!, 'Depends'], { encoding: 'utf8' }),
+    /tau-appimage-runtime-0\.1\.0 \(= 0\.1\.0\)/u,
+  );
+  assert.match(
+    await readFile(join(selector, 'usr/share/applications/tau-appimage.desktop'), 'utf8'),
+    /x-scheme-handler\/tau;/u,
+  );
   const launcher = join(appDirectory, 'AppRun');
   await chmod(launcher, 0o755);
   const launched = spawnSync(launcher, ['space argument', '--fixture'], {

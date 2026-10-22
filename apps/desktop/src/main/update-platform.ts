@@ -10,6 +10,8 @@ import { z } from 'zod';
 import type { ProviderRuntimeOptions } from 'electron-updater/out/providers/Provider.js';
 import type { AppUpdater, UpdateInfo, ResolvedUpdateFileInfo } from 'electron-updater';
 
+import { linuxInstallation } from '#shared/linux-installation.js';
+import { isManagedAppImage } from '#main/managed-appimage.js';
 import { startPlatformUpdateController } from '#main/update-controller.js';
 import type { PlatformUpdateOptions, PlatformUpdateBackend } from '#main/update-controller.js';
 import {
@@ -136,9 +138,16 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
   ) {
     throw new Error('Installed route source differs from packaged application');
   }
-  if (installation.route === 'linux-apt') {
-    const launcher = installation.channel === 'staging' ? '/usr/bin/tau-staging' : '/usr/bin/tau';
-    const selector = installation.channel === 'staging' ? '/opt/tau-staging/current' : '/opt/tau/current';
+  const managedImage =
+    installation.route === 'linux-appimage' &&
+    (await isManagedAppImage({
+      path: process.env['APPIMAGE'],
+      channel: installation.channel,
+      version: installation.version,
+    }));
+  if (installation.route === 'linux-apt' || managedImage) {
+    const { launcher, root, executable } = linuxInstallation(installation.channel, managedImage);
+    const selector = `${root}/current`;
     let selected: string | undefined;
     const inspect = async (): Promise<AvailableUpdate | undefined> => {
       const runtime = await realpath(selector);
@@ -151,11 +160,14 @@ export const startPlatformUpdater = async (options: PlatformUpdateOptions): Prom
         version,
       });
       if (
-        selectedMarker.route !== 'linux-apt' ||
+        selectedMarker.route !== installation.route ||
         selectedMarker.trust !== installation.trust ||
-        runtime !== `/opt/tau${installation.channel === 'staging' ? '-staging' : ''}/releases/${version}`
+        runtime !== `${root}/releases/${version}`
       ) {
         throw new Error('APT selected runtime is outside its immutable generation');
+      }
+      if (managedImage) {
+        await isManagedAppImage({ path: `${runtime}/${executable}`, channel: installation.channel, version });
       }
       if (!isNewerVersion(selectedMarker.version, installation.version)) {
         return undefined;

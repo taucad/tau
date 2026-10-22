@@ -112,6 +112,7 @@ import { readWindowState, writeWindowState } from '#main/window-state.js';
 import { prepareOtaProbe } from '#main/ota-probe.js';
 import { initializeDesktopErrorReporting } from '#main/error-reporting.js';
 import { prepareRouteQualificationProbe } from '#main/route-qualification-probe.js';
+import { linuxInstallation } from '#shared/linux-installation.js';
 import { parseDesktopInstallation } from '#main/update-identity.js';
 import { z } from 'zod';
 import type { DesktopUpdater, DesktopUpdaterOptions } from '#main/updater.js';
@@ -201,7 +202,10 @@ const routeQualification = (() => {
   const route = installation?.route ?? 'macos-zip';
   const installedPath =
     route === 'linux-appimage'
-      ? process.env['APPIMAGE']
+      ? process.env['APPIMAGE'] ===
+        `${linuxInstallation(desktopChannel, true).root}/releases/${app.getVersion()}/Tau.AppImage`
+        ? linuxInstallation(desktopChannel, true).launcher
+        : process.env['APPIMAGE']
       : route === 'linux-apt'
         ? desktopChannel === 'staging'
           ? '/usr/bin/tau-staging'

@@ -313,11 +313,18 @@ jobs:
           TAU_APPIMAGE_APP_DIR: ${{ steps.stage.outputs.app }}
           TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/installer-appimage
         run: pnpm nx run desktop:make-appimage
+      - name: Wrap the verified AppImage in managed runtime and selector packages
+        env:
+          TAU_LINUX_APP_DIR: ${{ github.workspace }}/out/installer-appimage/verification/squashfs-root
+          TAU_MANAGED_APPIMAGE: ${{ github.workspace }}/out/installer-appimage/Tau-linux-x64.AppImage
+          TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/installer-appimage-deb
+        run: pnpm nx run desktop:make-linux-deb
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-linux-x64
           path: |
             out/installer-deb/*.deb
+            out/installer-appimage-deb/*.deb
             out/installer-appimage/*.AppImage
             out/installer-input/Tau-*.tar.gz
           if-no-files-found: error
@@ -357,7 +364,7 @@ jobs:
               const path = join(directory, entry.name);
               if (entry.isSymbolicLink()) throw new Error('Unexpected candidate artifact link');
               if (entry.isDirectory()) visit(path);
-              else if (/^(?:Tau-[A-Za-z0-9.-]+|tau(?:-staging)?(?:-runtime-[0-9.]+)?_[0-9.]+_amd64\.deb)$/.test(entry.name)) copyFileSync(path, join(process.env.DESKTOP_ASSETS_DIR, basename(path)), constants.COPYFILE_EXCL);
+              else if (/^(?:Tau-[A-Za-z0-9.-]+|tau(?:-staging)?(?:-appimage)?(?:-runtime-[0-9.]+)?_[0-9.]+_amd64\.deb)$/.test(entry.name)) copyFileSync(path, join(process.env.DESKTOP_ASSETS_DIR, basename(path)), constants.COPYFILE_EXCL);
               else throw new Error('Unexpected candidate artifact');
             }
           };

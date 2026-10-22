@@ -5,6 +5,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import { linuxDebKinds } from '#shared/linux-installation.js';
 import {
   desktopArtifactKinds,
   desktopArtifactName,
@@ -150,7 +151,7 @@ const expectedPointers = (manifest: DesktopArtifactManifest): string[] =>
     ...(['windows-nsis', 'linux-appimage'] as const)
       .filter((route) => manifest.artifacts.some((item) => item.kind === route))
       .map((route) => `latest/desktop-update-${route}-x64.json`),
-    ...(manifest.artifacts.some((item) => item.kind === 'linux-deb-runtime')
+    ...(manifest.artifacts.some((item) => linuxDebKinds.some((kind) => kind === item.kind))
       ? [`apt/dists/${manifest.channel === 'production' ? 'stable' : 'staging'}/InRelease`]
       : []),
   ].sort();
@@ -568,7 +569,7 @@ export const publishDesktopRoutes = async (operation: string): Promise<void> => 
     await writeFile(catalogPath, catalog.bytes);
   }
   const aptPointers: Array<{ key: string; path: string }> = [];
-  if (manifest.artifacts.some((artifact) => artifact.kind === 'linux-deb-runtime')) {
+  if (manifest.artifacts.some((artifact) => linuxDebKinds.some((kind) => kind === artifact.kind))) {
     const suite = manifest.channel === 'production' ? 'stable' : 'staging';
     const key = `apt/dists/${suite}/InRelease`;
     const current = await store.read(key);

@@ -12,13 +12,14 @@ import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { z } from 'zod';
+import { linuxDebKinds, linuxInstallation } from '#shared/linux-installation.js';
 import { desktopArtifactName, desktopReleaseIdentity } from '#shared/desktop-release.js';
 
 const hashSchema = z.string().regex(/^[a-f\d]{64}$/u);
 const packageSchema = z.strictObject({
   tag: z.string(),
   sourceCommit: z.string().regex(/^[a-f\d]{40}$/u),
-  kind: z.enum(['linux-deb-runtime', 'linux-deb-selector']),
+  kind: z.enum(linuxDebKinds),
   name: z.string(),
   poolPath: z.string(),
   sha256: hashSchema,
@@ -199,18 +200,20 @@ export const buildLinuxAptRepository = async (
         throw new Error('Generation package sources disagree');
       }
       generationSources.set(version, generationSource);
-      const roles = versions.get(version) ?? new Set<string>();
+      const appImage = item.kind.startsWith('linux-appimage-');
+      const generation = `${version}:${appImage ? 'appimage' : 'directory'}`;
+      const roles = versions.get(generation) ?? new Set<string>();
       roles.add(item.kind);
-      versions.set(version, roles);
-      const name = `tau${channel === 'staging' ? '-staging' : ''}`;
+      versions.set(generation, roles);
+      const { name, runtimeKind, selectorKind } = linuxInstallation(channel, appImage);
       const path = join(outputDirectory, item.poolPath);
       const field = (key: string): string => command('dpkg-deb', ['--field', path, key]).trim();
-      const packageName = item.kind === 'linux-deb-runtime' ? `${name}-runtime-${version}` : name;
+      const packageName = item.kind === runtimeKind ? `${name}-runtime-${version}` : name;
       if (
         field('Package') !== packageName ||
         field('Version') !== version ||
         field('Architecture') !== 'amd64' ||
-        (item.kind === 'linux-deb-selector' &&
+        (item.kind === selectorKind &&
           !field('Depends')
             .split(',')
             .map((value) => value.trim())

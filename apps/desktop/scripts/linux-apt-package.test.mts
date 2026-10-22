@@ -24,7 +24,7 @@ const provider = join(root, 'provider');
 await mkdir(join(provider, 'DEBIAN'), { recursive: true });
 await writeFile(
   join(provider, 'DEBIAN/control'),
-  `Package: tau-test-system-dependencies\nVersion: 999\nArchitecture: amd64\nMaintainer: Test <test@example.invalid>\nDescription: Inert dependency stand-ins for isolated package lifecycle tests\nProvides: libc6 (= 999), libgtk-3-0, libnss3, libasound2t64, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0, libatk-bridge2.0-0, libcups2, bubblewrap, xdg-utils\n`,
+  `Package: tau-test-system-dependencies\nVersion: 999\nArchitecture: amd64\nMaintainer: Test <test@example.invalid>\nDescription: Inert dependency stand-ins for isolated package lifecycle tests\nProvides: libc6 (= 999), libgtk-3-0, libnss3, libasound2t64, libgbm1, libdrm2, libx11-6, libxcomposite1, libxdamage1, libxrandr2, libxkbcommon0, libsecret-1-0, libatk1.0-0, libatk-bridge2.0-0, libcups2, bubblewrap, xdg-utils, libfuse2t64, fuse3\n`,
 );
 command('dpkg-deb', ['--build', provider, join(root, 'provider.deb')]);
 command('dpkg', ['-i', join(root, 'provider.deb')]);
@@ -107,6 +107,58 @@ for (const file of [...first, ...second]) {
   const size = Number(command('dpkg-deb', ['-f', file, 'Installed-Size']).trim());
   assert.ok(size > 0, 'Every package reports retained disk cost');
 }
+// Inert executable images exercise dpkg lifecycle; native FUSE/sandbox proof is a separate guest test.
+const managed = async (sequence: number) => {
+  const version = `1.0.${sequence}`;
+  const app = join(root, `managed-source-${version}`);
+  await mkdir(join(app, 'resources/branding'), { recursive: true });
+  await writeFile(join(app, 'resources/branding/icon.png'), 'test icon');
+  const tag = `desktop-staging@0.1.0-staging.${sequence}`;
+  await writeFile(
+    join(app, 'resources/desktop-installation.json'),
+    JSON.stringify({
+      schemaVersion: 1,
+      route: 'linux-appimage',
+      tag,
+      channel: 'staging',
+      version,
+      sourceCommit,
+      arch: 'x64',
+      trust: 'test',
+      cache: 'tau-staging-updater',
+      keys: {},
+    }),
+  );
+  const image = join(app, 'Tau.AppImage');
+  await writeFile(image, `#!/bin/sh\nprintf '${version}'\n`, { mode: 0o755 });
+  return buildLinuxAptPackages({
+    appDirectory: app,
+    appImagePath: image,
+    outputDirectory: join(root, `managed-out-${version}`),
+    tag,
+    sourceCommit,
+    maintainer: 'Test <test@example.invalid>',
+  });
+};
+const managedA = await managed(10);
+const managedB = await managed(11);
+command('dpkg', ['-i', ...managedA]);
+assert.equal(command('/usr/bin/tau-staging-appimage', []), '1.0.10');
+const originalImage = await readFile('/opt/tau-staging-appimage/releases/1.0.10/Tau.AppImage');
+command('dpkg', ['-i', ...managedB]);
+assert.equal(command('/usr/bin/tau-staging-appimage', []), '1.0.11');
+assert.deepEqual(await readFile('/opt/tau-staging-appimage/releases/1.0.10/Tau.AppImage'), originalImage);
+command('apt-mark', ['auto', 'tau-staging-appimage-runtime-1.0.10']);
+assert.doesNotMatch(command('apt-get', ['--simulate', 'autoremove']), /^Remv tau-staging-appimage-runtime-1\.0\.10/mu);
+// Explicit administrator rollback reselects retained authenticated bytes; no application writes /opt.
+command('dpkg', ['-i', ...managedA]);
+assert.equal(command('/usr/bin/tau-staging-appimage', []), '1.0.10');
+command('dpkg', ['--purge', 'tau-staging-appimage']);
+assert.notEqual(spawnSync('test', ['-e', '/opt/tau-staging-appimage/current']).status, 0);
+assert.notEqual(spawnSync('test', ['-e', '/etc/apparmor.d/tau-staging-appimage']).status, 0);
+assert.deepEqual(await readFile('/opt/tau-staging-appimage/releases/1.0.10/Tau.AppImage'), originalImage);
+command('dpkg', ['-i', ...managedB]);
+assert.equal(command('/usr/bin/tau-staging-appimage', []), '1.0.11');
 const third = await build('1.0.3', true);
 const failed = spawnSync('dpkg', ['-i', ...third], { encoding: 'utf8' });
 assert.notEqual(failed.status, 0, '1 MiB runtime filesystem must reject 2 MiB generation');

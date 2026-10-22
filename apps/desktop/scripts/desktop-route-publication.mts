@@ -18,7 +18,7 @@ const catalogKinds = {
   'macos-zip': ['macos-dmg', 'macos-zip'],
   'windows-nsis': ['windows-nsis', 'windows-zip'],
   'linux-apt': ['linux-deb-selector', 'linux-deb-runtime', 'linux-tar'],
-  'linux-appimage': ['linux-appimage', 'linux-tar'],
+  'linux-appimage': ['linux-appimage', 'linux-appimage-deb-runtime', 'linux-appimage-deb-selector', 'linux-tar'],
 } as const satisfies Partial<Record<DesktopAcceptanceRoute, readonly DesktopArtifactKind[]>>;
 
 /** Hash the canonical parsed manifest to bind operator approval to all artifact bytes. */

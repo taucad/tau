@@ -10,6 +10,7 @@ import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { z } from 'zod';
+import { linuxInstallation } from '#shared/linux-installation.js';
 import { promisify } from 'node:util';
 import { defaultPayloadStore } from '@taucad/host';
 import { fetchQualificationCandidates } from './qualification-candidates.mjs';
@@ -17,7 +18,7 @@ import { qualificationArtifactObjects, qualificationFeed } from './qualification
 import { startQualificationMirrorProcess } from './qualification-mirror-process.mjs';
 import { assertDisposableQualificationHost, prepareQualificationTls } from './qualification-tls.mjs';
 import { createWindowsQualificationDriver } from './qualification-windows.mjs';
-import { createLinuxAppImageQualificationDriver, createLinuxAptQualificationDriver } from './qualification-linux.mjs';
+import { createLinuxAptQualificationDriver } from './qualification-linux.mjs';
 import { prepareQualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { QualificationAptEnrollment } from './qualification-apt-enrollment.mjs';
 import type { LinuxAptQualificationDriver } from './qualification-linux.mjs';
@@ -167,9 +168,7 @@ const main = async (): Promise<void> => {
     ? join(homedir(), 'Applications', `tau-qualification-${nonce}`, 'Tau.app')
     : route === 'windows-nsis'
       ? join(required('LOCALAPPDATA'), 'Programs', `tau-qualification-${nonce}`)
-      : route === 'linux-apt'
-        ? `/usr/bin/tau${channel === 'staging' ? '-staging' : ''}`
-        : join(root, 'Tau.AppImage');
+      : linuxInstallation(channel, route === 'linux-appimage').launcher;
   const candidate = (index: number): QualificationCandidate => ({ ...candidates[index]!, route });
   let tls: Awaited<ReturnType<typeof prepareQualificationTls>> | undefined;
   let mirror: Awaited<ReturnType<typeof startQualificationMirrorProcess>> | undefined;
@@ -195,7 +194,7 @@ const main = async (): Promise<void> => {
     });
     mirror = transport;
     const keys = z.record(z.string(), z.string()).parse(JSON.parse(process.env['TAU_APPIMAGE_PUBLIC_KEYS'] ?? '{}'));
-    if (route === 'linux-apt') {
+    if (route === 'linux-apt' || route === 'linux-appimage') {
       apt = await prepareQualificationAptEnrollment({
         candidates: [candidate(0), candidate(1), candidate(2)],
         bundleDirectories: candidates.map((item) => item.artifactDirectory) as [string, string, string],
@@ -239,13 +238,11 @@ const main = async (): Promise<void> => {
             installationPath,
             publisher: required('TAU_WINDOWS_PUBLISHER'),
           })
-        : route === 'linux-apt' && apt
-          ? (aptDriver = createLinuxAptQualificationDriver({
-              mode: 'release',
-              installationPath: `/opt/tau${channel === 'staging' ? '-staging' : ''}`,
-              repository: apt.repositories[0]!,
-            }))
-          : createLinuxAppImageQualificationDriver({ mode: 'release', installationPath });
+        : (aptDriver = createLinuxAptQualificationDriver({
+            mode: 'release',
+            installationPath: linuxInstallation(channel, route === 'linux-appimage').root,
+            repository: apt!.repositories[0]!,
+          }));
 
     const installedA = await driver.install(candidate(0));
     if (route !== 'linux-apt') {
@@ -268,7 +265,7 @@ const main = async (): Promise<void> => {
       const feed = feeds[index]!;
       await transport.switchLatest(new Map([[`/latest/${feed.name}`, feed.object]]));
     };
-    if (route !== 'linux-apt') {
+    if (!apt) {
       await setLatest(1);
     }
     const identity = (index: number) => {
@@ -283,11 +280,7 @@ const main = async (): Promise<void> => {
       target,
       channel,
       installedPath: await realpath(
-        route === 'linux-apt'
-          ? installationPath
-          : route === 'windows-nsis'
-            ? installedA.executablePath
-            : installedA.installationPath,
+        apt ? installationPath : route === 'windows-nsis' ? installedA.executablePath : installedA.installationPath,
       ),
       mirrorOrigin: transport.origin,
       startedAt: Date.now(),
@@ -381,7 +374,7 @@ const main = async (): Promise<void> => {
         }
       }, 'Initial observe command did not release updater initialization');
       const beforeReconnect = await driver.observe(candidate(0));
-      if (route === 'linux-apt') {
+      if (apt) {
         let failed = false;
         try {
           await execFileAsync('sudo', ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], {
@@ -398,7 +391,7 @@ const main = async (): Promise<void> => {
       }
       const reconnectStart = Date.now();
       await transport.setAvailable(true);
-      if (route === 'linux-apt') {
+      if (apt) {
         await execFileAsync('sudo', ['-n', 'apt-get', '-o', 'APT::Update::Error-Mode=any', 'update'], {
           timeout: 180_000,
         });
@@ -429,7 +422,7 @@ const main = async (): Promise<void> => {
         ),
         { flag: 'wx' },
       );
-      await render('a', offlineReady.pid, route === 'linux-apt' ? 'quit' : 'quit-ready');
+      await render('a', offlineReady.pid, apt ? 'quit' : 'quit-ready');
       await waitFor(
         async () => (alive(offlineReady.pid) ? undefined : true),
         'Baseline ordinary quit did not exit',
@@ -546,7 +539,7 @@ const main = async (): Promise<void> => {
         security,
       });
       offset = await stat(join(profile, 'logs/desktop.log')).then((info) => info.size);
-      if (stage === 'a' && route !== 'linux-apt') {
+      if (stage === 'a' && !apt) {
         await setLatest(2);
       }
       if (stage === 'c') {
@@ -560,7 +553,7 @@ const main = async (): Promise<void> => {
             ['-NoProfile', '-NonInteractive', '-Command', 'Start-Process -FilePath $env:TAU_Q_OPEN_URI'],
             { env: { ...process.env, TAU_Q_OPEN_URI: uri }, timeout: 30_000 },
           );
-        } else if (route === 'linux-apt') {
+        } else if (apt) {
           await execFileAsync('xdg-open', [uri], { timeout: 30_000 });
         } else {
           await execFileAsync(installationPath, [uri], { timeout: 30_000 });
@@ -659,7 +652,7 @@ const main = async (): Promise<void> => {
           existsAfter,
         },
       },
-      ...(route === 'linux-apt' ? { scheduler } : {}),
+      ...(apt ? { scheduler } : {}),
       mirrorRequests: transport.requests.map((request) => ({ ...request, at: Date.parse(request.at) })),
       logs: `https://github.com/taucad/tau/actions/runs/${required('GITHUB_RUN_ID')}`,
       suite: 'installed-route-a-b-c-v1',

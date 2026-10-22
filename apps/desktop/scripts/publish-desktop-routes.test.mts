@@ -67,6 +67,30 @@ const run = async (): Promise<void> => {
       },
     ],
   });
+  const managed = parseDesktopArtifactManifest({
+    ...manifest,
+    artifacts: (['linux-appimage', 'linux-appimage-deb-runtime', 'linux-appimage-deb-selector'] as const).map(
+      (kind) => ({
+        ...manifest.artifacts[0],
+        kind,
+        target: 'linux-x64',
+        name: desktopArtifactName({ ...identity, kind, arch: 'x64' }),
+        format: desktopArtifactKinds[kind].format,
+        roles: desktopArtifactKinds[kind].roles,
+      }),
+    ),
+  });
+  await assert.rejects(
+    completeDesktopPromotion(store, {
+      root,
+      manifest: managed,
+      pointers: [
+        { key: 'latest/installers.json', path: join(root, 'unused') },
+        { key: 'latest/desktop-update-linux-appimage-x64.json', path: join(root, 'unused') },
+      ],
+    }),
+    /omits or duplicates/u,
+  );
   const path = join(root, name);
   await writeFile(path, bytes);
   await verifyDesktopRouteFiles(root, manifest);

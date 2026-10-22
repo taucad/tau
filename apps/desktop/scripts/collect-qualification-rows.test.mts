@@ -36,6 +36,8 @@ const fixture = () => {
     ['linux-x64', 'linux-deb-runtime'],
     ['linux-x64', 'linux-deb-selector'],
     ['linux-x64', 'linux-appimage'],
+    ['linux-x64', 'linux-appimage-deb-runtime'],
+    ['linux-x64', 'linux-appimage-deb-selector'],
   ];
   const candidate = parseDesktopArtifactManifest({
     schemaVersion: 1,
@@ -50,7 +52,7 @@ const fixture = () => {
       format: desktopArtifactKinds[kind].format,
       roles: desktopArtifactKinds[kind].roles,
       size: 100,
-      sha256: String(index + 1).repeat(64),
+      sha256: (index + 1).toString(16).padStart(64, '0'),
       sha512: Buffer.alloc(64, index + 1).toString('base64'),
     })),
   });

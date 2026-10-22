@@ -55,6 +55,8 @@ export const desktopArtifactKinds = {
   'linux-tar': { platform: 'linux', format: 'tar.gz', roles: ['archive'] },
   'linux-deb-runtime': { platform: 'linux', format: 'deb', roles: ['runtime', 'repository'] },
   'linux-deb-selector': { platform: 'linux', format: 'deb', roles: ['installer', 'repository'] },
+  'linux-appimage-deb-runtime': { platform: 'linux', format: 'deb', roles: ['runtime', 'repository'] },
+  'linux-appimage-deb-selector': { platform: 'linux', format: 'deb', roles: ['installer', 'repository'] },
   'linux-appimage': { platform: 'linux', format: 'AppImage', roles: ['installer', 'update'] },
 } as const;
 export type DesktopArtifactKind = keyof typeof desktopArtifactKinds;
@@ -90,6 +92,12 @@ export const desktopArtifactName = (options: {
     case 'linux-appimage': {
       return 'Tau-linux-x64.AppImage';
     }
+    case 'linux-appimage-deb-runtime': {
+      return `tau${channel === 'staging' ? '-staging' : ''}-appimage-runtime-${version}_${version}_amd64.deb`;
+    }
+    case 'linux-appimage-deb-selector': {
+      return `tau${channel === 'staging' ? '-staging' : ''}-appimage_${version}_amd64.deb`;
+    }
     case 'linux-deb-runtime': {
       return `tau${channel === 'staging' ? '-staging' : ''}-runtime-${version}_${version}_amd64.deb`;
     }
@@ -114,6 +122,8 @@ const kindSchema = z.enum([
   'linux-tar',
   'linux-deb-runtime',
   'linux-deb-selector',
+  'linux-appimage-deb-runtime',
+  'linux-appimage-deb-selector',
   'linux-appimage',
 ]);
 const artifactSchema = z.strictObject({
@@ -176,6 +186,13 @@ export const parseDesktopArtifactManifest = (input: unknown): DesktopArtifactMan
     if (artifacts.has(`${target}:macos-dmg`) && !artifacts.has(`${target}:macos-zip`)) {
       throw new TypeError('Mac DMG requires the existing ZIP update artifact');
     }
+    if (
+      artifacts.has(`${target}:linux-appimage-deb-runtime`) !==
+        artifacts.has(`${target}:linux-appimage-deb-selector`) ||
+      (artifacts.has(`${target}:linux-appimage-deb-runtime`) && !artifacts.has(`${target}:linux-appimage`))
+    ) {
+      throw new TypeError('Managed AppImage requires its image, runtime and selector artifacts');
+    }
     if (artifacts.has(`${target}:linux-deb-runtime`) !== artifacts.has(`${target}:linux-deb-selector`)) {
       throw new TypeError('APT requires both the runtime and selector artifacts');
     }
@@ -189,7 +206,7 @@ export const desktopAcceptanceRoutes = {
   'macos-dmg': ['macos-dmg', 'macos-zip'],
   'windows-nsis': ['windows-nsis'],
   'linux-apt': ['linux-deb-runtime', 'linux-deb-selector'],
-  'linux-appimage': ['linux-appimage'],
+  'linux-appimage': ['linux-appimage', 'linux-appimage-deb-runtime', 'linux-appimage-deb-selector'],
 } as const satisfies Record<string, readonly DesktopArtifactKind[]>;
 export type DesktopAcceptanceRoute = keyof typeof desktopAcceptanceRoutes;
 

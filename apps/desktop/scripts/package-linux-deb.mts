@@ -2,7 +2,7 @@
 /**
  * Purpose: Wrap the existing Linux application in retained runtime and stable selector Debian packages.
  * Environment: Linux x64, dpkg-deb, TAU_LINUX_APP_DIR, DESKTOP_RELEASE_TAG, TAU_DESKTOP_SOURCE_SHA,
- * TAU_LINUX_MAINTAINER; optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT. No signing keys or host package mutation.
+ * TAU_LINUX_MAINTAINER; optional TAU_MANAGED_APPIMAGE, TAU_DESKTOP_PACKAGE_OUTPUT_ROOT. No signing keys or host package mutation.
  * Usage: pnpm nx run desktop:make-linux-deb
  * Exit: nonzero on mismatched staged identity, missing tools or invalid output.
  */
@@ -58,6 +58,9 @@ const main = async (): Promise<void> => {
   );
   const files = await buildLinuxAptPackages({
     appDirectory,
+    ...(process.env['TAU_MANAGED_APPIMAGE']
+      ? { appImagePath: await realpath(process.env['TAU_MANAGED_APPIMAGE']) }
+      : {}),
     outputDirectory: resolve(
       process.env['TAU_DESKTOP_PACKAGE_OUTPUT_ROOT'] ?? join(import.meta.dirname, '../package-out/deb'),
     ),

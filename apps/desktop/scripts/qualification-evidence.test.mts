@@ -158,7 +158,9 @@ const platformFixture = (route: 'macos-zip' | 'macos-dmg' | 'linux-appimage' | '
         ? (['macos-zip', 'macos-dmg'] as const)
         : route === 'linux-apt'
           ? (['linux-deb-runtime', 'linux-deb-selector'] as const)
-          : [route];
+          : route === 'linux-appimage'
+            ? (['linux-appimage', 'linux-appimage-deb-runtime', 'linux-appimage-deb-selector'] as const)
+            : [route];
     stage.candidate = parseDesktopArtifactManifest({
       ...stage.candidate,
       artifacts: kinds.map((kind) => ({
@@ -214,6 +216,10 @@ const platformFixture = (route: 'macos-zip' | 'macos-dmg' | 'linux-appimage' | '
           };
     }
     if (route === 'linux-appimage') {
+      stage.installed.installationPath = `/opt/tau-staging-appimage/releases/${stage.candidate.version}/Tau.AppImage`;
+      stage.installed.executablePath = stage.installed.installationPath;
+      stage.probe.installedPath = '/usr/bin/tau-staging-appimage';
+      input.lifecycle.uninstall.removedInstallationPath = '/usr/bin/tau-staging-appimage';
       const expected = stage.installed.executableSha256;
       const artifact = stage.candidate.artifacts[0]!;
       stage.installed.measurements['extractedExecutableSha256'] = expected;
@@ -221,6 +227,10 @@ const platformFixture = (route: 'macos-zip' | 'macos-dmg' | 'linux-appimage' | '
       stage.installed.artifactSha256 = artifact.sha256;
       stage.security.processes[0]!.measurements['executableSha256'] = expected;
       stage.security.processes[0]!.measurements['mountedAsarSha256'] = stage.installed.asarSha256;
+      stage.security.processes[0]!.measurements['mount'] = 'fuse.Tau.AppImage ro,nosuid,nodev';
+      for (const process of stage.security.processes) {
+        process.measurements['appArmor'] = 'tau-staging-appimage (unconfined)';
+      }
     }
   }
   if (mac || route === 'linux-apt') {
@@ -240,7 +250,7 @@ const platformFixture = (route: 'macos-zip' | 'macos-dmg' | 'linux-appimage' | '
       at: 2500,
     },
   ];
-  if (route === 'linux-apt') {
+  if (route === 'linux-apt' || route === 'linux-appimage') {
     input.scheduler = [0, 1].map((index) => ({
       installation: input.stages[index + 1]!.installed,
       activeSession: {
@@ -252,7 +262,7 @@ const platformFixture = (route: 'macos-zip' | 'macos-dmg' | 'linux-appimage' | '
       retained: {
         pid: input.stages[index]!.probe.pid,
         startTime: '12345',
-        executable: input.stages[index]!.installed.executablePath,
+        executable: input.stages[index]!.security.processes[0]!.executable,
         resourcePath: `${input.stages[index]!.installed.installationPath}/resources/app.asar`,
         resourceSha256: input.stages[index]!.installed.asarSha256,
       },
@@ -418,6 +428,19 @@ const main = (): void => {
     input.stages[1].security.measurements[key!] = value!;
     assert.throws(() => collectQualificationReceipt(input), /disabled/u);
   }
+  for (const mount of [
+    'ext4 ro,nosuid,nodev',
+    'fuse.Tau.AppImage rw,nosuid,nodev',
+    'fuse.Tau.AppImage ro,nodev',
+    'fuse.Tau.AppImage ro,nosuid',
+  ]) {
+    const invalid = platformFixture('linux-appimage');
+    invalid.stages[0].security.processes[0]!.measurements['mount'] = mount;
+    assert.throws(() => collectQualificationReceipt(invalid), /FUSE mount/u);
+  }
+  const wrongProfile = platformFixture('linux-appimage');
+  wrongProfile.stages[0].security.processes[0]!.measurements['appArmor'] = 'unconfined';
+  assert.throws(() => collectQualificationReceipt(wrongProfile), /profile label/u);
   const debian = platformFixture('linux-appimage');
   for (const stage of debian.stages) {
     stage.security.osVersion = 'Linux\nID=debian\nVERSION_ID="13"';

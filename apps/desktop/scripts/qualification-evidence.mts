@@ -1,5 +1,6 @@
 /** Convert independently collected native observations into one CI receipt; fixture data never qualifies a release. */
 import { z } from 'zod';
+import { linuxInstallation } from '#shared/linux-installation.js';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
@@ -167,6 +168,18 @@ const checkSecurity = (stage: QualificationStageEvidence, target: QualificationE
   const main = security.processes.find((entry) => entry.pid === probe.pid);
   requireEvidence(main !== undefined, 'main process security unavailable');
   if (stage.installed.route === 'linux-appimage') {
+    const profile = `${linuxInstallation(stage.candidate.channel, true).name} (unconfined)`;
+    const [filesystem, options] = (main?.measurements['mount'] ?? '').split(/\s+/u);
+    requireEvidence(
+      Boolean(filesystem?.startsWith('fuse')) &&
+        ['ro', 'nosuid', 'nodev'].every((flag) => options?.split(',').includes(flag)),
+      'managed AppImage is not a read-only nosuid/nodev FUSE mount',
+    );
+    requireEvidence(
+      main?.measurements['appArmor'] === profile &&
+        security.processes.find((entry) => entry.pid === renderer.pid)?.measurements['appArmor'] === profile,
+      'managed AppImage profile label differs',
+    );
     requireEvidence(
       main?.measurements['executableSha256'] === stage.installed.measurements['expectedExecutableSha256'] &&
         main?.measurements['mountedAsarSha256'] === stage.installed.asarSha256,
@@ -394,8 +407,10 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
   }
   const removed = input.lifecycle.uninstall;
   const removedEntry =
-    input.route === 'linux-apt'
-      ? `/usr/bin/tau${c.candidate.channel === 'staging' ? '-staging' : ''}`
+    input.route === 'linux-apt' ||
+    (input.route === 'linux-appimage' &&
+      c.candidate.artifacts.some((item) => item.kind === 'linux-appimage-deb-runtime'))
+      ? linuxInstallation(c.candidate.channel, input.route === 'linux-appimage').launcher
       : input.route === 'windows-nsis'
         ? c.installed.executablePath
         : input.route.startsWith('macos-')
@@ -438,7 +453,11 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
       removed.before.some((file) => file.path === c.renderer.projectPath && file.sha256 === c.renderer.projectSha256),
     'uninstall preservation or removal was not observed',
   );
-  if (input.route === 'linux-apt') {
+  if (
+    input.route === 'linux-apt' ||
+    (input.route === 'linux-appimage' &&
+      c.candidate.artifacts.some((item) => item.kind === 'linux-appimage-deb-runtime'))
+  ) {
     requireEvidence(input.scheduler?.length === 2, 'both real scheduler transitions required');
     for (const [index, event] of (input.scheduler ?? []).entries()) {
       const before = input.stages[index]!;
@@ -451,7 +470,10 @@ export const collectQualificationReceipt = (input: QualificationEvidence): Deskt
           event.activeSession.vertices >= 3 &&
           event.retained.resourceSha256.length === 64 &&
           equalInstallation(event.installation, after.installed) &&
-          event.retained.executable === before.installed.executablePath &&
+          event.retained.executable ===
+            (input.route === 'linux-appimage'
+              ? before.security.processes.find((process) => process.pid === before.probe.pid)?.executable
+              : before.installed.executablePath) &&
           /^\d+$/u.test(event.retained.startTime) &&
           event.scheduler['result'] === 'success' &&
           Boolean(event.scheduler['invocation']) &&

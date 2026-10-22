@@ -50,7 +50,11 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
-sudo apt-get update -qq
+# Do not hide or wait indefinitely on hosted-runner repository refresh problems.
+printf 'Refreshing hosted runner package indexes (five-minute deadline)\n'
+sudo timeout --kill-after=30s 300s apt-get \
+  -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 \
+  -o APT::Update::Error-Mode=any update
 sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils acl
 # Only this disposable host user receives access. QEMU and the guest tests stay unprivileged.
 sudo setfacl -m "u:$(id -un):rw" /dev/kvm

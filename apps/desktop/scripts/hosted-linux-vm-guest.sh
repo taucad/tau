@@ -23,9 +23,9 @@ sudo grep -E '^CONFIG_(SECCOMP|SECCOMP_FILTER|USER_NS)=y$' "/boot/config-$(uname
 for feature in SECCOMP SECCOMP_FILTER USER_NS; do
   sudo grep -qx "CONFIG_${feature}=y" "/boot/config-$(uname -r)"
 done
-sysctl kernel.unprivileged_userns_clone user.max_user_namespaces
+/usr/sbin/sysctl kernel.unprivileged_userns_clone user.max_user_namespaces
 if [[ "$ID" == ubuntu ]]; then
-  [[ "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" == 1 ]]
+  [[ "$(/usr/sbin/sysctl -n kernel.apparmor_restrict_unprivileged_userns)" == 1 ]]
 fi
 # Record the stock policy's decision; do not turn off AppArmor to make unshare pass.
 if unshare -Ur true; then printf 'Unprivileged userns: allowed\n'; else printf 'Unprivileged userns: restricted by stock policy\n'; fi

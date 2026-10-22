@@ -1342,7 +1342,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [fileManager.recordFiles],
   );
 
-  const resumePendingProjectOperation = useCallback(
+  const commitPendingProjectOperation = useCallback(
     async (operation: PendingProjectOperation, suppliedWorker?: Remote<ObjectStoreWorker>): Promise<void> => {
       const worker = suppliedWorker ?? (await getReadiedWorker());
 
@@ -1437,6 +1437,38 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       queryClient,
       removeProjectComposerRecords,
     ],
+  );
+
+  const resumePendingProjectOperation = useCallback(
+    async (operation: PendingProjectOperation, suppliedWorker?: Remote<ObjectStoreWorker>): Promise<void> => {
+      // Live creates and copies need the same quarantine as startup recovery.
+      // Keep it until both the manifest and its rooted routes are usable.
+      recoveriesRef.current.set(operation.operationId, pendingOperationRecovery(operation));
+      setRecoveries([...recoveriesRef.current.values()]);
+      const previous = discoveryPassRef.current;
+      if (previous) {
+        await previous.catch(() => undefined);
+      }
+      try {
+        await commitPendingProjectOperation(operation, suppliedWorker);
+        const pendingDiscovery = discoveryPassRef.current;
+        if (pendingDiscovery) {
+          await pendingDiscovery.catch(() => undefined);
+        }
+        recoveriesRef.current.delete(operation.operationId);
+      } catch (error) {
+        recoveriesRef.current.set(operation.operationId, {
+          ...pendingOperationRecovery(operation),
+          status: 'failed',
+          reason: error instanceof PendingProjectRecoveryError ? error.reason : 'filesystem-error',
+        });
+        throw error;
+      } finally {
+        setRecoveries([...recoveriesRef.current.values()]);
+        invalidateProjectsList();
+      }
+    },
+    [commitPendingProjectOperation, invalidateProjectsList],
   );
 
   const createProjectOnce = useCallback(
@@ -1633,11 +1665,16 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const runDiscoveryPass = useCallback(
     async (options?: { quarantinedLocators?: ReadonlyMap<string, string> }) => {
       const epoch = ++discoveryEpochRef.current;
+      const quarantinedLocators = new Map(
+        options?.quarantinedLocators ?? quarantinedLocatorsOf(recoveriesRef.current.values()),
+      );
       const [discovered, persistedConfigs] = await Promise.all([
         fileManager.client.listProjectManifests(),
         getAllProjectFileSystemConfigs(),
       ]);
-      const quarantinedLocators = options?.quarantinedLocators ?? quarantinedLocatorsOf(recoveriesRef.current.values());
+      for (const [locator, projectId] of quarantinedLocatorsOf(recoveriesRef.current.values())) {
+        quarantinedLocators.set(locator, projectId);
+      }
       // One cursor pass over the route configs serves duplicate anchoring, the
       // per-entry reconcile below and the orphan sweep after it. Mid-loop writes
       // update the map so the sweep judges the route this pass just published.

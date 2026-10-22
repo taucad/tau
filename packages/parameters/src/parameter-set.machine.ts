@@ -1055,7 +1055,11 @@ export const createParameterSetActor = (input: ParameterSetActorInput): Paramete
       // async-iife: report a watch that cannot open to the actor.
       void reportReady();
       const reportClosed = async (): Promise<void> => {
-        await watch.closed;
+        try {
+          await watch.closed;
+        } catch {
+          /* A watch that fails closes too; `unsubscribe` below rejects it with an abort, which `fail` drops. */
+        }
         fail({ code: 'WATCH_CLOSED', message: 'Parameter watch closed.' });
       };
       // async-iife: a live authority treats a watch that ends on its own as a failure.

@@ -1594,11 +1594,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
         devTools: !app.isPackaged,
         contextIsolation: true,
         nodeIntegration: false,
-        /* `sandbox: false` because the preload is ESM; the CJS-preload fix is
-         * post-POC hygiene (G18), not a security regression — context
-         * isolation is what fences the renderer. */
-        sandbox: false,
-        preload: join(import.meta.dirname, '../preload/preload.mjs'),
+        // The self-contained CommonJS preload runs within Electron's renderer sandbox.
+        sandbox: true,
+        preload: join(import.meta.dirname, '../preload/preload.cjs'),
         additionalArguments: [
           `${bootstrapArgumentPrefix}${JSON.stringify({
             env: clientEnvironment(environment),

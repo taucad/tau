@@ -13,6 +13,8 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { createPackage } from '@electron/asar';
 import { z } from 'zod';
+// oxlint-disable-next-line no-restricted-imports -- Share the actual preload bridge proof across native hosts.
+import { writeSandboxedPreloadFixture } from './preload-sandbox-fixture.mjs';
 
 assert.equal(process.platform, 'linux');
 assert.equal(process.arch, 'x64');
@@ -32,6 +34,7 @@ const root = await mkdtemp(join(output, 'appimage-sandbox-'));
 const sudo = (args: string[]): string => execFileSync('sudo', ['-n', ...args], { encoding: 'utf8', timeout: 30_000 });
 const proofSchema = z.object({
   sandboxed: z.literal(true),
+  bridge: z.literal('desktop'),
   isolated: z.literal(true),
   pid: z.number().int().positive(),
   browserPid: z.number().int().positive(),
@@ -45,40 +48,7 @@ try {
   const electron = z.string().parse(createRequire(import.meta.url)('electron'));
   await cp(dirname(electron), appDirectory, { recursive: true });
   await rename(join(appDirectory, 'electron'), join(appDirectory, 'Tau'));
-  const source = join(root, 'source');
-  await mkdir(source);
-  await writeFile(
-    join(source, 'package.json'),
-    JSON.stringify({
-      name: 'tau-sandbox-fixture',
-      version: '1.0.1',
-      main: 'main.cjs',
-      tauDesktop: { channel: 'staging', sourceCommit: 'a'.repeat(40), environmentOverrides: false },
-    }),
-  );
-  await writeFile(
-    join(source, 'preload.cjs'),
-    `const {ipcRenderer} = require('electron'); ipcRenderer.send('fixture-ready', {sandboxed:process.sandboxed, isolated:process.contextIsolated});`,
-  );
-  await writeFile(
-    join(source, 'main.cjs'),
-    `
-const {app, BrowserWindow, ipcMain} = require('electron');
-const {join} = require('node:path');
-const assert = require('node:assert/strict');
-app.whenReady().then(async () => {
-  const window = new BrowserWindow({show:false, webPreferences:{sandbox:true, contextIsolation:true, nodeIntegration:false, preload:join(__dirname,'preload.cjs')}});
-  ipcMain.once('fixture-ready', (event, result) => {
-    assert.equal(event.sender, window.webContents);
-    assert.equal(result.sandboxed, true);
-    assert.equal(result.isolated, true);
-    console.log('TAU_SANDBOX_PROOF:'+JSON.stringify({...result,pid:window.webContents.getOSProcessId(),browserPid:process.pid,executable:process.execPath}));
-  });
-  await window.loadURL('data:text/html,<title>Tau sandbox fixture</title>');
-}).catch(error => {console.error(error); app.exit(1);});
-setTimeout(() => app.exit(1), 45000);
-`,
-  );
+  const source = await writeSandboxedPreloadFixture(root);
   await createPackage(source, join(appDirectory, 'resources/app.asar'));
   const { publicKey } = generateKeyPairSync('ed25519');
   const keyFile = join(root, 'keys.json');

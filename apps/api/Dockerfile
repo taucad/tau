@@ -70,6 +70,9 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # Upload maps from the exact built image before pruning. The token is available
 # only to this BuildKit step, never as an ARG, ENV or runtime image file.
 # Deployment builds opt in; local and PR smoke builds need no hosted credential.
+# The native Sentry CLI uses the OS trust store, absent from node:slim.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
 ARG SENTRY_UPLOAD_ENABLED=false
 RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
     if [ "$SENTRY_UPLOAD_ENABLED" = true ]; then \

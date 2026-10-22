@@ -27,7 +27,7 @@ git checkout --detach "$source_sha"
 corepack enable
 pnpm install --frozen-lockfile
 python3 - <<'PYRUN'
-import json, os, pathlib, select, subprocess, sys, tempfile, zipfile
+import json, os, pathlib, select, subprocess, sys, tempfile, time, zipfile
 root = pathlib.Path.home() / 'tau'
 config = pathlib.Path.home() / 'qualification-env.json'
 values = json.loads(config.read_text())
@@ -67,20 +67,40 @@ if mode == 'tooling':
     # Selecting the already installed CA package version makes this transaction a no-op.
     version = subprocess.check_output(['dpkg-query', '-W', '-f=${Version}', 'ca-certificates'], text=True)
     lock = subprocess.Popen(['sudo', '-n', 'python3', '-c',
-        "import fcntl,time; f=open('/var/lib/dpkg/lock-frontend','r+'); fcntl.lockf(f,fcntl.LOCK_EX); print('locked',flush=True); time.sleep(8)"],
-        stdout=subprocess.PIPE, text=True)
+        "import fcntl,select,sys; f=open('/var/lib/dpkg/lock-frontend','r+'); fcntl.lockf(f,fcntl.LOCK_EX); print('locked',flush=True); ready=select.select([sys.stdin],[],[],60)[0]; sys.exit(0 if ready and sys.stdin.read(1)=='x' else 1)"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    apt = None
     try:
-        if not select.select([lock.stdout], [], [], 30)[0] or lock.stdout.readline().strip() != 'locked':
+        if not select.select([lock.stdout], [], [], 30)[0] or lock.stdout.readline().strip() != b'locked':
             raise RuntimeError('Could not acquire fixture dpkg lock')
-        result = subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=module', '--eval',
-            "import { runQualificationApt } from './apps/desktop/scripts/qualification-linux.mts'; console.log(runQualificationApt('install', [process.argv[1]]));",
-            'ca-certificates=' + version], cwd=root, env=dict(env, LC_ALL='C'), check=True, timeout=170,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        if 'Waiting for cache lock' not in result.stdout:
-            raise RuntimeError('APT did not observe the held fixture lock: ' + result.stdout)
+        apt = subprocess.Popen(['node', '--import', '@oxc-node/core/register', '--input-type=module', '--eval',
+            "import { runQualificationApt } from './apps/desktop/scripts/qualification-linux.mts'; runQualificationApt('install', [process.argv[1]]);",
+            'ca-certificates=' + version], cwd=root, env=dict(env, LC_ALL='C'),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output = b''
+        deadline = time.monotonic() + 30
+        while b'Waiting for cache lock' not in output:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([apt.stdout], [], [], remaining)[0]:
+                raise RuntimeError('APT did not report fixture lock contention: ' + output.decode(errors='replace'))
+            chunk = os.read(apt.stdout.fileno(), 4096)
+            if not chunk:
+                raise RuntimeError('APT exited before observing contention: ' + output.decode(errors='replace'))
+            output += chunk
+        lock.stdin.write(b'x')
+        lock.stdin.flush()
         if lock.wait(timeout=10) != 0:
             raise RuntimeError('Fixture dpkg lock holder failed')
+        tail, _ = apt.communicate(timeout=140)
+        if apt.returncode != 0:
+            raise RuntimeError('APT failed after lock release: ' + (output + tail).decode(errors='replace'))
     finally:
+        if apt is not None:
+            if apt.poll() is None:
+                apt.terminate()
+                apt.wait(timeout=10)
+            apt.stdout.close()
+        lock.stdin.close()
         if lock.poll() is None:
             lock.terminate()
             lock.wait(timeout=10)

@@ -30,26 +30,27 @@ const host = (): void => {
     throw new QualificationUnavailable('Linux x64 disposable-host authorization is required');
   }
 };
-const command = (file: string, args: string[]): string => {
+const command = (file: string, args: string[], inheritOutput = false): string => {
   host();
-  const result = spawnSync(file, args, { encoding: 'utf8', timeout: 180_000, maxBuffer: 8 * 1024 * 1024 });
+  const result = spawnSync(file, args, {
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 8 * 1024 * 1024,
+    stdio: ['ignore', inheritOutput ? 'inherit' : 'pipe', 'pipe'],
+  });
   if (result.status !== 0) {
     throw new QualificationUnavailable(`${file} failed: ${result.stderr || result.error?.message}`);
   }
-  return result.stdout.trim();
+  return inheritOutput ? '' : result.stdout.trim();
 };
 /** Let an existing unattended upgrade finish without disabling it or removing its lock. */
-export const runQualificationApt = (operation: 'install' | 'remove', packages: string[]): string =>
-  command('sudo', [
-    '-n',
-    'apt-get',
-    '-o',
-    'DPkg::Lock::Timeout=120',
-    operation,
-    '--yes',
-    '--no-install-recommends',
-    ...packages,
-  ]);
+export const runQualificationApt = (operation: 'install' | 'remove', packages: string[]): void => {
+  command(
+    'sudo',
+    ['-n', 'apt-get', '-o', 'DPkg::Lock::Timeout=120', operation, '--yes', '--no-install-recommends', ...packages],
+    true,
+  );
+};
 const hashFile = async (path: string): Promise<string> => {
   const info = await lstat(path);
   if (!info.isFile() || (await realpath(path)) !== resolve(path)) {

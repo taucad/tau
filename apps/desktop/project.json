@@ -607,6 +607,14 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-tls.test.mts"
       }
     },
+    "test-qualification-electron-writer": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-electron-writer.test.mts"
+      }
+    },
     "test-qualification-probe-process": {
       "executor": "nx:run-commands",
       "cache": false,

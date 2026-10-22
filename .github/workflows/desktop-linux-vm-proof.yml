@@ -5,6 +5,8 @@ on:
     paths:
       - '.github/workflows/desktop-linux-vm-proof.yml'
       - 'apps/desktop/scripts/hosted-linux-*.sh'
+      - 'apps/desktop/scripts/qualification-electron-writer.test.mts'
+      - 'packages/filesystem/src/backend/node/authority-writer-lock*'
 permissions:
   contents: read
   actions: read

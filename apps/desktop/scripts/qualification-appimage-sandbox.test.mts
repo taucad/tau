@@ -174,7 +174,11 @@ setTimeout(() => app.exit(1), 45000);
       if (expectedProfile) {
         assert.equal(label, `${expectedProfile} (unconfined)`);
       }
-      const mount = sudo(['findmnt', '-n', '-o', 'FSTYPE,OPTIONS', '-T', observation.executable]).trim();
+      // Default FUSE access belongs to the mounting user, not even root without allow_root.
+      const mount = execFileSync('findmnt', ['-n', '-o', 'FSTYPE,OPTIONS', '-T', observation.executable], {
+        encoding: 'utf8',
+        timeout: 10_000,
+      }).trim();
       assert.match(mount, /fuse/iu);
       assert.match(mount, /nosuid/u);
       return { ...observation, label, rendererNamespace, browserNamespace, seccomp: 2, noNewPrivs: 1, mount };

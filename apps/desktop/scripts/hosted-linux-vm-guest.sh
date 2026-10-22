@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validate distro/kernel, systemd timer and a real Xorg/Openbox desktop in a disposable guest.
-# Called over authenticated loopback SSH by hosted-linux-vm-proof.sh, never on the host.
+# Called over authenticated loopback SSH by hosted-linux-vm.sh, never on the host.
 # Required env: none. Usage: bash hosted-linux-vm-guest.sh ubuntu|debian
 # Exit codes: 0 assertions passed; 1 assertion or guest setup failed.
 set -euo pipefail

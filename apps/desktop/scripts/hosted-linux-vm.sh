@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
-# Prove disposable full Linux guests on standard hosted x64 CI; never emit release receipts.
+# Run disposable full Linux guests for infrastructure proof or protected staging qualification.
 # See desktop-release-signing-pipeline/linux-remote-qualification-2026-10-22.md.
 # Required env: TAU_VM_DISTRO (ubuntu or debian), RUNNER_TEMP (disposable CI directory).
-# Optional env: none. Usage: TAU_VM_DISTRO=ubuntu pnpm nx run desktop:hosted-linux-vm-proof
+# Optional env: TAU_VM_MODE (proof default, tooling, or qualification with protected staging inputs). Usage: TAU_VM_DISTRO=ubuntu pnpm nx run desktop:hosted-linux-vm-proof
 # Exit codes: 0 proof passed; 1 failed assertion/external operation; 3 missing host prerequisite.
 set -euo pipefail
+umask 077
 : "${TAU_VM_DISTRO:?set TAU_VM_DISTRO}"
 : "${RUNNER_TEMP:?disposable hosted runner required}"
 [[ "${GITHUB_ACTIONS:-}" == true && "$(uname -m)" == x86_64 ]] || exit 3
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+mode="${TAU_VM_MODE:-proof}"
+case "$mode" in
+  proof|tooling) ;;
+  qualification)
+    [[ "${GITHUB_REF:-}" == refs/heads/main && "${GITHUB_EVENT_NAME:-}" == workflow_dispatch &&
+       "${GITHUB_REPOSITORY:-}" == taucad/tau && "${TAU_DESKTOP_QUALIFICATION_SCOPE:-}" == linux &&
+       "${TAU_QUALIFICATION_CHANNEL:-}" == staging ]] || { printf 'Hosted qualification requires protected Linux staging main dispatch\n' >&2; exit 1; }
+    [[ "${GITHUB_SHA:-}" =~ ^[a-f0-9]{40}$ ]]
+    [[ "${TAU_QUALIFICATION_ROUTE:-}" == linux-apt || "${TAU_QUALIFICATION_ROUTE:-}" == linux-appimage ]]
+    : "${GH_TOKEN:?read-only job token required for existing candidate provenance checks}"
+    ;;
+  *) printf 'Invalid VM mode\n' >&2; exit 1 ;;
+esac
 case "$TAU_VM_DISTRO" in
   ubuntu)
     url=https://cloud-images.ubuntu.com/releases/noble/release-20261017/ubuntu-24.04-server-cloudimg-amd64.img
@@ -88,4 +102,42 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 "bash -s -- $TAU_VM_DISTRO" \
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /tmp/tau-desktop.xwd' > "$output/desktop.xwd"
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' > "$output/guest-boot-id.txt"
 [[ "$(cat "$output/guest-boot-id.txt")" != "$(cat /proc/sys/kernel/random/boot_id)" ]]
-printf 'Full guest infrastructure proof passed; signed Tau qualification remains unexecuted.\n' | tee "$output/result.txt"
+printf 'Full guest infrastructure proof passed; any selected harness outcome is recorded separately.\n' | tee "$output/result.txt"
+
+if [[ "$mode" != proof ]]; then
+  # Reuse the verified Node installation from setup-nx. No host home/cache or signing material is copied.
+  node_root="$(dirname "$(dirname "$(command -v node)")")"
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/node'
+  tar -C "$node_root" -cf - . | ssh "${ssh_options[@]}" tau@127.0.0.1 'tar -xf - -C ~/node'
+  TAU_VM_MODE="$mode" python3 - "$work/qualification-env.json" <<'PYENV'
+import json, os, sys
+names = ['GH_TOKEN', 'GITHUB_SHA', 'GITHUB_REF', 'GITHUB_EVENT_NAME', 'GITHUB_REPOSITORY', 'GITHUB_RUN_ID',
+         'TAU_DESKTOP_QUALIFICATION_SCOPE', 'TAU_QUALIFICATION_ROUTE', 'TAU_QUALIFICATION_CHANNEL',
+         'TAU_QUALIFICATION_RUN_A', 'TAU_QUALIFICATION_RUN_B', 'TAU_QUALIFICATION_RUN_C',
+         'TAU_APPIMAGE_PUBLIC_KEYS', 'TAU_APPIMAGE_KEY_ID', 'TAU_APT_PRIMARY_FINGERPRINT', 'TAU_APT_SIGNING_FINGERPRINT']
+if os.environ['TAU_VM_MODE'] == 'tooling':
+    names = ['GITHUB_SHA']
+values = {name: os.environ[name] for name in names}
+values['TAU_VM_MODE'] = os.environ['TAU_VM_MODE']
+with open(sys.argv[1], 'x') as output:
+    json.dump(values, output)
+PYENV
+  # The only credential is this job's short-lived contents/actions-read token, never signing secrets.
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'umask 077; cat > ~/qualification-env.json' < "$work/qualification-env.json"
+  status=0
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'bash -s' \
+    < "$REPO_ROOT/apps/desktop/scripts/hosted-linux-qualification-guest.sh" | tee "$output/guest-harness.txt" || status=$?
+  # Collect only the existing diagnostic allowlist. Never copy TLS keys, app profiles or environment JSON.
+  mkdir -p "$REPO_ROOT/out/route-qualification"
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'python3 -' <<'PYRESULT' | tar -xf - -C "$REPO_ROOT/out/route-qualification"
+import glob, os, sys, tarfile
+root = os.path.expanduser('~/tau/out/route-qualification')
+with tarfile.open(fileobj=sys.stdout.buffer, mode='w|') as output:
+    for pattern in ['qualification-*.json', 'renderer-*.json', 'renderer-*.png', 'mirror-trust.json', 'route-receipts.json']:
+        for path in glob.glob(os.path.join(root, pattern)):
+            if os.path.isfile(path) and not os.path.islink(path):
+                output.add(path, arcname=os.path.basename(path), recursive=False)
+PYRESULT
+  printf '%s\n' "$status" > "$output/harness-exit-code.txt"
+  exit "$status"
+fi

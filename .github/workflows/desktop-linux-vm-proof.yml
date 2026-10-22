@@ -4,7 +4,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/desktop-linux-vm-proof.yml'
-      - 'apps/desktop/scripts/hosted-linux-vm-*.sh'
+      - 'apps/desktop/scripts/hosted-linux-*.sh'
 permissions:
   contents: read
 concurrency:
@@ -13,7 +13,7 @@ concurrency:
 jobs:
   guest:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -22,10 +22,25 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - name: Prove full guest infrastructure without signing credentials
+      - uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      - name: Reject hosted qualification outside protected staging
         env:
+          TAU_VM_MODE: qualification
+          TAU_VM_DISTRO: ubuntu
+          TAU_QUALIFICATION_CHANNEL: production
+        run: |
+          if bash apps/desktop/scripts/hosted-linux-vm.sh > "$RUNNER_TEMP/refusal.log" 2>&1; then
+            echo '::error::Unprotected hosted qualification was admitted'
+            exit 1
+          fi
+          grep -F 'Hosted qualification requires protected Linux staging main dispatch' "$RUNNER_TEMP/refusal.log"
+      - name: Prove full guest infrastructure and harness tooling without credentials
+        env:
+          TAU_VM_MODE: tooling
           TAU_VM_DISTRO: ${{ matrix.distro }}
-        run: bash apps/desktop/scripts/hosted-linux-vm-proof.sh
+        run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Retain infrastructure evidence only
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

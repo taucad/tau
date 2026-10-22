@@ -88,7 +88,7 @@ jobs:
       max-parallel: 4
       matrix:
         include: ${{ fromJSON(needs.admission.outputs.matrix) }}
-    runs-on: ${{ fromJSON(matrix.host) }}
+    runs-on: ${{ inputs.scope == 'linux' && 'ubuntu-24.04' || fromJSON(matrix.host) }}
     env:
       GH_TOKEN: ${{ github.token }}
       TAU_QUALIFICATION_DISPOSABLE_HOST: '1'
@@ -110,10 +110,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
+      - name: Run Linux staging inside a disposable full guest
+        if: inputs.scope == 'linux'
+        env:
+          TAU_VM_MODE: qualification
+          TAU_VM_DISTRO: ${{ startsWith(matrix.id, 'ubuntu-') && 'ubuntu' || 'debian' }}
+        run: bash apps/desktop/scripts/hosted-linux-vm.sh
       - name: Run installed shipping renderer, explicit update and latest-feed update
+        if: inputs.scope != 'linux'
         run: pnpm nx run desktop:qualify-installed-route
       - name: Remove only this run's temporary TLS trust even after failure
-        if: always()
+        if: always() && inputs.scope != 'linux'
         run: pnpm nx run desktop:cleanup-qualification-trust
       - name: Preserve diagnostic observations without private TLS keys or app profile contents
         if: always()

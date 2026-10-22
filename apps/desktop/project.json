@@ -685,7 +685,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "bash apps/desktop/scripts/hosted-linux-vm-proof.sh"
+        "command": "bash apps/desktop/scripts/hosted-linux-vm.sh"
       }
     }
   }

@@ -1,7 +1,6 @@
 import React, { useLayoutEffect, useMemo, useState } from 'react';
 import { selectCameraProjection } from '@taucad/camera/machine';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
-import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { createSectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { resolveCameraControlProps, TauCameraControls } from '#graphics/three/controls/tau-camera-controls.jsx';
 import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.jsx';
@@ -55,7 +54,6 @@ export const Controls = React.memo(function ({
   zoomSpeed,
   gizmoContainer,
 }: ControlsProperties) {
-  const backend = useThreeGraphicsBackend();
   const cameraRig = useCameraRig();
   const renderFrame = useRenderFrame();
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
@@ -71,13 +69,13 @@ export const Controls = React.memo(function ({
       setPlanePicker(undefined);
       return undefined;
     }
-    const picker = createSectionPlanePicker(backend);
+    const picker = createSectionPlanePicker();
     // oxlint-disable-next-line react/set-state-in-effect -- The effect owns allocation and StrictMode-safe teardown of this external resource.
     setPlanePicker(picker);
     return () => {
       picker.dispose();
     };
-  }, [backend, enableGizmo, isSectionViewActive]);
+  }, [enableGizmo, isSectionViewActive]);
   /* `initialTarget` is read once, in the controls' own state initializer, which writes the live
    * camera's orientation before `ActorBridge` is mounted. It is a render-unit API, so the actor's
    * metre target is converted here rather than landing 1/metersPerRenderUnit away for two frames. */

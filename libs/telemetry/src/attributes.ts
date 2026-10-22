@@ -31,6 +31,7 @@ export const AttributeKey = {
   GEN_AI_TOKEN_TYPE: 'gen_ai.token.type',
   GEN_AI_REQUEST_MODEL: 'gen_ai.request.model',
   REDIS_ROLE: 'redis.role',
+  HEALTH_INDICATOR: 'health.indicator',
   ERROR_TYPE: 'error.type',
   WS_RECONNECTION_ATTEMPT: 'ws.reconnection.attempt',
   EDITOR_KERNEL: 'editor.kernel',

@@ -363,6 +363,20 @@ export const TauMetrics = {
     }),
   }),
 
+  /**
+   * Readiness refusals by failing indicator. A refusal is the probe working (Fly drains the
+   * Machine), so it is counted here and logged as a warning rather than reported as an
+   * application error; one increment per down indicator per refused probe.
+   */
+  healthReadinessFailures: defineCounter({
+    name: 'health.readiness.failures',
+    unit: '{failure}',
+    description: 'Readiness probe refusals by failing health indicator',
+    attributes: z.object({
+      'health.indicator': z.string().optional(),
+    }),
+  }),
+
   publicationViewsTotal: defineCounter({
     name: 'publication.views',
     unit: '{view}',

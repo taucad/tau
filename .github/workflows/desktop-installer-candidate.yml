@@ -14,7 +14,7 @@ on:
         required: true
         type: string
       release_run_id:
-        description: Successful release-build.yml run for the exact tag/source
+        description: Exact-tag release-build.yml run; Linux staging verifies its prerequisite jobs
         required: true
         type: string
 
@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-nx
-      - name: Bind source archives to the exact successful trusted run
+      - name: Bind source archives to exact trusted run and required successful jobs
         id: identity
         env:
           GH_TOKEN: ${{ github.token }}

@@ -15,7 +15,10 @@ const main = async (): Promise<void> => {
     await mkdir(tools);
     const gh = join(tools, 'gh');
     const git = join(tools, 'git');
-    await writeFile(gh, '#!/usr/bin/env node\nconsole.log(process.env.TEST_RUN);\n');
+    await writeFile(
+      gh,
+      '#!/usr/bin/env node\nconsole.log(process.argv.some(arg => arg.includes("/jobs?")) ? process.env.TEST_JOBS : process.env.TEST_RUN);\n',
+    );
     await writeFile(
       git,
       '#!/usr/bin/env node\nif(process.argv[2]==="rev-parse") console.log(process.env.TEST_SOURCE);\n',
@@ -66,6 +69,58 @@ const main = async (): Promise<void> => {
       assert.equal(run('resolve', { TEST_RUN: JSON.stringify({ ...successful, ...change }) }).status, 1);
     }
     assert.equal(run('resolve', { GITHUB_REF: 'refs/heads/untrusted' }).status, 1);
+    const linuxTag = 'desktop-staging@0.2.0-staging.3';
+    const linuxJobs = [
+      'resolve',
+      `Verify ${linuxTag}`,
+      'Package linux-x64 (unsigned)',
+      'Attach immutable candidate assets',
+    ].map((name) => ({ name, head_sha: source, run_id: 123, status: 'completed', conclusion: 'success' }));
+    const linuxResolve = {
+      DESKTOP_RELEASE_TAG: linuxTag,
+      TAU_DESKTOP_QUALIFICATION_SCOPE: 'linux',
+      TEST_JOBS: JSON.stringify([{ jobs: linuxJobs }]),
+      TEST_RUN: JSON.stringify({ ...successful, conclusion: 'failure' }),
+    };
+    const admitted = run('resolve', linuxResolve);
+    assert.equal(admitted.status, 0, admitted.stderr);
+    assert.equal(run('resolve', { ...linuxResolve, TAU_DESKTOP_QUALIFICATION_SCOPE: 'all' }).status, 1);
+    for (const conclusion of ['cancelled', 'timed_out']) {
+      assert.equal(
+        run('resolve', { ...linuxResolve, TEST_RUN: JSON.stringify({ ...successful, conclusion }) }).status,
+        1,
+      );
+    }
+    for (const index of [0, 1, 2, 3]) {
+      for (const change of [
+        { conclusion: 'failure' },
+        { conclusion: 'skipped' },
+        { status: 'in_progress' },
+        { head_sha: 'b'.repeat(40) },
+        { run_id: 456 },
+      ]) {
+        const jobs = linuxJobs.map((job, jobIndex) => (jobIndex === index ? { ...job, ...change } : job));
+        assert.equal(run('resolve', { ...linuxResolve, TEST_JOBS: JSON.stringify([{ jobs }]) }).status, 1);
+      }
+      assert.equal(
+        run('resolve', {
+          ...linuxResolve,
+          TEST_JOBS: JSON.stringify([{ jobs: linuxJobs.filter((_, jobIndex) => jobIndex !== index) }]),
+        }).status,
+        1,
+      );
+    }
+    assert.equal(
+      run('resolve', { ...linuxResolve, TEST_JOBS: JSON.stringify([{ jobs: [...linuxJobs, linuxJobs[0]] }]) }).status,
+      1,
+    );
+    assert.equal(
+      run('resolve', {
+        ...linuxResolve,
+        TEST_JOBS: JSON.stringify([{ jobs: linuxJobs.slice(0, 2) }, { jobs: linuxJobs.slice(2) }]),
+      }).status,
+      0,
+    );
     const archives = join(root, 'archives');
     await mkdir(archives);
     const app = join(root, 'Tau-linux-x64');
@@ -146,7 +201,7 @@ const main = async (): Promise<void> => {
     assert.equal(run('stage', { ...staging, TAU_DESKTOP_SOURCE_SHA: 'b'.repeat(40) }).status, 1);
     await writeFile(archive, 'tampered');
     assert.equal(run('stage', { ...staging, DESKTOP_CANDIDATE_STAGE: join(root, 'tamper-stage') }).status, 1);
-    console.log('Passed 12 candidate source-run and exact archive admission scenarios.');
+    console.log('Passed candidate source-run, Linux prerequisite and exact archive admission scenarios.');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

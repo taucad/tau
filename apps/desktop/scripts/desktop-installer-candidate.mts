@@ -82,12 +82,59 @@ const main = async (): Promise<void> => {
       run.path !== '.github/workflows/release-build.yml' ||
       run.event !== 'push' ||
       run.status !== 'completed' ||
-      run.conclusion !== 'success' ||
+      (scope === 'linux' ? !['success', 'failure'].includes(run.conclusion) : run.conclusion !== 'success') ||
       run.head_sha !== source ||
       run.head_repository.full_name !== repository ||
       run.repository.full_name !== repository
     ) {
-      throw new Error('Source archive run is not a successful same-repository release build for the exact tag');
+      throw new Error('Source archive run is not an admissible same-repository release build for the exact tag');
+    }
+    if (scope === 'linux') {
+      // A macOS OTA failure must not erase successful Linux archive evidence. Full candidates retain whole-run success.
+      /* eslint-disable @typescript-eslint/naming-convention -- GitHub job provenance fields. */
+      const pages = z
+        .array(
+          z.object({
+            jobs: z.array(
+              z.object({
+                name: z.string(),
+                head_sha: z.string(),
+                run_id: z.number().int().positive(),
+                status: z.string(),
+                conclusion: z.string().nullable(),
+              }),
+            ),
+          }),
+        )
+        .parse(
+          JSON.parse(
+            command('gh', [
+              'api',
+              '--paginate',
+              '--slurp',
+              `repos/${repository}/actions/runs/${runId}/jobs?filter=latest&per_page=100`,
+            ]),
+          ),
+        );
+      /* eslint-enable @typescript-eslint/naming-convention -- End job provenance fields. */
+      const jobs = pages.flatMap((page) => page.jobs);
+      for (const name of [
+        'resolve',
+        `Verify ${tag}`,
+        'Package linux-x64 (unsigned)',
+        'Attach immutable candidate assets',
+      ]) {
+        const matches = jobs.filter((job) => job.name === name);
+        if (
+          matches.length !== 1 ||
+          matches[0]!.head_sha !== source ||
+          String(matches[0]!.run_id) !== runId ||
+          matches[0]!.status !== 'completed' ||
+          matches[0]!.conclusion !== 'success'
+        ) {
+          throw new Error(`Linux source archive prerequisite did not succeed at the exact source/run: ${name}`);
+        }
+      }
     }
     command('git', ['merge-base', '--is-ancestor', source, 'HEAD']);
     await output('source', source);

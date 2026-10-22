@@ -4,7 +4,8 @@
 # Optional env: none. Usage: invoked over SSH by hosted-linux-vm.sh in qualification mode.
 # Exit codes: 0 harness/cleanup passed; nonzero missing prerequisite, qualification or cleanup failure.
 set -euo pipefail
-umask 077
+# The transferred credential file is already 0600; public source/package directories need normal modes.
+umask 022
 export PATH="$HOME/node/bin:$PATH"
 [[ "$(id -un)" == tau && "$(id -u)" != 0 && "$(cat /proc/1/comm)" == systemd ]]
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \

@@ -15,7 +15,6 @@ import {
 } from '#graphics/three/controls/section-handles.js';
 import type { SectionHandle } from '#graphics/three/controls/section-handles.js';
 import type { SectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
-import { ensureSelectorLabelAtlasReady } from '#graphics/three/controls/selector-label-atlas.js';
 import { SceneOverlay } from '#graphics/three/scene-overlay.jsx';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { createRafCoalescer } from '#graphics/three/utils/raf-coalescer.js';
@@ -113,24 +112,6 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
     },
     [handles],
   );
-
-  useEffect(() => {
-    if (!planePicker) {
-      return undefined;
-    }
-    const cancellation = { cancelled: false };
-    // async-iife: bootstrap — React effects cannot be async; the tile labels redraw once the web font settles,
-    // and teardown simply suppresses the repaint.
-    void (async () => {
-      await ensureSelectorLabelAtlasReady();
-      if (!cancellation.cancelled) {
-        invalidate();
-      }
-    })();
-    return () => {
-      cancellation.cancelled = true;
-    };
-  }, [invalidate, planePicker]);
 
   useFrame((state) => {
     if (isActive) {

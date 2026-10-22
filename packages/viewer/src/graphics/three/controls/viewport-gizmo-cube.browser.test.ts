@@ -67,6 +67,25 @@ it.each(['light', 'dark', 'black', 'high-contrast'])(
   },
 );
 
+it('should resolve the section plane tiles to their axis hues, deeper for hover and selection', () => {
+  const { planeTiles } = readViewportGizmoStyle({
+    container: document.body,
+    colorScheme: 'light',
+    isHighContrast: false,
+    accentColor: '#008c7d',
+  });
+  const channels = (color: number): Readonly<{ r: number; g: number; b: number }> => new Color(color);
+  // Each axis's strongest channel is its own: X red, Y green, Z blue, as the axis triad.
+  expect(channels(planeTiles.x.edge).r).toBeGreaterThan(channels(planeTiles.x.edge).b);
+  expect(channels(planeTiles.y.edge).g).toBeGreaterThan(channels(planeTiles.y.edge).r);
+  expect(channels(planeTiles.z.edge).b).toBeGreaterThan(channels(planeTiles.z.edge).r);
+  for (const tints of Object.values(planeTiles)) {
+    expect(new Set([tints.edge, tints.strong, tints.deep]).size).toBe(3);
+    const lightness = (color: number): number => new Color(color).getHSL({ h: 0, s: 0, l: 0 }).l;
+    expect(lightness(tints.deep)).toBeLessThan(lightness(tints.strong));
+  }
+});
+
 it.each(['webgl', 'webgpu'] as const)(
   'should keep the %s cube opaque inside and antialiased outside',
   async (backend) => {

@@ -5,8 +5,13 @@ import type { MockProxy } from 'vitest-mock-extended';
 import {
   createSectionPlanePicker,
   resolveSectionPlanePickerRect,
+  resolveSectionPlaneTileBasis,
 } from '#graphics/three/controls/section-plane-picker.js';
-import type { SectionPlanePickerRenderer } from '#graphics/three/controls/section-plane-picker.js';
+import type {
+  SectionPlanePicker,
+  SectionPlanePickerRenderer,
+  SectionPlanePickerStyle,
+} from '#graphics/three/controls/section-plane-picker.js';
 
 const canvasHeight = 600;
 
@@ -19,6 +24,25 @@ const createRenderer = (isWebGpu: boolean): MockProxy<SectionPlanePickerRenderer
   });
   renderer.getViewport.mockImplementation((target) => target.set(0, 0, 800, canvasHeight));
   return renderer;
+};
+
+/* oxlint-disable tau-lint/no-hardcoded-color -- distinct fixture tints, so each state's colour is identifiable */
+const style: SectionPlanePickerStyle = {
+  face: 0xdd_dd_dd,
+  label: 0x22_22_22,
+  font: 'sans-serif',
+  planeTiles: {
+    x: { edge: 0xe0_80_80, strong: 0xf0_50_50, deep: 0xa0_30_30 },
+    y: { edge: 0x80_c0_80, strong: 0x50_d0_50, deep: 0x30_90_30 },
+    z: { edge: 0x80_a0_e0, strong: 0x50_80_f0, deep: 0x30_50_a0 },
+  },
+};
+/* oxlint-enable tau-lint/no-hardcoded-color */
+
+const createStyledPicker = (): SectionPlanePicker => {
+  const picker = createSectionPlanePicker();
+  picker.setStyle(style);
+  return picker;
 };
 
 /** Looks down −Z, so the XY tile faces the camera at the picker's centre. */
@@ -66,7 +90,7 @@ describe('section plane picker', () => {
       viewportY: 508,
     },
   ] as const)('should follow $placement', ({ isWebGpu, cubeViewport, rect, viewportY }) => {
-    const picker = createSectionPlanePicker();
+    const picker = createStyledPicker();
     const renderer = createRenderer(isWebGpu);
 
     picker.render({ renderer, camera: createTopCamera(), cubeViewport });
@@ -80,7 +104,7 @@ describe('section plane picker', () => {
   });
 
   it('should pick the tile under a point in its square, and nothing outside it', () => {
-    const picker = createSectionPlanePicker();
+    const picker = createStyledPicker();
     picker.render({ renderer: createRenderer(false), camera: createTopCamera(), cubeViewport: [704, 494, 96, 96] });
 
     expect(picker.pick(620 + 44, 14 + 44)).toBe('xy');
@@ -97,58 +121,132 @@ describe('section plane picker', () => {
         camera.updateProjectionMatrix();
       }
     });
-    const picker = createSectionPlanePicker();
+    const picker = createStyledPicker();
     picker.render({ renderer, camera: createTopCamera(), cubeViewport: [704, canvasHeight - 96, 96, 96] });
 
     expect(picker.camera).toHaveProperty('reversedDepth', true);
     expect(picker.pick(620 + 44, 508 + 44)).toBe('xy');
   });
 
-  it('should stand the current plane forward and the others back until hovered', () => {
+  it('should draw nothing until the view cube has styled it', () => {
     const picker = createSectionPlanePicker();
     const renderer = createRenderer(false);
+
     picker.render({ renderer, camera: createTopCamera(), cubeViewport: [704, 494, 96, 96] });
-    const scene = renderer.render.mock.calls[0]?.[0];
-    /** The tiles' scales, XY, XZ and YZ. */
-    const scales = (): number[] => {
-      const values: number[] = [];
-      scene?.traverse((object) => {
-        if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshMatcapMaterial) {
-          values.push(object.scale.x);
-        }
-      });
-      return values;
-    };
 
-    picker.paint({ current: 'xy' });
-    expect(scales()).toEqual([1.04, 0.92, 0.92]);
-
-    picker.paint({ current: 'xy', hovered: 'xz', active: 'yz' });
-    expect(scales()).toEqual([1.04, 1.1, 0.96]);
+    expect(renderer.render).not.toHaveBeenCalled();
+    expect(picker.rect).toBeUndefined();
   });
 
-  it('should set every tile back and fade the tiles and labels while dimmed, hovered or not', () => {
-    const picker = createSectionPlanePicker();
-    /** Each tile's scale and opacity, XY, XZ and YZ, and the labels' opacity. */
-    const look = (): Readonly<{ scales: number[]; opacities: number[]; labelOpacities: number[] }> => {
-      const scales: number[] = [];
-      const opacities: number[] = [];
-      const labelOpacities: number[] = [];
-      picker.scene.traverse((object) => {
-        if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshMatcapMaterial) {
-          scales.push(object.scale.x);
-          opacities.push(object.material.opacity);
-        } else if (object instanceof THREE.Mesh && object.material instanceof THREE.MeshBasicMaterial) {
-          labelOpacities.push(object.material.opacity);
-        }
-      });
-      return { scales, opacities, labelOpacities };
-    };
+  it.each([
+    // The camera on each side of each axis; the tile faces it, printed right-way round from there.
+    { plane: 'xy', side: 1, right: [1, 0, 0], up: [0, 1, 0], normal: [0, 0, 1] },
+    { plane: 'xy', side: -1, right: [1, 0, 0], up: [0, -1, 0], normal: [0, 0, -1] },
+    { plane: 'xz', side: -1, right: [1, 0, 0], up: [0, 0, 1], normal: [0, -1, 0] },
+    { plane: 'xz', side: 1, right: [-1, 0, 0], up: [0, 0, 1], normal: [0, 1, 0] },
+    { plane: 'yz', side: 1, right: [0, 1, 0], up: [0, 0, 1], normal: [1, 0, 0] },
+    { plane: 'yz', side: -1, right: [0, -1, 0], up: [0, 0, 1], normal: [-1, 0, 0] },
+  ] as const)('should print the $plane tile outward and unmirrored on side $side', ({ plane, side, ...expected }) => {
+    const [right, up, normal] = resolveSectionPlaneTileBasis(plane, side);
 
-    picker.paint({ current: undefined, hovered: 'xz', isDimmed: true });
-    expect(look()).toEqual({ scales: [0.92, 0.92, 0.92], opacities: [0.4, 0.4, 0.4], labelOpacities: [0.4, 0.4, 0.4] });
+    // `+ 0` folds negated zeros, which `toEqual` tells apart.
+    const plain = (vector: THREE.Vector3): number[] => vector.toArray().map((value) => value + 0);
+    expect({ right: plain(right), up: plain(up), normal: plain(normal) }).toEqual({
+      right: [...expected.right],
+      up: [...expected.up],
+      normal: [...expected.normal],
+    });
+    // Right-handed, so the label reads as printed rather than mirrored.
+    expect(right.clone().cross(up).dot(normal)).toBe(1);
+  });
 
-    picker.paint({ current: undefined, hovered: 'xz' });
-    expect(look()).toEqual({ scales: [0.92, 1.1, 0.92], opacities: [0.9, 1, 0.9], labelOpacities: [1, 1, 1] });
+  it('should turn each tile to the side of its axis that faces the camera', () => {
+    const picker = createStyledPicker();
+    const camera = new THREE.PerspectiveCamera();
+    camera.up.set(0, 0, 1);
+    camera.position.set(-4, -6, 5);
+    camera.lookAt(0, 0, 0);
+    picker.render({ renderer: createRenderer(false), camera, cubeViewport: [704, 494, 96, 96] });
+
+    const normals = Object.fromEntries(
+      ['xy', 'xz', 'yz'].map((plane) => {
+        const tile = picker.scene.getObjectByName(`section-plane-tile:${plane}`);
+        return [
+          plane,
+          new THREE.Vector3(0, 0, 1)
+            .applyQuaternion(tile?.quaternion ?? new THREE.Quaternion())
+            .round()
+            .toArray()
+            .map((value) => value + 0),
+        ];
+      }),
+    );
+    expect(normals).toEqual({ xy: [0, 0, 1], xz: [0, -1, 0], yz: [-1, 0, 0] });
+  });
+
+  /** Each tile's scale, band, face and label opacity, XY, XZ and YZ. */
+  const look = (picker: SectionPlanePicker): ReadonlyArray<Readonly<Record<string, number>>> =>
+    ['xy', 'xz', 'yz'].map((plane) => {
+      const tile = picker.scene.getObjectByName(`section-plane-tile:${plane}`);
+      const [band, face, label] = (tile?.children ?? []) as Array<
+        THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+      >;
+      return {
+        scale: tile?.scale.x ?? Number.NaN,
+        band: band?.material.color.getHex() ?? Number.NaN,
+        face: face?.material.color.getHex() ?? Number.NaN,
+        opacity: label?.material.opacity ?? Number.NaN,
+      };
+    });
+
+  it('should edge every tile in its axis colour, fill the current one and wash a hovered one', () => {
+    const picker = createStyledPicker();
+
+    picker.paint({ current: undefined });
+    expect(look(picker)).toEqual([
+      { scale: 0.94, band: 0x80_a0_e0, face: 0xdd_dd_dd, opacity: 1 },
+      { scale: 0.94, band: 0x80_c0_80, face: 0xdd_dd_dd, opacity: 1 },
+      { scale: 0.94, band: 0xe0_80_80, face: 0xdd_dd_dd, opacity: 1 },
+    ]);
+
+    picker.paint({ current: 'xy', hovered: 'xz', active: 'yz' });
+    const [current, hovered, pressed] = look(picker);
+    expect(current).toEqual({ scale: 1, band: 0x50_80_f0, face: 0x80_a0_e0, opacity: 1 });
+    expect(hovered).toMatchObject({ scale: 1.08, band: 0x50_d0_50 });
+    // Washed part-way from the face tone toward the axis colour.
+    expect(hovered?.['face']).not.toBe(0xdd_dd_dd);
+    expect(hovered?.['face']).not.toBe(0x80_c0_80);
+    expect(pressed).toMatchObject({ scale: 0.96, band: 0xf0_50_50 });
+  });
+
+  it('should deepen the current tile while it is hovered, so hover always shows', () => {
+    const picker = createStyledPicker();
+
+    picker.paint({ current: 'xz', hovered: 'xz' });
+
+    expect(look(picker)[1]).toEqual({ scale: 1.08, band: 0x30_90_30, face: 0x50_d0_50, opacity: 1 });
+  });
+
+  it('should set every tile back and fade it while dimmed, hovered or not', () => {
+    const picker = createStyledPicker();
+
+    picker.paint({ current: 'xy', hovered: 'xz', isDimmed: true });
+    expect(look(picker)).toEqual([
+      { scale: 0.94, band: 0x80_a0_e0, face: 0xdd_dd_dd, opacity: 0.4 },
+      { scale: 0.94, band: 0x80_c0_80, face: 0xdd_dd_dd, opacity: 0.4 },
+      { scale: 0.94, band: 0xe0_80_80, face: 0xdd_dd_dd, opacity: 0.4 },
+    ]);
+  });
+
+  it('should keep its state when the view cube restyles it', () => {
+    const picker = createStyledPicker();
+    picker.paint({ current: 'yz' });
+
+    picker.setStyle({
+      ...style,
+      planeTiles: { ...style.planeTiles, x: { edge: 0x11_11_11, strong: 0x22_22_22, deep: 0x33_33_33 } },
+    });
+
+    expect(look(picker)[2]).toEqual({ scale: 1, band: 0x22_22_22, face: 0x11_11_11, opacity: 1 });
   });
 });

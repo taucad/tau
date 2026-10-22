@@ -145,10 +145,6 @@ import {
 import type { QuickLookResult } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
-/* Must precede `app.whenReady()`: a scheme cannot gain `standard`/`secure`
- * privileges once the network service has started. */
-protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
-
 /* A packaged build ignores endpoint, renderer, client-root, executable-path and
  * `TAU_E2E_*` overrides unless it was packaged to honour them (ad-hoc and
  * certificate-signed or unsigned development packages; never a release). Scrubbed before anything below
@@ -238,6 +234,10 @@ if (routeQualification) {
 }
 // Crashpad may create profile files, so initialize only after the pristine probe admission above.
 initializeDesktopErrorReporting(desktopChannel);
+/* Sentry first registers its IPC scheme and wraps subsequent registrations.
+ * Register app:// afterward so both schemes retain their privileges, still
+ * before app.whenReady() starts the network service. */
+protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* Packaged executable launches skip Playwright's readiness loader. Hold window

@@ -540,6 +540,18 @@ describe('desktop main compute owner', () => {
   };
 
   it(
+    'should register app privileges after Sentry installs its protocol wrapper',
+    async () => {
+      await bootstrap();
+      const { protocol } = await import('electron');
+      expect(state.initializeErrorReporting.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(protocol.registerSchemesAsPrivileged).mock.invocationCallOrder[0] ?? 0,
+      );
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'should open the update surface from the native menu without a modal or restart',
     async () => {
       await bootstrap();

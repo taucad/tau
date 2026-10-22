@@ -9,7 +9,7 @@ umask 022
 export PATH="$HOME/node/bin:$PATH"
 [[ "$(id -un)" == tau && "$(id -u)" != 0 && "$(cat /proc/1/comm)" == systemd ]]
 sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  git git-lfs curl ca-certificates gh python3 openssl gnupg apt-utils unattended-upgrades \
+  git git-lfs curl ca-certificates gh unzip python3 openssl gnupg apt-utils unattended-upgrades \
   libnss3-tools xdg-utils xdotool wmctrl bubblewrap desktop-file-utils libgtk-3-0t64 libsecret-1-0 libasound2t64 \
   libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libxkbcommon0 libxcomposite1 \
   libxdamage1 libxrandr2 libgbm1
@@ -27,7 +27,7 @@ git checkout --detach "$source_sha"
 corepack enable
 pnpm install --frozen-lockfile
 python3 - <<'PYRUN'
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, subprocess, sys, tempfile, zipfile
 root = pathlib.Path.home() / 'tau'
 config = pathlib.Path.home() / 'qualification-env.json'
 values = json.loads(config.read_text())
@@ -43,6 +43,21 @@ subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=mod
                cwd=root, env=env, check=True)
 # The harness creates its own fresh leaf with recursive=false. A fresh clone has no out parent.
 (root / 'out').mkdir(exist_ok=True)
+# Cloud images need not have the desktop config parent; the app's profile leaf must remain absent.
+(pathlib.Path.home() / '.config').mkdir(exist_ok=True)
+# Exercise the same native ZIP listing/extraction used by authenticated artifact admission.
+with tempfile.TemporaryDirectory(prefix='tau-zip-preflight-') as scratch:
+    archive = pathlib.Path(scratch) / 'candidate.zip'
+    with zipfile.ZipFile(archive, 'x') as fixture:
+        fixture.writestr('fixture.txt', 'archive admission prerequisite')
+    listing = subprocess.check_output(['unzip', '-Z1', str(archive)], text=True)
+    if listing.strip() != 'fixture.txt':
+        raise RuntimeError('ZIP prerequisite listing mismatch')
+    extracted = pathlib.Path(scratch) / 'extracted'
+    subprocess.run(['unzip', '-q', str(archive), '-d', str(extracted)], check=True)
+    if (extracted / 'fixture.txt').read_text() != 'archive admission prerequisite':
+        raise RuntimeError('ZIP prerequisite extraction mismatch')
+print('Guest archive tools and fresh-profile parent ready', flush=True)
 if mode == 'tooling':
     config.unlink()
     result = subprocess.run(['pnpm', 'nx', 'run-many', '-p', 'desktop', '-t', 'test-qualification-linux',

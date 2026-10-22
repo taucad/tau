@@ -237,7 +237,7 @@ if (routeQualification) {
   app.commandLine.appendSwitch('remote-debugging-port', '0');
 }
 // Crashpad may create profile files, so initialize only after the pristine probe admission above.
-initializeDesktopErrorReporting();
+initializeDesktopErrorReporting(desktopChannel);
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* Packaged executable launches skip Playwright's readiness loader. Hold window

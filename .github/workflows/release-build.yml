@@ -309,6 +309,8 @@ jobs:
       name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
     env:
       GEOSPEC_WORKERS: 1
+      # Public DSN owned by tau-repo Terraform on each signed desktop environment.
+      SENTRY_DSN: ${{ vars.SENTRY_DSN }}
       # Baked into the desktop main bundle (`tauPostHogClientKey`) from POSTHOG_CLIENT_KEY_PRODUCTION or _STAGING; unset leaves desktop analytics inert.
       POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}

@@ -63,7 +63,7 @@ it('imports inertly, admits a pristine profile, then lets crash reporting create
       mirrorOrigin: 'https://127.0.0.1:4443',
     });
     expect(probe?.stage).toBe('a');
-    initializeDesktopErrorReporting();
+    initializeDesktopErrorReporting('production');
     expect(initialize).toHaveBeenCalledWith(
       expect.objectContaining({ dsn: 'https://key@errors.example/1', sendDefaultPii: false }),
     );
@@ -76,6 +76,13 @@ it('imports inertly, admits a pristine profile, then lets crash reporting create
 it('keeps local builds inert when no release DSN is baked in', async () => {
   vi.stubGlobal('tauSentryDsn', '');
   const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');
-  initializeDesktopErrorReporting();
+  initializeDesktopErrorReporting('production');
   expect(initialize).not.toHaveBeenCalled();
+});
+
+it.each(['staging', 'production'] as const)('labels %s crash reports with the packaged channel', async (channel) => {
+  vi.stubGlobal('tauSentryDsn', 'https://key@errors.example/1');
+  const { initializeDesktopErrorReporting } = await import('#main/error-reporting.js');
+  initializeDesktopErrorReporting(channel);
+  expect(initialize).toHaveBeenCalledWith(expect.objectContaining({ environment: channel, sendDefaultPii: false }));
 });

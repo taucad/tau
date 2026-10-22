@@ -82,6 +82,12 @@ describe('parseProtocolArguments', () => {
     });
   });
 
+  it('should read a negative region coordinate passed as its own argument', () => {
+    expect(
+      parseProtocolArguments([...base, '--region-min', '-5,-2.5,0', '--region-max', '5,2.5,4']).request.region,
+    ).toEqual({ min: [-5, -2.5, 0], max: [5, 2.5, 4] });
+  });
+
   it('should leave out what the call does not carry', () => {
     expect(parseProtocolArguments([...base, '--mesh-angular-tolerance-degrees', '5'])).toEqual({
       request: {

@@ -447,7 +447,10 @@ const openNativeGeoSpecSession = async (root: string): Promise<NativeGeoSpecSess
  * @public
  */
 export const createHostGeoSpecExporter = async (options: {
-  readonly client: () => Promise<HostGeoSpecRuntimeClient & Partial<Pick<RuntimeClient, 'shutdown' | 'terminate'>>>;
+  /** The exporter owns what this returns, so it must say how to release it. */
+  readonly client: () => Promise<
+    HostGeoSpecRuntimeClient & (Pick<RuntimeClient, 'shutdown'> | Pick<RuntimeClient, 'terminate'>)
+  >;
   readonly extensions: readonly string[];
 }): Promise<GeoSpecModelExporter> => tauClientExporter(options);
 

@@ -126,6 +126,28 @@ const protocolOptions = {
 } as const;
 
 /**
+ * Attach a region coordinate to its flag. `commandExporter` passes `--region-min -5,0,0` as two arguments, and strict
+ * `parseArgs` refuses an option value that starts with a dash unless it is written `--region-min=-5,0,0`.
+ *
+ * @param argv - The arguments after `export`.
+ * @returns The arguments with each region coordinate joined to its flag.
+ */
+const joinRegionValues = (argv: readonly string[]): string[] => {
+  const joined: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    const value = argv[index + 1];
+    if ((argument === '--region-min' || argument === '--region-max') && value !== undefined) {
+      joined.push(`${argument}=${value}`);
+      index += 1;
+    } else {
+      joined.push(argument);
+    }
+  }
+  return joined;
+};
+
+/**
  * Read GeoSpec's protocol 1 flags into an export request.
  *
  * @internal
@@ -136,7 +158,12 @@ const protocolOptions = {
 export const parseProtocolArguments = (argv: readonly string[]): ProtocolCall => {
   let values: ReturnType<typeof parseArgs<{ args: string[]; strict: true; options: typeof protocolOptions }>>['values'];
   try {
-    ({ values } = parseArgs({ args: [...argv], strict: true, allowPositionals: false, options: protocolOptions }));
+    ({ values } = parseArgs({
+      args: joinRegionValues(argv),
+      strict: true,
+      allowPositionals: false,
+      options: protocolOptions,
+    }));
   } catch (error) {
     throw usage((error as Error).message);
   }

@@ -108,6 +108,7 @@ if mode == 'tooling':
     print('Native APT signature and lock-contention fixtures passed', flush=True)
     subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-appimage-package', '--skip-nx-cache'], cwd=root, env=env, check=True)
     subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-qualification-electron-writer'], cwd=root, env=env, check=True)
+    subprocess.run(['pnpm', 'nx', 'run', 'desktop:test-qualification-appimage-sandbox'], cwd=root, env=env, check=True)
     result = subprocess.run(['pnpm', 'nx', 'run-many', '-p', 'desktop', '-t', 'test-qualification-linux',
                              'test-qualification-metadata', 'test-qualification-evidence', 'test-qualification-probe-process'], cwd=root, env=env)
     sys.exit(result.returncode)

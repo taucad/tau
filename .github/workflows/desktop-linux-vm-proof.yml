@@ -6,6 +6,7 @@ on:
       - '.github/workflows/desktop-linux-vm-proof.yml'
       - 'apps/desktop/scripts/hosted-linux-*.sh'
       - 'apps/desktop/scripts/qualification-electron-writer.test.mts'
+      - 'apps/desktop/scripts/qualification-appimage-sandbox.test.mts'
       - 'apps/desktop/scripts/appimage-package.test.mts'
       - 'apps/desktop/resources/appimage/AppRun'
       - 'packages/filesystem/src/backend/node/authority-writer-lock*'

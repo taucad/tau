@@ -707,6 +707,14 @@
     },
     "test": {
       "dependsOn": ["test-sourcemaps"]
+    },
+    "test-qualification-appimage-sandbox": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/qualification-appimage-sandbox.test.mts",
+        "cwd": "."
+      }
     }
   }
 }

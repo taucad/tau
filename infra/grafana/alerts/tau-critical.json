@@ -16,7 +16,9 @@
           },
           "datasourceUid": "prometheus",
           "model": {
-            "expr": "redis_connection_state{app=~\".*\",service_name=\"tau-api\"} == 0",
+            "instant": true,
+            "range": false,
+            "expr": "redis_connection_state{app=~\".*\",service_name=\"tau-api\"} == bool 0",
             "intervalMs": 15000,
             "maxDataPoints": 20,
             "refId": "redis_down"

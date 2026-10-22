@@ -15,7 +15,7 @@
     "dashboards/system-overview.json": "76c15090dce7ef3cfad2ae92d0ce3846026e220ff099b42d0e1fee6ce09c8f8c",
     "dashboards/tau-sync.json": "3af2f4a48ed8c22c9d40c3a2c8db20f00720926e07ac4225890c587b6117bcb4",
     "dashboards/websocket-rpc.json": "4b79c58efc8e1ae5215b956e1346d4629a4f83a50215eb1b5ba4fc0fcd05a3fd",
-    "alerts/tau-critical.json": "f817b156107b5a3b3b218c03fdff895d5dd732d2ef03f6b53c1384c1776f4134",
+    "alerts/tau-critical.json": "7e1d068831320238c0f118308a13471061ee83120f7b78ccc97ce69abe5ffca1",
     "alerts/tau-warning.json": "581074f205a2dea288465c234ea59c5cc9eea2b5255d860896d5c3fd2379831b"
   }
 }

@@ -34,8 +34,15 @@ values = json.loads(config.read_text())
 mode = values.pop('TAU_VM_MODE')
 env = dict(os.environ, **values)
 env.update({'DISPLAY': ':0', 'XAUTHORITY': str(pathlib.Path.home()/'.Xauthority'), 'XDG_SESSION_TYPE': 'x11',
-            'TAU_QUALIFICATION_DISPOSABLE_HOST': '1', 'TAU_QUALIFICATION_DIRECTORY': str(root/'out/route-qualification'),
+            'TAU_QUALIFICATION_DISPOSABLE_HOST': '1', 'TAU_QUALIFICATION_DISPOSABLE_VM': '1',
+            'TAU_QUALIFICATION_DIRECTORY': str(root/'out/route-qualification'),
             'GITHUB_WORKSPACE': str(root), 'NX_NO_CLOUD': 'true', 'NX_DAEMON': 'false', 'NX_NATIVE_COMMAND_RUNNER': 'false'})
+# Exercise the real admission helper in tooling as well as installed runs.
+subprocess.run(['node', '--import', '@oxc-node/core/register', '--input-type=module', '--eval',
+                "import { assertDisposableQualificationHost } from './apps/desktop/scripts/qualification-tls.mts'; assertDisposableQualificationHost();"],
+               cwd=root, env=env, check=True)
+# The harness creates its own fresh leaf with recursive=false. A fresh clone has no out parent.
+(root / 'out').mkdir(exist_ok=True)
 if mode == 'tooling':
     config.unlink()
     result = subprocess.run(['pnpm', 'nx', 'run-many', '-p', 'desktop', '-t', 'test-qualification-linux',

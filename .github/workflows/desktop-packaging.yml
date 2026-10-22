@@ -39,6 +39,24 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
+      - name: Observe free hosted Linux virtualization capability (not qualification)
+        if: runner.os == 'Linux'
+        run: |
+          python3 - <<'PYTHON'
+          import fcntl, json, os, platform
+          result = {'architecture': platform.machine(), 'kvmDevice': os.path.exists('/dev/kvm'), 'vmCreated': False}
+          try:
+              with open('/dev/kvm', 'rb') as device:
+                  result['kvmApi'] = fcntl.ioctl(device, 0xAE00, 0)
+                  vm = fcntl.ioctl(device, 0xAE01, 0)
+                  os.close(vm)
+                  result['vmCreated'] = True
+          except OSError as error:
+              result['error'] = str(error)
+          print(json.dumps(result))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Hosted KVM capability only; no stock guest or signed app tested.\n```json\n' + json.dumps(result) + '\n```\n')
+          PYTHON
       - uses: ./.github/actions/setup-nx
       - name: Windows NSIS artifact identity and per-user structure
         if: runner.os == 'Windows'

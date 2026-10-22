@@ -1,0 +1,75 @@
+# Incident recovery for the verified Sentry startup repair. Manual downloads only;
+# native update feeds still require the successor's real signed OTA qualification.
+name: Bootstrap repaired staging desktop
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: desktop-promotion-staging
+  cancel-in-progress: false
+jobs:
+  bootstrap:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: desktop-staging
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Admit the exact verified recovery candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          tag=desktop-staging@0.1.0-staging.329
+          source=3ee03f55070efb22f008a6f41b13f6b14de8eb43
+          mkdir -p out/desktop/bootstrap
+          gh api "repos/$GH_REPO/actions/runs/39729131365" > "$RUNNER_TEMP/run.json"
+          jq -e --arg source "$source" '.head_sha == $source and .path == ".github/workflows/release-build.yml"' "$RUNNER_TEMP/run.json"
+          gh api 'repos/'"$GH_REPO"'/actions/runs/39729131365/jobs?filter=latest&per_page=100' > "$RUNNER_TEMP/jobs.json"
+          for job in 'Verify desktop-staging@0.1.0-staging.329' 'Package macOS arm64 (signed)' 'Package linux-x64 (unsigned)' 'Package win32-x64 (unsigned)' 'Mirror candidate to R2'; do
+            jq -e --arg job "$job" 'any(.jobs[]; .name == $job and .conclusion == "success")' "$RUNNER_TEMP/jobs.json"
+          done
+          gh release download "$tag" --pattern download.json --pattern mirror-receipt.json --dir out/desktop/bootstrap
+          jq -e --arg tag "$tag" --arg source "$source" '.tag == $tag and .sourceCommit == $source and .verified == true' out/desktop/bootstrap/mirror-receipt.json
+          jq -e --arg tag "$tag" --arg source "$source" '.tag == $tag and .sourceCommit == $source and .channel == "staging" and .version == "1.3.29" and .assets["darwin-arm64"].sha256 == "19741ca3c532d39462e1f7244b15a1781824ed301aeeef1226e649dd86266924"' out/desktop/bootstrap/download.json
+          curl --fail --silent --show-error https://downloads.taucad.dev/latest/download.json > "$RUNNER_TEMP/current.json"
+          jq -e '.tag == "desktop-staging@0.1.0-staging.324" or .tag == "desktop-staging@0.1.0-staging.329"' "$RUNNER_TEMP/current.json"
+      - name: Publish the immutable manual bootstrap without an OTA receipt
+        uses: ./.github/actions/release-assets
+        with:
+          tag: desktop-staging@0.1.0-staging.329
+          publish: 'true'
+          latest: 'false'
+          github-token: ${{ github.token }}
+      - name: Advance staging manual downloads only
+        env:
+          DESKTOP_R2_BUCKET: ${{ vars.DESKTOP_R2_BUCKET }}
+          DESKTOP_R2_ENDPOINT: ${{ vars.DESKTOP_R2_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.DESKTOP_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.DESKTOP_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          tag=desktop-staging@0.1.0-staging.329
+          manifest=out/desktop/bootstrap/download.json
+          # Preserve monotonic intent so an older queued promotion cannot undo recovery.
+          aws --endpoint-url "$DESKTOP_R2_ENDPOINT" s3api get-object --bucket "$DESKTOP_R2_BUCKET" --key latest/promotion.json "$RUNNER_TEMP/promotion.json" > /dev/null
+          jq -e '.tag == "desktop-staging@0.1.0-staging.324" or .tag == "desktop-staging@0.1.0-staging.329"' "$RUNNER_TEMP/promotion.json"
+          aws --endpoint-url "$DESKTOP_R2_ENDPOINT" s3api put-object --bucket "$DESKTOP_R2_BUCKET" --key latest/promotion.json --body "$manifest" --content-type application/json --cache-control no-store > /dev/null
+          aws --endpoint-url "$DESKTOP_R2_ENDPOINT" s3api get-object --bucket "$DESKTOP_R2_BUCKET" --key latest/desktop-update-darwin-arm64.json "$RUNNER_TEMP/feed-before.json" > /dev/null
+          for archive in Tau-macos-arm64.zip Tau-linux-x64.tar.gz Tau-win32-x64.zip; do
+            content_type=application/zip
+            if [[ "$archive" == *.tar.gz ]]; then content_type=application/gzip; fi
+            aws --endpoint-url "$DESKTOP_R2_ENDPOINT" s3api copy-object --bucket "$DESKTOP_R2_BUCKET" --key "latest/$archive" --copy-source "$DESKTOP_R2_BUCKET/releases/$tag/$archive" --metadata-directive REPLACE --content-type "$content_type" --cache-control no-store --content-disposition "attachment; filename=\"$archive\"" > /dev/null
+          done
+          aws --endpoint-url "$DESKTOP_R2_ENDPOINT" s3api put-object --bucket "$DESKTOP_R2_BUCKET" --key latest/download.json --body "$manifest" --content-type application/json --cache-control no-store > /dev/null
+          curl --fail --silent --show-error https://downloads.taucad.dev/latest/download.json > "$RUNNER_TEMP/readback.json"
+          diff <(jq -S . "$manifest") <(jq -S . "$RUNNER_TEMP/readback.json")
+          aws --endpoint-url "$DESKTOP_R2_ENDPOINT" s3api get-object --bucket "$DESKTOP_R2_BUCKET" --key latest/desktop-update-darwin-arm64.json "$RUNNER_TEMP/feed-after.json" > /dev/null
+          cmp "$RUNNER_TEMP/feed-before.json" "$RUNNER_TEMP/feed-after.json"
+          echo 'Manual bootstrap 329 published. Native update feeds were not changed; a successor must pass real OTA from this baseline.' >> "$GITHUB_STEP_SUMMARY"

@@ -119,7 +119,13 @@ export type CreateTauAgentHostOptions = {
   readonly model?: AgentSessionModel | undefined;
   readonly modelTransport: ModelTransport;
   readonly toolRegistry: ToolRegistry;
-  /** Opens the project-root `.tau/chats/<chatId>/events.jsonl` appender. */
+  /**
+   * Opens the project-root `.tau/chats/<chatId>/events.jsonl` appender.
+   *
+   * Two views of one chat (XD1): `read`/`readBatch` are this device's own rows, which every run decision reads — run
+   * ids, sequences, leadership epochs, admission and resume markers, approvals — and `messages` is the chat's history
+   * over every device's segment, which is what the model is given and what a turn's history rows are checked against.
+   */
   readonly openEventLog: (chatId: string) => Promise<DurableEventLog>;
   readonly createId?: (() => string) | undefined;
   readonly createLeaderEpoch?: (() => string) | undefined;
@@ -1228,6 +1234,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         legacyConfigs.get(commandId) ?? admissionConfigOf(start.config, { systemPrompt: options.systemPrompt });
       legacyConfigs.delete(commandId);
       const log = await logOf(chatId);
+      /* Whatever sync brought since the log opened joins the history this turn is given (XD1). */
+      await log.refresh?.();
       const events = await log.read();
       const { agent } = config;
       if (agent !== undefined) {
@@ -1368,6 +1376,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       refuseUnplaced();
       const resume = payload as unknown as CommandPayload<'resume'>;
       const log = await logOf(chatId);
+      await log.refresh?.();
       const ledger = await ledgerOf(chatId);
       const entry = ledger.runs[runId];
       const events = await log.read();

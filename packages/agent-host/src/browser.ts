@@ -4,14 +4,17 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
 import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent, StorageDurabilityClass } from '#log/event-types.js';
+import type { ChatLogSegment } from '#log/segments.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { HostClock } from '#harness/session.js';
 import { createBrowserLeadership } from '#browser/leadership.js';
 import {
   chatRecordFileName,
+  chatSegmentsDirectoryName,
   createChatStore,
   isPurgedChatRecord,
+  readChatSegments,
   requireChatPathSegment,
 } from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
@@ -58,6 +61,12 @@ export type ProviderEventLogOptions = {
     unlink(path: string): Promise<void>;
     /** Current durable byte size; omission retains the full-read compatibility fallback. */
     stat?(path: string, options: FileStatOptions): Promise<{ readonly size: number }>;
+    /**
+     * The entry names of a directory, rejecting `ENOENT` when it does not exist. A chat store lists the chat's
+     * `events/` directory with it to read the other devices' segments (XD1); without it the history is this
+     * device's alone.
+     */
+    readdir?(path: string): Promise<readonly string[]>;
   };
 };
 
@@ -142,8 +151,27 @@ export async function createOpfsEventLog(
       return new Uint8Array(await file.arrayBuffer());
     });
   }
+  return openOpfsWriter(options.fileHandle);
+}
 
-  const acquire = (options.fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
+/**
+ * The write half of {@link createOpfsEventLog}.
+ *
+ * @param fileHandle - The log's file handle.
+ * @param segments - Reads the chat's other devices' segments, for the merged history (XD1); none for a bare log.
+ * @returns The appender.
+ */
+const openOpfsWriter = async (
+  fileHandle: FileSystemFileHandle,
+  segments?: () => Promise<readonly ChatLogSegment[]>,
+): Promise<EventLogAppender> => {
+  if (location.origin === 'null') {
+    throw new EventLogError(
+      'STORAGE_NOT_WRITABLE',
+      'OPFS is unavailable on a null origin. Run the dedicated worker from a real secure or localhost origin.',
+    );
+  }
+  const acquire = (fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
   if (typeof acquire !== 'function') {
     throw new EventLogError(
       'STORAGE_NOT_WRITABLE',
@@ -153,7 +181,7 @@ export async function createOpfsEventLog(
 
   let handle: SyncAccessHandle;
   try {
-    handle = await acquire.call(options.fileHandle);
+    handle = await acquire.call(fileHandle);
   } catch (error) {
     throw new EventLogError(
       'WRITER_LOCKED',
@@ -174,6 +202,7 @@ export async function createOpfsEventLog(
     size: async () => handle.getSize(),
     // The exclusive handle is held for the log's life, so every section is already exclusive.
     exclusive: async (section) => section(),
+    ...(segments === undefined ? {} : { segments }),
     close: async () => {
       handle.close();
     },
@@ -185,7 +214,7 @@ export async function createOpfsEventLog(
     handle.close();
     throw error;
   }
-}
+};
 
 /**
  * Open an event log through Tau's abstract filesystem provider or bridge proxy.
@@ -211,11 +240,28 @@ export async function createProviderEventLog(
   options: ProviderEventLogOptions,
 ): Promise<BrowserEventLogReader | EventLogAppender> {
   const { filePath, fileSystem } = options;
+  if (options.access === 'read') {
+    return readerOf(async () =>
+      (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : new Uint8Array(),
+    );
+  }
+  return openProviderWriter(options);
+}
+
+/**
+ * The write half of {@link createProviderEventLog}.
+ *
+ * @param options - The log's options.
+ * @param segments - Reads the chat's other devices' segments, for the merged history (XD1); none for a bare log.
+ * @returns The appender.
+ */
+const openProviderWriter = async (
+  options: ProviderEventLogOptions,
+  segments?: () => Promise<readonly ChatLogSegment[]>,
+): Promise<EventLogAppender> => {
+  const { filePath, fileSystem } = options;
   const readBytes = async (): Promise<Uint8Array<ArrayBuffer>> =>
     (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : new Uint8Array();
-  if (options.access === 'read') {
-    return readerOf(readBytes);
-  }
   const { appendFile } = fileSystem;
   if (!appendFile) {
     throw new EventLogError('STORAGE_NOT_WRITABLE', 'The selected filesystem provider cannot append event-log data.');
@@ -265,6 +311,7 @@ export async function createProviderEventLog(
       return bytes.byteLength;
     },
     exclusive: async (section) => navigator.locks.request(lockName, { mode: 'exclusive' }, section),
+    ...(segments === undefined ? {} : { segments }),
     close: releaseWriterLock,
   };
 
@@ -274,7 +321,7 @@ export async function createProviderEventLog(
     await releaseWriterLock();
     throw error;
   }
-}
+};
 
 /**
  * Read chat attachments through Tau's abstract filesystem provider or bridge proxy (D15).
@@ -397,6 +444,8 @@ const logName = 'events.jsonl';
 export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatStore => {
   const { log } = options;
   const logPath = (chatId: string): string => `.tau/chats/${requireChatPathSegment(chatId)}/${logName}`;
+  const segmentsPath = (chatId: string): string =>
+    `.tau/chats/${requireChatPathSegment(chatId)}/${chatSegmentsDirectoryName}`;
   const recordPath = (chatId: string): string => `.tau/chats/${requireChatPathSegment(chatId)}/${chatRecordFileName}`;
   const decoder = new TextDecoder();
 
@@ -421,6 +470,35 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
       }
       throw error;
     }
+  };
+
+  /**
+   * The entry names of a directory under the OPFS project directory.
+   *
+   * @param directory - The OPFS project directory.
+   * @param path - The directory's root-relative path.
+   * @returns Its entry names; none when it is not there.
+   */
+  const opfsNames = async (directory: FileSystemDirectoryHandle, path: string): Promise<string[]> => {
+    let parent = directory;
+    try {
+      for (const segment of path.split('/')) {
+        // oxlint-disable-next-line no-await-in-loop -- each directory opens inside the one before it.
+        parent = await parent.getDirectoryHandle(segment);
+      }
+    } catch (error) {
+      const { name } = error as { readonly name?: unknown };
+      if (name === 'NotFoundError' || name === 'TypeMismatchError') {
+        return [];
+      }
+      throw error;
+    }
+    const names: string[] = [];
+    // ponytail: `keys()` is in DOM.AsyncIterable, which this package's lib set does not load.
+    for await (const name of (parent as unknown as { keys(): AsyncIterable<string> }).keys()) {
+      names.push(name);
+    }
+    return names;
   };
 
   if (log.kind === 'opfs') {
@@ -466,8 +544,13 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
         const record = await bytesOf(recordPath(chatId));
         return isPurgedChatRecord(record === undefined ? undefined : decoder.decode(record));
       },
+      /* The writer appends to this device's file only; its history also reads the other devices' segments (XD1). */
       openWriter: async (chatId) =>
-        createOpfsEventLog({ fileHandle: (await opfsFile(directory, logPath(chatId), true))!, access: 'write' }),
+        openOpfsWriter((await opfsFile(directory, logPath(chatId), true))!, async () =>
+          readChatSegments(await opfsNames(directory, segmentsPath(chatId)), async (name) =>
+            bytesOf(`${segmentsPath(chatId)}/${name}`),
+          ),
+        ),
       /* OPFS's exclusive handle cannot be stolen from a frozen holder (RH-R12). */
       leadership: leadershipOf(options, false),
     });
@@ -497,12 +580,35 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
       /* This open runs under the chat's Web Lock (M2), so a surviving marker is a dead or stolen holder's; the
        * per-append fence refuses that holder's appends whatever the marker says (EQ2, RH-R12). */
       await fileSystem.unlink(`${filePath}.lock`).catch(() => undefined);
-      return createProviderEventLog({
-        fileSystem,
-        filePath,
-        access: 'write',
-        lockName: `tau-log-append:${options.projectId}/${requireChatPathSegment(chatId)}`,
-      });
+      const { readdir } = fileSystem;
+      const directory = segmentsPath(chatId);
+      return openProviderWriter(
+        {
+          fileSystem,
+          filePath,
+          access: 'write',
+          lockName: `tau-log-append:${options.projectId}/${requireChatPathSegment(chatId)}`,
+        },
+        /* The writer appends to this device's file only; its history also reads the other devices' segments (XD1). */
+        readdir === undefined
+          ? undefined
+          : async () => {
+              let names: readonly string[];
+              try {
+                names = await readdir.call(fileSystem, directory);
+              } catch (error) {
+                const { code } = error as { readonly code?: unknown };
+                if (code === 'ENOENT' || code === 'ENOTDIR') {
+                  return [];
+                }
+                throw error;
+              }
+              return readChatSegments(names, async (name) => {
+                const path = `${directory}/${name}`;
+                return (await fileSystem.exists(path)) ? fileSystem.readFile(path) : undefined;
+              });
+            },
+      );
     },
     /* The provider leg fences each append, so a steal from a silent holder can serve (RH-R12). */
     leadership: leadershipOf(options, true),

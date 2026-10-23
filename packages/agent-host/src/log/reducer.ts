@@ -72,8 +72,41 @@ type EventLogTransition =
 /** What replaying one row of history found; the row is kept either way (CL-R6). @internal */
 export type ReplayAnomaly = SequenceAnomaly | { readonly kind: 'history'; readonly message: string };
 
-/** Incremental reducer used to validate a transition before it reaches storage. @internal */
-export const createEventLogReducer = (): {
+/**
+ * Which rules a reducer applies (CL-R5, CL-R6).
+ *
+ * - `log`: one device's log, folded whole: its term rules and its message history.
+ * - `terms`: only the term rules, over this device's own rows. The integer epoch is monotone within one device's log
+ *   only, so these rules never span a merge.
+ * - `history`: only the message rules, over rows another reader already ordered and de-duplicated, such as
+ *   `mergeLogSegments`'s union of every device's segment.
+ *
+ * @internal
+ */
+export type EventLogReducerMode = 'log' | 'terms' | 'history';
+
+/**
+ * A sequence that holds no term rules (`history` mode).
+ *
+ * @returns A sequence that finds every row new and in order.
+ */
+const unsequenced = (): ReturnType<typeof createEventSequence> => ({
+  check: () => ({ duplicate: false, fingerprint: '' }),
+  commit: () => undefined,
+  replay: () => ({ duplicate: false }),
+  replayOwned: () => ({ duplicate: false }),
+});
+
+/**
+ * Incremental reducer used to validate a transition before it reaches storage.
+ *
+ * @param mode - The rules it applies; `log` (both) when absent.
+ * @returns The reducer.
+ * @internal
+ */
+export const createEventLogReducer = (
+  mode: EventLogReducerMode = 'log',
+): {
   prepare(candidate: AgentLogEvent): EventLogTransition;
   /**
    * Fold one row of history as an opening reader does: never throws. A broken term rule or a history the message
@@ -89,7 +122,8 @@ export const createEventLogReducer = (): {
   /** `false` once a history row was rejected at replay. */
   historyIntact(): boolean;
 } => {
-  const sequence = createEventSequence();
+  const sequence = mode === 'history' ? unsequenced() : createEventSequence();
+  const historyRules = mode !== 'terms';
   const knownMessageIds = new Set<string>();
   const preparedInvocations = new Set<string>();
   const invocationBindings = new Map<string, string>();
@@ -246,7 +280,7 @@ export const createEventLogReducer = (): {
     if (sequenceCheck.duplicate) {
       return { duplicate: true };
     }
-    const apply = opaque ? () => undefined : transitionOf(event);
+    const apply = opaque || !historyRules ? () => undefined : transitionOf(event);
     return {
       duplicate: false,
       event,
@@ -261,6 +295,9 @@ export const createEventLogReducer = (): {
     { event, opaque }: ReadRow,
     replayed: ReturnType<typeof sequence.replay>,
   ): { readonly duplicate: boolean; readonly anomaly?: ReplayAnomaly } => {
+    if (!historyRules) {
+      return replayed;
+    }
     if (!replayed.duplicate && opaque && historyRowTypes.has(event.type)) {
       intact = false;
     }

@@ -8,6 +8,7 @@ import type { AttachmentReader } from '#harness/session-record.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { EventLogError } from '#log/event-log-error.js';
 import type { StorageDurabilityClass } from '#log/event-types.js';
+import type { ChatLogSegment } from '#log/segments.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
@@ -110,6 +111,44 @@ const bindingKey = Symbol('tau.chatStore');
 
 /** The chat record's name beside the log, restated: `@taucad/revisions` owns it and this package does not import it. @internal */
 export const chatRecordFileName = 'chat.json';
+
+/**
+ * The directory beside a chat's `events.jsonl` that holds every other device's log, restated from `@taucad/revisions`
+ * (`chatSegmentPath`: `events/<deviceId>.jsonl`), which this package does not import. @internal
+ */
+export const chatSegmentsDirectoryName = 'events';
+
+/**
+ * The device a segment file belongs to.
+ *
+ * @param name - One entry of the chat's `events/` directory.
+ * @returns The device id `chatSegmentPath` spelled it from, or `undefined` for any other entry.
+ * @internal
+ */
+export const segmentDeviceIdOf = (name: string): string | undefined =>
+  /^[^/\\]+\.jsonl$/u.test(name) ? name.slice(0, -'.jsonl'.length) : undefined;
+
+/**
+ * Read every other device's segment of one chat.
+ *
+ * @param names - The entries of the chat's `events/` directory; none when it does not exist.
+ * @param read - Reads one entry's bytes by name, `undefined` when it vanished meanwhile.
+ * @returns One segment per `<deviceId>.jsonl` entry, in name order.
+ * @internal
+ */
+export const readChatSegments = async (
+  names: readonly string[],
+  read: (name: string) => Promise<Uint8Array<ArrayBuffer> | undefined>,
+): Promise<readonly ChatLogSegment[]> => {
+  const found = await Promise.all(
+    names.toSorted().map(async (name): Promise<ChatLogSegment | undefined> => {
+      const deviceId = segmentDeviceIdOf(name);
+      const bytes = deviceId === undefined ? undefined : await read(name);
+      return deviceId === undefined || bytes === undefined ? undefined : { deviceId, bytes };
+    }),
+  );
+  return found.filter((segment) => segment !== undefined);
+};
 
 /**
  * Whether a chat record's text carries a permanent delete's tombstone.

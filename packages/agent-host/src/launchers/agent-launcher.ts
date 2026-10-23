@@ -570,9 +570,11 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       },
       read: async () => log.read(),
       readBatch: async (input) => log.readBatch(input),
+      /* The chat's history over every device's segment; `read` above stays this device's rows (XD1). */
       messages: async () => log.messages(),
       historyIntact: async () => log.historyIntact(),
       anomalies: async () => log.anomalies(),
+      ...(log.refresh === undefined ? {} : { refresh: log.refresh.bind(log) }),
       close: async () => {
         writers.delete(chatId);
         writerGenerations.delete(chatId);

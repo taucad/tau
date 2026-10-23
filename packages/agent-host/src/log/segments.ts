@@ -13,7 +13,9 @@ import type { AgentLogEvent, RowKey } from '#log/event-types.js';
  *
  * Reading is the other half of that: one ordered view over every segment. The
  * writer is untouched (it still appends to one file) and the reducer stays the
- * single message deriver; this is the step between them.
+ * single message deriver; this is the step between them. Every agent host's
+ * appender folds the model's history through it (XD1), and the UI's display
+ * projection folds the foreign runs it shows.
  *
  * **The epoch does not order anything across devices.** S39 says "the reader
  * concatenates segments in epoch order"; `leaderEpoch` is a random id minted
@@ -110,11 +112,32 @@ const deviceOf = (term: Term): string => [...term.orderByDevice.keys()].toSorted
 export const mergeLogSegments = (
   segments: readonly ChatLogSegment[],
   options: MergeLogSegmentsOptions = {},
+): readonly AgentLogEvent[] =>
+  mergeSegmentRows(
+    segments.map((segment) => ({ deviceId: segment.deviceId, events: parseEventLogBytes(segment.bytes).events })),
+    options,
+  );
+
+/** One device's segment, already parsed: a writer's own rows as it holds them, or a segment it read. @internal */
+export type ParsedLogSegment = Readonly<{ deviceId: string; events: readonly AgentLogEvent[] }>;
+
+/**
+ * {@link mergeLogSegments} over rows already parsed, for a writer that holds its own rows in memory. The kept rows
+ * are the very objects given, so a caller can map a merged row back to where its own segment holds it.
+ *
+ * @param segments - One entry per segment.
+ * @param options - `onConflict` hears about each conflicting copy dropped.
+ * @returns The merged records.
+ * @internal
+ */
+export const mergeSegmentRows = (
+  segments: readonly ParsedLogSegment[],
+  options: MergeLogSegmentsOptions = {},
 ): readonly AgentLogEvent[] => {
   const terms = new Map<string, Term>();
   for (const segment of segments) {
     const introduced = new Set<string>();
-    for (const event of parseEventLogBytes(segment.bytes).events) {
+    for (const event of segment.events) {
       let term = terms.get(event.leaderEpoch);
       if (term === undefined) {
         term = {

@@ -256,6 +256,26 @@ describe('build-id skew guard (DF20)', () => {
     expect(isBuildSuperseded()).toBe(false);
   });
 
+  it('asks again, and resumes, when a tab on its own build appears after the server superseded it', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
+    answerLiveBuild(buildId - 1);
+    announce(buildId + 1);
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (serverConfirmations + 1));
+    });
+    await pause();
+    expect(isBuildSuperseded()).toBe(true);
+
+    // The rollback is undone: a fresh tab loads this build again and announces it.
+    answerLiveBuild(buildId);
+    announce(buildId);
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
+  });
+
   it("resumes writing when a later announcement's check names this build", async () => {
     const { buildId, isBuildSuperseded } = await load();
     answerLiveBuild('unreachable');
@@ -346,7 +366,7 @@ describe('build-id skew guard (DF20)', () => {
     expect(readSupersedingBuildId()).toBe(buildId - 1);
   });
 
-  it("checks a peer's live claim with the server and stays when the server names this build", async () => {
+  it("checks a peer's live claim with the server and stays, without answering it with a claim of its own", async () => {
     const { buildId, isBuildSuperseded } = await load();
     answerLiveBuild(buildId);
     const heard = listen();
@@ -355,7 +375,38 @@ describe('build-id skew guard (DF20)', () => {
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);
-    expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
+    expect(heard.map((event) => event.data as unknown)).not.toContainEqual({ buildId, live: true });
+  });
+
+  it("settles in a bounded number of server checks when two tabs' edges name different builds", async () => {
+    const { buildId, isBuildSuperseded } = await load();
+    // This tab's edge names its own build.
+    const fetchMock = answerLiveBuild(buildId);
+    /* The other tab, on build `buildId - 1`, behind an edge that names that build: it answers each live
+     * claim for another build by checking its own edge and claiming its own build live in turn. */
+    const peer = new BroadcastChannel(channelName);
+    openChannels.push(peer);
+    let peerChecks = 0;
+    peer.addEventListener('message', (event: MessageEvent) => {
+      const message = event.data as { readonly buildId?: number; readonly live?: boolean };
+      if (message.live === true && message.buildId !== buildId - 1) {
+        peerChecks += 1;
+        peer.postMessage({ buildId: buildId - 1, live: true });
+      }
+    });
+
+    // The other tab boots and announces its (older) build plainly; this tab answers with its own.
+    announce(buildId - 1);
+    peer.postMessage({ buildId: buildId - 1, live: true });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 300);
+      });
+    });
+
+    expect(isBuildSuperseded()).toBe(false);
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(peerChecks).toBeLessThanOrEqual(1);
   });
 
   it.each<LiveAnswer>(['unreachable', 'spa-fallback'])(

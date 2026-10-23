@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   mapWithConcurrency,
+  parseServedAssetsIndex,
   planRetention,
   retainPreviousAssets,
   servedAssetsIndexFileName,
@@ -143,16 +144,27 @@ describe('planRetention', () => {
     ['a string', 'assets/a-1.js'],
     ['an object without a path', { integrity: integrityOf('x'), generation: 0 }],
   ])('should call an index entry that is %s malformed', (_label, entry) => {
-    expect(() => planRetention(indexOf([entry as unknown as ServedAsset]), new Set(), { generations: 2 })).toThrow(
+    expect(() => parseServedAssetsIndex(indexOf([entry as unknown as ServedAsset]), 'the live index')).toThrow(
       'The live asset index has a malformed entry',
     );
   });
 
+  it.each([
+    ['null', null],
+    ['an index of another schema', { schema: 'other', assets: [] }],
+    ['an index without assets', { schema: servedAssetsIndexSchema }],
+  ])('should refuse a live index that is %s', (_label, value) => {
+    expect(() => parseServedAssetsIndex(value, 'the live index')).toThrow(/is not a tau-ui-served-assets-v1 index/u);
+  });
+
   it('should keep a path the index lists twice once, at its youngest generation', () => {
-    const twice = indexOf([
-      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
-      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
-    ]);
+    const twice = parseServedAssetsIndex(
+      indexOf([
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
+      ]),
+      'the live index',
+    );
 
     expect(planRetention(twice, new Set(), { generations: 2 })).toStrictEqual([
       { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
@@ -167,7 +179,7 @@ describe('planRetention', () => {
     ['carries a backslash', String.raw`assets/a\b.js`],
   ])('should refuse an index whose path %s', (_label, path) => {
     expect(() =>
-      planRetention(indexOf([{ path, integrity: integrityOf('x'), generation: 0 }]), new Set(), { generations: 2 }),
+      parseServedAssetsIndex(indexOf([{ path, integrity: integrityOf('x'), generation: 0 }]), 'the live index'),
     ).toThrow(/refuses the path/u);
   });
 });
@@ -222,6 +234,26 @@ describe('retainPreviousAssets', () => {
         { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
       ]),
     );
+  });
+
+  it('should recognise the same build by its hashed paths even when injection changed its bytes', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-NEW1.js': 'new1 //# chunkId=run-1', 'assets/route-OLD2.js': 'old2' },
+      indexOf([
+        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1 //# chunkId=run-1'), generation: 0 },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+      ]),
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1 //# chunkId=run-2' });
+
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+
+    const { assets } = await readIndex(client);
+    expect(assets).toContainEqual({
+      path: 'assets/route-OLD2.js',
+      integrity: integrityOf('old2'),
+      generation: 2,
+    });
   });
 
   it('should age the generations when a different build is deployed', async () => {
@@ -283,16 +315,22 @@ describe('retainPreviousAssets', () => {
     );
   });
 
-  it('should treat an HTML page where the index should be as no index yet (a pre-retention host)', async () => {
+  it('should fail the deploy on an HTML page where the index should be (a catch-all or maintenance page)', async () => {
     const live = await startLiveDeploy({ [servedAssetsIndexFileName]: '<!DOCTYPE html><title>Tau</title>' }, undefined);
     const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
 
-    const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+    await expect(retainPreviousAssets({ clientDirectory: client, origin: live.origin })).rejects.toThrow(
+      /answered 200 .*not the index.*TAU_RETAIN_ASSETS_SKIP/u,
+    );
+  });
+
+  it('should ship past an HTML page where the index should be only when retention is skipped', async () => {
+    const live = await startLiveDeploy({ [servedAssetsIndexFileName]: '<!DOCTYPE html><title>Tau</title>' }, undefined);
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin, skip: true });
 
     expect(result.retained).toBe(0);
-    expect(await readIndex(client)).toStrictEqual(
-      indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
-    );
   });
 
   it.each<readonly [string, 'unavailable' | { readonly status: number }]>([

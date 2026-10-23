@@ -17,10 +17,11 @@
  *
  * It fails closed: a malformed index, an asset that does not match its integrity,
  * a listed asset the live deploy lost, or a live index it cannot read (a network
- * error, a 5xx or any other status but 404, after the retries) fails the build,
- * since publishing then would drop every retained asset. Only a live site without
- * an index yet (a 404, or a 200 page that is not JSON: the first deploy that runs
- * this) keeps nothing and says so.
+ * error, any status but 200 or 404 after the retries, or a 200 that is not the
+ * JSON index, such as an SPA catch-all) fails the build, since publishing then
+ * would drop every retained asset. Only a 404 means the live site has no index
+ * yet; it keeps nothing and says so. A site whose catch-all answers 200 needs
+ * `TAU_RETAIN_ASSETS_SKIP=1` for the first deploy that runs this.
  *
  * Optional env vars:
  *   TAU_RETAIN_ASSETS_FROM   Netlify origin of the live deploy, e.g. https://taucad-prod-us.netlify.app
@@ -135,33 +136,56 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
 };
 
 /**
- * Whether the new build is the one the live deploy already serves: its own assets are exactly the
- * live index's generation `0`. The build id cannot tell, since every build stamps a fresh one
- * (`vite.config.ts`) while its client chunks keep their hashes.
+ * Check a live index, which arrives as untrusted JSON, once: its schema, every entry, and one entry
+ * per path (a path listed twice keeps its youngest generation, so it is downloaded once).
+ *
+ * @param value - The parsed JSON.
+ * @param source - Where it came from, for the error.
+ * @returns The index with checked entries.
+ * @throws When the schema, an entry or a path is not one this script publishes.
+ */
+export const parseServedAssetsIndex = (value: unknown, source: string): ServedAssetsIndex => {
+  const index = (typeof value === 'object' && value !== null ? value : {}) as Partial<
+    Record<'schema' | 'assets', unknown>
+  >;
+  if (index.schema !== servedAssetsIndexSchema || !Array.isArray(index.assets)) {
+    throw new Error(`${source} is not a ${servedAssetsIndexSchema} index.`);
+  }
+  const youngest = new Map<string, ServedAsset>();
+  for (const entry of index.assets as readonly unknown[]) {
+    const asset = assertServedAsset(entry);
+    const known = youngest.get(asset.path);
+    if (known === undefined || asset.generation < known.generation) {
+      youngest.set(asset.path, asset);
+    }
+  }
+  return { schema: servedAssetsIndexSchema, assets: [...youngest.values()] };
+};
+
+/**
+ * Whether the new build is the one the live deploy already serves: its own asset paths are exactly
+ * the live index's generation `0`. The paths carry Vite's content hashes, taken before source-map
+ * injection, so they identify the build even if an injector stamps per-run ids into the bytes (the
+ * unpinned `npx @posthog/cli` has minted random chunk ids in older modes). The build id cannot tell
+ * either, since every build stamps a fresh one (`vite.config.ts`).
  *
  * @param previous - The live deploy's index.
  * @param own - The new build's own assets.
  * @returns `true` for a redeploy of the same build, whose generations must not age.
  */
 export const isSameBuild = (previous: ServedAssetsIndex, own: readonly ServedAsset[]): boolean => {
-  const live = new Set(
-    (previous.assets as readonly unknown[])
-      .map((entry) => assertServedAsset(entry))
-      .filter((asset) => asset.generation === 0)
-      .map((asset) => `${asset.path}\0${asset.integrity}`),
-  );
-  return live.size === own.length && own.every((asset) => live.has(`${asset.path}\0${asset.integrity}`));
+  const live = new Set(previous.assets.filter((asset) => asset.generation === 0).map((asset) => asset.path));
+  return live.size === own.length && own.every((asset) => live.has(asset.path));
 };
 
 /**
  * The assets a new deploy keeps from the live one.
  *
- * @param previous - The live deploy's index.
+ * @param previous - The live deploy's index, checked ({@link parseServedAssetsIndex}).
  * @param ownPaths - Asset paths the new build has itself.
  * @param options - `generations`: deploys after its own that an asset stays served for; `shouldAge`:
  *   `false` for a redeploy of the same build ({@link isSameBuild}), whose ages stay as listed.
  * @returns The assets to download, one generation older than the live index lists them unless not aging.
- * @throws When the index names a path outside `assets/`.
  */
 export const planRetention = (
   previous: ServedAssetsIndex,
@@ -170,16 +194,7 @@ export const planRetention = (
 ): readonly ServedAsset[] => {
   const { generations = retainedGenerations, shouldAge = true } = options;
   const step = shouldAge ? 1 : 0;
-  // One entry per path, at its youngest generation: a path listed twice is downloaded once.
-  const youngest = new Map<string, ServedAsset>();
-  for (const entry of previous.assets as readonly unknown[]) {
-    const asset = assertServedAsset(entry);
-    const known = youngest.get(asset.path);
-    if (known === undefined || asset.generation < known.generation) {
-      youngest.set(asset.path, asset);
-    }
-  }
-  return [...youngest.values()]
+  return previous.assets
     .filter(
       (asset) =>
         asset.generation + step <= generations && !ownPaths.has(asset.path) && !isNeverLoadedByPages(asset.path),
@@ -318,20 +333,26 @@ const readLiveIndex = async (origin: string, transport: Transport): Promise<Serv
     // After the retries: a live deploy that cannot be reached, or keeps failing, may still have assets to keep.
     throw unreadableIndex(origin, String(error));
   }
-  /* No index yet: a 404, or an OK page that is not JSON. A host from before retention answers this
-   * path with its app's HTML (production on Fly answered 200 text/html on 2026-10-23). */
-  if (response.status === 404 || (response.status === 200 && !response.contentType.includes('application/json'))) {
+  // No index yet: only a 404. The first deploy that runs this on a site whose catch-all answers 200 skips once.
+  if (response.status === 404) {
     console.log(`→ ${origin} publishes no ${servedAssetsIndexFileName} yet; nothing to retain.`);
     return undefined;
   }
   if (response.status !== 200) {
     throw unreadableIndex(origin, `answered ${String(response.status)}`);
   }
-  const index = JSON.parse(new TextDecoder().decode(response.body)) as Partial<ServedAssetsIndex>;
-  if (index.schema !== servedAssetsIndexSchema || !Array.isArray(index.assets)) {
-    throw new Error(`${origin}/${servedAssetsIndexFileName} is not a ${servedAssetsIndexSchema} index.`);
+  /* A 200 that is not the index (an SPA catch-all, a maintenance page, a rollback to a deploy from
+   * before retention) may stand in front of assets pages still load: it fails rather than keep none. */
+  if (!response.contentType.includes('application/json')) {
+    throw unreadableIndex(origin, `answered 200 ${response.contentType || 'without a content type'}, not the index`);
   }
-  return index as ServedAssetsIndex;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(response.body));
+  } catch (error) {
+    throw unreadableIndex(origin, `answered JSON that does not parse (${String(error)})`);
+  }
+  return parseServedAssetsIndex(parsed, `${origin}/${servedAssetsIndexFileName}`);
 };
 
 type Download = { readonly origin: string; readonly clientDirectory: string; readonly transport: Transport };

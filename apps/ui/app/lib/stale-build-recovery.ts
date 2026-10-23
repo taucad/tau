@@ -102,15 +102,21 @@ export type StaleBuildRecoveryOptions = {
    */
   readonly subscribeLiveBuildConfirmed?: (listener: () => void) => () => void;
   /**
-   * Report a failure decided genuine (`current`) that nothing else reports: one a boundary caught,
-   * or one a deploy first explained and the server then took back. Called once per failure.
+   * Report a failure decided genuine (`current`), to each destination at most once. Analytics hears
+   * every genuine failure, wherever it was caught. Sentry hears it here only when nothing else
+   * reports it: a boundary caught it, or a deploy first explained it (so `classify` dropped
+   * Sentry's own event) and the server then took that back. A global listener's genuine failure
+   * reaches Sentry through Sentry's own handler.
    */
-  readonly onGenuineFailure?: (failure: unknown) => void;
+  readonly onGenuineFailure?: (failure: unknown, destinations: GenuineReportDestinations) => void;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
   readonly reloadTimeout?: number;
 };
+
+/** Where one genuine failure's report goes this time: each destination hears a failure once. */
+export type GenuineReportDestinations = { readonly sentry: boolean; readonly analytics: boolean };
 
 /**
  * Where a failure was caught: by a React boundary (the route error page, `onCaughtError`), whose
@@ -158,12 +164,20 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   const sources = new WeakMap<WeakKey, FailureSource>();
   /** Failures a deploy explains (`reloading` or `superseded`), decided again if the server takes that back. */
   const explained = new Set<WeakKey>();
-  /** Failures already handed to {@link StaleBuildRecoveryOptions.onGenuineFailure}. */
-  const reported = new WeakSet();
-  const classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
+  /** Failures only `classify` saw and called a deploy's, whose Sentry events were dropped for it. */
+  const classifiedExplained = new Set<WeakKey>();
+  /** Failures each destination of {@link StaleBuildRecoveryOptions.onGenuineFailure} has heard. */
+  const reportedToSentry = new WeakSet();
+  const reportedToAnalytics = new WeakSet();
+  let classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
+  /** Bumped each time the server names this build again; a decision begun before it cannot stand. */
+  let confirmations = 0;
+  let stallTimer: ReturnType<typeof setTimeout> | undefined;
   const outcomeTopic = new Topic<void>({ name: 'stale-build-outcomes' });
   let reloadState: ReloadState = 'idle';
   const reloadStateTopic = new Topic<void>({ name: 'stale-build-reload' });
+  // Read through a call, so a check after an `await` sees a reload another failure started meanwhile.
+  const readReloadState = (): ReloadState => reloadState;
   const setReloadState = (next: ReloadState): void => {
     if (next !== reloadState) {
       reloadState = next;
@@ -171,20 +185,27 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
   };
 
-  const reportGenuine = (failure: WeakKey): void => {
-    if (!reported.has(failure)) {
-      reported.add(failure);
-      options.onGenuineFailure?.(failure);
+  /** Report a genuine failure to analytics, and to Sentry when `toSentry`, each at most once. */
+  const reportGenuine = (failure: WeakKey, toSentry: boolean): void => {
+    const sentry = toSentry && !reportedToSentry.has(failure);
+    const analytics = !reportedToAnalytics.has(failure);
+    if (!sentry && !analytics) {
+      return;
     }
+    if (sentry) {
+      reportedToSentry.add(failure);
+    }
+    if (analytics) {
+      reportedToAnalytics.add(failure);
+    }
+    options.onGenuineFailure?.(failure, { sentry, analytics });
   };
 
-  /** Record a settled decision; a genuine one a boundary caught is reported, since nothing else will. */
+  /** Record a settled decision; a genuine one is reported (to Sentry only if a boundary caught it). */
   const settle = (failure: WeakKey, outcome: StaleBuildOutcome): void => {
     outcomes.set(failure, outcome);
     if (outcome === 'current') {
-      if (sources.get(failure) === 'boundary') {
-        reportGenuine(failure);
-      }
+      reportGenuine(failure, sources.get(failure) === 'boundary');
     } else {
       explained.add(failure);
     }
@@ -192,21 +213,31 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   };
 
   /** The server runs this build after all: every failure a deploy explained is genuine, and reported once. */
-  const decideAllGenuine = (): void => {
+  const confirmThisBuildLive = (): void => {
+    /* Everything a deploy explained is void at once: decisions still in flight cannot settle as a
+     * deploy (they check `confirmations`), classifications Sentry cached are dropped, and this page's
+     * own reload stops waiting to be called stalled. */
+    confirmations += 1;
+    classifications = new WeakMap();
+    clearTimeout(stallTimer);
+    stallTimer = undefined;
+    setReloadState('idle');
+    for (const failure of classifiedExplained) {
+      reportGenuine(failure, true);
+    }
+    classifiedExplained.clear();
     if (explained.size === 0) {
       return;
     }
     for (const failure of explained) {
-      const current: Promise<StaleBuildOutcome> = Promise.resolve('current');
-      decisions.set(failure, current);
-      classifications.set(failure, current);
+      decisions.set(failure, Promise.resolve('current'));
       outcomes.set(failure, 'current');
-      reportGenuine(failure);
+      reportGenuine(failure, true);
     }
     explained.clear();
     outcomeTopic.emit();
   };
-  options.subscribeLiveBuildConfirmed?.(decideAllGenuine);
+  options.subscribeLiveBuildConfirmed?.(confirmThisBuildLive);
 
   const supersede = (serverBuildId: number): StaleBuildOutcome => {
     options.onSuperseded(serverBuildId);
@@ -240,13 +271,20 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   };
 
   const decide = async (): Promise<StaleBuildOutcome> => {
-    const { answer, replacing: serverBuildId } = await askServer();
-    passOn(answer);
-    if (serverBuildId === undefined) {
-      return 'current';
-    }
+    // A failure while this page's own reload is under way shares its explanation, whatever the server says now.
     if (reloadState === 'pending') {
       return 'reloading';
+    }
+    const askedIn = confirmations;
+    const { answer, replacing: serverBuildId } = await askServer();
+    passOn(answer);
+    // A reload another failure started while this one asked: it covers this failure too, answered or not.
+    if (readReloadState() === 'pending') {
+      return 'reloading';
+    }
+    // The server named this build meanwhile (to another caller): this answer is stale, and the failure genuine.
+    if (serverBuildId === undefined || askedIn !== confirmations) {
+      return 'current';
     }
     if (!options.canReloadSafely() || options.storage === undefined) {
       return supersede(serverBuildId);
@@ -269,17 +307,22 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
      * unload prompt, `use-flush-on-close`). The guard stays, and later failures are offered the reload,
      * never another automatic one. Before offering, the server is asked again: if it names this build
      * by now, every failure the reload covered is decided genuine instead. */
-    setTimeout(() => {
+    const reloadedIn = confirmations;
+    stallTimer = setTimeout(() => {
+      stallTimer = undefined;
       const offerIfStillReplaced = async (): Promise<void> => {
         const { answer, replacing: stillReplacing } = await askServer();
         passOn(answer);
-        if (stillReplacing === undefined) {
-          setReloadState('idle');
-          decideAllGenuine();
+        if (reloadedIn !== confirmations) {
           return;
         }
+        if (answer === options.buildId) {
+          confirmThisBuildLive();
+          return;
+        }
+        // No answer keeps the explanation the deploy gave: only the server naming this build takes it back.
         setReloadState('stalled');
-        options.onSuperseded(stillReplacing);
+        options.onSuperseded(stillReplacing ?? serverBuildId);
       };
       // async-iife: bootstrap -- a timer cannot await; the check acts on its own.
       void offerIfStillReplaced();
@@ -292,11 +335,17 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       if (!isKey(failure)) {
         return decide();
       }
-      if (!sources.has(failure)) {
+      if (sources.get(failure) !== 'boundary') {
+        /* A boundary's word wins over a global listener's: Vite's `vite:preloadError` reports a failure
+         * before the boundary that catches it does, and no global handler reports a caught one. */
         sources.set(failure, source);
+        if (source === 'boundary' && outcomes.get(failure) === 'current') {
+          reportGenuine(failure, true);
+        }
       }
       let decision = decisions.get(failure);
       if (decision === undefined) {
+        const startedIn = confirmations;
         decision = decide();
         decisions.set(failure, decision);
         const decided = decision;
@@ -304,9 +353,18 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         void (async () => {
           const outcome = await decided;
           // A later decision (the server took a deploy's reason back) has replaced this one meanwhile.
-          if (decisions.get(failure) === decided) {
-            settle(failure, outcome);
+          if (decisions.get(failure) !== decided) {
+            return;
           }
+          // The server named this build after the decision began: no deploy explains the failure.
+          if (outcome !== 'current' && startedIn !== confirmations) {
+            decisions.set(failure, Promise.resolve('current'));
+            // Its own report, if any, was dropped as a deploy's (`classify`); this is the one that stands.
+            reportGenuine(failure, true);
+            settle(failure, 'current');
+            return;
+          }
+          settle(failure, outcome);
         })();
       }
       return decision;
@@ -317,9 +375,16 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       if (known !== undefined) {
         return known;
       }
+      const askedIn = confirmations;
       const classification = (async (): Promise<StaleBuildOutcome> => {
         const { replacing } = await askServer();
-        return replacing === undefined ? 'current' : 'superseded';
+        if (replacing === undefined || askedIn !== confirmations) {
+          return 'current';
+        }
+        if (key !== undefined && !decisions.has(key)) {
+          classifiedExplained.add(key);
+        }
+        return 'superseded';
       })();
       if (key !== undefined) {
         classifications.set(key, classification);
@@ -328,7 +393,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     },
     readOutcome: (failure) => (isKey(failure) ? outcomes.get(failure) : undefined),
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
-    readReloadState: () => reloadState,
+    readReloadState,
     subscribeReloadState: (listener) => reloadStateTopic.subscribe(listener),
     confirmArrival() {
       try {
@@ -392,10 +457,14 @@ const getPageRecovery = (): StaleBuildRecovery => {
     onSuperseded: offerReload,
     onLiveBuild: recordLiveBuild,
     subscribeLiveBuildConfirmed,
-    onGenuineFailure: (failure) => {
-      void reportUiError(failure);
-      genuineForAnalytics.push(failure);
-      genuineFailureTopic.emit();
+    onGenuineFailure: (failure, { sentry, analytics }) => {
+      if (sentry) {
+        void reportUiError(failure);
+      }
+      if (analytics) {
+        genuineForAnalytics.push(failure);
+        genuineFailureTopic.emit();
+      }
     },
     canReloadSafely: () => !hasUserInteracted && performance.now() <= autoReloadWindow,
   });

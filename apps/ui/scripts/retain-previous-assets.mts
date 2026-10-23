@@ -27,6 +27,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
+import { setTimeout } from 'node:timers/promises';
 
 /** File the new deploy publishes at its root, listing every asset it serves. */
 export const servedAssetsIndexFileName = 'tau-served-assets.json';
@@ -54,7 +55,22 @@ export type ServedAssetsIndex = {
 const assetPath = /^assets\/[\w.-]+(?:\/[\w.-]+)*$/u;
 const sha384Integrity = /^sha384-[A-Za-z0-9+/]+={0,2}$/u;
 const downloadConcurrency = 8;
-const attempts = 3;
+/** Milliseconds to wait before each retry of a failed request. */
+const retryBackoff = [1000, 2000, 4000] as const;
+/** Milliseconds one request may take, the body included. */
+const defaultRequestTimeout = 30_000;
+
+/**
+ * Files only the local Node server uses: precompressed siblings (`compress-static-assets.mts`)
+ * and source maps, which the upload deletes before a deploy. Netlify neither serves them as
+ * chunks nor needs them kept.
+ */
+const isLocalOnly = (path: string): boolean => /\.(?:br|gz|map)$/u.test(path);
+
+type Transport = {
+  readonly requestTimeout: number;
+  readonly wait: (milliseconds: number) => Promise<void>;
+};
 
 const integrityOf = (bytes: Uint8Array<ArrayBuffer>): string =>
   `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
@@ -86,14 +102,14 @@ export const planRetention = (
     assertServedAsset(asset);
   }
   return previous.assets
-    .filter((asset) => asset.generation + 1 <= generations && !ownPaths.has(asset.path))
+    .filter((asset) => asset.generation + 1 <= generations && !ownPaths.has(asset.path) && !isLocalOnly(asset.path))
     .map((asset) => ({ ...asset, generation: asset.generation + 1 }));
 };
 
 const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAsset[]> => {
-  const assetsDirectory = join(clientDirectory, 'assets');
-  const entries = await readdir(assetsDirectory, { recursive: true, withFileTypes: true }).catch(() => []);
-  const files = entries.filter((entry) => entry.isFile());
+  // A build without its asset directory is broken; publishing an empty index would drop every retained asset.
+  const entries = await readdir(join(clientDirectory, 'assets'), { recursive: true, withFileTypes: true });
+  const files = entries.filter((entry) => entry.isFile() && !isLocalOnly(entry.name));
   return Promise.all(
     files.map(async (entry) => {
       const absolute = join(entry.parentPath, entry.name);
@@ -103,16 +119,27 @@ const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAs
   );
 };
 
-const fetchWithRetry = async (url: string): Promise<Response> => {
+/** One request, its body read within the timeout; a 5xx or a network error is retried after the backoff. */
+const fetchWithRetry = async (
+  url: string,
+  transport: Transport,
+): Promise<{ readonly status: number; readonly body: Uint8Array<ArrayBuffer> }> => {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
+  for (const backoff of [0, ...retryBackoff]) {
+    if (backoff > 0) {
       // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
-      const response = await fetch(url, { cache: 'no-store' });
+      await transport.wait(backoff);
+    }
+    try {
+      const signal = AbortSignal.timeout(transport.requestTimeout);
+      // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
+      const response = await fetch(url, { cache: 'no-store', signal });
+      // oxlint-disable-next-line no-await-in-loop -- The body belongs to this attempt.
+      const body = new Uint8Array(await response.arrayBuffer());
       if (response.status < 500) {
-        return response;
+        return { status: response.status, body };
       }
-      lastError = new Error(`answered ${String(response.status)}`);
+      lastError = new Error(`${url} answered ${String(response.status)}`);
     } catch (error) {
       lastError = error;
     }
@@ -120,10 +147,10 @@ const fetchWithRetry = async (url: string): Promise<Response> => {
   throw lastError;
 };
 
-const readLiveIndex = async (origin: string): Promise<ServedAssetsIndex | undefined> => {
-  let response: Response;
+const readLiveIndex = async (origin: string, transport: Transport): Promise<ServedAssetsIndex | undefined> => {
+  let response: { readonly status: number; readonly body: Uint8Array<ArrayBuffer> };
   try {
-    response = await fetchWithRetry(`${origin}/${servedAssetsIndexFileName}`);
+    response = await fetchWithRetry(`${origin}/${servedAssetsIndexFileName}`, transport);
   } catch (error) {
     console.warn(`::warning::No assets retained: ${origin} could not be reached (${String(error)}).`);
     return undefined;
@@ -132,27 +159,29 @@ const readLiveIndex = async (origin: string): Promise<ServedAssetsIndex | undefi
     console.log(`→ ${origin} publishes no ${servedAssetsIndexFileName} yet; nothing to retain.`);
     return undefined;
   }
-  if (!response.ok) {
+  if (response.status !== 200) {
     console.warn(
       `::warning::No assets retained: ${origin}/${servedAssetsIndexFileName} answered ${String(response.status)}.`,
     );
     return undefined;
   }
-  const index = (await response.json()) as Partial<ServedAssetsIndex>;
+  const index = JSON.parse(new TextDecoder().decode(response.body)) as Partial<ServedAssetsIndex>;
   if (index.schema !== servedAssetsIndexSchema || !Array.isArray(index.assets)) {
     throw new Error(`${origin}/${servedAssetsIndexFileName} is not a ${servedAssetsIndexSchema} index.`);
   }
   return index as ServedAssetsIndex;
 };
 
-const downloadAsset = async (origin: string, clientDirectory: string, asset: ServedAsset): Promise<number> => {
-  const response = await fetchWithRetry(`${origin}/${asset.path}`);
-  if (!response.ok) {
+type Download = { readonly origin: string; readonly clientDirectory: string; readonly transport: Transport };
+
+const downloadAsset = async ({ origin, clientDirectory, transport }: Download, asset: ServedAsset): Promise<number> => {
+  const response = await fetchWithRetry(`${origin}/${asset.path}`, transport);
+  if (response.status !== 200) {
     throw new Error(
       `${asset.path} answered ${String(response.status)} on ${origin}; the live deploy lost an asset its index lists.`,
     );
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  const bytes = response.body;
   if (integrityOf(bytes) !== asset.integrity) {
     throw new Error(`${asset.path} does not match its integrity in the live index; refusing to publish it.`);
   }
@@ -171,18 +200,28 @@ const downloadAsset = async (origin: string, clientDirectory: string, asset: Ser
 export const retainPreviousAssets = async (options: {
   readonly clientDirectory: string;
   readonly origin: string | undefined;
+  /** Milliseconds one request may take; defaults to 30 s. */
+  readonly requestTimeout?: number;
+  /** Waits out a retry's backoff; replaceable in tests. */
+  readonly wait?: (milliseconds: number) => Promise<void>;
 }): Promise<{ readonly retained: number; readonly bytes: number; readonly index: ServedAssetsIndex }> => {
+  const transport: Transport = {
+    requestTimeout: options.requestTimeout ?? defaultRequestTimeout,
+    wait: options.wait ?? (async (milliseconds) => setTimeout(milliseconds)),
+  };
   const own = await listOwnAssets(options.clientDirectory);
   const origin = options.origin?.replace(/\/+$/u, '');
-  const previous = origin === undefined ? undefined : await readLiveIndex(origin);
+  const previous = origin === undefined ? undefined : await readLiveIndex(origin, transport);
   const kept = previous === undefined ? [] : planRetention(previous, new Set(own.map((asset) => asset.path)));
 
   let bytes = 0;
+  const download: Download = { origin: origin ?? '', clientDirectory: options.clientDirectory, transport };
   const queue = [...kept];
   const worker = async (): Promise<void> => {
     for (let asset = queue.shift(); asset !== undefined; asset = queue.shift()) {
       // oxlint-disable-next-line no-await-in-loop -- Each worker downloads one asset at a time.
-      bytes += await downloadAsset(origin ?? '', options.clientDirectory, asset);
+      const size = await downloadAsset(download, asset);
+      bytes += size;
     }
   };
   await Promise.all(Array.from({ length: Math.min(downloadConcurrency, queue.length) }, worker));

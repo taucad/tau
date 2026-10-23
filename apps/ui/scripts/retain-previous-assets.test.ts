@@ -44,11 +44,20 @@ const createClient = async (files: Readonly<Record<string, string>>): Promise<st
 const startLiveDeploy = async (
   files: Readonly<Record<string, string>>,
   index: ServedAssetsIndex | undefined,
+  misbehave: (path: string, attempt: number) => 'hang' | 'unavailable' | undefined = () => undefined,
 ): Promise<{ readonly origin: string; readonly requests: string[] }> => {
   const requests: string[] = [];
   const server: Server = createServer((request, response) => {
     const path = (request.url ?? '/').slice(1);
     requests.push(path);
+    const fault = misbehave(path, requests.filter((requested) => requested === path).length);
+    if (fault === 'hang') {
+      return;
+    }
+    if (fault === 'unavailable') {
+      response.writeHead(503).end();
+      return;
+    }
     const body = path === servedAssetsIndexFileName && index ? JSON.stringify(index) : files[path];
     if (body === undefined) {
       response.writeHead(404, { 'content-type': 'text/html' }).end('<!DOCTYPE html>');
@@ -62,6 +71,7 @@ const startLiveDeploy = async (
   cleanups.push(
     async () =>
       new Promise<void>((resolve) => {
+        server.closeAllConnections();
         server.close(() => {
           resolve();
         });
@@ -168,6 +178,75 @@ describe('retainPreviousAssets', () => {
     expect(await readIndex(client)).toStrictEqual(
       indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
     );
+  });
+
+  it('should retry an unavailable live deploy, waiting longer each time, before giving up', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+      (path, attempt) => (path === 'assets/route-OLD1.js' && attempt < 3 ? 'unavailable' : undefined),
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const waits: number[] = [];
+
+    await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+    });
+
+    expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
+    expect(waits).toStrictEqual([1000, 2000]);
+  });
+
+  it('should give up on an asset the live deploy never finishes sending', async () => {
+    const live = await startLiveDeploy(
+      {},
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+      (path) => (path === 'assets/route-OLD1.js' ? 'hang' : undefined),
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    await expect(
+      retainPreviousAssets({
+        clientDirectory: client,
+        origin: live.origin,
+        requestTimeout: 50,
+        wait: async () => undefined,
+      }),
+    ).rejects.toMatchObject({ name: 'TimeoutError' });
+  });
+
+  it('should fail when the new build has no asset directory to publish', async () => {
+    const client = await createClient({ 'index.html': '<!DOCTYPE html>' });
+
+    await expect(retainPreviousAssets({ clientDirectory: client, origin: undefined })).rejects.toThrow('ENOENT');
+  });
+
+  it('should leave files only the local Node server uses out of the index and out of retention', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/kcl-OLD1.wasm': 'wasm' },
+      indexOf([
+        { path: 'assets/kcl-OLD1.wasm', integrity: integrityOf('wasm'), generation: 0 },
+        { path: 'assets/kcl-OLD1.wasm.br', integrity: integrityOf('br'), generation: 0 },
+        { path: 'assets/route-OLD1.js.map', integrity: integrityOf('map'), generation: 0 },
+      ]),
+    );
+    const client = await createClient({
+      'assets/kcl-NEW1.wasm': 'new',
+      'assets/kcl-NEW1.wasm.br': 'br',
+      'assets/kcl-NEW1.wasm.gz': 'gz',
+      'assets/route-NEW1.js.map': 'map',
+    });
+
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+
+    const index = await readIndex(client);
+    expect(index.assets.map((asset) => asset.path)).toStrictEqual(['assets/kcl-NEW1.wasm', 'assets/kcl-OLD1.wasm']);
+    expect(live.requests).not.toContain('assets/kcl-OLD1.wasm.br');
+    expect(live.requests).not.toContain('assets/route-OLD1.js.map');
   });
 
   it('should publish an index of its own assets when no live deploy is named', async () => {

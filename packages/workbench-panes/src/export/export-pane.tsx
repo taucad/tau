@@ -13,7 +13,6 @@ import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
-import { useIsInsideDrawer } from '@taucad/ui/components/drawer';
 import { Label } from '@taucad/ui/components/label';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
@@ -500,7 +499,6 @@ function FormatSelector({
   readonly onSelect: (format: FileExtension) => void;
   readonly FileIcon: FileIconComponent;
 }) {
-  const isInsideDrawer = useIsInsideDrawer();
   const [isOpen, setIsOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
 
@@ -549,7 +547,6 @@ function FormatSelector({
             description='Choose a less common export format.'
             searchPlaceHolder='Filter formats…'
             popoverProperties={{ side: 'right', align: 'end', className: 'w-64' }}
-            isNested
             onOpenChange={setIsMoreOpen}
             onSelect={handleSelect}
           >
@@ -576,7 +573,6 @@ function FormatSelector({
       title='Export format'
       description='Choose the format to export.'
       isSearchEnabled={false}
-      isNested={isInsideDrawer}
       popoverProperties={{ align: 'start', className: 'w-(--radix-popover-trigger-width) min-w-56' }}
       footer={moreFormats}
       onOpenChange={setIsOpen}

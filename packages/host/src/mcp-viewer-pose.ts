@@ -23,7 +23,7 @@ import { readModelMechanism, resolveModelPose } from '@taucad/agent-tools/runtim
 
 /** One shown model `pose_model` drives: a drawn file on disk, or a watched source's render held in memory. */
 export type McpViewerPoseTarget = Readonly<
-  { model: TauViewerModel } & ({ absolutePath: string } | { bytes: Uint8Array })
+  { model: TauViewerModel } & ({ absolutePath: string } | { bytes: Uint8Array<ArrayBuffer> })
 >;
 
 /** What the poser needs from the live link to the pages. */

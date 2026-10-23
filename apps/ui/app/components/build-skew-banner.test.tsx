@@ -24,7 +24,16 @@ const announce = (message: unknown): void => {
 
 const openChannels: BroadcastChannel[] = [];
 
-type LiveAnswer = number | 'unreachable';
+type LiveAnswer = number | 'unreachable' | 'spa-fallback';
+
+const respond = (answer: LiveAnswer): Response => {
+  if (answer === 'unreachable') {
+    throw new TypeError('Failed to fetch');
+  }
+  return answer === 'spa-fallback'
+    ? new Response('<!DOCTYPE html>', { headers: { 'content-type': 'text/html' } })
+    : Response.json({ buildId: answer });
+};
 
 /** The server's answer to `/health/build`, settled by the test; counts the requests. */
 const serveLiveBuild = (): {
@@ -38,10 +47,7 @@ const serveLiveBuild = (): {
     const answer = await new Promise<LiveAnswer>((resolve) => {
       waiting.push(resolve);
     });
-    if (answer === 'unreachable') {
-      throw new TypeError('Failed to fetch');
-    }
-    return Response.json({ buildId: answer });
+    return respond(answer);
   });
   return {
     requests: () => requests,
@@ -59,13 +65,10 @@ const serveLiveBuild = (): {
 };
 
 /** The server answers every `/health/build` at once with `answer`. */
-const answerLiveBuild = (answer: LiveAnswer): void => {
-  vi.stubGlobal('fetch', async () => {
-    if (answer === 'unreachable') {
-      throw new TypeError('Failed to fetch');
-    }
-    return Response.json({ buildId: answer });
-  });
+const answerLiveBuild = (answer: LiveAnswer): ReturnType<typeof vi.fn> => {
+  const fetchMock = vi.fn(async () => respond(answer));
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
 };
 
 const listen = (): MessageEvent[] => {
@@ -178,6 +181,51 @@ describe('build-id skew guard (DF20)', () => {
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);
+  });
+
+  it('keeps the old newer-wins rule, and asks no more, on a host without a build endpoint', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, readSupersedingBuildId, peerRecheckDelay } = await load();
+    const fetchMock = answerLiveBuild('spa-fallback');
+
+    announce(buildId + 1);
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * 3);
+    });
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readSupersedingBuildId()).toBe(buildId + 1);
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('stays silent to older tabs once the server has superseded it, so a rollback cannot echo', async () => {
+    const { buildId, isBuildSuperseded } = await load();
+    answerLiveBuild(buildId - 2);
+    announce(buildId + 1);
+    await pause();
+    expect(isBuildSuperseded()).toBe(true);
+    const heard = listen();
+
+    announce(buildId - 2);
+    await pause();
+
+    expect(heard.map((event) => event.data as unknown)).not.toContain(buildId);
+  });
+
+  it("withdraws a deploy's reload offer once the server names this build again", async () => {
+    const { buildId, isReloadOffered, offerReload, readSupersedingBuildId } = await load();
+    act(() => {
+      offerReload(buildId + 1);
+    });
+    expect(isReloadOffered()).toBe(true);
+    answerLiveBuild(buildId);
+
+    announce({ buildId: buildId + 1, live: true });
+    await pause();
+
+    expect(isReloadOffered()).toBe(false);
+    expect(readSupersedingBuildId()).toBe(buildId);
   });
 
   it('names the build the server serves, not the announcing tab, when the server knows better', async () => {

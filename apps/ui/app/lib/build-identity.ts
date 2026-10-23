@@ -46,43 +46,58 @@ export const readBuildIdentity = (): string => {
 /** Same-origin route that names the build the server renders pages for (`routes/health.build.ts`). */
 export const buildIdentityPath = '/health/build';
 
-/** Milliseconds {@link fetchLiveBuildId} waits for the server before giving up. */
+/** Milliseconds {@link askLiveBuild} waits for the server before calling it unreachable. */
 export const liveBuildIdTimeout = 4000;
 
-let liveBuildIdRequest: Promise<number | undefined> | undefined;
+/**
+ * What the server said about its live build: the build id; `none` when the host has no
+ * build endpoint or names no build (the desktop and `tau serve` hosts answer this path
+ * with their SPA `index.html`); `unreachable` when no answer came in time.
+ */
+export type LiveBuildAnswer = number | 'none' | 'unreachable';
 
-const requestLiveBuildId = async (requestTimeout: number): Promise<number | undefined> => {
-  const response = await fetch(buildIdentityPath, {
-    cache: 'no-store',
-    credentials: 'omit',
-    signal: AbortSignal.timeout(requestTimeout),
-  });
-  if (!response.ok) {
-    return undefined;
+let liveBuildRequest: Promise<LiveBuildAnswer> | undefined;
+
+const requestLiveBuild = async (): Promise<LiveBuildAnswer> => {
+  let response: Response;
+  try {
+    response = await fetch(buildIdentityPath, {
+      cache: 'no-store',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(liveBuildIdTimeout),
+    });
+  } catch {
+    return 'unreachable';
   }
-  const { buildId: published } = (await response.json()) as { readonly buildId?: unknown };
-  const liveBuildId = Number(published);
-  return Number.isFinite(liveBuildId) && liveBuildId > 0 ? liveBuildId : undefined;
+  if (!response.ok || !(response.headers.get('content-type') ?? '').includes('application/json')) {
+    return 'none';
+  }
+  try {
+    const { buildId: published } = (await response.json()) as { readonly buildId?: unknown };
+    const liveBuildId = Number(published);
+    return Number.isFinite(liveBuildId) && liveBuildId > 0 ? liveBuildId : 'none';
+  } catch {
+    return 'none';
+  }
 };
 
 /**
  * Ask the server which build it renders pages for, so a page can tell a deploy
  * from a genuine failure (`#lib/stale-build-recovery`) and a live tab from a
- * stale one (`#filesystem/build-skew`). Never answered from a cache; callers that
- * ask while a request is in flight share it, and a later caller asks afresh.
+ * stale one (`#filesystem/build-skew`). Never answered from a cache and never
+ * throws; callers that ask while a request is in flight share it, and a later
+ * caller asks afresh.
  *
- * @param requestTimeout - Milliseconds to wait before giving up.
- * @returns The live build id, or `undefined` when the server names none.
- * @throws When the server cannot be reached in time (a `TimeoutError` after `requestTimeout`).
+ * @returns The live build id, `none` or `unreachable` ({@link LiveBuildAnswer}).
  */
-export const fetchLiveBuildId = async (requestTimeout: number = liveBuildIdTimeout): Promise<number | undefined> => {
-  const settle = async (): Promise<number | undefined> => {
+export const askLiveBuild = async (): Promise<LiveBuildAnswer> => {
+  const settle = async (): Promise<LiveBuildAnswer> => {
     try {
-      return await requestLiveBuildId(requestTimeout);
+      return await requestLiveBuild();
     } finally {
-      liveBuildIdRequest = undefined;
+      liveBuildRequest = undefined;
     }
   };
-  liveBuildIdRequest ??= settle();
-  return liveBuildIdRequest;
+  liveBuildRequest ??= settle();
+  return liveBuildRequest;
 };

@@ -132,13 +132,7 @@ describe('createStaleBuildRecovery', () => {
 
   it.each([
     ['the server runs this build', async (): Promise<number | undefined> => ownBuildId],
-    [
-      'the server cannot be reached',
-      async (): Promise<number | undefined> => {
-        throw new TypeError('offline');
-      },
-    ],
-    ['the server publishes no build id', async (): Promise<number | undefined> => undefined],
+    ['the server cannot be reached or names no build', async (): Promise<number | undefined> => undefined],
   ])('should report a genuine failure when %s', async (_label, fetchServerBuildId) => {
     const { recovery, reload, onSuperseded } = setup({ fetchServerBuildId });
 
@@ -186,7 +180,7 @@ describe('createStaleBuildRecovery', () => {
   });
 
   it('should reload once for failures that arrive together', async () => {
-    // One request serves them: `fetchLiveBuildId` coalesces callers (`build-identity.test.ts`).
+    // One request serves them: `askLiveBuild` coalesces callers (`build-identity.test.ts`).
     const { recovery, reload } = setup();
 
     const outcomes = await Promise.all([recovery.recover(failure()), recovery.recover(failure())]);
@@ -219,6 +213,17 @@ describe('createStaleBuildRecovery', () => {
     expect(onSuperseded).toHaveBeenCalledWith(deployedBuildId);
     await expect(recovery.recover(failure())).resolves.toBe('superseded');
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('should clear the guard of a refused reload, since no loop happened', async () => {
+    vi.useFakeTimers();
+    const { recovery, storage } = setup({ reloadTimeout: 5000 });
+
+    await recovery.recover(failure());
+    expect(storage.entries.get(staleBuildReloadKey)).toBe(guardFor(ownBuildId, deployedBuildId));
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(storage.entries.has(staleBuildReloadKey)).toBe(false);
   });
 
   describe('classify', () => {

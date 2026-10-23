@@ -30,7 +30,7 @@
  */
 
 import { buildId, offerReload, recordLiveBuild } from '#filesystem/build-skew.js';
-import { fetchLiveBuildId } from '#lib/build-identity.js';
+import { askLiveBuild } from '#lib/build-identity.js';
 
 /**
  * What a module load failure turned out to be.
@@ -70,7 +70,7 @@ export const isStaleModuleError = (error: unknown): boolean =>
 export type StaleBuildRecoveryOptions = {
   /** This bundle's build id; `0` means unknown, which never reloads. */
   readonly buildId: number;
-  /** The live server's build id, or `undefined` when it publishes none. May reject when unreachable. */
+  /** The live server's build id, or `undefined` when it names none or cannot be reached. Never rejects. */
   readonly fetchServerBuildId: () => Promise<number | undefined>;
   /** Per-tab storage for the reload guard; `undefined` where none is available. */
   readonly storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
@@ -111,15 +111,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   const decisions = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
   const classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
   let reloadPending = false;
-
-  // Failures that arrive together share one request (`fetchLiveBuildId` coalesces callers); a later one asks again.
-  const askServer = async (): Promise<number | undefined> => {
-    try {
-      return await options.fetchServerBuildId();
-    } catch {
-      return undefined;
-    }
-  };
+  let reloadRefused = false;
 
   const supersede = (serverBuildId: number): StaleBuildOutcome => {
     options.onSuperseded(serverBuildId);
@@ -130,7 +122,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     if (options.buildId === 0) {
       return 'current';
     }
-    const serverBuildId = await askServer();
+    const serverBuildId = await options.fetchServerBuildId();
     if (serverBuildId === undefined || serverBuildId === options.buildId) {
       return 'current';
     }
@@ -138,24 +130,35 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     if (reloadPending) {
       return 'reloading';
     }
-    if (!options.canReloadSafely() || options.storage === undefined) {
+    if (reloadRefused || !options.canReloadSafely() || options.storage === undefined) {
       return supersede(serverBuildId);
     }
+    const { storage } = options;
     const guard = guardFor(options.buildId, serverBuildId);
     try {
-      if (options.storage.getItem(staleBuildReloadKey) === guard) {
+      if (storage.getItem(staleBuildReloadKey) === guard) {
         return supersede(serverBuildId);
       }
-      options.storage.setItem(staleBuildReloadKey, guard);
+      storage.setItem(staleBuildReloadKey, guard);
     } catch {
       // Without a written guard nothing would stop a reload loop.
       return supersede(serverBuildId);
     }
     reloadPending = true;
     options.reload();
-    // A page still here after the timeout had its reload refused (an unload prompt, a blocked navigation).
+    /* A page still here after the timeout had its reload refused (an unload prompt, a blocked
+     * navigation). No loop happened, so the session guard goes; this page offers the reload from
+     * now on instead of asking again, and the next document starts with automatic recovery. */
     setTimeout(() => {
       reloadPending = false;
+      reloadRefused = true;
+      try {
+        if (storage.getItem(staleBuildReloadKey) === guard) {
+          storage.removeItem(staleBuildReloadKey);
+        }
+      } catch {
+        // No storage to tidy.
+      }
       options.onSuperseded(serverBuildId);
     }, options.reloadTimeout ?? reloadTimeout);
     return 'reloading';
@@ -183,7 +186,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         if (options.buildId === 0) {
           return 'current';
         }
-        const serverBuildId = await askServer();
+        const serverBuildId = await options.fetchServerBuildId();
         return serverBuildId === undefined || serverBuildId === options.buildId ? 'current' : 'superseded';
       })();
       if (key !== undefined) {
@@ -218,7 +221,11 @@ let pageRecovery: StaleBuildRecovery | undefined;
 const getPageRecovery = (): StaleBuildRecovery => {
   pageRecovery ??= createStaleBuildRecovery({
     buildId,
-    fetchServerBuildId: fetchLiveBuildId,
+    // Failures that arrive together share one request (`askLiveBuild` coalesces callers); a later one asks again.
+    fetchServerBuildId: async () => {
+      const answer = await askLiveBuild();
+      return typeof answer === 'number' ? answer : undefined;
+    },
     storage: readSessionStorage(),
     reload: () => {
       globalThis.location.reload();

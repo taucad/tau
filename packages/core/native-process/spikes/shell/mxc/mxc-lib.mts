@@ -17,7 +17,7 @@ import { createServer, type Server } from 'node:http';
 import { createRequire } from 'node:module';
 import { arch, platform, release } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 
 import { type Check, check, sha256File, sleep, waitFor, writeJson } from '../lib.mts';
@@ -25,7 +25,10 @@ import { type Check, check, sha256File, sleep, waitFor, writeJson } from '../lib
 export { check, sha256File, sleep, waitFor, writeJson };
 export type { Check };
 
-export const mxcDirectory = dirname(new URL(import.meta.url).pathname);
+// fileURLToPath (not `new URL(...).pathname`): on Windows the latter yields `/D:/a/...`, whose
+// leading slash makes readFileSync resolve a doubled `D:\D:\...` path. fileURLToPath returns the
+// native `D:\a\...` form, so every readPin()/fallback.ps1 path resolves correctly on all platforms.
+export const mxcDirectory = dirname(fileURLToPath(import.meta.url));
 /** Resolve the MXC SDK (and its own package.json) from this spike's node_modules only. */
 const sdkRequire = createRequire(join(mxcDirectory, 'package.json'));
 

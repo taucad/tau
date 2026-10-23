@@ -65,8 +65,6 @@ const sql = async (statement: string): Promise<string> => {
   return result.stdout.trim();
 };
 
-const authHeaders = (): Record<string, string> => ({ authorization: `Bearer ${token}` });
-
 /** Registration is seeded for a free owner: deletion must not require purchasing a sync plan. */
 const seedProject = async (name: string): Promise<string> => {
   const id = `proj_${randomBytes(16).toString('hex').slice(0, 21)}`;
@@ -77,14 +75,16 @@ const seedProject = async (name: string): Promise<string> => {
   return id;
 };
 
-const state = async (id: string): Promise<string> => {
-  const response = await fetch(`${desktopE2EApiUrl}/v1/projects/${id}/deletion`, { headers: authHeaders() });
+const state = async (id: string, sessionToken = token): Promise<string> => {
+  const response = await fetch(`${desktopE2EApiUrl}/v1/projects/${id}/deletion`, {
+    headers: { authorization: `Bearer ${sessionToken}` },
+  });
   expect(response.status).toBe(200);
   return ((await response.json()) as { state: string }).state;
 };
 
 /** Real browser security and a persistent profile, retained after the browser exits. */
-const browser = async (profile: string, touch = false): Promise<BrowserContext> => {
+const browser = async (profile: string, touch = false, sessionToken = token): Promise<BrowserContext> => {
   const context = await chromium.launchPersistentContext(join(artifacts, profile), {
     baseURL: desktopE2EFrontendUrl,
     viewport: { width: 1600, height: 1000 },
@@ -101,7 +101,7 @@ const browser = async (profile: string, touch = false): Promise<BrowserContext> 
       },
     ]);
     const response = await context.request.post(`${desktopE2EApiUrl}/v1/auth/one-time-token/verify`, {
-      data: { token: await mintOneTimeToken(token) },
+      data: { token: await mintOneTimeToken(sessionToken) },
       headers: { origin: desktopE2EFrontendUrl },
     });
     expect(response.status()).toBe(200);
@@ -112,13 +112,20 @@ const browser = async (profile: string, touch = false): Promise<BrowserContext> 
   }
 };
 
-const openDeletion = async (page: Page, name: string, keyboard = false): Promise<void> => {
+const openDeletion = async (
+  page: Page,
+  name: string,
+  input: 'mouse' | 'keyboard' | 'touch' = 'mouse',
+): Promise<void> => {
   const actions = page.getByRole('button', { name: `Actions for ${name}`, exact: true });
-  if (keyboard) {
+  if (input === 'keyboard') {
     await actions.focus();
     await page.keyboard.press('Enter');
     await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).focus();
     await page.keyboard.press('Enter');
+  } else if (input === 'touch') {
+    await actions.tap();
+    await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).tap();
   } else {
     await actions.click();
     await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).click();
@@ -158,7 +165,7 @@ const cli = async (args: readonly string[]): Promise<Record<string, unknown>> =>
 };
 
 /** Install the normal development paid fixture only for the downloaded-copy case. */
-const seedPaidPlan = async (): Promise<void> => {
+const seedPaidPlan = async (email = ownerEmail, accountUserId = userId): Promise<void> => {
   await sql('SELECT 1');
   await execFileAsync(
     process.execPath,
@@ -168,7 +175,7 @@ const seedPaidPlan = async (): Promise<void> => {
       'apps/api/app/testing/development-billing-account.ts',
       'fund',
       '--email',
-      ownerEmail,
+      email,
     ],
     {
       cwd: workspaceRoot,
@@ -184,12 +191,12 @@ const seedPaidPlan = async (): Promise<void> => {
     },
   );
   const accountId = await sql(
-    `SELECT account_id FROM billing.billing_owner_binding WHERE auth_user_id = '${userId}' AND revoked_at IS NULL;`,
+    `SELECT account_id FROM billing.billing_owner_binding WHERE auth_user_id = '${accountUserId}' AND revoked_at IS NULL;`,
   );
   if (!/^[a-zA-Z0-9_-]+$/u.test(accountId)) {
     throw new Error('Missing disposable billing owner binding.');
   }
-  const id = `cpd-${userId}`;
+  const id = `cpd-${accountUserId}`;
   await sql(
     `INSERT INTO billing.billing_stripe_customer (id, account_id, environment, stripe_account_id, livemode) VALUES ('${id}', '${accountId}', 'development', 'acct_cpd07', false);`,
   );
@@ -198,10 +205,10 @@ const seedPaidPlan = async (): Promise<void> => {
   );
 };
 
-const register = async (projectId: string, name: string): Promise<number> => {
+const register = async (projectId: string, name: string, sessionToken = token): Promise<number> => {
   const response = await fetch(`${desktopE2EApiUrl}/v1/projects/${projectId}`, {
     method: 'PUT',
-    headers: { ...authHeaders(), 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${sessionToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ name }),
   });
   await response.arrayBuffer();
@@ -241,6 +248,41 @@ const browserSnapshot = async (
     };
   }, slug);
 
+/** The browser's real Git branch, retained independently of the visible dirty worktree. */
+const browserHead = async (page: Page, slug: string): Promise<string> =>
+  page.evaluate(async (name) => {
+    const opfs = await navigator.storage.getDirectory();
+    const root = await opfs.getDirectoryHandle(name);
+    const git = await root.getDirectoryHandle('.git');
+    const references = await git.getDirectoryHandle('refs');
+    const heads = await references.getDirectoryHandle('heads');
+    const handle = await heads.getFileHandle('main');
+    const file = await handle.getFile();
+    return file.text();
+  }, slug);
+
+/** Create a disposable local account using the real auth endpoints. */
+const createAccount = async (): Promise<{ email: string; token: string; userId: string }> => {
+  const email = `tau-desktop-deletion-${randomUUID()}@example.test`;
+  const password = `Tau-${randomUUID()}-pass`;
+  const headers = { 'content-type': 'application/json', origin: desktopE2EFrontendUrl };
+  const signedUp = await fetch(`${desktopE2EApiUrl}/v1/auth/sign-up/email`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email, password, name: 'Deletion acceptance' }),
+  });
+  expect(signedUp.status).toBe(200);
+  await sql(`UPDATE "user" SET email_verified = true WHERE email = '${email}';`);
+  const signedIn = await fetch(`${desktopE2EApiUrl}/v1/auth/sign-in/email`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ email, password }),
+  });
+  expect(signedIn.status).toBe(200);
+  const account = (await signedIn.json()) as { token: string; user: { id: string } };
+  return { email, token: signedIn.headers.get('set-auth-token') ?? account.token, userId: account.user.id };
+};
+
 describe('completed artifact cloud deletion in native and browser libraries', () => {
   beforeAll(async () => {
     if (
@@ -257,27 +299,11 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
     );
     await mkdir(output, { recursive: true });
     artifacts = await mkdtemp(join(output, 'run-'));
-    const email = `tau-desktop-deletion-${randomUUID()}@example.test`;
-    ownerEmail = email;
-    const password = `Tau-${randomUUID()}-pass`;
-    const headers = { 'content-type': 'application/json', origin: desktopE2EFrontendUrl };
-    const signedUp = await fetch(`${desktopE2EApiUrl}/v1/auth/sign-up/email`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ email, password, name: 'Deletion acceptance' }),
-    });
-    expect(signedUp.status).toBe(200);
-    await sql(`UPDATE "user" SET email_verified = true WHERE email = '${email}';`);
-    const signedIn = await fetch(`${desktopE2EApiUrl}/v1/auth/sign-in/email`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ email, password }),
-    });
-    expect(signedIn.status).toBe(200);
-    const account = (await signedIn.json()) as { token: string; user: { id: string } };
-    token = signedIn.headers.get('set-auth-token') ?? account.token;
-    userId = account.user.id;
-    await writeFile(join(artifacts, 'owner.json'), JSON.stringify({ userId, email }));
+    const owner = await createAccount();
+    ownerEmail = owner.email;
+    token = owner.token;
+    userId = owner.userId;
+    await writeFile(join(artifacts, 'owner.json'), JSON.stringify({ userId, email: ownerEmail }));
     ui = await startUiServer();
   });
 
@@ -303,8 +329,10 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         await page.getByRole('button', { name: 'View mode', exact: true }).click();
         await page.getByRole('menuitemcheckbox', { name: view, exact: true }).click();
         await page.getByPlaceholder('Search projects…').fill(name);
-        await openDeletion(page, name, view === 'Grid');
-        await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await openDeletion(page, name, view === 'Grid' ? 'keyboard' : 'touch');
+        const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
+        expect(await cancel.evaluate((element) => element === document.activeElement)).toBe(true);
+        await (view === 'Table' ? cancel.tap() : page.keyboard.press('Enter'));
         expect(await state(id)).toBe('active');
         expect(
           await page
@@ -321,19 +349,30 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
           expect(committed.status()).toBe(200);
           await route.abort('connectionfailed');
         });
-        await openDeletion(page, name);
+        await openDeletion(page, name, view === 'Table' ? 'touch' : 'mouse');
+        await page.screenshot({ path: join(artifacts, `confirmation-${view.toLowerCase()}.png`), fullPage: true });
         const recovered = page.waitForResponse(
           (response) =>
             response.url() === `${desktopE2EApiUrl}/v1/projects/${id}/deletion` &&
             response.request().method() === 'GET',
         );
-        await page.getByRole('button', { name: 'Delete from Tau Cloud', exact: true }).click();
+        const confirm = page.getByRole('button', { name: 'Delete from Tau Cloud', exact: true });
+        await (view === 'Table' ? confirm.tap() : confirm.click());
         const recoveredResponse = await recovered;
         expect(recoveredResponse.status()).toBe(200);
         expect(await recoveredResponse.json()).toMatchObject({ state: 'deleted', projectId: id });
         await expect.poll(async () => state(id), { timeout: 30_000 }).toBe('deleted');
         await page.reload();
-        await page.getByPlaceholder('Search projects…').fill(name);
+        // Independent cookie-authenticated readback is not invalidated by document replacement.
+        const refreshedResponse = await context.request.get(`${desktopE2EApiUrl}/v1/projects`);
+        expect(refreshedResponse.status()).toBe(200);
+        const projects = (await refreshedResponse.json()) as Array<{ id: string }>;
+        expect(projects.some((project) => project.id === id)).toBe(false);
+        await page
+          .getByPlaceholder('Search projects…')
+          .or(page.getByRole('heading', { name: 'No projects yet', exact: true }))
+          .first()
+          .waitFor();
         await expect
           .poll(async () => page.getByRole('button', { name: `Actions for ${name}`, exact: true }).count())
           .toBe(0);
@@ -352,8 +391,15 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
     const profile = join(artifacts, 'native-profile');
     const root = join(profile, 'home', slug);
     await seedPaidPlan();
+    const collaborator = await createAccount();
+    if (!/^[a-zA-Z0-9_-]+$/u.test(collaborator.userId)) {
+      throw new Error('Unexpected disposable collaborator identity.');
+    }
+    await sql(
+      `INSERT INTO project_collaborator (project_id, user_id, role) VALUES ('${id}', '${collaborator.userId}', 'write');`,
+    );
     const source = join(artifacts, 'native-source');
-    await mkdir(join(source, '.tau/chats'), { recursive: true });
+    await mkdir(source, { recursive: true });
     await mkdir(join(profile, 'home'), { recursive: true });
     const declaration = JSON.stringify({
       $schema: 'https://tau.new/schemas/tau-v1.json',
@@ -362,11 +408,8 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       tags: [],
       assets: { main: { entryPath: 'main.scad' } },
     });
-    const identity = JSON.stringify({ version: 1, projectId: id });
     const chat = JSON.stringify({ marker: 'retained opaque chat bytes', userId });
     await writeFile(join(source, 'tau.json'), declaration);
-    await writeFile(join(source, '.tau/project.json'), identity);
-    await writeFile(join(source, '.tau/chats/preserved.json'), chat);
     await writeFile(join(source, 'main.scad'), 'cube(3);\n');
     await git(source, ['init', '--initial-branch=main']);
     await git(source, ['config', 'user.name', 'Deletion acceptance']);
@@ -384,8 +427,14 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
     await git(root, ['config', 'user.name', 'Deletion acceptance']);
     await git(root, ['config', 'user.email', 'deletion@example.invalid']);
     expect(await readFile(join(root, 'main.scad'), 'utf8')).toBe('cube(3);\n');
+    expect(JSON.parse(await readFile(join(root, '.tau/project.json'), 'utf8'))).toMatchObject({ projectId: id });
+    await mkdir(join(root, '.tau/chats'), { recursive: true });
+    await writeFile(join(root, '.tau/chats/preserved.json'), chat);
     expect(await git(root, ['remote', '-v'])).toContain(`/v1/git/${id}.git`);
-    await git(root, ['remote', 'add', 'independent', 'https://example.invalid/retained.git']);
+    // The scheduler uses Git's first remote. Keep Tau selected while preserving another definition.
+    await git(root, ['remote', 'add', 'z-independent', 'https://example.invalid/retained.git']);
+    const remoteNames = await git(root, ['remote']);
+    expect(remoteNames.split('\n')[0]).toBe('tau');
     await writeFile(join(root, 'main.scad'), 'cube(7); // dirty native work\n');
     let session: DesktopSession | undefined;
     let context: BrowserContext | undefined;
@@ -400,14 +449,37 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       await authenticatePackagedDesktop(session, token);
       await session.page.goto('app://tau/projects');
       await session.page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
-      context = await browser('browser-retained');
+      context = await browser('browser-retained', false, collaborator.token);
       let page = context.pages()[0] ?? (await context.newPage());
+      await page.goto(`${desktopE2EFrontendUrl}/projects`);
+      await page.getByRole('button', { name: `Open ${name}`, exact: true }).click();
+      await page.waitForURL(/\/w\/[^/]+\/[^/?]+/u, { timeout: 120_000 });
+      const browserSlug = decodeURIComponent(new URL(page.url()).pathname.split('/').at(-1)!);
+      await expect
+        .poll(
+          async () =>
+            page.evaluate(async (slug) => {
+              try {
+                const opfs = await navigator.storage.getDirectory();
+                const directory = await opfs.getDirectoryHandle(slug);
+                const handle = await directory.getFileHandle('main.scad');
+                const file = await handle.getFile();
+                return await file.text();
+              } catch {
+                return undefined;
+              }
+            }, browserSlug),
+          { timeout: 120_000 },
+        )
+        .toBe('cube(3);\n');
+      await page.getByRole('button', { name: /^Open Revisions\..*Rev 1/u }).waitFor({ timeout: 120_000 });
+      // Leave the workbench before placing unsaved bytes; the real download has already completed.
       await page.goto(`${desktopE2EFrontendUrl}/projects`);
       await page.evaluate(
         async (input) => {
           const opfs = await navigator.storage.getDirectory();
-          const directory = await opfs.getDirectoryHandle(input.slug, { create: true });
-          const tau = await directory.getDirectoryHandle('.tau', { create: true });
+          const directory = await opfs.getDirectoryHandle(input.slug);
+          const tau = await directory.getDirectoryHandle('.tau');
           const chats = await tau.getDirectoryHandle('chats', { create: true });
           const write = async (parent: FileSystemDirectoryHandle, name: string, text: string): Promise<void> => {
             const handle = await parent.getFileHandle(name, { create: true });
@@ -415,25 +487,33 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
             await stream.write(text);
             await stream.close();
           };
-          await write(directory, 'tau.json', input.declaration);
           await write(directory, 'main.scad', 'sphere(9); // dirty browser work\n');
-          await write(tau, 'project.json', input.identity);
           await write(chats, 'preserved.json', input.chat);
         },
-        { slug, declaration, identity, chat },
+        { slug: browserSlug, chat },
       );
       await page.reload();
       await page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
       const nativeBefore = await nativeSnapshot(root);
-      const browserBefore = await browserSnapshot(page, slug);
+      const browserBefore = await browserSnapshot(page, browserSlug);
+      const browserHeadBefore = await browserHead(page, browserSlug);
+      expect(browserHeadBefore.trim()).toBe(await git(source, ['rev-parse', 'HEAD']));
+      expect(JSON.parse(browserBefore.identity)).toMatchObject({ projectId: id });
+      await page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
+      expect(await page.getByRole('menuitem', { name: 'Delete from Tau Cloud…', exact: true }).count()).toBe(0);
+      await page.keyboard.press('Escape');
+      // The collaborator misses the deletion and must retain its bytes on reconnect.
+      await context.setOffline(true);
       await openDeletion(session.page, name);
       await session.page.getByRole('button', { name: 'Delete from Tau Cloud', exact: true }).click();
       await expect.poll(async () => state(id), { timeout: 30_000 }).toBe('deleted');
       await session.page.getByRole('alertdialog').waitFor({ state: 'detached' });
       expect(await nativeSnapshot(root)).toEqual(nativeBefore);
+      await context.setOffline(false);
       await page.reload();
       await page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
-      expect(await browserSnapshot(page, slug)).toEqual(browserBefore);
+      expect(await browserSnapshot(page, browserSlug)).toEqual(browserBefore);
+      expect(await browserHead(page, browserSlug)).toBe(browserHeadBefore);
       await session.close();
       session = undefined;
       await context.close();
@@ -448,11 +528,12 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       await session.page.goto('app://tau/projects');
       await session.page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
       expect(await nativeSnapshot(root)).toEqual(nativeBefore);
-      context = await browser('browser-retained');
+      context = await browser('browser-retained', false, collaborator.token);
       page = context.pages()[0] ?? (await context.newPage());
       await page.goto(`${desktopE2EFrontendUrl}/projects`);
       await page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
-      expect(await browserSnapshot(page, slug)).toEqual(browserBefore);
+      expect(await browserSnapshot(page, browserSlug)).toEqual(browserBefore);
+      expect(await browserHead(page, browserSlug)).toBe(browserHeadBefore);
       // Duplicate is the product operation that deliberately creates a fresh identity.
       await page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
       await page.getByRole('menuitem', { name: 'Duplicate', exact: true }).click();
@@ -465,13 +546,24 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       const duplicateSlug = decodeURIComponent(
         new URL(duplicateHref!, desktopE2EFrontendUrl).pathname.split('/').at(-1)!,
       );
-      const duplicate = await browserSnapshot(page, duplicateSlug);
+      const duplicate = await page.evaluate(async (slug) => {
+        const opfs = await navigator.storage.getDirectory();
+        const directory = await opfs.getDirectoryHandle(slug);
+        const tau = await directory.getDirectoryHandle('.tau');
+        const sourceHandle = await directory.getFileHandle('main.scad');
+        const identityHandle = await tau.getFileHandle('project.json');
+        const sourceFile = await sourceHandle.getFile();
+        const identityFile = await identityHandle.getFile();
+        return { source: await sourceFile.text(), identity: await identityFile.text() };
+      }, duplicateSlug);
       const duplicateIdentity = JSON.parse(duplicate.identity) as { projectId: string };
       expect(duplicateIdentity.projectId).toMatch(/^proj_[A-Za-z0-9]{21}$/u);
       expect(duplicateIdentity.projectId).not.toBe(id);
       expect(duplicate.source).toBe(browserBefore.source);
-      expect(await register(duplicateIdentity.projectId, duplicateName)).toBe(200);
-      expect(await state(duplicateIdentity.projectId)).toBe('active');
+      // Creating a new cloud identity still requires the collaborator's own sync entitlement.
+      await seedPaidPlan(collaborator.email, collaborator.userId);
+      expect(await register(duplicateIdentity.projectId, duplicateName, collaborator.token)).toBe(200);
+      expect(await state(duplicateIdentity.projectId, collaborator.token)).toBe('active');
       expect(await register(id, name)).toBe(410);
 
       // Local Trash is reversible without reopening the remote's permanently reserved ID.
@@ -498,12 +590,30 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       expect(await readFile(join(root, 'main.scad'), 'utf8')).toBe(nativeBefore['source']);
       expect(await git(root, ['remote', '-v'])).toBe(nativeBefore['remotes']);
       expect(await state(id)).toBe('deleted');
+      await page.getByRole('link', { name: `Open ${name}`, exact: true }).click();
+      await page
+        .getByRole('button', { name: /^Open Revisions\./u })
+        .first()
+        .click();
+      const sync = page.getByRole('region', { name: 'Sync', exact: true });
+      await expect
+        .poll(async () => sync.textContent(), { timeout: 60_000 })
+        .toMatch(/no repository|deleted|not found/iu);
+      expect(await browserSnapshot(page, browserSlug)).toEqual(browserBefore);
       await page.screenshot({ path: join(artifacts, 'retained-browser.png'), fullPage: true });
 
       await writeFile(
         join(artifacts, 'preservation.json'),
         JSON.stringify(
-          { projectId: id, nativeBefore, browserBefore, duplicateId: duplicateIdentity.projectId, localSave },
+          {
+            projectId: id,
+            collaboratorId: collaborator.userId,
+            nativeBefore,
+            browserBefore,
+            browserHeadBefore,
+            duplicateId: duplicateIdentity.projectId,
+            localSave,
+          },
           null,
           2,
         ),
@@ -512,6 +622,79 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       await context?.close();
       await session?.close();
       // Keep every local project, browser profile, account, database and object namespace for inspection.
+    }
+  });
+
+  it('should delete cloud access from local Trash and preserve the local tombstone through restart', async () => {
+    const name = `Trashed copy ${randomBytes(4).toString('hex')}`;
+    const id = await seedProject(name);
+    const profile = join(artifacts, 'trash-native-profile');
+    const root = join(profile, 'home', 'trashed-copy');
+    await mkdir(join(root, '.tau/chats'), { recursive: true });
+    await writeFile(join(root, 'tau.json'), JSON.stringify({ name, assets: { main: { entryPath: 'main.scad' } } }));
+    await writeFile(join(root, '.tau/project.json'), JSON.stringify({ version: 1, projectId: id }));
+    await writeFile(join(root, '.tau/chats/preserved.json'), 'retained local chat record');
+    await writeFile(join(root, 'main.scad'), 'cube(3);\n');
+    await git(root, ['init', '--initial-branch=main']);
+    await git(root, ['config', 'user.name', 'Deletion acceptance']);
+    await git(root, ['config', 'user.email', 'deletion@example.invalid']);
+    await git(root, ['add', 'tau.json', 'main.scad']);
+    await git(root, ['commit', '-m', 'History retained in local Trash']);
+    await writeFile(join(root, 'main.scad'), 'cube(11); // dirty while trashed\n');
+    let session: DesktopSession | undefined;
+    try {
+      session = await launchDesktopApp({
+        token,
+        profileRoot: profile,
+        preserveProfile: true,
+        preparedKernels: false,
+        env: { TAU_DESKTOP_UPDATES: 'off' },
+      });
+      await authenticatePackagedDesktop(session, token);
+      await session.page.goto('app://tau/projects');
+      await session.page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
+      await session.page.getByRole('menuitem', { name: 'Move to Trash', exact: true }).click();
+      await session.page.getByText(`Moved ${name} to Trash`, { exact: true }).waitFor();
+      await session.page.goto('app://tau/projects?trash=1');
+      const before = await nativeSnapshot(root);
+      const localTombstone = await readFile(join(root, '.tau/library.json'), 'utf8');
+      expect(JSON.parse(localTombstone)).toHaveProperty('deletedAt');
+      await openDeletion(session.page, name);
+      await session.page.screenshot({ path: join(artifacts, 'trash-cloud-confirmation.png'), fullPage: true });
+      const deletionResponse = session.page.waitForResponse(
+        (response) =>
+          response.url() === `${desktopE2EApiUrl}/v1/projects/${id}` && response.request().method() === 'DELETE',
+      );
+      await session.page.getByRole('button', { name: 'Delete from Tau Cloud', exact: true }).click();
+      const response = await deletionResponse;
+      expect([200, 202], await response.text()).toContain(response.status());
+      await expect.poll(async () => state(id), { timeout: 30_000 }).toBe('deleted');
+      await session.page.getByRole('alertdialog').waitFor({ state: 'detached' });
+      expect(await nativeSnapshot(root)).toEqual(before);
+      expect(await readFile(join(root, '.tau/library.json'), 'utf8')).toBe(localTombstone);
+      await session.close();
+      session = undefined;
+      session = await launchDesktopApp({
+        token,
+        profileRoot: profile,
+        preserveProfile: true,
+        preparedKernels: false,
+        env: { TAU_DESKTOP_UPDATES: 'off' },
+      });
+      await session.page.goto('app://tau/projects?trash=1');
+      await session.page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
+      expect(await readFile(join(root, '.tau/library.json'), 'utf8')).toBe(localTombstone);
+      expect(await nativeSnapshot(root)).toEqual(before);
+      await session.page.getByRole('menuitem', { name: 'Restore', exact: true }).click();
+      await session.page.getByText(`Restored ${name}`, { exact: true }).waitFor();
+      expect(await nativeSnapshot(root)).toEqual(before);
+      expect(await register(id, name)).toBe(410);
+      await writeFile(
+        join(artifacts, 'trash-preservation.json'),
+        JSON.stringify({ projectId: id, before, localTombstone }, null, 2),
+      );
+    } finally {
+      await session?.close();
     }
   });
 });

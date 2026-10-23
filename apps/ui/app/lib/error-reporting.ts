@@ -19,7 +19,7 @@ let isListening = false;
  * Load and start the SDK once. A failed load (a chunk a deploy stopped serving, a network error) is
  * forgotten, so the next call tries again instead of leaving reporting off for the page.
  */
-const start = async (): Promise<typeof SentryLibrary | undefined> => {
+const start = async (): Promise<{ readonly sentry?: typeof SentryLibrary; readonly failure?: unknown }> => {
   started ??= (async () => {
     const sentry = await loadSentry();
     sentry?.initSentry();
@@ -27,16 +27,26 @@ const start = async (): Promise<typeof SentryLibrary | undefined> => {
     return sentry;
   })();
   try {
-    return await started;
-  } catch {
+    return { sentry: await started };
+  } catch (error) {
     started = undefined;
-    return undefined;
+    return { failure: error };
   }
 };
 
-/** Start reporting uncaught errors and unhandled rejections. Never rejects. */
-export const startErrorReporting = async (): Promise<void> => {
-  await start();
+/**
+ * Start reporting uncaught errors and unhandled rejections. Never rejects. A failed SDK load goes to
+ * `onLoadFailure`, once, as its rejection used to reach the global handler (the entry hands it to
+ * the stale-build recovery, since a deploy may have replaced the SDK's own chunk); a later report
+ * tries to start again.
+ *
+ * @param onLoadFailure - Called with the error when the SDK could not be loaded.
+ */
+export const startErrorReporting = async (onLoadFailure?: (failure: unknown) => void): Promise<void> => {
+  const { failure } = await start();
+  if (failure !== undefined) {
+    onLoadFailure?.(failure);
+  }
 };
 
 /**
@@ -55,6 +65,6 @@ export const isErrorTrackerListening = (): boolean => isListening;
  * @param error - The caught value.
  */
 export const reportUiError = async (error: unknown): Promise<void> => {
-  const sentry = await start();
+  const { sentry } = await start();
   sentry?.captureUiError(error);
 };

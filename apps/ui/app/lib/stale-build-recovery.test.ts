@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { lookupConfirmDelay, serverConfirmations } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import {
   autoReloadBudget,
@@ -423,6 +424,42 @@ describe('createStaleBuildRecovery', () => {
       const tag = recovery.classifySettled(error);
       answer(deployedBuildId);
       await decision;
+
+      await expect(tag).resolves.toBe('superseded');
+    });
+
+    it('should wait out the slowest lookup, its confirmations included, before tagging', async () => {
+      vi.useFakeTimers();
+      // Each answer takes 3.5 s, inside the 4 s request timeout; a lookup is one answer and its confirmations.
+      const slowAnswer = async (): Promise<number> =>
+        new Promise<number>((resolve) => {
+          setTimeout(() => {
+            resolve(deployedBuildId);
+          }, 3500);
+        });
+      const answers = 1 + serverConfirmations;
+      const { recovery } = setup({
+        canReloadSafely: () => false,
+        fetchServerBuildId: async () => {
+          let answer = deployedBuildId;
+          for (let check = 0; check < answers; check += 1) {
+            if (check > 0) {
+              // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential.
+              await new Promise((resolve) => {
+                setTimeout(resolve, lookupConfirmDelay);
+              });
+            }
+            // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential.
+            answer = await slowAnswer();
+          }
+          return answer;
+        },
+      });
+      const error = failure();
+      void recovery.recover(error, 'boundary');
+
+      const tag = recovery.classifySettled(error);
+      await vi.advanceTimersByTimeAsync(answers * 3500 + serverConfirmations * lookupConfirmDelay);
 
       await expect(tag).resolves.toBe('superseded');
     });

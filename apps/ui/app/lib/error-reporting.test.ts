@@ -10,7 +10,7 @@ const sentry = vi.hoisted(() => ({
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- The environment's own names.
 vi.mock('#environment.config.js', () => ({ ENV: { SENTRY_DSN: 'https://public@o0.ingest.sentry.io/0' } }));
-vi.mock('#lib/sentry.lib.js', () => {
+const sentryLibrary = () => {
   sentry.loads += 1;
   if (sentry.failNextLoad) {
     sentry.failNextLoad = false;
@@ -18,11 +18,12 @@ vi.mock('#lib/sentry.lib.js', () => {
     throw new TypeError('Importing a module script failed.');
   }
   return { initSentry: sentry.initSentry, captureUiError: sentry.captureUiError };
-});
+};
 
-/** Fresh module state per test: whether reporting has started is module-level. */
+/** Fresh module state per test: whether reporting has started is module-level, and so is the SDK load. */
 const load = async () => {
   vi.resetModules();
+  vi.doMock('#lib/sentry.lib.js', sentryLibrary);
   return import('#lib/error-reporting.js');
 };
 
@@ -54,5 +55,24 @@ describe('error reporting', () => {
 
     await expect(reportUiError(new Error('caught by a boundary'))).resolves.toBeUndefined();
     await expect(started).resolves.toBeUndefined();
+  });
+
+  it('should hand a failed SDK load at boot over once, and retry on the next report', async () => {
+    const { startErrorReporting, reportUiError } = await load();
+    const onLoadFailure = vi.fn();
+    sentry.failNextLoad = true;
+
+    await startErrorReporting(onLoadFailure);
+
+    expect(onLoadFailure).toHaveBeenCalledOnce();
+    const [failure] = onLoadFailure.mock.calls[0] as [unknown];
+    expect(String(failure instanceof Error ? (failure.cause ?? failure) : failure)).toMatch(
+      /Importing a module script failed/u,
+    );
+
+    const error = new Error('caught by a boundary');
+    await reportUiError(error);
+    expect(sentry.captureUiError).toHaveBeenCalledExactlyOnceWith(error);
+    expect(onLoadFailure).toHaveBeenCalledOnce();
   });
 });

@@ -7,7 +7,7 @@
  * start-up and reloads, and the invariants below are checked after every step.
  */
 import process from 'node:process';
-import { array, assert, asyncProperty, constant, constantFrom, oneof, record } from 'fast-check';
+import { array, assert, asyncProperty, constant, constantFrom, oneof, record, tuple } from 'fast-check';
 import type { Arbitrary } from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as BuildIdentity from '#lib/build-identity.js';
@@ -74,6 +74,8 @@ const deliverAll = (): number => {
 type Tab = {
   readonly build: number;
   answer: Answer;
+  /** Milliseconds this tab's edge takes to answer (a slow edge stays inside the 4 s request timeout). */
+  readonly answerDelay: number;
   /** Answers naming this tab's own build since the last one naming another. */
   consecutiveOwn: number;
   fetches: number;
@@ -102,6 +104,11 @@ const loadTab = async (tab: Tab): Promise<void> => {
     readBuildId: () => tab.build,
     askLiveBuild: async () => {
       tab.fetches += 1;
+      if (tab.answerDelay > 0) {
+        await new Promise((resolve) => {
+          setTimeout(resolve, tab.answerDelay);
+        });
+      }
       if (tab.answer === 'none') {
         tab.sawNone = true;
       }
@@ -139,9 +146,10 @@ const loadTab = async (tab: Tab): Promise<void> => {
   });
 };
 
-const newTab = (build: number, answer: Answer): Tab => ({
+const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   build,
   answer,
+  answerDelay,
   consecutiveOwn: 0,
   fetches: 0,
   trackerReady: false,
@@ -349,51 +357,56 @@ afterEach(() => {
 describe('build-skew and stale-build-recovery, together (model)', () => {
   it('keep DF20, report every failure once, offer on replaced and withdraw on live, and ask a bounded number of times', async () => {
     await assert(
-      asyncProperty(answer, answer, array(step, { minLength: 1, maxLength: 12 }), async (answerA, answerB, steps) => {
-        bus.queue.length = 0;
-        bus.channels.clear();
-        const tabs = [newTab(buildX, answerA), newTab(buildY, answerB)] as const;
-        await loadTab(tabs[0]);
-        await loadTab(tabs[1]);
-        try {
-          for (const next of steps) {
-            const fetchesBefore = tabs.map((tab) => tab.fetches);
-            // oxlint-disable-next-line no-await-in-loop -- The model runs one step at a time.
-            const delivered = await run(tabs, next);
-            // oxlint-disable-next-line no-await-in-loop -- The model runs one step at a time.
+      asyncProperty(
+        tuple(answer, answer, constantFrom(0, 3500)),
+        array(step, { minLength: 1, maxLength: 12 }),
+        async ([answerA, answerB, answerDelayA], steps) => {
+          bus.queue.length = 0;
+          bus.channels.clear();
+          const tabs = [newTab(buildX, answerA, answerDelayA), newTab(buildY, answerB, 0)] as const;
+          await loadTab(tabs[0]);
+          await loadTab(tabs[1]);
+          try {
+            for (const next of steps) {
+              const fetchesBefore = tabs.map((tab) => tab.fetches);
+              // oxlint-disable-next-line no-await-in-loop -- The model runs one step at a time.
+              const delivered = await run(tabs, next);
+              // oxlint-disable-next-line no-await-in-loop -- The model runs one step at a time.
+              await flush();
+              checkStep(tabs, next, { fetchesBefore, delivered });
+            }
+            for (const tab of tabs) {
+              startTracker(tab);
+            }
+            // Past the longest wait `beforeSend` holds an event for, slow edges included.
+            await vi.advanceTimersByTimeAsync(tabs[0].recovery!.staleBuildTagWait + 1000);
             await flush();
-            checkStep(tabs, next, { fetchesBefore, delivered });
-          }
-          for (const tab of tabs) {
-            startTracker(tab);
-          }
-          await vi.advanceTimersByTimeAsync(5000);
-          await flush();
-          for (const tab of tabs) {
-            startTracker(tab);
-          }
-          await checkEnd(tabs);
-          // I6: no phase stops writes for good without a recheck, unless the server confirmed
-          // another build (or there is no build endpoint, where the newer build wins as before).
-          for (const tab of tabs) {
-            tab.answer = tab.build === buildX ? 'X' : 'Y';
-          }
-          for (let round = 0; round < 12; round += 1) {
-            deliverAll();
-            // oxlint-disable-next-line no-await-in-loop -- Time passes one recheck at a time.
-            await vi.advanceTimersByTimeAsync(30_000);
-          }
-          for (const [index, tab] of tabs.entries()) {
-            if (tab.skew!.isBuildSuperseded() && !tab.sawNone) {
-              expect(tab.skew!.readServerVerdict(), `I6 tab ${String(index)}`).toBe('replaced');
+            for (const tab of tabs) {
+              startTracker(tab);
+            }
+            await checkEnd(tabs);
+            // I6: no phase stops writes for good without a recheck, unless the server confirmed
+            // another build (or there is no build endpoint, where the newer build wins as before).
+            for (const tab of tabs) {
+              tab.answer = tab.build === buildX ? 'X' : 'Y';
+            }
+            for (let round = 0; round < 12; round += 1) {
+              deliverAll();
+              // oxlint-disable-next-line no-await-in-loop -- Time passes one recheck at a time.
+              await vi.advanceTimersByTimeAsync(30_000);
+            }
+            for (const [index, tab] of tabs.entries()) {
+              if (tab.skew!.isBuildSuperseded() && !tab.sawNone) {
+                expect(tab.skew!.readServerVerdict(), `I6 tab ${String(index)}`).toBe('replaced');
+              }
+            }
+          } finally {
+            for (const tab of tabs) {
+              tab.skew?.closeBuildSkewChannel();
             }
           }
-        } finally {
-          for (const tab of tabs) {
-            tab.skew?.closeBuildSkewChannel();
-          }
-        }
-      }),
+        },
+      ),
       { numRuns: modelRuns },
     );
   }, 300_000);

@@ -279,4 +279,28 @@ describe('installStaleBuildRecovery', () => {
     const inputTypes = ['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'];
     expect(removed.mock.calls.map(([type]) => type).toSorted()).toStrictEqual(inputTypes.toSorted());
   });
+
+  it("should recover from the error tracker's own chunk a deploy stopped serving, wrapped or not", async () => {
+    const { recoverFromSdkLoadFailure } = await load();
+    stubServer(deployedBuildId);
+    const reload = stubReload();
+    const loadFailure = new Error('Loading the error tracker failed', {
+      cause: new TypeError('Importing a module script failed.'),
+    });
+
+    recoverFromSdkLoadFailure(loadFailure);
+    await settle();
+
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('should leave any other SDK load failure alone', async () => {
+    const { recoverFromSdkLoadFailure } = await load();
+    const fetchMock = stubServer(deployedBuildId);
+
+    recoverFromSdkLoadFailure(new Error('blocked by the browser'));
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

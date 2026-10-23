@@ -39,12 +39,15 @@
  */
 
 import { Topic } from '@taucad/events';
+import { liveBuildIdTimeout } from '#lib/build-identity.js';
 import {
   buildId,
+  lookupConfirmDelay,
   offerReload,
   queryLiveBuild,
   readServerVerdict,
   readSupersedingBuildId,
+  serverConfirmations,
 } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { isErrorTrackerListening, reportUiError } from '#lib/error-reporting.js';
@@ -168,9 +171,12 @@ const capturedBySentry: Readonly<Record<FailureSource, boolean>> = { global: tru
 
 /**
  * Milliseconds the error tracker's `beforeSend` waits for a failure's decision before tagging it with
- * what is known: one lookup and its confirmations (`build-skew`), each answer within its 4 s timeout.
+ * what is known: the slowest lookup `build-skew` makes (one answer and its confirmations, each within
+ * the request timeout, `lookupConfirmDelay` apart), derived from those constants so it cannot drift,
+ * plus a margin for the decision's own work.
  */
-export const staleBuildTagWait = 10_000;
+export const staleBuildTagWait =
+  (1 + serverConfirmations) * liveBuildIdTimeout + serverConfirmations * lookupConfirmDelay + 2000;
 
 /** Milliseconds a failure only `vite:preloadError` reported waits for the channel Vite rethrows it into. */
 export const preloadFollowUpDelay = 1000;
@@ -577,6 +583,22 @@ export const subscribeReloadState = (listener: () => void): (() => void) =>
  */
 export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildTag> =>
   getPageRecovery().classifySettled(failure);
+
+/**
+ * Hand a failed load of the error tracker's own SDK (`startErrorReporting`) to the recovery when a
+ * deploy explains it: its chunk is one the new deploy may no longer serve. The failure may arrive
+ * wrapped, so its `cause` is checked too.
+ *
+ * @param failure - Why the SDK could not be loaded.
+ */
+export const recoverFromSdkLoadFailure = (failure: unknown): void => {
+  const cause: unknown = failure instanceof Error ? failure.cause : undefined;
+  const stale = isStaleModuleError(failure) ? failure : isStaleModuleError(cause) ? cause : undefined;
+  if (stale !== undefined) {
+    // async-iife: bootstrap -- the recovery decides, and acts, on its own.
+    void recoverFromStaleBuild(stale, 'global');
+  }
+};
 
 /**
  * Hand a module load failure any React error boundary caught to the recovery (`hydrateRoot`'s

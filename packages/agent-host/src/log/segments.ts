@@ -112,14 +112,21 @@ const deviceOf = (term: Term): string => [...term.orderByDevice.keys()].toSorted
 export const mergeLogSegments = (
   segments: readonly ChatLogSegment[],
   options: MergeLogSegmentsOptions = {},
-): readonly AgentLogEvent[] =>
-  mergeSegmentRows(
-    segments.map((segment) => ({ deviceId: segment.deviceId, events: parseEventLogBytes(segment.bytes).events })),
-    options,
-  );
+): readonly AgentLogEvent[] => mergeSegmentRows(parseLogSegments(segments), options);
 
-/** One device's segment, already parsed: a writer's own rows as it holds them, or a segment it read. @internal */
+/** One device's segment, already parsed: a writer's own rows as it holds them, or a segment it read. @public */
 export type ParsedLogSegment = Readonly<{ deviceId: string; events: readonly AgentLogEvent[] }>;
+
+/**
+ * Parse each segment once, for a reader that both merges them and reads their runs (`mergeSegmentRows`,
+ * `unsettledParsedRuns`).
+ *
+ * @param segments - Segments as read.
+ * @returns Each segment's kept rows.
+ * @public
+ */
+export const parseLogSegments = (segments: readonly ChatLogSegment[]): readonly ParsedLogSegment[] =>
+  segments.map((segment) => ({ deviceId: segment.deviceId, events: parseEventLogBytes(segment.bytes).events }));
 
 /**
  * {@link mergeLogSegments} over rows already parsed, for a writer that holds its own rows in memory. The kept rows
@@ -128,7 +135,7 @@ export type ParsedLogSegment = Readonly<{ deviceId: string; events: readonly Age
  * @param segments - One entry per segment.
  * @param options - `onConflict` hears about each conflicting copy dropped.
  * @returns The merged records.
- * @internal
+ * @public
  */
 export const mergeSegmentRows = (
   segments: readonly ParsedLogSegment[],

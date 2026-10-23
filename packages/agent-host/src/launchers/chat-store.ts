@@ -135,8 +135,9 @@ export type ChatSegmentsSource = Readonly<{
   /** One entry's bytes, `undefined` when it vanished meanwhile. */
   read: (name: string) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   /**
-   * A fingerprint of one entry that changes whenever its bytes do (its size and modification time), read without its
-   * bytes; `undefined` when it vanished. Without it every call reads every segment.
+   * A fingerprint of one entry that changes whenever its bytes do (its size and a modification time), read without its
+   * bytes. `undefined` when there is none to trust — no modification time, or the entry vanished — and the bytes are
+   * read instead. Without it every call reads every segment.
    */
   version?: ((name: string) => Promise<string | undefined>) | undefined;
 }>;

@@ -7,7 +7,7 @@ import type { ForeignRun } from '#log/foreign-runs.js';
 import { mergeSegmentRows } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
-import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
+import type { AgentLogEvent, ProviderMessage, RowKey, UserProviderMessage } from '#log/event-types.js';
 
 /**
  * Result of an idempotent event-log append: whether a row was written, and the log's end cursor after it, so a
@@ -188,6 +188,66 @@ const keptOfAbandonedRun = (event: AgentLogEvent): boolean => {
   return kind === undefined || kind === 'external-agent';
 };
 
+/**
+ * The rows of one segment the history keeps while some of its runs are abandoned (XD3): every row of a run that is
+ * not, and {@link keptOfAbandonedRun} of each that is. A run abandoned before it committed its turn holds the person's
+ * message only in its admission; that message joins as the run's user turn, under the admission row's own key.
+ *
+ * @param events - One device's rows.
+ * @param abandoned - The run ids its device abandoned.
+ * @returns The rows the merge folds.
+ */
+const withoutAbandonedOutput = (
+  events: readonly AgentLogEvent[],
+  abandoned: ReadonlySet<string>,
+): readonly AgentLogEvent[] => {
+  const said = new Set<string>();
+  for (const event of events) {
+    if (abandoned.has(event.runId) && keptOfAbandonedRun(event) && 'message' in event) {
+      said.add(event.message.id);
+    }
+  }
+  return events.flatMap((event): AgentLogEvent[] => {
+    if (!abandoned.has(event.runId)) {
+      return [event];
+    }
+    if (keptOfAbandonedRun(event)) {
+      return [event];
+    }
+    const admitted =
+      event.type === 'run.lifecycle' && event.state === 'admitted' ? admittedMessageOf(event) : undefined;
+    if (admitted === undefined || said.has(admitted.id)) {
+      return [];
+    }
+    said.add(admitted.id);
+    const { version, leaderEpoch, sequence, recordedAt, runId, epoch } = event;
+    return [
+      {
+        version,
+        leaderEpoch,
+        sequence,
+        recordedAt,
+        runId,
+        ...(epoch === undefined ? {} : { epoch }),
+        type: 'message.appended',
+        message: admitted,
+      },
+    ];
+  });
+};
+
+/**
+ * The person's message an admission row carries, when it carries one.
+ *
+ * @param event - A `run.lifecycle` `admitted` row.
+ * @returns The user message, or `undefined`.
+ */
+const admittedMessageOf = (event: AgentLogEvent): UserProviderMessage | undefined => {
+  const { admission } = event as { readonly admission?: { readonly message?: unknown } };
+  const message = admission?.message as { readonly role?: unknown; readonly id?: unknown } | undefined;
+  return message?.role === 'user' && typeof message.id === 'string' ? (message as UserProviderMessage) : undefined;
+};
+
 const encoder = new TextEncoder();
 
 /**
@@ -277,6 +337,12 @@ export const createEventLogAppender = async (
    * always has, and `merged` folds them together with every other device's segment once there is one.
    */
   const terms = createEventLogReducer('terms');
+  /*
+   * The history over this device's rows alone, as a one-device log has always folded it, term rules included. Folding
+   * it in `history` mode over the rows `terms` kept would drop the duplicated sequence work, but it reports a
+   * different history verdict on corpora the Lean ledger goldens pin (`chat-ledger.differential.test.ts`), so the
+   * duplication stays.
+   */
   const own = createEventLogReducer();
   const anomalies: EventLogAnomaly[] = parsed.quarantined.map((byteOffset) => ({
     kind: 'quarantined',
@@ -286,6 +352,8 @@ export const createEventLogAppender = async (
   const opaqueRows = new Set<AgentLogEvent>();
   /** This device's rows a merge folds, in file order: each key once, as the term rules kept it. */
   const ownRows: AgentLogEvent[] = [];
+  /** The run ids this device's own rows name: never another device's runs (XD3). */
+  const ownRunIds = new Set<string>();
   const cursorOf = new Map<AgentLogEvent, number>();
   for (const [cursor, row] of parsed.rows.entries()) {
     if (row.opaque) {
@@ -294,6 +362,7 @@ export const createEventLogAppender = async (
     const kept = terms.replay(row.event);
     if (!kept.duplicate && kept.anomaly?.kind !== 'conflict') {
       ownRows.push(row.event);
+      ownRunIds.add(row.event.runId);
       cursorOf.set(row.event, cursor);
     }
     const replayed: { readonly anomaly?: ReplayAnomaly } = own.replay(row.event);
@@ -304,6 +373,8 @@ export const createEventLogAppender = async (
 
   let segments: readonly ChatLogSegment[] = [];
   let foreign: readonly ParsedLogSegment[] = [];
+  /** Every run the foreign segments hold unsettled, as the last fold read them (XD3). */
+  let foreignUnsettled: readonly ForeignRun[] = [];
   /** Each segment's rows by its bytes: an unchanged segment is parsed once, whichever other segment moved. */
   const parsedBytes = new WeakMap<Uint8Array<ArrayBuffer>, readonly AgentLogEvent[]>();
   const parse = (bytes: Uint8Array<ArrayBuffer>): readonly AgentLogEvent[] => {
@@ -323,6 +394,7 @@ export const createEventLogAppender = async (
     refoldAt = undefined;
     if (segments.length === 0) {
       foreign = [];
+      foreignUnsettled = [];
       merged = undefined;
       mergedAnomalies = [];
       return;
@@ -336,12 +408,12 @@ export const createEventLogAppender = async (
      * calls closed here as disconnected, while that device still runs it. Once it is past the fence's staleness bound
      * its device is gone, and the person's turn joins the history without what the run left half done.
      */
-    const ownRuns = new Set(ownRows.map((row) => row.runId));
     const at = now();
     const held = new Map<string, Set<string>>();
     const abandoned = new Map<string, Set<string>>();
-    for (const run of unsettledParsedRuns(foreign)) {
-      if (ownRuns.has(run.runId)) {
+    foreignUnsettled = unsettledParsedRuns(foreign);
+    for (const run of foreignUnsettled) {
+      if (ownRunIds.has(run.runId)) {
         continue;
       }
       const stale = isAbandonedForeignRun(run, at);
@@ -363,12 +435,9 @@ export const createEventLogAppender = async (
           ? segment
           : {
               deviceId: segment.deviceId,
-              events: segment.events.filter((event) =>
-                heldIds?.has(event.runId) === true
-                  ? false
-                  : abandonedIds?.has(event.runId) === true
-                    ? keptOfAbandonedRun(event)
-                    : true,
+              events: withoutAbandonedOutput(
+                heldIds === undefined ? segment.events : segment.events.filter((event) => !heldIds.has(event.runId)),
+                abandonedIds ?? new Set(),
               ),
             };
       }),
@@ -556,6 +625,7 @@ export const createEventLogAppender = async (
         }
         events.push(transition.event);
         ownRows.push(transition.event);
+        ownRunIds.add(transition.event.runId);
         cursorOf.set(transition.event, events.length - 1);
         byteLength += bytes.byteLength;
         needsSeparator = false;
@@ -602,8 +672,7 @@ export const createEventLogAppender = async (
                   { cause: segmentFailure.message },
                 );
               }
-              const ownRuns = new Set(ownRows.map((row) => row.runId));
-              return unsettledParsedRuns(foreign).filter((run) => !ownRuns.has(run.runId));
+              return foreignUnsettled.filter((run) => !ownRunIds.has(run.runId));
             }),
         }),
     close: async () =>

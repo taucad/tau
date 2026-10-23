@@ -63,7 +63,12 @@ afterEach(async () => {
 const launch = (
   chats: ChatStore,
   transport: ModelTransport,
-  options: Readonly<{ runHeartbeat?: number; publish?: NonNullable<TurnPlacementPort['publish']> }> = {},
+  options: Readonly<{
+    runHeartbeat?: number;
+    pausedRunHold?: number;
+    idleEviction?: number;
+    publish?: NonNullable<TurnPlacementPort['publish']>;
+  }> = {},
 ): AgentLauncher => {
   const placement = fakePlacement({ registry: emptyTools }).port;
   const launcher = createAgentLauncher({
@@ -74,7 +79,11 @@ const launch = (
     systemPrompt: 'You are Tau.',
     toolRegistry: emptyTools,
     turnPlacement: options.publish === undefined ? placement : { ...placement, publish: options.publish },
-    ...(options.runHeartbeat === undefined ? {} : { delays: { runHeartbeat: options.runHeartbeat } }),
+    delays: {
+      ...(options.runHeartbeat === undefined ? {} : { runHeartbeat: options.runHeartbeat }),
+      ...(options.pausedRunHold === undefined ? {} : { pausedRunHold: options.pausedRunHold }),
+      ...(options.idleEviction === undefined ? {} : { idleEviction: options.idleEviction }),
+    },
   });
   launchers.push(launcher);
   return launcher;
@@ -349,12 +358,17 @@ describe('a chat continued on a second device', () => {
       const phone = await workspace();
       const phoneModel = recordingModel('phone answer');
       const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
-      /* The same in-flight rows, last written longer ago than the bound: a device that went away mid-run. */
+      /*
+       * The same in-flight run, last written longer ago than the bound: a device that went away mid-run. Only its
+       * lifecycle rows, which every snapshot of a running run holds whatever else it has written by then: the person's
+       * message is then in its admission alone.
+       */
       const stale = new Date(Date.now() - foreignRunStaleMilliseconds - 60_000).toISOString();
       await project(
         phone,
         'device-desktop',
         rowsOf(inFlight.bytes)
+          .filter((row) => row.type === 'run.lifecycle')
           .map((row) => `${JSON.stringify({ ...row, recordedAt: stale })}\n`)
           .join(''),
       );
@@ -439,6 +453,60 @@ describe('a chat continued on a second device', () => {
       const after = rowsOf(await readFile(ownLog(root), 'utf8'));
       expect(ended.some((row) => row.type === 'run.lifecycle' && row.state === 'completed')).toBe(true);
       expect(heartbeatsAfter(after, 'completed')).toEqual([]);
+    });
+
+    /** A run on this device paused on an approval, its stream answering nothing until the pause aborts it. */
+    const pausedRun = async (options: Parameters<typeof launch>[2]): Promise<string> => {
+      const root = await workspace();
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          ...recordingModel('answer').transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await new Promise((resolve) => {
+              request.signal.addEventListener('abort', resolve, { once: true });
+            });
+            yield { type: 'completed', stopReason: 'aborted' };
+          },
+        },
+        options,
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
+      await launcher.execute({
+        type: 'interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
+      });
+      return root;
+    };
+    const heartbeatCount = async (root: string): Promise<number> =>
+      heartbeatsAfter(rowsOf(await readFile(ownLog(root), 'utf8')), 'paused').length;
+
+    /* A forgotten pause holds the chat for a bounded time, then its device stops writing and the fence lets go. */
+    it('should stop a paused run’s heartbeats once its hold is over', async () => {
+      const root = await pausedRun({ runHeartbeat: 10, pausedRunHold: 120 });
+      await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= 2);
+      await sleep(300);
+      const settled = await heartbeatCount(root);
+      await sleep(150);
+
+      expect(await heartbeatCount(root)).toBe(settled);
+      expect(settled).toBeLessThan(20);
+    });
+
+    /* An evicted incarnation's log is closed: no heartbeat reopens it. */
+    it('should write no heartbeat once the paused run’s incarnation has closed its log', async () => {
+      const root = await pausedRun({ runHeartbeat: 30, idleEviction: 50 });
+      await sleep(250);
+      const settled = await heartbeatCount(root);
+      await sleep(150);
+
+      expect(await heartbeatCount(root)).toBe(settled);
     });
 
     it('should keep a paused run alive with heartbeats while its session is open here', async () => {

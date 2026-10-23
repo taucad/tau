@@ -175,6 +175,8 @@ export type CreateTauAgentHostOptions = {
         streamStall?: number;
         /** How long a live run's chat may go without a row before a heartbeat is written; {@link runHeartbeatMilliseconds}. */
         runHeartbeat?: number;
+        /** How long a paused run's heartbeats continue; {@link pausedRunHoldMilliseconds}. */
+        pausedRunHold?: number;
       }>
     | undefined;
   /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
@@ -305,6 +307,8 @@ type ChatStore = {
   wrote?: Readonly<{ leaderEpoch: string; at: number }> | undefined;
   /** Cancels the armed heartbeat (XD3). */
   heartbeat?: (() => void) | undefined;
+  /** When this host last paused the chat's run, or rested on its paused run again: where its hold starts (XD3). */
+  pausedAt?: number | undefined;
 };
 
 /**
@@ -320,6 +324,17 @@ type ChatStore = {
  * @public
  */
 export const runHeartbeatMilliseconds = 60_000;
+
+/**
+ * How long a paused run keeps holding its chat for the other devices: thirty minutes from its pause, or from the
+ * incarnation that rests on it again when the chat is opened (XD3). A paused run waits on a person, who may never
+ * come back to it; past this its heartbeats stop, and the other devices free the chat one staleness bound
+ * (`foreignRunStaleMilliseconds`) later, so a forgotten pause costs a bounded number of rows, commits and pushes.
+ * An idle incarnation's eviction (`idleEviction`) can end the hold sooner.
+ *
+ * @public
+ */
+export const pausedRunHoldMilliseconds = 30 * 60 * 1000;
 
 const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
 
@@ -988,44 +1003,79 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /* An offline remote queues the push, and an older session has no such verb. */
     }
   };
+  const pausedHold = options.delays?.pausedRunHold ?? pausedRunHoldMilliseconds;
+  /**
+   * The run a heartbeat may be written for now, under which term, or `undefined` when none may: the host is open, the
+   * chat's incarnation is the one that armed it and its log is open, its run is live, and it writes under a term
+   * already claimed — one this incarnation wrote under, or the term of a paused run it rests on (never the first row
+   * of a term that still has an orphan to abandon, RA-R9). A paused run is held for {@link pausedRunHoldMilliseconds}
+   * from its pause, or from the incarnation that rests on it again, and no longer.
+   *
+   * @param store - The chat's state.
+   * @param chatId - The chat.
+   * @param deliver - The incarnation that armed the heartbeat.
+   * @returns The run and term, or `undefined`.
+   */
+  const heartbeatTarget = (
+    store: ChatStore,
+    chatId: string,
+    deliver: ChatStore['deliver'],
+  ): Readonly<{ runId: string; leaderEpoch: string }> | undefined => {
+    const { ledger, wrote } = store;
+    const runId = ledger?.currentRunId;
+    const leaderEpoch = registry.termOf(chatId);
+    const state = ledger === undefined ? 'none' : chatRunState(ledger);
+    const claimed = wrote?.leaderEpoch === leaderEpoch || state === 'paused';
+    const held = state !== 'paused' || (store.pausedAt !== undefined && now().getTime() - store.pausedAt < pausedHold);
+    return closed ||
+      deliver === undefined ||
+      store.deliver !== deliver ||
+      store.log === undefined ||
+      runId === undefined ||
+      leaderEpoch === undefined ||
+      !liveRunStates.has(state) ||
+      !claimed ||
+      !held
+      ? undefined
+      : { runId, leaderEpoch };
+  };
   const armHeartbeat = (chatId: string, heartbeatDelay?: number): void => {
     const store = storeOf(chatId);
-    if (closed || store.heartbeat !== undefined) {
+    const { deliver } = store;
+    if (closed || deliver === undefined || store.heartbeat !== undefined) {
       return;
     }
     const clock: HostClock = options.clock ?? globalThis;
     const tick = async (): Promise<void> => {
       store.heartbeat = undefined;
-      const { ledger, wrote, deliver } = store;
-      const runId = ledger?.currentRunId;
-      const leaderEpoch = registry.termOf(chatId);
-      const state = ledger === undefined ? 'none' : chatRunState(ledger);
-      /* A term this incarnation already wrote under, or a paused run it rests on: never the first row of a term that
-       * still has an orphan to abandon (RA-R9), which only a live, unsettled run at open can be. */
-      const claimed = wrote?.leaderEpoch === leaderEpoch || state === 'paused';
-      if (
-        closed ||
-        deliver === undefined ||
-        runId === undefined ||
-        leaderEpoch === undefined ||
-        !liveRunStates.has(state) ||
-        !claimed
-      ) {
+      const target = heartbeatTarget(store, chatId, deliver);
+      if (target === undefined) {
         return;
       }
-      const quiet = wrote?.leaderEpoch === leaderEpoch ? now().getTime() - wrote.at : heartbeatInterval;
+      const { wrote } = store;
+      const quiet = wrote?.leaderEpoch === target.leaderEpoch ? now().getTime() - wrote.at : heartbeatInterval;
       if (quiet < heartbeatInterval) {
         armHeartbeat(chatId, heartbeatInterval - quiet);
         return;
       }
       const heartbeat: LogRowBody = { type: 'run.heartbeat' };
       try {
-        const committed = await serial(chatId, async () => write(chatId, leaderEpoch, [{ runId, body: heartbeat }]));
+        /* Checked again inside the chat's chain: a settlement or a `closeLog` queued ahead of this row wins, and a
+         * closed log is never reopened for a heartbeat. */
+        const committed = await serial(chatId, async () => {
+          const current = heartbeatTarget(store, chatId, deliver);
+          return current === undefined
+            ? undefined
+            : write(chatId, current.leaderEpoch, [{ runId: current.runId, body: heartbeat }]);
+        });
+        if (committed === undefined) {
+          return;
+        }
         if (store.deliver === deliver) {
           deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
         }
         /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
-        void publishChat(chatId, runId);
+        void publishChat(chatId, target.runId);
       } catch {
         /* A fenced or closed log ends the heartbeat with the incarnation that wrote it. */
         return;
@@ -1170,6 +1220,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         onAppended: (row, ledger) => {
           store.ledger = ledger;
           store.wrote = { leaderEpoch, at: now().getTime() };
+          if (row.type === 'run.lifecycle' && row.state === 'paused') {
+            store.pausedAt = now().getTime();
+          }
           runChats.set(row.runId, chatId);
           if (row.type === 'message.appended') {
             messageIds.push(row.message.id);
@@ -1344,6 +1397,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
         /* XD3: a paused run this host rests on again keeps holding the chat for the other devices. */
         if (chatRunState(ledger) === 'paused') {
+          store.pausedAt = now().getTime();
           armHeartbeat(chatId);
         }
         return { ledger, repair };

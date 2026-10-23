@@ -5,7 +5,7 @@ import { createChatSegmentsReader, segmentDeviceIdOf } from '#launchers/chat-sto
 const encoder = new TextEncoder();
 
 /** A chat's `events/` directory: each entry's bytes and a fingerprint that moves when they do. */
-const directory = (files: Map<string, Readonly<{ bytes: string; version: string }>>) => {
+const directory = (files: Map<string, Readonly<{ bytes: string; version: string | undefined }>>) => {
   const read = vi.fn(async (name: string) => {
     const file = files.get(name);
     return file === undefined ? undefined : encoder.encode(file.bytes);
@@ -45,6 +45,21 @@ describe('a chat’s segments, read again on each refresh (XD1)', () => {
       'device-laptop.jsonl',
       'device-laptop.jsonl',
     ]);
+  });
+
+  /* A provider that reports no modification time gives no fingerprint: a same-length rewrite must still be seen. */
+  it('should read a segment again whenever it has no fingerprint to trust', async () => {
+    const files = new Map<string, Readonly<{ bytes: string; version: string | undefined }>>([
+      ['device-desktop.jsonl', { bytes: 'a\n', version: undefined }],
+    ]);
+    const { read, reader } = directory(files);
+    await reader();
+
+    files.set('device-desktop.jsonl', { bytes: 'b\n', version: undefined });
+    const [segment] = await reader();
+
+    expect(new TextDecoder().decode(segment!.bytes)).toBe('b\n');
+    expect(read).toHaveBeenCalledTimes(2);
   });
 
   it('should drop a segment whose file went away', async () => {

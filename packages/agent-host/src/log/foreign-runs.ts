@@ -1,7 +1,7 @@
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { AgentLogEvent, RowKey, RunLifecycleState } from '#log/event-types.js';
+import { parseLogSegments } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
-import { parseEventLogBytes } from '#log/serialization.js';
 
 /**
  * Another device's run that has not settled, as that device's synced segment holds it (XD3, cross-device run fence).
@@ -82,11 +82,11 @@ const unsettledRunsOf = (segment: ParsedLogSegment): readonly ForeignRun[] => {
 };
 
 /**
- * {@link unsettledForeignRuns} over segments already parsed, for a writer that holds them.
+ * {@link unsettledForeignRuns} over segments already parsed (`parseLogSegments`), for a reader that holds them.
  *
  * @param segments - Other devices' parsed segments.
  * @returns Every unsettled run, segment by segment.
- * @internal
+ * @public
  */
 export const unsettledParsedRuns = (segments: readonly ParsedLogSegment[]): readonly ForeignRun[] =>
   segments.flatMap((segment) => unsettledRunsOf(segment));
@@ -109,12 +109,7 @@ export const unsettledParsedRuns = (segments: readonly ParsedLogSegment[]): read
  * ```
  */
 export const unsettledForeignRuns = (segments: readonly ChatLogSegment[]): readonly ForeignRun[] =>
-  unsettledParsedRuns(
-    segments.map((segment) => ({
-      deviceId: segment.deviceId,
-      events: parseEventLogBytes(segment.bytes).events,
-    })),
-  );
+  unsettledParsedRuns(parseLogSegments(segments));
 
 /**
  * Whether a foreign run no longer holds the chat: its newest row is more than {@link foreignRunStaleMilliseconds} old,

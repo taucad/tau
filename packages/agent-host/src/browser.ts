@@ -554,7 +554,9 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
             version: async (name) => {
               const file = await opfsFile(directory, `${segmentsPath(chatId)}/${name}`, false);
               const blob = await file?.getFile();
-              return blob === undefined ? undefined : `${String(blob.size)}:${String(blob.lastModified)}`;
+              return blob === undefined || blob.lastModified <= 0
+                ? undefined
+                : `${String(blob.size)}:${String(blob.lastModified)}`;
             },
             read: async (name) => bytesOf(`${segmentsPath(chatId)}/${name}`),
           }),
@@ -621,7 +623,8 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
                         return undefined;
                       }
                       const { size, mtimeMs } = await stat.call(fileSystem, path, { content: 'head' });
-                      return `${String(size)}:${String(mtimeMs)}`;
+                      /* Size alone cannot tell a rewrite of the same length: with no modification time, read the bytes. */
+                      return mtimeMs !== undefined && mtimeMs > 0 ? `${String(size)}:${String(mtimeMs)}` : undefined;
                     },
                   }),
               read: async (name) => {

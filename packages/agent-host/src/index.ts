@@ -12,13 +12,14 @@ export type { FoldProjectionFactsInput } from '#log/chat-ledger.js';
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
-export { mergeLogSegments } from '#log/segments.js';
-export type { ChatLogSegment, MergeLogSegmentsOptions } from '#log/segments.js';
+export { mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segments.js';
+export type { ChatLogSegment, MergeLogSegmentsOptions, ParsedLogSegment } from '#log/segments.js';
 export {
   foreignRunStaleMilliseconds,
   isAbandonedForeignRun,
   liveForeignRun,
   unsettledForeignRuns,
+  unsettledParsedRuns,
 } from '#log/foreign-runs.js';
 export type { ForeignRun } from '#log/foreign-runs.js';
 export { segmentDeviceIdOf } from '#launchers/chat-store.js';
@@ -30,7 +31,7 @@ export {
   userProviderMessageSchema,
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
-export { createTauAgentHost, runHeartbeatMilliseconds } from '#host/tau-agent-host.js';
+export { createTauAgentHost, pausedRunHoldMilliseconds, runHeartbeatMilliseconds } from '#host/tau-agent-host.js';
 export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
 export {
   emptyChatLedger,

@@ -1437,7 +1437,8 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       const trigger = page.getByRole('button', { name: 'Actions for Wide' }).filter({ hasText: 'Wide' });
       await trigger.waitFor();
 
-      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item. */
+      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item, one row
+       * further down since the page's part gallery put Open preview at the top (PAR-7). */
       const region = page.getByRole('application', { name: 'Model viewer' });
       await region.focus();
       await page.keyboard.press('Shift+F10');
@@ -1450,6 +1451,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
           .evaluate((item) => item === document.activeElement),
       ).toBe(true);
       const copy = menu.getByRole('menuitem', { name: 'Copy reference' });
+      await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowDown');
       expect(await isFocused(copy)).toBe(true);

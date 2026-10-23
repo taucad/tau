@@ -316,7 +316,21 @@ export type SessionGrant = {
   readonly proxy: { host: string; port: number; token: string };
 };
 
-/** Build a processcontainer ContainerRequest for one session's grant, running `command`. */
+/**
+ * The system directories every launched process needs READ access to inside a base container. The
+ * processcontainer filesystem policy is allow-list: a path absent from readwritePaths/readonlyPaths is
+ * NOT readable. A child launched without these dies at load time with 0xC0000142 (STATUS_DLL_INIT_
+ * FAILED) because it cannot read its own executable + its DLL closure (System32 kernel DLLs, and the
+ * self-contained .NET that ships with pwsh 7). These are the toolchain roots, NOT per-session data, so
+ * granting both sessions read here does not weaken the cross-session isolation claim (which is about
+ * each session's PRIVATE project/home roots being mutually inaccessible).
+ */
+export const systemReadonlyRoots = (): string[] => {
+  const windir = process.env['SystemRoot'] ?? 'C:\\Windows';
+  const programFiles = process.env['ProgramFiles'] ?? 'C:\\Program Files';
+  return [windir, join(programFiles, 'PowerShell', '7'), join(programFiles, 'dotnet')].filter((p) => existsSync(p));
+};
+
 export const requestFor = (
   grant: SessionGrant,
   command: string,
@@ -328,7 +342,9 @@ export const requestFor = (
   containerName: `tau-session-${grant.id}`,
   filesystem: {
     readwritePaths: [grant.project, grant.home, grant.temporary],
-    readonlyPaths: [grant.readOnly],
+    // grant.readOnly is the session toolchain root; systemReadonlyRoots() adds Windows + the pwsh/.NET
+    // install dirs so the launched PowerShell can actually load its DLLs (else 0xC0000142 at init).
+    readonlyPaths: [grant.readOnly, ...systemReadonlyRoots()],
     // deniedPaths need PSE_SUPPORT_FS_DENY. When absent, omit them and let the probe record that the
     // read-isolation assertion is governed by the ambient DACL (a typed limit), not by MXC deny.
     ...(denyPathsSupported ? { deniedPaths: [...grant.deny] } : {}),

@@ -288,7 +288,8 @@ describe('mesh/build/export phase separation', () => {
       const second = await renderView(worker);
       expect(first.success && second.success).toBe(true);
       expect(evaluations).toBe(1);
-      expect(rendered).toEqual(['b', 'b']);
+      // The reused build still offers only `b`, and its projection of `b` answers the second render.
+      expect(rendered).toEqual(['b']);
     } finally {
       await worker.cleanup();
     }

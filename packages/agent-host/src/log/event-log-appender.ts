@@ -2,11 +2,12 @@ import { EventLogError } from '#log/event-log-error.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
-import { foreignRunStanding, noteGrownRows, unsettledParsedRuns } from '#log/foreign-runs.js';
-import type { ForeignRun } from '#log/foreign-runs.js';
+import { foreignRunStanding, parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
+import type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
 import { mergeSegmentRows } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
+import { isPersonsMessage } from '#log/event-types.js';
 import type { AgentLogEvent, ProviderMessage, RowKey, UserProviderMessage } from '#log/event-types.js';
 
 /**
@@ -122,12 +123,13 @@ export type EventLogAppender = {
    */
   foreignRuns?(): Promise<readonly ForeignRun[]>;
   /**
-   * When another device last wrote this chat, as the last open or refresh read its segments: the newest `recordedAt`
-   * among rows that are not this device's own runs read back, in epoch milliseconds; `undefined` when none. A writer
-   * whose term began before it opens a new term for its next turn, so that turn merges after the other device's
-   * (terms merge whole, CL-R14). Absent where `refresh` is.
+   * Whether another device has written this chat since this log first wrote under its current term (XD1): whether any
+   * other device's segment, as the last open or refresh read it, holds more rows that are not this device's own runs
+   * read back than it held, as read then. It compares what this device read, never another device's clock. `false`
+   * before this log writes. A writer whose term another device's rows came after opens a new term for its next turn,
+   * so that turn merges after them (terms merge whole, CL-R14). Absent where `refresh` is.
    */
-  foreignWrittenAt?(): Promise<number | undefined>;
+  foreignWroteSinceTermBegan?(): Promise<boolean>;
   /**
    * Whether the history is unknown: the other devices' segments cannot be read and this device's rows do not fold
    * without them (XD1). {@link EventLogAppender.historyIntact} then answers `true`, since nothing proves the history
@@ -175,19 +177,6 @@ export type EventLogAppenderOptions = Readonly<{
   now?: (() => number) | undefined;
 }>;
 
-/** Whether `next` is `prior`'s parsed bytes with more appended after them. */
-const grewFrom = (prior: Uint8Array<ArrayBuffer>, validByteLength: number, next: Uint8Array<ArrayBuffer>): boolean => {
-  if (next.byteLength <= prior.byteLength || validByteLength === 0) {
-    return false;
-  }
-  for (let index = 0; index < validByteLength; index++) {
-    if (prior[index] !== next[index]) {
-      return false;
-    }
-  }
-  return true;
-};
-
 /** The own segment's device id in a merge: the empty string, which no segment file can be named. */
 const ownDeviceId = '';
 
@@ -209,11 +198,7 @@ const keptOfAbandonedRun = (event: AgentLogEvent): boolean => {
   if (event.type === 'turn.history-projection-committed' || event.type === 'history.rewound') {
     return true;
   }
-  if (event.type !== 'message.appended' || event.message.role !== 'user') {
-    return false;
-  }
-  const kind = event.message.metadata?.tauInternal?.['kind'];
-  return kind === undefined || kind === 'external-agent';
+  return event.type === 'message.appended' && isPersonsMessage(event.message);
 };
 
 /**
@@ -407,6 +392,16 @@ export const createEventLogAppender = async (
 
   let segments: readonly ChatLogSegment[] = [];
   let foreign: readonly ParsedLogSegment[] = [];
+  /** How many rows each other device's segment held, not counting this device's runs read back. */
+  const foreignFrontier = (): ReadonlyMap<string, number> =>
+    new Map(
+      foreign.map((segment) => [
+        segment.deviceId,
+        segment.events.filter((event) => !ownRunIds.has(event.runId)).length,
+      ]),
+    );
+  /** The term this log last wrote under, and the other devices' rows as read when it first wrote under it. */
+  let termFrontier: Readonly<{ leaderEpoch: string; rows: ReadonlyMap<string, number> }> | undefined;
   /** Every run the foreign segments hold unsettled, as the last fold read them (XD3). */
   let foreignUnsettled: readonly ForeignRun[] = [];
   /*
@@ -414,28 +409,9 @@ export const createEventLogAppender = async (
    * only grew (a row, a heartbeat) parses its new lines alone and keeps the rows it already had, so the fold can replay
    * just what was appended.
    */
-  const parsedSegments = new Map<
-    string,
-    Readonly<{ bytes: Uint8Array<ArrayBuffer>; events: readonly AgentLogEvent[]; validByteLength: number }>
-  >();
+  const parsedSegments = new Map<string, SegmentParse>();
   const parse = (deviceId: string, bytes: Uint8Array<ArrayBuffer>): readonly AgentLogEvent[] => {
-    const prior = parsedSegments.get(deviceId);
-    if (prior?.bytes === bytes) {
-      return prior.events;
-    }
-    let next: Readonly<{ bytes: Uint8Array<ArrayBuffer>; events: readonly AgentLogEvent[]; validByteLength: number }>;
-    if (prior !== undefined && grewFrom(prior.bytes, prior.validByteLength, bytes)) {
-      const tail = parseEventLogBytes(bytes.slice(prior.validByteLength));
-      const events = tail.events.length === 0 ? prior.events : [...prior.events, ...tail.events];
-      if (events !== prior.events) {
-        /* Its runs fold on from the rows already folded (XD3). */
-        noteGrownRows(events, prior.events);
-      }
-      next = { bytes, events, validByteLength: prior.validByteLength + tail.validByteLength };
-    } else {
-      const whole = parseEventLogBytes(bytes);
-      next = { bytes, events: whole.events, validByteLength: whole.validByteLength };
-    }
+    const next = parseSegmentFrom(parsedSegments.get(deviceId), bytes);
     parsedSegments.set(deviceId, next);
     return next.events;
   };
@@ -760,6 +736,9 @@ export const createEventLogAppender = async (
           }
           mergedRows.push(transition.event);
         }
+        if (termFrontier?.leaderEpoch !== transition.event.leaderEpoch) {
+          termFrontier = { leaderEpoch: transition.event.leaderEpoch, rows: foreignFrontier() };
+        }
         events.push(transition.event);
         ownRows.push(transition.event);
         ownRunIds.add(transition.event.runId);
@@ -815,19 +794,14 @@ export const createEventLogAppender = async (
               await readSegments();
             }),
           historyUnknown: async () => enqueue(async () => historyUnknown()),
-          foreignWrittenAt: async () =>
+          foreignWroteSinceTermBegan: async () =>
             enqueue(async () => {
               assertOpen();
-              let newest: number | undefined;
-              for (const segment of foreign) {
-                for (const event of segment.events) {
-                  const at = Date.parse(event.recordedAt);
-                  if (!ownRunIds.has(event.runId) && !Number.isNaN(at) && (newest === undefined || at > newest)) {
-                    newest = at;
-                  }
-                }
+              if (termFrontier === undefined) {
+                return false;
               }
-              return newest;
+              const seen = termFrontier.rows;
+              return [...foreignFrontier()].some(([deviceId, rows]) => rows > (seen.get(deviceId) ?? 0));
             }),
           foreignRuns: async () =>
             enqueue(async () => {

@@ -23,7 +23,7 @@ import {
   foreignRunStanding,
   liveForeignRun,
   mergeSegmentRows,
-  parseLogSegments,
+  parseSegmentFrom,
   unsettledParsedRuns,
 } from '@taucad/agent-host';
 import type {
@@ -37,6 +37,7 @@ import type {
   ForeignRun,
   ParsedLogSegment,
   RowKey,
+  SegmentParse,
   TurnPlacement,
 } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
@@ -179,11 +180,6 @@ export type ChatProjection = Readonly<{
     views: Readonly<Record<string, RunView>>;
     /** Runs another device has not settled, each segment read on its own ledger (XD3). */
     unsettled?: readonly ForeignRun[];
-    /**
-     * Each segment as last parsed, by its device, size and byte hash: a refold parses again only the segments whose
-     * bytes changed (one device's heartbeat changes its segment every minute, the others' not at all).
-     */
-    parsed?: Readonly<Record<string, ParsedLogSegment>>;
   }>;
   /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
   blocks: Readonly<Record<string, Readonly<Record<string, Block>>>>;
@@ -357,6 +353,30 @@ const signaturesOf = (sorted: readonly ChatLogSegment[]): readonly SegmentSignat
 
 const signatureKey = ({ deviceId, byteLength, hash }: SegmentSignature): string =>
   `${deviceId}:${String(byteLength)}:${String(hash)}`;
+
+/** One device's segment as the projection last parsed it, and the signature of the bytes it parsed. */
+type KeptParse = Readonly<{ key: string; parse: SegmentParse }>;
+
+/*
+ * Each remote projection's segment parses, beside the projection rather than in it: the state stays plain data, and
+ * the next `remote` event parses on from the parses of the projection it replaces. A projection rebuilt any other way
+ * simply parses whole once.
+ */
+const segmentParses = new WeakMap<NonNullable<ChatProjection['remote']>, ReadonlyMap<string, KeptParse>>();
+
+/**
+ * The segment parses a remote projection was folded from, by device.
+ *
+ * @param remote - The projection's `remote`.
+ * @returns Each device's parse, or `undefined` for none.
+ * @internal
+ */
+export const remoteSegmentParsesOf = (
+  remote: ChatProjection['remote'],
+): ReadonlyMap<string, SegmentParse> | undefined => {
+  const kept = remote === undefined ? undefined : segmentParses.get(remote);
+  return kept === undefined ? undefined : new Map([...kept].map(([deviceId, { parse }]) => [deviceId, parse]));
+};
 
 /** One bounded digest of the segment bytes that can change the merged transcript. @public */
 export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =>
@@ -1062,29 +1082,23 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
     if (digest === state.remote?.digest) {
       return { state };
     }
-    /* Each segment is parsed once, for the merged views and for the runs another device has not settled (XD3), and
-     * not again while its bytes stay the same. */
-    const known = state.remote?.parsed ?? {};
-    const byKey: Record<string, ParsedLogSegment> = {};
-    const parsed = sorted.map((segment, index) => {
+    /* Each segment is parsed once, for the merged views and for the runs another device has not settled (XD3): not
+     * again while its bytes stay the same, and only its new rows when it grew, as the agent host's appender does. */
+    const known = state.remote === undefined ? undefined : segmentParses.get(state.remote);
+    const parses = new Map<string, KeptParse>();
+    const parsed: ParsedLogSegment[] = sorted.map(({ deviceId, bytes }, index) => {
       const key = signatureKey(signatures[index]!);
-      const reused = known[key] ?? parseLogSegments([segment])[0]!;
-      byKey[key] = reused;
-      return reused;
+      const prior = known?.get(deviceId);
+      /* The same signature is the same bytes, though a read may hand them over as a new array. */
+      const parse = prior?.key === key ? prior.parse : parseSegmentFrom(prior?.parse, bytes);
+      parses.set(deviceId, { key, parse });
+      return { deviceId, events: parse.events };
     });
     const { views } = foldRunViews(mergeSegmentRows(parsed), {}, {});
     const unsettled = unsettledParsedRuns(parsed);
-    return {
-      state: {
-        ...state,
-        remote: {
-          digest,
-          views,
-          ...(unsettled.length === 0 ? {} : { unsettled }),
-          parsed: byKey,
-        },
-      },
-    };
+    const remote = { digest, views, ...(unsettled.length === 0 ? {} : { unsettled }) };
+    segmentParses.set(remote, parses);
+    return { state: { ...state, remote } };
   }
   if (event.type === 'live') {
     const { runId } = event.event;

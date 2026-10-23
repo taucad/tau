@@ -153,6 +153,23 @@ export type ProviderMessage =
   | ToolInputProviderMessage
   | ToolOutputProviderMessage;
 
+/**
+ * Whether a message is the person's own words: a user message that carries no Tau-internal kind, or an external
+ * agent's turn (whose marker only names the session it went to). A user message Tau makes for its own bookkeeping — an
+ * approval answer, client memory, a stream checkpoint, an external tool's result, a billing invocation — is not.
+ *
+ * @param message - One message of a transcript.
+ * @returns Whether it is what the person said.
+ * @public
+ */
+export const isPersonsMessage = (message: ProviderMessage): boolean => {
+  if (message.role !== 'user') {
+    return false;
+  }
+  const kind = message.metadata?.tauInternal?.['kind'];
+  return kind === undefined || kind === 'external-agent';
+};
+
 /** Catalog provider identities accepted by the portable host. @public */
 export const modelProviderKinds = [
   'openai',

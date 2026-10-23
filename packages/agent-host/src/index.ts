@@ -19,10 +19,11 @@ export {
   foreignRunStanding,
   isAbandonedForeignRun,
   liveForeignRun,
+  parseSegmentFrom,
   unsettledForeignRuns,
   unsettledParsedRuns,
 } from '#log/foreign-runs.js';
-export type { ForeignRun } from '#log/foreign-runs.js';
+export type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
 export { segmentDeviceIdOf } from '#launchers/chat-store.js';
 export {
   agentLogEventSchema,
@@ -121,7 +122,7 @@ export type {
   TurnPlacement,
   UserProviderMessage,
 } from '#log/event-types.js';
-export { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
+export { isPersonsMessage, modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
 export type { PromptCacheControl } from '#log/event-types.js';
 export type {
   DurableEventLog,

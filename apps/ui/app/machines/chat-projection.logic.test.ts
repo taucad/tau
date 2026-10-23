@@ -37,6 +37,7 @@ import {
   selectTranscriptSource,
   selectToolsInFlight,
   selectTurnRevision,
+  remoteSegmentParsesOf,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
 import { lifecycleRow, logRow, runningRows } from '#machines/chat-projection.fixture.js';
@@ -468,8 +469,11 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(withoutWatchedRun.some((message) => message.id === watched)).toBe(false);
   });
 
-  /* A heartbeat changes one device's segment every minute; the others' bytes are the same and are not parsed again. */
-  it('parses again only the segments whose bytes changed', () => {
+  /*
+   * A heartbeat changes one device's segment every minute; the others' bytes are the same and are not parsed again, and
+   * the one that grew parses just its new rows. The parses live beside the projection state, never in it.
+   */
+  it('parses again only the segments whose bytes changed, and only what a grown segment gained', () => {
     const encode = (rows: readonly unknown[]) =>
       new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
     const steady = { deviceId: 'device-a', bytes: encode([lifecycleRow(0, 'admitted', 'run_a')]) };
@@ -487,13 +491,14 @@ describe('chatProjectionLogic (PV-S7)', () => {
         },
       ],
     }).state;
-    const parsedOf = (state: typeof first, deviceId: string) =>
-      Object.values(state.remote?.parsed ?? {}).find((segment) => segment.deviceId === deviceId);
+    const rowsOf = (state: typeof first, deviceId: string) =>
+      remoteSegmentParsesOf(state.remote)?.get(deviceId)?.events;
 
-    expect(parsedOf(second, 'device-a')).toBeDefined();
-    expect(parsedOf(second, 'device-a')).toBe(parsedOf(first, 'device-a'));
-    expect(parsedOf(second, 'device-b')).not.toBe(parsedOf(first, 'device-b'));
-    expect(Object.keys(second.remote?.parsed ?? {})).toHaveLength(2);
+    expect(rowsOf(second, 'device-a')).toBeDefined();
+    expect(rowsOf(second, 'device-a')).toBe(rowsOf(first, 'device-a'));
+    expect(rowsOf(second, 'device-b')).toHaveLength(2);
+    expect(rowsOf(second, 'device-b')![0]).toBe(rowsOf(first, 'device-b')![0]);
+    expect(second.remote).not.toHaveProperty('parsed');
     /* Nor is the unchanged segment's run folded on its ledger again. */
     const runOf = (state: typeof first) => state.remote?.unsettled?.find((run) => run.deviceId === 'device-a');
     expect(runOf(second)).toBeDefined();

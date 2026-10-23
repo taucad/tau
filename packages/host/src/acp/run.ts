@@ -28,7 +28,7 @@ import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type { ContentBlock, McpServer, StopReason, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
-import { isResumableRunFailure, materializeAttachments, reduceEventLog } from '@taucad/agent-host';
+import { isPersonsMessage, isResumableRunFailure, materializeAttachments, reduceEventLog } from '@taucad/agent-host';
 import type {
   DocumentBlockBuilder,
   ExternalAgentPort,
@@ -398,8 +398,8 @@ const tailOf = (line: string, budget: number): string => {
  *
  * An agent keeps its own session: a turn Tau ran, or another device ran and sync brought into the chat's segments,
  * never reached it. A fresh session has seen none of the chat; a session it continues has seen everything up to the
- * end of its own last turn. The person's words and the replies are carried as text, most recent kept within
- * {@link handoffCharacters}; tool calls and media are not.
+ * end of its own last turn. The person's words ({@link isPersonsMessage}, never a user message Tau made for itself)
+ * and the replies are carried as text, most recent kept within {@link handoffCharacters}; tool calls and media are not.
  *
  * @param turn - The turn, with the chat's merged transcript.
  * @param sessionId - The vendor session the prompt goes to, or `undefined` for a fresh one.
@@ -427,7 +427,8 @@ export const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undef
     }
   }
   const lines = prior.slice(start).flatMap((entry) => {
-    const text = entry.role === 'user' || entry.role === 'assistant' ? messageText(entry) : undefined;
+    /* The person's words as theirs, never a user message Tau made for itself (the same rule an abandoned run keeps). */
+    const text = isPersonsMessage(entry) || entry.role === 'assistant' ? messageText(entry) : undefined;
     return text === undefined ? [] : [`**${entry.role}**: ${text}`];
   });
   if (lines.length === 0) {

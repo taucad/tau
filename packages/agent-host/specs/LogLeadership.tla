@@ -90,9 +90,9 @@
 (* heartbeat, bounded by C11 (W6.r1 round 4). Unmodelled: here that holder *)
 (* simply has not answered yet, and the command is still in `msgs`.        *)
 (***************************************************************************)
-\* XD1: a new term begins with a new incarnation, never inside one; the host ends an incarnation whose term began
-\* before another device's newest row, before it admits a turn (`rehomeStaleTerm`), so the turn's term starts after
-\* that row. The ordering it keeps is CrossDevice.tla's AdmittedAfterSeen under Rehome; this model's leadership and
+\* XD1: a new term begins with a new incarnation, never inside one; the host ends an incarnation that has read another
+\* device's rows since its term's first row, before it admits a turn (`rehomeStaleTerm`), so the turn's term starts
+\* after those rows. The ordering it keeps is CrossDevice.tla's AdmittedAfterSeen under Rehome; this model's leadership and
 \* fences are unchanged by it.
 EXTENDS Naturals, Sequences, FiniteSets
 

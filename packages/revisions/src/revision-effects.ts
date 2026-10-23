@@ -2921,6 +2921,12 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       },
       branchOf: async (checkoutId) => {
         await ensureStore();
+        /*
+         * A head move records its removal evidence after the move resolves (`recordOperation`): a pull that made a
+         * dropped branch again has cleared its record only once that settles, so the record is read after it.
+         */
+        await loggedOperation;
+        await removedWrites;
         const removed = await readRemovedCheckouts();
         if (removed.has(checkoutId)) {
           return 'removed';

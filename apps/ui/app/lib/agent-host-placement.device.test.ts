@@ -23,6 +23,8 @@ const {
   isPlacementOnThisDevice,
   resetLoopbackAgentHosts,
   isPlacementOnThisDeviceNow,
+  onPlacementReachabilityChanged,
+  redeemLoopbackHandOff,
   resetOriginAgentHostAnswer,
   unplaceableExecutionReason,
 } = await import('#lib/agent-host-placement.js');
@@ -160,6 +162,36 @@ describe('unplaceableExecutionReason', () => {
       }
     });
 
+    /* XD2: a placement held while the origin had not answered is re-checked when it answers differently. */
+    it('should say reachability changed when the origin’s discovery finds a daemon, and not again for the same answer', async () => {
+      vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
+      resetOriginAgentHostAnswer();
+      vi.stubGlobal('location', { origin: 'http://127.0.0.1:7777' });
+      const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValueOnce(new TypeError('network down'));
+      fetch.mockResolvedValue(
+        new Response(JSON.stringify({ v: 1, agent: true, label: 'Studio', workspaceRoot: '/work' }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      vi.stubGlobal('fetch', fetch);
+      const changed = vi.fn();
+      const stop = onPlacementReachabilityChanged(changed);
+      try {
+        await isPlacementOnThisDevice('origin');
+        expect(changed).toHaveBeenCalledTimes(1);
+        vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+
+        await isPlacementOnThisDevice('origin');
+        await isPlacementOnThisDevice('origin');
+
+        expect(changed).toHaveBeenCalledTimes(2);
+      } finally {
+        stop();
+        vi.useRealTimers();
+        resetOriginAgentHostAnswer();
+      }
+    });
+
     /* XD2: a legacy chat record's `origin` placement is no host on a page no daemon serves. */
     it('should not count an origin placement as this device’s on the web build', async () => {
       vi.stubEnv('TAU_ORIGIN_AGENT_HOST', 'absent');
@@ -191,6 +223,27 @@ describe('unplaceableExecutionReason', () => {
       storage.set('tau:loopback-agent-hosts', JSON.stringify([{ origin, session: 'session_1' }]));
 
       expect(unplaceableExecutionReason(loopbackCodex)).toBeUndefined();
+    });
+
+    /* XD2: the same signal covers a loopback daemon handed to this tab. */
+    it('should say reachability changed when this tab is handed a loopback daemon', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+          new Response(JSON.stringify({ v: 1, session: 'session_1' }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+      );
+      const changed = vi.fn();
+      const stop = onPlacementReachabilityChanged(changed);
+      try {
+        await redeemLoopbackHandOff({ origin, code: 'code_1' });
+
+        expect(changed).toHaveBeenCalledTimes(1);
+      } finally {
+        stop();
+      }
     });
 
     /* XD2: a legacy chat record's loopback placement is kept on this device only where this tab can reach it. */

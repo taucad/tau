@@ -3628,15 +3628,10 @@ export class ChatSessionStore {
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id, projectId);
 
     /*
-     * XD2, once per chat: a record written before placement moved to the device can name a daemon on the device that
-     * wrote it. Where that daemon is reachable from here the chat store drops it from the chat record, in the one write
-     * that does (`adoptLegacyChatPlacement`), and it becomes this device's placement for the chat.
-     */
-    /*
      * XD2: a record written before placement moved to the device can name a device-relative host (`origin`, a
      * `loopback:` daemon). It is relative to a device no tab can prove it is, so it is never removed from the synced
      * record by adopting it: each device that reaches a host of that name adopts it into its own placements record,
-     * and the record keeps it until an explicit choice of the chat's execution supersedes it. Read from the record
+     * and the record keeps it until a write of the chat's execution supersedes it. Read from the record
      * the load already read, and asked without the network: only a host known unreachable is declined.
      */
     const legacyPlacementOf = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {

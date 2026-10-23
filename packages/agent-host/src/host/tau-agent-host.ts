@@ -309,8 +309,6 @@ type ChatStore = {
   heartbeat?: Readonly<{ deliver: ChatStore['deliver']; cancel: () => void }> | undefined;
   /** When this host last paused the chat's run under its current term: where its hold starts (XD3). */
   pausedAt?: number | undefined;
-  /** When this host wrote the first row under its current term (`wrote.leaderEpoch`): where that term starts. */
-  termStartedAt?: number | undefined;
   /** When this host last asked the placement to publish the chat's ref for its live run (XD3). */
   publishedAt?: number | undefined;
   /**
@@ -1039,7 +1037,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     store.sharing = { shared: true };
     return true;
   };
-  /** What the placement last said about sharing, while it still stands; `undefined` when it is to be asked. */
   /**
    * What the placement last said about sharing (XD3): `shared`; `not-shared` while that answer is under an interval
    * old; `recheck` once it is older (a remote may have been added); `unknown` before any answer, or after a fence or a
@@ -1147,7 +1144,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
        * remote) stops it: no other device reads the chat, and builds older than XD3 read the row as opaque. Unknown
        * (no answer yet, a fence, a failure) writes the row and publishes it, so publish trouble never makes a live run
        * look gone elsewhere. The chat is asked at the run's start (`armHeartbeat`), and a "not shared" is asked again
-       * once an interval old, by that tick's one publish; no tick publishes twice.
+       * once an interval old, by that tick's one publish, before its row; no tick publishes twice.
        */
       const sharing = sharingOf(store);
       if (sharing === 'not-shared') {
@@ -1155,11 +1152,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         armHeartbeat(chatId);
         return;
       }
-      if (sharing === 'recheck') {
+      /* A recheck publishes first, and its answer decides this tick's row: shared or unknown writes it, unpublished
+       * until the next tick, so the tick still publishes once. */
+      const rechecked = sharing === 'recheck';
+      if (rechecked) {
         store.publishedAt = now().getTime();
         await publishChat(store, chatId, target.runId);
-        armHeartbeat(chatId);
-        return;
+        if (sharingOf(store) === 'not-shared') {
+          armHeartbeat(chatId);
+          return;
+        }
       }
       const heartbeat: LogRowBody = { type: 'run.heartbeat' };
       try {
@@ -1178,8 +1180,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
         }
         /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
-        store.publishedAt = now().getTime();
-        void publishChat(store, chatId, target.runId);
+        if (!rechecked) {
+          store.publishedAt = now().getTime();
+          void publishChat(store, chatId, target.runId);
+        }
       } catch {
         /* A fenced or closed log ends the heartbeat with the incarnation that wrote it. */
         return;
@@ -1233,50 +1237,49 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     );
   };
 
+  /*
+   * Read what sync brought once per dispatch of a command: the term check and the admission that follow one `execute`
+   * share one refresh. A re-send of the same command (a `wait` refusal asks for exactly that) is a new dispatch and
+   * reads again. Entries live only while their dispatch does.
+   */
+  const dispatches = new Map<string, { refreshed?: DurableEventLog }>();
+  const refreshFor = async (log: DurableEventLog, commandId: string): Promise<void> => {
+    const dispatch = dispatches.get(commandId);
+    if (dispatch?.refreshed === log) {
+      return;
+    }
+    await log.refresh?.();
+    if (dispatch !== undefined) {
+      dispatch.refreshed = log;
+    }
+  };
+  /** Each chat's term check in flight: later commands for the chat wait behind it. */
+  const rehomes = new Map<string, Promise<void>>();
   /**
    * A new term for a turn another device's turn came between (XD1). An incarnation keeps one term while it stays
    * open, and a term's rows merge together, ordered by the term's start (CL-R14): a turn written under a term that
    * began before another device's rows would merge ahead of them in every device's history. So when the chat's open
-   * incarnation already wrote under its term and another device has written since that term began, the incarnation
-   * is closed before the turn is admitted, and the next one writes it under a new term that starts now. An incarnation
-   * holding a live run is left alone: the command is refused as it would be anyway.
+   * incarnation already wrote under its term and its log has read rows from another device since it first wrote under
+   * that term, the incarnation is closed before the turn is admitted, and the next one writes it under a new term that
+   * starts now. What "since" means is what this host read, not when the other device's clock says it wrote. An
+   * incarnation holding a live run is left alone: the command is refused as it would be anyway.
    *
    * @param chatId - The chat.
+   * @param commandId - The command the check runs for: it shares that dispatch's refresh.
+   * @returns The check in flight, or `undefined` when there is nothing to check.
    */
-  /*
-   * Read what sync brought, once per command: the term check and the admission that follows it share one refresh,
-   * as long as the log it refreshed is still the chat's.
-   */
-  const refreshedFor = new Map<string, Readonly<{ commandId: string; log: DurableEventLog }>>();
-  const refreshFor = async (chatId: string, log: DurableEventLog, commandId: string): Promise<void> => {
-    const done = refreshedFor.get(chatId);
-    if (done?.commandId === commandId && done.log === log) {
-      return;
-    }
-    await log.refresh?.();
-    refreshedFor.set(chatId, { commandId, log });
-  };
-  /** Each chat's term check in flight: later commands for the chat wait behind it. */
-  const rehomes = new Map<string, Promise<void>>();
   const rehomeStaleTerm = (chatId: string, commandId: string): Promise<void> | undefined => {
     const store = stores.get(chatId);
     const opened = store?.log;
     const leaderEpoch = registry.termOf(chatId);
-    const termStartedAt = store?.termStartedAt;
-    if (
-      opened === undefined ||
-      leaderEpoch === undefined ||
-      store?.wrote?.leaderEpoch !== leaderEpoch ||
-      termStartedAt === undefined
-    ) {
+    if (opened === undefined || leaderEpoch === undefined || store?.wrote?.leaderEpoch !== leaderEpoch) {
       return undefined;
     }
     const check = async (): Promise<void> => {
       try {
         const log = await opened;
-        await refreshFor(chatId, log, commandId);
-        const foreignAt = await log.foreignWrittenAt?.();
-        if (foreignAt === undefined || foreignAt < termStartedAt) {
+        await refreshFor(log, commandId);
+        if ((await log.foreignWroteSinceTermBegan?.()) !== true) {
           return;
         }
         await registry.evict(chatId);
@@ -1438,9 +1441,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         rows,
         onAppended: (row, ledger) => {
           store.ledger = ledger;
-          if (store.wrote?.leaderEpoch !== leaderEpoch) {
-            store.termStartedAt = now().getTime();
-          }
           store.wrote = { leaderEpoch, at: now().getTime() };
           if (row.type === 'run.lifecycle' && row.state === 'paused') {
             store.pausedAt = now().getTime();
@@ -1647,7 +1647,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       legacyConfigs.delete(commandId);
       const log = await logOf(chatId);
       /* Whatever sync brought since the log opened joins the history this turn is given (XD1). */
-      await refreshFor(chatId, log, commandId);
+      await refreshFor(log, commandId);
       await refuseForeignRun(chatId, log);
       const events = await log.read();
       const { agent } = config;
@@ -1789,7 +1789,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       refuseUnplaced();
       const resume = payload as unknown as CommandPayload<'resume'>;
       const log = await logOf(chatId);
-      await refreshFor(chatId, log, commandId);
+      await refreshFor(log, commandId);
       await refuseForeignRun(chatId, log);
       const ledger = await ledgerOf(chatId);
       const entry = ledger.runs[runId];
@@ -2236,7 +2236,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (checking !== undefined) {
       await checking;
     }
+    /* One dispatch of this command: what it refreshes is not refreshed again within it, and only within it. */
+    const dispatch: { refreshed?: DurableEventLog } = {};
     if (command.type === 'start' || command.type === 'resume') {
+      dispatches.set(command.commandId, dispatch);
       /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
       const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId);
       if (rehoming !== undefined) {
@@ -2291,6 +2294,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         await absorbed(answer);
         if (admissions.get(command.payload.chatId) === entry) {
           admissions.delete(command.payload.chatId);
+        }
+        if (dispatches.get(command.commandId) === dispatch) {
+          dispatches.delete(command.commandId);
         }
       };
       void release();

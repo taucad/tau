@@ -23,7 +23,7 @@ import { inspect } from '#machines/inspector.js';
 import {
   isPlacementOnThisDevice,
   isPlacementOnThisDeviceNow,
-  onLoopbackAgentHostsChanged,
+  onPlacementReachabilityChanged,
 } from '#lib/agent-host-placement.js';
 
 const ChatSessionStoreContext = createContext<ChatSessionStore | undefined>(undefined);
@@ -61,7 +61,7 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
     adoptLegacyChatPlacement: projectManager.adoptLegacyChatPlacement,
     isPlacementOnThisDevice,
     isPlacementOnThisDeviceNow,
-    onPlacementReachabilityChanged: onLoopbackAgentHostsChanged,
+    onPlacementReachabilityChanged,
     touchChatRecency: projectManager.touchChatRecency,
     consumeChatStartupRequest: projectManager.consumeChatStartupRequest,
     commitCancelledDraftRestore: projectManager.commitCancelledDraftRestore,

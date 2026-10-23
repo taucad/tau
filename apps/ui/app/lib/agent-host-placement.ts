@@ -354,6 +354,8 @@ export const resetOriginAgentHostAnswer = (): void => {
 };
 
 const loopbackChanges = new Topic<void>({ name: 'agentHostPlacement.loopbackChanges' });
+/* The origin's discovery answered differently from its last answer. */
+const originChanges = new Topic<void>({ name: 'agentHostPlacement.originChanges' });
 /* Per tab: a reload keeps the daemon, a new tab is handed one of its own. */
 const loopbackStorageKey = 'tau:loopback-agent-hosts';
 let loopbackRestored = false;
@@ -408,6 +410,28 @@ export const onLoopbackAgentHostsChanged = (listener: () => void): (() => void) 
   loopbackChanges.subscribe(() => {
     listener();
   });
+
+/**
+ * Listen for anything that changes which device-relative placements this tab reaches (XD2): a loopback daemon handed
+ * to it, or the origin's discovery answering differently from before (a daemon found after a failed ask, or gone). A
+ * placement held because its reach was unknown or out is checked again on each.
+ *
+ * @param listener - Called after each change.
+ * @returns Unsubscribe.
+ * @public
+ */
+export const onPlacementReachabilityChanged = (listener: () => void): (() => void) => {
+  const stopLoopback = loopbackChanges.subscribe(() => {
+    listener();
+  });
+  const stopOrigin = originChanges.subscribe(() => {
+    listener();
+  });
+  return () => {
+    stopLoopback();
+    stopOrigin();
+  };
+};
 
 /** Test-only reset of the loopback admissions. @internal */
 export const resetLoopbackAgentHosts = (): void => {
@@ -508,6 +532,7 @@ export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<b
   if (asked !== undefined && ((await asked.answer) || Date.now() - asked.askedAt < originAnswerReuse)) {
     return asked.answer;
   }
+  const previous = asked?.settled;
   const asking: { answer: Promise<boolean>; askedAt: number; settled?: boolean } = {
     answer: Promise.resolve(false),
     askedAt: Date.now(),
@@ -519,8 +544,11 @@ export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<b
     } catch {
       found = false;
     }
-    /* Read without waiting by `isPlacementOnThisDeviceNow`. */
+    /* Read without waiting by `isPlacementOnThisDeviceNow`; a held placement is checked again on a new answer. */
     asking.settled = found;
+    if (found !== previous) {
+      originChanges.emit();
+    }
     return found;
   })();
   originHostsAgent = asking;

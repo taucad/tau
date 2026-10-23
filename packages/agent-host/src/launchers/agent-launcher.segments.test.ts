@@ -121,6 +121,22 @@ const settleRun = async (launcher: AgentLauncher, runId: string): Promise<HostRu
   throw new Error(`Run ${runId} never completed.`);
 };
 
+/** Start a turn once the chat is free (the last run's settlement may still be landing), and wait until it completes. */
+const turnWhenFree = async (launcher: AgentLauncher, runId: string, text: string): Promise<HostRunSnapshot> => {
+  await vi.waitFor(
+    async () => {
+      const answer = await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId, trigger: 'submit', message: { id: `user-${runId}`, role: 'user', content: text } },
+      });
+      expect(answer, JSON.stringify(answer)).toMatchObject({ status: 'applied' });
+    },
+    { timeout: 3000, interval: 20 },
+  );
+  return settleRun(launcher, runId);
+};
+
 /** Start one user turn and wait until its run completes. */
 const turn = async (launcher: AgentLauncher, runId: string, text: string): Promise<HostRunSnapshot | undefined> => {
   const answer = await launcher.execute({
@@ -267,6 +283,63 @@ describe('a chat continued on a second device', () => {
         'assistant: desktop answer',
         'user: fifth, on the phone',
       ]);
+    });
+
+    /*
+     * The term check never compares clocks across devices: it opens a new term when sync brought rows this term had not
+     * seen when it began, and only then, whatever the other device's clock says.
+     */
+    describe('with another device’s clock skewed', () => {
+      const shifted = (bytes: string, offset: number): string =>
+        rowsOf(bytes)
+          .map(
+            (row) =>
+              `${JSON.stringify({ ...row, recordedAt: new Date(Date.parse(row.recordedAt) + offset).toISOString() })}\n`,
+          )
+          .join('');
+      const day = 24 * 60 * 60 * 1000;
+
+      it.each([
+        ['behind', -day],
+        ['ahead', day],
+      ])('should open a new term after a turn it had not seen, from a clock %s', async (_label, offset) => {
+        const desktop = await workspace();
+        const phone = await workspace();
+        const onDesktop = launch(
+          createNodeChatStore({ workspaceRoot: desktop }),
+          recordingModel('desktop answer').transport,
+        );
+        const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
+        await turn(onDesktop, 'run-desktop-1', 'first, on the desktop');
+        await project(phone, 'device-desktop', await readFile(ownLog(desktop), 'utf8'));
+        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+        await project(desktop, 'device-phone', shifted(await readFile(ownLog(phone), 'utf8'), offset));
+
+        await turnWhenFree(onDesktop, 'run-desktop-2', 'third, back on the desktop');
+
+        const rows = rowsOf(await readFile(ownLog(desktop), 'utf8'));
+        const termOf = (runId: string): string | undefined => rows.find((row) => row.runId === runId)?.leaderEpoch;
+        expect(termOf('run-desktop-2')).not.toBe(termOf('run-desktop-1'));
+      });
+
+      it('should keep its term when nothing new came, however far behind the other device’s clock is', async () => {
+        const desktop = await workspace();
+        const phone = await workspace();
+        const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
+        await turn(onPhone, 'run-phone-1', 'first, on the phone');
+        await project(desktop, 'device-phone', shifted(await readFile(ownLog(phone), 'utf8'), -day));
+        const onDesktop = launch(
+          createNodeChatStore({ workspaceRoot: desktop }),
+          recordingModel('desktop answer').transport,
+        );
+        await turn(onDesktop, 'run-desktop-1', 'second, on the desktop');
+
+        await turnWhenFree(onDesktop, 'run-desktop-2', 'third, on the desktop');
+
+        const rows = rowsOf(await readFile(ownLog(desktop), 'utf8'));
+        const termOf = (runId: string): string | undefined => rows.find((row) => row.runId === runId)?.leaderEpoch;
+        expect(termOf('run-desktop-2')).toBe(termOf('run-desktop-1'));
+      });
     });
 
     /* The term check and the admission after it read what sync brought once, not twice, per command. */
@@ -478,6 +551,37 @@ describe('a chat continued on a second device', () => {
       expect(refusalOf('SEGMENTS_UNREADABLE').retry).toBe('wait');
       expect(phoneModel.requests).toEqual([]);
       expect(await readFile(ownLog(phone), 'utf8').catch(() => '')).toBe('');
+    });
+
+    /* A `wait` refusal is answered by re-sending the same command: each send reads the other devices' segments again. */
+    it('should read the segments again for a re-send of the same command, after either wait refusal', async () => {
+      const inFlight = await desktopInFlight();
+      const phone = await workspace();
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
+      const segments = join(phone, '.tau', 'chats', chatId, 'events');
+      const command = {
+        type: 'start',
+        commandId: 'cmd-resent',
+        payload: {
+          chatId,
+          runId: 'run-phone-1',
+          trigger: 'submit',
+          message: { id: 'user-run-phone-1', role: 'user', content: 'on the phone' },
+        },
+      } as const;
+      /* Unreadable first: a directory where the desktop's segment should be. */
+      await mkdir(join(segments, 'device-desktop.jsonl'), { recursive: true });
+      await expect(onPhone.execute(command)).resolves.toMatchObject({ code: 'SEGMENTS_UNREADABLE' });
+
+      await rm(join(segments, 'device-desktop.jsonl'), { recursive: true });
+      await project(phone, 'device-desktop', inFlight.bytes);
+      await expect(onPhone.execute(command)).resolves.toMatchObject({ code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE' });
+
+      inFlight.release();
+      await settle(inFlight.launcher, 'run-desktop-1');
+      await project(phone, 'device-desktop', await readFile(ownLog(inFlight.desktop), 'utf8'));
+      await expect(onPhone.execute(command)).resolves.toMatchObject({ status: 'applied' });
+      await settleRun(onPhone, 'run-phone-1');
     });
 
     it('should admit a run once the other device’s run has gone stale, with its user turn but nothing it left half done', async () => {
@@ -769,6 +873,56 @@ describe('a chat continued on a second device', () => {
       expect(heartbeatsAfter(after, 'running').length - heartbeats).toBeLessThanOrEqual(1);
       /* Asked at most about once an interval while unshared (300 ms at 40 ms), never twice a tick. */
       expect(whileUnshared).toBeLessThanOrEqual(9);
+    });
+
+    /* The tick that asks an unshared chat again and hears it is shared now writes its heartbeat then, not a tick later;
+     * it still publishes once. */
+    it('should write the heartbeat on the tick whose recheck finds the chat shared', async () => {
+      const root = await workspace();
+      const gate = Promise.withResolvers<void>();
+      const recorded = recordingModel('answer');
+      const shared = { now: false };
+      const published: Array<Readonly<{ heartbeats: number; shared: boolean }>> = [];
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await gate.promise;
+            yield* recorded.transport.stream(request);
+          },
+        },
+        {
+          runHeartbeat: 40,
+          publish: async ({ requestId }) => {
+            const answer = shared.now;
+            const rows = rowsOf(await readFile(ownLog(root), 'utf8').catch(() => ''));
+            published.push({ heartbeats: heartbeatsAfter(rows, 'running').length, shared: answer });
+            return answer
+              ? { requestId, status: 'applied' }
+              : { requestId, status: 'refused', code: 'CHAT_NOT_SHARED', message: 'No remote.' };
+          },
+        },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
+      await sleep(100);
+      shared.now = true;
+      await vi.waitFor(
+        () => {
+          expect(published.filter((call) => call.shared).length).toBeGreaterThanOrEqual(2);
+        },
+        { timeout: 3000 },
+      );
+      gate.resolve();
+
+      const [recheck, next] = published.filter((call) => call.shared);
+      /* The recheck's own tick wrote one row after it, and the next tick one more before its publish. */
+      expect(next!.heartbeats - recheck!.heartbeats).toBe(2);
     });
 
     /** A run on this device paused on an approval, its stream answering nothing until the pause aborts it. */

@@ -49,9 +49,10 @@ VARIABLES
   stepped, \* whether the one backwards clock step has happened
   syncs,   \* syncs so far
   duped,   \* whether the one stale second copy exists
+  seen,    \* seen[d]: the other devices' rows d's view held when d wrote its current term's first row
   admitted \* ghost: each admission row's key, with the keys of the other devices' rows its device saw when it admitted
 
-vars == <<file, got, dup, termNo, seqNo, clock, stepped, syncs, duped, admitted>>
+vars == <<file, got, dup, termNo, seqNo, clock, stepped, syncs, duped, seen, admitted>>
 
 Kinds == {"admit", "run", "complete", "settle"}
 
@@ -160,30 +161,35 @@ UsedRuns == UNION {{file[d][i].run : i \in 1..Len(file[d])} : d \in Devices}
 
 (* ---------------- Actions ------------------------------------------------- *)
 
-WriteRow(d, r, kind) ==
-  /\ Len(file[d]) < MaxRows
-  /\ file' = [file EXCEPT ![d] = Append(@, [dev |-> d, tn |-> termNo[d], seq |-> seqNo[d], run |-> r, kind |-> kind, at |-> clock[d], out |-> d])]
-  /\ seqNo' = [seqNo EXCEPT ![d] = @ + 1]
-  /\ clock' = [clock EXCEPT ![d] = @ + 1]
-  /\ UNCHANGED <<got, dup, termNo, stepped, syncs, duped>>
-
-Write(d, r, kind) == WriteRow(d, r, kind) /\ UNCHANGED admitted
-
 RowKey(x) == <<x.dev, x.tn, x.seq>>
 
 \* The other devices' rows d's view holds.
 Foreign(d) == {x \in ToSet(View(d)) : x.dev # d}
 
-\* Where d's current term starts: its first row's time, or the next row's while it has none.
-TermStart(d) ==
-  LET mine == {i \in DOMAIN file[d] : file[d][i].tn = termNo[d]}
-  IN IF mine = {} THEN clock[d] ELSE file[d][Min(mine)].at
+\* The one clock assumption Rehome keeps is the merge's (`segments.ts` orders terms by their start): a term's first row
+\* is stamped after every row its device has read (clocks agree within the staleness bound; ClockStep models the
+\* exception). Deciding to rehome reads no clock (Stale).
+Stamp(d) == IF Rehome /\ seqNo[d] = 0 THEN Max({clock[d]} \cup {x.at + 1 : x \in Foreign(d)}) ELSE clock[d]
 
-\* XD1: another device wrote a row d sees at or after its term began, so a turn written under it would merge first.
-Stale(d) == \E x \in Foreign(d) : x.at >= TermStart(d)
+\* A term's first row records what d had read of the other devices then: the frontier the term check compares.
+\* Tracked only under Rehome, where it is read, so the other configurations keep their state spaces.
+WriteRow(d, r, kind) ==
+  /\ Len(file[d]) < MaxRows
+  /\ file' = [file EXCEPT ![d] = Append(@, [dev |-> d, tn |-> termNo[d], seq |-> seqNo[d], run |-> r, kind |-> kind, at |-> Stamp(d), out |-> d])]
+  /\ seqNo' = [seqNo EXCEPT ![d] = @ + 1]
+  /\ clock' = [clock EXCEPT ![d] = Stamp(d) + 1]
+  /\ seen' = IF Rehome /\ seqNo[d] = 0 THEN [seen EXCEPT ![d] = {RowKey(x) : x \in Foreign(d)}] ELSE seen
+  /\ UNCHANGED <<got, dup, termNo, stepped, syncs, duped>>
+
+Write(d, r, kind) == WriteRow(d, r, kind) /\ UNCHANGED admitted
+
+\* XD1 (`foreignWroteSinceTermBegan`): d's view holds another device's row it had not read when its current term wrote
+\* its first row, so a turn written under that term would merge first. It compares what d read, never two clocks; a
+\* term with no row yet is never stale.
+Stale(d) == seqNo[d] > 0 /\ \E x \in Foreign(d) : RowKey(x) \notin seen[d]
 
 \* The host admits only when its own view shows no live run; the run id is minted on the device. With Rehome it
-\* also admits only under a term that began after every other device's row it sees.
+\* also admits only under a term that had read, at its first row, every other device's row it sees now.
 Admit(d, r) ==
   /\ r = d /\ r \notin UsedRuns /\ Live(View(d)) = {}
   /\ Rehome => ~Stale(d)
@@ -205,7 +211,7 @@ Sync(d, e) ==
   /\ got[d][e] < Len(file[e])
   /\ got' = [got EXCEPT ![d][e] = Len(file[e])]
   /\ syncs' = syncs + 1
-  /\ UNCHANGED <<file, dup, termNo, seqNo, clock, stepped, duped, admitted>>
+  /\ UNCHANGED <<file, dup, termNo, seqNo, clock, stepped, duped, seen, admitted>>
 
 \* A second, stale copy of a segment d already holds: its own file projected back, or an old projection.
 Duplicate(d, e) ==
@@ -215,33 +221,31 @@ Duplicate(d, e) ==
        /\ n > 0
        /\ dup' = [dup EXCEPT ![d][e] = n]
   /\ duped' = TRUE
-  /\ UNCHANGED <<file, got, termNo, seqNo, clock, stepped, syncs, admitted>>
+  /\ UNCHANGED <<file, got, termNo, seqNo, clock, stepped, syncs, seen, admitted>>
 
 ClockStep(d) ==
   /\ ClockSkew
   /\ ~stepped
   /\ clock' = [clock EXCEPT ![d] = @ - 2]
   /\ stepped' = TRUE
-  /\ UNCHANGED <<file, got, dup, termNo, seqNo, syncs, duped, admitted>>
+  /\ UNCHANGED <<file, got, dup, termNo, seqNo, syncs, duped, seen, admitted>>
 
-\* XD1 (`rehomeStaleTerm`): a device whose term began before another device's rows it sees closes its incarnation;
-\* the next one writes under a new term that starts now. Its wall clock is past the rows it has read (clocks agree
-\* within the staleness bound; ClockSkew models the exception).
+\* XD1 (`rehomeStaleTerm`): a device whose term has rows and whose view has since gained another device's rows closes
+\* its incarnation; the next one writes under a new term, its first row stamped after what it has read (Stamp).
 RehomeTerm(d) ==
   /\ Rehome
   /\ Stale(d)
   /\ termNo[d] < MaxTerms
-  /\ termNo' = [termNo EXCEPT ![d] = IF seqNo[d] > 0 THEN @ + 1 ELSE @]
+  /\ termNo' = [termNo EXCEPT ![d] = @ + 1]
   /\ seqNo' = [seqNo EXCEPT ![d] = 0]
-  /\ clock' = [clock EXCEPT ![d] = Max({@} \cup {x.at + 1 : x \in Foreign(d)})]
-  /\ UNCHANGED <<file, got, dup, stepped, syncs, duped, admitted>>
+  /\ UNCHANGED <<file, got, dup, clock, stepped, syncs, duped, seen, admitted>>
 
 NewTerm(d) ==
   /\ termNo[d] < MaxTerms
   /\ seqNo[d] > 0
   /\ termNo' = [termNo EXCEPT ![d] = @ + 1]
   /\ seqNo' = [seqNo EXCEPT ![d] = 0]
-  /\ UNCHANGED <<file, got, dup, clock, stepped, syncs, duped, admitted>>
+  /\ UNCHANGED <<file, got, dup, clock, stepped, syncs, duped, seen, admitted>>
 
 Init ==
   /\ file = [d \in Devices |-> <<>>]
@@ -253,6 +257,7 @@ Init ==
   /\ stepped = FALSE
   /\ syncs = 0
   /\ duped = FALSE
+  /\ seen = [d \in Devices |-> {}]
   /\ admitted = {}
 
 Next ==

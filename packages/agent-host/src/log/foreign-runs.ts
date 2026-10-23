@@ -2,6 +2,7 @@ import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
 import type { AgentLogEvent, RowKey, RunLifecycleState } from '#log/event-types.js';
 import { parseLogSegments } from '#log/segments.js';
+import { parseEventLogBytes } from '#log/serialization.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 
 /**
@@ -114,6 +115,53 @@ const grownFrom = new WeakMap<readonly AgentLogEvent[], readonly AgentLogEvent[]
  */
 export const noteGrownRows = (grown: readonly AgentLogEvent[], prior: readonly AgentLogEvent[]): void => {
   grownFrom.set(grown, prior);
+};
+
+/** One device's segment as last parsed: its bytes, its rows, and how many of its bytes those rows came from. @public */
+export type SegmentParse = Readonly<{
+  bytes: Uint8Array<ArrayBuffer>;
+  events: readonly AgentLogEvent[];
+  validByteLength: number;
+}>;
+
+/** Whether `next` is `prior`'s parsed bytes with more appended after them. */
+const grewFrom = (prior: Uint8Array<ArrayBuffer>, validByteLength: number, next: Uint8Array<ArrayBuffer>): boolean => {
+  if (next.byteLength <= prior.byteLength || validByteLength === 0) {
+    return false;
+  }
+  for (let index = 0; index < validByteLength; index++) {
+    if (prior[index] !== next[index]) {
+      return false;
+    }
+  }
+  return true;
+};
+
+/**
+ * Parse one device's segment on from its last parse (XD1, XD3): the same bytes give the same parse; bytes that only
+ * grew (a row, a heartbeat) parse just their new lines, keep the rows already parsed, and let a run fold of those rows
+ * carry on ({@link noteGrownRows}); anything else parses whole. Every reader of segments (the agent host's appender,
+ * the page's projection) parses through this.
+ *
+ * @param prior - The segment's last parse, if any.
+ * @param bytes - Its bytes now.
+ * @returns Its parse now.
+ * @public
+ */
+export const parseSegmentFrom = (prior: SegmentParse | undefined, bytes: Uint8Array<ArrayBuffer>): SegmentParse => {
+  if (prior?.bytes === bytes) {
+    return prior;
+  }
+  if (prior !== undefined && grewFrom(prior.bytes, prior.validByteLength, bytes)) {
+    const tail = parseEventLogBytes(bytes.slice(prior.validByteLength));
+    const events = tail.events.length === 0 ? prior.events : [...prior.events, ...tail.events];
+    if (events !== prior.events) {
+      noteGrownRows(events, prior.events);
+    }
+    return { bytes, events, validByteLength: prior.validByteLength + tail.validByteLength };
+  }
+  const whole = parseEventLogBytes(bytes);
+  return { bytes, events: whole.events, validByteLength: whole.validByteLength };
 };
 
 const runFoldOf = (segment: ParsedLogSegment): RunFold => {

@@ -348,7 +348,7 @@
     "CrossDevice.handoff.cfg": {
       "tier": "nightly",
       "expect": "pass",
-      "ref": "XD1 handoff: AdmittedAfterSeen under Rehome (rehomeStaleTerm), W3's merge, synced clocks, MaxRows 3, MaxTerms 3, MaxSyncs 2 (34 s, 48,237 states)"
+      "ref": "XD1 handoff: AdmittedAfterSeen under Rehome (rehomeStaleTerm: the rows a term has read since its first row, no clock), W3's merge, a term's first row stamped after the rows its device read (the merge's clock assumption), MaxRows 3, MaxTerms 3, MaxSyncs 2 (16 s, 33,965 states)"
     },
     "CrossDevice.ledger-OneLiveRunMerged.cfg": {
       "tier": "nightly",

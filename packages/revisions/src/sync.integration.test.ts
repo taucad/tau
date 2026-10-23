@@ -1319,7 +1319,7 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
    */
   /* XD4: a pull that deletes a branch the remote dropped records the removal, so a chat that names that branch's
    * checkout is refused for good (CHECKOUT_UNKNOWN) instead of waiting on a branch that will never come back. */
-  it('XD4: records a branch a pull deletes because the remote dropped it as removed', async () => {
+  it('XD4: records a branch a pull deletes because the remote dropped it as removed, until a pull makes it again', async () => {
     const remoteRoot = await temporaryRoot('remote-branch-dropped');
     const remote = await startGitHttpBackend({ root: remoteRoot });
     try {
@@ -1338,6 +1338,16 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
       const { objectFormat } = await two.port.describe();
       const removed = JSON.parse(await two.filesystem.readFile('.git/tau-removed-checkouts.json', 'utf8')) as unknown;
       expect(removed).toContain(checkoutIdOfBranch(objectFormat, 'feature'));
+
+      /* The remote makes it again: the next pull brings it back, and a chat naming its checkout places on it. */
+      await remote.git(['update-ref', 'refs/heads/feature', String(base)]);
+      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+
+      expect(await two.port.readRef('feature')).toBe(base);
+      expect(await two.actors.turns.branchOf(checkoutIdOfBranch(objectFormat, 'feature'))).toStrictEqual({
+        branch: 'feature',
+        unborn: false,
+      });
     } finally {
       await remote.close();
     }

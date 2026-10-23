@@ -263,6 +263,26 @@ describe('the chat handoff an ACP prompt carries', () => {
     expect(text).not.toContain('a opens');
   });
 
+  /* Only the person's words are carried as theirs: user messages Tau makes for itself never read as "**user**". */
+  it.each(['approval-answer', 'client-memory', 'stream-checkpoint', 'external-tool', 'billing-invocation'])(
+    'should leave out a Tau-internal user message of kind %s',
+    (kind) => {
+      const current = marked('turn-2', 'next');
+      const transcript = [
+        said('phone-1', 'user', 'from the phone'),
+        { id: 'internal-1', role: 'user', content: `internal ${kind}`, metadata: { tauInternal: { kind } } },
+        said('phone-answer-1', 'assistant', 'phone answer'),
+        current,
+      ] satisfies ProviderMessage[];
+
+      const text = textOf(handoffBlocks(turnOf(transcript, current), undefined));
+
+      expect(text).toContain('from the phone');
+      expect(text).toContain('phone answer');
+      expect(text).not.toContain(`internal ${kind}`);
+    },
+  );
+
   /* A session whose own turns compaction or a rewind removed still saw the chat up to there: nothing is resent. */
   it('should send nothing for a reattached session whose own turns the history no longer holds', () => {
     const current = marked('turn-9', 'next');

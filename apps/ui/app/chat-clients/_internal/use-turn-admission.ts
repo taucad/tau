@@ -51,7 +51,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
   const creditPreflight = useCreditPreflight();
   const admitExecution = useCallback(
     async (turnExecution: CadAgentExecution = liveExecution): Promise<ChatExecutionTarget> => {
-      /* An external agent pinned to a launcher this device lacks is refused at once: nothing will ever publish
+      /* An external agent pinned to a host this device cannot reach is refused at once: nothing will publish
        * that host here, and the chat keeps its pin rather than moving to Tau. */
       const unplaceable = unplaceableExecutionReason(turnExecution);
       if (unplaceable !== undefined) {

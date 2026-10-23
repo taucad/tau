@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CadAgentExecution } from '@taucad/chat';
 import { portableExecutionOf } from '#utils/chat-execution.js';
 
@@ -18,7 +18,8 @@ vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
   },
 }));
 
-const { daemonPlacementOf, unplaceableExecutionReason } = await import('#lib/agent-host-placement.js');
+const { daemonPlacementOf, resetLoopbackAgentHosts, unplaceableExecutionReason } =
+  await import('#lib/agent-host-placement.js');
 
 const model = 'anthropic-claude-opus-4.8';
 /** Every device-relative Tau placement a chat record can carry from the device that wrote it, and none. */
@@ -35,6 +36,8 @@ const placeStored = (execution: CadAgentExecution) => daemonPlacementOf(portable
 
 afterEach(() => {
   build.desktop = false;
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe('device-local placement of a stored Tau chat', () => {
@@ -69,7 +72,9 @@ describe('unplaceableExecutionReason', () => {
   const desktopCodex: CadAgentExecution = { kind: 'acp', hostId: 'desktop', agentId: 'codex' };
 
   it('should refuse an external agent pinned to Tau Desktop when this build is the web', () => {
-    expect(unplaceableExecutionReason(desktopCodex)).toMatch(/Tau desktop app/);
+    expect(unplaceableExecutionReason(desktopCodex)).toBe(
+      'codex runs in Tau Desktop. Open this chat there, or choose Tau to continue here.',
+    );
   });
 
   it('should place the same external agent on Tau Desktop', () => {
@@ -80,5 +85,51 @@ describe('unplaceableExecutionReason', () => {
 
   it.each(deviceRelative)('should never refuse a Tau execution with a stored %s host', (_label, execution) => {
     expect(unplaceableExecutionReason(execution)).toBeUndefined();
+  });
+
+  describe('an external agent pinned to the daemon that served its page', () => {
+    const originCodex: CadAgentExecution = { kind: 'acp', hostId: 'origin', agentId: 'codex' };
+
+    it('should refuse at once on the web build, whose origin is never a daemon', () => {
+      vi.stubEnv('TAU_ORIGIN_AGENT_HOST', 'absent');
+
+      expect(unplaceableExecutionReason(originCodex)).toMatch(/choose Tau to continue here\.$/u);
+    });
+
+    it('should refuse at once on Tau Desktop, whose window no daemon serves', () => {
+      build.desktop = true;
+
+      expect(unplaceableExecutionReason(originCodex)).toMatch(/choose Tau to continue here\.$/u);
+    });
+
+    it('should leave a page a daemon may have served to discovery', () => {
+      expect(unplaceableExecutionReason(originCodex)).toBeUndefined();
+    });
+  });
+
+  describe('an external agent pinned to a loopback daemon', () => {
+    const origin = 'http://127.0.0.1:4100';
+    const loopbackCodex: CadAgentExecution = { kind: 'acp', hostId: `loopback:${origin}`, agentId: 'codex' };
+    const storage = new Map<string, string>();
+
+    beforeEach(() => {
+      storage.clear();
+      vi.stubGlobal('sessionStorage', {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+      });
+      resetLoopbackAgentHosts();
+    });
+
+    it('should refuse at once while this tab has not been handed that daemon', () => {
+      expect(unplaceableExecutionReason(loopbackCodex)).toMatch(/tau open --desktop.*choose Tau to continue here\.$/u);
+    });
+
+    it('should place it once this tab holds a session for that daemon', () => {
+      storage.set('tau:loopback-agent-hosts', JSON.stringify([{ origin, session: 'session_1' }]));
+
+      expect(unplaceableExecutionReason(loopbackCodex)).toBeUndefined();
+    });
   });
 });

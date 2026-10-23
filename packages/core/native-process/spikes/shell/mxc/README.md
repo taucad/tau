@@ -155,6 +155,12 @@ inside the token, while cmd.exe and native binaries start. The S2 receipt is
 the pty; the UTF-8 bytes Bash wrote are re-read by the orchestrator. `WRITE_RESTRICTED` gates writes
 only, so read isolation rests on distinct sandbox users plus deny-read ACEs.
 
+Observed status (runs 40032794341, 40034047709; both rows): write and read isolation pass and every
+grant is revoked, but **S2 in-token is not proven**. As the sandbox user inside the token, cmd.exe
+and its built-ins run, while `node.exe` and Git for Windows `bash.exe` each stall at startup with
+stdio redirected to files: no output, no stderr, killed at 30s (`fallback.s2Pty.startProbe.*`). So
+the driver never reaches its first statement, and `fallback.s2Pty.inContainer` fails typed.
+
 ## Running
 
 CI: `workflow_dispatch`, or any PR touching `mxc/**` or the workflow. The job installs the pinned

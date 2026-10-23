@@ -230,6 +230,26 @@ export const workbenchLayoutSchema = z
 export const cameraPresets = ['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom'] as const;
 
 /**
+ * Each preset's camera direction, from the model toward the camera in `tau:root` (Z up), and its up. Isometric names
+ * no up: it follows the view's `upDirection`. Captures, the Tau app and the agent plugin page frame from this one table.
+ */
+/** @public */
+export const cameraPresetOrientations: Readonly<
+  Record<
+    (typeof cameraPresets)[number],
+    Readonly<{ direction: readonly [number, number, number]; up?: readonly [number, number, number] }>
+  >
+> = {
+  isometric: { direction: [Math.sqrt(3 / 8), -Math.sqrt(3 / 8), 0.5] },
+  front: { direction: [0, -1, 0], up: [0, 0, 1] },
+  back: { direction: [0, 1, 0], up: [0, 0, 1] },
+  right: { direction: [1, 0, 0], up: [0, 0, 1] },
+  left: { direction: [-1, 0, 0], up: [0, 0, 1] },
+  top: { direction: [0, 0, 1], up: [0, 1, 0] },
+  bottom: { direction: [0, 0, -1], up: [0, 1, 0] },
+};
+
+/**
  * A preset and a look are instructions: the page frames the model from that side and then stores the pose it owns.
  * A look takes a direction from the model toward the camera, any length (`resolveCameraState` normalises it;
  * `[0, -1, 0]` is the front preset, "View From −Y") and an optional up, both in `tau:root`; `up` defaults to the
@@ -318,6 +338,20 @@ export const viewFieldsSchema = z.strictObject({
   grid: viewGridSchema.default({ unit: 'mm' }),
   section: sectionSchema.default({ active: false, cuts: [] }),
   measurements: z.array(pinnedMeasurementSchema).max(64).default([]),
+});
+
+/**
+ * The fields of a view a live viewer owns besides its camera: what a viewer reports after a person changes its display,
+ * grid, field of view, up direction, section or pinned measurements, and what a host merges into the view record.
+ */
+/** @public */
+export const viewSettingsSchema = viewFieldsSchema.pick({
+  fieldOfView: true,
+  upDirection: true,
+  display: true,
+  grid: true,
+  section: true,
+  measurements: true,
 });
 
 /** One authored kernel projection's durable choices. Evaluation-local instance ids never enter this record. */
@@ -434,6 +468,10 @@ export type WorkbenchView = z.output<typeof workbenchViewSchema>;
 export type WorkbenchEntries = z.output<typeof workbenchEntriesSchema>;
 /** @public */
 export type EntrySettings = z.output<typeof entrySettingsSchema>;
+/** @public */
+export type ComponentDisplay = z.output<typeof componentDisplaySchema>;
+/** @public */
+export type ViewSettings = z.output<typeof viewSettingsSchema>;
 /** @public */
 export type NamedLayout = z.output<typeof namedLayoutSchema>;
 /** @public */

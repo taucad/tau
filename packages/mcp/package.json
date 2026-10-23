@@ -65,7 +65,8 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "catalog:"
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@taucad/workbench": "workspace:*"
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",

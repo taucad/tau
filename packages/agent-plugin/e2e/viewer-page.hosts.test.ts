@@ -810,6 +810,71 @@ describe("the tab's panels (W10)", () => {
   );
 
   it(
+    'should preview a dragged parameter on the shown model and write only the released value (PAR-2)',
+    async () => {
+      const first = await callTool(client, 'show_model', { targetFile: 'plate.ts' });
+      const calls: Array<Readonly<{ name: string; at: number }>> = [];
+      const page = await mountInHarness(client, first, {
+        displayMode: 'fullscreen',
+        answer: (name) => {
+          calls.push({ name, at: Date.now() });
+          return undefined;
+        },
+      });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+      const panels = frame.getByRole('complementary', { name: 'Workbench' });
+      const width = panels.getByRole('tabpanel', { name: 'Parameters' }).getByRole('spinbutton', { name: /Width/u });
+      await width.waitFor({ timeout: 60_000 });
+      const sidecar = async (): Promise<string> => {
+        try {
+          return await readFile(join(project, '.tau/parameters/plate.ts.json'), 'utf8');
+        } catch {
+          return '';
+        }
+      };
+      const before = await sidecar();
+      const box = await width.boundingBox();
+      if (box === null) {
+        throw new Error('The Width field has no box.');
+      }
+
+      /* A drag of about a second: the page previews it, throttled, and writes nothing. */
+      const startX = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await page.mouse.move(startX, y);
+      await page.mouse.down();
+      const dragStart = Date.now();
+      for (let step = 1; step <= 20; step += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one pointer move at a time, as a hand drags.
+        await page.mouse.move(startX + step * 4, y);
+        // oxlint-disable-next-line no-await-in-loop -- one pointer move at a time, as a hand drags.
+        await page.waitForTimeout(50);
+      }
+      const previews = calls.filter((call) => call.name === 'app_preview_parameters');
+      expect(previews.length).toBeGreaterThan(0);
+      /* At most one per 200 ms on the page's clock, counted rather than spaced: delivery to the recorder jitters. */
+      expect(previews.length).toBeLessThanOrEqual(Math.floor((Date.now() - dragStart) / 200) + 1);
+      expect(calls.some((call) => call.name === 'apply_parameter_operation')).toBe(false);
+      expect(await sidecar()).toBe(before);
+
+      const released = calls.length;
+      await page.mouse.up();
+      await expect.poll(sidecar, { timeout: 60_000 }).not.toBe(before);
+      /* The release is one checked write; the watched source renders it, so the page only reads and syncs after. */
+      const after = calls.slice(released).map((call) => call.name);
+      const written = after.indexOf('apply_parameter_operation');
+      expect(written).toBeGreaterThanOrEqual(0);
+      expect(
+        after.slice(written + 1).filter((name) => !['get_parameters', 'app_sync', 'app_read'].includes(name)),
+      ).toEqual([]);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
     'should say why Export lists no formats: a server without the tool, or a failure it can retry',
     async () => {
       const shownMain = await callTool(client, 'show_model', { targetFile: 'main.ts' });
@@ -855,6 +920,66 @@ describe("the tab's panels (W10)", () => {
       expect(await panel.getByRole('checkbox', { name: 'Save to project' }).isChecked()).toBe(true);
       expect(pageErrors).toEqual([]);
       await failing.close();
+    },
+    kernelCallLimit,
+  );
+});
+
+describe('the Files pane (PAR-9)', () => {
+  it(
+    'should list the project, open another file in this page alone, and list a file created on disk',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const first = await callTool(client, 'show_model', { targetFile: 'surface.glb' });
+      const shownId = shown(first).model.id;
+      const asking = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      const other = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      await drawn(viewerFrame(asking), 'Export');
+      await drawn(viewerFrame(other), 'Export');
+
+      /* The pane lists the project's root, folders first; `.tau` is never listed. */
+      const panel = await openPane(viewerFrame(asking), 'Files');
+      await panel.getByRole('option', { name: /^small\.glb/u }).waitFor({ timeout: 30_000 });
+      expect(await panel.getByRole('option', { name: /^main\.ts/u }).count()).toBe(1);
+      expect(await panel.getByRole('option', { name: /^\.tau/u }).count()).toBe(0);
+      expect(await panel.getByRole('option', { name: /^surface\.glb/u }).getAttribute('aria-current')).toBe('true');
+
+      /* Opening another file shows it in the asking page, without show_model. */
+      await panel.getByRole('option', { name: /^small\.glb/u }).click();
+      await expect
+        .poll(
+          async () => {
+            const calls = await recorded(asking, 'toolCalls');
+            return calls.some((call) => call.name === 'app_read' && call.arguments['modelId'] !== shownId);
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+      await expect
+        .poll(async () => panel.getByRole('option', { name: /^small\.glb/u }).getAttribute('aria-current'))
+        .toBe('true');
+      const askingCalls = await recorded(asking, 'toolCalls');
+      const opens = askingCalls.filter((call) => call.name === 'app_open_file');
+      expect(opens.map((call) => call.arguments)).toEqual([
+        expect.objectContaining({ path: 'small.glb', modelId: shownId }) as unknown,
+      ]);
+      expect(askingCalls.some((call) => call.name === 'show_model')).toBe(false);
+
+      /* The second page keeps its model, and the agent's model shown last has not moved. */
+      const otherCalls = await recorded(other, 'toolCalls');
+      const otherReads = otherCalls.filter((call) => call.name === 'app_read');
+      expect(new Set(otherReads.map((call) => call.arguments['modelId']))).toEqual(new Set([shownId]));
+      const lastShown = await callTool(client, 'show_model', {});
+      expect(shown(lastShown).model.path).toBe('surface.glb');
+
+      /* A file written on disk appears through app_sync's filesVersion; one the viewer cannot show is disabled. */
+      await writeFile(join(project, 'notes.md'), '# Notes\n');
+      const notes = panel.getByRole('option', { name: /^notes\.md/u });
+      await notes.waitFor({ timeout: 60_000 });
+      expect(await notes.getAttribute('aria-disabled')).toBe('true');
+      await capture(asking, 'files-pane');
+      await rm(join(project, 'notes.md'));
+      expect(pageErrors).toEqual([]);
     },
     kernelCallLimit,
   );
@@ -926,8 +1051,13 @@ describe('the live view (W6)', () => {
         return calls;
       };
       await expect.poll(modelIdNow, { timeout: 120_000 }).toBe(shown(first).model.id);
+      /* The page reports what it draws on its next sync, which can follow the model's own report. */
+      const revisionEntryNow = async (): Promise<string | undefined> => {
+        const view = await viewNow();
+        return view?.sourceRevision?.entry;
+      };
+      await expect.poll(revisionEntryNow, { timeout: 30_000 }).toBe('live.ts');
       const before = await viewNow();
-      expect(before?.sourceRevision?.entry).toBe('live.ts');
       const { length: callsBefore } = await toolCallsNow();
 
       /* An editor, the agent or sed changes the file: the server's watched document renders it again. */
@@ -1167,6 +1297,101 @@ describe('Add to chat on each route (VUI-3)', () => {
   );
 });
 
+describe("desktop's structured errors (PAR-4)", () => {
+  beforeAll(async () => {
+    await writeFile(join(project, 'broken.ts'), `export default function main() {\n  return (;\n}\n`);
+  });
+
+  /**
+   * Open the bar's issues list.
+   *
+   * @param root - The frame the viewer is in, drawn in the tab composition.
+   * @param name - The segment's accessible name.
+   * @returns The list.
+   */
+  const openIssues = async (root: Frame, name: RegExp): Promise<Locator> => {
+    const segment = root.getByRole('group', { name: 'Viewer controls' }).getByRole('button', { name });
+    await segment.waitFor({ timeout: 120_000 });
+    await segment.click();
+    const list = root.getByRole('region', { name: 'Issues' });
+    await list.waitFor();
+    return list;
+  };
+
+  it(
+    'should list a failed build in the bar and hand an issue to the chat',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'broken.ts' });
+      expect(result.isError).toBe(true);
+      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const frame = viewerFrame(page);
+
+      const list = await openIssues(frame, /^Build failed\. Issues: 1 error$/u);
+      await capture(page, 'structured-errors');
+      await list.getByRole('button', { name: 'Add to chat', exact: true }).click();
+      await expect.poll(async () => recorded(page, 'modelContext')).toHaveLength(1);
+      expect(JSON.stringify(await recorded(page, 'modelContext'))).toContain('Fix this issue');
+      await frame.getByRole('status').filter({ hasText: 'Added to chat' }).waitFor();
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should prepare a kernel that is not prepared and show the model again',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'small.glb' });
+      const clean = shown(result);
+      const refused: CallToolResult = {
+        ...result,
+        structuredContent: {
+          ...clean,
+          model: {
+            ...clean.model,
+            issues: [
+              {
+                message: 'The picogk kernel is not prepared on this computer.',
+                code: 'KERNEL_NOT_PREPARED',
+                severity: 'error',
+                details: { kernel: 'picogk' },
+              },
+            ],
+          },
+        },
+      };
+      const page = await mountInHarness(client, refused, {
+        displayMode: 'fullscreen',
+        answer: (name) =>
+          name === 'prepare_kernel'
+            ? { content: [{ type: 'text', text: 'ready' }], structuredContent: { outcome: 'ready' } }
+            : name === 'show_model'
+              ? result
+              : undefined,
+      });
+      const frame = viewerFrame(page);
+
+      const list = await openIssues(frame, /^Issues: 1 error$/u);
+      await list.getByRole('button', { name: 'Prepare', exact: true }).click();
+      await expect
+        .poll(async () => {
+          const calls = await recorded(page, 'toolCalls');
+          return calls.filter((call) => call.name === 'prepare_kernel');
+        })
+        .toEqual([{ name: 'prepare_kernel', arguments: { kernel: 'picogk' } }]);
+      /* The model shows again without the refusal, so the segment goes. */
+      await expect
+        .poll(async () => frame.getByRole('button', { name: /Issues:/u }).count(), { timeout: 60_000 })
+        .toBe(0);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
 describe('the part menu from the keyboard (VUI-6)', () => {
   /** A wide part at the framed centre, so a right press there lands on it, and a narrow one beside it. */
   const keysSource = `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return [\n    { shape: drawRectangle(40, 20).sketchOnPlane('XY').extrude(4), name: 'Wide' },\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4).translate(35, 0, 0), name: 'Narrow' },\n  ];\n}\n`;
@@ -1212,7 +1437,8 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       const trigger = page.getByRole('button', { name: 'Actions for Wide' }).filter({ hasText: 'Wide' });
       await trigger.waitFor();
 
-      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item. */
+      /* Shift+F10 on the focused canvas region opens the menu on its first item; ↓ reaches the chat item, one row
+       * further down since the page's part gallery put Open preview at the top (PAR-7). */
       const region = page.getByRole('application', { name: 'Model viewer' });
       await region.focus();
       await page.keyboard.press('Shift+F10');
@@ -1225,6 +1451,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
           .evaluate((item) => item === document.activeElement),
       ).toBe(true);
       const copy = menu.getByRole('menuitem', { name: 'Copy reference' });
+      await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('ArrowDown');
       expect(await isFocused(copy)).toBe(true);
@@ -1446,6 +1673,128 @@ describe('the viewer page from a text host', () => {
       const lane = await page.getByRole('complementary', { name: 'Workbench' }).boundingBox();
       await page.mouse.move((lane?.x ?? 0) + 40, (lane?.y ?? 0) + 200, { steps: 4 });
       await expect.poll(async () => badge.count()).toBe(0);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should restore an arranged view and the camera the person left after a reload (PAR-3)',
+    async () => {
+      const records = join(project, '.tau/workbench');
+      await rm(records, { recursive: true, force: true });
+      onTestFinished(async () => {
+        await rm(records, { recursive: true, force: true });
+      });
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
+      const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
+      page.on('pageerror', (error) => {
+        pageErrors.push(error.message);
+      });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+      const viewNow = async (): Promise<TauViewerViewState> => {
+        const result = await callTool(client, 'view_state', {});
+        expect(result.isError).toBeFalsy();
+        return (result.structuredContent as { view: TauViewerViewState }).view;
+      };
+      const canvas = await page.getByRole('application', { name: 'Model viewer' }).boundingBox();
+      if (canvas === null) {
+        throw new Error('The canvas region has no box.');
+      }
+      const middle = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 };
+      /* The person picks the surface, once it is under the pointer, so its component id is known. */
+      await page.mouse.move(middle.x, middle.y, { steps: 4 });
+      await expect
+        .poll(async () => page.getByTestId('model-component-name-badge').textContent(), { timeout: 30_000 })
+        .toBe('surface');
+      await page.mouse.click(middle.x, middle.y);
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            return view.selected.length;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(0);
+      const picked = await viewNow();
+      const [surface] = picked.selected;
+
+      /* The agent arranges a view from the top with a section, a measurement and the surface hidden. */
+      const arranged = await callTool(client, 'arrange_workbench', {
+        views: [
+          {
+            id: 'saved',
+            entryPath: 'small.glb',
+            camera: { kind: 'preset', preset: 'top' },
+            section: { active: true, cuts: [{ kind: 'plane', plane: 'xy', offset: 0, isFlipped: false }] },
+            measurements: [{ id: 'gap', startPoint: [0, 0, 0], endPoint: [1, 0, 0] }],
+          },
+        ],
+        entries: [{ path: 'small.glb', components: { hidden: [surface?.componentId] } }],
+      });
+      expect(arranged.isError).toBeFalsy();
+
+      await page.reload();
+      await drawn(page, 'Export');
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            /* The reloaded page has had no input yet; the page before it had. */
+            return {
+              fresh: view.interactedAt === 0,
+              direction: view.camera?.direction.map((axis) => Math.round(axis * 1000) / 1000),
+              sectionActive: view.sectionActive,
+              measurementCount: view.measurementCount,
+              hidden: view.hidden,
+            };
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual({
+          fresh: true,
+          direction: [0, 0, 1],
+          sectionActive: true,
+          measurementCount: 1,
+          hidden: [surface?.componentId],
+        });
+      await capture(page, 'restored-arranged');
+
+      /* The person orbits; once the pose is kept, a reload opens on it. */
+      /* Away from the middle, where the measurement's label sits and a press would act on it. */
+      const corner = { x: canvas.x + canvas.width / 4, y: canvas.y + (canvas.height * 3) / 4 };
+      await page.mouse.move(corner.x, corner.y);
+      await page.mouse.down();
+      await page.mouse.move(corner.x + 120, corner.y - 60, { steps: 8 });
+      await page.mouse.up();
+      const savedPose = async (): Promise<unknown> => {
+        const text = await readFile(join(records, 'views/saved.json'), 'utf8').catch(() => '{}');
+        return (JSON.parse(text) as { camera?: { kind?: string } }).camera?.kind;
+      };
+      await expect.poll(savedPose, { timeout: 30_000 }).toBe('pose');
+      const { camera: orbited } = await viewNow();
+      expect(orbited?.direction.map((axis) => Math.round(axis * 1000) / 1000)).not.toEqual([0, 0, 1]);
+
+      await page.reload();
+      await drawn(page, 'Export');
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            return view.interactedAt === 0
+              ? view.camera?.direction.map((axis) => Math.round(axis * 100) / 100)
+              : 'stale';
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual(orbited?.direction.map((axis) => Math.round(axis * 100) / 100));
+      const restored = await viewNow();
+      expect(restored).toMatchObject({ sectionActive: true, measurementCount: 1, hidden: [surface?.componentId] });
+      expect(restored.camera?.verticalSpan).toBeCloseTo(orbited?.verticalSpan ?? 0, 3);
+      expect(pageErrors).toEqual([]);
       await page.close();
     },
     kernelCallLimit,

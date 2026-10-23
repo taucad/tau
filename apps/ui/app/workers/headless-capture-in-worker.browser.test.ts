@@ -5,7 +5,7 @@ import { runEncodeProbe, runHeadlessCaptureProbe } from '#workers/headless-captu
 import { canonicalCaptureViews } from '@taucad/agent-tools/capture';
 import { workbenchRecords } from '@taucad/workbench';
 import { HeadlessImageService } from '#services/headless-image.service.js';
-import { viewCameraOrientation } from '#workbench-records/projection.js';
+import { viewCameraOrientation } from '@taucad/workbench-panes/records/view-record';
 
 /**
  * Four bytes of `glTF` magic and no chunks: enough for the raster backend to

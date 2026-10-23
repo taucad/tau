@@ -57,6 +57,8 @@ export {
 export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityRequest } from '#capacity-domain.js';
 
 export { BoundedFileCache } from '#bounded-file-cache.js';
+export { TreeIndex } from '#tree-index.js';
+export type { TreeIndexAdmits, TreeNode, TreeSearchOptions } from '#tree-index.js';
 export { ResourceQueue } from '#resource-queue.js';
 export type { ResourceQueueClaim } from '#resource-queue.js';
 export { ChangeEventBus } from '#change-event-bus.js';

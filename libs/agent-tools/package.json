@@ -53,6 +53,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/workbench": "workspace:*",
     "geospec": "workspace:*"
   },
   "imports": {

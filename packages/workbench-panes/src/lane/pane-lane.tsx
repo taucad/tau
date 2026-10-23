@@ -26,6 +26,19 @@ const laneWidth = { minimum: 260, initial: 340, maximum: 640 } as const;
 const resizeStep = 16;
 
 /**
+ * What a lane can restore: its open tabs in order, the active one and its width in CSS pixels.
+ *
+ * @public
+ */
+export type PaneLaneLayout = Readonly<{
+  open: readonly WorkbenchPaneId[];
+  active?: WorkbenchPaneId | undefined;
+  width: number;
+}>;
+
+const clampWidth = (next: number): number => Math.min(laneWidth.maximum, Math.max(laneWidth.minimum, next));
+
+/**
  * Props for {@link PaneLane}.
  *
  * @public
@@ -35,6 +48,13 @@ export type PaneLaneProps = Readonly<{
   panes: readonly WorkbenchPaneId[];
   /** The tabs the lane opens with; the first is active. */
   initialOpen: readonly WorkbenchPaneId[];
+  /**
+   * A layout saved by {@link PaneLaneProps.onLayoutChange}, read once on mount: its tabs replace `initialOpen`, and
+   * offered panes it does not name stay closed. A pane no longer offered is dropped, and a width is clamped.
+   */
+  initialLayout?: Partial<PaneLaneLayout> | undefined;
+  /** Called with the lane's layout each time a tab opens, closes or activates, or the lane is resized. */
+  onLayoutChange?: ((layout: PaneLaneLayout) => void) | undefined;
   /** Draws one pane's body. */
   renderPane: (pane: WorkbenchPaneId) => ReactNode;
   /** Opens `pane` and makes it the active tab each time `requestId` changes (a part menu's "Show kinematics"). */
@@ -79,17 +99,36 @@ const groupLabels = { design: 'Design', project: 'Project' } as const;
 export function PaneLane({
   panes,
   initialOpen,
+  initialLayout,
+  onLayoutChange,
   renderPane,
   openRequest,
   headerEnd,
   className,
 }: PaneLaneProps): React.JSX.Element {
   const [open, setOpen] = useState<readonly WorkbenchPaneId[]>(() =>
-    initialOpen.filter((pane) => panes.includes(pane)),
+    (initialLayout?.open ?? initialOpen).filter((pane) => panes.includes(pane)),
   );
-  const [active, setActive] = useState<WorkbenchPaneId | undefined>(() => open[0]);
-  const [width, setWidth] = useState<number>(laneWidth.initial);
+  const [active, setActive] = useState<WorkbenchPaneId | undefined>(() =>
+    initialLayout?.active !== undefined && open.includes(initialLayout.active) ? initialLayout.active : open[0],
+  );
+  const [width, setWidth] = useState<number>(() =>
+    initialLayout?.width === undefined || !Number.isFinite(initialLayout.width)
+      ? laneWidth.initial
+      : clampWidth(initialLayout.width),
+  );
   const drag = useRef<{ startX: number; startWidth: number } | undefined>(undefined);
+  const layoutListener = useRef(onLayoutChange);
+  layoutListener.current = onLayoutChange;
+  const isFirstLayout = useRef(true);
+  useEffect(() => {
+    /* The mounted layout is the saved one, or the opening default: only a change is reported. */
+    if (isFirstLayout.current) {
+      isFirstLayout.current = false;
+      return;
+    }
+    layoutListener.current?.({ open, active, width });
+  }, [active, open, width]);
 
   const openPane = useCallback((pane: WorkbenchPaneId) => {
     setOpen((current) => (current.includes(pane) ? current : [...current, pane]));
@@ -116,8 +155,6 @@ export function PaneLane({
   const groups = (['design', 'project'] as const)
     .map((group) => ({ group, items: definitions.filter((definition) => definition.group === group) }))
     .filter(({ items }) => items.length > 0);
-
-  const clampWidth = (next: number): number => Math.min(laneWidth.maximum, Math.max(laneWidth.minimum, next));
 
   return (
     <aside

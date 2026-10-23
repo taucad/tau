@@ -17,6 +17,8 @@ import { tauCadTopologyExtension } from '@taucad/runtime/types';
 
 import { markedGlb, scriptedRuntime } from '#mcp-entry-sessions.fixture.js';
 import type { ScriptedRender, ScriptedRuntime } from '#mcp-entry-sessions.fixture.js';
+import type { EntryDocument, EntrySessionRuntime } from '#mcp-entry-sessions.js';
+import { viewerSettings } from '#mcp-viewer-chrome.js';
 import { createLocalMcpViewer } from '#mcp-viewer.js';
 import type { LocalMcpViewer, LocalMcpViewerOptions } from '#mcp-viewer.js';
 
@@ -83,9 +85,114 @@ describe('createLocalMcpViewer', () => {
       mimeType: 'model/gltf-binary',
       byteLength: glb.length,
       sha256: sha(glb),
+      projectKey: createHash('sha256').update(root).digest('hex').slice(0, 16),
     });
     expect(viewerUrl).toBeUndefined();
     expect(runtime.documents).toHaveLength(0);
+  });
+
+  it("should render the shown model's part thumbnails through its page tool, refusing a model it did not show", async () => {
+    const partThumbnails = vi.fn<NonNullable<LocalMcpViewerOptions['partThumbnails']>>(async ({ request }) => ({
+      thumbnails: request.parts.map(({ id }) => ({ id, mimeType: 'image/webp', data: 'AQID' })),
+    }));
+    const withThumbnails = createLocalMcpViewer({
+      page,
+      namedRoot: () => root,
+      workspaceRoot: root,
+      liveRuntime,
+      partThumbnails,
+    });
+    const tool = withThumbnails.pageTools?.find(({ name }) => name === 'app_part_thumbnails');
+    const { model } = shownModel(await withThumbnails.show({ targetFile: 'models/part.glb' }, inline));
+    const parts = [{ id: 'gear', primitives: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }] }];
+
+    await expect(tool?.call({ modelId: model.id, parts }, inline)).resolves.toEqual({
+      thumbnails: [{ id: 'gear', mimeType: 'image/webp', data: 'AQID' }],
+    });
+    expect(partThumbnails).toHaveBeenCalledWith(
+      expect.objectContaining({ root, source: { absolutePath: join(root, 'models', 'part.glb') } }),
+    );
+    /* A watched source's render is drawn from the session's memory, never from the project. */
+    const rendered = shownModel(await withThumbnails.show({ targetFile: 'src/bracket.ts' }, inline)).model;
+    await expect(tool?.call({ modelId: rendered.id, parts }, inline)).resolves.toMatchObject({
+      thumbnails: [{ id: 'gear' }],
+    });
+    expect(partThumbnails).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        root,
+        source: { bytes: expect.any(Uint8Array) as unknown, mimeType: 'model/gltf-binary' },
+      }),
+    );
+    expect(rendered.projectKey).toBe(createHash('sha256').update(root).digest('hex').slice(0, 16));
+    await expect(tool?.call({ modelId: 'unknown', parts }, inline)).resolves.toMatchObject({
+      errorCode: 'UNKNOWN_MODEL',
+    });
+    expect(() =>
+      tool?.inputSchema.parse({ modelId: model.id, parts: Array.from({ length: 5 }, () => parts[0]) }),
+    ).toThrow();
+    expect(() => tool?.inputSchema.parse({ modelId: model.id, parts, size: 1024 })).toThrow();
+    expect(viewer.pageTools?.some(({ name }) => name === 'app_part_thumbnails')).toBe(false);
+    await withThumbnails.close();
+  });
+
+  it("should keep the shown entry's render timeout and save captures for the page's bar", async () => {
+    const settings = viewer.pageTools?.find(({ name }) => name === 'app_viewer_settings');
+    const capture = viewer.pageTools?.find(({ name }) => name === 'app_save_capture');
+    const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+
+    await expect(settings?.call({ modelId: model.id, renderTimeout: 45_000 }, inline)).resolves.toEqual({
+      renderTimeout: 45_000,
+      defaultRenderTimeout: 600_000,
+    });
+    await expect(capture?.call({ modelId: model.id, data: png }, inline)).resolves.toMatchObject({
+      path: 'exports/bracket-capture-1.png',
+    });
+    await expect(settings?.call({ modelId: 'unknown' }, inline)).resolves.toMatchObject({ errorCode: 'UNKNOWN_MODEL' });
+  });
+
+  it("should answer RENDER_TIMEOUT when a watched source outlasts its entry's render timeout", async () => {
+    await viewerSettings({
+      root,
+      entryPath: 'src/bracket.ts',
+      defaultRenderTimeout: 600_000,
+      request: { modelId: 'any', renderTimeout: 20 },
+    });
+    /* A runtime whose evaluation never settles until the call gives up on it. */
+    const stalled: EntrySessionRuntime = {
+      lifecycleState: 'connected',
+      capabilities: undefined,
+      open: () =>
+        ({
+          on: () => () => undefined,
+          evaluation: async ({ signal }: { signal?: AbortSignal } = {}) =>
+            new Promise((_resolve, reject) => {
+              signal?.addEventListener('abort', () => {
+                reject(new Error('The render was given up on.'));
+              });
+            }),
+          view: () => ({
+            on: () => () => undefined,
+            rendering: async () =>
+              new Promise(() => {
+                /* Never renders. */
+              }),
+            close: () => undefined,
+          }),
+          close: () => undefined,
+        }) as unknown as EntryDocument,
+    };
+    const slow = createLocalMcpViewer({
+      page,
+      namedRoot: () => root,
+      workspaceRoot: root,
+      liveRuntime: async () => stalled,
+    });
+
+    await expect(slow.show({ targetFile: 'src/bracket.ts' }, inline)).resolves.toMatchObject({
+      errorCode: 'RENDER_TIMEOUT',
+    });
+    await slow.close();
   });
 
   it('should show a GLB exported from a source with that source, so its panes have parameters', async () => {
@@ -158,6 +265,50 @@ describe('createLocalMcpViewer', () => {
       byteLength: 16,
       totalBytes: 16,
       data: Buffer.from(markedGlb(1)).toString('base64'),
+    });
+    expect(await readdir(root)).not.toContain('.tau');
+  });
+
+  it("should preview a drag's values on the shown source's document, and refuse a drawn file or an unknown model", async () => {
+    const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+    const part = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+
+    expect(await viewer.previewParameters?.({ modelId: model.id, parameters: { width: 30 } }, inline)).toEqual({
+      accepted: true,
+    });
+    expect(runtime.documents[0]?.updates).toEqual([{ parameters: { width: 30 }, transient: true }]);
+    /* The page follows its drag through the source's newest render, which no write left in the project. */
+    const card = syncedOf(
+      await viewer.sync(
+        {
+          pageId: 'card-source',
+          version: 0,
+          follow: false,
+          wait: false,
+          view: {
+            model: { id: model.id, title: model.title, path: model.path, sourceFile: model.sourceFile },
+            selected: [],
+            hidden: [],
+            isolated: [],
+            sectionActive: false,
+            measurementCount: 0,
+            composition: 'inline',
+            interactedAt: 1,
+          },
+        },
+        inline,
+      ),
+    );
+    expect(card.show?.model.sha256).toBe(sha(markedGlb(2)));
+    expect(card.status?.['src/bracket.ts']?.building).toBe(false);
+    expect(await viewer.previewParameters?.({ modelId: model.id }, inline)).toEqual({ accepted: true });
+    expect(runtime.documents[0]?.updates.at(-1)).toEqual({});
+
+    expect(
+      await viewer.previewParameters?.({ modelId: part.model.id, parameters: { width: 30 } }, inline),
+    ).toMatchObject({ errorCode: 'NOT_LIVE' });
+    expect(await viewer.previewParameters?.({ modelId: 'unknown', parameters: {} }, inline)).toMatchObject({
+      errorCode: 'UNKNOWN_MODEL',
     });
     expect(await readdir(root)).not.toContain('.tau');
   });
@@ -338,13 +489,78 @@ describe('createLocalMcpViewer', () => {
     });
   });
 
-  it('should list renderable files with the main entry first, skipping tests and dependencies', async () => {
-    expect(await viewer.browse(inline)).toEqual({
-      files: [
-        { path: 'src/bracket.ts', title: 'bracket' },
-        { path: 'models/part.glb', title: 'part' },
+  it("should list the project's files with exports, leaving out .tau and dependencies", async () => {
+    await mkdir(join(root, 'exports'));
+    await writeFile(join(root, 'exports', 'bracket.stl'), 'solid bracket');
+    await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+    await writeFile(join(root, '.tau', 'artifacts', 'preview.glb'), glb);
+
+    expect(await viewer.listFiles({ path: '' }, inline)).toEqual({
+      entries: [
+        { name: 'exports', path: 'exports', isFolder: true, renderable: false },
+        { name: 'models', path: 'models', isFolder: true, renderable: false },
+        { name: 'src', path: 'src', isFolder: true, renderable: false },
+        { name: 'tau.json', path: 'tau.json', isFolder: false, size: expect.any(Number) as unknown, renderable: false },
+      ],
+      truncated: false,
+      filesVersion: 1,
+    });
+    expect(await viewer.listFiles({ query: 'bracket' }, inline)).toMatchObject({
+      entries: [
+        { path: 'exports/bracket.stl', size: 13, renderable: true },
+        { path: 'src/bracket.test.ts', renderable: false },
+        { path: 'src/bracket.ts', renderable: true },
       ],
     });
+  });
+
+  it("should answer a page's sync with the new filesVersion when a file is created on disk", async () => {
+    const { model } = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+    const listed = await viewer.listFiles({ modelId: model.id, path: 'src' }, inline);
+    const view = {
+      model: { id: model.id, title: model.title, path: model.path },
+      selected: [],
+      hidden: [],
+      isolated: [],
+      sectionActive: false,
+      measurementCount: 0,
+      composition: 'tab',
+      interactedAt: 5,
+    } as const;
+    const page = { pageId: 'page-files-0', follow: false, view } as const;
+    const first = await viewer.sync({ ...page, version: 0, wait: false }, inline);
+    expect(first).toMatchObject({ filesVersion: 'filesVersion' in listed ? listed.filesVersion : -1 });
+
+    const held = viewer.sync({ ...page, version: 'version' in first ? first.version : 0, wait: true }, inline);
+    await writeFile(join(root, 'src', 'arm.ts'), 'export default () => null;');
+    const after = await held;
+
+    expect('filesVersion' in after && after.filesVersion).toBeGreaterThan(1);
+    expect(await viewer.listFiles({ modelId: model.id, path: 'src' }, inline)).toMatchObject({
+      entries: expect.arrayContaining([expect.objectContaining({ path: 'src/arm.ts', renderable: true })]) as unknown,
+    });
+  });
+
+  it("should open a file for the asking page only, leaving the agent's model and other pages as they are", async () => {
+    const shown = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+    const other = await viewer.sync({ pageId: 'page-other-0', version: 0, follow: true, wait: false }, inline);
+
+    const opened = shownModel(await viewer.openFile({ pageId: 'page-asking-0', path: 'src/bracket.ts' }, inline));
+
+    expect(opened.model).toMatchObject({ sourceFile: 'src/bracket.ts' });
+    expect(opened.viewerUrl).toBeUndefined();
+    /* The page's open watches the source as a show does, so the asking page follows its edits. */
+    expect(runtime.documents).toHaveLength(1);
+    expect(runtime.documents[0]).toMatchObject({ entryPath: 'src/bracket.ts', watch: true });
+    /* The other page hears of no show, and the agent's show without a target still names the model it showed. */
+    const version = 'version' in other ? other.version : 0;
+    expect(
+      await viewer.sync({ pageId: 'page-other-0', version, follow: true, wait: false }, inline),
+    ).not.toHaveProperty('show');
+    expect(shownModel(await viewer.show({}, inline)).model.id).toBe(shown.model.id);
+    expect(
+      await viewer.openFile({ pageId: 'page-asking-0', path: 'tau.json', modelId: shown.model.id }, inline),
+    ).toMatchObject({ errorCode: 'NOT_RENDERABLE' });
   });
 
   it('should read a shown model in ranges and refuse one that changed', async () => {
@@ -423,7 +639,7 @@ describe('createLocalMcpViewer', () => {
       const synced = await held;
       expect(synced.status).toBe(200);
       expect(await synced.json()).toEqual({
-        accepts: ['references', 'sourceRevision'],
+        accepts: ['references', 'sourceRevision', 'settings'],
         version: 2,
         show: { ...next, select: ['component:arm'] },
       });

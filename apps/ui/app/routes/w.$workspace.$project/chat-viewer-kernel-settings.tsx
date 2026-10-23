@@ -8,7 +8,7 @@ import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { getLiveViewOptions, setLiveViewOptions, useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import type { LiveViewOptions } from '#workbench-records/live-view-options.js';
-import { newViewRecord } from '#workbench-records/projection.js';
+import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 
 /** How long setting edits rest before the view record is written; closing the menu writes at once. */

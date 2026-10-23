@@ -30,7 +30,7 @@ describe('createMcpEntrySessions', () => {
 
     expect(second).toBe(first);
     expect(runtime.documents).toHaveLength(1);
-    expect(runtime.documents[0]).toMatchObject({ entryPath: 'main.ts', watch: true, parameters: undefined });
+    expect(runtime.documents[0]).toMatchObject({ entryPath: 'main.ts', watch: true, updates: [] });
     expect(runtime.documents[0]?.viewRequests).toEqual([
       { id: 'model', request: { content: { includeTopology: true } } },
     ]);
@@ -46,25 +46,49 @@ describe('createMcpEntrySessions', () => {
     expect(runtime.documents[0]?.isClosed()).toBe(true);
   });
 
-  it('should ask for no content a kernel does not advertise, and key sessions by project, entry and parameters', async () => {
+  it('should ask for no content a kernel does not advertise, and key sessions by project and entry', async () => {
     const runtime = scriptedRuntime({ topology: false });
     const sessions = createMcpEntrySessions({ runtimeFor: async () => runtime, onEvent: vi.fn() });
 
     const plain = await sessions.acquire({ root: '/project', entryPath: 'main.ts' });
     await plain.settled();
-    const tall = await sessions.acquire({ root: '/project', entryPath: 'main.ts', parameters: { height: 2 } });
+    const again = await sessions.acquire({ root: '/project', entryPath: 'main.ts' });
     const other = await sessions.acquire({ root: '/other', entryPath: 'main.ts' });
 
     expect(runtime.documents[0]?.viewRequests).toEqual([{ id: 'model', request: undefined }]);
-    expect(new Set([plain.key, tall.key, other.key]).size).toBe(3);
-    expect(runtime.documents[1]?.parameters).toEqual({ height: 2 });
-    expect(entrySessionKey({ root: '/r', entryPath: 'a.ts', parameters: { b: 1, a: 2 } })).toBe(
-      entrySessionKey({ root: '/r', entryPath: 'a.ts', parameters: { a: 2, b: 1 } }),
-    );
-    expect(entrySessionKey({ root: '/r', entryPath: 'a.ts', parameters: {} })).toBe(
-      entrySessionKey({ root: '/r', entryPath: 'a.ts' }),
-    );
+    expect(again).toBe(plain);
+    expect(other.key).not.toBe(plain.key);
+    expect(plain.key).toBe(entrySessionKey({ root: '/project', entryPath: 'main.ts' }));
     sessions.close();
+  });
+
+  it('should render a drag preview transiently without building, and restore the committed values', async () => {
+    const runtime = scriptedRuntime();
+    const events: EntrySessionEvent[] = [];
+    const sessions = createMcpEntrySessions({
+      runtimeFor: async () => runtime,
+      onEvent: (_session, event) => events.push(event),
+    });
+    const session = await sessions.acquire({ root: '/project', entryPath: 'main.ts' });
+    await session.settled();
+    events.length = 0;
+
+    expect(await session.preview({ faceWidth: 16 })).toEqual({ accepted: true });
+    await settle();
+    expect(runtime.documents[0]?.updates).toEqual([{ parameters: { faceWidth: 16 }, transient: true }]);
+    /* The page sees the dragged model, but no "Building" for it. */
+    expect(events.filter((event) => event.type === 'rendered')).toHaveLength(1);
+    expect(events.some((event) => event.type === 'status' && event.status.building)).toBe(false);
+    expect(session.current()?.bytes).toEqual(markedGlb(2));
+
+    expect(await session.preview(undefined)).toEqual({ accepted: true });
+    await settle();
+    expect(runtime.documents[0]?.updates.at(-1)).toEqual({});
+    /* Restoring renders the committed values again, which is a build like any committed change. */
+    expect(events.some((event) => event.type === 'status' && event.status.building)).toBe(true);
+    expect(session.status().building).toBe(false);
+    sessions.close();
+    expect(await session.preview({ faceWidth: 12 })).toEqual({ accepted: false });
   });
 
   it('should render a file change, keep the newest two renders, and touch the project runtime on each', async () => {

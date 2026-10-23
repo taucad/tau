@@ -1,12 +1,14 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry event and breadcrumb fields are SDK wire names. */
 import { describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
-import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import * as Sentry from '@sentry/react';
+import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 import {
   beforeSendSentryEvent,
   consoleBreadcrumbTextLimit,
   createBeforeSend,
   sentryRelease,
+  staleBuildFingerprint,
   isUnhandledAbortRejection,
   scrubSentryBreadcrumb,
   scrubSentryEvent,
@@ -149,28 +151,65 @@ const moduleImportEvent = (): ErrorEvent => ({
 const moduleImportFailure = new TypeError('Importing a module script failed.');
 
 describe('createBeforeSend', () => {
-  it.each<StaleBuildOutcome>(['reloading', 'superseded'])(
-    'should drop a module import failure a deploy explains (%s)',
-    async (outcome) => {
-      const decide = vi.fn(async (_failure: unknown) => outcome);
-      const beforeSend = createBeforeSend(decide);
-
-      await expect(beforeSend(moduleImportEvent(), { originalException: moduleImportFailure })).resolves.toBeNull();
-      expect(decide).toHaveBeenCalledExactlyOnceWith(moduleImportFailure);
-    },
-  );
-
-  it('should report a module import failure the live build still has, scrubbed', async () => {
-    const beforeSend = createBeforeSend(async () => 'current');
+  it('should keep a module import failure a deploy explains, tagged and grouped apart at level info', async () => {
+    const describeFailure = vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded');
+    const beforeSend = createBeforeSend(describeFailure);
 
     const sent = await beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
 
-    expect(sent?.exception).toStrictEqual(moduleImportEvent().exception);
-    expect(sent?.request).toStrictEqual({ url: 'https://taucad.dev/w/home/ak47-receiver-curves' });
+    expect(sent?.tags).toMatchObject({ stale_build: 'superseded' });
+    expect(sent?.level).toBe('info');
+    expect(sent?.fingerprint).toStrictEqual([...staleBuildFingerprint]);
+    expect(describeFailure).toHaveBeenCalledExactlyOnceWith(moduleImportFailure);
+  });
+
+  it.each<StaleBuildTag>(['current', 'unknown'])(
+    'should keep a module import failure tagged %s in its usual group, scrubbed',
+    async (tag) => {
+      const beforeSend = createBeforeSend(async () => tag);
+
+      const sent = await beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
+
+      expect(sent?.tags).toMatchObject({ stale_build: tag });
+      expect(sent?.fingerprint).toBeUndefined();
+      expect(sent?.exception).toStrictEqual(moduleImportEvent().exception);
+      expect(sent?.request).toStrictEqual({ url: 'https://taucad.dev/w/home/ak47-receiver-curves' });
+    },
+  );
+
+  it('should deliver a superseded chunk failure to the transport once, tagged, and never again', async () => {
+    const sent: unknown[] = [];
+    Sentry.init({
+      dsn: 'https://public@o0.ingest.sentry.io/0',
+      defaultIntegrations: false,
+      transport: () => ({
+        send: async (envelope) => {
+          sent.push(envelope);
+          return {};
+        },
+        flush: async () => true,
+      }),
+      beforeSend: createBeforeSend(async () => 'superseded'),
+    });
+    try {
+      const failure = new TypeError('Importing a module script failed.');
+
+      Sentry.captureException(failure);
+      // A second capture of the same error, as a re-report after the fact would be, is discarded by Sentry.
+      Sentry.captureException(failure);
+      await Sentry.flush(1000);
+
+      const events = sent.map((envelope) => (envelope as [unknown, Array<[{ type: string }, ErrorEvent]>])[1][0]);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.[1].tags).toMatchObject({ stale_build: 'superseded' });
+      expect(events[0]?.[1].level).toBe('info');
+    } finally {
+      await Sentry.close();
+    }
   });
 
   it('should not probe the server for any other error', () => {
-    const decide = vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'reloading');
+    const decide = vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded');
     const beforeSend = createBeforeSend(decide);
 
     const sent = beforeSend(rejectionEvent('generic'), { originalException: new Error('boom') });

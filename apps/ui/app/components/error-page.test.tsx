@@ -299,6 +299,25 @@ describe('ErrorPage', () => {
     }
   });
 
+  it('should report an error once even when the error page mounts again for it', async () => {
+    const error = new Error('controlled render failure');
+    const first = renderPage(error);
+    await waitFor(() => {
+      expect(mocks.reportUiError).toHaveBeenCalledWith(error);
+    });
+    first.unmount();
+
+    renderPage(error);
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    expect(mocks.reportUiError).toHaveBeenCalledOnce();
+    expect(mocks.captureException).toHaveBeenCalledOnce();
+  });
+
   it('should report any other error without asking the server', async () => {
     const error = new Error('controlled render failure');
 

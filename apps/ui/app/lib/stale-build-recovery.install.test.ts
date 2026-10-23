@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
+const lookupConfirmDelay = 1000;
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));
 
 /** This bundle's build id and the deploy that replaced it, set by {@link load} from the real module. */
@@ -34,13 +35,19 @@ const stubReload = (): ReturnType<typeof vi.fn> => {
   return reload;
 };
 
+/** Let `build-skew`'s lookup and its confirmations (`lookupConfirmDelay` apart) run, then the decision. */
 const settle = async (): Promise<void> => {
   await vi.waitFor(() => {
     expect(globalThis.fetch).toHaveBeenCalled();
   });
-  await new Promise((resolve) => {
-    setTimeout(resolve, 10);
-  });
+  await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
+};
+
+/** Ask `build-skew` once more, as any later lookup would, letting its confirmations run. */
+const askAgain = async (queryLiveBuild: () => Promise<void>): Promise<void> => {
+  const asked = queryLiveBuild();
+  await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
+  await asked;
 };
 
 const rejectWithStaleModule = (): void => {
@@ -52,6 +59,7 @@ const rejectWithStaleModule = (): void => {
 let uninstall: (() => void) | undefined;
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   // A page a second after load; tests that need it older say so.
   vi.spyOn(performance, 'now').mockReturnValue(1000);
 });
@@ -66,6 +74,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe('installStaleBuildRecovery', () => {
@@ -137,7 +146,8 @@ describe('installStaleBuildRecovery', () => {
     recoverFromCaughtError(new TypeError('Importing a module script failed.'));
     await settle();
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    // One answer and the confirmations `build-skew` asks for before calling the build replaced.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(reload).toHaveBeenCalledOnce();
   });
 
@@ -146,9 +156,7 @@ describe('installStaleBuildRecovery', () => {
     const fetchMock = stubServer(deployedBuildId);
 
     recoverFromCaughtError(new Error('controlled render failure'));
-    await new Promise((resolve) => {
-      setTimeout(resolve, 10);
-    });
+    await vi.advanceTimersByTimeAsync(10);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -161,9 +169,7 @@ describe('installStaleBuildRecovery', () => {
     const event = new Event('unhandledrejection') as PromiseRejectionEvent;
     Object.assign(event, { reason: new Error('boom') });
     globalThis.dispatchEvent(event);
-    await new Promise((resolve) => {
-      setTimeout(resolve, 10);
-    });
+    await vi.advanceTimersByTimeAsync(10);
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -177,63 +183,89 @@ describe('installStaleBuildRecovery', () => {
     expect(sessionStorage.getItem('tau-stale-build-reload')).toBeNull();
   });
 
-  it('should report a failure only onCaughtError saw, with no error page, once the rollback ends', async () => {
+  it('should hand a failure only onCaughtError saw to the error tracker once, and keep it explained when the rollback ends', async () => {
     const { recoverFromCaughtError, readStaleBuildOutcome, subscribeGenuineFailures, skew } = await load();
     stubServer(ownBuildId - 3_600_000);
     vi.spyOn(performance, 'now').mockReturnValue(60_000);
     const error = new TypeError('Importing a module script failed.');
     const heard: unknown[] = [];
+    const unsubscribe = subscribeGenuineFailures((failure) => {
+      heard.push(failure);
+    });
 
     recoverFromCaughtError(error);
     await settle();
     expect(readStaleBuildOutcome(error)).toBe('superseded');
-    expect(reportUiError).not.toHaveBeenCalled();
 
-    // The rollback ends: once the server has named this build as often as the confirmation rule asks.
+    // The rollback ends: the server names this build as often as the confirmation rule asks.
     stubServer(ownBuildId);
-    for (let check = 0; check < skew.serverConfirmations; check += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- Each check is its own question, one after the other.
-      await skew.queryLiveBuild();
-    }
-    expect(readStaleBuildOutcome(error)).toBe('superseded');
-    const unsubscribe = subscribeGenuineFailures((failure) => {
-      heard.push(failure);
-    });
-    await skew.queryLiveBuild();
+    await askAgain(skew.queryLiveBuild);
     unsubscribe();
 
     expect(reportUiError.mock.calls).toStrictEqual([[error]]);
-    expect(heard).toStrictEqual([error]);
+    expect(heard).toStrictEqual([]);
+    expect(readStaleBuildOutcome(error)).toBe('superseded');
+    expect(skew.isReloadOffered()).toBe(false);
+  });
+
+  it('should neither offer nor reload on one answer naming another build, until it is confirmed', async () => {
+    const { recoverFromCaughtError, readStaleBuildOutcome, skew } = await load();
+    const reload = stubReload();
+    let answers = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        answers += 1;
+        // An edge still answering for a build it is leaving names another build once.
+        return Response.json({ buildId: answers === 1 ? deployedBuildId : ownBuildId });
+      }),
+    );
+    const error = new TypeError('Importing a module script failed.');
+
+    recoverFromCaughtError(error);
+    await settle();
+
     expect(readStaleBuildOutcome(error)).toBe('current');
+    expect(reload).not.toHaveBeenCalled();
     expect(skew.isReloadOffered()).toBe(false);
   });
 
   it('should re-report nothing when one stale answer names this build during a rollout', async () => {
-    const { recoverFromCaughtError, readStaleBuildOutcome, skew } = await load();
+    const { recoverFromCaughtError, readStaleBuildOutcome, subscribeGenuineFailures, skew } = await load();
     stubServer(deployedBuildId);
     vi.spyOn(performance, 'now').mockReturnValue(60_000);
     const error = new TypeError('Importing a module script failed.');
+    const heard: unknown[] = [];
+    const unsubscribe = subscribeGenuineFailures((failure) => {
+      heard.push(failure);
+    });
     recoverFromCaughtError(error);
     await settle();
     expect(readStaleBuildOutcome(error)).toBe('superseded');
 
     // An edge still answering for the build it is leaving names this one, once.
-    stubServer(ownBuildId);
-    await skew.queryLiveBuild();
-    stubServer(deployedBuildId);
-    await skew.queryLiveBuild();
+    let answers = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        answers += 1;
+        return Response.json({ buildId: answers === 1 ? ownBuildId : deployedBuildId });
+      }),
+    );
+    await askAgain(skew.queryLiveBuild);
+    unsubscribe();
 
     expect(readStaleBuildOutcome(error)).toBe('superseded');
     expect(skew.readServerVerdict()).toBe('replaced');
     expect(skew.isReloadOffered()).toBe(true);
-    expect(reportUiError).not.toHaveBeenCalled();
+    expect(reportUiError.mock.calls).toStrictEqual([[error]]);
+    expect(heard).toStrictEqual([]);
   });
 
   it.each([
     ['after the first input', 'input'],
     ['once the auto-reload window has passed', 'window'],
   ])('should stop listening for input %s', async (_label, trigger) => {
-    vi.useFakeTimers();
     const { installStaleBuildRecovery, autoReloadWindow } = await load();
     const removed = vi.spyOn(globalThis, 'removeEventListener');
     uninstall = installStaleBuildRecovery();
@@ -246,6 +278,5 @@ describe('installStaleBuildRecovery', () => {
 
     const inputTypes = ['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'];
     expect(removed.mock.calls.map(([type]) => type).toSorted()).toStrictEqual(inputTypes.toSorted());
-    vi.useRealTimers();
   });
 });

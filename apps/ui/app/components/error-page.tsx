@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect, useRef, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
@@ -24,6 +24,22 @@ const CollapsibleCodeBlock = lazy(async () => {
 });
 
 const serverReloadState = (): ReloadState => 'idle';
+
+/**
+ * Errors this page has reported, kept for the module's life rather than one mount's, so the same
+ * error reaching a remounted error page (a re-render of the route, a parent boundary resetting) is
+ * reported once. A module load failure is the recovery's to report.
+ */
+const reportedErrors = new WeakSet();
+
+const isReported = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && reportedErrors.has(error);
+
+const markReported = (error: unknown): void => {
+  if (typeof error === 'object' && error !== null) {
+    reportedErrors.add(error);
+  }
+};
 const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
 
 export function ErrorPage(): React.JSX.Element {
@@ -41,8 +57,6 @@ export function ErrorPage(): React.JSX.Element {
   const isExplained = staleOutcome === 'reloading' || staleOutcome === 'superseded';
   // This screen is the reload prompt while it shows; the floating banner would only repeat it.
   useReloadPromptOwner(isExplained);
-  // Each other error is reported once, however often the effect runs again (a new `analytics`, a remount).
-  const reportedError = useRef<unknown>(undefined);
 
   useEffect(() => {
     if (isModuleLoadFailure) {
@@ -51,7 +65,7 @@ export function ErrorPage(): React.JSX.Element {
       return;
     }
     // Don't report 404 errors to analytics - they're expected user behavior
-    if (reportedError.current === error || (isRouteErrorResponse(error) && error.status === 404)) {
+    if (isReported(error) || (isRouteErrorResponse(error) && error.status === 404)) {
       return;
     }
     let captured: Error | undefined;
@@ -66,7 +80,7 @@ export function ErrorPage(): React.JSX.Element {
     if (captured === undefined) {
       return;
     }
-    reportedError.current = error;
+    markReported(error);
     analytics.captureException(captured, { context: { component: 'ErrorPage' } });
     if (toErrorTracker) {
       void reportUiError(captured);

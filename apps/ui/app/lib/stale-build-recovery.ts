@@ -29,13 +29,13 @@
  *
  * The recovery asks no server itself: `build-skew` owns every `/health/build` answer and the
  * verdict it supports (`live`, `replaced`, `unknown`, with the same confirmation rule both ways),
- * and every outcome here derives from that one state. Neither deploy outcome is a bug to report.
- * One failure is decided once, however many channels (boundary, global handler, Sentry) report it;
- * when the verdict turns `live`, every failure a deploy explained becomes genuine at once and is
- * reported once (Sentry through `onGenuineFailure`, analytics through
- * {@link subscribeGenuineFailures}); `classify` then lets Sentry's own events through. A genuine
- * failure a boundary caught is reported the same way, since no global handler hears it. The
- * route error page only displays the outcome.
+ * and every outcome here derives from that one state, once: a later verdict (a rollback ending)
+ * never turns a failure a deploy explained into a bug report. One failure is decided once, however
+ * many channels report it. The error tracker hears every chunk failure, explained or not (its own
+ * handlers, or `reportToErrorTracker` for channels it does not capture), and `beforeSend` tags it
+ * `stale_build` = `superseded` | `current` | `unknown` instead of dropping it, since Sentry discards
+ * a second capture of an error it has seen. Analytics hears a failure decided `current` once, at
+ * decision time ({@link subscribeGenuineFailures}). The route error page only displays the outcome.
  */
 
 import { Topic } from '@taucad/events';
@@ -45,10 +45,10 @@ import {
   queryLiveBuild,
   readServerVerdict,
   readSupersedingBuildId,
-  subscribeServerVerdict,
 } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { reportUiError } from '#lib/error-reporting.js';
+import { readSessionStorage } from '#lib/session-storage.js';
 
 /**
  * What a module load failure turned out to be.
@@ -104,13 +104,13 @@ export type StaleBuildRecoveryOptions = {
   /** Hand the reload over to the update control, with the build id the server reported. */
   readonly onSuperseded: (serverBuildId: number) => void;
   /**
-   * Report a failure decided genuine (`current`), to each destination at most once. Analytics hears
-   * every genuine failure, wherever it was caught. Sentry hears it here only when nothing else
-   * reports it: a boundary caught it, or a deploy first explained it (so `classify` dropped
-   * Sentry's own event) and the server then took that back. A global listener's genuine failure
-   * reaches Sentry through Sentry's own handler.
+   * Hand a failure to the error tracker, once, when no channel it arrived through is one the tracker
+   * captures itself (see {@link FailureSource}). Every chunk failure goes, whatever its outcome:
+   * the tracker's `beforeSend` tags it ({@link StaleBuildTag}) rather than the page dropping it.
    */
-  readonly onGenuineFailure?: (failure: unknown, destinations: GenuineReportDestinations) => void;
+  readonly reportToErrorTracker?: (failure: unknown) => void;
+  /** Tell analytics, once, of a failure decided genuine (`current`) when it was decided. */
+  readonly onGenuineFailure?: (failure: unknown) => void;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
@@ -130,16 +130,19 @@ export type LiveBuildSource = {
   readonly readVerdict: () => ServerVerdict;
   /** The build the server named instead, while the verdict is `replaced`. */
   readonly readReplacingBuild: () => number;
-  /** Subscribe to each change of the verdict. */
-  readonly subscribe: (listener: () => void) => () => void;
 };
 
-/** Where one genuine failure's report goes this time: each destination hears a failure once. */
-export type GenuineReportDestinations = { readonly sentry: boolean; readonly analytics: boolean };
+/**
+ * What the error tracker is told about a chunk failure, as a tag (`stale_build`): a deploy explains
+ * it (`superseded`), the live build still has the failure (`current`), or the server did not say
+ * (`unknown`). Operators filter on it; the page never drops the event.
+ */
+export type StaleBuildTag = 'superseded' | 'current' | 'unknown';
 
 /**
  * The channel a failure arrived through. Whether Sentry captures that channel itself decides
- * whether the recovery must report a genuine failure to Sentry:
+ * whether the recovery hands the failure to Sentry (`reportToErrorTracker`), whatever its outcome;
+ * `beforeSend` then tags every chunk failure with its {@link StaleBuildTag} and drops none:
  *
  * | Channel                                   | Source     | Sentry captures it?                            |
  * | ----------------------------------------- | ---------- | ---------------------------------------------- |
@@ -150,7 +153,8 @@ export type GenuineReportDestinations = { readonly sentry: boolean; readonly ana
  *
  * Vite rethrows a preload failure into the import that asked for it, so a `preload` sighting is
  * usually followed by a `boundary` or `unhandledrejection` one; the recovery waits
- * {@link preloadFollowUpDelay} for it before deciding Sentry has not seen the failure.
+ * {@link preloadFollowUpDelay} for it before deciding Sentry has not seen the failure. Analytics
+ * hears each failure decided `current` once, at decision time, wherever it was caught.
  */
 export type FailureSource = 'boundary' | 'global' | 'preload';
 
@@ -172,15 +176,15 @@ export const autoReloadTimesKey = 'tau-stale-build-auto-reloads';
 /** The recovery of one page. */
 export type StaleBuildRecovery = {
   /**
-   * Decide, and act on, one module load failure. The same failure always gets the same answer, until
-   * the server names this build again and every failure a deploy explained is decided genuine.
+   * Decide, and act on, one module load failure. The same failure always gets the same answer: a
+   * later verdict (a rollback ending) never turns a failure a deploy explained into a bug report.
    */
   readonly recover: (failure: unknown, source?: FailureSource) => Promise<StaleBuildOutcome>;
   /**
-   * What a failure was, without acting on it: the decision already made for it, or else
-   * whether a deploy explains it (`superseded`) or not (`current`). Never reloads.
+   * What the error tracker should be told about a failure ({@link StaleBuildTag}), without acting
+   * on it: from the decision already made for it, or else from the live verdict. Never reloads.
    */
-  readonly classify: (failure: unknown) => Promise<StaleBuildOutcome>;
+  readonly classify: (failure: unknown) => Promise<StaleBuildTag>;
   /** The settled decision for a failure, or `undefined` while none is. */
   readonly readOutcome: (failure: unknown) => StaleBuildOutcome | undefined;
   /** Subscribe to each settled or changed decision ({@link StaleBuildRecovery.readOutcome}). */
@@ -209,41 +213,26 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   type FailureRecord = {
     /** The decision, made (and acted on) once. */
     decision?: Promise<StaleBuildOutcome>;
-    /** The settled outcome; `current` never changes again. */
+    /** The settled outcome, which never changes. */
     outcome?: StaleBuildOutcome;
+    /** The verdict the outcome rested on, for the error tracker's tag. */
+    verdict?: ServerVerdict;
     /** Channels it arrived through ({@link FailureSource}). */
     readonly sources: Set<FailureSource>;
-    /** `classify` called it a deploy's, so Sentry dropped its event. */
-    droppedBySentry: boolean;
-    reportedToSentry: boolean;
+    reportedToErrorTracker: boolean;
     reportedToAnalytics: boolean;
     /** Waiting for the channel Vite rethrows a preload failure into. */
     preloadWait?: ReturnType<typeof setTimeout>;
-    /** The wait is over: no channel Sentry captures followed the preload failure. */
-    preloadSettled: boolean;
   };
   const records = new WeakMap<WeakKey, FailureRecord>();
   const recordOf = (failure: WeakKey): FailureRecord => {
     let record = records.get(failure);
     if (record === undefined) {
-      record = {
-        sources: new Set(),
-        droppedBySentry: false,
-        reportedToSentry: false,
-        reportedToAnalytics: false,
-        preloadSettled: false,
-      };
+      record = { sources: new Set(), reportedToErrorTracker: false, reportedToAnalytics: false };
       records.set(failure, record);
     }
     return record;
   };
-  /**
-   * Failures a deploy explains (decided, or only classified), re-derived together when the verdict
-   * turns `live`. Iterated, because a failure no page displays (`onCaughtError`, a global listener,
-   * a Sentry-only one) must still be reported then; held weakly, so it pins no error.
-   */
-  const explained = new Set<WeakRef<WeakKey>>();
-  let stallTimer: ReturnType<typeof setTimeout> | undefined;
   const outcomeTopic = new Topic<void>({ name: 'stale-build-outcomes' });
   let reloadState: ReloadState = 'idle';
   const reloadStateTopic = new Topic<void>({ name: 'stale-build-reload' });
@@ -256,80 +245,43 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
   };
 
-  /** Whether Sentry still needs the recovery's report of a genuine failure (see {@link FailureSource}). */
-  const sentryNeedsReport = (record: FailureRecord): boolean =>
-    record.droppedBySentry || ![...record.sources].some((source) => capturedBySentry[source]);
+  const isCapturedBySentry = (record: FailureRecord): boolean =>
+    [...record.sources].some((source) => capturedBySentry[source]);
 
-  /** Report a genuine failure to analytics, and to Sentry if it has not seen it, each at most once. */
-  const reportGenuine = (failure: WeakKey): void => {
+  /** Hand a failure to the error tracker once, unless a channel the tracker captures itself saw it. */
+  const reportToErrorTracker = (failure: WeakKey): void => {
     const record = recordOf(failure);
-    if (record.outcome !== 'current') {
+    if (record.reportedToErrorTracker || isCapturedBySentry(record)) {
       return;
     }
-    const onlyPreload = record.sources.size > 0 && [...record.sources].every((source) => source === 'preload');
-    // Vite rethrows a preload failure into the import that asked; give that channel the chance first.
-    const isAwaitingFollowUp = onlyPreload && !record.preloadSettled && !record.droppedBySentry;
-    if (isAwaitingFollowUp) {
+    if (!record.sources.has('boundary')) {
+      // Only Vite's preloader saw it so far: give the channel it rethrows into the chance first.
       record.preloadWait ??= setTimeout(() => {
         record.preloadWait = undefined;
-        record.preloadSettled = true;
-        reportGenuine(failure);
+        if (!record.reportedToErrorTracker && !isCapturedBySentry(record)) {
+          record.reportedToErrorTracker = true;
+          options.reportToErrorTracker?.(failure);
+        }
       }, preloadFollowUpDelay);
-    }
-    const sentry = !isAwaitingFollowUp && sentryNeedsReport(record) && !record.reportedToSentry;
-    const analytics = !record.reportedToAnalytics;
-    if (!sentry && !analytics) {
       return;
     }
-    record.reportedToSentry ||= sentry;
-    record.reportedToAnalytics = true;
-    options.onGenuineFailure?.(failure, { sentry, analytics });
+    clearTimeout(record.preloadWait);
+    record.preloadWait = undefined;
+    record.reportedToErrorTracker = true;
+    options.reportToErrorTracker?.(failure);
   };
 
-  /** Record a settled decision against the live verdict now; a genuine one is reported. */
-  const settle = (failure: WeakKey, decided: StaleBuildOutcome): void => {
+  /** Record a settled decision; analytics hears a genuine one now, and never later. */
+  const settle = (failure: WeakKey, outcome: StaleBuildOutcome): void => {
     const record = recordOf(failure);
-    const outcome = decided !== 'current' && liveBuild.readVerdict() === 'live' ? 'current' : decided;
-    if (outcome !== decided) {
-      record.decision = Promise.resolve('current');
-      // Sentry heard (if at all) a deploy's failure and dropped it: this report is the one that stands.
-      record.droppedBySentry = true;
-    }
     record.outcome = outcome;
-    if (outcome === 'current') {
-      reportGenuine(failure);
-    } else {
-      explained.add(new WeakRef(failure));
+    record.verdict = liveBuild.readVerdict();
+    if (outcome === 'current' && !record.reportedToAnalytics) {
+      record.reportedToAnalytics = true;
+      options.onGenuineFailure?.(failure);
     }
     outcomeTopic.emit();
   };
-
-  /* The server names this build: no deploy explains anything. Every explained failure becomes genuine
-   * at once, and this page's own reload stops waiting to be called stalled. */
-  liveBuild.subscribe(() => {
-    if (liveBuild.readVerdict() !== 'live') {
-      return;
-    }
-    clearTimeout(stallTimer);
-    stallTimer = undefined;
-    setReloadState('idle');
-    if (explained.size === 0) {
-      return;
-    }
-    for (const reference of explained) {
-      const failure = reference.deref();
-      if (failure !== undefined) {
-        const record = recordOf(failure);
-        record.decision = Promise.resolve('current');
-        record.outcome = 'current';
-        // Sentry dropped it as a deploy's, or never heard it: this report is the one that stands.
-        record.droppedBySentry = true;
-        reportGenuine(failure);
-      }
-    }
-    explained.clear();
-    outcomeTopic.emit();
-  });
 
   const now = options.now ?? Date.now;
 
@@ -355,13 +307,13 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     return 'superseded';
   };
 
-  /** Whether a deploy replaced this build, by the live verdict after one shared question. */
-  const isReplaced = async (): Promise<boolean> => {
+  /** Ask `build-skew` (one shared question, its confirmations included) and read its verdict. */
+  const askVerdict = async (): Promise<ServerVerdict> => {
     if (options.buildId === 0) {
-      return false;
+      return 'unknown';
     }
     await liveBuild.query();
-    return liveBuild.readVerdict() === 'replaced';
+    return liveBuild.readVerdict();
   };
 
   const decide = async (): Promise<StaleBuildOutcome> => {
@@ -369,11 +321,11 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     if (readReloadState() === 'pending') {
       return 'reloading';
     }
-    const replaced = await isReplaced();
+    const verdict = await askVerdict();
     if (readReloadState() === 'pending') {
       return 'reloading';
     }
-    if (!replaced) {
+    if (verdict !== 'replaced') {
       return 'current';
     }
     const serverBuildId = liveBuild.readReplacingBuild();
@@ -396,13 +348,16 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     /* A page still here after the timeout is stalled: the reload was refused or is only slow, and no
      * signal tells the two apart (the old document lives until the new one commits; Tau registers no
      * unload prompt, `use-flush-on-close`). The guard stays, and later failures are offered the reload,
-     * never another automatic one. Before offering, the server is asked again; if it names this build,
-     * the verdict subscription has already decided everything genuine and ended the wait. */
-    stallTimer = setTimeout(() => {
-      stallTimer = undefined;
+     * never another automatic one. Before offering, the server is asked again: if it names this build
+     * by now, there is nothing to offer. */
+    setTimeout(() => {
       const offerIfStillReplaced = async (): Promise<void> => {
-        await liveBuild.query();
+        const stillVerdict = await askVerdict();
         if (readReloadState() !== 'pending') {
+          return;
+        }
+        if (stillVerdict === 'live') {
+          setReloadState('idle');
           return;
         }
         // No answer keeps the explanation the deploy gave: only the server naming this build takes it back.
@@ -415,46 +370,39 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     return 'reloading';
   };
 
+  const tagOf = (outcome: StaleBuildOutcome, verdict: ServerVerdict | undefined): StaleBuildTag => {
+    if (outcome !== 'current') {
+      return 'superseded';
+    }
+    return verdict === 'live' ? 'current' : 'unknown';
+  };
+
   return {
     async recover(failure, source = 'boundary') {
       if (!isKey(failure)) {
         return decide();
       }
       const record = recordOf(failure);
-      const isNewChannel = !record.sources.has(source);
       record.sources.add(source);
-      if (isNewChannel && record.outcome === 'current') {
-        // A later channel may be the one Sentry never captures: reporting follows every channel seen.
-        reportGenuine(failure);
-      }
+      reportToErrorTracker(failure);
       if (record.decision === undefined) {
         const decided = decide();
         record.decision = decided;
         // async-iife: bootstrap -- the settled outcome is published once the decision lands.
         void (async () => {
-          const outcome = await decided;
-          // A later decision (the server took a deploy's reason back) has replaced this one meanwhile.
-          if (record.decision === decided) {
-            settle(failure, outcome);
-          }
+          settle(failure, await decided);
         })();
       }
       return record.decision;
     },
     async classify(failure) {
-      if (!isKey(failure)) {
-        return (await isReplaced()) ? 'superseded' : 'current';
+      const known = isKey(failure) ? records.get(failure)?.decision : undefined;
+      if (known !== undefined) {
+        const outcome = await known;
+        return tagOf(outcome, isKey(failure) ? records.get(failure)?.verdict : undefined);
       }
-      const known = records.get(failure)?.decision;
-      const outcome = known === undefined ? ((await isReplaced()) ? 'superseded' : 'current') : await known;
-      if (outcome !== 'current') {
-        recordOf(failure).droppedBySentry = true;
-        if (known === undefined) {
-          // Only Sentry saw it: re-derived with the decided ones when the server names this build.
-          explained.add(new WeakRef(failure));
-        }
-      }
-      return outcome;
+      const verdict = await askVerdict();
+      return verdict === 'replaced' ? 'superseded' : tagOf('current', verdict);
     },
     readOutcome: (failure) => (isKey(failure) ? records.get(failure)?.outcome : undefined),
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
@@ -473,14 +421,6 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   };
 };
 
-const readSessionStorage = (): Storage | undefined => {
-  try {
-    return globalThis.sessionStorage;
-  } catch {
-    return undefined;
-  }
-};
-
 let hasUserInteracted = false;
 let pageRecovery: StaleBuildRecovery | undefined;
 
@@ -489,7 +429,7 @@ const genuineForAnalytics: unknown[] = [];
 const genuineFailureTopic = new Topic<void>({ name: 'stale-build-genuine' });
 
 /**
- * Hear each module load failure the recovery decided genuine and reports (`onGenuineFailure`), for
+ * Hear each module load failure the recovery decided genuine (`onGenuineFailure`), for
  * analytics, which lives in React context. Failures decided before anyone listened are delivered
  * on subscribing; each is delivered once.
  *
@@ -514,7 +454,6 @@ const getPageRecovery = (): StaleBuildRecovery => {
       query: queryLiveBuild,
       readVerdict: readServerVerdict,
       readReplacingBuild: readSupersedingBuildId,
-      subscribe: subscribeServerVerdict,
     },
     storage: readSessionStorage(),
     reload: () => {
@@ -522,14 +461,12 @@ const getPageRecovery = (): StaleBuildRecovery => {
     },
     // A lone tab keeps writing until the user reloads; other bundles stop it through `build-skew`'s own channel.
     onSuperseded: offerReload,
-    onGenuineFailure: (failure, { sentry, analytics }) => {
-      if (sentry) {
-        void reportUiError(failure);
-      }
-      if (analytics) {
-        genuineForAnalytics.push(failure);
-        genuineFailureTopic.emit();
-      }
+    reportToErrorTracker: (failure) => {
+      void reportUiError(failure);
+    },
+    onGenuineFailure: (failure) => {
+      genuineForAnalytics.push(failure);
+      genuineFailureTopic.emit();
     },
     canReloadSafely: () => !hasUserInteracted && performance.now() <= autoReloadWindow,
   });
@@ -584,13 +521,13 @@ export const subscribeReloadState = (listener: () => void): (() => void) =>
   getPageRecovery().subscribeReloadState(listener);
 
 /**
- * What one module load failure was, for an error reporter: the decision the page already
- * made, or a classification that never reloads or supersedes anything.
+ * What the error tracker should be told about one module load failure ({@link StaleBuildTag}):
+ * the decision the page already made, or the live verdict. Never reloads or supersedes anything.
  *
  * @param failure - The caught value.
- * @returns `current` when the failure is worth reporting.
+ * @returns The `stale_build` tag for its event.
  */
-export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildOutcome> =>
+export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildTag> =>
   getPageRecovery().classify(failure);
 
 /**
@@ -655,7 +592,8 @@ export const installStaleBuildRecovery = (): (() => void) => {
     stopWatchingInput();
   }
   for (const type of inputTypes) {
-    globalThis.addEventListener(type, onInput, { capture: true });
+    // Passive: noting an input never cancels it, so scrolling and touch stay on the fast path.
+    globalThis.addEventListener(type, onInput, { capture: true, passive: true });
   }
   inputWindow = setTimeout(stopWatchingInput, Math.max(0, autoReloadWindow - performance.now()));
   for (const [type, listener] of failureListeners) {

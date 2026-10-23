@@ -5,7 +5,7 @@ import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
-import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 
 /**
  * Remove the query string and fragment, then any invitation token, from a URL.
@@ -63,25 +63,38 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
 export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
   isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
 
+/** Fingerprint shared by chunk failures a deploy explains, so they group apart from genuine ones. */
+export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
+
 /**
- * The `beforeSend` hook with version-skew filtering (TAU-UI-6).
+ * The `beforeSend` hook with version-skew tagging (TAU-UI-6).
  *
- * The stale-build recovery owns module load failures (`installStaleBuildRecovery` and the
- * route error page); this hook never acts on one. It consults the decision already made for
- * the failure, or a classification that never reloads, and drops the event when a deploy
- * explains it. A failure the live build still has is reported like any other event.
+ * The stale-build recovery owns module load failures (`installStaleBuildRecovery` and the route
+ * error page); this hook never acts on one and never drops one: Sentry marks an error captured
+ * before `beforeSend` runs, so a dropped event could never be sent again. It tags each with what is
+ * known now (`stale_build` = `superseded` | `current` | `unknown`); one a deploy explains is grouped
+ * apart (its own fingerprint) at level `info`, for operators to filter.
  *
- * @param decide - Classifies one failure without acting on it (`classifyStaleBuildFailure`).
+ * @param describe - What is known about one failure, without acting on it (`classifyStaleBuildFailure`).
  * @returns The hook to pass to `Sentry.init`.
  * @public
  */
-export const createBeforeSend = (decide: (failure: unknown) => Promise<StaleBuildOutcome>) => {
+export const createBeforeSend = (describe: (failure: unknown) => Promise<StaleBuildTag>) => {
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
-  const unlessDeployed = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> =>
-    (await decide(hint?.originalException)) === 'current' ? beforeSendSentryEvent(event, hint) : null;
+  const tagged = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> => {
+    const tag = await describe(hint?.originalException);
+    const annotated: ErrorEvent = {
+      ...event,
+      // oxlint-disable-next-line naming-convention -- A Sentry tag name, filtered on by operators.
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
+      tags: { ...event.tags, stale_build: tag },
+      ...(tag === 'superseded' ? { level: 'info', fingerprint: [...staleBuildFingerprint] } : {}),
+    };
+    return beforeSendSentryEvent(annotated, hint);
+  };
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
   return (event: ErrorEvent, hint?: EventHint): ErrorEvent | null | Promise<ErrorEvent | null> =>
-    isStaleModuleError(hint?.originalException) ? unlessDeployed(event, hint) : beforeSendSentryEvent(event, hint);
+    isStaleModuleError(hint?.originalException) ? tagged(event, hint) : beforeSendSentryEvent(event, hint);
 };
 
 /**

@@ -31,6 +31,21 @@ const ids = (events: readonly AgentLogEvent[]): readonly string[] =>
   events.map((event) => (event.type === 'message.appended' ? event.message.id : event.type));
 
 describe('mergeLogSegments', () => {
+  /*
+   * A writer merges its own rows under no device id (the empty string), and every other device sees them under the
+   * writer's id. Two terms that start in the same millisecond still merge in one order on both devices.
+   */
+  it('should merge the same rows in one order on each device, whatever id it reads its own rows under', () => {
+    const at = '2026-09-13T06:00:00.000Z';
+    const phone = [record({ leaderEpoch: 'epoch-z-phone', sequence: 0, recordedAt: at, text: 'phone' })];
+    const desktop = [record({ leaderEpoch: 'epoch-a-desktop', sequence: 0, recordedAt: at, text: 'desktop' })];
+
+    const onPhone = ids(mergeLogSegments([segment('', phone), segment('device-desktop', desktop)]));
+    const onDesktop = ids(mergeLogSegments([segment('', desktop), segment('device-phone', phone)]));
+
+    expect(onPhone).toEqual(onDesktop);
+  });
+
   it('orders two devices by when each leadership term started and loses no record', () => {
     const deviceA = segment('device-a', [
       record({ leaderEpoch: 'epoch-a', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'a0' }),

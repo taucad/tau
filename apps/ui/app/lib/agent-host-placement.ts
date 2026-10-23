@@ -479,7 +479,58 @@ export const isDeviceRelativeHostReachable = (hostId: TauAgentHostId): boolean =
  * Whether this page's origin is a daemon, as last asked. A daemon is a daemon for the page's life; "no daemon" may be
  * a request that failed (the page cannot tell them apart), so it is asked again after {@link originAnswerReuse}.
  */
-let originHostsAgent: { answer: Promise<boolean>; readonly askedAt: number; settled?: boolean } | undefined;
+type OriginAsk = {
+  /** The origin's descriptor, or `undefined` when it serves no agent; rejects as the discovery did. */
+  descriptor: Promise<TauHostDescriptor | undefined>;
+  /** Whether it serves an agent; a failed ask reads as no. */
+  answer: Promise<boolean>;
+  readonly askedAt: number;
+  /** The answer once it is in: read without waiting by {@link isPlacementOnThisDeviceNow}. */
+  settled?: boolean;
+};
+let originHostsAgent: OriginAsk | undefined;
+
+/**
+ * Ask this page's origin whether it is a daemon, and record the answer: the one recorder of the origin's reach, which
+ * the listing, a chat's load and the composer's notice all read. A held placement is checked again when an answer
+ * differs from the last one.
+ *
+ * @param discover - How to ask; {@link discoverOriginAgentHost} unless a test stands in.
+ * @returns The ask, recorded before it is awaited, so concurrent readers share it.
+ */
+const askOrigin = (discover: typeof discoverOriginAgentHost = discoverOriginAgentHost): OriginAsk => {
+  const previous = originHostsAgent?.settled;
+  const asking: OriginAsk = {
+    descriptor: Promise.resolve(undefined),
+    answer: Promise.resolve(false),
+    askedAt: Date.now(),
+  };
+  const settle = (found: boolean): void => {
+    asking.settled = found;
+    if (found !== previous) {
+      originChanges.emit();
+    }
+  };
+  asking.descriptor = (async (): Promise<TauHostDescriptor | undefined> => {
+    try {
+      const found = await discover();
+      settle(found !== undefined);
+      return found;
+    } catch (error) {
+      settle(false);
+      throw error;
+    }
+  })();
+  asking.answer = (async (): Promise<boolean> => {
+    try {
+      return (await asking.descriptor) !== undefined;
+    } catch {
+      return false;
+    }
+  })();
+  originHostsAgent = asking;
+  return asking;
+};
 /** How long a "no daemon" answer about this page's origin stands before it is asked again, in milliseconds. */
 const originAnswerReuse = 30_000;
 
@@ -544,27 +595,7 @@ export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<b
   ) {
     return asked.answer;
   }
-  const previous = asked?.settled;
-  const asking: { answer: Promise<boolean>; askedAt: number; settled?: boolean } = {
-    answer: Promise.resolve(false),
-    askedAt: Date.now(),
-  };
-  asking.answer = (async (): Promise<boolean> => {
-    let found = false;
-    try {
-      found = (await discoverOriginAgentHost()) !== undefined;
-    } catch {
-      found = false;
-    }
-    /* Read without waiting by `isPlacementOnThisDeviceNow`; a held placement is checked again on a new answer. */
-    asking.settled = found;
-    if (found !== previous) {
-      originChanges.emit();
-    }
-    return found;
-  })();
-  originHostsAgent = asking;
-  return asking.answer;
+  return askOrigin().answer;
 };
 
 /**
@@ -788,7 +819,8 @@ export const listAgentHostPlacements = async (
   const bridge = (options.bridge ?? desktopBridge)();
   restoreLoopbackAdmissions();
   const [origin, paired, desktopAgents, loopbackTargets] = await Promise.all([
-    (options.discoverOrigin ?? discoverOriginAgentHost)(),
+    /* Recorded as it is asked: every reader of the origin's reach shares this answer. */
+    askOrigin(options.discoverOrigin).descriptor,
     (options.listHosts ?? listRemoteHosts)().catch((error: unknown) => {
       directoryOutage = error instanceof Error ? error.message : 'Tau could not reach your paired computers.';
       return [];

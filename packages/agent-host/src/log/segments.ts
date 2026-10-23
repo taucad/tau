@@ -102,8 +102,8 @@ const deviceOf = (term: Term): string => [...term.orderByDevice.keys()].toSorted
  * The result is the exact union of the segments' rows by key, `(leaderEpoch, sequence)`, and it depends only on the
  * set of rows: neither segment order nor a segment read twice changes it. A term's start is the earliest record any
  * copy holds; each device's terms are then clamped once, in the order its own file holds them, so a backwards clock
- * step on one device never reorders its own history; terms are ordered by that clamped start, then device, then file
- * order; and each term's records stay contiguous in `sequence` order. Two different rows under one key keep the copy
+ * step on one device never reorders its own history; terms are ordered by that clamped start, then by their device's
+ * first term (the same on every machine, whatever id a reader gives its own segment), then file order; and each term's records stay contiguous in `sequence` order. Two different rows under one key keep the copy
  * from the term's device (the smallest canonical form among its copies), and the other is reported through
  * `onConflict`.
  *
@@ -202,11 +202,23 @@ export const mergeSegmentRows = (
     }
   }
 
+  /*
+   * Ties between devices break on each device's first term, never on its id: a writer reads its own rows under no id
+   * (the empty string) while every other device reads them under its own, so an id would order a tie differently on
+   * each machine. A device's first term is the same row everywhere.
+   */
+  const deviceKey = new Map<string, string>();
+  for (const [deviceId, entries] of byDevice) {
+    const first = entries.toSorted(
+      (left, right) => left.order - right.order || compare(left.term.leaderEpoch, right.term.leaderEpoch),
+    )[0]!;
+    deviceKey.set(deviceId, first.term.leaderEpoch);
+  }
   return placed
     .toSorted(
       (left, right) =>
         clamped.get(left.term)! - clamped.get(right.term)! ||
-        compare(left.deviceId, right.deviceId) ||
+        compare(deviceKey.get(left.deviceId)!, deviceKey.get(right.deviceId)!) ||
         left.order - right.order ||
         compare(left.term.leaderEpoch, right.term.leaderEpoch),
     )

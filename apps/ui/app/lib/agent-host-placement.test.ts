@@ -1,6 +1,8 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  isPlacementOnThisDeviceNow,
+  resetOriginAgentHostAnswer,
   AgentHostPlacementError,
   discoverOriginAgentHost,
   externalAgentDisplayName,
@@ -146,6 +148,17 @@ describe('shouldAutoOfferCloudPlacement', () => {
 });
 
 describe('listAgentHostPlacements', () => {
+  /* XD2: one recorder of the origin's reach: the listing's discovery answers every later reader, the notice's too. */
+  it('should record the origin it discovers, so a reader without the network knows it', async () => {
+    resetOriginAgentHostAnswer();
+    expect(isPlacementOnThisDeviceNow('origin')).toBeUndefined();
+
+    await listAgentHostPlacements({ discoverOrigin: async () => descriptor, listHosts: async () => [] });
+
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
+    resetOriginAgentHostAnswer();
+  });
+
   it('lists rung 1 first and only paired devices that advertised the capability', async () => {
     await expect(
       listAgentHostPlacements({

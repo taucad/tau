@@ -42,6 +42,7 @@
 \* chat.json drops device-relative hosts in the chat store alone; queue paths unchanged.
 \* A late reach answer settles a load placement only while the chat still runs on it, and placements are read
 \* and written through one path; queue paths unchanged.
+\* A chat's open reads its placement through that one shared read too; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

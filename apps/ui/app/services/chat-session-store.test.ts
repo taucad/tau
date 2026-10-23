@@ -6307,6 +6307,31 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model, hostId: 'origin' });
   });
 
+  /* One read path: a chat opened right after a listing read its project's placements reads them no second time. */
+  it('should open a chat on the placements a read moments before already holds', async () => {
+    const chatId = 'chat_open_after_listing';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
+    await store.getChatHostSettings(chatId);
+    const reads = vi.spyOn(deps.client, 'readFile');
+
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    expect(reads.mock.calls.filter(([path]) => path === placementsPath)).toHaveLength(0);
+    store.release(chatId);
+  });
+
   it('should not hold the load on finishing a half-done legacy adoption', async () => {
     const chatId = 'chat_adoption_slow';
     const deps = createStubDeps();

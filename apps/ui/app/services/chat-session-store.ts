@@ -65,7 +65,7 @@ import {
 } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { readChatPlacement, readChatPlacementsShared, writeChatPlacement } from '#db/chat-placements.js';
+import { readChatPlacementsShared, writeChatPlacement } from '#db/chat-placements.js';
 import type { ComposerRecord, ComposerRecordClient } from '#db/composer-record-store.js';
 import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
@@ -3648,7 +3648,8 @@ export class ChatSessionStore {
     const placementOnOpen = async (
       storedChat: ChatEntity,
     ): Promise<Readonly<{ placement: TauAgentHostId | undefined; adopting: boolean }>> => {
-      const placement = await readChatPlacement(depsRef().client, projectId, storedChat.id);
+      const placements = await readChatPlacementsShared(depsRef().client, projectId);
+      const placement = placements[storedChat.id];
       if (placement !== undefined) {
         return { placement, adopting: false };
       }

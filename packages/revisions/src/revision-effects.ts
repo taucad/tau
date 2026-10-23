@@ -697,8 +697,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * themselves (`withOwedPushes`). Upgrade path: write the log commit before
    * the head moves and publish both in one ref transaction.
    */
-  /* The newest queued log commit: appends run in order, so it settles last. */
+  /*
+   * Every head move's records, settled: each move's promise also waits for the ones before it, so the newest settles
+   * last even when an earlier move's records (an operation log append, a removal) take longer than a later one's.
+   */
   let loggedOperation: Promise<void> = Promise.resolve();
+  const afterBoth = async (prior: Promise<void>, next: Promise<void>): Promise<void> => {
+    await Promise.all([prior, next]);
+  };
   const port: RevisionPort = Object.freeze({
     ...options.port,
     listRemoteRefs: async (
@@ -725,7 +731,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (result.status === 'updated') {
         /* Held, so `settled()` — and a host removing the project — waits for it;
          * `recordOperation` never rejects. */
-        loggedOperation = recordOperation(input.name, result.previousHead, result.head);
+        loggedOperation = afterBoth(loggedOperation, recordOperation(input.name, result.previousHead, result.head));
       }
       return result;
     },
@@ -4627,10 +4633,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           // oxlint-disable-next-line no-await-in-loop -- each deleted remote branch has its own CAS.
           const removed = await port.updateRef({ name: branch, expectedHead: revisionId(prior) });
           if (removed.status === 'updated') {
+            /* XD4: the wrapped port records the removal (`recordOperation`), so a chat naming it is refused for good. */
             localByName.delete(branch);
-            /* XD4: a branch the remote dropped is gone here too: a chat naming its checkout is refused for good. */
-            // oxlint-disable-next-line no-await-in-loop -- recorded with the deletion it follows.
-            await noteBranchRemoved(branch, true);
           }
           const tracking = remoteTrackingRef(input.remote, branch);
           // oxlint-disable-next-line no-await-in-loop -- paired cleanup for the same remote branch.

@@ -72,24 +72,6 @@ export const readChatPlacementsShared = async (
 };
 
 /**
- * One chat's placement on this device, or `undefined` for this device's default.
- *
- * @param client - The worker filesystem client.
- * @param projectId - The chat's project.
- * @param chatId - The chat.
- * @returns Its placement.
- * @public
- */
-export const readChatPlacement = async (
-  client: ComposerRecordClient,
-  projectId: string,
-  chatId: string,
-): Promise<TauAgentHostId | undefined> => {
-  const placements = await readChatPlacements(client, projectId);
-  return placements[chatId];
-};
-
-/**
  * Keep, or clear, one chat's placement on this device: one field-scoped read-modify-write of its project's
  * placements record, skipped when the record already says the same or there is no record to clear. Never throws.
  *
@@ -109,8 +91,6 @@ export const writeChatPlacement = async ({
   placement: TauAgentHostId | undefined;
 }>): Promise<boolean> => {
   const store = createComposerRecordStore(client, composerRecordPaths.placements(projectId));
-  /* Whatever this write does, the next read reads the record again. */
-  placementReads.get(client)?.delete(projectId);
   try {
     const current = await store.read();
     if (current.status === 'valid' && current.record.placements?.[chatId] === placement) {
@@ -121,9 +101,11 @@ export const writeChatPlacement = async ({
       return true;
     }
     await store.patch({ placements: { [chatId]: placement ?? false } });
-    placementReads.get(client)?.delete(projectId);
     return true;
   } catch {
     return false;
+  } finally {
+    /* Whatever this write did, a read that overlapped it or follows it reads the record again. */
+    placementReads.get(client)?.delete(projectId);
   }
 };

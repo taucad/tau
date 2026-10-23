@@ -1336,6 +1336,8 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
 
       expect(await two.port.readRef('feature')).toBeUndefined();
       const { objectFormat } = await two.port.describe();
+      /* Recorded with the deletion's operation, which a placement reads after (`branchOf`). */
+      expect(await two.actors.turns.branchOf(checkoutIdOfBranch(objectFormat, 'feature'))).toBe('removed');
       const removed = JSON.parse(await two.filesystem.readFile('.git/tau-removed-checkouts.json', 'utf8')) as unknown;
       expect(removed).toContain(checkoutIdOfBranch(objectFormat, 'feature'));
 

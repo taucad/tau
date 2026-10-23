@@ -214,7 +214,9 @@ export function ComboBoxResponsive<T>({
                   handleOpenChange(false);
                 }}
               >
-                <ChevronLeft className='size-5' />
+                {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
+                    chevron reads as sitting right; a half-pixel nudge left and a lighter stroke settle it. */}
+                <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
               </Button>
               <DrawerTitle className='truncate text-center text-sm font-medium' id='drawer-title'>
                 {title}

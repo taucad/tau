@@ -130,7 +130,11 @@ jobs:
       # sandbox_check which pids are in our session and the driver reaps them, re-enumerating until
       # empty. Tested against all four adversaries plus a concurrent second session that must survive.
       # Writes sbmember.<adversary>.json into the same evidence directory for the combined matrix.
+      # Step-level bound: a hung step must never eat the whole job (the 30-min job timeout cancels
+      # every remaining step, including the receipt upload). On a step timeout the always() steps
+      # below still run and upload whatever receipts exist.
       - name: Run reaping candidate (c) sandbox membership
+        timeout-minutes: 10
         shell: bash
         env:
           TAU_SPIKE_ROW: ${{ matrix.row }}
@@ -142,6 +146,8 @@ jobs:
 
       # node-pty for the S2 interactive-PTY receipt (clang/python preinstalled on the macOS runners).
       - name: Install node-pty for the S2 PTY receipt
+        if: ${{ !cancelled() }}
+        timeout-minutes: 8
         shell: bash
         run: npm install --prefix packages/core/native-process/spikes/shell --no-audit --no-fund
 
@@ -149,6 +155,8 @@ jobs:
       # session.sb deny-default Seatbelt profile — isatty, programmatic resize, Ctrl-C (status 130),
       # Ctrl-Z/fg job control, and UTF-8 round-trip, each pass/fail with captured evidence in s2.json.
       - name: Run S2 interactive PTY inside the Seatbelt containment
+        if: ${{ !cancelled() }}
+        timeout-minutes: 6
         shell: bash
         env:
           TAU_SPIKE_ROW: ${{ matrix.row }}

@@ -35,7 +35,17 @@
  * Dev-only evidence. Never shipped; never run elevated (no sudo); synthetic canary/marker only.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { arch, platform, release } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -128,6 +138,7 @@ type Session = {
   /** Diagnostics for a silent sandbox kill: sandbox-exec exits non-zero (profile rejected) or the
    * sandboxed shell is SIGKILLed by a denied operation, both of which leave startedBytes=0. */
   stderr: string;
+  stderrPath: string;
   exit?: { code: number | null; signal: NodeJS.Signals | null };
 };
 
@@ -143,7 +154,11 @@ const launchSession = (kind: Adversary, makeCommand: (sentinel: string) => strin
   const sentinel = join(dir, `${mark}.log`);
   rmSync(sentinel, { force: true });
 
-  const session: Session = { mark, marker, sentinel, dir, pid: undefined, stderr: '' };
+  // Session stderr goes to a FILE, not a pipe: every descendant inherits fds 1/2, so a pipe would be
+  // held open by any surviving escapee and keep this driver's event loop alive indefinitely.
+  const stderrPath = join(dir, 'sandbox-exec.stderr');
+  const stderrFd = openSync(stderrPath, 'a');
+  const session: Session = { mark, marker, sentinel, dir, pid: undefined, stderr: '', stderrPath };
   const child = spawn(
     'sandbox-exec',
     [
@@ -157,15 +172,23 @@ const launchSession = (kind: Adversary, makeCommand: (sentinel: string) => strin
       `SCRIPTDIR=${here}`,
       ...makeCommand(sentinel),
     ],
-    { cwd: dir, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } },
+    { cwd: dir, detached: true, stdio: ['ignore', 'ignore', stderrFd], env: { ...process.env } },
   );
+  closeSync(stderrFd);
   session.pid = child.pid;
   child.on('error', (e) => (session.spawnError = e.message));
   child.on('exit', (code, signal) => (session.exit = { code, signal }));
-  child.stdout?.resume();
-  child.stderr?.setEncoding('utf8').on('data', (c: string) => (session.stderr = (session.stderr + c).slice(-600)));
   child.unref();
   return session;
+};
+
+/** Read the session's captured sandbox-exec stderr tail (call before the session dir is removed). */
+const readStderr = (session: Session): string => {
+  try {
+    return readFileSync(session.stderrPath, 'utf8').slice(-600);
+  } catch {
+    return '';
+  }
 };
 
 /** The adversary shell run inside a session (the sentinel is this session's canary target). */
@@ -254,6 +277,8 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
   const secondSurvived = otherGrew && !crossKilled && otherStraysAfter.length > 0;
 
   // Cleanup (safety net, AFTER measuring): kill every straggler of BOTH sessions so nothing leaks.
+  ours.stderr = readStderr(ours);
+  other.stderr = readStderr(other);
   const leftover = strays(ours.mark);
   run('pkill', ['-9', '-f', ours.mark]);
   run('pkill', ['-9', '-f', other.mark]);
@@ -388,7 +413,7 @@ const preflight = async (): Promise<{ checks: Check[]; detail: Record<string, st
         '-c',
         'exec sleep 8',
       ],
-      { cwd: dir, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env } },
+      { cwd: dir, detached: true, stdio: ['ignore', 'ignore', 'ignore'], env: { ...process.env } },
     );
     let err = '';
     let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
@@ -479,3 +504,5 @@ writeFileSync(
   `${JSON.stringify({ row, summary }, undefined, 2)}\n`,
 );
 process.stdout.write(`${JSON.stringify({ row, summary }, undefined, 2)}\n`);
+// Exit explicitly: receipts are written; never let a straggler's inherited handle hold the step open.
+process.exit(0);

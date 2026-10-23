@@ -10,8 +10,8 @@ const durableStore = () => {
   let held: { manifest: ManifestBytes; token: CommitToken } | undefined;
   let generation = 0;
   const store = mock<RepositoryStore>({
-    readManifest: vi.fn(async () => held),
-    commitManifest: vi.fn(async (_locator, manifest, expected) => {
+    readManifest: vi.fn<RepositoryStore['readManifest']>(async () => held),
+    commitManifest: vi.fn<RepositoryStore['commitManifest']>(async (_locator, manifest, expected) => {
       if (expected === 'absent' ? held !== undefined : expected.token !== held?.token.token) {
         return 'lost';
       }

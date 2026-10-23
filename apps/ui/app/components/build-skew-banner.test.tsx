@@ -21,10 +21,34 @@ const announce = (buildId: number): void => {
 
 const openChannels: BroadcastChannel[] = [];
 
+/** The server names `liveBuildId` as the build it renders pages for (`/health/build`). */
+const serveLiveBuild = (liveBuildId: number): void => {
+  vi.stubGlobal('fetch', async () => Response.json({ buildId: liveBuildId }));
+};
+
+const listen = (): MessageEvent[] => {
+  const channel = new BroadcastChannel(channelName);
+  openChannels.push(channel);
+  const heard: MessageEvent[] = [];
+  channel.addEventListener('message', (event: MessageEvent) => {
+    heard.push(event);
+  });
+  return heard;
+};
+
+const pause = async (): Promise<void> => {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 30);
+    });
+  });
+};
+
 afterEach(() => {
   for (const channel of openChannels.splice(0)) {
     channel.close();
   }
+  vi.unstubAllGlobals();
 });
 
 describe('build-id skew guard (DF20)', () => {
@@ -74,6 +98,50 @@ describe('build-id skew guard (DF20)', () => {
     markBuildSuperseded(buildId + 1);
 
     expect(readSupersedingBuildId()).toBe(buildId + 1);
+  });
+
+  it('keeps a tab on the live build when a tab on a replaced build announces a newer one', async () => {
+    const { buildId, isBuildSuperseded } = await load();
+    serveLiveBuild(buildId);
+    const heard = listen();
+
+    announce(buildId + 1);
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
+    expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
+  });
+
+  it('supersedes this tab with the live build when another tab confirms it is live', async () => {
+    const { buildId, isBuildSuperseded, readSupersedingBuildId } = await load();
+    const channel = new BroadcastChannel(channelName);
+    openChannels.push(channel);
+
+    channel.postMessage({ buildId: buildId - 1, live: true });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readSupersedingBuildId()).toBe(buildId - 1);
+  });
+
+  it('names the build the server serves, not the announcing tab, when the server knows better', async () => {
+    const { buildId, isBuildSuperseded, readSupersedingBuildId } = await load();
+    serveLiveBuild(buildId - 1);
+
+    announce(buildId + 1);
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readSupersedingBuildId()).toBe(buildId - 1);
+  });
+
+  it('records the live build for the prompt without superseding this tab yet', async () => {
+    const { buildId, isBuildSuperseded, readSupersedingBuildId, recordLiveBuild } = await load();
+
+    recordLiveBuild(buildId - 1);
+
+    expect(readSupersedingBuildId()).toBe(buildId - 1);
+    expect(isBuildSuperseded()).toBe(false);
   });
 
   it('leaves an equal or older build untouched', async () => {

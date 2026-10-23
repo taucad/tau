@@ -11,11 +11,19 @@
  * suspends its durable writes (reads stay fine) and asks the user to reload.
  * Answering an older announcement with our own id is what lets the *older* tab
  * find out — the newer tab may have booted first.
+ *
+ * Newer is not always live: after a rollback the server renders an older build,
+ * and a tab still on the replaced newer one would otherwise keep superseding every
+ * freshly loaded live tab. So a tab that hears a newer build first asks the server
+ * (`/health/build`). When the server names this tab's build, the tab stays and
+ * answers `{ buildId, live: true }`, which supersedes the announcer instead; when
+ * it names another build, that build is the one to reload into. Without an answer
+ * the newer announcement wins, as before.
  */
 
 import { Topic } from '@taucad/events';
 import { metaConfig } from '#constants/meta.constants.js';
-import { readBuildId } from '#lib/build-identity.js';
+import { fetchLiveBuildId, readBuildId } from '#lib/build-identity.js';
 
 const channelName = `${metaConfig.databasePrefix}build-id`;
 
@@ -27,41 +35,92 @@ let supersedingBuildId = buildId;
 const supersededTopic = new Topic<void>({ name: 'build-skew' });
 const supersedingBuildTopic = new Topic<void>({ name: 'superseding-build' });
 
+/** Where word of the superseding build came from: another tab, or the server, which is the authority. */
+export type BuildSource = 'tab' | 'server';
+
+const recordSupersedingBuild = (otherBuildId: number, source: BuildSource): void => {
+  const isFirstRollback = otherBuildId < buildId && supersedingBuildId === buildId;
+  const isAuthoritative = source === 'server' && otherBuildId !== supersedingBuildId;
+  if (otherBuildId > supersedingBuildId || isFirstRollback || isAuthoritative) {
+    supersedingBuildId = otherBuildId;
+    supersedingBuildTopic.emit();
+  }
+};
+
+/**
+ * Record the build the server renders pages for, as soon as it is known, so the
+ * prompt names it (a rollback included) before anything is superseded.
+ *
+ * @param liveBuildId - The server's build id (`/health/build`).
+ */
+export function recordLiveBuild(liveBuildId: number): void {
+  if (liveBuildId !== buildId) {
+    recordSupersedingBuild(liveBuildId, 'server');
+  }
+}
+
 /**
  * Mark this build superseded by another one: a newer tab announced it, or the
  * server answered with a different build after a deploy (`#lib/stale-build-recovery`).
  * A rollback serves an older build, which supersedes this one without being newer;
- * a newer build heard later still outranks it.
+ * a newer tab heard later still outranks it, but the server's word always stands.
  *
  * @param otherBuildId - The superseding build's id.
+ * @param source - Who said so; defaults to another tab.
  */
-export function markBuildSuperseded(otherBuildId: number): void {
-  const isFirstRollback = otherBuildId < buildId && supersedingBuildId === buildId;
-  if (otherBuildId > supersedingBuildId || isFirstRollback) {
-    supersedingBuildId = otherBuildId;
-    supersedingBuildTopic.emit();
-  }
+export function markBuildSuperseded(otherBuildId: number, source: BuildSource = 'tab'): void {
+  recordSupersedingBuild(otherBuildId, source);
   if (!superseded) {
     superseded = true;
     supersededTopic.emit();
   }
 }
 
+/** A tab whose build the server confirmed live; it supersedes whoever hears it. */
+type LiveAnnouncement = { readonly buildId: number; readonly live: true };
+
+const isLiveAnnouncement = (message: unknown): message is LiveAnnouncement =>
+  typeof message === 'object' && message !== null && 'live' in message && message.live === true;
+
 const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName);
 
 if (channel) {
   // Node keeps the event loop alive for an open channel; browsers have no unref.
   (channel as { unref?: () => void }).unref?.();
+  const resolveNewerAnnouncement = async (other: number): Promise<void> => {
+    let liveBuildId: number | undefined;
+    try {
+      liveBuildId = await fetchLiveBuildId();
+    } catch {
+      liveBuildId = undefined;
+    }
+    if (liveBuildId === buildId) {
+      channel.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
+      return;
+    }
+    if (liveBuildId === undefined) {
+      markBuildSuperseded(other);
+      return;
+    }
+    markBuildSuperseded(liveBuildId, 'server');
+  };
   channel.addEventListener('message', (event: MessageEvent) => {
-    const other = Number(event.data);
+    const message: unknown = event.data;
+    const isLive = isLiveAnnouncement(message);
+    const other = Number(isLive ? message.buildId : message);
     if (!Number.isFinite(other) || other === buildId) {
+      return;
+    }
+    if (isLive) {
+      markBuildSuperseded(other, 'server');
       return;
     }
     if (other < buildId) {
       channel.postMessage(buildId);
       return;
     }
-    markBuildSuperseded(other);
+    // async-iife: bootstrap -- a channel listener cannot await; the answer acts on its own.
+    void resolveNewerAnnouncement(other);
   });
   channel.postMessage(buildId);
 }

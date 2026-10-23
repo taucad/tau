@@ -137,6 +137,13 @@ export type ActiveChatKernel = {
   kernelId: KernelId;
   kernel: KernelEntry;
   setActiveKernel: (kernelId: KernelId) => void;
+  /**
+   * The chat's own kernel when this runtime cannot execute it, such as a
+   * native kernel only Tau Desktop advertises, read on the web. `kernel` is
+   * the one used instead; the chat keeps its preference, so it returns
+   * wherever that kernel runs. Absent when the chat's kernel is the one used.
+   */
+  unavailableKernel?: KernelEntry;
 };
 
 /**
@@ -681,15 +688,19 @@ function useSessionExecution(session: ChatSession): ActiveChatExecution {
  * The chat-row id is re-validated via {@link isKernelId} so a stale id
  * (e.g. a kernel that was retired from `kernelConfigurations` after the
  * row was persisted) heals to the cookie default instead of resurrecting
- * into the UI.
+ * into the UI. A known kernel this runtime cannot execute also runs the
+ * cookie default, but stays on the chat row and is named as
+ * `unavailableKernel`, so the composer can say which kernel runs and why
+ * (cross-device chat handoff, XD5).
  */
 function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const chatActiveKernel = useSelector(session.persistenceActorRef, (state) => state.context.activeKernel);
   const { kernel: cookieKernel, setKernel: setCookieKernel } = useKernel();
-  const sessionKernel =
-    isKernelId(chatActiveKernel) && isKernelAvailable(chatActiveKernel) ? chatActiveKernel : undefined;
+  const knownKernel = isKernelId(chatActiveKernel) ? chatActiveKernel : undefined;
+  const sessionKernel = knownKernel !== undefined && isKernelAvailable(knownKernel) ? knownKernel : undefined;
   const kernelId: KernelId = sessionKernel ?? cookieKernel;
   const kernel = resolveKernel(kernelId);
+  const unavailableKernelId = sessionKernel === undefined ? knownKernel : undefined;
   const setActiveKernel = useCallback(
     (next: KernelId) => {
       setCookieKernel(next);
@@ -697,7 +708,15 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
     },
     [session.persistenceActorRef, setCookieKernel],
   );
-  return useMemo<ActiveChatKernel>(() => ({ kernelId, kernel, setActiveKernel }), [kernelId, kernel, setActiveKernel]);
+  return useMemo<ActiveChatKernel>(
+    () => ({
+      kernelId,
+      kernel,
+      setActiveKernel,
+      ...(unavailableKernelId === undefined ? {} : { unavailableKernel: resolveKernel(unavailableKernelId) }),
+    }),
+    [kernelId, kernel, setActiveKernel, unavailableKernelId],
+  );
 }
 
 /**

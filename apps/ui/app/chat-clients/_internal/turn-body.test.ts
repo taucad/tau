@@ -33,7 +33,7 @@ describe('placing a chat started in Tau Desktop, on the web', () => {
 
     await expect(dial).rejects.toBeInstanceOf(AgentHostPlacementError);
     await expect(dial).rejects.toHaveProperty('code', 'HOST_NOT_ON_THIS_DEVICE');
-    await expect(dial).rejects.toThrow(/Tau desktop app/);
+    await expect(dial).rejects.toThrow(/runs in Tau Desktop/);
     expect(storage.getProjectFileSystemConfig).not.toHaveBeenCalled();
   });
 

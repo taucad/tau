@@ -1191,6 +1191,7 @@ describe('ActiveChatProvider', () => {
         expect(result.current.kernel.kernelId).toBe('manifold');
       });
       expect(result.current.kernel.kernel.id).toBe('manifold');
+      expect(result.current.kernel.unavailableKernel).toBeUndefined();
     });
 
     it('should fall back to the cookie when Chat.activeKernel is undefined', async () => {
@@ -1217,6 +1218,22 @@ describe('ActiveChatProvider', () => {
         expect(result.current.kernel.kernelId).toBe('openscad');
       });
       expect(result.current.kernel.kernel.id).toBe('openscad');
+    });
+
+    it('should run the cookie kernel beside a desktop-only chat kernel, keeping the chat’s preference', async () => {
+      // Build123d needs a native runtime only Tau Desktop advertises; this runtime has none.
+      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_desktop_kernel', activeKernel: 'build123d' }));
+
+      const { result } = renderHook(() => useChatComposer(), {
+        wrapper: createSessionWrapper('chat_desktop_kernel'),
+      });
+
+      await waitFor(() => {
+        expect(result.current.kernel.unavailableKernel?.id).toBe('build123d');
+      });
+      expect(result.current.kernel.kernel.id).toBe('openscad');
+      expect(harness.patchChat).not.toHaveBeenCalledWith('chat_desktop_kernel', 'activeKernel', expect.anything());
+      expect(harness.setKernel).not.toHaveBeenCalled();
     });
 
     it('should dual-write (chat row + cookie) when setActiveKernel is called', async () => {

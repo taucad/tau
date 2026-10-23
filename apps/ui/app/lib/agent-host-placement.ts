@@ -113,23 +113,6 @@ export const externalAgentDisplayName = (agentId: string): string =>
   discoveredAgents.get(agentId)?.displayName ?? agentId;
 
 /**
- * Why one execution cannot be placed on this device, or `undefined` when it can.
- *
- * A Tau execution always can: every device-relative host it carries means
- * local placement here. An external agent cannot when it is pinned to Tau
- * Desktop and this build is the web: its CLI is a process on that computer,
- * so the chat keeps its pin and the turn is refused, never moved to Tau.
- *
- * @param execution - The turn's execution.
- * @returns The refusal's user-facing reason, or `undefined` when the execution is placeable.
- * @public
- */
-export const unplaceableExecutionReason = (execution: CadAgentExecution): string | undefined =>
-  execution.kind === 'acp' && execution.hostId === 'desktop' && !isDesktopTarget
-    ? `${externalAgentDisplayName(execution.agentId)} runs in the Tau desktop app on the computer this chat was started on. Open the project there to continue it, or pick another agent.`
-    : undefined;
-
-/**
  * The rung one host id is placed on.
  *
  * @param hostId - The execution's host id.
@@ -159,7 +142,7 @@ export type AgentHostPlacementErrorCode =
   | 'DESKTOP_ROOT_NOT_GRANTED'
   /** The desktop build has no browser agent worker to construct; nothing to grant or retry. */
   | 'BROWSER_HOST_UNAVAILABLE'
-  /** An external agent pinned to a launcher on another device; see {@link unplaceableExecutionReason}. */
+  /** An external agent pinned to a host this device cannot reach; see {@link unplaceableExecutionReason}. */
   | 'HOST_NOT_ON_THIS_DEVICE';
 
 /** A placement that could not be established, carrying which rung gave up. @public */
@@ -430,6 +413,59 @@ export const resetLoopbackAgentHosts = (): void => {
   } catch {
     // Nothing stored.
   }
+};
+
+/**
+ * Whether this page's origin can never be a daemon: the web build is served by
+ * the static web host (`TAU_ORIGIN_AGENT_HOST`), and no daemon serves Tau
+ * Desktop's window. Any other page asks its origin (`discoverOriginAgentHost`).
+ */
+const originNeverHostsAgent = (): boolean => import.meta.env.TAU_ORIGIN_AGENT_HOST === 'absent' || isDesktopTarget;
+
+/**
+ * Why one execution cannot be placed on this device, or `undefined` when it can.
+ *
+ * A Tau execution always can: every device-relative host it carries means
+ * local placement here. An external agent cannot when this device already
+ * knows nothing will ever publish its host here, so the chat keeps its pin and
+ * the turn is refused at once instead of after the availability wait, never
+ * moved to Tau (`bricked-acp-chat-browser-recovery.md`):
+ * - pinned to Tau Desktop, on the web: its CLI is a process on that computer;
+ * - pinned to the daemon that served its page (`origin`), on a page no daemon
+ *   serves;
+ * - pinned to a loopback daemon this tab holds no session for. The tab can
+ *   still be handed one, so this answer changes with
+ *   {@link onLoopbackAgentHostsChanged}.
+ *
+ * Each reason names where the agent runs and the choice that continues here.
+ *
+ * @param execution - The turn's execution.
+ * @returns The refusal's user-facing reason, or `undefined` when the execution is placeable.
+ * @public
+ */
+export const unplaceableExecutionReason = (execution: CadAgentExecution): string | undefined => {
+  if (execution.kind !== 'acp') {
+    return undefined;
+  }
+  const name = externalAgentDisplayName(execution.agentId);
+  const { hostId } = execution;
+  if (hostId === 'desktop') {
+    return isDesktopTarget
+      ? undefined
+      : `${name} runs in Tau Desktop. Open this chat there, or choose Tau to continue here.`;
+  }
+  if (hostId === 'origin') {
+    return originNeverHostsAgent()
+      ? `${name} runs on the Tau host that served this chat's page. Open this chat from that host, or choose Tau to continue here.`
+      : undefined;
+  }
+  if (hostId.startsWith(loopbackHostIdPrefix)) {
+    restoreLoopbackAdmissions();
+    return loopbackAdmissions.has(hostId)
+      ? undefined
+      : `${name} runs on a Tau host this tab has not been handed. Run \`tau open --desktop\` to hand it over, or choose Tau to continue here.`;
+  }
+  return undefined;
 };
 
 const loopbackTarget = (

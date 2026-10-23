@@ -321,8 +321,9 @@ export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): 
  *
  * The placement is this device's ({@link daemonPlacementOf}): a Tau chat with a
  * device-relative host runs locally, so only a paired device or a daemon this
- * device chose is dialled. An external agent pinned to a launcher this build
- * does not have is refused before anything is resolved or dialled.
+ * device chose is dialled. An external agent whose host this device already
+ * knows it cannot reach (`unplaceableExecutionReason`) is refused before
+ * anything is resolved or dialled.
  *
  * @param execution - The chat's execution, as this device places it.
  * @param projectId - Project whose node root launcher 2 is granted.

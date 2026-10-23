@@ -103,6 +103,8 @@ describe('UI source-map credential ownership', () => {
           '#!/bin/sh\necho "$*" >> "$CALLS"\nif [ "$3" = ui:sourcemaps ]; then echo "$POSTHOG_CLI_TOKEN:$POSTHOG_CLI_ENV_ID:$SENTRY_AUTH_TOKEN" >> "$CALLS"; exit "$UPLOAD_EXIT"; fi\n',
           { mode: 0o700 },
         );
+        // The asset retention step that ends the command (TAU-UI-6); recorded, not run.
+        writeFileSync(join(directory, 'node'), '#!/bin/sh\necho "node $*" >> "$CALLS"\n', { mode: 0o700 });
         expect(uploadCommands).toHaveLength(2);
         for (const command of uploadCommands) {
           writeFileSync(calls, '');
@@ -131,6 +133,8 @@ describe('UI source-map credential ownership', () => {
           if (uploads) {
             expect(recordedCalls).toContain('phx_github:123:sentry_github');
           }
+          // Assets are retained last, and only from a build that passed its upload policy.
+          expect(recordedCalls.trimEnd().endsWith('node scripts/retain-previous-assets.mts')).toBe(status === 0);
           if (optional === 'true' && (!uploads || uploadExit !== '0')) {
             expect(result.stdout).toContain('Warning: source map upload disabled or failed');
           }

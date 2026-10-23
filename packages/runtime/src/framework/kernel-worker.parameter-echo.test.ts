@@ -121,6 +121,7 @@ const createEchoWorker = async (binding: ComputeBinding) => {
   // The client keeps only renderings of the intent it last sent, as the document session does.
   let clientIntent = 0;
   const accepted = (): Rendered[] => rendered.filter((event) => event.intent === clientIntent);
+  const delivered = (): unknown[] => accepted().map((event) => (event.success ? event.artifact : event.issues));
 
   worker.handleOpenDocument({
     documentId: 'doc',
@@ -157,12 +158,13 @@ const createEchoWorker = async (binding: ComputeBinding) => {
     };
   };
 
-  return { worker, builds, meshes, rendered, accepted, persistRecord, commit, gateBuilds };
+  return { worker, builds, meshes, rendered, accepted, delivered, persistRecord, commit, gateBuilds };
 };
 
 describe.each(computeBindings)('KernelWorker parameter sidecar echo (compute reuse %s)', (_mode, binding) => {
   it('should build and mesh once when the update arrives after the watch rendered the persisted sidecar', async () => {
-    const { worker, builds, meshes, rendered, accepted, persistRecord, commit } = await createEchoWorker(binding());
+    const { worker, builds, meshes, rendered, accepted, delivered, persistRecord, commit } =
+      await createEchoWorker(binding());
     try {
       const bytes = await persistRecord(3);
       // The measured order: the watch's evaluation of the host's own write finishes before the update lands.
@@ -174,28 +176,21 @@ describe.each(computeBindings)('KernelWorker parameter sidecar echo (compute reu
         expect(accepted()).toHaveLength(1);
       });
 
-      expect({ builds, meshes, delivered: accepted().map(({ artifact, success }) => ({ success, artifact })) }).toEqual(
-        {
-          builds: [3],
-          meshes: [3],
-          delivered: [
-            {
-              success: true,
-              artifact: {
-                mimeType: 'image/svg+xml',
-                content: '<svg xmlns="http://www.w3.org/2000/svg"><text>3</text></svg>',
-              },
-            },
-          ],
-        },
-      );
+      expect({ builds, meshes, delivered: delivered() }).toEqual({
+        builds: [3],
+        meshes: [3],
+        delivered: [
+          { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"><text>3</text></svg>' },
+        ],
+      });
     } finally {
       await worker.cleanup();
     }
   });
 
   it('should build and mesh once when the update arrives while the watch is building the persisted sidecar', async () => {
-    const { worker, builds, meshes, accepted, persistRecord, commit, gateBuilds } = await createEchoWorker(binding());
+    const { worker, builds, meshes, accepted, delivered, persistRecord, commit, gateBuilds } =
+      await createEchoWorker(binding());
     try {
       const release = gateBuilds();
       const bytes = await persistRecord(3);
@@ -208,7 +203,7 @@ describe.each(computeBindings)('KernelWorker parameter sidecar echo (compute reu
         expect(accepted()).toHaveLength(1);
       });
 
-      expect({ builds, meshes, delivered: accepted().map(({ artifact }) => artifact) }).toEqual({
+      expect({ builds, meshes, delivered: delivered() }).toEqual({
         builds: [3],
         meshes: [3],
         delivered: [
@@ -221,14 +216,14 @@ describe.each(computeBindings)('KernelWorker parameter sidecar echo (compute reu
   });
 
   it('should re-evaluate a sidecar another writer changed without an update', async () => {
-    const { worker, builds, meshes, accepted, persistRecord } = await createEchoWorker(binding());
+    const { worker, builds, meshes, accepted, delivered, persistRecord } = await createEchoWorker(binding());
     try {
       await persistRecord(7);
       await vi.waitFor(() => {
         expect(accepted()).toHaveLength(1);
       });
 
-      expect({ builds, meshes, delivered: accepted().map(({ artifact }) => artifact) }).toEqual({
+      expect({ builds, meshes, delivered: delivered() }).toEqual({
         builds: [7],
         meshes: [7],
         delivered: [

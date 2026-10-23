@@ -2,44 +2,58 @@
 # AppArmor profile row. Spike W1's LNX-U row runs on a hosted ubuntu-24.04 runner whose AppArmor /
 # userns posture is a runner artifact (and where Tau's own setup-linux-sandbox would set
 # kernel.apparmor_restrict_unprivileged_userns=0 — a GLOBAL relaxation this program forbids). This
-# file stands up a GENUINE stock Ubuntu 24.04 cloud image in a VM, leaves that sysctl at its shipped
-# value, and runs the EXISTING, UNMODIFIED harness packages/core/native-process/spikes/shell/
-# fs-net-probe.mts against Tau's BUNDLED bwrap, in three phases, to settle three questions:
+# file stands up a GENUINE stock cloud image in a VM, leaves that sysctl at its shipped value, and runs
+# the EXISTING, UNMODIFIED harness packages/core/native-process/spikes/shell/fs-net-probe.mts against
+# Tau's BUNDLED bwrap, in three phases, to settle three questions:
 #
-#   1. CONFIRM it is stock-24.04 behaviour (not hosted-runner-specific): with Tau's bundled bwrap at an
+#   1. CONFIRM it is stock-distro behaviour (not hosted-runner-specific): with Tau's bundled bwrap at an
 #      /opt/Tau path that the stock /usr/bin/bwrap AppArmor profile does not cover, loopback bring-up
 #      fails `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted` and the sandbox is
-#      unavailable — under apparmor_restrict_unprivileged_userns left at stock 1.
+#      unavailable — under apparmor_restrict_unprivileged_userns left at its shipped value.
 #   2. PROTOTYPE a Tau-SCOPED AppArmor profile (linux-vm/apparmor/tau-bwrap) installed the .deb way
-#      (apparmor_parser at install time). With it loaded — sysctl STILL 1, system default untouched —
+#      (apparmor_parser at install time). With it loaded — sysctl untouched, system default untouched —
 #      the sandbox launches and fs-net-probe produces real S0/S1.
 #   3. RECORD what an AppImage gets WITHOUT the profile: the same bwrap at an AppImage mount path, no
 #      install step → still blocked. AppImage packaging needs a different containment story.
 #
+# ─ Image rows (Ubuntu + Debian) ─────────────────────────────────────────────────────────────────────
+# The lane is image-agnostic: run-in-guest.sh records /etc/os-release and provisions via apt, so the
+# SAME three-phase harness runs unchanged on either distro. The `distro` dispatch input selects the row
+# (ubuntu-2404 default, or debian-13); each row acquires its publisher's stock cloud image and verifies
+# against that publisher's SHA256SUMS (Ubuntu) / SHA512SUMS (Debian). The Debian 13 row exists to
+# confirm the AppArmor-profile approach generalizes beyond Ubuntu. image_url/image_sha256 still override.
+#
 # ─ KVM reality ─────────────────────────────────────────────────────────────────────────────────────
-# A stock Ubuntu cloud image reaches cloud-init completion in minutes even under QEMU TCG software
-# emulation, so unlike the Win11 lane a missing /dev/kvm is NOT a hard blocker: preflight-kvm.sh records
-# the KVM verdict (a first-class output of this lane) and selects TCG with a longer inner deadline when
-# KVM is absent. The accelerator actually used is recorded in the receipts. If KVM is absent AND TCG is
+# A stock cloud image reaches cloud-init completion in minutes even under QEMU TCG software emulation,
+# so unlike the Win11 lane a missing /dev/kvm is NOT a hard blocker: preflight-kvm.sh records the KVM
+# verdict (a first-class output of this lane) and selects TCG with a longer inner deadline when KVM is
+# absent. The accelerator actually used is recorded in the receipts. If KVM is absent AND TCG is
 # disallowed (allow_tcg=false), the row records a kvm-unavailable blocker and fails — never a fake green.
 #
-# ─ Image basis (license-clean, pinned) ──────────────────────────────────────────────────────────────
-# Ubuntu cloud images are freely redistributable and published with SHA256SUMS, so this lane ships a
-# working default URL and verifies the download against Ubuntu's published checksums (trust-on-publish);
-# an operator may pin image_sha256 exactly. Point image_url/image_sha256 at a Debian 13 generic cloud
-# image to run the optional Debian 13 row with no code change (the lane is image-agnostic).
+# ─ Image basis (license-clean, pinned by publish) ───────────────────────────────────────────────────
+# Ubuntu and Debian cloud images are freely redistributable and published with SHA{256,512}SUMS, so this
+# lane ships a working default URL per distro and verifies the download against the publisher's checksums
+# (trust-on-publish / observed-on-first-use); an operator may pin image_sha256 (a SHA-256) exactly.
 name: Spike W2 (Linux stock-VM netns + Tau AppArmor profile)
 
 on:
   workflow_dispatch:
     inputs:
+      distro:
+        description: 'Which stock cloud image row to run (image-agnostic lane; same three phases).'
+        required: false
+        type: choice
+        default: ubuntu-2404
+        options:
+          - ubuntu-2404
+          - debian-13
       image_url:
-        description: 'HTTPS URL of a stock cloud image. Default = Ubuntu 24.04 server cloud image. Point at a Debian 13 generic cloud image for that row.'
+        description: 'HTTPS URL of a stock cloud image on an allow-listed publisher host (cloud-images.ubuntu.com / cloud.debian.org). Empty = the selected distro default.'
         required: false
         type: string
         default: ''
       image_sha256:
-        description: 'Lowercase hex SHA-256 to pin the image exactly. Empty = verify against the publisher SHA256SUMS.'
+        description: 'Lowercase hex SHA-256 to pin the image exactly. Empty = verify against the publisher SHA{256,512}SUMS.'
         required: false
         type: string
         default: ''
@@ -59,7 +73,9 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: spike-w2-linux-${{ github.event.pull_request.number || github.ref }}
+  # Keep the Ubuntu and Debian dispatch rows in distinct groups so dispatching one never cancels an
+  # in-progress run of the other; PR runs share the default group (cancel-in-progress stays per-row).
+  group: spike-w2-linux-${{ github.event.pull_request.number || github.ref }}-${{ (github.event_name == 'workflow_dispatch' && inputs.distro) || 'default' }}
   cancel-in-progress: true
 
 env:
@@ -68,7 +84,7 @@ env:
 
 jobs:
   linux-vm:
-    name: Stock Ubuntu 24.04 VM — bwrap/netns + Tau AppArmor profile (LNX-VM)
+    name: ${{ (github.event_name == 'workflow_dispatch' && inputs.distro == 'debian-13') && 'Stock Debian 13 VM — bwrap/netns + Tau AppArmor profile (LNX-VM)' || 'Stock Ubuntu 24.04 VM — bwrap/netns + Tau AppArmor profile (LNX-VM)' }}
     runs-on: ubuntu-24.04
     # A cloud-image boot + apt + a harness run is quick under KVM; under TCG it is much slower. Give the
     # job room but never the full 6h — boot-vm.sh enforces its own inner deadline so a hung VM fails.
@@ -100,16 +116,17 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils xorriso
 
-      # Step 3: fetch + digest-verify the stock cloud image (or record an image blocker).
-      - name: Acquire and verify stock Ubuntu 24.04 cloud image
+      # Step 3: fetch + digest-verify the selected distro's stock cloud image (or record an image blocker).
+      - name: Acquire and verify stock cloud image
         id: image
         env:
+          DISTRO: ${{ inputs.distro || 'ubuntu-2404' }}
           IMAGE_URL: ${{ inputs.image_url }}
           IMAGE_SHA256: ${{ inputs.image_sha256 }}
           DROP: ${{ runner.temp }}/linux-vm-drop
         run: |
           set -euo pipefail
-          # Default IMAGE_URL handled inside the script; keep empty inputs from overriding the default.
+          # Default IMAGE_URL handled inside the script (per DISTRO); keep empty inputs from overriding it.
           if [[ -z "${IMAGE_URL}" ]]; then unset IMAGE_URL; fi
           if [[ -z "${IMAGE_SHA256}" ]]; then unset IMAGE_SHA256; fi
           bash packages/core/native-process/spikes/shell/linux-vm/acquire-image.sh
@@ -142,7 +159,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: shell-spike-LNX-VM
+          # Ubuntu / PR runs keep the stable name; the Debian dispatch row uploads a distinct artifact so
+          # its receipts never collide with the Ubuntu row's.
+          name: ${{ (github.event_name == 'workflow_dispatch' && inputs.distro == 'debian-13') && 'shell-spike-LNX-VM-debian-13' || 'shell-spike-LNX-VM' }}
           path: ${{ runner.temp }}/linux-vm-drop/
           # A recorded blocker (e.g. kvm.json with allow_tcg=false) is a valid outcome whose receipt we
           # still want uploaded, so a present-but-minimal drop must not fail the upload.

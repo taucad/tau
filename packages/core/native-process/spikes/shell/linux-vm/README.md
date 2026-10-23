@@ -6,8 +6,9 @@ This lane settles whether Tau can run its sandboxed Bash on **stock** Ubuntu 24.
 
 It runs the **existing, unmodified** harness
 `packages/core/native-process/spikes/shell/fs-net-probe.mts` inside a genuine stock cloud-image VM,
-in three phases, with the AppArmor unprivileged-userns sysctl left at its **shipped value (1)** the
-whole time.
+in three phases, with the AppArmor unprivileged-userns sysctl left at its **shipped value** the
+whole time. The lane is **image-agnostic**: the same three phases run unchanged on an Ubuntu 24.04 or
+a Debian 13 cloud image (selected by the `distro` dispatch input — see **Running the rows**).
 
 ## The finding this lane resolves
 
@@ -45,8 +46,9 @@ harness):
 | B — profile  | `LNX-VM-PROFILE`   | same                               | `tau-bwrap` loaded via `apparmor_parser` | loopback OK → real S0/S1                    |
 | C — AppImage | `LNX-VM-APPIMAGE`  | AppImage mount path                | none (no install step)                   | blocked, like A                             |
 
-`apparmor_restrict_unprivileged_userns` stays at `1` in **all three** (recorded in `context.json`
-and `apparmor_parser.log`). The decisive proof is **A blocked + B launches, sysctl unchanged**.
+`apparmor_restrict_unprivileged_userns` stays at its shipped value in **all three** (recorded in
+`context.json` and `apparmor_parser.log`). The decisive proof is **A blocked + B launches, sysctl
+unchanged**.
 
 The repro and harness run as an **unprivileged user** (`tau`), not root: the AppArmor restriction only
 strips capabilities from _unprivileged_ user namespaces, so running as root (cloud-init's default) would
@@ -115,6 +117,26 @@ What it is and is not:
   as the containment-bearing Linux artifact**, with AppImage treated as best-effort / unsupported for
   the sandbox on stock 24.04+.
 
+## Running the rows (Ubuntu / Debian 13)
+
+The lane is image-agnostic, so the two distros are expressed as a single `workflow_dispatch` input
+rather than duplicated jobs:
+
+- **Ubuntu 24.04 (default).** Dispatch with `distro=ubuntu-2404` (or just defaults; `pull_request`
+  runs use it too). Acquires `ubuntu-24.04-server-cloudimg-amd64.img` from `cloud-images.ubuntu.com`,
+  verified against the publisher `SHA256SUMS`. Artifact `shell-spike-LNX-VM`.
+- **Debian 13 / trixie.** Dispatch with `distro=debian-13`. Acquires
+  `debian-13-generic-amd64.qcow2` from `cloud.debian.org`, verified against the publisher
+  `SHA512SUMS` (Debian ships no `SHA256SUMS` in that dir). Artifact `shell-spike-LNX-VM-debian-13`.
+  This row exists to confirm the AppArmor-profile approach **generalizes beyond Ubuntu**.
+
+`acquire-image.sh` picks the per-distro stock URL + checksum algorithm from `DISTRO`; `image_url` /
+`image_sha256` still override it. `image_url` is constrained to `https` on an allow-listed publisher
+host (`cloud-images.ubuntu.com`, `cloud.debian.org`) as an SSRF guard — the checksum file is fetched
+from the same host. Nothing distro-specific lives in the guest orchestrator: `run-in-guest.sh` reads
+`/etc/os-release`, provisions via `apt`, and records the **as-booted** sysctl value untouched, so the
+three phases and their verdicts are identical across the two images.
+
 ## KVM reality
 
 `preflight-kvm.sh` reports the `/dev/kvm` verdict (a first-class output of this lane). A cloud image
@@ -131,9 +153,9 @@ if the lane times out under TCG that is itself the signal that the VM rows want 
 - `apparmor/tau-bwrap` — the Tau-scoped AppArmor profile (the key artifact).
 - `cloud-init/{user-data,meta-data}` — NoCloud seed: mounts the 9p shares, provisions, runs the
   orchestrator, powers off.
-- `preflight-kvm.sh`, `acquire-image.sh`, `make-seed-iso.sh`, `boot-vm.sh`, `summarize-vm.sh` —
-  host-side lane steps.
-- `run-in-guest.sh` — the in-guest three-phase orchestrator.
+- `preflight-kvm.sh`, `acquire-image.sh` (distro-aware: Ubuntu/Debian stock image + publisher
+  checksum, SSRF allow-list), `make-seed-iso.sh`, `boot-vm.sh`, `summarize-vm.sh` — host-side lane steps.
+- `run-in-guest.sh` — the in-guest three-phase orchestrator (image-agnostic).
 
 No secrets: the only credential is a synthetic VM-local console password; the host↔guest channel is
 the 9p drop share, not the network.

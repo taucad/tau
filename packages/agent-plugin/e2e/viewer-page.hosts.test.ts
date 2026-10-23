@@ -810,6 +810,71 @@ describe("the tab's panels (W10)", () => {
   );
 
   it(
+    'should preview a dragged parameter on the shown model and write only the released value (PAR-2)',
+    async () => {
+      const first = await callTool(client, 'show_model', { targetFile: 'plate.ts' });
+      const calls: Array<Readonly<{ name: string; at: number }>> = [];
+      const page = await mountInHarness(client, first, {
+        displayMode: 'fullscreen',
+        answer: (name) => {
+          calls.push({ name, at: Date.now() });
+          return undefined;
+        },
+      });
+      const frame = viewerFrame(page);
+      await drawn(frame, 'Export');
+      const panels = frame.getByRole('complementary', { name: 'Workbench' });
+      const width = panels.getByRole('tabpanel', { name: 'Parameters' }).getByRole('spinbutton', { name: /Width/u });
+      await width.waitFor({ timeout: 60_000 });
+      const sidecar = async (): Promise<string> => {
+        try {
+          return await readFile(join(project, '.tau/parameters/plate.ts.json'), 'utf8');
+        } catch {
+          return '';
+        }
+      };
+      const before = await sidecar();
+      const box = await width.boundingBox();
+      if (box === null) {
+        throw new Error('The Width field has no box.');
+      }
+
+      /* A drag of about a second: the page previews it, throttled, and writes nothing. */
+      const startX = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await page.mouse.move(startX, y);
+      await page.mouse.down();
+      const dragStart = Date.now();
+      for (let step = 1; step <= 20; step += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one pointer move at a time, as a hand drags.
+        await page.mouse.move(startX + step * 4, y);
+        // oxlint-disable-next-line no-await-in-loop -- one pointer move at a time, as a hand drags.
+        await page.waitForTimeout(50);
+      }
+      const previews = calls.filter((call) => call.name === 'app_preview_parameters');
+      expect(previews.length).toBeGreaterThan(0);
+      /* At most one per 200 ms on the page's clock, counted rather than spaced: delivery to the recorder jitters. */
+      expect(previews.length).toBeLessThanOrEqual(Math.floor((Date.now() - dragStart) / 200) + 1);
+      expect(calls.some((call) => call.name === 'apply_parameter_operation')).toBe(false);
+      expect(await sidecar()).toBe(before);
+
+      const released = calls.length;
+      await page.mouse.up();
+      await expect.poll(sidecar, { timeout: 60_000 }).not.toBe(before);
+      /* The release is one checked write; the watched source renders it, so the page only reads and syncs after. */
+      const after = calls.slice(released).map((call) => call.name);
+      const written = after.indexOf('apply_parameter_operation');
+      expect(written).toBeGreaterThanOrEqual(0);
+      expect(
+        after.slice(written + 1).filter((name) => !['get_parameters', 'app_sync', 'app_read'].includes(name)),
+      ).toEqual([]);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
     'should say why Export lists no formats: a server without the tool, or a failure it can retry',
     async () => {
       const shownMain = await callTool(client, 'show_model', { targetFile: 'main.ts' });
@@ -986,8 +1051,13 @@ describe('the live view (W6)', () => {
         return calls;
       };
       await expect.poll(modelIdNow, { timeout: 120_000 }).toBe(shown(first).model.id);
+      /* The page reports what it draws on its next sync, which can follow the model's own report. */
+      const revisionEntryNow = async (): Promise<string | undefined> => {
+        const view = await viewNow();
+        return view?.sourceRevision?.entry;
+      };
+      await expect.poll(revisionEntryNow, { timeout: 30_000 }).toBe('live.ts');
       const before = await viewNow();
-      expect(before?.sourceRevision?.entry).toBe('live.ts');
       const { length: callsBefore } = await toolCallsNow();
 
       /* An editor, the agent or sed changes the file: the server's watched document renders it again. */

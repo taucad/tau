@@ -1,23 +1,24 @@
 name: 'Netlify staging router'
 description: >-
   Serves a staging site's custom domain from its `staging` alias deploy. Publishes,
-  when missing or outdated, a production deploy that only proxies every request to the
-  alias, then clears the site's CDN cache and checks the custom domain serves the
-  build the alias serves.
+  when missing or outdated, a production deploy whose edge function forwards every
+  request to the alias, then clears the site's CDN cache and checks the custom domain
+  serves the build the alias serves.
 
 # Netlify bills 15 credits for each production deploy and nothing for a draft
 # (`--alias`) deploy. Staging therefore publishes every build to the `staging` alias
 # (`https://staging--<site>.netlify.app`) and keeps one production deploy per site:
 # this router. A custom domain always serves the site's production deploy, and DNS
 # cannot select an alias because Netlify picks the deploy from the Host header, so the
-# router's `netlify.toml` proxies `/*` to the alias with a 200 rewrite. The router is
-# republished only when its target or public host changes; once in place a staging
-# deploy costs no credits.
+# router's edge function (`router.ts`) fetches each request from the alias. A
+# `_redirects` 200 proxy would skip the alias's own edge functions (observed
+# 2026-10-23: taucad.dev served the app at `/` instead of marketing). The router is
+# republished only when its version, target or public host changes; once in place a
+# staging deploy costs no credits.
 #
-# The proxy adds `X-Tau-Public-Host` to each request so code behind it can name the
-# domain the visitor used (`apps/ui/netlify/edge-functions/marketing.ts`). Proxied
-# responses keep the alias deploy's headers, so a long-lived `Netlify-CDN-Cache-Control`
-# would outlive a new alias deploy: every run purges the site's cache.
+# The router adds `X-Tau-Public-Host` to each request so code behind it can name the
+# domain the visitor used (`apps/ui/netlify/edge-functions/marketing.ts`), and moves
+# redirects to the alias onto that domain. Every run purges the site's CDN cache.
 #
 # If the domain does not serve the alias's build after a router publish, the step
 # restores the production deploy that was published before it (a rollback costs no
@@ -57,7 +58,7 @@ runs:
         set -euo pipefail
         netlify="$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify"
         target="https://staging--$SITE_NAME.netlify.app"
-        expected=$(jq -cn --arg target "$target" --arg host "$PUBLIC_HOST" '{version: 1, target: $target, host: $host}')
+        expected=$(jq -cn --arg target "$target" --arg host "$PUBLIC_HOST" '{version: 2, target: $target, host: $host}')
         current=$(curl --silent --fail --max-time 30 "https://$SITE_NAME.netlify.app/__tau-staging-router" || true)
 
         previous=''
@@ -70,24 +71,11 @@ runs:
           root="$RUNNER_TEMP/staging-router-$SITE_NAME"
           router="$root/$(jq -r '.build_settings.base // ""' <<< "$site")"
           rm -rf "$root" && mkdir -p "$router" && git init --quiet "$root"
+          mkdir -p "$router/netlify/edge-functions"
+          printf '[build]\npublish = "."\n' > "$router/netlify.toml"
           printf '%s\n' "$expected" > "$router/router.json"
-          cat > "$router/netlify.toml" <<EOF
-        [build]
-        publish = "."
-
-        [[redirects]]
-        from = "/__tau-staging-router"
-        to = "/router.json"
-        status = 200
-        force = true
-
-        [[redirects]]
-        from = "/*"
-        to = "$target/:splat"
-        status = 200
-        force = true
-        headers = { X-Tau-Public-Host = "$PUBLIC_HOST" }
-        EOF
+          sed -e "s|__TAU_ROUTER_TARGET__|$target|" -e "s|__TAU_ROUTER_PUBLIC_HOST__|$PUBLIC_HOST|" \
+            "$GITHUB_ACTION_PATH/router.ts" > "$router/netlify/edge-functions/router.ts"
           echo "Publishing the staging router (one production deploy) for $PUBLIC_HOST -> $target"
           (cd "$router" && "$netlify" deploy --prod --no-build --dir . --site "$SITE_ID" \
             --message "Staging router: $PUBLIC_HOST -> $target")

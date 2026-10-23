@@ -67,6 +67,8 @@ const electronPath = desktopRequire('electron') as unknown as string;
 const isWindows = process.platform === 'win32';
 /** Set by `--packaged`: the packaged fixture executable and the client root inside its resources. */
 let packagedApp: { executable: string; clientRoot: string } | undefined;
+/** Launches that needed a second attempt, written into every suite result so a retry is never silent. */
+const launchRetries: Array<{ kind: Kind; at: string; error: string }> = [];
 
 const sleep = async (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -218,13 +220,22 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
     ...values['electron-arg'],
     ...extraArguments,
   ];
-  const app = await electron.launch({
-    executablePath: packagedApp?.executable ?? electronPath,
-    args: arguments_,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
-    env: { ...process.env, S3_CLIENT_ROOT: packagedApp?.clientRoot ?? clientRoot },
-    timeout: 60_000,
-  });
+  const start = async () =>
+    electron.launch({
+      executablePath: packagedApp?.executable ?? electronPath,
+      args: arguments_,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
+      env: { ...process.env, S3_CLIENT_ROOT: packagedApp?.clientRoot ?? clientRoot },
+      timeout: isWindows ? 120_000 : 60_000,
+    });
+  let app: ElectronApplication;
+  try {
+    app = await start();
+  } catch (error) {
+    // Windows on Arm sometimes never finishes Playwright's launch handshake; one recorded retry, then the error stands.
+    launchRetries.push({ kind, at: new Date().toISOString(), error: String(error).split('\n')[0]! });
+    app = await start();
+  }
   const page = await app.firstWindow();
   await page.waitForSelector('body[data-ready="true"]', { timeout: 30_000 });
   return { app, page, kind };
@@ -1331,6 +1342,20 @@ const r04OrcaRun = async (kind: Kind) => {
   }
 };
 
+/** A whole-desktop capture (what the screen reader had in front of it), kept beside the results as evidence. */
+const desktopScreenshot = (name: string): void => {
+  const file = path.join(resultsDirectory, name);
+  if (process.platform === 'darwin') {
+    sh('screencapture', ['-x', file]);
+  } else if (isWindows) {
+    sh('powershell', [
+      '-NoProfile',
+      '-Command',
+      `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $i = New-Object System.Drawing.Bitmap $b.Width, $b.Height; [System.Drawing.Graphics]::FromImage($i).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $i.Save('${file}')`,
+    ]);
+  }
+};
+
 /** The part of `@guidepup/guidepup`'s VoiceOver and NVDA drivers the screen-reader suites use. */
 type GuidepupReader = {
   start: (options?: { capture?: boolean | 'initial' }) => Promise<void>;
@@ -1373,9 +1398,19 @@ const r04ScreenReaderRun = async (kind: Kind, readerName: keyof typeof screenRea
     await call(active, 'settle', 1500);
     await main(
       active,
-      'const [window] = electron.BrowserWindow.getAllWindows(); electron.app.focus({ steal: true }); window.show(); window.focus();',
+      'const [window] = electron.BrowserWindow.getAllWindows(); electron.app.focus({ steal: true }); window.setAlwaysOnTop(true); window.show(); window.moveTop(); window.focus();',
     );
+    if (isWindows) {
+      // Windows refuses SetForegroundWindow from a background process; AppActivate from a fresh shell is allowed.
+      sh('powershell', [
+        '-NoProfile',
+        '-Command',
+        `(New-Object -ComObject WScript.Shell).AppActivate(${active.app.process().pid})`,
+      ]);
+    }
     await active.page.bringToFront();
+    await call(active, 'settle', 1000);
+    desktopScreenshot(`${readerName}-${kind}-before.png`);
     await call(active, 'settle', 1500);
     await active.page.evaluate(() => {
       if (document.activeElement instanceof HTMLElement) {
@@ -1405,6 +1440,7 @@ const r04ScreenReaderRun = async (kind: Kind, readerName: keyof typeof screenRea
       reader.perform(reader.keyboardCommands[names.previousLine]),
     );
     await step('focus escape (Shift+Tab)', async () => reader.press('Shift+Tab'));
+    desktopScreenshot(`${readerName}-${kind}-after.png`);
     const focusedAfterShiftTab = await call<boolean>(active, 'activeElementInPane');
     return {
       kind,
@@ -1508,7 +1544,8 @@ for (const name of selected) {
   const result = await suite();
   await writeFile(
     path.join(resultsDirectory, `${name}.json`),
-    `${JSON.stringify({ suite: name, command: process.argv.slice(1), startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, environmentDigest: sha256(JSON.stringify(identity)), result }, undefined, 2)}\n`,
+    `${JSON.stringify({ suite: name, command: process.argv.slice(1), startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, environmentDigest: sha256(JSON.stringify(identity)), launchRetries, result }, undefined, 2)}\n`,
   );
+  launchRetries.length = 0;
   process.stdout.write(`${name} done in ${Math.round((Date.now() - started) / 1000)} s\n`);
 }

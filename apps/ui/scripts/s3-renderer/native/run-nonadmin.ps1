@@ -46,6 +46,9 @@ try {
   } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Drop 'nonadmin-context.json')
   if ($isAdmin) { throw 'created user unexpectedly in Administrators; refusing to run elevated' }
 
+  # Read access to the checkout (node_modules, the built harness; the runner's ACL admits only administrators), then
+  # write access to the drop and the harness output. Inheritable grants propagate to existing children.
+  cmd /c "icacls `"$env:GITHUB_WORKSPACE`" /grant `"${user}:(OI)(CI)RX`" /C /Q" | Out-Null
   # Write access to the drop and the harness output (packaged fixture, Electron user data stays in the profile).
   foreach ($path in @($Drop, (Join-Path $env:GITHUB_WORKSPACE 'out/s3-renderer'))) {
     cmd /c "icacls `"$path`" /grant `"${user}:(OI)(CI)M`"" | Out-Null

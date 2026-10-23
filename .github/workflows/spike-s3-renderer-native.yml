@@ -114,6 +114,7 @@ jobs:
         if: always()
         timeout-minutes: 5
         run: |
+          set -o pipefail
           node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
             core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
             voiceover=r04voiceover | tee -a "$GITHUB_STEP_SUMMARY"
@@ -264,6 +265,7 @@ jobs:
         if: always()
         timeout-minutes: 5
         run: |
+          set -o pipefail
           node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
             core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
             orca=r04orca | tee -a "$GITHUB_STEP_SUMMARY"

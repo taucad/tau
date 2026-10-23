@@ -22,6 +22,7 @@ const {
   daemonPlacementOf,
   isPlacementOnThisDevice,
   resetLoopbackAgentHosts,
+  isPlacementOnThisDeviceNow,
   resetOriginAgentHostAnswer,
   unplaceableExecutionReason,
 } = await import('#lib/agent-host-placement.js');
@@ -132,6 +133,29 @@ describe('unplaceableExecutionReason', () => {
         expect(fetch).toHaveBeenCalledTimes(2);
       } finally {
         vi.useRealTimers();
+        resetOriginAgentHostAnswer();
+      }
+    });
+
+    /* XD2: a chat's load never waits on discovery: until the origin has answered, its reach is unknown. */
+    it('should not know the origin’s reach without waiting until its discovery has answered', async () => {
+      resetOriginAgentHostAnswer();
+      vi.stubGlobal('location', { origin: 'http://127.0.0.1:7777' });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn<typeof globalThis.fetch>().mockResolvedValue(
+          new Response(JSON.stringify({ v: 1, agent: true, label: 'Studio', workspaceRoot: '/work' }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+      );
+      try {
+        expect(isPlacementOnThisDeviceNow('origin')).toBeUndefined();
+        await expect(isPlacementOnThisDevice('origin')).resolves.toBe(true);
+
+        expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
+        expect(isPlacementOnThisDeviceNow('dev_studio_mini')).toBe(false);
+      } finally {
         resetOriginAgentHostAnswer();
       }
     });

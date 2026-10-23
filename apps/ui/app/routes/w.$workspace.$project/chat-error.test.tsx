@@ -758,6 +758,25 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  /* XD4: a placement refused `wait` after the run was admitted ends it RUN_ABANDONED with the code kept (RA-R1): the
+   * card says what it waits on, and Resume places it again once sync brings the branch. */
+  it('should say an abandoned run waits on sync for its branch, and offer Resume', async () => {
+    const user = userEvent.setup();
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: "This chat's branch is not on this device yet.",
+      code: 'RUN_ABANDONED',
+      details: { code: 'BRANCH_UNAVAILABLE' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ['LEADER_VERSION_MISMATCH', 'Another version of Tau is running this chat'],
     ['RUN_UNREADABLE', 'This chat was continued in a newer version of Tau'],

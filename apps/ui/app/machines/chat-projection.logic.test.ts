@@ -494,6 +494,10 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(parsedOf(second, 'device-a')).toBe(parsedOf(first, 'device-a'));
     expect(parsedOf(second, 'device-b')).not.toBe(parsedOf(first, 'device-b'));
     expect(Object.keys(second.remote?.parsed ?? {})).toHaveLength(2);
+    /* Nor is the unchanged segment's run folded on its ledger again. */
+    const runOf = (state: typeof first) => state.remote?.unsettled?.find((run) => run.deviceId === 'device-a');
+    expect(runOf(second)).toBeDefined();
+    expect(runOf(second)).toBe(runOf(first));
   });
 
   it('refolds another device’s run when its segment digest changes', async () => {

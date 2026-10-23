@@ -222,6 +222,7 @@ type StubDeps = {
     | 'queueLock'
     | 'adoptLegacyChatPlacement'
     | 'isPlacementOnThisDevice'
+    | 'isPlacementOnThisDeviceNow'
     | 'onPlacementReachabilityChanged'
   >]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
@@ -6012,7 +6013,9 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       chatId,
     );
 
-    expect(legacy).toBeUndefined();
+    await vi.waitFor(() => {
+      expect(legacy).toBeUndefined();
+    });
     expect(placementOnDisk(deps, chatId)).toBe('origin');
     expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
       kind: 'tau',
@@ -6196,6 +6199,52 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     const reads = vi.spyOn(deps.client, 'readFile');
     await Promise.all([store.getChatHostSettings(chatId), store.getChatHostSettings(chatId)]);
     expect(reads.mock.calls.filter(([path]) => path === placementsPath).length).toBeLessThanOrEqual(1);
+    store.release(chatId);
+  });
+
+  /* Opening a chat never waits on the network: a placement whose reach is not known yet is held, then applied. */
+  it('should load without waiting for the origin probe, and apply the placement once the probe answers', async () => {
+    const chatId = 'chat_probe_pending';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const probe = Promise.withResolvers<boolean>();
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        isPlacementOnThisDevice: async () => probe.promise,
+        isPlacementOnThisDeviceNow: () => undefined,
+      },
+      chatId,
+    );
+    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBe('origin');
+
+    probe.resolve(true);
+
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+        kind: 'tau',
+        model,
+        hostId: 'origin',
+      });
+    });
+    store.release(chatId);
+  });
+
+  /* Finishing a half adoption reads the chat record again: it runs after the load, never ahead of it. */
+  it('should not hold the load on finishing a half-done legacy adoption', async () => {
+    const chatId = 'chat_adoption_slow';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const adopting = Promise.withResolvers<undefined>();
+    const { store, session } = await openLoaded(
+      { ...deps, adoptLegacyChatPlacement: async () => adopting.promise },
+      chatId,
+    );
+
+    expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    adopting.resolve(undefined);
     store.release(chatId);
   });
 

@@ -34,6 +34,7 @@
 \* picks an execution elsewhere; admission, delivery and the queue never read it.
 \* The persistence context is the held placement's one copy, which the placement write reads.
 \* A half-finished legacy adoption is finished on a later open; queue paths are unchanged.
+\* A chat's load never waits on the origin probe or on finishing an adoption; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

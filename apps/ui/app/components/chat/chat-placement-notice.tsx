@@ -12,7 +12,7 @@ import {
   unplaceableExecutionReason,
 } from '#lib/agent-host-placement.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
-import { isDeviceRelativeHostId } from '#utils/chat-execution.js';
+import { isDeviceRelativeHostId, withoutHostId } from '#utils/chat-execution.js';
 
 /**
  * Why this device cannot place one execution, kept current: a loopback daemon
@@ -42,8 +42,7 @@ const tauHere = (execution: CadAgentExecution): CadAgentExecution => {
   ) {
     return execution;
   }
-  const { hostId: _unreachable, ...local } = execution;
-  return local;
+  return withoutHostId(execution);
 };
 
 /**

@@ -204,24 +204,32 @@ function codedErrorCard({
   if (category === 'pausedTurn') {
     // The orphan rule records why the driver went (`orphanRows`): an agent left waiting for approval asks again.
     const awaitingApproval = code === 'RUN_ABANDONED' && error.details?.['cause'] === 'awaiting-approval';
+    /* A `wait` refusal that ended an admitted run is recorded RUN_ABANDONED with its code kept (RA-R1, XD3/XD4). */
+    const abandonedCode = code === 'RUN_ABANDONED' ? error.details?.['code'] : undefined;
+    const waitingOnSync =
+      typeof abandonedCode === 'string' && cardOf(abandonedCode, error.category).category === 'waitingOnSync';
     return (
       <ChatErrorPausedTurn
         className={className}
         title={
           awaitingApproval
             ? 'Tau closed while the agent waited for your approval'
-            : code === 'RUN_ABANDONED'
-              ? 'Chat paused'
-              : code === 'NETWORK_ERROR'
-                ? 'Connection lost'
-                : undefined
+            : waitingOnSync
+              ? 'Waiting on sync from another device'
+              : code === 'RUN_ABANDONED'
+                ? 'Chat paused'
+                : code === 'NETWORK_ERROR'
+                  ? 'Connection lost'
+                  : undefined
         }
         reason={
           awaitingApproval
             ? 'Resume and the agent asks for it again.'
-            : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
-              ? undefined
-              : error.message
+            : waitingOnSync
+              ? 'Resume once sync brings what another device wrote.'
+              : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
+                ? undefined
+                : error.message
         }
         resumable={retry === 'resume' && resumable}
         icon={error.category === errorCategory.overloaded ? WifiOff : CircleAlert}

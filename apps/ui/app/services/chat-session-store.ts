@@ -200,6 +200,12 @@ export type ChatSessionDeps = {
   /** Whether a device-relative placement names a host this device can reach now. Absent: none can. */
   isPlacementOnThisDevice?: ((hostId: TauAgentHostId) => Promise<boolean>) | undefined;
   /**
+   * {@link ChatSessionDeps.isPlacementOnThisDevice} as far as it is known without waiting: `undefined` while it would
+   * have to ask the network. A chat's load then holds the placement and applies it once the answer comes. Absent: the
+   * load waits for the answer.
+   */
+  isPlacementOnThisDeviceNow?: ((hostId: TauAgentHostId) => boolean | undefined) | undefined;
+  /**
    * Hear when what this tab can reach may have changed (a loopback daemon handed to it later), so a held placement is
    * checked again. Returns an unsubscribe.
    */
@@ -3644,6 +3650,8 @@ export class ChatSessionStore {
         return undefined;
       }
     };
+    /* Assigned once the persistence actor exists; the load only calls it after its first await. */
+    let applyHeldAfterLoad: (held: TauAgentHostId) => Promise<void> = async () => undefined;
     /*
      * An adoption is two writes: this device's placement, then the chat record's drop. A drop that did not land leaves
      * the legacy host in the record; the next open finishes it, but only for the host this device's placement already
@@ -3666,8 +3674,25 @@ export class ChatSessionStore {
       if (placement === undefined) {
         return adoptLegacyPlacement(storedChat);
       }
-      await finishAdoption(storedChat, placement);
+      /* After the load, never ahead of it: it reads the chat record again, only for a chat this device placed. */
+      void finishAdoption(storedChat, placement);
       return placement;
+    };
+    /*
+     * The placement this tab runs the chat on at load, without waiting on the network: one whose reach is not known yet
+     * (the origin's discovery still out) is held, and applied once that answer says this tab reaches it.
+     */
+    const placementAtLoad = async (placement: TauAgentHostId | undefined): Promise<TauAgentHostId | undefined> => {
+      const deps = depsRef();
+      if (placement === undefined || deps.isPlacementOnThisDeviceNow === undefined) {
+        return reachablePlacement(deps, placement);
+      }
+      const known = deps.isPlacementOnThisDeviceNow(placement);
+      if (known === undefined) {
+        void applyHeldAfterLoad(placement);
+        return undefined;
+      }
+      return known ? placement : undefined;
     };
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
@@ -3678,7 +3703,7 @@ export class ChatSessionStore {
               /* The chat record never holds this device's placement (XD2): its placements record does. */
               const devicePlacement = storedChat === undefined ? undefined : await placementOnOpen(storedChat);
               /* A placement this tab cannot reach is held, not applied: the chat runs locally and the composer says so. */
-              const reachable = await reachablePlacement(depsRef(), devicePlacement);
+              const reachable = await placementAtLoad(devicePlacement);
               /* This device's placement the open tab cannot reach: kept in the record for the tab that can (XD2). The
                * persistence context holds it from here; it is the one copy. */
               const heldPlacement = reachable === undefined ? devicePlacement : undefined;
@@ -3871,6 +3896,11 @@ export class ChatSessionStore {
     composerRecordRef.start();
     /* A held placement becomes this tab's once it can reach it, as when a loopback daemon is handed to it (XD2). */
     const heldNow = (): TauAgentHostId | undefined => persistenceActorRef.getSnapshot().context.heldPlacement;
+    /* A placement held at load because its reach was not known yet: applied once the load is in and the answer is. */
+    applyHeldAfterLoad = async (held: TauAgentHostId): Promise<void> => {
+      await waitFor(persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat).catch(() => undefined);
+      await applyHeldPlacement(held);
+    };
     const applyHeldPlacement = async (held: TauAgentHostId): Promise<void> => {
       if ((await reachablePlacement(depsRef(), held)) !== held || heldNow() !== held) {
         return;

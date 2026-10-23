@@ -455,9 +455,34 @@ export const isDeviceRelativeHostReachable = (hostId: TauAgentHostId): boolean =
  * Whether this page's origin is a daemon, as last asked. A daemon is a daemon for the page's life; "no daemon" may be
  * a request that failed (the page cannot tell them apart), so it is asked again after {@link originAnswerReuse}.
  */
-let originHostsAgent: Readonly<{ answer: Promise<boolean>; askedAt: number }> | undefined;
+let originHostsAgent: { answer: Promise<boolean>; readonly askedAt: number; settled?: boolean } | undefined;
 /** How long a "no daemon" answer about this page's origin stands before it is asked again, in milliseconds. */
 const originAnswerReuse = 30_000;
+
+/**
+ * {@link isPlacementOnThisDevice} as far as this tab knows without asking: `undefined` while the origin's discovery is
+ * unasked, out, or its "no daemon" is stale, so a caller holds the placement instead of waiting (XD2).
+ *
+ * @param hostId - The placement's host id.
+ * @returns Whether this tab reaches it, or `undefined` when only the network can say.
+ * @public
+ */
+export const isPlacementOnThisDeviceNow = (hostId: TauAgentHostId): boolean | undefined => {
+  if (hostId !== 'origin' && !hostId.startsWith(loopbackHostIdPrefix)) {
+    return false;
+  }
+  if (!isDeviceRelativeHostReachable(hostId)) {
+    return false;
+  }
+  if (hostId !== 'origin') {
+    return true;
+  }
+  const settled = originHostsAgent?.settled;
+  if (settled === true) {
+    return true;
+  }
+  return settled === false && Date.now() - originHostsAgent!.askedAt < originAnswerReuse ? false : undefined;
+};
 
 /**
  * Whether a device-relative placement names a host this tab can reach, here and now (XD2): `origin` on a page a
@@ -483,15 +508,23 @@ export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<b
   if (asked !== undefined && ((await asked.answer) || Date.now() - asked.askedAt < originAnswerReuse)) {
     return asked.answer;
   }
-  const answer = (async (): Promise<boolean> => {
+  const asking: { answer: Promise<boolean>; askedAt: number; settled?: boolean } = {
+    answer: Promise.resolve(false),
+    askedAt: Date.now(),
+  };
+  asking.answer = (async (): Promise<boolean> => {
+    let found = false;
     try {
-      return (await discoverOriginAgentHost()) !== undefined;
+      found = (await discoverOriginAgentHost()) !== undefined;
     } catch {
-      return false;
+      found = false;
     }
+    /* Read without waiting by `isPlacementOnThisDeviceNow`. */
+    asking.settled = found;
+    return found;
   })();
-  originHostsAgent = { answer, askedAt: Date.now() };
-  return answer;
+  originHostsAgent = asking;
+  return asking.answer;
 };
 
 /**

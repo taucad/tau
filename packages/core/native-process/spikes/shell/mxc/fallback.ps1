@@ -631,29 +631,40 @@ if ($apiOk -and $null -ne $shellPath) {
       $deskRB = New-SessionDesktop 'read-B' @($sandboxB.Sid, $cap2)
       Add-Check 'fallback.desktop.read' 'per-session private desktops + window-station ACEs for the read sessions (sandbox user SID + cap SID participants)' "deskRA=$deskRA deskRB=$deskRB winstaA=$gRA winstaB=$gRB" (($null -ne $deskRA) -and ($null -ne $deskRB) -and ($gRA -like 'ok rc=0') -and ($gRB -like 'ok rc=0')) $null
 
-      # Breadcrumb first: distinguishes "child never started" from "child started and stalled".
-      $payloadRA = "Set-Content -LiteralPath '$outA\started-A.txt' -Value STARTED; `$env:TEMP='$outA'; `$env:TMP='$outA'; & '$canaryChild' -SessionId A -OwnSecret '$fA' -OtherSecret '$fB' -NeverSecret '$fN' -OutDir '$outA'"
-      $payloadRB = "Set-Content -LiteralPath '$outB\started-B.txt' -Value STARTED; `$env:TEMP='$outB'; `$env:TMP='$outB'; & '$canaryChild' -SessionId B -OwnSecret '$fB' -OtherSecret '$fA' -NeverSecret '$fN' -OutDir '$outB'"
+      # Read workload = cmd.exe itself, running as the sandbox user inside its write-restricted token.
+      # Run 40023733988: pwsh as a sandbox user never reached its first statement even with a loaded
+      # profile; run 40025705260: cmd.exe as the same identity DOES start (S2 breadcrumb), and a cmd
+      # prelude in front of pwsh pushed the line past CreateProcessWithTokenW's 1024-char limit. The
+      # read probe needs no PowerShell: the same cmd child copies its own secret (positive control),
+      # then tries the other session secret and the never-grantable secret into exfil files, and
+      # records its own stderr for each. The orchestrator decides from those files.
+      function Build-ReadCmd([string]$sid, [string]$own, [string]$other, [string]$nev, [string]$o) {
+        $body = "echo STARTED>`"$o\started-$sid.txt`" & type `"$own`" > `"$o\own-read-$sid.txt`" 2> `"$o\own-err-$sid.txt`" & type `"$other`" >> `"$o\exfil-$sid.txt`" 2> `"$o\cross-err-$sid.txt`" & type `"$nev`" >> `"$o\exfil-never-$sid.txt`" 2> `"$o\never-err-$sid.txt`" & echo done>`"$o\done-$sid.txt`""
+        '"' + $cmdExe + '" /d /s /c "' + $body + '"'
+      }
+      $cmdLineRA = Build-ReadCmd 'A' $fA $fB $fN $outA
+      $cmdLineRB = Build-ReadCmd 'B' $fB $fA $fN $outB
       $eRA = 0; $eRB = 0
-      $hRA = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, (Build-UserChildCmd $childShell $payloadRA $outA "$outA\cmd-started-A.txt"), $cap1, $logonSid, $env:SystemRoot, $deskRA, [ref]$eRA)
+      $hRA = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, $cmdLineRA, $cap1, $logonSid, $env:SystemRoot, $deskRA, [ref]$eRA)
       $noteRA = [TauRestrict]::LastLaunchNote
-      $hRB = [TauRestrict]::LaunchAsUser($sandboxB.Name, $sandboxB.Secure, $cmdExe, (Build-UserChildCmd $childShell $payloadRB $outB "$outB\cmd-started-B.txt"), $cap2, $logonSid, $env:SystemRoot, $deskRB, [ref]$eRB)
+      $hRB = [TauRestrict]::LaunchAsUser($sandboxB.Name, $sandboxB.Secure, $cmdExe, $cmdLineRB, $cap2, $logonSid, $env:SystemRoot, $deskRB, [ref]$eRB)
       $noteRB = [TauRestrict]::LastLaunchNote
       $xRA = $null; $xRB = $null
       if ($hRA -ne [IntPtr]::Zero) { $xRA = [TauRestrict]::Wait($hRA, 120000); if ($xRA -eq -1) { [TauRestrict]::Kill($hRA) }; [TauRestrict]::Close($hRA) }
       if ($hRB -ne [IntPtr]::Zero) { $xRB = [TauRestrict]::Wait($hRB, 120000); if ($xRB -eq -1) { [TauRestrict]::Kill($hRB) }; [TauRestrict]::Close($hRB) }
       $rRA = ($xRA -eq 0); $rRB = ($xRB -eq 0)
       $startedRA = Test-Path -LiteralPath (Join-Path $outA 'started-A.txt'); $startedRB = Test-Path -LiteralPath (Join-Path $outB 'started-B.txt')
-      $cmdRA = Test-Path -LiteralPath (Join-Path $outA 'cmd-started-A.txt'); $cmdRB = Test-Path -LiteralPath (Join-Path $outB 'cmd-started-B.txt')
-      Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion (-1 = timed out and killed)' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) cmdStartedA=$cmdRA pwshStartedA=$startedRA exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) cmdStartedB=$cmdRB pwshStartedB=$startedRB exitB=$xRB shell=$childShell" ($rRA -and $rRB) @{ launchA = $noteRA; launchB = $noteRB }
+      $doneRA = Test-Path -LiteralPath (Join-Path $outA 'done-A.txt'); $doneRB = Test-Path -LiteralPath (Join-Path $outB 'done-B.txt')
+      Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion (-1 = timed out and killed)' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) startedA=$startedRA doneA=$doneRA exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) startedB=$startedRB doneB=$doneRB exitB=$xRB workload=cmd.exe cmdLineLen=$($cmdLineRA.Length)/$($cmdLineRB.Length)" ($rRA -and $rRB) @{ launchA = $noteRA; launchB = $noteRB }
 
       $readOf = { param($f) if (Test-Path -LiteralPath $f) { [string](Get-Content -LiteralPath $f -Raw) } else { '' } }
       $ownRA = & $readOf (Join-Path $outA 'own-read-A.txt'); $ownRB = & $readOf (Join-Path $outB 'own-read-B.txt')
       $exfA = & $readOf (Join-Path $outA 'exfil-A.txt'); $exfB = & $readOf (Join-Path $outB 'exfil-B.txt')
       $nevA = & $readOf (Join-Path $outA 'exfil-never-A.txt'); $nevB = & $readOf (Join-Path $outB 'exfil-never-B.txt')
       $crA = $null; $crB = $null
-      try { $crA = Get-Content -LiteralPath (Join-Path $outA 'child-report-A.json') -Raw | ConvertFrom-Json } catch {}
-      try { $crB = Get-Content -LiteralPath (Join-Path $outB 'child-report-B.json') -Raw | ConvertFrom-Json } catch {}
+      # The child's own stderr per attempt: context only, never the decision.
+      $crA = [pscustomobject]@{ ownRead = (& $readOf (Join-Path $outA 'own-err-A.txt')).Trim(); crossRead = (& $readOf (Join-Path $outA 'cross-err-A.txt')).Trim(); neverRead = (& $readOf (Join-Path $outA 'never-err-A.txt')).Trim() }
+      $crB = [pscustomobject]@{ ownRead = (& $readOf (Join-Path $outB 'own-err-B.txt')).Trim(); crossRead = (& $readOf (Join-Path $outB 'cross-err-B.txt')).Trim(); neverRead = (& $readOf (Join-Path $outB 'never-err-B.txt')).Trim() }
       $pcA = $rRA -and ($ownRA -eq $secretA); $pcB = $rRB -and ($ownRB -eq $secretB)
       Add-Check 'fallback.read.ownAllowed.A' 'session A child (running as tausbxa in its restricted token) reads its own root secret (positive control; external copy matches)' "ran=$rRA ownCopyMatches=$($ownRA -eq $secretA)" $pcA @{ childReport = $crA }
       Add-Check 'fallback.read.ownAllowed.B' 'session B child (running as tausbxb in its restricted token) reads its own root secret (positive control; external copy matches)' "ran=$rRB ownCopyMatches=$($ownRB -eq $secretB)" $pcB @{ childReport = $crB }

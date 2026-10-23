@@ -6,7 +6,7 @@ const deployedBuildId = 1_792_730_113_029;
 
 vi.mock('#filesystem/build-skew.js', () => ({
   buildId: ownBuildId,
-  markBuildSuperseded: vi.fn(),
+  offerReload: vi.fn(),
   recordLiveBuild: vi.fn(),
 }));
 
@@ -79,7 +79,7 @@ describe('installStaleBuildRecovery', () => {
     'should offer the reload instead of forcing it after a %s',
     async (type) => {
       const { installStaleBuildRecovery } = await load();
-      const { markBuildSuperseded } = await import('#filesystem/build-skew.js');
+      const { offerReload } = await import('#filesystem/build-skew.js');
       stubServer(deployedBuildId);
       const reload = stubReload();
       uninstall = installStaleBuildRecovery();
@@ -89,7 +89,7 @@ describe('installStaleBuildRecovery', () => {
       await settle();
 
       expect(reload).not.toHaveBeenCalled();
-      expect(markBuildSuperseded).toHaveBeenCalledWith(deployedBuildId, 'server');
+      expect(offerReload).toHaveBeenCalledWith(deployedBuildId);
     },
   );
 

@@ -21,14 +21,15 @@
  *   on demand), so the window and the absence of input stand in for it.
  *   The guard is the `from>to` build pair in `sessionStorage`, cleared once the page
  *   runs the target build, so a deploy that cannot serve its own chunks never loops.
- * - A different build otherwise: the build is marked superseded and the sidebar
- *   update control (`BrowserUpdate`) or banner offers the reload (`superseded`).
+ * - A different build otherwise: the sidebar update control (`BrowserUpdate`) or banner
+ *   offers the reload (`superseded`). Writes go on: in a lone tab no other bundle shares
+ *   storage, and another tab's bundle stops them through `build-skew`'s channel.
  *
  * Neither deploy outcome is a bug to report. One failure is decided once, however
  * many channels (boundary, global handler, Sentry) report it.
  */
 
-import { buildId, markBuildSuperseded, recordLiveBuild } from '#filesystem/build-skew.js';
+import { buildId, offerReload, recordLiveBuild } from '#filesystem/build-skew.js';
 import { fetchLiveBuildId } from '#lib/build-identity.js';
 
 /**
@@ -224,9 +225,8 @@ const getPageRecovery = (): StaleBuildRecovery => {
     reload: () => {
       globalThis.location.reload();
     },
-    onSuperseded: (serverBuildId) => {
-      markBuildSuperseded(serverBuildId, 'server');
-    },
+    // A lone tab keeps writing until the user reloads; other bundles stop it through `build-skew`'s own channel.
+    onSuperseded: offerReload,
     onLiveBuild: recordLiveBuild,
     canReloadSafely: () => !hasUserInteracted && performance.now() <= autoReloadWindow,
   });

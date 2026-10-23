@@ -169,8 +169,11 @@ def main():
     pid = os.fork()
     if pid == 0:
         # Child: wire the slave as stdio and exec the profiled bwrap + ctty-shim + bash -i.
+        # Do NOT setsid() here: bwrap --new-session calls setsid() itself, and setsid() fails with
+        # EPERM if the caller is already a process group leader. The forked child is never a group
+        # leader (its PGID is inherited, never its own pid), so bwrap's setsid() is guaranteed to
+        # succeed; the in-sandbox shim then re-acquires this pty as the new session's controlling tty.
         os.close(master)
-        os.setsid()  # detach from the driver's session; bwrap --new-session will setsid again harmlessly
         os.dup2(slave, 0); os.dup2(slave, 1); os.dup2(slave, 2)
         if slave > 2:
             os.close(slave)

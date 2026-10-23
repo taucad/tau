@@ -1614,6 +1614,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 },
               };
         }
+        /* A host persists a committed edit before its update stages the same bytes, so the watch
+         * can evaluate that write first and publish under the intent the client has already left.
+         * The update then reuses that build; it reuses its meshes too, because each projection is
+         * keyed by every input it was made from and the build is the same native handle. */
+        const priorEvaluation = document.current;
+        const evaluationSlot = evaluation.artifact?.evaluationSlot;
+        if (evaluationSlot !== undefined && priorEvaluation?.artifact?.evaluationSlot === evaluationSlot) {
+          priorEvaluation.projections ??= new Map();
+          evaluation.projections = priorEvaluation.projections;
+        }
         if (initialWatchRefusal && evaluation.result.success) {
           throw initialWatchRefusal.error;
         }

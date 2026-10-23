@@ -6,12 +6,13 @@
  * positive and negative with an out-of-sandbox observer (file digests, canary listeners), never a
  * trusted error string. Writes `s0.json` and `s1.json` receipts under the row's evidence directory.
  */
+import { spawnSync } from 'node:child_process';
 import { connect, createServer } from 'node:net';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-import type { BashIdentity, Check, ShellGrant } from './lib.mts';
+import type { BashIdentity, Check, ShellGrant, SupervisorResult } from './lib.mts';
 import {
   check,
   fixtureRoot,
@@ -437,6 +438,82 @@ writeJson(join(evidenceDirectory, row, 's1.json'), {
   rawResults: { denied: rDenied, granted: rGranted, cross: rCross, descendants: rDesc, long: rLong },
 });
 
+// ── WIN deny-by-default read prototype (orchestrator task 1) ──────────────────────────────────────
+// A separate user's ambient DACL is not D4's boundary, so test whether srt-win 0.0.75's per-session
+// denyRead can MAKE one: enumerate the fixed NTFS volumes + ProgramData, deny-read them, allow-read
+// only the admitted roots + toolchain. Canaries written out-of-sandbox by the host on the other fixed
+// volume and in ProgramData are read back through the sandbox — first with no denyRead (positive
+// control: srt-sandbox, a BUILTIN\Users member, reaches them), then under the enumerated denyRead. An
+// external digest decides each read; a trusted error string never does.
+let winReadBoundary: Record<string, unknown> | undefined;
+if (isWindows) {
+  const fixedVolumes = (
+    spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        "[System.IO.DriveInfo]::GetDrives() | Where-Object {$_.DriveType -eq 'Fixed'} | ForEach-Object {$_.RootDirectory.FullName}",
+      ],
+      { encoding: 'utf8', windowsHide: true, timeout: 20_000 },
+    ).stdout ?? ''
+  )
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const programData = process.env['ProgramData'] ?? 'C:\\ProgramData';
+  const fixtureVolume = root.slice(0, 2).toUpperCase();
+  const otherVolume = fixedVolumes.find((v) => v.slice(0, 2).toUpperCase() !== fixtureVolume) ?? 'C:\\';
+  const volCanaryDir = join(otherVolume, 'tau-spike-canary');
+  const pdCanaryDir = join(programData, 'tau-spike-canary');
+  const volCanary = join(volCanaryDir, 'secret.txt');
+  const pdCanary = join(pdCanaryDir, 'secret.txt');
+  for (const file of [volCanary, pdCanary]) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, 'CANARY-READABLE\n');
+  }
+  const reads = [
+    { id: 'authored', command: `cat ${p(join(project, 'src', 'model.txt'))}`, cwd: project },
+    { id: 'vol', command: `cat ${p(volCanary)}`, cwd: project },
+    { id: 'pd', command: `cat ${p(pdCanary)}`, cwd: project },
+  ];
+  // Positive control: the base profile (no denyRead on the canaries). Deny test: deny-read every fixed
+  // volume + ProgramData, allow-read only the admitted roots (grant already carries them in allowRead).
+  const controlRun = await startSupervisor({ profile, bash: bash.path, runs: reads });
+  const denyProfile = shellProfile({ ...grant, hidden: [...(grant.hidden ?? []), ...fixedVolumes, programData] });
+  const denyRun = await startSupervisor({ profile: denyProfile, bash: bash.path, runs: reads });
+  const [{ results: rControl }, { results: rDeny }] = await Promise.all([controlRun.done, denyRun.done]);
+  const got = (results: SupervisorResult[], id: string): string =>
+    `${results.find((r) => r.id === id)?.stdout ?? ''}${results.find((r) => r.id === id)?.stderr ?? ''}`;
+  const controlVolReadable = got(rControl, 'vol').includes('CANARY-READABLE');
+  const controlPdReadable = got(rControl, 'pd').includes('CANARY-READABLE');
+  const denyVolDenied = !got(rDeny, 'vol').includes('CANARY-READABLE');
+  const denyPdDenied = !got(rDeny, 'pd').includes('CANARY-READABLE');
+  const denyAuthoredOk = got(rDeny, 'authored').includes('authored-original');
+  winReadBoundary = {
+    question: 'can per-session denyRead on enumerated fixed volumes + ProgramData give deny-by-default reads',
+    fixedVolumes,
+    programData,
+    control: { volReadable: controlVolReadable, pdReadable: controlPdReadable },
+    deny: { volDenied: denyVolDenied, pdDenied: denyPdDenied, admittedStillReadable: denyAuthoredOk },
+    // Holds only if the control first proved the reads were reachable AND the enumerated denyRead then
+    // blocks both canaries while the admitted root stays readable.
+    verdict:
+      controlVolReadable && controlPdReadable && denyVolDenied && denyPdDenied && denyAuthoredOk
+        ? 'deny-by-default-achievable'
+        : 'deny-by-default-not-achievable',
+    rawControl: rControl,
+    rawDeny: rDeny,
+  };
+  writeJson(join(evidenceDirectory, row, 's0-win-read-boundary.json'), {
+    spike: 'WIN-READ-BOUNDARY',
+    identity: identity(row, project, bash),
+    ...winReadBoundary,
+  });
+  rmSync(volCanaryDir, { recursive: true, force: true });
+  rmSync(pdCanaryDir, { recursive: true, force: true });
+}
+
 const allChecks = [...s0Checks, ...s1Checks];
 process.stdout.write(
   `${JSON.stringify(
@@ -447,6 +524,7 @@ process.stdout.write(
       // WIN-only: surface the token/ACE characterization in the console log too (not just the
       // uploaded s0.json), so the read-mask verdict is self-documenting from the job log alone.
       ...(isWindows ? { characterization: out('win-characterization') } : {}),
+      ...(winReadBoundary ? { winReadBoundary } : {}),
       verdict: allChecks.every((c) => c.verdict === 'pass') ? 'pass' : 'fail',
     },
     undefined,

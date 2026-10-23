@@ -56,7 +56,7 @@ The kernels' libraries come with the server: do not install them or add a `packa
 4. `test_model` runs the project's GeoSpec suite, or one file or test by name. Fix the model, not the test, unless the requirement changed.
 5. `screenshot` the views that show the change, and look at the images before you describe the result.
 6. `export_model` only when the user asks for a file. `evaluate_model` lists the export IDs a file offers; pass one, or an extension such as `step`, `stl` or `3mf`.
-7. `arrange_workbench` is optional: it opens views and panes for a person who has the project open in the Tau app (skill `workbench`).
+7. `arrange_workbench` is optional: it opens views and panes for a person who has the project open in the Tau app (skill `workbench`). `screenshot { workbenchView: '<id>' }` then captures a saved view as that person sees it: its file, camera, field of view, section cuts and display. Section offsets are metres in both tools.
 
 These are the Tau server's tools; your host may show them with a server prefix. Repeat steps 2–5 until the model evaluates cleanly and the tests pass.
 

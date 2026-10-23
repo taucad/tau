@@ -10,15 +10,43 @@ import {
 } from '#schemas/tools/screenshot.tool.schema.js';
 
 describe('screenshotInputSchema', () => {
-  it('defaults an omitted mode to single and still requires targetFile', () => {
+  it('defaults an omitted mode to single and requires targetFile or workbenchView', () => {
     expect(screenshotInputSchema.parse({ targetFile: 'main.ts', view: 'model' }).mode).toBe('single');
-    expect(screenshotInputSchema.safeParse({ mode: 'single' }).success).toBe(false);
+    expect(screenshotInputSchema.parse({ workbenchView: 'front-cut' })).toStrictEqual({
+      mode: 'single',
+      workbenchView: 'front-cut',
+    });
+    expect(screenshotInputSchema.safeParse({ mode: 'single' })).toMatchObject({
+      error: {
+        issues: [
+          {
+            path: ['targetFile'],
+            message: 'Give targetFile, or workbenchView to capture a view arrange_workbench saved.',
+          },
+        ],
+      },
+    });
   });
 
-  it('declares the mode default on the wire instead of requiring it', () => {
+  it.each([
+    [{ section: { plane: 'xy', offset: 0 } }, 'section'],
+    [{ view: 'model' }, 'view'],
+    [{ instance: 'sheet-1' }, 'instance'],
+    [{ options: { detail: 1 } }, 'options'],
+    [{ mode: 'multi_angle' }, 'mode'],
+  ])('should refuse %j beside workbenchView, which carries its own', (extra, key) => {
+    const result = screenshotInputSchema.safeParse({ workbenchView: 'front-cut', ...extra });
+    expect(result.error?.issues.map(({ path }) => path)).toStrictEqual([[key]]);
+  });
+
+  it('should refuse a workbenchView that is not a view id', () => {
+    expect(screenshotInputSchema.safeParse({ workbenchView: 'Front Cut' }).success).toBe(false);
+  });
+
+  it('declares the mode default on the wire and requires nothing', () => {
     const wire = toProviderToolJsonSchema(screenshotInputSchema);
-    expect(wire['required']).toEqual(['targetFile']);
-    expect(wire).toMatchObject({ properties: { mode: { default: 'single' } } });
+    expect(wire['required'] ?? []).toEqual([]);
+    expect(wire).toMatchObject({ properties: { mode: { default: 'single' }, workbenchView: { type: 'string' } } });
   });
 });
 
@@ -33,16 +61,11 @@ describe('screenshotInputSchema section and parameters', () => {
     ).toMatchObject({ section: { plane: 'xy', offset: 0.194, keep: 'positive' }, parameters: { voxelSize: 0.5 } });
   });
 
-  it('should parse the deprecated offsetMm into the same section in metres, and keep it on a second parse', () => {
-    const parsed = screenshotInputSchema.parse({ targetFile: 'main.ts', section: { plane: 'xy', offsetMm: 6 } });
-    expect(parsed.section).toStrictEqual({ plane: 'xy', offset: 0.006 });
-    expect(parsed.section).toStrictEqual(screenshotSectionSchema.parse({ plane: 'xy', offset: 0.006 }));
-    expect(screenshotInputSchema.parse(parsed)).toStrictEqual(parsed);
-    expect(screenshotSectionSchema.parse({ plane: 'yz', offsetMm: 33.3, keep: 'negative' })).toStrictEqual({
-      plane: 'yz',
-      offset: 0.0333,
-      keep: 'negative',
-    });
+  it('should refuse the removed millimetre spelling offsetMm', () => {
+    expect(screenshotSectionSchema.safeParse({ plane: 'xy', offsetMm: 6 }).success).toBe(false);
+    expect(
+      screenshotInputSchema.safeParse({ targetFile: 'main.ts', section: { plane: 'xy', offsetMm: 6 } }).success,
+    ).toBe(false);
   });
 
   it.each([
@@ -50,27 +73,11 @@ describe('screenshotInputSchema section and parameters', () => {
     [{ plane: 'xy' }],
     [{ plane: 'xy', offset: 0, keep: 'below' }],
     [{ plane: 'xy', offsetMm: 0, offset: 0 }],
+    [{ plane: 'xy', offsetMm: 6 }],
     [{ plane: 'xy', offset: 0, depth: 1 }],
     [{ plane: 'xy', offset: Number.POSITIVE_INFINITY }],
-    [{ plane: 'xy', offsetMm: Number.POSITIVE_INFINITY }],
   ])('refuses the malformed section %j', (section) => {
     expect(screenshotInputSchema.safeParse({ targetFile: 'main.ts', section }).success).toBe(false);
-  });
-
-  it('should name the missing offset, and the alias given beside it, in metres', () => {
-    const issuesOf = (section: unknown) => {
-      const result = screenshotSectionSchema.safeParse(section);
-      return result.success ? [] : result.error.issues.map(({ path, message }) => ({ path, message }));
-    };
-    expect(issuesOf({ plane: 'xy' })).toStrictEqual([
-      {
-        path: ['offset'],
-        message: "Give offset, the plane's position along its normal axis in metres (0.006 is 6 mm).",
-      },
-    ]);
-    expect(issuesOf({ plane: 'xy', offset: 0.006, offsetMm: 6 })).toStrictEqual([
-      { path: ['offsetMm'], message: 'Give offset alone; offsetMm is its deprecated millimetre spelling.' },
-    ]);
   });
 
   it('refuses parameters that are not a JSON object', () => {
@@ -82,16 +89,16 @@ describe('screenshotInputSchema section and parameters', () => {
 
   it('exposes section and parameters on the provider wire without requiring them', () => {
     const wire = toProviderToolJsonSchema(screenshotInputSchema);
-    expect(wire['required']).toEqual(['targetFile']);
+    expect(wire['required'] ?? []).toEqual([]);
     expect(wire).toMatchObject({
       properties: {
-        section: { properties: { plane: { enum: ['xy', 'xz', 'yz'] } }, required: ['plane'] },
+        section: { properties: { plane: { enum: ['xy', 'xz', 'yz'] } }, required: ['plane', 'offset'] },
       },
     });
     expect(JSON.stringify(wire['properties'])).toContain('this call only');
   });
 
-  it('should describe offset in metres in tau:root as arrange_workbench does, and offsetMm as deprecated for one release', () => {
+  it('should describe offset in metres in tau:root as arrange_workbench does, and offer no offsetMm', () => {
     expect(toProviderToolJsonSchema(screenshotInputSchema)).toMatchObject({
       properties: {
         section: {
@@ -100,20 +107,23 @@ describe('screenshotInputSchema section and parameters', () => {
               type: 'number',
               description: expect.stringContaining('Metres in tau:root: 0.006 is 6 mm.') as unknown,
             },
-            offsetMm: {
-              type: 'number',
-              description: expect.stringMatching(/^Deprecated, kept for one release:/u) as unknown,
-            },
           },
+          required: ['plane', 'offset'],
         },
       },
     });
+    expect(toProviderToolJsonSchema(screenshotInputSchema)).not.toHaveProperty([
+      'properties',
+      'section',
+      'properties',
+      'offsetMm',
+    ]);
     expect(JSON.stringify(toProviderToolJsonSchema(arrangeWorkbenchInputSchema))).toContain(
       "The plane's position along its axis. Metres in tau:root: 0.012 is 12 mm.",
     );
   });
 
-  it("should convert with Zod's default output mode to the parsed section, which has offset and no offsetMm", () => {
+  it("should convert with Zod's default output mode to the same section as its input", () => {
     const output = z.toJSONSchema(screenshotInputSchema);
     expect(output).toMatchObject({
       properties: {
@@ -130,8 +140,9 @@ describe('screenshotInputSchema section and parameters', () => {
       },
     });
     expect(output).not.toHaveProperty(['properties', 'section', 'properties', 'offsetMm']);
-    expect(z.toJSONSchema(screenshotSectionSchema, { io: 'input' })).toMatchObject({ required: ['plane'] });
-    expect(z.toJSONSchema(screenshotSectionSchema, { io: 'input' })).toHaveProperty(['properties', 'offsetMm']);
+    expect(z.toJSONSchema(screenshotSectionSchema, { io: 'input' })).toStrictEqual(
+      z.toJSONSchema(screenshotSectionSchema),
+    );
   });
 });
 
@@ -152,7 +163,7 @@ describe('screenshotInputSchema includeEdges', () => {
 
   it('publishes includeEdges as an optional boolean on the wire', () => {
     const wire = toProviderToolJsonSchema(screenshotInputSchema);
-    expect(wire['required']).toEqual(['targetFile']);
+    expect(wire['required'] ?? []).toEqual([]);
     expect(wire).toMatchObject({ properties: { includeEdges: { type: 'boolean' } } });
   });
 });
@@ -185,7 +196,7 @@ describe('screenshotInputSchema pose', () => {
     ).toMatchObject({ pose: { animation: { id: 'four-sun-turns', time: 2 } } });
     const wire = z.toJSONSchema(screenshotInputSchema, { io: 'input' });
     expect(wire).toHaveProperty(['properties', 'pose']);
-    expect(wire.required).not.toContain('pose');
+    expect(wire.required ?? []).not.toContain('pose');
   });
 });
 

@@ -4,6 +4,7 @@ import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#r
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
 import { glbChunks } from '#runtime/glb-chunks.js';
 import { planetaryGlb } from '#runtime/planetary-glb.fixture.js';
+import type { CaptureWorkbenchView } from '@taucad/chat/rpc';
 import type {
   Description,
   Evaluation,
@@ -641,6 +642,72 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
       Readonly<Record<string, unknown>>
     >;
     expect(nodes[1]).toHaveProperty('matrix');
+  });
+
+  it('captures a saved workbench view from its camera with its cuts, keyed by the record, and says what it left out', async () => {
+    const fixture = runtimeFixture();
+    const clients = clientsFor(fixture);
+    const workbenchView: CaptureWorkbenchView = {
+      id: 'front-cut',
+      camera: { kind: 'preset', preset: 'front' },
+      fieldOfView: 0,
+      upDirection: 'z',
+      display: {
+        surfaces: true,
+        lines: true,
+        gizmo: false,
+        grid: true,
+        axes: true,
+        matcap: false,
+        postProcessing: false,
+      },
+      section: { active: true, cuts: [{ kind: 'plane', plane: 'xz', offset: 0.006, isFlipped: false }] },
+    };
+
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+    const result = await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single', workbenchView });
+
+    expect(result).toMatchObject({
+      success: true,
+      images: [{ angle: 'front' }],
+      message:
+        'Workbench view front-cut: front preset, orthographic. Section: kept y ≤ 0.006 m; the cut faces are capped. The grid, pinned measurements and components hidden in the viewer are not drawn.',
+    });
+    const [plainJob, viewJob] = clients.exporter.mock.calls.map(([job]) => job);
+    expect(viewJob?.identity).not.toBe(plainJob?.identity);
+    expect(viewJob?.exportOptions).toMatchObject({
+      axes: false,
+      camera: { framing: 'bounds', direction: [0, -1, 0], projection: { kind: 'orthographic' } },
+      sections: { planes: [{ point: [0, 0.006, 0], normal: [0, -1, 0] }] },
+    });
+  });
+
+  it('refuses a saved view with a revolution cut before rendering an image', async () => {
+    const clients = clientsFor(runtimeFixture());
+
+    await expect(
+      clients.images.captureImages({
+        targetFile: 'main.ts',
+        mode: 'single',
+        workbenchView: {
+          id: 'wedge',
+          camera: { kind: 'preset', preset: 'isometric' },
+          fieldOfView: 60,
+          upDirection: 'z',
+          display: {
+            surfaces: true,
+            lines: true,
+            gizmo: true,
+            grid: true,
+            axes: true,
+            matcap: false,
+            postProcessing: false,
+          },
+          section: { active: true, cuts: [{ kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 0, sweep: 90 }] },
+        },
+      }),
+    ).resolves.toMatchObject({ success: false, errorCode: 'VALIDATION_ERROR' });
+    expect(clients.exporter).not.toHaveBeenCalled();
   });
 
   it('refuses a pose the mechanism cannot take before rendering an image', async () => {

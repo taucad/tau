@@ -6,6 +6,7 @@ import type {
   RpcImageClient,
   RpcParameterClient,
   RpcRuntimeClient,
+  CaptureWorkbenchView,
 } from '@taucad/chat/rpc';
 import type { GetParametersOutput } from '@taucad/chat/schemas/tools/parameter';
 import type { ModelMechanism, ModelSummary } from '@taucad/chat/schemas/tools/evaluate-model';
@@ -21,7 +22,7 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { assertRootedPath } from '@taucad/utils/path';
-import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
+import type { ScreenshotAngle, ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
 
 import { projectParameterValues } from '#runtime/parameter-values.js';
 import { reportModelMechanism } from '#runtime/model-mechanism.js';
@@ -37,6 +38,8 @@ import {
   describeCaptureSection,
   resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';
+import { workbenchViewCamera, workbenchViewSections } from '#capture/capture-workbench-view.js';
+import type { CaptureExportOptionsInput } from '#capture/capture-views.js';
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
 
 const captureSize = 1600;
@@ -63,12 +66,14 @@ const withSectionGuidance = async <Result>(
   }
 };
 
-/** The result `message`: what a section kept and where a pose put each coordinate, or nothing. */
+/** The result `message`: the workbench view drawn, what a section kept and where a pose put each coordinate. */
 const captureMessage = (
   section: ScreenshotSection | undefined,
   posed: Readonly<{ coordinates: Readonly<Record<string, number>>; atLimit: readonly string[] }> | undefined,
+  workbench?: readonly string[],
 ): Readonly<{ message?: string }> => {
   const sentences = [
+    ...(workbench ?? []),
     ...(section === undefined ? [] : [describeCaptureSection(section)]),
     ...(posed === undefined
       ? []
@@ -81,6 +86,50 @@ const captureMessage = (
         ]),
   ];
   return sentences.length === 0 ? {} : { message: sentences.join(' ') };
+};
+
+/**
+ * A saved workbench view as one capture: its raster camera, cuts and display, the identity they add to the image
+ * key, the sentences the result `message` opens with, and the canonical angle a preset names; or why it cannot be
+ * drawn.
+ *
+ * @param view - The view the screenshot handler resolved from its record, if any.
+ * @returns The capture, a refusal, or `undefined` without a view.
+ */
+const savedCapture = (
+  view: CaptureWorkbenchView | undefined,
+):
+  | Readonly<{
+      status: 'capture';
+      workbench: NonNullable<CaptureExportOptionsInput['workbench']>;
+      identity: string;
+      sentences: readonly string[];
+      angle: ScreenshotAngle | undefined;
+    }>
+  | Readonly<{ status: 'refused'; message: string }>
+  | undefined => {
+  if (view === undefined) {
+    return undefined;
+  }
+  const camera = workbenchViewCamera(view);
+  if (camera.status === 'refused') {
+    return camera;
+  }
+  const sections = workbenchViewSections(view);
+  if (sections.status === 'refused') {
+    return sections;
+  }
+  return {
+    status: 'capture',
+    workbench: { camera: camera.camera, planes: sections.planes, display: view.display },
+    identity: `:workbench:${JSON.stringify([view.camera, view.fieldOfView, view.upDirection, view.display, view.section])}`,
+    sentences: [
+      `Workbench view ${view.id}: ${camera.label}, ${view.fieldOfView === 0 ? 'orthographic' : `${String(view.fieldOfView)}° field of view`}.`,
+      ...(sections.description === undefined ? [] : [sections.description]),
+      'The grid, pinned measurements and components hidden in the viewer are not drawn.',
+    ],
+    angle: view.camera.kind === 'preset' ? view.camera.preset : undefined,
+  };
 };
 
 /** Per-call parameter values as the runtime's caller overrides; absent means the stored group alone. */
@@ -750,18 +799,32 @@ export const createRuntimeAgentClients = (
               { count: 1, mimeType: 'image/png' },
             );
             context?.signal?.throwIfAborted();
-            return { success: true, images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }], ...provenance };
+            return {
+              success: true,
+              images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }],
+              ...provenance,
+              ...(captureInput.workbenchView === undefined
+                ? {}
+                : {
+                    message: `Workbench view ${captureInput.workbenchView.id} selects the 2D view ${rendering.view}; its camera, cuts and display apply to 3D views only.`,
+                  }),
+            };
           }
           assertGlb(artifact.content);
           const posed = captureInput.pose === undefined ? undefined : poseModelGlb(artifact.content, captureInput.pose);
           if (posed?.status === 'refused') {
             return { success: false, errorCode: rpcClientErrorCode.validationError, message: posed.message };
           }
+          const saved = savedCapture(captureInput.workbenchView);
+          if (saved?.status === 'refused') {
+            return { success: false, errorCode: rpcClientErrorCode.validationError, message: saved.message };
+          }
           const exportOptions = buildCaptureExportOptions({
             mode: captureInput.mode,
             size: captureSize,
             ...(captureInput.includeEdges === undefined ? {} : { includeEdges: captureInput.includeEdges }),
             ...(captureInput.section === undefined ? {} : { section: captureInput.section }),
+            ...(saved === undefined ? {} : { workbench: saved.workbench }),
           });
           // The image service keys captures by identity, so a cut is part of it.
           const sectionIdentity =
@@ -770,6 +833,8 @@ export const createRuntimeAgentClients = (
               : `:section:${captureInput.section.plane}:${captureInput.section.offset}:${resolveCaptureSectionKeep(captureInput.section)}`;
           /* A pose changes the drawn geometry, so it is part of both keys. */
           const poseKey = captureInput.pose === undefined ? '' : `:pose:${JSON.stringify(captureInput.pose)}`;
+          /* A single capture names its canonical angle: the isometric default, or the preset a saved view frames. */
+          const singleAngle: ScreenshotAngle | undefined = saved === undefined ? 'isometric' : saved.angle;
           const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
           const names =
             captureInput.mode === 'multi_angle'
@@ -779,7 +844,7 @@ export const createRuntimeAgentClients = (
             await withSectionGuidance(captureInput.section, async () =>
               input.exportImage({
                 kind: 'capture',
-                identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}${sectionIdentity}${poseKey}`,
+                identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}${sectionIdentity}${saved?.identity ?? ''}${poseKey}`,
                 sourceFormat: 'glb',
                 sourcePath: targetFile,
                 geometryHash: `${rendering.hash}${poseKey}`,
@@ -798,9 +863,15 @@ export const createRuntimeAgentClients = (
             images:
               captureInput.mode === 'multi_angle'
                 ? canonicalCaptureViews.map(({ id }, index) => ({ ...echo, angle: id, dataUrl: dataUrls[index]! }))
-                : [{ ...echo, angle: 'isometric', dataUrl: dataUrls[0]! }],
+                : [
+                    {
+                      ...echo,
+                      ...(singleAngle === undefined ? {} : { angle: singleAngle }),
+                      dataUrl: dataUrls[0]!,
+                    },
+                  ],
             ...provenance,
-            ...captureMessage(captureInput.section, posed),
+            ...captureMessage(captureInput.section, posed, saved?.sentences),
           };
         } finally {
           view.close();

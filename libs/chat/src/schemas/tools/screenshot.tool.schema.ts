@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { workbenchIdSchema } from '@taucad/workbench';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 import { parameterOverridesSchema } from '#schemas/tools/parameter.tool.schema.js';
@@ -21,48 +22,14 @@ const sectionKeep = z
 
 /**
  * One axis-aligned section cut through a 3D view, in metres in `tau:root` (Z-up), the frame `arrange_workbench`
- * writes its cuts in. The renderer clips surfaces and lines and caps the cut. `offsetMm`, the millimetre spelling it
- * replaced, is still accepted and parsed into `offset` until 0.1.0-beta.8 removes it, so a parsed section always
- * carries metres, and its output JSON Schema (`io: 'output'`) is that parsed shape.
+ * writes its cuts in. The renderer clips surfaces and lines and caps the cut. `offsetMm`, the deprecated millimetre
+ * spelling, was removed in 0.1.0-beta.9 and is refused.
  * @public
  */
 export const screenshotSectionSchema = z
-  .object({
-    plane: sectionPlane,
-    offset: sectionOffset.optional(),
-    /**
-     * @deprecated Send `offset` in metres instead: `offsetMm: 6` is `offset: 0.006`, the millimetres divided by 1000.
-     * Removed in 0.1.0-beta.8.
-     */
-    offsetMm: z
-      .number()
-      .optional()
-      .describe('Deprecated, kept for one release: the same position in millimetres. Send offset instead.'),
-    keep: sectionKeep.optional(),
-  })
-  .strict()
-  // oxlint-disable-next-line typescript/no-deprecated -- The alias is read only here, to parse it into offset.
-  .transform(({ offset, offsetMm, ...section }, context) => {
-    if (offsetMm === undefined && offset !== undefined) {
-      return { ...section, offset };
-    }
-    if (offset === undefined && offsetMm !== undefined) {
-      /* Fifteen significant digits make 33.3 mm the number 0.0333, as an agent writing metres would send it. */
-      return { ...section, offset: Number((offsetMm / 1000).toPrecision(15)) };
-    }
-    context.addIssue({
-      code: 'custom',
-      path: offset === undefined ? ['offset'] : ['offsetMm'],
-      message:
-        offset === undefined
-          ? "Give offset, the plane's position along its normal axis in metres (0.006 is 6 mm)."
-          : 'Give offset alone; offsetMm is its deprecated millimetre spelling.',
-    });
-    return z.NEVER;
-  })
-  /* The parsed shape, so the schema converts to JSON Schema in output mode too and a second parse is a no-op. */
-  .pipe(z.object({ plane: sectionPlane, offset: sectionOffset, keep: sectionKeep.optional() }).strict());
-/** A parsed section: its offset is always metres. @public */
+  .object({ plane: sectionPlane, offset: sectionOffset, keep: sectionKeep.optional() })
+  .strict();
+/** A section: its offset is metres. @public */
 export type ScreenshotSection = z.infer<typeof screenshotSectionSchema>;
 
 /**
@@ -75,9 +42,16 @@ export const screenshotInputSchema = z
       .enum(['single', 'multi_angle'])
       .default('single')
       .describe('single (default): deterministic perspective isometric view. multi_angle: all 6 orthographic views'),
-    targetFile: rootedFilePathSchema.describe(
-      'Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").',
-    ),
+    targetFile: rootedFilePathSchema
+      .optional()
+      .describe(
+        'Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad"). Required unless workbenchView names a view.',
+      ),
+    workbenchView: workbenchIdSchema
+      .optional()
+      .describe(
+        'A view id arrange_workbench wrote (.tau/workbench/views/<id>.json): capture its file, kernel view, camera, field of view, section cuts and display, as the viewer shows them.',
+      ),
     view: z.string().optional().describe('A view ID offered by evaluate_model; omit for the default view.'),
     instance: z.string().optional().describe('A sheet or drawing ID offered under that view; omit for the first.'),
     options: z
@@ -93,7 +67,35 @@ export const screenshotInputSchema = z
     parameters: parameterOverridesSchema.optional(),
     pose: capturePoseSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((input, context) => {
+    if (input.workbenchView === undefined) {
+      if (input.targetFile === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['targetFile'],
+          message: 'Give targetFile, or workbenchView to capture a view arrange_workbench saved.',
+        });
+      }
+      return;
+    }
+    const conflicting = (['view', 'instance', 'options', 'section'] as const).filter((key) => input[key] !== undefined);
+    for (const key of conflicting) {
+      context.addIssue({
+        code: 'custom',
+        path: [key],
+        message: `workbenchView carries its own ${key === 'section' ? 'section cuts' : 'kernel view, instance and options'}; omit ${key}, or capture without workbenchView.`,
+      });
+    }
+    if (input.mode === 'multi_angle') {
+      context.addIssue({
+        code: 'custom',
+        path: ['mode'],
+        message:
+          "workbenchView captures the view's own camera; omit mode, or capture multi_angle without workbenchView.",
+      });
+    }
+  });
 /** @public */
 export type ScreenshotInput = z.infer<typeof screenshotInputSchema>;
 

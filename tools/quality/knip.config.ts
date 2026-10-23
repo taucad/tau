@@ -170,6 +170,8 @@ const config: KnipConfig = {
         'app/testing/billing-load/{run,driver,cluster}.ts',
         'app/testing/development-billing-account.ts',
         'app/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
+        // The deletion recovery integration test spawns this process by path.
+        'app/testing/project-deletion-process.ts',
         'app/lifecycle/graceful-shutdown.signal-fixture.ts',
       ],
       ignoreDependencies: [
@@ -266,6 +268,8 @@ const config: KnipConfig = {
         'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
         // Vite alias replacement for `@resvg/resvg-js` in the browser bundle.
         'app/lib/browser-stubs/resvg-js.ts',
+        // The deletion component browser suite selects this nested config with --config.
+        'app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
       ],
       ignore: ['public/**'],
       // The desktop and serve builds are separate React Router apps (`build:desktop`,

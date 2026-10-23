@@ -9,7 +9,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { desktopE2EApiUrl, desktopE2EDesktopCloudEnabled, desktopE2EFreeTierSyncEnabled } from '#support/config.js';
-import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
   forgetBackupByDefault,
@@ -28,6 +27,7 @@ import {
   basicAuthorization,
   forgetSeededProjects,
   projectLfsBytes,
+  launchTauCloudDesktop,
   mintOneTimeToken,
   readStorageUsage,
   runGit,
@@ -553,7 +553,7 @@ describe.runIf(desktopE2EFreeTierSyncEnabled)('a free-tier owner with the free-s
   const incompressible = (bytes: number): string => randomBytes(bytes).toString('base64');
 
   beforeAll(async () => {
-    desktop = await launchDesktopApp({ token: required(free).bearer });
+    desktop = await launchTauCloudDesktop(required(free).bearer);
     collaborator = await seed('sync-collaborator', 'free');
   }, 900_000);
 

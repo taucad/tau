@@ -5,7 +5,9 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { tauDatabaseCommand } from '#support/tau-account.js';
-import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
+import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } from '#support/config.js';
+import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
+import type { DesktopSession } from '#support/desktop-app.js';
 
 /**
  * What one Tau Cloud owner needs before a project can sync at all (charter W18).
@@ -30,6 +32,20 @@ const psql = async (statement: string): Promise<string> => {
   const { file, args } = tauDatabaseCommand(statement);
   const { stdout } = await execFileAsync(file, [...args, '-qtAX'], { encoding: 'utf8' });
   return stdout.trim();
+};
+
+/** Launch an authenticated client using the production handoff for packaged acceptance. */
+export const launchTauCloudDesktop = async (bearer: string): Promise<DesktopSession> => {
+  const session = await launchDesktopApp({ token: bearer, env: { TAU_DESKTOP_UPDATES: 'off' } });
+  try {
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, bearer);
+    }
+    return session;
+  } catch (error) {
+    await session.close();
+    throw error;
+  }
 };
 
 /** The identifiers a seeded owner is addressed by on the billing side. */

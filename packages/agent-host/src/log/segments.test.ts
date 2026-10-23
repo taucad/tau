@@ -32,6 +32,35 @@ const ids = (events: readonly AgentLogEvent[]): readonly string[] =>
 
 describe('mergeLogSegments', () => {
   /*
+   * A device whose id changed leaves its old segment beside the new one, which holds the same rows and more. The merge
+   * reads rows and writers, never segment ids: one machine holding both files and another holding only the new one
+   * agree (`t7_prefix_segment`).
+   */
+  it('should merge one order whether a device’s rows are read from one segment or from two that overlap', () => {
+    const first = record({ leaderEpoch: 'epoch-1', sequence: 0, recordedAt: '2026-09-13T06:05:00.000Z', text: 'one' });
+    /* The device's clock stepped back between its terms: its file order still holds. */
+    const second = record({ leaderEpoch: 'epoch-2', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'two' });
+    const other = record({
+      leaderEpoch: 'epoch-o',
+      sequence: 0,
+      recordedAt: '2026-09-13T06:02:00.000Z',
+      text: 'other',
+    });
+
+    const holdingBoth = ids(
+      mergeLogSegments([
+        segment('device-1', [first]),
+        segment('device-2', [first, second]),
+        segment('device-o', [other]),
+      ]),
+    );
+    const holdingOne = ids(mergeLogSegments([segment('device-2', [first, second]), segment('device-o', [other])]));
+
+    expect(holdingBoth).toEqual(holdingOne);
+    expect(holdingOne.indexOf('epoch-1-0')).toBeLessThan(holdingOne.indexOf('epoch-2-0'));
+  });
+
+  /*
    * A writer merges its own rows under no device id (the empty string), and every other device sees them under the
    * writer's id. Two terms that start in the same millisecond still merge in one order on both devices.
    */

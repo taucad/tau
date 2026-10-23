@@ -70,7 +70,7 @@ export const compareSegmentDeviceIds = (
 
 /** @public */
 export type MergeLogSegmentsOptions = Readonly<{
-  /** Two segments hold different rows under one key; the copy from the term's device is kept. */
+  /** Two segments hold different rows under one key; the smallest canonical copy is kept. */
   onConflict?: (conflict: Readonly<{ key: RowKey; keptDeviceId: string; droppedDeviceId: string }>) => void;
 }>;
 
@@ -78,8 +78,11 @@ type Copy = { readonly event: AgentLogEvent; readonly deviceId: string; readonly
 
 type Term = {
   readonly leaderEpoch: string;
-  /** Each device id → where the term first appears among that device's segments, in file order. */
-  readonly orderByDevice: Map<string, number>;
+  /**
+   * Each writer → where the term first appears among that writer's segments, in file order. A segment's writer is the
+   * first term it holds: the same row in every copy of one file, whatever the segment is called.
+   */
+  readonly orderByWriter: Map<string, number>;
   /** Each sequence → every copy read, from every segment. */
   readonly copies: Map<number, Copy[]>;
   startedAt: number;
@@ -93,19 +96,20 @@ const startedAtOf = (event: AgentLogEvent): number => {
 // Code-unit order, not `localeCompare`: the merge must agree on every machine.
 const compare = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
-/** The term's device: the smallest deviceId among the segments holding it (CL-R14). */
-const deviceOf = (term: Term): string => [...term.orderByDevice.keys()].toSorted(compare)[0]!;
+/** The term's writer: the smallest writer among the segments holding it (CL-R14, `deviceOf` in ChatLedger.lean). */
+const writerOf = (term: Term): string => [...term.orderByWriter.keys()].toSorted(compare)[0]!;
 
 /**
  * Every record of one chat, across every device that wrote it, in one order (I6, CL-R14).
  *
- * The result is the exact union of the segments' rows by key, `(leaderEpoch, sequence)`, and it depends only on the
- * set of rows: neither segment order nor a segment read twice changes it. A term's start is the earliest record any
- * copy holds; each device's terms are then clamped once, in the order its own file holds them, so a backwards clock
- * step on one device never reorders its own history; terms are ordered by that clamped start, then by their device's
- * first term (the same on every machine, whatever id a reader gives its own segment), then file order; and each term's records stay contiguous in `sequence` order. Two different rows under one key keep the copy
- * from the term's device (the smallest canonical form among its copies), and the other is reported through
- * `onConflict`.
+ * The result is the exact union of the segments' rows by key, `(leaderEpoch, sequence)`, and it reads no segment id:
+ * neither segment order, a segment read twice, what a segment is called, nor a second copy of a prefix of one file
+ * changes it (`t7_same_rows`, `t7_segment_ids`, `t7_prefix_segment` in ChatLedger.lean). A segment's writer is the
+ * first term it holds. A term's start is the earliest record any copy holds; each writer's terms are then clamped once,
+ * in the order its own file holds them, so a backwards clock step on one device never reorders its own history; terms
+ * are ordered by that clamped start, then writer, then file order; and each term's records stay contiguous in
+ * `sequence` order. Two different rows under one key keep the smallest canonical form among all copies, and each other
+ * is reported through `onConflict`.
  *
  * @param segments - One entry per segment file in the chat's directory.
  * @param options - `onConflict` hears about each conflicting copy dropped.
@@ -162,12 +166,13 @@ export const mergeSegmentRows = (
   const terms = new Map<string, Term>();
   for (const segment of segments) {
     const introduced = new Set<string>();
+    const writer = segment.events[0]?.leaderEpoch;
     for (const event of segment.events) {
       let term = terms.get(event.leaderEpoch);
       if (term === undefined) {
         term = {
           leaderEpoch: event.leaderEpoch,
-          orderByDevice: new Map(),
+          orderByWriter: new Map(),
           copies: new Map(),
           startedAt: startedAtOf(event),
         };
@@ -176,7 +181,7 @@ export const mergeSegmentRows = (
       if (!introduced.has(event.leaderEpoch)) {
         introduced.add(event.leaderEpoch);
         const order = introduced.size - 1;
-        term.orderByDevice.set(segment.deviceId, Math.min(order, term.orderByDevice.get(segment.deviceId) ?? order));
+        term.orderByWriter.set(writer!, Math.min(order, term.orderByWriter.get(writer!) ?? order));
       }
       term.startedAt = Math.min(term.startedAt, startedAtOf(event));
       const copies = term.copies.get(event.sequence) ?? [];
@@ -186,13 +191,12 @@ export const mergeSegmentRows = (
   }
 
   const placed = [...terms.values()].map((term) => {
-    const deviceId = deviceOf(term);
-    return { term, deviceId, order: term.orderByDevice.get(deviceId)! };
+    const writer = writerOf(term);
+    return { term, writer, order: term.orderByWriter.get(writer)! };
   });
-  // One clamp per device, in its own file order: a term never starts before an earlier term of its device.
+  // One clamp per writer, in its own file order: a term never starts before an earlier term of its writer.
   const clamped = new Map<Term, number>();
-  const byDevice = Map.groupBy(placed, (entry) => entry.deviceId);
-  for (const entries of byDevice.values()) {
+  for (const entries of Map.groupBy(placed, (entry) => entry.writer).values()) {
     let floor = Number.NEGATIVE_INFINITY;
     for (const { term } of entries.toSorted(
       (left, right) => left.order - right.order || compare(left.term.leaderEpoch, right.term.leaderEpoch),
@@ -202,33 +206,21 @@ export const mergeSegmentRows = (
     }
   }
 
-  /*
-   * Ties between devices break on each device's first term, never on its id: a writer reads its own rows under no id
-   * (the empty string) while every other device reads them under its own, so an id would order a tie differently on
-   * each machine. A device's first term is the same row everywhere.
-   */
-  const deviceKey = new Map<string, string>();
-  for (const [deviceId, entries] of byDevice) {
-    const first = entries.toSorted(
-      (left, right) => left.order - right.order || compare(left.term.leaderEpoch, right.term.leaderEpoch),
-    )[0]!;
-    deviceKey.set(deviceId, first.term.leaderEpoch);
-  }
+  /* Clamped start, then writer, then file order, then term: no segment id, so every machine merges one order. */
   return placed
     .toSorted(
       (left, right) =>
         clamped.get(left.term)! - clamped.get(right.term)! ||
-        compare(deviceKey.get(left.deviceId)!, deviceKey.get(right.deviceId)!) ||
+        compare(left.writer, right.writer) ||
         left.order - right.order ||
         compare(left.term.leaderEpoch, right.term.leaderEpoch),
     )
-    .flatMap(({ term, deviceId }) =>
+    .flatMap(({ term }) =>
       [...term.copies.entries()]
         .toSorted(([left], [right]) => left - right)
         .map(([sequence, copies]) => {
-          const own = copies.filter((copy) => copy.deviceId === deviceId);
-          // The device id breaks a tie between equal copies, so `keptDeviceId` does not depend on segment order.
-          const kept = (own.length > 0 ? own : copies).toSorted(
+          /* The smallest canonical copy, whichever segment holds it; the device id only names the copy reported kept. */
+          const kept = copies.toSorted(
             (left, right) => compare(left.canonical, right.canonical) || compare(left.deviceId, right.deviceId),
           )[0]!;
           const dropped = new Map<string, string>();

@@ -790,7 +790,8 @@ structure Copy where
   device : Nat
   deriving DecidableEq, Repr, Inhabited
 
-/-- A term across segments: `orders` is `orderByDevice`, `copies` maps a sequence to every copy read. -/
+/-- A term across segments: `orders` maps a writer (the first term of a segment holding it, `firstTerm`) to its
+place in that writer's file; `copies` maps a sequence to every copy read. -/
 structure MTerm where
   term : Nat
   orders : List (Nat × Nat)
@@ -810,21 +811,22 @@ def canonKey (r : Row) : List (List Nat) :=
 /-- The kept copy's comparator: canonical form, then device id. -/
 def copyKey (c : Copy) : List (List Nat) := canonKey c.row.fp ++ [digits c.device]
 
-/-- Record one copy of `e` read from device `dev`; `order` is the term's place in this segment when the segment
-introduces it here. -/
-def MTerm.add (t : MTerm) (dev : Nat) (order : Option Nat) (e : Row) : MTerm :=
+/-- Record one copy of `e` read from device `dev`; `order` is `(writer, place)`, the segment's first term and the
+term's place in it, when the segment introduces it here. -/
+def MTerm.add (t : MTerm) (dev : Nat) (order : Option (Nat × Nat)) (e : Row) : MTerm :=
   { t with
     orders := match order with
-      | some o => upsert dev (min o ((lookup dev t.orders).getD o)) t.orders
+      | some (w, o) => upsert w (min o ((lookup w t.orders).getD o)) t.orders
       | none => t.orders
     started := min t.started e.ms
     copies := upsert e.seq (((lookup e.seq t.copies).getD []) ++ [⟨e, dev⟩]) t.copies }
 
-/-- One row of one segment; `st.2` is this segment's `introduced`, in order. -/
+/-- One row of one segment; `st.2` is this segment's `introduced`, in order. The segment's writer is the first term it
+introduces: the same row in every copy of one file, whatever the segment is called. -/
 def addRow (dev : Nat) (st : List MTerm × List Nat) (e : Row) : List MTerm × List Nat :=
   let fresh := !st.2.contains e.term
   let intro := if fresh then st.2 ++ [e.term] else st.2
-  let order := if fresh then some (intro.length - 1) else none
+  let order := if fresh then some (st.2.headD e.term, intro.length - 1) else none
   if st.1.any (fun t => decide (t.term = e.term)) then
     (st.1.map (fun t => if t.term = e.term then t.add dev order e else t), intro)
   else (st.1 ++ [MTerm.add ⟨e.term, [], [], e.ms⟩ dev order e], intro)
@@ -832,9 +834,11 @@ def addRow (dev : Nat) (st : List MTerm × List Nat) (e : Row) : List MTerm × L
 def mergeSegment (terms : List MTerm) (seg : Nat × List Row) : List MTerm :=
   (seg.2.foldl (addRow seg.1) (terms, [])).1
 
-/-- `deviceOf(term)`: the smallest device id holding the term. -/
+/-- `writerOf(term)`: the smallest writer (in term order) of the segments holding the term. It reads no segment id:
+a writer reads its own file under no id and others read it under theirs, and a device whose id changed leaves two
+overlapping files on one machine and one on another. -/
 def deviceOf (t : MTerm) : Nat :=
-  match keySort (fun d => [digits d]) (t.orders.map Prod.fst) with
+  match keySort (fun d => [termId d]) (t.orders.map Prod.fst) with
   | d :: _ => d
   | [] => 0
 
@@ -850,11 +854,10 @@ def clampStarts (placed : List (MTerm × Nat × Nat)) : List (Nat × Nat) :=
       let floor := match acc.1 with | some f => max f p.1.started | none => p.1.started
       (some floor, acc.2 ++ [(p.1.term, floor)])) (none, [])).2
 
-/-- The kept copy of one key: the smallest canonical form (then device id) among the term device's own copies, or
-among all copies when that device holds none. -/
-def keptCopy (device : Nat) (copies : List Copy) : Copy :=
-  let own := copies.filter (fun c => decide (c.device = device))
-  (keySort copyKey (if own.isEmpty then copies else own)).headD default
+/-- The kept copy of one key: the smallest canonical form among all copies, whichever segment holds it (then device id,
+which only names the copy reported kept). -/
+def keptCopy (copies : List Copy) : Copy :=
+  (keySort copyKey copies).headD default
 
 /-- One copy per distinct content other than the kept one, from the smallest device holding it. -/
 def dropped (kept : Copy) (copies : List Copy) : List Copy :=
@@ -862,17 +865,17 @@ def dropped (kept : Copy) (copies : List Copy) : List Copy :=
     if c.row.fp = kept.row.fp ∨ acc.any (fun d => decide (d.row.fp = c.row.fp)) then acc else acc ++ [c]) []
 
 /-- The kept copy of one key and the devices of the distinct dropped copies. -/
-def keep (device : Nat) (copies : List Copy) : Copy × List Nat :=
-  (keptCopy device copies, (dropped (keptCopy device copies) copies).map (·.device))
+def keep (copies : List Copy) : Copy × List Nat :=
+  (keptCopy copies, (dropped (keptCopy copies) copies).map (·.device))
 
 /-- One merged key: the kept row, and the conflicts `(key, kept device, dropped device)` it reports. -/
 def mergeKey (p : MTerm × Nat × Nat) (sc : Nat × List Copy) : Row × List (Key × Nat × Nat) :=
-  let k := keep p.2.1 sc.2
+  let k := keep sc.2
   (k.1.row, k.2.map fun d => ((p.1.term, sc.1), k.1.device, d))
 
-/-- The final order's key of a placed term: clamped start, device, file order, term. -/
+/-- The final order's key of a placed term: clamped start, writer, file order, term. -/
 def placedKey (clamped : List (Nat × Nat)) (p : MTerm × Nat × Nat) : List (List Nat) :=
-  [[(lookup p.1.term clamped).getD 0], digits p.2.1, [p.2.2], termId p.1.term]
+  [[(lookup p.1.term clamped).getD 0], termId p.2.1, [p.2.2], termId p.1.term]
 
 /-- `mergeLogSegments(segments, {onConflict})`: the merged rows and the conflicts `(key, kept, dropped)`. -/
 def mergeFull (segs : List (Nat × List Row)) : List Row × List (Key × Nat × Nat) :=

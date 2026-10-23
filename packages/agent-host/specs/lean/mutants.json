@@ -22,7 +22,7 @@
   },
   {
     "id": "M4",
-    "drift": "no per-device clamp (holdFileOrder) in the merge (T7)",
+    "drift": "no per-writer clamp (holdFileOrder) in the merge (T7)",
     "file": "specs/lean/ChatLedger.lean",
     "find": "let floor := match acc.1 with | some f => max f p.1.started | none => p.1.started",
     "replace": "let floor := p.1.started"
@@ -71,10 +71,10 @@
   },
   {
     "id": "M11",
-    "drift": "the merge keeps the smallest copy of any device, not the term device's own (T7)",
+    "drift": "the merge reads a segment's id as its writer, not the first term it holds (T7: t7_segment_ids, t7_prefix_segment)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "(keySort copyKey (if own.isEmpty then copies else own)).headD default",
-    "replace": "(keySort copyKey copies).headD default"
+    "find": "let order := if fresh then some (st.2.headD e.term, intro.length - 1) else none",
+    "replace": "let order := if fresh then some (dev, intro.length - 1) else none"
   },
   {
     "id": "M12",

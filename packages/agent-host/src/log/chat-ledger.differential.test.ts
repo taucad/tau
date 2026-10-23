@@ -677,8 +677,57 @@ const mergeSegmentsOf = (random: Random, duplicates: boolean): Array<{ device: n
   return segments;
 };
 
-const mergeTrace = (random: Random, name: string, duplicates: boolean): Trace => {
-  const segments = mergeSegmentsOf(random, duplicates);
+/**
+ * Devices whose terms start in the same millisecond (`ties`: the order breaks the tie on the writer, never a segment
+ * id), or a device whose id changed and left its old file, a prefix of its new one, beside it (`overlap`).
+ */
+const layoutSegmentsOf = (random: Random, layout: 'ties' | 'overlap'): Array<{ device: number; rows: MergeRow[] }> => {
+  const devices = 2 + below(random, 2);
+  const at = 10 + below(random, 30);
+  /* Device ids drawn apart from term order, so a tie broken on the id and one broken on the writer disagree. */
+  const ids = Array.from({ length: devices }, (_unused, index) => index + 1);
+  for (let index = ids.length - 1; index > 0; index--) {
+    const other = below(random, index + 1);
+    [ids[index], ids[other]] = [ids[other]!, ids[index]!];
+  }
+  let nextTerm = 0;
+  const segments = Array.from({ length: devices }, (_unused, device) => {
+    const rows: MergeRow[] = [];
+    let clock = layout === 'ties' ? at : below(random, 60);
+    for (let index = 0, terms = 1 + below(random, 3); index < terms; index++) {
+      const term = nextTerm++;
+      if (index > 0) {
+        clock =
+          random() < (layout === 'overlap' ? 0.6 : 0.3)
+            ? Math.max(0, clock - below(random, 60))
+            : clock + below(random, 3);
+      }
+      for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+        rows.push({ term, seq, run: 1, kind: 'O', argument: below(random, 3), ms: clock, epoch: term + 1, attempt: 0 });
+      }
+    }
+    return { device: ids[device]!, rows };
+  });
+  if (layout === 'overlap') {
+    const source = pick(random, segments);
+    const kept = 1 + below(random, source.rows.length);
+    /* The old file's id may sort before or after the new one's. */
+    segments.push({ device: random() < 0.5 ? 0 : devices + 1, rows: source.rows.slice(0, kept) });
+  }
+  for (let index = segments.length - 1; index > 0; index--) {
+    const other = below(random, index + 1);
+    [segments[index], segments[other]] = [segments[other]!, segments[index]!];
+  }
+  return segments;
+};
+
+const mergeTrace = (
+  random: Random,
+  name: string,
+  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' }>,
+): Trace => {
+  const { duplicates, layout } = shape;
+  const segments = layout === undefined ? mergeSegmentsOf(random, duplicates) : layoutSegmentsOf(random, layout);
   const text = [`T ${name}`];
   for (const segment of segments) {
     text.push(`SEG ${segment.device}`, ...segment.rows.map((row) => `ROW ${rowLine(row)}`));
@@ -769,6 +818,8 @@ type Corpus = {
   /** Merge traces instead of log traces; `true` draws duplicated and conflicting segments. */
   readonly merge?: boolean;
   readonly duplicates?: boolean;
+  /** Merge traces of one shape: terms tied at one millisecond across devices, or a file overlapping its old copy. */
+  readonly layout?: 'ties' | 'overlap';
 };
 
 /** The tables, then `count` traces of the corpus's kind, from one seeded stream. */
@@ -778,7 +829,10 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
   for (let index = 0; index < corpus.count; index++) {
     traces.push(
       corpus.merge === true
-        ? mergeTrace(random, `merge-${index}`, corpus.duplicates === true)
+        ? mergeTrace(random, `merge-${index}`, {
+            duplicates: corpus.duplicates === true,
+            ...(corpus.layout === undefined ? {} : { layout: corpus.layout }),
+          })
         : // oxlint-disable-next-line no-await-in-loop -- one trace at a time keeps the seeded stream reproducible.
           await logTrace(random, `log-${index}`, corpus.profile ?? baseProfile),
     );
@@ -829,6 +883,8 @@ const corpora: readonly Corpus[] = [
     profile: { ...baseProfile, raw: 0.15, reader: true, queries: false },
   },
   { name: 'duplicate-segments', seed: 20_260_928, count: 150, merge: true, duplicates: true },
+  { name: 'merge-ties', seed: 20_261_023, count: 120, merge: true, layout: 'ties' },
+  { name: 'overlapping-segments', seed: 20_261_024, count: 120, merge: true, layout: 'overlap' },
   { name: 'legacy-epochs', seed: 20_260_929, count: 120, profile: { ...baseProfile, legacy: 0.5, attempts: 0.3 } },
   {
     name: 'opaque-rows',

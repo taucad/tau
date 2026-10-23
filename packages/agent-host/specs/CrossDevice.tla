@@ -124,7 +124,9 @@ FixedView(segs) ==
       keys    == {KeyOf(r) : r \in rows}
       rowsOf(k) == {r \in rows : KeyOf(r) = k}
       start(k)  == Min({r.at : r \in rowsOf(k)})
-      \* One clamp per owner device, in the owner's own term order.
+      \* One clamp per owner device, in the owner's own term order. A row carries its owner here; segments.ts and
+      \* ChatLedger.lean read it as the writer, the first term of a segment holding the row, so every copy of one
+      \* file (a projection, a stale prefix, a file left under an old id) names the same owner and ties break alike.
       clamped(k) == Max({start(j) : j \in {x \in keys : x[1] = k[1] /\ x[2] <= k[2]}})
       before(a, b) ==
         \/ clamped(a) < clamped(b)

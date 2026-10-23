@@ -2,10 +2,10 @@
  * Viewer shell parity guard: the Tau app's viewer and the agent plugin's viewer page draw their shell from
  * `@taucad/workbench-panes`, not from copies of it.
  *
- * Each host file must import the shared composite it adopted (the stage, the part menu, the header actions and the
- * tab leaf), and the host trees must not grow back the code those composites replaced: the hover label's custom
- * properties, the secondary-gesture driver, the hover-name lookup, a hand-built Share or Export action, and
- * `fade-row` tab markup. It reads files as text, so it adds no dependency between the hosts and the package.
+ * Each host file must import the shared composite it adopted (the stage, the part menu, the header actions, the tab
+ * leaf and the issues), and the host trees must not grow back the code those composites replaced: the hover label's
+ * custom properties, the secondary-gesture driver, the hover-name lookup, a hand-built Share or Export action,
+ * `fade-row` tab markup, and the issue list's stack trace toggle. It reads files as text, so it adds no dependency between the hosts and the package.
  *
  * Usage:
  *   node scripts/src/check-viewer-shell-parity.ts
@@ -36,6 +36,8 @@ export const requiredImports: Readonly<Record<string, readonly string[]>> = {
     `${panes}/components/workbench-tab`,
   ],
   'packages/agent-plugin/app/workbench-lane.tsx': [`${panes}/lane/pane-lane`],
+  'apps/ui/app/routes/w.$workspace.$project/chat-stack-trace.tsx': [`${panes}/shell/viewer-issues`],
+  'packages/agent-plugin/app/page-issues.tsx': [`${panes}/shell/viewer-issues`],
 };
 
 /** The host source trees the replaced code must not return to. */
@@ -67,6 +69,10 @@ export const forbiddenPatterns: readonly ForbiddenPattern[] = [
   {
     name: 'a PaneAction for Share or Export (ViewerHeaderActions draws them)',
     test: matches(/<PaneAction\b(?:(?!<PaneAction\b|\/>)[\s\S]){0,600}?\blabel=\{?["'`](?:Share|Export)["'`]/u),
+  },
+  {
+    name: 'the stack trace toggle (ViewerIssues draws the issue list)',
+    test: matches(/platform internals \(/u),
   },
   {
     name: 'fade-row tab markup (WorkbenchTab draws the tab leaf)',

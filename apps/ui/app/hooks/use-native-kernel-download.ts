@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KernelIssue } from '@taucad/runtime';
+import { unpreparedKernelOf } from '@taucad/workbench-panes/shell/viewer-issues';
 import type { DesktopKernelPreparation } from '@taucad/types/desktop-native-kernels';
 import { desktopNativeKernels } from '#filesystem/desktop-bridge.js';
 
@@ -15,27 +16,6 @@ export type NativeKernelDownload =
       cancel: () => void;
     }>
   | Readonly<{ status: 'stopped'; kernel: string; message: string; retry: () => void }>;
-
-/**
- * The kernel a `KERNEL_NOT_PREPARED` refusal names, and its download size.
- * @param issues - The viewed model's issues.
- * @returns The first unprepared kernel, or `undefined`.
- */
-export const unpreparedKernelOf = (
-  issues: readonly KernelIssue[] | undefined,
-): Readonly<{ kernel: string; byteLength: number | undefined }> | undefined => {
-  for (const issue of issues ?? []) {
-    if (issue.code !== 'KERNEL_NOT_PREPARED' || typeof issue.details !== 'object' || issue.details === null) {
-      continue;
-    }
-    const kernel: unknown = Reflect.get(issue.details, 'kernel');
-    const byteLength: unknown = Reflect.get(issue.details, 'byteLength');
-    if (typeof kernel === 'string' && kernel !== '') {
-      return { kernel, byteLength: typeof byteLength === 'number' && byteLength > 0 ? byteLength : undefined };
-    }
-  }
-  return undefined;
-};
 
 /**
  * Download on first use (desktop first-use download blueprint, DS-1): when the viewed model's kernel refuses with

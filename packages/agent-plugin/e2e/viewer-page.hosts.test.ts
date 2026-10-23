@@ -1167,6 +1167,101 @@ describe('Add to chat on each route (VUI-3)', () => {
   );
 });
 
+describe("desktop's structured errors (PAR-4)", () => {
+  beforeAll(async () => {
+    await writeFile(join(project, 'broken.ts'), `export default function main() {\n  return (;\n}\n`);
+  });
+
+  /**
+   * Open the bar's issues list.
+   *
+   * @param root - The frame the viewer is in, drawn in the tab composition.
+   * @param name - The segment's accessible name.
+   * @returns The list.
+   */
+  const openIssues = async (root: Frame, name: RegExp): Promise<Locator> => {
+    const segment = root.getByRole('group', { name: 'Viewer controls' }).getByRole('button', { name });
+    await segment.waitFor({ timeout: 120_000 });
+    await segment.click();
+    const list = root.getByRole('region', { name: 'Issues' });
+    await list.waitFor();
+    return list;
+  };
+
+  it(
+    'should list a failed build in the bar and hand an issue to the chat',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'broken.ts' });
+      expect(result.isError).toBe(true);
+      const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
+      const frame = viewerFrame(page);
+
+      const list = await openIssues(frame, /^Build failed\. Issues: 1 error$/u);
+      await capture(page, 'structured-errors');
+      await list.getByRole('button', { name: 'Add to chat', exact: true }).click();
+      await expect.poll(async () => recorded(page, 'modelContext')).toHaveLength(1);
+      expect(JSON.stringify(await recorded(page, 'modelContext'))).toContain('Fix this issue');
+      await frame.getByRole('status').filter({ hasText: 'Added to chat' }).waitFor();
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should prepare a kernel that is not prepared and show the model again',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const result = await callTool(client, 'show_model', { targetFile: 'small.glb' });
+      const clean = shown(result);
+      const refused: CallToolResult = {
+        ...result,
+        structuredContent: {
+          ...clean,
+          model: {
+            ...clean.model,
+            issues: [
+              {
+                message: 'The picogk kernel is not prepared on this computer.',
+                code: 'KERNEL_NOT_PREPARED',
+                severity: 'error',
+                details: { kernel: 'picogk' },
+              },
+            ],
+          },
+        },
+      };
+      const page = await mountInHarness(client, refused, {
+        displayMode: 'fullscreen',
+        answer: (name) =>
+          name === 'prepare_kernel'
+            ? { content: [{ type: 'text', text: 'ready' }], structuredContent: { outcome: 'ready' } }
+            : name === 'show_model'
+              ? result
+              : undefined,
+      });
+      const frame = viewerFrame(page);
+
+      const list = await openIssues(frame, /^Issues: 1 error$/u);
+      await list.getByRole('button', { name: 'Prepare', exact: true }).click();
+      await expect
+        .poll(async () => {
+          const calls = await recorded(page, 'toolCalls');
+          return calls.filter((call) => call.name === 'prepare_kernel');
+        })
+        .toEqual([{ name: 'prepare_kernel', arguments: { kernel: 'picogk' } }]);
+      /* The model shows again without the refusal, so the segment goes. */
+      await expect
+        .poll(async () => frame.getByRole('button', { name: /Issues:/u }).count(), { timeout: 60_000 })
+        .toBe(0);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+});
+
 describe('the part menu from the keyboard (VUI-6)', () => {
   /** A wide part at the framed centre, so a right press there lands on it, and a narrow one beside it. */
   const keysSource = `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return [\n    { shape: drawRectangle(40, 20).sketchOnPlane('XY').extrude(4), name: 'Wide' },\n    { shape: drawRectangle(10, 10).sketchOnPlane('XY').extrude(4).translate(35, 0, 0), name: 'Narrow' },\n  ];\n}\n`;

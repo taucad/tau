@@ -67,6 +67,7 @@
     "./share/share-pane": "./src/share/share-pane.tsx",
     "./share/share-source": "./src/share/share-source.ts",
     "./shell/viewer-header-actions": "./src/shell/viewer-header-actions.tsx",
+    "./shell/viewer-issues": "./src/shell/viewer-issues.tsx",
     "./shell/viewer-stage": "./src/shell/viewer-stage.tsx",
     "./shell/viewer-status": "./src/shell/viewer-status.tsx",
     "./styles/panes.css": {
@@ -238,6 +239,11 @@
         "types": "./dist/shell/viewer-header-actions.d.mts",
         "import": "./dist/shell/viewer-header-actions.mjs",
         "default": "./dist/shell/viewer-header-actions.mjs"
+      },
+      "./shell/viewer-issues": {
+        "types": "./dist/shell/viewer-issues.d.mts",
+        "import": "./dist/shell/viewer-issues.mjs",
+        "default": "./dist/shell/viewer-issues.mjs"
       },
       "./shell/viewer-stage": {
         "types": "./dist/shell/viewer-stage.d.mts",

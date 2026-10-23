@@ -13,12 +13,14 @@ import { useActorRef, useSelector } from '@xstate/react';
 import { Box, Maximize2, MessageSquarePlus } from 'lucide-react';
 import type {
   TauViewerCamera,
+  TauViewerEntryStatus,
+  TauViewerIssue,
   TauViewerModel,
   TauViewerShowResult,
-  TauViewerEntryStatus,
   TauViewerWorkbenchState,
 } from '@taucad/mcp/viewer-protocol';
 import type { Artifact } from '@taucad/runtime';
+import { isKernelIssueCode } from '@taucad/runtime/types';
 import type { GeometryComponentReference } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -35,6 +37,7 @@ import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadat
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 import { getViewCameraSession } from '@taucad/viewer/services/graphics-camera-registry';
 import { ModelViewer } from '@taucad/viewer/model-viewer';
+import { ToolCallError } from '#app/host-bridge.js';
 import type { ChatRoute, HostBridge, HostView } from '#app/host-bridge.js';
 import { loadModel } from '#app/model-loader.js';
 import { chatReferenceOf } from '#app/chat-reference.js';
@@ -55,6 +58,8 @@ import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-sta
 import { createComponentReveal, createPageComponentActions } from '#app/sources/component-menu.jsx';
 import { WorkbenchLane } from '#app/workbench-lane.jsx';
 import { entryPathOf, liveViewSettings, readWorkbenchState, seedViewer } from '#app/workbench-state.js';
+import { PageViewerIssues } from '#app/page-issues.jsx';
+import type { PageIssues } from '#app/page-issues.jsx';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
 
@@ -62,10 +67,61 @@ type PageState =
   | Readonly<{ kind: 'waiting' }>
   | Readonly<{ kind: 'loading'; model: TauViewerModel; loaded: number; previous?: Loaded }>
   | Readonly<{ kind: 'ready'; current: Loaded }>
-  | Readonly<{ kind: 'failed'; message: string; previous?: Loaded }>;
+  | Readonly<{
+      kind: 'failed';
+      message: string;
+      /** What the failure reported, as issues the bar lists. */
+      issues: readonly TauViewerIssue[];
+      /** The source that failed, when the page knows it. */
+      sourceFile: string | undefined;
+      previous?: Loaded;
+    }>;
 
 const previousOf = (state: PageState): Loaded | undefined =>
   state.kind === 'ready' ? state.current : state.kind === 'waiting' ? undefined : state.previous;
+
+/**
+ * A failure the page heard as a code and a message, as the one issue it lists.
+ *
+ * @param message - The failure's message.
+ * @param code - The server's code, when it named one; a code the runtime does not define reads as `UNKNOWN`.
+ * @returns The issue.
+ */
+const failureIssue = (message: string, code: string | undefined): TauViewerIssue => ({
+  message,
+  code: isKernelIssueCode(code) ? code : 'UNKNOWN',
+  severity: 'error',
+});
+
+/**
+ * The page's one issue source: the server's live status of the shown source (PAR-1), else the shown model's issues, or
+ * the failed show's. Nothing while a model loads, as the desktop bar shows no issues while the build runs.
+ *
+ * @param state - What the page shows.
+ * @param liveStatus - The live state of each watched source, by project-relative path; absent from an older server.
+ * @returns The issues, whether the build failed and the source they are for.
+ */
+const pageIssuesOf = (
+  state: PageState,
+  liveStatus: Readonly<Record<string, TauViewerEntryStatus>> | undefined,
+): PageIssues => {
+  if (state.kind === 'failed') {
+    return { issues: state.issues, isFailed: true, sourceFile: state.sourceFile };
+  }
+  if (state.kind === 'ready') {
+    const { model } = state.current;
+    const entry = liveStatus?.[model.sourceFile ?? model.path];
+    if (entry !== undefined) {
+      return {
+        issues: entry.issues,
+        isFailed: entry.issues.some((issue) => issue.severity === 'error'),
+        sourceFile: model.sourceFile,
+      };
+    }
+    return { issues: model.issues ?? [], isFailed: false, sourceFile: model.sourceFile };
+  }
+  return { issues: [], isFailed: false, sourceFile: undefined };
+};
 
 /** The card's height where the host's cap allows it (E5, G21). */
 const inlineHeight = 420;
@@ -120,12 +176,19 @@ type SeedViewer = (model: TauViewerModel, saved: TauViewerWorkbenchState | undef
 function useShownModel(
   bridge: HostBridge,
   seedRef: React.RefObject<SeedViewer | undefined>,
-): readonly [PageState, HostView, React.RefObject<((result: TauViewerShowResult) => void) | undefined>, SelectRequest] {
+): readonly [
+  PageState,
+  HostView,
+  React.RefObject<((result: TauViewerShowResult) => void) | undefined>,
+  SelectRequest,
+  React.RefObject<((failure: ShowFailure) => void) | undefined>,
+] {
   const [state, setState] = useState<PageState>({ kind: 'waiting' });
   const [view, setView] = useState<HostView>(() => bridge.view());
   const [select, setSelect] = useState<SelectRequest>(undefined);
   const shownSha = useRef<string | undefined>(undefined);
   const showRef = useRef<((result: TauViewerShowResult) => void) | undefined>(undefined);
+  const failRef = useRef<((failure: ShowFailure) => void) | undefined>(undefined);
 
   useEffect(() => {
     let current = 0;
@@ -135,6 +198,12 @@ function useShownModel(
         setSelect({ modelSha: model.sha256, componentIds: result.select });
       }
       if (model.sha256 === shownSha.current) {
+        /* The same bytes may come with other issues, such as after a kernel was prepared: the bar follows them. */
+        setState((previous) =>
+          previous.kind === 'ready' && previous.current.model.sha256 === model.sha256
+            ? { kind: 'ready', current: { ...previous.current, model } }
+            : previous,
+        );
         return;
       }
       shownSha.current = model.sha256;
@@ -158,9 +227,12 @@ function useShownModel(
         } catch (error) {
           if (request === current) {
             shownSha.current = undefined;
+            const message = error instanceof Error ? error.message : String(error);
             setState((previous) => ({
               kind: 'failed',
-              message: error instanceof Error ? error.message : String(error),
+              message,
+              issues: [failureIssue(message, undefined)],
+              sourceFile: model.sourceFile,
               previous: previousOf(previous),
             }));
           }
@@ -169,26 +241,43 @@ function useShownModel(
       // async-iife: bootstrap — a host event starts the load; its outcome lands in state, and a newer model supersedes it.
       void load();
     };
+    const fail = ({ message, code, targetFile }: ShowFailure): void => {
+      /* A failed show supersedes a model still loading; the one on screen stays behind the issues. */
+      current += 1;
+      shownSha.current = undefined;
+      setState((previous) => ({
+        kind: 'failed',
+        message,
+        issues: [failureIssue(message, code)],
+        sourceFile: targetFile,
+        previous: previousOf(previous),
+      }));
+    };
     showRef.current = show;
+    failRef.current = fail;
     const unsubscribe = bridge.subscribe((event) => {
       if (event.type === 'context') {
         setView(event.view);
         return;
       }
       if (event.type === 'error') {
-        setState((previous) => ({ kind: 'failed', message: event.message, previous: previousOf(previous) }));
+        fail(event);
         return;
       }
       show(event.result);
     });
     return () => {
       showRef.current = undefined;
+      failRef.current = undefined;
       unsubscribe();
     };
   }, [bridge, seedRef]);
 
-  return [state, view, showRef, select] as const;
+  return [state, view, showRef, select, failRef] as const;
 }
+
+/** A show that failed, as the bridge reports it. */
+type ShowFailure = Readonly<{ message: string; code?: string | undefined; targetFile?: string | undefined }>;
 
 /** The agent's request to select components of one model (`show_model` with `select`). */
 type SelectRequest = Readonly<{ modelSha: string; componentIds: readonly string[] }> | undefined;
@@ -285,13 +374,18 @@ function LaneToggle({ children }: Readonly<{ children: React.ReactNode }>): Reac
 
 /**
  * What the canvas shows besides the model, in the shared stage: the download's progress, the server's build of a
- * change to the shown source, or the failure.
+ * change to the shown source, or the card's failure.
  *
  * @param state - Whether the page waits, loads, shows or failed, with the download's byte count.
  * @param building - The title of the shown source the server is building again, if it is.
- * @returns The loading pill with its share, the build, the failure, or `undefined` while waiting or showing.
+ * @param isInline - Whether the page is the card, which has no bar to list the failure in.
+ * @returns The loading pill with its share, the build, the card's failure, or `undefined` while waiting or showing.
  */
-const stageStatusOf = (state: PageState, building: string | undefined): ViewerStageStatus | undefined => {
+const stageStatusOf = (
+  state: PageState,
+  building: string | undefined,
+  isInline: boolean,
+): ViewerStageStatus | undefined => {
   if (state.kind === 'loading') {
     return {
       kind: 'loading',
@@ -300,7 +394,8 @@ const stageStatusOf = (state: PageState, building: string | undefined): ViewerSt
     };
   }
   if (state.kind === 'failed') {
-    return { kind: 'failed', message: state.message };
+    /* The tab lists a failure in the bar's issues, as desktop's editor does; the card has no bar. */
+    return isInline ? { kind: 'failed', message: state.message } : undefined;
   }
   return building === undefined ? undefined : { kind: 'loading', label: `Building ${building}` };
 };
@@ -316,7 +411,7 @@ const addedKeyOf = (model: TauViewerModel): string => model.sourceFile ?? model.
  */
 export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.JSX.Element {
   const seedRef = useRef<SeedViewer | undefined>(undefined);
-  const [state, view, showRef, select] = useShownModel(bridge, seedRef);
+  const [state, view, showRef, select, failRef] = useShownModel(bridge, seedRef);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
@@ -369,6 +464,25 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   const [liveStatus, setLiveStatus] = useState<Readonly<Record<string, TauViewerEntryStatus>> | undefined>(undefined);
   const shownSource = shown?.model.sourceFile;
   const status = shownSource === undefined ? undefined : liveStatus?.[shownSource];
+  /* Shows a source again once its kernel is prepared, reporting the outcome as a show or a failure. */
+  const showSource = useCallback(
+    (targetFile: string | undefined) => {
+      // async-iife: bootstrap — a finished preparation asks for the model again.
+      void (async () => {
+        try {
+          const result = await bridge.callTool('show_model', targetFile === undefined ? {} : { targetFile });
+          showRef.current?.(result as TauViewerShowResult);
+        } catch (error) {
+          failRef.current?.({
+            message: error instanceof Error ? error.message : String(error),
+            code: error instanceof ToolCallError ? error.code : undefined,
+            targetFile,
+          });
+        }
+      })();
+    },
+    [bridge, failRef, showRef],
+  );
   const isDrawn = useCallback((): boolean => {
     const { current } = latest;
     if (current.state.kind !== 'ready') {
@@ -695,14 +809,22 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                     regionLabel='Model viewer'
                     partMenu={isInline ? undefined : partMenu}
                     isModelShown={shown !== undefined}
-                    status={stageStatusOf(state, status?.building === true ? shown?.model.title : undefined)}
+                    status={stageStatusOf(state, status?.building === true ? shown?.model.title : undefined, isInline)}
                     className='min-h-0 min-w-0 flex-1'
                     /* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */
                     controls={
                       isInline ? undefined : (
                         <>
                           {notice === undefined ? null : <Notice text={notice} />}
-                          <ViewerControls />
+                          <PageViewerIssues
+                            bridge={bridge}
+                            source={pageIssuesOf(state, liveStatus)}
+                            chatRoute={view.chatRoute}
+                            onPrepared={showSource}
+                            onNotice={setNotice}
+                          >
+                            {({ segment, list }) => <ViewerControls leading={segment} aboveControls={list} />}
+                          </PageViewerIssues>
                         </>
                       )
                     }

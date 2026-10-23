@@ -632,6 +632,22 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  /* XD3: another device runs the chat; its run cannot be moved or stopped from here. */
+  it('should state that another device is running the chat and offer nothing', () => {
+    persisted({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Chat chat_1 is running on another device; send this again once that run finishes.',
+      code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('This chat is running on another device')).toBeInTheDocument();
+    expect(screen.getByText('Send again here once that run finishes.')).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
   /* The one restart that loses nothing: admission refused before a run existed. */
   it('should keep Try again for a turn that never started', async () => {
     const user = userEvent.setup();

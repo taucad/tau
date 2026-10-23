@@ -43,6 +43,7 @@ import {
 } from 'react';
 import type { Chat } from '@ai-sdk/react';
 import { isResumableRun } from '@taucad/agent-host';
+import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
@@ -58,7 +59,7 @@ import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
-import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
+import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -190,6 +191,11 @@ export type ChatComposerContextValue = {
   /** Continue a failed host run while it can still be resumed. */
   resume: (() => void) | undefined;
   /**
+   * The run another device is running on this chat now (XD3): the host refuses a new run until it settles or goes
+   * stale, so the composer holds its send. Always `undefined` under the composer provider.
+   */
+  runElsewhere: ForeignRun | undefined;
+  /**
    * Most-recent `data-context-usage` part across the chat's messages, or
    * `undefined` when no usage data has streamed. Always `undefined` under
    * the composer provider (no messages exist).
@@ -302,6 +308,7 @@ export function ChatComposerProvider({
       agentActivity: 'ready',
       stop: noopStop,
       resume: undefined,
+      runElsewhere: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: false,
@@ -384,6 +391,7 @@ export function HomeNewProjectComposerProvider({
       agentActivity: 'ready',
       stop: noopStop,
       resume: undefined,
+      runElsewhere: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: true,
@@ -448,6 +456,7 @@ function ActiveChatSessionProvider({
   const agentActivity = useSessionAgentActivity(session);
   const stop = useSessionStop(session);
   const resume = useSessionResume(session, chatId);
+  const runElsewhere = useSessionRunElsewhere(chatId);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
 
@@ -471,6 +480,7 @@ function ActiveChatSessionProvider({
       agentActivity,
       stop,
       resume,
+      runElsewhere,
       contextUsage,
       session: sessionValue,
       canSelectExecution: true,
@@ -486,6 +496,7 @@ function ActiveChatSessionProvider({
       agentActivity,
       stop,
       resume,
+      runElsewhere,
       contextUsage,
       sessionValue,
       consumeDraft,
@@ -807,6 +818,34 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
     void store.requestTurn(chatId, { kind: 'continue' });
   }, [chatId, session, store]);
   return canResume() ? resume : undefined;
+}
+
+/** How often a held chat re-reads the clock, so a run that went stale on another device frees the composer. */
+const runElsewhereRecheckMilliseconds = 30_000;
+
+/**
+ * The run another device holds this chat with, kept current (XD3): it changes when sync brings that device's segment,
+ * and the clock is re-read on an interval, because a run that goes stale changes nothing a store would announce.
+ */
+function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
+  const store = useChatSessionStore();
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const unsubscribe = store.subscribeProjection(chatId, listener);
+      const timer = setInterval(listener, runElsewhereRecheckMilliseconds);
+      return () => {
+        clearInterval(timer);
+        unsubscribe();
+      };
+    },
+    [chatId, store],
+  );
+  /* Stable for one held run: the selector returns the run object the projection holds. */
+  const snapshot = useCallback(() => {
+    const projection = store.getProjection(chatId);
+    return projection === undefined ? undefined : selectRunElsewhere(projection, Date.now());
+  }, [chatId, store]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**

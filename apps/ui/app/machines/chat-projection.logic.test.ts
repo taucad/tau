@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAgentLauncher } from '@taucad/agent-host/launcher';
 import { createNodeChatStore } from '@taucad/agent-host/node';
-import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
+import { createTauCloudGatewayModelTransport, foreignRunStaleMilliseconds } from '@taucad/agent-host';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { createUIMessageStream, readUIMessageStream } from 'ai';
@@ -28,6 +28,7 @@ import {
   selectAttentionRow,
   selectCaughtUp,
   selectOpenInterrupts,
+  selectRunElsewhere,
   selectRunFailure,
   selectPosition,
   selectRunPhase,
@@ -36,7 +37,7 @@ import {
   selectTurnRevision,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection, ChatProjectionReadAnswer } from '#machines/chat-projection.logic.js';
-import { lifecycleRow, logRow } from '#machines/chat-projection.fixture.js';
+import { lifecycleRow, logRow, runningRows } from '#machines/chat-projection.fixture.js';
 
 /* Three recorded runs, and two seeded logs whose runs pause on an interrupt. */
 const logs = [
@@ -489,6 +490,59 @@ describe('chatProjectionLogic (PV-S7)', () => {
     ]);
     expect(reduceChatProjection(second, { type: 'remote', segments: after }).state).toBe(second);
     expect(completed.remote).toBe(second.remote);
+  });
+
+  /* XD3: a run in flight on another device holds this chat's composer until it settles or goes stale. */
+  describe('another device’s run in flight', () => {
+    const at = Date.parse('2026-09-28T00:00:00.000Z');
+    const remoteOf = (rows: readonly unknown[]) => [
+      {
+        deviceId: 'other-device',
+        bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
+      },
+    ];
+
+    it('names the run while it is unsettled and inside the bound', () => {
+      const remote = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+
+      expect(selectRunElsewhere(remote, at + 60_000)).toMatchObject({
+        deviceId: 'other-device',
+        runId: 'run_other',
+        state: 'running',
+        lastRecordedAt: at,
+      });
+    });
+
+    it('names none once the run settles, or once it has gone stale', () => {
+      const settled = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        segments: remoteOf([
+          lifecycleRow(0, 'admitted', 'run_other'),
+          lifecycleRow(1, 'running', 'run_other'),
+          lifecycleRow(2, 'completed', 'run_other'),
+        ]),
+      }).state;
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
+      }).state;
+
+      expect(selectRunElsewhere(settled, at)).toBeUndefined();
+      expect(selectRunElsewhere(running, at + foreignRunStaleMilliseconds + 1)).toBeUndefined();
+    });
+
+    it('never names this device’s own run, read back from a segment', () => {
+      const own = project(runningRows('run_own'), 2);
+      const remote = reduceChatProjection(own, {
+        type: 'remote',
+        segments: remoteOf(runningRows('run_own')),
+      }).state;
+
+      expect(selectRunElsewhere(remote, at)).toBeUndefined();
+    });
   });
 
   it('keeps a device’s run order when its clock moves backwards', () => {

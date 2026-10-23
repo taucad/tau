@@ -16,6 +16,7 @@ export type CodeCardCategory =
   | 'switchModel'
   | 'nothingToResume'
   | 'otherTab'
+  | 'otherDevice'
   | 'turnNotStarted'
   | 'otherBuild'
   | 'modelPending'
@@ -56,6 +57,7 @@ const codeCards = {
   BILLING_ACCOUNT_RESTRICTED: { category: 'accountRestricted' },
   RESUME_UNAVAILABLE: { category: 'nothingToResume' },
   LEADERSHIP_LOST: { category: 'otherTab' },
+  RUN_ACTIVE_ON_ANOTHER_DEVICE: { category: 'otherDevice' },
   LEADER_VERSION_MISMATCH: { category: 'otherBuild' },
   MODEL_ATTEMPT_PENDING: { category: 'modelPending' },
   BILLING_RECOVERY_UNAVAILABLE: { category: 'billingRecovery' },

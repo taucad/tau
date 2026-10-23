@@ -19,7 +19,9 @@ import {
   emptyChatLedger,
   foldReadAnswer,
   foldProjectionFacts,
+  liveForeignRun,
   mergeLogSegments,
+  unsettledForeignRuns,
 } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
@@ -29,6 +31,7 @@ import type {
   ProjectionSourceHealth,
   ChatLedger,
   ChatLogSegment,
+  ForeignRun,
   RowKey,
   TurnPlacement,
 } from '@taucad/agent-host';
@@ -170,6 +173,8 @@ export type ChatProjection = Readonly<{
   remote?: Readonly<{
     digest: string;
     views: Readonly<Record<string, RunView>>;
+    /** Runs another device has not settled, each segment read on its own ledger (XD3). */
+    unsettled?: readonly ForeignRun[];
   }>;
   /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
   blocks: Readonly<Record<string, Readonly<Record<string, Block>>>>;
@@ -1042,7 +1047,17 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       return { state };
     }
     const { views } = foldRunViews(mergeLogSegments(event.segments), {}, {});
-    return { state: { ...state, remote: { digest, views } } };
+    const unsettled = unsettledForeignRuns(event.segments);
+    return {
+      state: {
+        ...state,
+        remote: {
+          digest,
+          views,
+          ...(unsettled.length === 0 ? {} : { unsettled }),
+        },
+      },
+    };
   }
   if (event.type === 'live') {
     const { runId } = event.event;
@@ -1256,6 +1271,22 @@ export const selectCurrentRun = (
   const run = runId === undefined ? undefined : projection.ledger.runs[runId];
   return runId === undefined || run === undefined ? undefined : { runId, ...run };
 };
+
+/**
+ * The run another device is running on this chat now, if any (XD3): unsettled in that device's synced segment, not
+ * this device's own run, and not past the staleness bound at `now`. The host refuses a new run while it holds; it is
+ * gone once sync brings its settlement or once it goes stale.
+ *
+ * @param projection - The chat's projection.
+ * @param now - This device's time, in epoch milliseconds.
+ * @returns The run, or `undefined`.
+ * @public
+ */
+export const selectRunElsewhere = (projection: ChatProjection, now: number): ForeignRun | undefined =>
+  liveForeignRun(
+    (projection.remote?.unsettled ?? []).filter((run) => projection.ledger.runs[run.runId] === undefined),
+    now,
+  );
 
 /** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */
 export const selectTranscriptSource = (

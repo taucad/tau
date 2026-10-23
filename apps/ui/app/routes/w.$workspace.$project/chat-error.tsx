@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type React from 'react';
-import { Bot, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
+import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
@@ -308,6 +308,20 @@ function codedErrorCard({
         icon={Bot}
         title='This chat continued in another tab'
         description='Keep working there. Reload this page to follow along here.'
+      />
+    );
+  }
+
+  // Another device is running this chat (XD3). Its run cannot be moved or stopped from here (OQ-N21); the composer
+  // holds its send until sync brings that run's ending, and the draft that was refused is kept.
+  if (category === 'otherDevice') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={MonitorSmartphone}
+        title='This chat is running on another device'
+        description='Send again here once that run finishes.'
       />
     );
   }

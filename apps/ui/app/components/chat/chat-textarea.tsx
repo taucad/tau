@@ -20,6 +20,7 @@ import { useChatContextInsertion } from '#components/chat/chat-context-insertion
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { ChatPlacementNotice } from '#components/chat/chat-placement-notice.js';
+import { ChatRunElsewhereNotice } from '#components/chat/chat-run-elsewhere-notice.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
@@ -86,6 +87,8 @@ export const ChatTextarea = memo(function ({
     onBlur?.();
   }, [onBlur]);
 
+  /* Another device is running this chat (XD3): its host would refuse the send, so the composer holds it. */
+  const { runElsewhere } = useChatComposer();
   const logic = useChatTextareaLogic({
     ref,
     onSubmit,
@@ -93,7 +96,7 @@ export const ChatTextarea = memo(function ({
     onEscapePressed,
     onBlur: handleBlur,
     mode,
-    isSubmitDisabled,
+    isSubmitDisabled: isSubmitDisabled || runElsewhere !== undefined,
     onViewerScreenshotDrop: handleViewerScreenshotDrop,
     onAddContextChips: handleAddContextChips,
   });
@@ -328,6 +331,7 @@ export const ChatTextarea = memo(function ({
     mode === 'main' && projectContext && session ? (
       <>
         <ChatPlacementNotice />
+        <ChatRunElsewhereNotice />
         <ChatApprovalBanner />
       </>
     ) : undefined;

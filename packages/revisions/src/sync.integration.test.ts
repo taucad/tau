@@ -46,6 +46,7 @@ import { createActor } from 'xstate';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { chatRecordsPath, chatRefName, chatSegmentPath } from '#chat-ref.js';
+import { checkoutIdOfBranch } from '#checkout-id.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
@@ -1316,6 +1317,32 @@ describe.runIf(gitToolchainOnPath).each(legs)('W13 second-device flow over git h
    * is never taken from the device that recorded it. Its fetch keeps the line
    * and the decision, and its next push offers the line again.
    */
+  /* XD4: a pull that deletes a branch the remote dropped records the removal, so a chat that names that branch's
+   * checkout is refused for good (CHECKOUT_UNKNOWN) instead of waiting on a branch that will never come back. */
+  it('XD4: records a branch a pull deletes because the remote dropped it as removed', async () => {
+    const remoteRoot = await temporaryRoot('remote-branch-dropped');
+    const remote = await startGitHttpBackend({ root: remoteRoot });
+    try {
+      const one = await device({ leg, label: 'a-dropped', remoteUrl: remote.url, files: { 'a.scad': 'cube(1);\n' } });
+      const base = await record({ device: one, files: { 'a.scad': 'cube(1);\n' }, summary: 'Base' });
+      await one.port.updateRef({ name: 'feature', expectedHead: undefined, head: revisionId(base) });
+      await one.port.push({ remote: 'tau', atomic: true, refs: [{ name: mainRef }, { name: 'refs/heads/feature' }] });
+      const two = await device({ leg, label: 'b-dropped', remoteUrl: remote.url });
+      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+      expect(await two.port.readRef('feature')).toBeDefined();
+
+      await remote.git(['update-ref', '-d', 'refs/heads/feature']);
+      await run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 });
+
+      expect(await two.port.readRef('feature')).toBeUndefined();
+      const { objectFormat } = await two.port.describe();
+      const removed = JSON.parse(await two.filesystem.readFile('.git/tau-removed-checkouts.json', 'utf8')) as unknown;
+      expect(removed).toContain(checkoutIdOfBranch(objectFormat, 'feature'));
+    } finally {
+      await remote.close();
+    }
+  }, 180_000);
+
   it('row 13b (D14): a device keeps its own conflict line when the remote drops it, and offers it again', async () => {
     const remoteRoot = await temporaryRoot('remote-conflict-removed');
     const remote = await startGitHttpBackend({ root: remoteRoot });

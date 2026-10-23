@@ -726,6 +726,21 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(await turnCuts(project.port, key)).toEqual(['base']);
   });
 
+  /* TS-R2: a replay is answered by the attempt the root holds, before any placement work: a chat record that names
+   * another checkout since does not refuse it. */
+  it('should answer a replayed admission before placing it again, whatever the chat record names now', async () => {
+    const project = await createProject();
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    const { placement } = project.open();
+    const first = await placement.admit({ requestId: 'admit:run-1:1', key });
+    await writeChatRecord(project.filesystem, 'missing-checkout');
+
+    const again = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(first).toMatchObject({ status: 'applied' });
+    expect(again).toMatchObject({ requestId: 'admit:run-1:1', status: 'replayed' });
+  });
+
   it('should derive the settlement from the existing result when complete follows a crash after the cut', async () => {
     const project = await createProject();
     const before = project.open();

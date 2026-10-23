@@ -1795,7 +1795,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   const noteBranchRemoved = async (branch: string, removed: boolean): Promise<void> => {
     try {
       const { objectFormat } = await describePort();
-      await noteRemovedCheckout(checkoutIdOfBranch(objectFormat, branch), removed);
+      await noteRemovedCheckout(checkoutIdOfBranch(objectFormat, branch.replace(/^refs\/heads\//u, '')), removed);
     } catch {
       /* A store with no checkout to keep the record beside, or no format yet, records nothing. */
     }
@@ -4622,6 +4622,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           const removed = await port.updateRef({ name: branch, expectedHead: revisionId(prior) });
           if (removed.status === 'updated') {
             localByName.delete(branch);
+            /* XD4: a branch the remote dropped is gone here too: a chat naming its checkout is refused for good. */
+            // oxlint-disable-next-line no-await-in-loop -- recorded with the deletion it follows.
+            await noteBranchRemoved(branch, true);
           }
           const tracking = remoteTrackingRef(input.remote, branch);
           // oxlint-disable-next-line no-await-in-loop -- paired cleanup for the same remote branch.

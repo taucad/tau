@@ -853,9 +853,10 @@ export const createTurnPlacementPort = <Tools>(
           message: admitMessage('TURN_ALREADY_LEASED', '', ''),
         });
       }
-      /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. */
-      const intended = checkoutId ?? (await recordedCheckout(key.chatId));
-      const placed = await placeIntent(key, intended);
+      /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. A replay
+       * (TS-R2) does no placement work: the root answers it from the attempt it already holds. */
+      const intended = replay ? undefined : (checkoutId ?? (await recordedCheckout(key.chatId)));
+      const placed = replay ? { checkoutId: undefined } : await placeIntent(key, intended);
       if (isFenced()) {
         return fencedAnswer(requestId);
       }
@@ -867,7 +868,9 @@ export const createTurnPlacementPort = <Tools>(
         });
       }
       const intent = placed.checkoutId;
-      await options.settle?.();
+      if (!replay) {
+        await options.settle?.();
+      }
       const heard = listen(key, (event) => (event.type === 'placed' || event.type === 'refused' ? event : undefined));
       actor.send({ type: 'admitTurn', key, ...(intent === undefined ? {} : { checkoutId: intent }) });
       const event = await heard.answer;

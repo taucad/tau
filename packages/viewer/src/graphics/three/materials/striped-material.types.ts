@@ -8,8 +8,8 @@ export type StripedMaterialProperties = {
    */
   readonly stripeFrequency?: number;
   /**
-   * The width of each stripe in plane-local units.
-   * @default 0.12
+   * The width of each stripe in device pixels.
+   * @default 1
    */
   readonly stripeWidth?: number;
   /**

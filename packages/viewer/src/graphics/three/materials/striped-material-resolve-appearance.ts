@@ -37,7 +37,7 @@ export function resolveStripedAppearance(properties?: StripedMaterialProperties)
 } {
   const source = properties ?? {};
   const stripeFrequency = source.stripeFrequency ?? 2;
-  const stripeWidth = source.stripeWidth ?? 0.12;
+  const stripeWidth = source.stripeWidth ?? 1;
   const stripeAngle = source.stripeAngle ?? Math.PI / 4;
 
   if (source.tintColor !== undefined) {

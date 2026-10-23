@@ -122,7 +122,6 @@ const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]):
             innerRef={{ current: inner }}
             snapshotRef={{ current: snapshotStore }}
             stripeFrequency={2}
-            stripeWidth={0.25}
             onCommit={(cuts) => commits.push(cuts)}
           />
         </ThreeGraphicsBackendProvider>,

@@ -4,10 +4,11 @@ import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   abs,
   attribute,
-  float,
+  clamp,
   Fn as tslFunction,
   fwidth,
   max,
+  min,
   mix,
   mod,
   mul,
@@ -42,15 +43,16 @@ export function createVertexColoredStripedNodeMaterial(properties?: StripedMater
       .add(mul(surfacePlane.y, stripeAxis.y))
       .toVar('patternCoordinate');
 
-    // Thin lines centred on multiples of the spacing, at least a pixel wide, antialiased over one pixel.
+    // Lines a constant width in device pixels, centred on multiples of the model-space spacing and box-filtered over
+    // one pixel; where the spacing nears a few pixels the lines fade to their average coverage instead of aliasing.
     const pixel = max(fwidth(patternCoordinate), 1e-6).toVar('pixel');
     const halfSpacing = mul(uStripeFrequency, 0.5).toVar('halfSpacing');
-    const lineDistance = abs(mod(patternCoordinate.add(halfSpacing), uStripeFrequency).sub(halfSpacing)).toVar(
-      'lineDistance',
-    );
-    const halfWidth = max(mul(uStripeWidth, 0.5), mul(pixel, 0.5)).toVar('halfWidth');
-    const halfPixel = mul(pixel, 0.5);
-    const lineMask = float(1).sub(smoothstep(halfWidth.sub(halfPixel), halfWidth.add(halfPixel), lineDistance));
+    const lineDistance = abs(mod(patternCoordinate.add(halfSpacing), uStripeFrequency).sub(halfSpacing))
+      .div(pixel)
+      .toVar('lineDistance');
+    const lineCoverage = clamp(mul(uStripeWidth, 0.5).add(0.5).sub(lineDistance), 0, 1).mul(min(uStripeWidth, 1));
+    const periodPixels = uStripeFrequency.div(pixel).toVar('periodPixels');
+    const lineMask = mix(min(uStripeWidth.div(periodPixels), 1), lineCoverage, smoothstep(2, 4, periodPixels));
     return vec3(mix(baseColor, stripeColor, lineMask));
   })();
 

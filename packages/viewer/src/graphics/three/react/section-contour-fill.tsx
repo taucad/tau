@@ -49,8 +49,8 @@ export type SectionContourFillsProperties = Readonly<{
   /** The live cut list and its pieces in the render frame, committed once the sources it may cut are known. */
   cutSet: SectionCutSet;
   enabled: boolean;
+  /** The hatch spacing, in render units. */
   stripeFrequency: number;
-  stripeWidth: number;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   innerRef: React.RefObject<THREE.Group | null>;
   snapshotRef: React.RefObject<SectionViewSafeSnapshotStore>;
@@ -65,6 +65,9 @@ export type SectionContourFillsProperties = Readonly<{
 export const sectionCapRenderPriority = 1.2;
 
 const noCuts: readonly SectionCut[] = [];
+
+/** The hatch line width, in CSS pixels: constant on screen, as drafting keeps one pen weight for section lining. */
+export const sectionCapLineWidthCssPixels = 1;
 
 /** A pending source counts nothing into the stencil, so it is cut and outlined but not capped. */
 const uncappedLoops: SectionLoopCapSource = { matrix: new THREE.Matrix4(), bySlot: new Map() };
@@ -154,7 +157,6 @@ export function SectionContourFills({
   enabled,
   innerRef,
   stripeFrequency,
-  stripeWidth,
   snapshotRef,
   onCommit,
 }: SectionContourFillsProperties): React.JSX.Element {
@@ -214,7 +216,7 @@ export function SectionContourFills({
     if (enabled) {
       invalidate();
     }
-  }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, stripeFrequency, stripeWidth]);
+  }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, stripeFrequency]);
 
   /** Records a source's grade and what its per-loop slices found, once per change, as telemetry. */
   const reportGrade = (record: SectionSourceRecord, closedLoopCount: number, openChainCount: number): void => {
@@ -349,7 +351,7 @@ export function SectionContourFills({
       camera,
       pieces: committed.cutSet.pieces,
       sources,
-      stripes: { stripeFrequency, stripeWidth },
+      stripes: { stripeFrequency, stripeWidth: sectionCapLineWidthCssPixels * gl.getPixelRatio() },
       outlineWidthPixels: gltfEdgeLineWidth * gl.getPixelRatio(),
       viewportHeightPixels: drawingBufferSize.y,
     });

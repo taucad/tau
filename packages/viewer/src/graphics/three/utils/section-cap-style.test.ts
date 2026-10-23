@@ -77,7 +77,9 @@ describe('resolveSectionCapStyle', () => {
 
   it('should hatch a part at its own angle, 45 degrees by default', () => {
     expect(style(0, Math.PI / 6).normalStripeAxis).toEqual([Math.sin(Math.PI / 6), Math.cos(Math.PI / 6)]);
-    expect(style(0).normalStripeAxis).toEqual([Math.SQRT1_2, Math.SQRT1_2].map((value) => expect.closeTo(value)));
+    const [x, y] = style(0).normalStripeAxis;
+    expect(x).toBeCloseTo(Math.SQRT1_2);
+    expect(y).toBeCloseTo(Math.SQRT1_2);
   });
 
   it('should draw a part at a share of the cap spacing by lengthening its stripe axis', () => {
@@ -88,6 +90,7 @@ describe('resolveSectionCapStyle', () => {
       stripeAngle: Math.PI / 2,
       stripeSpacingScale: 0.5,
     });
-    expect(normalStripeAxis).toEqual([2, expect.closeTo(0)]);
+    expect(normalStripeAxis[0]).toBeCloseTo(2);
+    expect(normalStripeAxis[1]).toBeCloseTo(0);
   });
 });

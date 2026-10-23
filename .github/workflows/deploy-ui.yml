@@ -82,8 +82,10 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
           case "$ENVIRONMENT" in
-            staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev ;;
-            production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new ;;
+            # retain_from: the Netlify origin of the deploy now live, whose recent assets the new one keeps.
+            # Not the public host: tau.new is still served by Fly, and taucad.dev goes through a router.
+            staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev; retain_from=https://staging--taucad-staging.netlify.app ;;
+            production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new; retain_from=https://taucad-prod-us.netlify.app ;;
             *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
           esac
           if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
@@ -92,6 +94,7 @@ jobs:
           fi
           echo "site_id=$site_id" >> "$GITHUB_OUTPUT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "retain_from=$retain_from" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -185,7 +188,7 @@ jobs:
           TAU_POSTHOG_CLI_ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
           # The live deploy whose recent `/assets/*` this one keeps serving, so pages
           # loaded before it go live keep loading their chunks (`retain-previous-assets.mts`).
-          TAU_RETAIN_ASSETS_FROM: ${{ steps.site.outputs.url }}
+          TAU_RETAIN_ASSETS_FROM: ${{ steps.site.outputs.retain_from }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

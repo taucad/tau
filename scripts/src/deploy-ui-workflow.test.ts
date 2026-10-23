@@ -145,3 +145,34 @@ describe('UI source-map credential ownership', () => {
     },
   );
 });
+
+describe('UI asset retention origin', () => {
+  const site = workflow.jobs.deploy.steps.find((step) => step.id === 'site');
+  const deploy = workflow.jobs.deploy.steps.find((step) => step.env?.['TAU_RETAIN_ASSETS_FROM'] !== undefined);
+
+  it.each([
+    ['staging', 'https://staging--taucad-staging.netlify.app'],
+    // The public tau.new host is still served by Fly, which answers every path with its app's HTML.
+    ['production', 'https://taucad-prod-us.netlify.app'],
+  ])('should retain the %s assets from the Netlify deploy that is live, not the public host', (environment, origin) => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-retain-origin-'));
+    try {
+      const output = join(directory, 'output');
+      writeFileSync(output, '');
+      const result = spawnSync('bash', ['-c', site!.run!], {
+        encoding: 'utf8',
+        env: Object.fromEntries([
+          ['PATH', process.env['PATH']],
+          ['ENVIRONMENT', environment],
+          ['NETLIFY_AUTH_TOKEN', 'fixture'],
+          ['GITHUB_OUTPUT', output],
+        ]),
+      });
+      expect(result.status).toBe(0);
+      expect(readFileSync(output, 'utf8')).toContain(`retain_from=${origin}\n`);
+      expect(deploy?.env?.['TAU_RETAIN_ASSETS_FROM']).toMatch(/^\$\{\{ steps\.site\.outputs\.retain_from \}\}$/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});

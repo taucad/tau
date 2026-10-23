@@ -458,13 +458,10 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
     [updateName],
   );
 
-  const actions: ProjectActions = {
-    handleDelete,
-    handlePermanentlyDelete,
-    handleDuplicate,
-    handleRename,
-    handleRestore,
-  };
+  const actions = useMemo<ProjectActions>(
+    () => ({ handleDelete, handlePermanentlyDelete, handleDuplicate, handleRename, handleRestore }),
+    [handleDelete, handlePermanentlyDelete, handleDuplicate, handleRename, handleRestore],
+  );
 
   const viewControls = (
     <div className='flex items-center gap-2'>
@@ -830,11 +827,13 @@ function UnifiedProjectList({
   const [globalFilter, setGlobalFilter] = useSearchParameter(searchParameterName.query, queryParameter);
   const [pageSize, setPageSize] = useCookie<number>(cookieName.projectPageSize, defaultPageSize);
   const [pageIndex, setPageIndex] = useState(0);
+  // TanStack flexRender treats cell functions as component types; recreating them unmounts open row dialogs.
+  const columns = useMemo(() => createColumns(actions, onOpenCloudProject), [actions, onOpenCloudProject]);
 
   // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({
     data: rows,
-    columns: createColumns(actions, onOpenCloudProject),
+    columns,
     /* Stable across the cloud listing arriving, so a selection follows its project. */
     getRowId: (row) => row.id,
     /* A project this device does not hold has nothing here to trash (D20). */
@@ -902,7 +901,6 @@ function UnifiedProjectList({
     );
   }
 
-  const columns = createColumns(actions, onOpenCloudProject);
   return (
     <div className='space-y-4'>
       <div role='group' aria-label='Project controls' className='flex flex-wrap items-center justify-between gap-2'>

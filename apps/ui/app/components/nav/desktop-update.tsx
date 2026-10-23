@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUpCircle, Check, ArrowUpRight, ChevronRight, Download, LoaderCircle, ShieldAlert, X } from 'lucide-react';
+import { ArrowUpCircle, Check, Download, LoaderCircle, ShieldAlert } from 'lucide-react';
 import type { DesktopUpdateBridge, DesktopUpdateSnapshot } from '@taucad/types/desktop-updates';
-import { Button } from '@taucad/ui/components/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
-import { SidebarMenu, SidebarMenuItem, SidebarMenuButton, useSidebar } from '@taucad/ui/components/sidebar';
+import { useSidebar } from '@taucad/ui/components/sidebar';
+import { UpdateControl } from '#components/nav/update-control.js';
 import { desktopUpdates } from '#filesystem/desktop-bridge.js';
 
 /** Desktop-only subscription. Main owns checks, downloads and restart admission. */
@@ -125,86 +124,39 @@ export function DesktopUpdateControl({
       setActionFailed(true);
     }
   };
+  const actionLabel =
+    phase === 'ready'
+      ? 'Restart now'
+      : phase === 'restart-blocked'
+        ? 'Retry restart'
+        : phase === 'available'
+          ? 'Download'
+          : phase === 'current' || phase === 'system-managed'
+            ? 'Check again'
+            : 'Retry';
   return (
-    <SidebarMenu className='p-1'>
-      <SidebarMenuItem>
-        <Popover open={open} onOpenChange={setOpen}>
-          <PopoverTrigger asChild>
-            <SidebarMenuButton className='data-[state=open]:bg-sidebar-accent' aria-label={title}>
-              <Icon className={failed ? 'text-destructive' : 'text-muted-foreground'} />
-              <span>{title}</span>
-              <ChevronRight className='ml-auto text-muted-foreground' />
-            </SidebarMenuButton>
-          </PopoverTrigger>
-          <PopoverContent
-            side='top'
-            align='start'
-            sideOffset={4}
-            collisionPadding={8}
-            className='w-64 max-w-[calc(100vw-1rem)] p-3'
-            aria-label='Tau update'
-          >
-            <div className='flex items-center justify-between gap-2'>
-              <h2 className='text-sm leading-5 font-medium'>{title}</h2>
-              <Button
-                variant='ghost'
-                size='icon-xs'
-                aria-label='Close update details'
-                onClick={() => {
-                  setOpen(false);
-                }}
-              >
-                <X />
-              </Button>
-            </div>
-            <p className='text-xs leading-4 text-muted-foreground'>
-              Tau {snapshot.version ?? snapshot.currentVersion}
-              {snapshot.channel === 'staging' ? ' · Staging' : ''}
-            </p>
-            <p className='mt-2 text-xs leading-4 text-muted-foreground'>{detail}</p>
-            <div className='mt-3 flex items-center justify-between gap-2'>
-              {snapshot.releasePage ? (
-                <Button asChild variant='ghost' size='xs' className='-ml-2'>
-                  <a href={snapshot.releasePage} target='_blank' rel='noopener noreferrer'>
-                    What’s new
-                    <ArrowUpRight className='size-3' />
-                  </a>
-                </Button>
-              ) : (
-                <span />
-              )}
-              {phase !== 'downloading' && phase !== 'disabled' ? (
-                <Button
-                  size='xs'
-                  variant={
-                    phase === 'error' || phase === 'current' || phase === 'system-managed' ? 'outline' : 'default'
-                  }
-                  disabled={busy}
-                  onClick={() => {
-                    void act();
-                  }}
-                >
-                  {busy ? <LoaderCircle className='size-3 spin-glyph' /> : undefined}
-                  {busy
-                    ? 'Please wait…'
-                    : phase === 'ready'
-                      ? 'Restart now'
-                      : phase === 'restart-blocked'
-                        ? 'Retry restart'
-                        : phase === 'available'
-                          ? 'Download'
-                          : phase === 'current' || phase === 'system-managed'
-                            ? 'Check again'
-                            : 'Retry'}
-                </Button>
-              ) : undefined}
-            </div>
-          </PopoverContent>
-        </Popover>
-        <span className='sr-only' role='status' aria-live='polite'>
-          {title}
-        </span>
-      </SidebarMenuItem>
-    </SidebarMenu>
+    <UpdateControl
+      title={title}
+      version={`Tau ${snapshot.version ?? snapshot.currentVersion}${snapshot.channel === 'staging' ? ' · Staging' : ''}`}
+      detail={detail}
+      icon={Icon}
+      isFailed={failed}
+      isProminent={phase === 'ready' && !actionFailed}
+      releasePage={snapshot.releasePage}
+      isOpen={open}
+      action={
+        phase === 'downloading' || phase === 'disabled'
+          ? undefined
+          : {
+              label: actionLabel,
+              variant: phase === 'error' || phase === 'current' || phase === 'system-managed' ? 'outline' : 'default',
+              busy,
+              onClick: () => {
+                void act();
+              },
+            }
+      }
+      onOpenChange={setOpen}
+    />
   );
 }

@@ -9,7 +9,8 @@
 # Tau's production app:// protocol and CSP (`--packaged`).
 #
 # Hosted runners have no real GPU: every row is labelled "software/virtual GPU" (S3_GPU_LABEL) and supports no GPU
-# performance claim. A reader or non-admin launch that cannot run on a hosted runner is a typed result in the
+# performance claim. Measured sets use WebGL through SwiftShader (`--software-gl`, as the cloud runs did); one set
+# keeps Chromium's default flags to record each candidate's no-WebGL fallback. A reader or non-admin launch that cannot run on a hosted runner is a typed result in the
 # drop and leaves the row red; nothing is skipped. Admin-run fallbacks are labelled `-admin` in their host label.
 name: Spike S3 (terminal renderer, native rows)
 
@@ -68,27 +69,34 @@ jobs:
         timeout-minutes: 20
         run: |
           node apps/ui/scripts/s3-renderer/run.mts --suite none --kinds "$KINDS"
-          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --packaged --kinds "$KINDS"
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --software-gl --packaged --kinds "$KINDS"
 
       - name: Core suites (integrity, disposal, R02-R07)
         timeout-minutes: 60
         continue-on-error: true
-        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out "$DROP/core"
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --kinds "$KINDS" --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out "$DROP/core"
+
+      # Chromium's default flags on a GPU-less runner: no WebGL, so this records each candidate's fallback. R05 needs a
+      # WebGL scene and runs only in the SwiftShader set above.
+      - name: Core suites with Chromium default GPU flags
+        timeout-minutes: 30
+        continue-on-error: true
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite integrity,r02,r04,r06 --out "$DROP/core-default"
 
       - name: R01 at matched load (4 MiB/s)
         timeout-minutes: 45
         continue-on-error: true
-        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r01 --rounds 3 --rate 4 --out "$DROP/r01-rate4"
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --kinds "$KINDS" --suite r01 --rounds 3 --rate 4 --out "$DROP/r01-rate4"
 
       - name: R01 unbounded
         timeout-minutes: 45
         continue-on-error: true
-        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r01 --rounds 3 --out "$DROP/r01"
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --kinds "$KINDS" --suite r01 --rounds 3 --out "$DROP/r01"
 
       - name: Packaged app under production protocol and CSP
         timeout-minutes: 20
         continue-on-error: true
-        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --packaged --kinds "$KINDS" --suite integrity,r02,r06 --out "$DROP/packaged"
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --packaged --kinds "$KINDS" --suite integrity,r02,r06 --out "$DROP/packaged"
 
       - name: Install pinned Guidepup and set up VoiceOver
         id: guidepup
@@ -108,7 +116,7 @@ jobs:
         continue-on-error: true
         env:
           S3_GUIDEPUP_MODULE: ${{ runner.temp }}/guidepup/node_modules/@guidepup/guidepup
-        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r04voiceover --out "$DROP/voiceover"
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --kinds "$KINDS" --suite r04voiceover --out "$DROP/voiceover"
 
       - name: Summarize and gate
         if: always()
@@ -116,8 +124,8 @@ jobs:
         run: |
           set -o pipefail
           node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
-            core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
-            voiceover=r04voiceover | tee -a "$GITHUB_STEP_SUMMARY"
+            core=integrity,disposal,r02,r03,r04,r05,r06,r07 core-default=integrity,r02,r04,r06 r01-rate4=r01 r01=r01 \
+            packaged=integrity,r02,r06 voiceover=r04voiceover | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
         if: always()
@@ -160,7 +168,7 @@ jobs:
         shell: bash
         run: |
           node apps/ui/scripts/s3-renderer/run.mts --suite none --kinds "$KINDS"
-          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --packaged --kinds "$KINDS"
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --software-gl --packaged --kinds "$KINDS"
 
       - name: Install pinned Guidepup and NVDA
         timeout-minutes: 15
@@ -181,11 +189,12 @@ jobs:
         shell: pwsh
         run: |
           & apps/ui/scripts/s3-renderer/native/run-nonadmin.ps1 -Drop $env:DROP -TimeoutSeconds 2700 -Runs @(
-            "core=--skip-build --kinds $env:KINDS --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out `"$env:DROP/core`"",
-            "r01-rate4=--skip-build --kinds $env:KINDS --suite r01 --rounds 3 --rate 4 --out `"$env:DROP/r01-rate4`"",
-            "r01=--skip-build --kinds $env:KINDS --suite r01 --rounds 3 --out `"$env:DROP/r01`"",
-            "packaged=--skip-build --packaged --kinds $env:KINDS --suite integrity,r02,r06 --out `"$env:DROP/packaged`"",
-            "nvda=--skip-build --kinds $env:KINDS --suite r04nvda --out `"$env:DROP/nvda`""
+            "core=--skip-build --software-gl --kinds $env:KINDS --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out `"$env:DROP/core`"",
+            "r01-rate4=--skip-build --software-gl --kinds $env:KINDS --suite r01 --rounds 3 --rate 4 --out `"$env:DROP/r01-rate4`"",
+            "r01=--skip-build --software-gl --kinds $env:KINDS --suite r01 --rounds 3 --out `"$env:DROP/r01`"",
+            "packaged=--skip-build --software-gl --packaged --kinds $env:KINDS --suite integrity,r02,r06 --out `"$env:DROP/packaged`"",
+            "nvda=--skip-build --software-gl --kinds $env:KINDS --suite r04nvda --out `"$env:DROP/nvda`"",
+            "core-default=--skip-build --kinds $env:KINDS --suite integrity,r02,r04,r06 --out `"$env:DROP/core-default`""
           )
           exit $LASTEXITCODE
 
@@ -198,8 +207,8 @@ jobs:
         env:
           S3_HOST_LABEL: WIN-ARM-admin
         run: |
-          node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out "$DROP-admin/core"
-          node apps/ui/scripts/s3-renderer/run.mts --skip-build --packaged --kinds "$KINDS" --suite integrity,r02,r06 --out "$DROP-admin/packaged"
+          node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --kinds "$KINDS" --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out "$DROP-admin/core"
+          node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --packaged --kinds "$KINDS" --suite integrity,r02,r06 --out "$DROP-admin/packaged"
 
       - name: Admin-labelled R04 with NVDA (runner's interactive session)
         timeout-minutes: 20
@@ -207,7 +216,7 @@ jobs:
         shell: bash
         env:
           S3_HOST_LABEL: WIN-ARM-admin
-        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r04nvda --out "$DROP-admin/nvda"
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --kinds "$KINDS" --suite r04nvda --out "$DROP-admin/nvda"
 
       - name: Summarize and gate
         if: always()
@@ -216,8 +225,8 @@ jobs:
         run: |
           status=0
           node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
-            core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
-            nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || status=1
+            core=integrity,disposal,r02,r03,r04,r05,r06,r07 core-default=integrity,r02,r04,r06 r01-rate4=r01 r01=r01 \
+            packaged=integrity,r02,r06 nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || status=1
           node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP-admin" nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || true
           exit $status
 
@@ -254,7 +263,7 @@ jobs:
         timeout-minutes: 20
         run: |
           node apps/ui/scripts/s3-renderer/run.mts --suite none --kinds "$KINDS"
-          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --packaged --kinds "$KINDS"
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --software-gl --packaged --kinds "$KINDS"
 
       - name: Boot the stock VM and run every row as an ordinary user
         timeout-minutes: 150
@@ -267,8 +276,8 @@ jobs:
         run: |
           set -o pipefail
           node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
-            core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
-            orca=r04orca | tee -a "$GITHUB_STEP_SUMMARY"
+            core=integrity,disposal,r02,r03,r04,r05,r06,r07 core-default=integrity,r02,r04,r06 r01-rate4=r01 r01=r01 \
+            packaged=integrity,r02,r06 orca=r04orca | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
         if: always()

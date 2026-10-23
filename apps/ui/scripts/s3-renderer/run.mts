@@ -44,6 +44,8 @@ const { values } = parseArgs({
     kinds: { type: 'string', default: 'xterm,ghostty' },
     /** Run the fixture as a packaged app (asar, `resources/ui/client`, Tau's macOS fuses) instead of `electron main.cjs`. */
     packaged: { type: 'boolean', default: false },
+    /** WebGL through SwiftShader (ANGLE), as the cloud runs used; GPU-less hosted runners otherwise have no WebGL. */
+    'software-gl': { type: 'boolean', default: false },
     'electron-arg': { type: 'string', multiple: true, default: [] },
   },
 });
@@ -67,6 +69,7 @@ const electronPath = desktopRequire('electron') as unknown as string;
 const isWindows = process.platform === 'win32';
 /** Set by `--packaged`: the packaged fixture executable and the client root inside its resources. */
 let packagedApp: { executable: string; clientRoot: string } | undefined;
+const softwareGlArguments = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 /** Launches that needed a second attempt, written into every suite result so a retry is never silent. */
 const launchRetries: Array<{ kind: Kind; at: string; error: string }> = [];
 
@@ -216,6 +219,7 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
     ...(packagedApp ? [] : [fixtureMain]),
     ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     '--js-flags=--expose-gc',
+    ...(values['software-gl'] ? softwareGlArguments : []),
     ...(scale === 1 ? [] : [`--force-device-scale-factor=${scale}`]),
     ...values['electron-arg'],
     ...extraArguments,
@@ -361,7 +365,7 @@ const environment = async () => {
             : sh('sh', ['-c', '. /etc/os-release && echo "$PRETTY_NAME"']),
       /** Which lane produced this run (workflow row label), and how its GPU should be read. */
       host: process.env['S3_HOST_LABEL'] ?? 'local',
-      gpuLabel: process.env['S3_GPU_LABEL'] ?? 'unlabelled',
+      gpuLabel: `${process.env['S3_GPU_LABEL'] ?? 'unlabelled'}; ${values['software-gl'] ? 'WebGL via SwiftShader' : 'Chromium default GPU flags'}`,
       runAsUser: os.userInfo().username,
       packaged: values.packaged ? { executable: packagedApp?.executable } : false,
       cpu: `${os.cpus()[0]?.model ?? 'unknown'} x${os.cpus().length}`,
@@ -1390,7 +1394,14 @@ const r04ScreenReaderRun = async (kind: Kind, readerName: keyof typeof screenRea
   let readerStarted = false;
   let session: Session | undefined;
   try {
-    await reader.start({ capture: true });
+    try {
+      await reader.start({ capture: true });
+    } catch (error) {
+      // VoiceOver on a fresh hosted runner can refuse its first start; one recorded retry.
+      receipts.push({ step: `start retried: ${String(error)}`, spoken: [], lastSpokenPhrase: '' });
+      await sleep(5000);
+      await reader.start({ capture: true });
+    }
     readerStarted = true;
     session = await launch(kind, ['--force-renderer-accessibility']);
     const active = session;

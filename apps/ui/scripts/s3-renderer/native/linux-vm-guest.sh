@@ -42,9 +42,11 @@ run() {
   timeout --kill-after=30s "${S3_STEP_TIMEOUT:-2400}" "$@" > "$DROP/$label.log" 2>&1 || status=$?
   printf '%s exit=%s\n' "$label" "$status" | tee -a "$DROP/rows.txt"
 }
-runner=(node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds xterm,aurigax)
+runner=(node apps/ui/scripts/s3-renderer/run.mts --skip-build --software-gl --kinds xterm,aurigax)
 xvfb=(xvfb-run -a -s '-screen 0 1920x1080x24')
 run core "${xvfb[@]}" "${runner[@]}" --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out "$DROP/core"
+run core-default "${xvfb[@]}" node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds xterm,aurigax \
+  --suite integrity,r02,r04,r06 --out "$DROP/core-default"
 run r01-rate4 "${xvfb[@]}" "${runner[@]}" --suite r01 --rounds 3 --rate 4 --out "$DROP/r01-rate4"
 run r01 "${xvfb[@]}" "${runner[@]}" --suite r01 --rounds 3 --out "$DROP/r01"
 run packaged "${xvfb[@]}" "${runner[@]}" --packaged --suite integrity,r02,r06 --out "$DROP/packaged"

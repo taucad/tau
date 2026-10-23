@@ -109,24 +109,15 @@ const guardFor = (from: number, to: number): string => `${String(from)}>${String
  */
 export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): StaleBuildRecovery => {
   const decisions = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
-  let probe: Promise<number | undefined> | undefined;
+  const classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
   let reloadPending = false;
 
+  // Failures that arrive together share one request (`fetchLiveBuildId` coalesces callers); a later one asks again.
   const askServer = async (): Promise<number | undefined> => {
     try {
       return await options.fetchServerBuildId();
     } catch {
       return undefined;
-    }
-  };
-
-  const readServerBuildId = async (): Promise<number | undefined> => {
-    // Failures that arrive together share one request; a later one asks again, since a deploy may land meanwhile.
-    probe ??= askServer();
-    try {
-      return await probe;
-    } finally {
-      probe = undefined;
     }
   };
 
@@ -139,7 +130,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     if (options.buildId === 0) {
       return 'current';
     }
-    const serverBuildId = await readServerBuildId();
+    const serverBuildId = await askServer();
     if (serverBuildId === undefined || serverBuildId === options.buildId) {
       return 'current';
     }
@@ -183,15 +174,22 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       return decision;
     },
     async classify(failure) {
-      const decided = typeof failure === 'object' && failure !== null ? decisions.get(failure) : undefined;
-      if (decided !== undefined) {
-        return decided;
+      const key = typeof failure === 'object' && failure !== null ? failure : undefined;
+      const known = key === undefined ? undefined : (decisions.get(key) ?? classifications.get(key));
+      if (known !== undefined) {
+        return known;
       }
-      if (options.buildId === 0) {
-        return 'current';
+      const classification = (async (): Promise<StaleBuildOutcome> => {
+        if (options.buildId === 0) {
+          return 'current';
+        }
+        const serverBuildId = await askServer();
+        return serverBuildId === undefined || serverBuildId === options.buildId ? 'current' : 'superseded';
+      })();
+      if (key !== undefined) {
+        classifications.set(key, classification);
       }
-      const serverBuildId = await readServerBuildId();
-      return serverBuildId === undefined || serverBuildId === options.buildId ? 'current' : 'superseded';
+      return classification;
     },
     confirmArrival() {
       try {

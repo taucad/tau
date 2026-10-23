@@ -49,20 +49,13 @@ export const buildIdentityPath = '/health/build';
 /** Milliseconds {@link fetchLiveBuildId} waits for the server before giving up. */
 export const liveBuildIdTimeout = 4000;
 
-/**
- * Ask the server which build it renders pages for, so a page can tell a deploy
- * from a genuine failure (`#lib/stale-build-recovery`) and a live tab from a
- * stale one (`#filesystem/build-skew`). Never answered from a cache.
- *
- * @param timeout - Milliseconds to wait before giving up.
- * @returns The live build id, or `undefined` when the server names none.
- * @throws When the server cannot be reached in time (a `TimeoutError` after `timeout`).
- */
-export const fetchLiveBuildId = async (timeout: number = liveBuildIdTimeout): Promise<number | undefined> => {
+let liveBuildIdRequest: Promise<number | undefined> | undefined;
+
+const requestLiveBuildId = async (requestTimeout: number): Promise<number | undefined> => {
   const response = await fetch(buildIdentityPath, {
     cache: 'no-store',
     credentials: 'omit',
-    signal: AbortSignal.timeout(timeout),
+    signal: AbortSignal.timeout(requestTimeout),
   });
   if (!response.ok) {
     return undefined;
@@ -70,4 +63,26 @@ export const fetchLiveBuildId = async (timeout: number = liveBuildIdTimeout): Pr
   const { buildId: published } = (await response.json()) as { readonly buildId?: unknown };
   const liveBuildId = Number(published);
   return Number.isFinite(liveBuildId) && liveBuildId > 0 ? liveBuildId : undefined;
+};
+
+/**
+ * Ask the server which build it renders pages for, so a page can tell a deploy
+ * from a genuine failure (`#lib/stale-build-recovery`) and a live tab from a
+ * stale one (`#filesystem/build-skew`). Never answered from a cache; callers that
+ * ask while a request is in flight share it, and a later caller asks afresh.
+ *
+ * @param requestTimeout - Milliseconds to wait before giving up.
+ * @returns The live build id, or `undefined` when the server names none.
+ * @throws When the server cannot be reached in time (a `TimeoutError` after `requestTimeout`).
+ */
+export const fetchLiveBuildId = async (requestTimeout: number = liveBuildIdTimeout): Promise<number | undefined> => {
+  const settle = async (): Promise<number | undefined> => {
+    try {
+      return await requestLiveBuildId(requestTimeout);
+    } finally {
+      liveBuildIdRequest = undefined;
+    }
+  };
+  liveBuildIdRequest ??= settle();
+  return liveBuildIdRequest;
 };

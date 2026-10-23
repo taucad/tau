@@ -34,6 +34,16 @@ describe('fetchLiveBuildId', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it('should send one request for callers that ask at the same time, and a new one afterwards', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ buildId: 7 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(Promise.all([fetchLiveBuildId(), fetchLiveBuildId()])).resolves.toStrictEqual([7, 7]);
+    await fetchLiveBuildId();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('should give up when the server does not answer in time', async () => {
     vi.stubGlobal(
       'fetch',

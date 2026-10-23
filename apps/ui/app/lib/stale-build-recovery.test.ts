@@ -185,13 +185,13 @@ describe('createStaleBuildRecovery', () => {
     expect(fetchServerBuildId).toHaveBeenCalledOnce();
   });
 
-  it('should share one check among failures that arrive together', async () => {
-    const { recovery, reload, fetchServerBuildId } = setup();
+  it('should reload once for failures that arrive together', async () => {
+    // One request serves them: `fetchLiveBuildId` coalesces callers (`build-identity.test.ts`).
+    const { recovery, reload } = setup();
 
     const outcomes = await Promise.all([recovery.recover(failure()), recovery.recover(failure())]);
 
     expect(outcomes).toStrictEqual(['reloading', 'reloading']);
-    expect(fetchServerBuildId).toHaveBeenCalledOnce();
     expect(reload).toHaveBeenCalledOnce();
   });
 
@@ -238,6 +238,16 @@ describe('createStaleBuildRecovery', () => {
       await recovery.recover(error);
 
       await expect(recovery.classify(error)).resolves.toBe('reloading');
+      expect(fetchServerBuildId).toHaveBeenCalledOnce();
+    });
+
+    it('should classify one failure once, however often it is asked', async () => {
+      const { recovery, fetchServerBuildId } = setup();
+      const error = failure();
+
+      await recovery.classify(error);
+      await recovery.classify(error);
+
       expect(fetchServerBuildId).toHaveBeenCalledOnce();
     });
 

@@ -71,7 +71,9 @@ fi
 log "apt install bubblewrap socat"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq || blocker "apt-get update failed"
-apt-get install -y -qq bubblewrap socat ca-certificates curl xz-utils apparmor apparmor-utils >/dev/null \
+# ripgrep is a hard SandboxManager.initialize dependency (SRT uses `rg` for filesystem masking); without
+# it the sandbox refuses to start with "ripgrep (rg) not found" — mirrors spike-w1-shell.yml's install.
+apt-get install -y -qq bubblewrap socat ripgrep ca-certificates curl xz-utils apparmor apparmor-utils >/dev/null \
   || blocker "apt install failed"
 
 if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(process.versions.node.split(".")[0]>=24?0:1)' 2>/dev/null; then

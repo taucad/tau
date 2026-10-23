@@ -53,14 +53,11 @@
 #include <libproc.h>
 #include <sys/types.h>
 
-/* SANDBOX_FILTER_PATH selects a path-argument check; NO_REPORT suppresses a sandbox-violation log
- * entry for the probe query itself (we are asking, not performing the operation). Values from the
- * private <sandbox.h>; redefined here because that header is not in the public SDK. */
+/* SANDBOX_FILTER_PATH selects a path-argument check. Value from the private <sandbox.h>; redefined
+ * here because that header is not in the public SDK. The documented path-check form passes this type
+ * alone (no extra flag bits), which keeps the `type` argument a small valid int. */
 #ifndef SANDBOX_FILTER_PATH
 #define SANDBOX_FILTER_PATH 1
-#endif
-#ifndef SANDBOX_CHECK_NO_REPORT
-#define SANDBOX_CHECK_NO_REPORT (1 << 31)
 #endif
 
 /* Private SPI. Weak-imported: a NULL pointer at runtime means the symbol did not resolve on this host,
@@ -87,7 +84,7 @@ static int sb_check(pid_t pid, const char *path) {
     return -1;
   }
   errno = 0;
-  return sandbox_check(pid, "file-read-data", SANDBOX_FILTER_PATH | SANDBOX_CHECK_NO_REPORT, path);
+  return sandbox_check(pid, "file-read-data", SANDBOX_FILTER_PATH, path);
 }
 
 int main(int argc, char **argv) {
@@ -99,9 +96,14 @@ int main(int argc, char **argv) {
   if (strcmp(argv[1], "--selftest") == 0) {
     pid_t probe[8];
     int n = list_pids(probe, 8);
+    /* Probe our OWN (unsandboxed) pid so the receipt records what sandbox_check returns and sets for
+     * a process with no sandbox: this disambiguates "unsandboxed -> 0/allowed" from "unsandboxed ->
+     * -1/EINVAL", which decides how the enumerator reads foreign pids. */
+    int selfRc = spi_present() ? sb_check(getpid(), "/etc/hosts") : -1;
+    int selfErrno = (selfRc < 0) ? errno : 0;
     printf("{\"helper\":\"tau-sbenum\",\"mode\":\"selftest\",\"spiPresent\":%s,\"listPidsOk\":%s,"
-           "\"feasible\":%s}\n",
-           spi_present() ? "true" : "false", (n > 0 || n == 8) ? "true" : "false",
+           "\"selfCheckRc\":%d,\"selfCheckErrno\":%d,\"feasible\":%s}\n",
+           spi_present() ? "true" : "false", (n > 0) ? "true" : "false", selfRc, selfErrno,
            spi_present() ? "true" : "false");
     return 0;
   }

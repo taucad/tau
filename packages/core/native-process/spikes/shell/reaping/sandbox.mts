@@ -125,10 +125,15 @@ type Session = {
   dir: string;
   pid: number | undefined;
   spawnError?: string;
+  /** Diagnostics for a silent sandbox kill: sandbox-exec exits non-zero (profile rejected) or the
+   * sandboxed shell is SIGKILLed by a denied operation, both of which leave startedBytes=0. */
+  stderr: string;
+  exit?: { code: number | null; signal: NodeJS.Signals | null };
 };
 
-/** Launch one sandboxed session: shell + adversary inside its own per-session Seatbelt profile. */
-const launchSession = (kind: Adversary): Session => {
+/** Launch one session inside its own per-session Seatbelt profile. `makeCommand` turns the session's
+ * sentinel path into the argv run under the sandbox (the adversary shell, or the preflight sleeper). */
+const launchSession = (kind: Adversary, makeCommand: (sentinel: string) => string[]): Session => {
   const uuid = randomUUID();
   const mark = `tau-reap-sbmember-${kind}-${uuid.slice(0, 8)}`;
   const dir = join(workRoot, uuid);
@@ -138,6 +143,7 @@ const launchSession = (kind: Adversary): Session => {
   const sentinel = join(dir, `${mark}.log`);
   rmSync(sentinel, { force: true });
 
+  const session: Session = { mark, marker, sentinel, dir, pid: undefined, stderr: '' };
   const child = spawn(
     'sandbox-exec',
     [
@@ -149,20 +155,23 @@ const launchSession = (kind: Adversary): Session => {
       `WORKDIR=${dir}`,
       '-D',
       `SCRIPTDIR=${here}`,
-      '/bin/bash',
-      advScript,
-      kind,
-      sentinel,
+      ...makeCommand(sentinel),
     ],
     { cwd: dir, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } },
   );
-  const session: Session = { mark, marker, sentinel, dir, pid: child.pid };
+  session.pid = child.pid;
   child.on('error', (e) => (session.spawnError = e.message));
+  child.on('exit', (code, signal) => (session.exit = { code, signal }));
   child.stdout?.resume();
-  child.stderr?.resume();
+  child.stderr?.setEncoding('utf8').on('data', (c: string) => (session.stderr = (session.stderr + c).slice(-600)));
   child.unref();
   return session;
 };
+
+/** The adversary shell run inside a session (the sentinel is this session's canary target). */
+const adversaryCommand =
+  (kind: Adversary) =>
+  (sentinel: string): string[] => ['/bin/bash', advScript, kind, sentinel];
 
 // ── one adversary run ─────────────────────────────────────────────────────────────────────────
 const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
@@ -186,11 +195,11 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
 
   // SECOND concurrent session: a different uuid/marker, in its own sandbox, launched first so it is
   // fully running (and has forked a descendant via `setsid`) before our cancel fires.
-  const other = launchSession('setsid');
+  const other = launchSession('setsid', adversaryCommand('setsid'));
   const otherStarted = other.pid !== undefined && (await waitFor(() => sizeOf(other.sentinel) > 0, 15_000, 100));
 
   // OUR session under test.
-  const ours = launchSession(kind);
+  const ours = launchSession(kind, adversaryCommand(kind));
   const started = ours.pid !== undefined && (await waitFor(() => sizeOf(ours.sentinel) > 0, 15_000, 100));
   const startedBytes = sizeOf(ours.sentinel);
   await sleep(1500);
@@ -259,14 +268,22 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
   const grewLive = startedBytes > 0 && beforeCancel >= startedBytes;
   const stopped = afterSettle === afterCancel;
   const reaped = grewLive && stopped && !blocked;
+  // A genuine host limitation (sandbox_check SPI absent) legitimately blocks; a launch that produced
+  // no canary while the SPI IS present is a sandbox/profile failure, surfaced here with the exit and
+  // stderr of the sandboxed launch rather than hidden behind "blocked".
+  const spiAbsent = first.spiPresent === false;
+  const launchDetail = {
+    ours: { exit: ours.exit, stderr: ours.stderr, spawnError: ours.spawnError ?? null },
+    other: { started: otherStarted, exit: other.exit, stderr: other.stderr, spawnError: other.spawnError ?? null },
+  };
 
   const checks: Check[] = [
     check(
       `${strategy}.${kind}.launched`,
       'the sandboxed launcher actually ran the adversary inside the host (external sentinel grew)',
-      `started=${started} startedBytes=${startedBytes} spawnError=${ours.spawnError ?? 'none'}`,
-      startedBytes > 0 || blocked,
-      ours.spawnError ? { spawnError: ours.spawnError } : undefined,
+      `started=${started} startedBytes=${startedBytes} oursExit=${JSON.stringify(ours.exit)} oursStderr=${ours.stderr.slice(-200)} spawnError=${ours.spawnError ?? 'none'}`,
+      startedBytes > 0 || spiAbsent,
+      launchDetail,
     ),
     check(
       `${strategy}.${kind}.reaped`,
@@ -304,6 +321,7 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
       sbAfter: otherSbAfter,
     },
     cancelDetail: { strategy, blocked, firstEnum: first, rounds, killed: [...killedAll] },
+    launchDetail,
     leftover,
     checks,
   };
@@ -353,20 +371,36 @@ const preflight = async (): Promise<{ checks: Check[]; detail: Record<string, st
     mkdirSync(dir, { recursive: true });
     const marker = join(dir, `tau-session-${uuid}.marker`);
     writeFileSync(marker, '');
+    // Run bash under the profile (not bare /bin/sleep), so the control exercises the SAME image as the
+    // real workload — if bash cannot start under session.sb, the positive control catches it here.
     const sleeper = spawn(
       'sandbox-exec',
-      ['-f', profile, '-D', `MARKER=${marker}`, '-D', `WORKDIR=${dir}`, '-D', `SCRIPTDIR=${here}`, '/bin/sleep', '8'],
+      [
+        '-f',
+        profile,
+        '-D',
+        `MARKER=${marker}`,
+        '-D',
+        `WORKDIR=${dir}`,
+        '-D',
+        `SCRIPTDIR=${here}`,
+        '/bin/bash',
+        '-c',
+        'exec sleep 8',
+      ],
       { cwd: dir, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env } },
     );
     let err = '';
+    let exit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
     sleeper.stderr?.setEncoding('utf8').on('data', (c: string) => (err += c));
+    sleeper.on('exit', (code, sig) => (exit = { code, signal: sig }));
     sleeper.unref();
-    await sleep(1200);
+    await sleep(1500);
     const report = sbenum(marker);
     found = (report.match ?? []).length > 0;
     observed = report.sandboxedObserved ?? 0;
     applied = {
-      out: `spawnRc=${sleeper.pid !== undefined} err=${err.slice(0, 160)} report=${JSON.stringify(report).slice(0, 220)}`,
+      out: `spawnRc=${sleeper.pid !== undefined} exit=${JSON.stringify(exit ?? null)} err=${err.slice(0, 200)} report=${JSON.stringify(report).slice(0, 260)}`,
       code: 0,
     };
     if (sleeper.pid !== undefined) {

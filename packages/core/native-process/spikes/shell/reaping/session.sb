@@ -15,20 +15,26 @@
 ;; tau-sbenum's control path (a path at the filesystem root, in no allow rule) is denied by `deny
 ;; default` here but permitted for any UNSANDBOXED pid — that is how the membership oracle rejects the
 ;; unsandboxed world. No secret is ever named; MARKER/WORKDIR/SCRIPTDIR are synthetic per-run paths.
+;;
+;; Every operation token below is a real Seatbelt operation; a single unknown token would make
+;; sandbox-exec reject the whole profile and the launch would never run.
 (version 1)
 
 (deny default)
 
-;; Process creation and signalling for the adversary tree (fork / exec / setsid / double-fork).
+;; Process creation, inspection and signalling for the adversary tree (fork / exec / setsid /
+;; double-fork). process-info* covers the code-signature / pid-info reads the loader makes on exec.
 (allow process-fork)
 (allow process-exec*)
+(allow process-info*)
 (allow signal (target self))
 
 ;; Loading and executing the system toolchain (dyld, bash, perl, sleep). file-map-executable is a
 ;; distinct operation under `deny default`, so mapping dylibs must be allowed explicitly or images
-;; will not load.
+;; will not load. file-ioctl covers the terminal/dev ioctls bash issues on startup.
 (allow file-map-executable)
 (allow file-read-metadata)
+(allow file-ioctl)
 (allow file-read*
   (subpath "/usr")
   (subpath "/bin")
@@ -49,11 +55,9 @@
   (subpath (param "WORKDIR"))
   (literal "/dev/null")
   (literal "/dev/dtracehelper")
-  (subpath "/dev/tty"))
+  (subpath "/dev"))
 
 ;; Runtime plumbing bash/perl touch on launch; none of it widens the marker or control rules.
 (allow sysctl-read)
 (allow mach-lookup)
-(allow mach-priv-host-port)
 (allow ipc-posix-shm*)
-(allow system-fsctl)

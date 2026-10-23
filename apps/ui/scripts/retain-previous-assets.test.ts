@@ -44,7 +44,10 @@ const createClient = async (files: Readonly<Record<string, string>>): Promise<st
 const startLiveDeploy = async (
   files: Readonly<Record<string, string>>,
   index: ServedAssetsIndex | undefined,
-  misbehave: (path: string, attempt: number) => 'hang' | 'unavailable' | undefined = () => undefined,
+  misbehave: (
+    path: string,
+    attempt: number,
+  ) => 'hang' | 'unavailable' | { readonly status: number; readonly retryAfter?: string } | undefined = () => undefined,
 ): Promise<{ readonly origin: string; readonly requests: string[] }> => {
   const requests: string[] = [];
   const server: Server = createServer((request, response) => {
@@ -56,6 +59,10 @@ const startLiveDeploy = async (
     }
     if (fault === 'unavailable') {
       response.writeHead(503).end();
+      return;
+    }
+    if (typeof fault === 'object') {
+      response.writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter }).end();
       return;
     }
     const body = path === servedAssetsIndexFileName && index ? JSON.stringify(index) : files[path];
@@ -201,6 +208,32 @@ describe('retainPreviousAssets', () => {
 
     expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
     expect(waits).toStrictEqual([1000, 2000]);
+  });
+
+  it.each([
+    ['a throttle that names its wait', { status: 429, retryAfter: '3' }, [3000]],
+    ['a throttle that asks for longer than the cap', { status: 429, retryAfter: '120' }, [30_000]],
+    ['a throttle without a wait', { status: 429 }, [1000]],
+    ['a request timeout', { status: 408 }, [1000]],
+  ])('should retry %s instead of failing the deploy', async (_label, fault, expectedWaits) => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+      (path, attempt) => (path === 'assets/route-OLD1.js' && attempt === 1 ? fault : undefined),
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const waits: number[] = [];
+
+    await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+    });
+
+    expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
+    expect(waits).toStrictEqual(expectedWaits);
   });
 
   it('should give up on an asset the live deploy never finishes sending', async () => {

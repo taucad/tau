@@ -156,26 +156,54 @@ const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAs
   );
 };
 
-/** One request, its body read within the timeout; a 5xx or a network error is retried after the backoff. */
+/** Milliseconds a `Retry-After` may ask for before the wait is capped. */
+const retryAfterCap = 30_000;
+
+/** Answers worth asking again: a request timeout, a throttle, and any server error. */
+const isRetryable = (status: number): boolean => status === 408 || status === 429 || status >= 500;
+
+/**
+ * Milliseconds a `Retry-After` header asks for (seconds or an HTTP date), capped.
+ *
+ * @param header - The header value, when present.
+ * @returns The wait, or `undefined` when the header names none.
+ */
+const retryAfterWait = (header: string | undefined): number | undefined => {
+  if (header === undefined || header.trim() === '') {
+    return undefined;
+  }
+  const seconds = Number(header);
+  const milliseconds = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
+  return Number.isFinite(milliseconds) ? Math.min(Math.max(milliseconds, 0), retryAfterCap) : undefined;
+};
+
+/**
+ * One request, its body read within the timeout. A network error, a 408, a 429 or a 5xx is
+ * retried after the backoff, or after the wait a `Retry-After` names (capped).
+ */
 const fetchWithRetry = async (
   url: string,
   transport: Transport,
 ): Promise<{ readonly status: number; readonly body: Uint8Array<ArrayBuffer> }> => {
   let lastError: unknown;
+  let requestedWait: number | undefined;
   for (const backoff of [0, ...retryBackoff]) {
-    if (backoff > 0) {
+    const wait = requestedWait ?? backoff;
+    if (wait > 0) {
       // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
-      await transport.wait(backoff);
+      await transport.wait(wait);
     }
+    requestedWait = undefined;
     try {
       const signal = AbortSignal.timeout(transport.requestTimeout);
       // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
       const response = await fetch(url, { cache: 'no-store', signal });
       // oxlint-disable-next-line no-await-in-loop -- The body belongs to this attempt.
       const body = new Uint8Array(await response.arrayBuffer());
-      if (response.status < 500) {
+      if (!isRetryable(response.status)) {
         return { status: response.status, body };
       }
+      requestedWait = retryAfterWait(response.headers.get('retry-after') ?? undefined);
       lastError = new Error(`${url} answered ${String(response.status)}`);
     } catch (error) {
       lastError = error;

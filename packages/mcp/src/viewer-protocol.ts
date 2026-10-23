@@ -159,7 +159,12 @@ export type TauViewerComponent = Readonly<{
 
 /** What the person sees in one viewer page. @public */
 export type TauViewerViewState = Readonly<{
-  model: Readonly<{ id: string; title: string; path: string; sourceFile?: string | undefined }>;
+  model: Readonly<{
+    id: string;
+    title: string;
+    path: string;
+    sourceFile?: string | undefined;
+  }>;
   selected: readonly TauViewerComponent[];
   hidden: readonly string[];
   isolated: readonly string[];
@@ -218,7 +223,10 @@ export type TauViewerSyncResult = Readonly<{
 }>;
 
 /** One captured image of the live view. @public */
-export type TauViewerImage = Readonly<{ mimeType: 'image/png' | 'image/jpeg'; data: string }>;
+export type TauViewerImage = Readonly<{
+  mimeType: 'image/png' | 'image/jpeg';
+  data: string;
+}>;
 
 /** Arguments of `app_capture_reply`. @public */
 export type TauViewerCaptureReplyInput = Readonly<{
@@ -245,7 +253,11 @@ export type TauViewerViewStateResult = Readonly<{
 /** What `initialize` told the server about its client, as far as presentation is concerned. @public */
 export type TauViewerClient = Readonly<{
   capabilities?:
-    | Readonly<Record<string, unknown> & { extensions?: Readonly<Record<string, unknown>> | undefined }>
+    | Readonly<
+        Record<string, unknown> & {
+          extensions?: Readonly<Record<string, unknown>> | undefined;
+        }
+      >
     | undefined;
   clientInfo?: Readonly<{ name: string }> | undefined;
 }>;
@@ -311,8 +323,8 @@ export type TauViewerDirectShare = Readonly<{
   entryPath: string;
   /** The portable share ZIP, base64url. */
   encodedArchive: string;
-  /** How the files were chosen: the runtime's source closure of the entry, or every project file git does not ignore. */
-  closure: 'runtime' | 'project-files';
+  /** How the files were chosen: the runtime's source closure of the entry. */
+  closure: 'runtime';
   fileCount: number;
   uncompressedBytes: number;
   archiveBytes: number;

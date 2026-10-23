@@ -10,7 +10,7 @@
  * timing-dependent.
  */
 
-import { spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
@@ -18,6 +18,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -38,12 +39,97 @@ const fakeAcpAgent = resolvePath(repoRoot, 'packages/host/src/acp/fixtures/fake-
 
 const disposers: Array<() => Promise<void> | void> = [];
 
+/* Past vitest's 10s hook default: a stopping daemon may spend twice its runtime child's 5s close grace, and the
+ * processes it leaves behind are then reaped before any directory they write is removed. */
 afterEach(async () => {
   for (const dispose of disposers.splice(0).reverse()) {
     // oxlint-disable-next-line no-await-in-loop -- teardown is ordered: children first, then their servers.
     await dispose();
   }
-});
+}, 60_000);
+
+/**
+ * Remove a test's temporary directory. Teardown has already waited for every process that writes here, so the
+ * retries only absorb a filesystem that settles late; they are not the race fix.
+ */
+const removeTemporaryDirectory = async (path: string): Promise<void> => {
+  await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+};
+
+const execFileAsync = promisify(execFile);
+
+/** Every process below `pid`, from one `ps` snapshot (POSIX `-A -o`, so Linux and macOS alike). */
+const descendantsOf = async (pid: number): Promise<number[]> => {
+  const { stdout } = await execFileAsync('ps', ['-A', '-o', 'pid=,ppid=']);
+  const childrenOf = new Map<number, number[]>();
+  for (const line of stdout.split('\n')) {
+    const [child, parent] = line.trim().split(/\s+/u).map(Number);
+    if (child !== undefined && parent !== undefined && Number.isInteger(child) && Number.isInteger(parent)) {
+      childrenOf.set(parent, [...(childrenOf.get(parent) ?? []), child]);
+    }
+  }
+  const found: number[] = [];
+  const pending = [pid];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    for (const child of childrenOf.get(next) ?? []) {
+      found.push(child);
+      pending.push(child);
+    }
+  }
+  return found;
+};
+
+/** Whether `pid` still runs. A zombie counts as exited: it holds no files, and a parent that never reaps it would keep it forever. */
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' })
+      .trim()
+      .startsWith('Z');
+  } catch {
+    /* `ps` exits non-zero once the process is gone. */
+    return false;
+  }
+};
+
+/**
+ * Wait for processes a stopped daemon left running, `SIGKILL`ing any still alive at the deadline. A daemon stopped
+ * before its runtime child exits orphans it, and the orphan (whose tsx loader writes its cache under the config
+ * directory's `runtime-children/…/tmp`) would otherwise race the directory's removal into `ENOTEMPTY`.
+ *
+ * @param pids - The processes to wait for.
+ * @param grace - Milliseconds to wait before `SIGKILL`ing the survivors.
+ */
+const reap = async (pids: readonly number[], grace: number): Promise<void> => {
+  const deadline = Date.now() + grace;
+  let alive = pids.filter((pid) => isAlive(pid));
+  while (alive.length > 0 && Date.now() < deadline) {
+    // oxlint-disable-next-line no-await-in-loop -- polling: each round waits before re-reading liveness.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    alive = alive.filter((pid) => isAlive(pid));
+  }
+  for (const pid of alive) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Exited between the check and the signal.
+    }
+  }
+  const killDeadline = Date.now() + 5000;
+  while (alive.length > 0 && Date.now() < killDeadline) {
+    // oxlint-disable-next-line no-await-in-loop -- polling: a SIGKILLed process is gone within moments.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    alive = alive.filter((pid) => isAlive(pid));
+  }
+};
 
 const listen = async (server: HttpServer): Promise<number> => {
   await new Promise<void>((resolve) => {
@@ -236,7 +322,7 @@ const startServe = async (options: {
   /* `SIGKILL` is how a test says "this daemon died"; `SIGTERM` is a graceful
    * stop, and a graceful stop cancels every run it was carrying. */
   const kill = async (signal: NodeJS.Signals = 'SIGTERM'): Promise<void> => {
-    if (child.exitCode !== null || child.signalCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null || child.pid === undefined) {
       return;
     }
     stopping = true;
@@ -245,14 +331,19 @@ const startServe = async (options: {
         resolve();
       });
     });
+    /* Read before the signal: once the daemon is gone its runtime child and workers are re-parented. */
+    const descendants = await descendantsOf(child.pid);
     child.kill(signal);
+    /* The daemon's own stop gives its runtime child a 5s close grace and then a 5s SIGTERM grace. */
     await Promise.race([
       exited,
       new Promise((resolve) => {
-        setTimeout(resolve, 5000);
+        setTimeout(resolve, 12_000);
       }),
     ]);
     child.kill('SIGKILL');
+    await exited;
+    await reap(descendants, 10_000);
   };
   disposers.push(async () => kill());
   const deadline = new Promise<never>((_resolve, reject) => {
@@ -358,8 +449,8 @@ describe('tau agent (scripted command projections)', () => {
       const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-live-ws-'));
       const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-live-cfg-'));
       disposers.push(async () => {
-        await rm(workspace, { recursive: true, force: true });
-        await rm(configDirectory, { recursive: true, force: true });
+        await removeTemporaryDirectory(workspace);
+        await removeTemporaryDirectory(configDirectory);
       });
       await writeFile(
         join(configDirectory, 'host.json'),
@@ -419,8 +510,8 @@ describe('tau agent (scripted command projections)', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-cli-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-cli-cfg-'));
     disposers.push(async () => {
-      await rm(workspace, { recursive: true, force: true });
-      await rm(configDirectory, { recursive: true, force: true });
+      await removeTemporaryDirectory(workspace);
+      await removeTemporaryDirectory(configDirectory);
     });
     await mkdir(configDirectory, { recursive: true });
     await writeFile(
@@ -553,8 +644,8 @@ describe('tau agent (scripted command projections)', () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-epipe-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-epipe-cfg-'));
     disposers.push(async () => {
-      await rm(workspace, { recursive: true, force: true });
-      await rm(configDirectory, { recursive: true, force: true });
+      await removeTemporaryDirectory(workspace);
+      await removeTemporaryDirectory(configDirectory);
     });
     await writeFile(
       join(configDirectory, 'host.json'),
@@ -594,10 +685,9 @@ describe('tau agent (scripted command projections)', () => {
   it('should record an external run whose daemon died mid-turn as abandoned', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-acp-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-acp-cfg-'));
-    /* The `SIGKILL`ed daemon's runtime child outlives it and can still be writing here, so removal retries. */
     disposers.push(async () => {
-      await rm(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
-      await rm(configDirectory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+      await removeTemporaryDirectory(workspace);
+      await removeTemporaryDirectory(configDirectory);
     });
     await writeFile(
       join(configDirectory, 'host.json'),
@@ -643,10 +733,9 @@ describe('tau agent (scripted command projections)', () => {
   it('should exit refused with the typed code when an external agent turns the turn down', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-refuse-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-refuse-cfg-'));
-    /* The stopped daemon's runtime child can still be writing its tsx cache here, so removal retries. */
     disposers.push(async () => {
-      await rm(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
-      await rm(configDirectory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+      await removeTemporaryDirectory(workspace);
+      await removeTemporaryDirectory(configDirectory);
     });
     await writeFile(
       join(configDirectory, 'host.json'),

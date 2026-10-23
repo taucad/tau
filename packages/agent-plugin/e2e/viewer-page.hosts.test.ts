@@ -823,7 +823,7 @@ describe("the tab's panels (W10)", () => {
       await capture(failing, 'export-retry');
       isFailing = false;
       await failure.getByRole('button', { name: 'Retry' }).click();
-      await panel.getByRole('region', { name: 'Formats' }).waitFor({ timeout: 60_000 });
+      await panel.getByRole('region', { name: 'Format' }).waitFor({ timeout: 60_000 });
       expect(await panel.getByRole('checkbox', { name: 'Save to project' }).isChecked()).toBe(true);
       expect(pageErrors).toEqual([]);
       await failing.close();

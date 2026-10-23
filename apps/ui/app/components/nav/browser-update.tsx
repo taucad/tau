@@ -2,17 +2,24 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
 import { Topic } from '@taucad/events';
 import { useSidebar } from '@taucad/ui/components/sidebar';
-import { isBuildSuperseded, readNewestBuildId, subscribeBuildSkew } from '#filesystem/build-skew.js';
+import {
+  buildId,
+  isBuildSuperseded,
+  readNewestBuildId,
+  subscribeBuildSkew,
+  subscribeNewestBuildId,
+} from '#filesystem/build-skew.js';
 import { UpdateControl } from '#components/nav/update-control.js';
 
 const serverSnapshot = (): boolean => false;
+const serverBuildSnapshot = (): number => buildId;
 
 let mountedControls = 0;
 const mountedTopic = new Topic<void>({ name: 'browser-update-control' });
 
 /**
- * `true` while a sidebar update control is mounted, so the floating fallback
- * (`BuildSkewBanner`) only appears on surfaces without the app sidebar.
+ * `true` while a sidebar update control is mounted in an open sidebar, so the
+ * floating fallback (`BuildSkewBanner`) covers surfaces without a reachable one.
  */
 export const useBrowserUpdateControlMounted = (): boolean =>
   useSyncExternalStore(
@@ -21,9 +28,9 @@ export const useBrowserUpdateControlMounted = (): boolean =>
     serverSnapshot,
   );
 
-const builtAt = (buildId: number): string | undefined =>
-  buildId > 0
-    ? `Tau · Updated ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(buildId)}`
+const builtAt = (newestBuildId: number): string | undefined =>
+  newestBuildId > 0
+    ? `Tau · Updated ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(newestBuildId)}`
     : undefined;
 
 /**
@@ -33,17 +40,23 @@ const builtAt = (buildId: number): string | undefined =>
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
   const superseded = useSyncExternalStore(subscribeBuildSkew, isBuildSuperseded, serverSnapshot);
+  const newestBuildId = useSyncExternalStore(subscribeNewestBuildId, readNewestBuildId, serverBuildSnapshot);
   const [open, setOpen] = useState(false);
   const [revealed, setRevealed] = useState(false);
-  const { setOpen: showSidebar } = useSidebar();
+  const { open: sidebarOpen, openMobile, isMobile, setOpen: showSidebar } = useSidebar();
+  // A collapsed sidebar is inert, so only an open one can own the prompt.
+  const isReachable = isMobile ? openMobile : sidebarOpen;
   useEffect(() => {
+    if (!isReachable) {
+      return undefined;
+    }
     mountedControls += 1;
     mountedTopic.emit();
     return () => {
       mountedControls -= 1;
       mountedTopic.emit();
     };
-  }, []);
+  }, [isReachable]);
   useEffect(
     () =>
       // Saving has stopped, so the transition is worth revealing once; a remount does not replay it.
@@ -60,7 +73,7 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   return (
     <UpdateControl
       title='Update ready'
-      version={builtAt(readNewestBuildId())}
+      version={builtAt(newestBuildId)}
       detail='A newer version of Tau is open in another tab. Reload to continue with the latest version.'
       icon={ArrowUpCircle}
       isProminent

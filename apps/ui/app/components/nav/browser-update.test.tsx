@@ -70,6 +70,55 @@ describe('browser update control', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  it('falls back to the floating prompt while the sidebar is collapsed', async () => {
+    const { BrowserUpdate, BuildSkewBanner, SidebarProvider, buildId } = await load();
+    const { useSidebar } = await import('@taucad/ui/components/sidebar');
+    function Collapse(): React.JSX.Element {
+      const { setOpen } = useSidebar();
+      return (
+        <button
+          type='button'
+          onClick={() => {
+            setOpen(false);
+          }}
+        >
+          Collapse
+        </button>
+      );
+    }
+    render(
+      <SidebarProvider>
+        <Collapse />
+        <BrowserUpdate />
+        <BuildSkewBanner />
+      </SidebarProvider>,
+    );
+    await announce(buildId + 1);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is open in another tab');
+  });
+
+  it('shows the newest build when a later one is announced', async () => {
+    const { BrowserUpdate, SidebarProvider, buildId } = await load();
+    render(
+      <SidebarProvider>
+        <BrowserUpdate />
+      </SidebarProvider>,
+    );
+    const later = buildId + 48 * 3_600_000;
+    const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+    await announce(buildId + 3_600_000);
+    await announce(later);
+
+    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toHaveTextContent(
+      `Tau · Updated ${format.format(later)}`,
+    );
+  });
+
   it('falls back to the floating prompt where no sidebar is mounted', async () => {
     const { BuildSkewBanner, buildId } = await load();
     render(<BuildSkewBanner />);

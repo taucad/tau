@@ -1,80 +1,33 @@
-name: Billing nightly (slow matrix)
+name: Billing nightly (local contracts)
 
-# The real Stripe test-mode acceptance runs nightly against its isolated
-# account. The same target runs in the internal PR/push L3 lane. Like that
-# lane, it skips with a notice while no STRIPE_TEST_* secret is configured
-# (operator ruling, 2026-10-02) and fails on a partial set.
-
+# Same credential-free suite as PR/main CI; no provider account or hosted UI.
 on:
   schedule:
-    - cron: '17 14 * * *' # 14:17 UTC — quiet hours for the shared test account.
+    - cron: '17 14 * * *'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
-  group: stripe-test-account
+  group: billing-nightly
   cancel-in-progress: false
 
 jobs:
   billing-nightly:
-    name: Billing L3 nightly
+    name: Billing database and Stripe adapter contracts
     runs-on: ubuntu-latest
-    env:
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_CREATE_RESTRICTED_KEY }}
-      STRIPE_READ_SECRET_KEY: ${{ secrets.STRIPE_TEST_READ_RESTRICTED_KEY }}
-      STRIPE_REFUND_SECRET_KEY: ${{ secrets.STRIPE_TEST_REFUND_RESTRICTED_KEY }}
-      STRIPE_ACCOUNT_ID: ${{ secrets.STRIPE_TEST_ACCOUNT_ID }}
-      # The test account's own catalog. The lane copies `.env.example` into `.env`, whose placeholders
-      # name no real Stripe object; exported values win over `.env` for Nx and for dotenv in vitest.
-      STRIPE_PRICE_ID_PRO_MONTHLY: ${{ secrets.STRIPE_TEST_PRICE_ID_PRO_MONTHLY }}
-      STRIPE_PRODUCT_ID_CREDIT_PACK: ${{ secrets.STRIPE_TEST_PRODUCT_ID_CREDIT_PACK }}
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Skip without isolated Stripe acceptance credentials
-        id: gate
-        run: |
-          set=0
-          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID" \
-            "$STRIPE_PRICE_ID_PRO_MONTHLY" "$STRIPE_PRODUCT_ID_CREDIT_PACK"; do
-            if [ -n "$value" ]; then set=$((set + 1)); fi
-          done
-          if [ "$set" -eq 0 ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Billing nightly skipped::No STRIPE_TEST_* secret is configured; the real Stripe lane runs once the payments work adds them."
-          elif [ "$set" -eq 6 ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Only $set of the six STRIPE_TEST_* secrets are set; set all six or none."
-            exit 1
-          fi
-
       - name: Setup Nx Environment
-        if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
 
-      - name: Install Stripe CLI
-        if: steps.gate.outputs.enabled == 'true'
-        run: |
-          curl -fsSL https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg >/dev/null
-          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
-          sudo apt-get update -qq && sudo apt-get install -y stripe
+      - name: Pull the billing foundation PostgreSQL image
+        run: docker pull postgres:17-alpine
 
-      - name: Prepare API env file
-        if: steps.gate.outputs.enabled == 'true'
-        run: cp apps/api/.env.example apps/api/.env
-
-      - name: Start Postgres + Redis + MinIO
-        if: steps.gate.outputs.enabled == 'true'
-        run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
-
-      # `api:db-migrate` is the release migration job: DDL, the billing protections and
-      # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in
-      # `.env.example`, so these lanes get schema and protections only, as Fly does).
-      - name: Apply the protected migration job
-        if: steps.gate.outputs.enabled == 'true'
-        run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run api:db-migrate
-
-      - name: Run real Stripe billing acceptance (L3)
-        if: steps.gate.outputs.enabled == 'true'
-        run: pnpm nx run api:test:billing-stripe
+      - name: Run billing database and Stripe adapter contracts
+        run: pnpm nx run-many -t test:billing-foundation

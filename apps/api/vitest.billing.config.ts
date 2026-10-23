@@ -9,7 +9,12 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
     globalSetup: ['./app/testing/billing-foundation.setup.ts'],
-    include: ['app/api/billing/*.foundation.test.ts', 'app/testing/billing-foundation.test.ts'],
+    include: [
+      'app/api/billing/*.foundation.test.ts',
+      'app/testing/billing-foundation.test.ts',
+      'app/api/billing/billing-stripe.test.ts',
+      'app/api/billing/billing-cash-stripe.test.ts',
+    ],
     testTimeout: 30_000,
     hookTimeout: 30_000,
     fileParallelism: false,

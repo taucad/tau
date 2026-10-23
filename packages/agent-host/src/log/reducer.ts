@@ -139,9 +139,26 @@ export const createEventLogReducer = (
   let messages: ProviderMessage[] = [];
   let intact = true;
   const skipMissing = options.missingMessages === 'skip';
+  /** The ids the history holds now, kept only when missing names are skipped: each lookup is then constant. */
+  const present = new Set<string>();
+  /** Keep {@link present} in step after a change that drops or reorders messages. */
+  const reindex = (): void => {
+    if (skipMissing) {
+      present.clear();
+      for (const message of messages) {
+        present.add(message.id);
+      }
+    }
+  };
+  const appendMessage = (message: ProviderMessage): void => {
+    messages.push(message);
+    if (skipMissing) {
+      present.add(message.id);
+    }
+  };
   /** The ids a row names, less those this history does not hold when missing names are skipped. */
   const held = (messageIds: readonly string[]): readonly string[] =>
-    skipMissing ? messageIds.filter((id) => messages.some((message) => message.id === id)) : messageIds;
+    skipMissing ? messageIds.filter((id) => present.has(id)) : messageIds;
 
   /** The history rules for one known row: returns its effect, or throws `HISTORY_INVALID`. */
   const transitionOf = (event: AgentLogEvent): (() => void) => {
@@ -151,7 +168,7 @@ export const createEventLogReducer = (
         assertNewMessageId(knownMessageIds, event.message);
         apply = () => {
           knownMessageIds.add(event.message.id);
-          messages.push(event.message);
+          appendMessage(event.message);
         };
         break;
       }
@@ -178,6 +195,7 @@ export const createEventLogReducer = (
         apply = () => {
           messages = messages.filter((message) => !evictedIds.has(message.id));
           messages.splice(insertionIndex, 0, event.summary);
+          reindex();
           knownMessageIds.add(event.summary.id);
         };
         break;
@@ -197,6 +215,7 @@ export const createEventLogReducer = (
             knownMessageIds.delete(removed.id);
           }
           messages = messages.slice(0, retainedMessageIds.length);
+          reindex();
         };
         break;
       }
@@ -225,6 +244,7 @@ export const createEventLogReducer = (
         const projected = [...messages.slice(0, retainedMessageIds.length), event.message];
         apply = () => {
           messages = projected;
+          reindex();
           knownMessageIds.add(event.message.id);
         };
         break;
@@ -237,7 +257,7 @@ export const createEventLogReducer = (
         assertNewMessageId(knownMessageIds, event.message);
         apply = () => {
           knownMessageIds.add(event.message.id);
-          messages.push(event.message);
+          appendMessage(event.message);
         };
         break;
       }

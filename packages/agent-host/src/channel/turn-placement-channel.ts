@@ -214,7 +214,15 @@ export const serveTurnPlacementChannel = (options: ServeTurnPlacementChannelOpti
         }
         case 'publish': {
           const input = parse('publish', args);
-          return session.publish?.(input) ?? { requestId: input.requestId, status: 'applied' };
+          /* A session with no publish verb records no chat ref, so no other device reads the chat (XD3). */
+          return (
+            session.publish?.(input) ?? {
+              requestId: input.requestId,
+              status: 'refused',
+              code: 'CHAT_NOT_SHARED',
+              message: 'This placement session records no chat ref for other devices.',
+            }
+          );
         }
         default: {
           throw unreadable(name, 'no such verb');

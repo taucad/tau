@@ -52,6 +52,12 @@ const recordingModel = (reply: string): Readonly<{ transport: ModelTransport; re
   };
 };
 
+/** A placement whose chats reach another device: every publish is recorded. */
+const sharedPublish: NonNullable<TurnPlacementPort['publish']> = async ({ requestId }) => ({
+  requestId,
+  status: 'applied',
+});
+
 const launchers: AgentLauncher[] = [];
 const roots: string[] = [];
 
@@ -545,6 +551,55 @@ describe('a chat continued on a second device', () => {
       expect(heartbeatsAfter(rows, 'running')).toEqual([]);
     });
 
+    /* One publish per heartbeat, after its row; an unshared chat is asked once per interval at most, never per tick. */
+    it('should publish once per heartbeat, and ask an unshared chat again only once its answer is an interval old', async () => {
+      const root = await workspace();
+      const gate = Promise.withResolvers<void>();
+      const recorded = recordingModel('answer');
+      const shared = { now: true };
+      const published: Array<Readonly<{ at: number; rows: number }>> = [];
+      const rowCount = async (): Promise<number> => rowsOf(await readFile(ownLog(root), 'utf8').catch(() => '')).length;
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await gate.promise;
+            yield* recorded.transport.stream(request);
+          },
+        },
+        {
+          runHeartbeat: 40,
+          publish: async ({ requestId }) => {
+            published.push({ at: Date.now(), rows: await rowCount() });
+            return shared.now
+              ? { requestId, status: 'applied' }
+              : { requestId, status: 'refused', code: 'CHAT_NOT_SHARED', message: 'No remote.' };
+          },
+        },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      const rows = await rowsUntil(root, (found) => heartbeatsAfter(found, 'running').length >= 3);
+      const heartbeats = heartbeatsAfter(rows, 'running').length;
+      const whileShared = published.length;
+      shared.now = false;
+      await sleep(300);
+      const after = rowsOf(await readFile(ownLog(root), 'utf8'));
+      const whileUnshared = published.length - whileShared;
+      gate.resolve();
+
+      /* While shared: one publish per heartbeat row, plus the first tick's for the rows the run began with. */
+      expect(whileShared).toBeLessThanOrEqual(heartbeats + 2);
+      /* Once unshared, at most the one heartbeat whose publish said so, then none. */
+      expect(heartbeatsAfter(after, 'running').length - heartbeats).toBeLessThanOrEqual(1);
+      /* Asked at most about once an interval while unshared (300 ms at 40 ms), never twice a tick. */
+      expect(whileUnshared).toBeLessThanOrEqual(9);
+    });
+
     /** A run on this device paused on an approval, its stream answering nothing until the pause aborts it. */
     const pausedRun = async (options: Parameters<typeof launch>[2]): Promise<string> => {
       const { root } = await pausedRunOn(options);
@@ -621,7 +676,7 @@ describe('a chat continued on a second device', () => {
 
     /* A forgotten pause holds the chat for a bounded time, then its device stops writing and the fence lets go. */
     it('should stop a paused run’s heartbeats once its hold is over', async () => {
-      const root = await pausedRun({ runHeartbeat: 10, pausedRunHold: 120 });
+      const root = await pausedRun({ runHeartbeat: 10, pausedRunHold: 120, publish: sharedPublish });
       await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= 2);
       await sleep(300);
       const settled = await heartbeatCount(root);
@@ -778,7 +833,7 @@ describe('a chat continued on a second device', () => {
             yield { type: 'completed', stopReason: 'aborted' };
           },
         },
-        { runHeartbeat: 20 },
+        { runHeartbeat: 20, publish: sharedPublish },
       );
       await launcher.execute({
         type: 'start',

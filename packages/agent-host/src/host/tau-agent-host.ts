@@ -311,6 +311,11 @@ type ChatStore = {
   pausedAt?: number | undefined;
   /** When this host last asked the placement to publish the chat's ref for its live run (XD3). */
   publishedAt?: number | undefined;
+  /**
+   * What the placement last said about the chat reaching another device (XD3): shared, or not shared until a moment
+   * one heartbeat interval after it said so; unknown before the first answer and once that moment has passed.
+   */
+  sharing?: Readonly<{ shared: true } | { shared: false; until: number }> | undefined;
 };
 
 /**
@@ -997,20 +1002,37 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    */
   const heartbeatInterval = options.delays?.runHeartbeat ?? runHeartbeatMilliseconds;
   /*
-   * XD3: ask the placement to record the chat's ref; a publish that fails is the next heartbeat's to repeat. Answers
-   * whether the chat reaches another device: `false` only when the placement refuses `CHAT_NOT_SHARED`.
+   * XD3: ask the placement to record the chat's ref; a publish that fails is the next heartbeat's to repeat. Records
+   * whether the chat reaches another device: not when the placement refuses `CHAT_NOT_SHARED`, or has no publish verb
+   * at all (nothing it records reaches another device), and that answer stands for one heartbeat interval.
    */
-  const publishChat = async (chatId: string, runId: string): Promise<boolean> => {
-    try {
-      const answer = await options.placement?.publish?.({
-        requestId: `publish:${chatId}:${runId}:${String(now().getTime())}`,
-        chatId,
-      });
-      return !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED');
-    } catch {
-      /* An offline remote queues the push, and an older session has no such verb. */
-      return true;
+  const publishChat = async (store: ChatStore, chatId: string, runId: string): Promise<boolean> => {
+    const notShared = (): boolean => {
+      store.sharing = { shared: false, until: now().getTime() + heartbeatInterval };
+      return false;
+    };
+    const publish = options.placement?.publish;
+    if (publish === undefined) {
+      return notShared();
     }
+    try {
+      const answer = await publish({ requestId: `publish:${chatId}:${runId}:${String(now().getTime())}`, chatId });
+      if (answer.status === 'refused' && answer.code === 'CHAT_NOT_SHARED') {
+        return notShared();
+      }
+    } catch {
+      /* An offline remote queues the push: the chat is still shared. */
+    }
+    store.sharing = { shared: true };
+    return true;
+  };
+  /** What the placement last said about sharing, while it still stands; `undefined` when it is to be asked. */
+  const sharingOf = (store: ChatStore): boolean | undefined => {
+    const { sharing } = store;
+    if (sharing === undefined || (!sharing.shared && now().getTime() >= sharing.until)) {
+      return undefined;
+    }
+    return sharing.shared;
   };
   const pausedHold = options.delays?.pausedRunHold ?? pausedRunHoldMilliseconds;
   /** Whether the chat's current run is paused here and still inside its hold (XD3). */
@@ -1086,7 +1108,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         let nextPublish = heartbeatInterval;
         if (unpublished && sincePublish >= heartbeatInterval) {
           store.publishedAt = at;
-          void publishChat(chatId, target.runId);
+          void publishChat(store, chatId, target.runId);
         } else if (unpublished) {
           nextPublish = heartbeatInterval - sincePublish;
         }
@@ -1095,10 +1117,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       }
       /*
        * A heartbeat is for the other devices, and builds older than XD3 read it as an opaque row of the run, so none is
-       * written while the placement says the chat reaches no other device. Asked again each interval: a remote can be
-       * added while the run is live.
+       * written while the placement says the chat reaches no other device. That answer stands an interval; the chat
+       * is asked again only before its first heartbeat and once a "not shared" is an interval old (a remote can be
+       * added while the run is live), so no heartbeat row lands on an unshared chat and no tick publishes twice.
        */
-      if (!(await publishChat(chatId, target.runId))) {
+      const sharing = sharingOf(store) ?? (await publishChat(store, chatId, target.runId));
+      if (!sharing) {
         store.publishedAt = now().getTime();
         armHeartbeat(chatId);
         return;
@@ -1121,7 +1145,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
         /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
         store.publishedAt = now().getTime();
-        void publishChat(chatId, target.runId);
+        void publishChat(store, chatId, target.runId);
       } catch {
         /* A fenced or closed log ends the heartbeat with the incarnation that wrote it. */
         return;
@@ -1837,6 +1861,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
                 ...(mode === 'start' && admission?.config ? { config: admission.config } : {}),
                 ...(state === undefined ? {} : { state }),
                 history: events,
+                /* Every device's turns, merged: the runner hands its agent those its session has not seen. */
+                transcript: await log.messages(),
                 append,
                 /* Session state the agent reports between prompts outlives the attempt: not gated by it (VSC3). */
                 appendSession: driverAppender({ chatId, key, leaderEpoch, gated: false }),

@@ -94,6 +94,17 @@ describe('the placement session channel', () => {
     expect(served.complete).toHaveBeenCalledWith({ requestId: 'complete-1', key, cut: true });
   });
 
+  /* XD3: a session with no publish verb records no chat ref, so no other device reads the chat: no heartbeat. */
+  it('should refuse a publish CHAT_NOT_SHARED for a session with no publish verb', async () => {
+    const { client } = connect(session());
+
+    await expect(client.publish?.({ requestId: 'publish-1', chatId: 'chat-1' })).resolves.toMatchObject({
+      requestId: 'publish-1',
+      status: 'refused',
+      code: 'CHAT_NOT_SHARED',
+    });
+  });
+
   it('should answer a request it cannot read FRAME_UNREADABLE and never call the session', async () => {
     const served = session();
     const { client } = connect(served);

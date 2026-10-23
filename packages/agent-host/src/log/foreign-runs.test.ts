@@ -5,6 +5,7 @@ import {
   isAbandonedForeignRun,
   liveForeignRun,
   unsettledForeignRuns,
+  unsettledParsedRuns,
 } from '#log/foreign-runs.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
 import { serializeLogEvent } from '#log/serialization.js';
@@ -40,6 +41,17 @@ const run = (lastRecordedAt: number, runId = 'run-1'): ForeignRun => ({
 const now = Date.parse('2026-10-23T10:00:00.000Z');
 
 describe('the cross-device run fence (XD3)', () => {
+  /* A refold reads every segment again; one whose rows did not change is not folded on its ledger again. */
+  it('should fold a segment’s runs once for as long as its parsed rows are the same', () => {
+    const events = [lifecycle('run-live', 0, { state: 'admitted', at: '2026-10-23T09:58:00.000Z' })];
+    const first = unsettledParsedRuns([{ deviceId: 'device-desktop', events }]);
+    const again = unsettledParsedRuns([{ deviceId: 'device-desktop', events }]);
+    const elsewhere = unsettledParsedRuns([{ deviceId: 'device-phone', events }]);
+
+    expect(again[0]).toBe(first[0]);
+    expect(elsewhere[0]).toMatchObject({ deviceId: 'device-phone' });
+  });
+
   it('should read each segment on its own ledger and keep only runs that have not settled', () => {
     const runs = unsettledForeignRuns([
       segment('device-desktop', [

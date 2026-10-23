@@ -89,7 +89,26 @@ const unsettledRunsOf = (segment: ParsedLogSegment): readonly ForeignRun[] => {
  * @public
  */
 export const unsettledParsedRuns = (segments: readonly ParsedLogSegment[]): readonly ForeignRun[] =>
-  segments.flatMap((segment) => unsettledRunsOf(segment));
+  segments.flatMap((segment) => cachedUnsettledRunsOf(segment));
+
+/*
+ * A segment's runs, by its parsed rows and device: a refold reads every segment again, and one whose rows are the same
+ * array (every reader keeps a parsed segment's rows while its bytes do not change) is not folded on its ledger again.
+ */
+const unsettledByRows = new WeakMap<readonly AgentLogEvent[], Map<string, readonly ForeignRun[]>>();
+const cachedUnsettledRunsOf = (segment: ParsedLogSegment): readonly ForeignRun[] => {
+  let byDevice = unsettledByRows.get(segment.events);
+  if (byDevice === undefined) {
+    byDevice = new Map();
+    unsettledByRows.set(segment.events, byDevice);
+  }
+  let runs = byDevice.get(segment.deviceId);
+  if (runs === undefined) {
+    runs = unsettledRunsOf(segment);
+    byDevice.set(segment.deviceId, runs);
+  }
+  return runs;
+};
 
 /**
  * The unsettled runs other devices' segments hold: each segment folded on its own ledger, never merged (XD3).

@@ -288,7 +288,9 @@ export const refusals = {
   CHECKOUT_UNKNOWN: { owner: 'revisions', retry: 'never' },
   /**
    * The chat's branch is not on this device yet (XD4): its checkout was opened on another device and no branch here
-   * derives it. A sync can bring the branch, so re-send later; the run's ending offers "Resume".
+   * derives it, and a remote may still bring it. A `wait`: never final. Placement runs after the admission row, so the
+   * run ends `RUN_ABANDONED` with this code in its details (no ending row carries a `wait` code, RA-R1), and that
+   * ending offers Resume, which places the turn again once sync brings the branch.
    */
   BRANCH_UNAVAILABLE: { owner: 'revisions', retry: 'wait' },
   /** The branch or publish machine is busy with another verb (W5 RM-S8). */

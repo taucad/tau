@@ -62,6 +62,14 @@ export type ChatRunRegistry = Readonly<{
 type Pending = Readonly<{ chatId: string; resolve: (answer: CommandAnswer) => void }>;
 type RefusedAnswer = Extract<CommandAnswer, Readonly<{ status: 'refused' }>>;
 
+/**
+ * How long a command waits for the chat's closing incarnation to finish closing its log before it is refused
+ * `WRITER_LOCKED`: ten seconds.
+ *
+ * @internal
+ */
+export const chatClosingWaitMilliseconds = 10_000;
+
 const refusedAnswer = (commandId: string, code: RefusalCode | string, message: string): RefusedAnswer => ({
   commandId,
   generation: 0,
@@ -216,12 +224,33 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
    * while its log closes waits for it to end and is served by the next incarnation. Without this the command joins the
    * closing incarnation and is drained `HOST_CLOSED` by a host that is not closed.
    */
-  const pastClosing = async (chatId: string): Promise<void> => {
+  /*
+   * Bounded: a close that never finishes still holds the chat's writer, and a fresh incarnation opened beside it would
+   * be a second writer over the same log. Past the bound the command is refused `WRITER_LOCKED` (`wait`), which the
+   * caller re-sends once the close lands.
+   * Returns `false` when the bound ran out.
+   */
+  const pastClosing = async (chatId: string): Promise<boolean> => {
     const live = actors.get(chatId);
-    if (live?.getSnapshot().status === 'active' && live.getSnapshot().matches('closing')) {
-      await waitFor(live, (snapshot) => snapshot.status !== 'active').catch(() => undefined);
+    if (live?.getSnapshot().status !== 'active' || !live.getSnapshot().matches('closing')) {
+      return true;
+    }
+    const bound = options.delays?.closingWait ?? chatClosingWaitMilliseconds;
+    try {
+      await waitFor(live, (snapshot) => snapshot.status !== 'active', {
+        signal: AbortSignal.timeout(bound), // Bound: chatClosingWaitMilliseconds.
+      });
+      return true;
+    } catch {
+      return live.getSnapshot().status !== 'active';
     }
   };
+  const stillClosing = (commandId: string, chatId: string): RefusedAnswer =>
+    refusedAnswer(
+      commandId,
+      'WRITER_LOCKED',
+      `Chat ${chatId} is still closing its log from an earlier session; send this again in a moment.`,
+    );
 
   const claim = async (chatId: string): Promise<ChatRunClaim> => {
     if (closing) {
@@ -230,7 +259,9 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
     if (fenced.has(chatId)) {
       return { refused: refusedAnswer('claim', 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`) };
     }
-    await pastClosing(chatId);
+    if (!(await pastClosing(chatId))) {
+      return { refused: stillClosing('claim', chatId) };
+    }
     if (isClosing()) {
       return { refused: refusedAnswer('claim', 'HOST_CLOSED', 'The Tau agent host is closed.') };
     }
@@ -278,7 +309,9 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
     if (fenced.has(chatId)) {
       return refusedAnswer(command.commandId, 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`);
     }
-    await pastClosing(chatId);
+    if (!(await pastClosing(chatId))) {
+      return stillClosing(command.commandId, chatId);
+    }
     /* Read through a call: `close` or `relinquish` may land while the closing incarnation ends. */
     if (isClosing()) {
       return refusedAnswer(command.commandId, 'HOST_CLOSED', 'The Tau agent host is closed.');

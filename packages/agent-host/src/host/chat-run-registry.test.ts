@@ -279,6 +279,58 @@ describe('the chat-run registry (RA-S3)', () => {
     await registry.close();
   });
 
+  /* A close that never finishes still holds the chat's writer: a command waits for it only so long, then is refused
+   * retryably, and no second incarnation opens over a writer that may still be held. */
+  it('should refuse WRITER_LOCKED once an evicted incarnation has spent the bound closing its log', async () => {
+    const closeStarted = Promise.withResolvers<void>();
+    let opens = 0;
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      delays: { closingWait: 50 },
+      services: {
+        openLog: async () => {
+          opens++;
+          return { ledger: emptyChatLedger, repair: [] };
+        },
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw new Error('Unexpected admission');
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          closeStarted.resolve();
+          await new Promise<never>(() => {
+            /* A close that never finishes. */
+          });
+        },
+      },
+    });
+    await registry.claim('chat-stuck-closing');
+    void registry.evict('chat-stuck-closing');
+    await closeStarted.promise;
+
+    const answer = await registry.execute({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-stuck-closing',
+        runId: 'run-stuck-closing',
+        trigger: 'submit',
+        message: { id: 'turn-stuck-closing', role: 'user', content: 'Start.' },
+      },
+    });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'WRITER_LOCKED' });
+    expect(opens).toBe(1);
+  });
+
   it('should refuse commands with HOST_CLOSED and open no log after close', async () => {
     const file = createMemoryLogFile();
     const opened = vi.fn(file.open);

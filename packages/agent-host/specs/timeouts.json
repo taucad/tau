@@ -93,6 +93,22 @@
       "owner": "XD3"
     },
     {
+      "id": "CHAT-CLOSING-WAIT",
+      "bound": "A command that reaches a chat whose incarnation is closing waits at most ten seconds for its log to close, then is refused WRITER_LOCKED (wait)",
+      "site": "packages/agent-host/src/host/chat-run-registry.ts",
+      "token": "chatClosingWaitMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
+      "id": "XD4-OPEN",
+      "bound": "Turn placement waits at most thirty seconds for a branch's checkout to open on this device, then refuses REVISIONS_UNAVAILABLE (wait) (XD4)",
+      "site": "packages/revisions/src/turn-placement.ts",
+      "token": "checkoutOpenMilliseconds",
+      "class": "External edge",
+      "owner": "XD4"
+    },
+    {
       "id": "A11",
       "bound": "Sync backoff",
       "site": "packages/revisions/src/sync.machine.ts",

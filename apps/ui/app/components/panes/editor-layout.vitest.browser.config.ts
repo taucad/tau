@@ -11,6 +11,7 @@ export default defineConfig({
     host: '127.0.0.1',
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
+  optimizeDeps: { entries: ['app/components/panes/editor-layout.browser.test.tsx'] },
   test: {
     include: ['app/components/panes/editor-layout.browser.test.tsx'],
     fileParallelism: false,

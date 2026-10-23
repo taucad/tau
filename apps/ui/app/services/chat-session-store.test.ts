@@ -6154,28 +6154,49 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     expect(listeners.size).toBe(0);
   });
 
-  it('should leave a legacy placement in the chat record when this device’s placement cannot be written', async () => {
-    const chatId = 'chat_legacy_unwritable';
+  /* The placement is written only once the chat record's drop has committed: a drop the lock refuses writes none. */
+  it('should write this device’s placement only after the chat record dropped the legacy host', async () => {
+    const chatId = 'chat_legacy_drop_refused';
     const deps = createStubDeps();
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    vi.spyOn(deps.client, 'writeFile').mockRejectedValue(new Error('quota'));
-    let legacy: string | undefined = 'origin';
     const { store, session } = await openLoaded(
       {
         ...deps,
+        /* Accepted, then refused under the lock: another device rewrote the record meanwhile. */
         adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
-          if (!(await accept('origin'))) {
-            return undefined;
-          }
-          legacy = undefined;
-          return 'origin';
+          await accept('origin');
+          return undefined;
         },
       },
       chatId,
     );
 
-    expect(legacy).toBe('origin');
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
     expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model });
+    store.release(chatId);
+  });
+
+  /* A placement write that fails after the drop leaves the chat local on the next open: always reachable, never lost
+   * to a host the record no longer names. */
+  it('should run this session on an adopted host even when its placement cannot be written', async () => {
+    const chatId = 'chat_legacy_unwritable';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    vi.spyOn(deps.client, 'writeFile').mockRejectedValue(new Error('quota'));
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) =>
+          (await accept('origin')) ? 'origin' : undefined,
+      },
+      chatId,
+    );
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
     store.release(chatId);
   });
 

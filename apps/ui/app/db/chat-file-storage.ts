@@ -316,7 +316,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   const write = async (
     chatId: string,
     mutate: (chat: Chat) => Chat | undefined,
-    writeOptions: Readonly<{ dropLegacyPlacement?: TauAgentHostId }> = {},
+    writeOptions: Readonly<{ dropLegacyPlacement?: TauAgentHostId; supersedeLegacyPlacement?: boolean }> = {},
   ): Promise<Chat | undefined> =>
     mutex.run(chatId, async () => {
       const projectId = await locate(chatId);
@@ -330,13 +330,22 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       if (writeOptions.dropLegacyPlacement !== undefined && storedLegacy !== writeOptions.dropLegacyPlacement) {
         return undefined;
       }
-      const legacy = writeOptions.dropLegacyPlacement === undefined ? storedLegacy : undefined;
+      /* An explicit choice of the chat's execution supersedes a legacy pin: only an untouched record keeps it. */
+      const legacy =
+        writeOptions.dropLegacyPlacement === undefined && writeOptions.supersedeLegacyPlacement !== true
+          ? storedLegacy
+          : undefined;
       const record = stored === undefined ? undefined : withPortableExecution(stored);
       const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
       if (existing === undefined || existing.purgedAt !== undefined) {
         return undefined;
       }
-      const updated = mutate(existing);
+      const mutated = mutate(existing);
+      /* The same execution chosen again still drops the pin it supersedes: the record is written without it. */
+      const updated =
+        mutated === undefined && writeOptions.supersedeLegacyPlacement === true && storedLegacy !== undefined
+          ? existing
+          : mutated;
       if (updated === undefined) {
         /* A no-op is reported as `undefined`, exactly as the object store's
          * `writeChatAtomic` did: the caller's cache invalidation is keyed on a
@@ -348,15 +357,23 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     });
 
   /** As {@link write}, but `false` from the mutator means "nothing changed". */
-  const patch = async (chatId: string, mutate: (chat: Chat) => boolean): Promise<Chat | undefined> =>
-    write(chatId, (chat) => {
-      const draft = { ...chat };
-      if (!mutate(draft)) {
-        return undefined;
-      }
-      draft.updatedAt = Date.now();
-      return draft;
-    });
+  const patch = async (
+    chatId: string,
+    mutate: (chat: Chat) => boolean,
+    writeOptions: Parameters<typeof write>[2] = {},
+  ): Promise<Chat | undefined> =>
+    write(
+      chatId,
+      (chat) => {
+        const draft = { ...chat };
+        if (!mutate(draft)) {
+          return undefined;
+        }
+        draft.updatedAt = Date.now();
+        return draft;
+      },
+      writeOptions,
+    );
 
   const create = async (
     resourceId: string,
@@ -536,18 +553,22 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     },
 
     patchChat: async (chatId, key, value) =>
-      patch(chatId, (chat) => {
-        if (key === 'messages') {
-          throw new Error('Chat transcript messages are host-log-owned and cannot be patched in chat.json.');
-        }
-        const next =
-          key === 'activeExecution' ? (portableExecutionOf(value as Chat['activeExecution']) as typeof value) : value;
-        if (valuesEqual(chat[key], next)) {
-          return false;
-        }
-        chat[key] = next;
-        return true;
-      }),
+      patch(
+        chatId,
+        (chat) => {
+          if (key === 'messages') {
+            throw new Error('Chat transcript messages are host-log-owned and cannot be patched in chat.json.');
+          }
+          const next =
+            key === 'activeExecution' ? (portableExecutionOf(value as Chat['activeExecution']) as typeof value) : value;
+          if (valuesEqual(chat[key], next)) {
+            return false;
+          }
+          chat[key] = next;
+          return true;
+        },
+        { supersedeLegacyPlacement: key === 'activeExecution' },
+      ),
 
     touchChatRecency: async (chatId, requestedAt) =>
       patch(chatId, (chat) => {

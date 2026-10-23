@@ -95,7 +95,8 @@ export type ChatStorage = {
   /**
    * Adopt the device-relative Tau placement (`origin`, a `loopback:` daemon) a record written before placement moved
    * to the device still carries (XD2). Asked once, by a session's open: when `accept` holds for the host, the record is
-   * written without it and the host is answered; otherwise nothing is written. Every other write keeps the host.
+   * written without it and the host is answered; otherwise nothing is written. An explicit write of the chat's
+   * `activeExecution` drops the host too (it is superseded); every other write keeps it.
    */
   adoptLegacyChatPlacement?(
     chatId: string,

@@ -188,7 +188,8 @@ export type ChatSessionDeps = {
   /**
    * Adopt the device-relative placement a chat record written before placement moved to the device still names (XD2),
    * once, on a session's open: when `accept` holds for it, the record is written without it and it is answered, to
-   * become this device's placement for the chat. Every other write keeps it in the record.
+   * become this device's placement for the chat once that write has committed. An explicit write of the chat's
+   * execution drops it too; every other write keeps it in the record.
    */
   adoptLegacyChatPlacement?:
     | ((
@@ -3635,15 +3636,20 @@ export class ChatSessionStore {
     const adoptLegacyPlacement = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
       const deps = depsRef();
       try {
-        /* The placement is written, and confirmed, before the chat record drops the host: a failed write drops nothing. */
+        /*
+         * The placement is written only once the chat record's drop has committed under its lock, so it never names a
+         * host the record no longer held. A placement write that fails then costs only this pin: the next open reads
+         * the chat as local, which every tab reaches.
+         */
         const adopted = await deps.adoptLegacyChatPlacement?.(
           storedChat.id,
           projectId,
-          async (hostId) =>
-            (await deps.isPlacementOnThisDevice?.(hostId)) === true &&
-            (await writeChatPlacement({ client: deps.client, projectId, chatId: storedChat.id, placement: hostId })),
+          async (hostId) => (await deps.isPlacementOnThisDevice?.(hostId)) === true,
         );
-        this.#placementReads.delete(projectId);
+        if (adopted !== undefined) {
+          await writeChatPlacement({ client: deps.client, projectId, chatId: storedChat.id, placement: adopted });
+          this.#placementReads.delete(projectId);
+        }
         return adopted;
       } catch {
         /* Local placement is always reachable: a legacy pin that cannot be adopted reads as local. */

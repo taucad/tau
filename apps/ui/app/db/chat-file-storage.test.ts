@@ -1246,14 +1246,10 @@ describe('chat file store — device-relative placement never reaches chat.json'
       const listed = await store.getChatRecordsForResource(projectId);
       expect(listed.map((chat) => chat.activeExecution)).toEqual([{ kind: 'tau', model }]);
 
-      /* A recency touch, a rename and a model change on a device that cannot reach the host keep it. */
+      /* A recency touch and a rename keep it. */
       await store.touchChatRecency(chatId, Date.now());
       await store.updateChat(chatId, { name: 'Renamed' });
-      await store.patchChat(chatId, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5' });
       expect(await storedHost()).toBe(hostId);
-      await expect(store.getChat(chatId, projectId)).resolves.toMatchObject({
-        activeExecution: { kind: 'tau', model: 'openai-gpt-5.5' },
-      });
 
       /* A device that cannot reach it never adopts it; the one that can, does, once. */
       await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => false)).resolves.toBeUndefined();
@@ -1263,6 +1259,33 @@ describe('chat file store — device-relative placement never reaches chat.json'
       await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
     },
   );
+
+  /* An explicit choice of the chat's execution supersedes a legacy pin, even one that names the same model. */
+  it.each([
+    ['another model', { kind: 'tau', model: 'openai-gpt-5.5' }],
+    ['the same model', { kind: 'tau', model }],
+  ] as const)('should drop a legacy placement when the execution is chosen again, with %s', async (_label, chosen) => {
+    const files = createStoreWithFiles();
+    const chatId = 'chat_legacy_superseded';
+    await files.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'Pinned',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      })}\n`,
+    );
+    const store = files.reopen();
+
+    await store.patchChat(chatId, 'activeExecution', chosen);
+
+    const stored = JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: unknown };
+    expect(stored.activeExecution).toEqual(chosen);
+    await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
+  });
 
   /* The host is accepted outside the chat's lock; a different one found under the lock is not dropped. */
   it('should not drop a legacy host that changed between its acceptance and the adopting write', async () => {

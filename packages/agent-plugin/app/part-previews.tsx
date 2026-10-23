@@ -13,9 +13,9 @@ import type {
 import type { ModelThumbnailRequest, ModelThumbnails } from '@taucad/workbench-panes/model/model-source';
 import { PartGallery } from '@taucad/workbench-panes/model/part-gallery';
 import type { PartGalleryPreviewRequest, PartGalleryPreviews } from '@taucad/workbench-panes/model/part-gallery';
+import { base64ToUint8Array } from 'uint8array-extras';
 import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge } from '#app/host-bridge.js';
-import { decodeBase64 } from '#app/model-loader.js';
 
 /** The page-only tool `tau mcp` renders part thumbnails with. */
 export const partThumbnailsToolName = 'app_part_thumbnails';
@@ -106,7 +106,7 @@ export function createPartThumbnails(bridge: HostBridge, modelId: string): PartT
               const data = rendered.get(id);
               return data === undefined
                 ? failed(id, new Error(`No preview was rendered for ${id}.`))
-                : [id, { status: 'ready', bytes: decodeBase64(data) }];
+                : [id, { status: 'ready', bytes: base64ToUint8Array(data) }];
             }),
           );
         } catch (error) {

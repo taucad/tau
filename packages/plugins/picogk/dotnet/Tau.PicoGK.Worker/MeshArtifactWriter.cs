@@ -187,15 +187,34 @@ internal static class MeshArtifactWriter
             component.Kind is not ("triangles" or "lines") ||
             component.Kind == "triangles" && (component.Normals.Length != component.Positions.Length || component.Indices.Length % 3 != 0) ||
             component.Kind == "lines" && (component.Normals.Length != 0 || component.Indices.Length % 2 != 0 || vertices < 2) ||
-            component.Indices.Any(index => index >= vertices) ||
-            component.Positions.Any(value => !float.IsFinite(value)) || component.Normals.Any(value => !float.IsFinite(value)) ||
+            !AllBelow(component.Indices, (uint)vertices) ||
+            !AllFinite(component.Positions) || !AllFinite(component.Normals) ||
             component.Color.Length != 4 || component.Color.Any(value => !float.IsFinite(value) || value < 0 || value > 1) ||
             !float.IsFinite(component.Metallic) || component.Metallic < 0 || component.Metallic > 1 ||
             !float.IsFinite(component.Roughness) || component.Roughness < 0 || component.Roughness > 1 ||
-            component.TexCoords is { } uv && (component.Kind != "triangles" || uv.Length != vertices * 2 || uv.Any(value => !float.IsFinite(value))) ||
+            component.TexCoords is { } uv && (component.Kind != "triangles" || uv.Length != vertices * 2 || !AllFinite(uv)) ||
             component.Tangents is { } tangents && (component.Kind != "triangles" || tangents.Length != vertices * 4 ||
-                tangents.Any(value => !float.IsFinite(value))))
+                !AllFinite(tangents)))
             throw new InvalidDataException("Invalid PicoGK scene prototype or occurrence.");
+    }
+
+    // CH10: flat loops over the bulk arrays; one delegate call per element cost milliseconds per component.
+    private static bool AllFinite(float[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!float.IsFinite(value)) return false;
+        }
+        return true;
+    }
+
+    private static bool AllBelow(uint[] indices, uint count)
+    {
+        foreach (var index in indices)
+        {
+            if (index >= count) return false;
+        }
+        return true;
     }
 
     private static void Align(Stream stream, IncrementalHash digest)

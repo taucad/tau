@@ -51,25 +51,19 @@ internal static class Program
              * while it can still stop it. The reader pairs each request with the token it can be
              * cancelled through; the lane is serialized, so a cancel can only mean the request whose
              * frame was read last. */
-            var frames = new BlockingCollection<(string Line, CancellationTokenSource Cancellation)>();
+            var frames = new BlockingCollection<(Frame Frame, CancellationTokenSource Cancellation)>();
             var reader = new Thread(() => ReadFrames(input, frames))
             {
                 IsBackground = true,
                 Name = "Tau protocol reader",
             };
             reader.Start();
-            foreach (var (line, cancellation) in frames.GetConsumingEnumerable())
+            foreach (var (frame, cancellation) in frames.GetConsumingEnumerable())
             {
-                if (line.Length > MaximumRequestCharacters) return 2;
-                Request request;
-                try
+                if (frame.Oversized) return 2;
+                if (frame.Request is not { } request)
                 {
-                    request = JsonSerializer.Deserialize<Request>(line, JsonOptions)
-                        ?? throw new JsonException("Request was null.");
-                }
-                catch (JsonException exception)
-                {
-                    error.WriteLine(exception.Message);
+                    error.WriteLine(frame.Error);
                     return 2;
                 }
                 if (request.ProtocolVersion != ProtocolVersion) return 2;
@@ -109,34 +103,40 @@ internal static class Program
         }
     }
 
-    private static void ReadFrames(TextReader input, BlockingCollection<(string, CancellationTokenSource)> frames)
+    /// <summary>One protocol line, parsed once by the reader (CH16): a request, or why it is not one.</summary>
+    internal sealed record Frame(Request? Request, string? Error, bool Oversized);
+
+    private static void ReadFrames(TextReader input, BlockingCollection<(Frame, CancellationTokenSource)> frames)
     {
         CancellationTokenSource? active = null;
         string? line;
         while ((line = input.ReadLine()) is not null)
         {
-            if (IsCancelFrame(line))
+            var frame = ParseFrame(line);
+            if (frame.Request?.Method == "cancel")
             {
                 active?.Cancel();
                 continue;
             }
             active = new CancellationTokenSource();
-            frames.Add((line, active));
+            frames.Add((frame, active));
         }
         frames.CompleteAdding();
     }
 
-    private static bool IsCancelFrame(string line)
+    // An oversized or malformed frame is not a cancel; the request loop owns its rejection.
+    internal static Frame ParseFrame(string line)
     {
-        // An oversized or malformed frame is not a cancel; the request loop owns its rejection.
-        if (line.Length > MaximumRequestCharacters) return false;
+        if (line.Length > MaximumRequestCharacters) return new Frame(null, null, true);
         try
         {
-            return JsonSerializer.Deserialize<Request>(line, JsonOptions)?.Method == "cancel";
+            return JsonSerializer.Deserialize<Request>(line, JsonOptions) is { } request
+                ? new Frame(request, null, false)
+                : new Frame(null, "Request was null.", false);
         }
-        catch (JsonException)
+        catch (JsonException exception)
         {
-            return false;
+            return new Frame(null, exception.Message, false);
         }
     }
 
@@ -214,6 +214,7 @@ internal static class Program
                 }
                 cancellation.ThrowIfCancellationRequested();
                 Write(new { protocolVersion = ProtocolVersion, requestId = request.RequestId, result });
+                ModelRunner.CollectReleased();
                 return false;
             }
             case "shutdown":

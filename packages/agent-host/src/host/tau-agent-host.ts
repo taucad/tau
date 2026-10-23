@@ -1122,20 +1122,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         return;
       }
       const { wrote } = store;
+      /* What this tick decided on: a heartbeat is written only if no row lands before it does. */
+      const decided = wrote;
       const at = now().getTime();
       const quiet = wrote?.leaderEpoch === target.leaderEpoch ? at - wrote.at : heartbeatInterval;
       if (quiet < heartbeatInterval) {
         /* Rows were written within the interval, so no heartbeat; those rows are published on the same cadence, or a
-         * busy run's chat would reach the other devices only when it settles and look stale there (XD3). */
+         * busy run's chat would reach the other devices only when it settles and look stale there (XD3). A tick that
+         * publishes them waits a whole interval for the next, so a heartbeat never publishes again moments later: the
+         * newest row is then at most two intervals old, far inside the staleness bound. */
         const sincePublish = store.publishedAt === undefined ? heartbeatInterval : at - store.publishedAt;
         const unpublished = wrote !== undefined && (store.publishedAt === undefined || wrote.at > store.publishedAt);
-        let nextPublish = heartbeatInterval;
         if (unpublished && sincePublish >= heartbeatInterval) {
           store.publishedAt = at;
           void publishChat(store, chatId, target.runId);
-        } else if (unpublished) {
-          nextPublish = heartbeatInterval - sincePublish;
+          armHeartbeat(chatId);
+          return;
         }
+        const nextPublish = unpublished ? heartbeatInterval - sincePublish : heartbeatInterval;
         armHeartbeat(chatId, Math.min(heartbeatInterval - quiet, nextPublish));
         return;
       }
@@ -1169,9 +1173,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
          * closed log is never reopened for a heartbeat. */
         const committed = await serial(chatId, async () => {
           const current = heartbeatTarget(store, chatId, deliver);
-          return current === undefined
-            ? undefined
-            : write(chatId, current.leaderEpoch, [{ runId: current.runId, body: heartbeat }]);
+          /* A row written while this tick waited (for the chain, or for a recheck's answer) is the run's liveness
+           * already, and its write armed the next tick: this one writes and publishes nothing, so two ticks never
+           * both publish. */
+          if (current === undefined || store.wrote !== decided) {
+            return undefined;
+          }
+          return write(chatId, current.leaderEpoch, [{ runId: current.runId, body: heartbeat }]);
         });
         if (committed === undefined) {
           return;

@@ -4,6 +4,7 @@
  * order, on every host; the writer still appends only to its own file, and run bookkeeping reads only its own rows.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -368,10 +369,11 @@ describe('a chat continued on a second device', () => {
       await turn(onPhone, 'run-phone-1', 'first, on the phone');
       await project(desktop, 'device-phone', await readFile(ownLog(phone), 'utf8'));
       await turn(onDesktop, 'run-desktop-1', 'second, on the desktop');
-      refreshes = 0;
 
+      /* Retried while the last run's settlement lands: only the attempt that is admitted is counted. */
       await vi.waitFor(
         async () => {
+          refreshes = 0;
           const answer = await onDesktop.execute({
             type: 'start',
             commandId: key(),
@@ -826,7 +828,8 @@ describe('a chat continued on a second device', () => {
       const recorded = recordingModel('answer');
       const shared = { now: true };
       const published: Array<Readonly<{ at: number; rows: number }>> = [];
-      const rowCount = async (): Promise<number> => rowsOf(await readFile(ownLog(root), 'utf8').catch(() => '')).length;
+      /* Read synchronously, so a publish and the rows it sees, and the counts at the flip below, are one moment. */
+      const rowsNow = () => rowsOf(existsSync(ownLog(root)) ? readFileSync(ownLog(root), 'utf8') : '');
       const launcher = launch(
         createNodeChatStore({ workspaceRoot: root }),
         {
@@ -839,7 +842,7 @@ describe('a chat continued on a second device', () => {
         {
           runHeartbeat: 40,
           publish: async ({ requestId }) => {
-            published.push({ at: Date.now(), rows: await rowCount() });
+            published.push({ at: Date.now(), rows: rowsNow().length });
             return shared.now
               ? { requestId, status: 'applied' }
               : { requestId, status: 'refused', code: 'CHAT_NOT_SHARED', message: 'No remote.' };
@@ -851,24 +854,26 @@ describe('a chat continued on a second device', () => {
         commandId: key(),
         payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
       });
-      const rows = await rowsUntil(root, (found) => heartbeatsAfter(found, 'running').length >= 3);
-      const heartbeats = heartbeatsAfter(rows, 'running').length;
+      await rowsUntil(root, (found) => heartbeatsAfter(found, 'running').length >= 3);
+      const heartbeats = heartbeatsAfter(rowsNow(), 'running').length;
       const whileShared = published.length;
       shared.now = false;
       await sleep(300);
-      const after = rowsOf(await readFile(ownLog(root), 'utf8'));
+      const after = rowsNow();
       const whileUnshared = published.length - whileShared;
       gate.resolve();
 
-      /* While shared: one publish per heartbeat row, plus the one that asks at the run's start and the one that carries
-       * the rows its first attempt wrote after that. */
-      expect(whileShared).toBeLessThanOrEqual(heartbeats + 2);
-      /* And never two in one tick: no probe right before a heartbeat's own publish. */
+      /* While shared: every heartbeat row is published (after it, by the same tick). Publishes of the run's own rows
+       * come on the same cadence; one may carry nothing new, since a row is marked written only once its append has
+       * landed, and a publish that already carried it cannot tell. */
+      expect(whileShared).toBeGreaterThanOrEqual(heartbeats);
+      /* And never two within an interval (40 ms; timers fire late, never early): no probe right before a heartbeat's
+       * own publish, and no heartbeat publish right after a publish of the run's rows. */
       const gaps = published
         .slice(0, whileShared)
         .slice(1)
         .map((call, index) => call.at - published[index]!.at);
-      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(5);
+      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(30);
       /* Once unshared, at most the one heartbeat whose publish said so, then none. */
       expect(heartbeatsAfter(after, 'running').length - heartbeats).toBeLessThanOrEqual(1);
       /* Asked at most about once an interval while unshared (300 ms at 40 ms), never twice a tick. */
@@ -877,12 +882,14 @@ describe('a chat continued on a second device', () => {
 
     /* The tick that asks an unshared chat again and hears it is shared now writes its heartbeat then, not a tick later;
      * it still publishes once. */
+    /* The tick that asks an unshared chat again and hears it is shared now writes its heartbeat then, not a tick later;
+     * it still publishes once. */
     it('should write the heartbeat on the tick whose recheck finds the chat shared', async () => {
       const root = await workspace();
       const gate = Promise.withResolvers<void>();
       const recorded = recordingModel('answer');
       const shared = { now: false };
-      const published: Array<Readonly<{ heartbeats: number; shared: boolean }>> = [];
+      const published: Array<Readonly<{ at: number; rows: number; shared: boolean }>> = [];
       const launcher = launch(
         createNodeChatStore({ workspaceRoot: root }),
         {
@@ -895,9 +902,10 @@ describe('a chat continued on a second device', () => {
         {
           runHeartbeat: 40,
           publish: async ({ requestId }) => {
+            /* Read as the publish is asked, before the next tick can write another row. */
+            const rows = rowsOf(existsSync(ownLog(root)) ? readFileSync(ownLog(root), 'utf8') : '');
+            published.push({ at: Date.now(), rows: rows.length, shared: shared.now });
             const answer = shared.now;
-            const rows = rowsOf(await readFile(ownLog(root), 'utf8').catch(() => ''));
-            published.push({ heartbeats: heartbeatsAfter(rows, 'running').length, shared: answer });
             return answer
               ? { requestId, status: 'applied' }
               : { requestId, status: 'refused', code: 'CHAT_NOT_SHARED', message: 'No remote.' };
@@ -909,8 +917,16 @@ describe('a chat continued on a second device', () => {
         commandId: key(),
         payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
       });
-      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
-      await sleep(100);
+      /* Past the ask at the run's start and the publishes of its first rows (they can land over a few ticks): two
+       * rechecks in a row that found no new row, so every publish from here is a recheck or a heartbeat's. */
+      await vi.waitFor(
+        () => {
+          const [before, last] = published.slice(-2);
+          expect(published.length).toBeGreaterThanOrEqual(3);
+          expect(last?.rows).toBe(before?.rows);
+        },
+        { timeout: 3000 },
+      );
       shared.now = true;
       await vi.waitFor(
         () => {
@@ -918,11 +934,18 @@ describe('a chat continued on a second device', () => {
         },
         { timeout: 3000 },
       );
+      const rows = rowsOf(await readFile(ownLog(root), 'utf8'));
       gate.resolve();
 
       const [recheck, next] = published.filter((call) => call.shared);
-      /* The recheck's own tick wrote one row after it, and the next tick one more before its publish. */
-      expect(next!.heartbeats - recheck!.heartbeats).toBe(2);
+      /* Milliseconds round both ways: a row stamped in the recheck's millisecond counts as after it. */
+      const first = heartbeatsAfter(rows, 'running').find((row) => Date.parse(row.recordedAt) >= recheck!.at - 1);
+      /*
+       * Its row lands on the recheck's own tick, so the next publish comes a timer's interval (40 ms) after it; a row
+       * written only by the next tick would be published by that tick at once. Load only lengthens the interval.
+       */
+      expect(first).toBeDefined();
+      expect(next!.at - Date.parse(first!.recordedAt)).toBeGreaterThanOrEqual(30);
     });
 
     /** A run on this device paused on an approval, its stream answering nothing until the pause aborts it. */

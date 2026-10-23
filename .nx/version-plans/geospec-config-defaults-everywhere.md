@@ -1,7 +1,7 @@
 ---
 geospec: minor
 host: minor
-mcp: patch
+mcp: minor
 ---
 
 `geospec/vitest/node` exports `setupGeoSpecVitestProject()`, which reads the project's `geospec.config.*` (exporters and `testTimeout`, with programmatic overrides), builds the model loader and installs the GeoSpec matchers for a Vitest project. The authoring skill says models load through the exporter the host or the project's `geospec.config.ts` supplies, which on Tau projects is Tau's runtime.

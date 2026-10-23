@@ -172,6 +172,20 @@ const main = async (): Promise<void> => {
       ),
     );
 
+    // isolation_session is PSEC-INDEPENDENT: it mints a per-session agent user + SID rather than
+    // using the process-security-environment feature, so it can be the stock-Windows isolation path
+    // where PSEC is flighted-off. Informational here (excluded from the gate like conpty): this fact
+    // decides whether the isolation_session lane is worth standing up on these runners.
+    const isolationSessionAvailable = Boolean(probeFacts['isolationSessionAvailable']);
+    checks.push(
+      check(
+        'mxc.isolationSession.available',
+        'isolationSessionAvailable (PSEC-independent per-session agent-user backend)',
+        String(isolationSessionAvailable),
+        isolationSessionAvailable,
+      ),
+    );
+
     const preflight = await preflightSentinel(sdk);
     checks.push(preflight.check);
     psecCreateClose = preflight.psecCreateClose;
@@ -208,9 +222,18 @@ const main = async (): Promise<void> => {
   );
 
   const apiPresent = Boolean(probeFacts['baseContainerApiPresent']) && psecCreateClose.available;
+  const isolationSessionAvailable = Boolean(probeFacts['isolationSessionAvailable']);
+  // Root-caused from mxc_ffi.dll: a false baseContainerApiPresent means CreateProcessSecurityEnvironment
+  // returned E_NOTIMPL — "The process security environment feature is not enabled on this OS build
+  // (disabled feature flags: ...)". PSEC is gated behind Windows VELOCITY/experimental feature flags,
+  // not a DISM optional feature; it is OFF by default on GA builds (observed false on both hosted
+  // windows-2025/Server 2025 AND real windows-11-arm Enterprise 25H2), so stock consumer Win11
+  // Home/Pro lacks it too. Enabling needs a flighted build or an experimental-features toggle that
+  // takes effect only after a REBOOT, so it cannot be turned on inside a single CI job. MXC falls
+  // back to AppContainer (appcontainer-bfs / appcontainer-dacl) on such builds.
   const conclusion = apiPresent
     ? 'PSEC/processcontainer base-container API present: the two-container isolation receipt is exercisable on this row.'
-    : 'PSEC/processcontainer base-container API NOT present on this Windows build (typed-unavailable, fail-closed — not a bug). The MXC two-container isolation receipt is not exercisable here; it needs a PSEC-capable Windows build (the Win11 Eval VM lane; §RQ5 minimum-build / D9). On this row the exercisable Windows isolation path is the capability-SID fallback.';
+    : `PSEC/processcontainer base-container API NOT present on this Windows build (typed-unavailable, fail-closed — not a bug). Root cause: CreateProcessSecurityEnvironment returns E_NOTIMPL because the process-security-environment feature flag is disabled on this GA build; it is a flighted/experimental feature, off by default on consumer and server SKUs alike, and enabling it needs a reboot so it cannot be enabled in-CI. The PSEC two-container receipt needs a flighted/VM Windows build. PSEC-INDEPENDENT alternative on this host: isolation_session (per-session agent user + SID) isolationSessionAvailable=${String(isolationSessionAvailable)} — if true it is the stock-Windows isolation path and does not require the PSEC feature flag.`;
 
   const receipt = {
     kind: 'capability-probe',
@@ -225,8 +248,13 @@ const main = async (): Promise<void> => {
     checks,
     // The row is green only if the SDK loaded, PSEC create/close was externally proven, and the
     // deny-path capability is present. ConPTY absence is recorded but does not alone sink the row
-    // (the shell can run without allocating new ttys); the summary states it explicitly.
-    verdict: checks.filter((c) => c.id !== 'mxc.conpty.binding').every((c) => c.verdict === 'pass') ? 'pass' : 'fail',
+    // (the shell can run without allocating new ttys); the isolation_session fact is informational.
+    // The summary states both explicitly.
+    verdict: checks
+      .filter((c) => c.id !== 'mxc.conpty.binding' && c.id !== 'mxc.isolationSession.available')
+      .every((c) => c.verdict === 'pass')
+      ? 'pass'
+      : 'fail',
     sdkAvailable: prereq.available,
   };
   const path = join(outDir(), 'probe.receipt.json');

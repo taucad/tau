@@ -345,12 +345,17 @@ s1Checks.push(
 canary.close();
 hostCanary.close();
 
-// Descendants: a backgrounded grandchild writing a sentinel must be reaped on cancellation.
+// Descendants: a backgrounded grandchild that escapes into its own session must still be reaped
+// on cancellation. The grandchild is made a session leader so the test proves tree-wide reaping,
+// not just process-group signalling. `setsid` is util-linux (absent on macOS), so fall back to
+// perl's POSIX::setsid, which ships on every target row — without the fallback the grandchild
+// never spawns on macOS and descendant-reaped passes vacuously.
 const sentinel = join(temporary, 'sentinel.log');
 rmSync(sentinel, { force: true });
+const descendantLoop = `while true; do echo tick >> ${p(sentinel)}; sleep 1; done`;
 const descendantCommand = isWindows
-  ? `( while true; do echo tick >> ${p(sentinel)}; sleep 1; done & ) ; sleep 2; echo STARTED`
-  : `setsid bash -c 'while true; do echo tick >> ${p(sentinel)}; sleep 1; done' & echo STARTED; sleep 30`;
+  ? `( ${descendantLoop} & ) ; sleep 2; echo STARTED`
+  : `loop='${descendantLoop}'; if command -v setsid >/dev/null 2>&1; then setsid bash -c "$loop" & else perl -MPOSIX -e 'POSIX::setsid(); exec("bash","-c",$ARGV[0])' "$loop" & fi; echo STARTED; sleep 30`;
 const descendants = await startSupervisor({
   profile,
   bash: bash.path,

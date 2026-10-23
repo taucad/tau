@@ -62,9 +62,14 @@ runs:
 
         previous=''
         if [ "$current" != "$expected" ]; then
-          previous=$("$netlify" api getSite --data "{\"site_id\": \"$SITE_ID\"}" | jq -r '.published_deploy.id // empty')
-          router="$RUNNER_TEMP/staging-router-$SITE_NAME"
-          rm -rf "$router" && mkdir -p "$router"
+          site=$("$netlify" api getSite --data "{\"site_id\": \"$SITE_ID\"}")
+          previous=$(jq -r '.published_deploy.id // empty' <<< "$site")
+          # The CLI applies the site's UI base directory (`apps/ui`, `apps/docs`) under the
+          # repository root and drops the site when that directory is missing, so the router
+          # lives at the same base inside a repository of its own.
+          root="$RUNNER_TEMP/staging-router-$SITE_NAME"
+          router="$root/$(jq -r '.build_settings.base // ""' <<< "$site")"
+          rm -rf "$root" && mkdir -p "$router" && git init --quiet "$root"
           printf '%s\n' "$expected" > "$router/router.json"
           cat > "$router/netlify.toml" <<EOF
         [build]

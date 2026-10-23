@@ -1861,6 +1861,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         invalidateProjectsList();
         const reconcile = async (): Promise<void> => {
           try {
+            // A pass in flight may already have read the stop and bailed: let it end, then run a fresh one.
+            await discoveryPassRef.current?.catch(() => undefined);
             await discoverProjects();
           } catch (error) {
             console.warn('[ProjectManager] reconciliation after the write stop lifted failed', error);

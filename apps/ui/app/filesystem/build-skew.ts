@@ -28,8 +28,8 @@
  * - No build endpoint (desktop and `tau serve` answer with their SPA document): the
  *   newer announcement wins, as it did before, and nothing is asked again.
  *
- * A tab the server superseded stays silent to older announcements: it is not the
- * build to vouch for, and a live tab answers them.
+ * A tab answers older announcements while it still writes, so the older tab stops;
+ * once superseded it stays silent and a live tab answers instead.
  *
  * A peer's `live` claim is checked the same way, never taken on trust. Once the
  * server has spoken, its build outranks anything a tab says.
@@ -197,7 +197,15 @@ const settleWithServer = (answer: LiveBuildAnswer, claimedBuildId: number, isRec
     }
     return;
   }
-  // No endpoint (desktop, `tau serve`): newer wins, as before there was a server to ask.
+  /* Without the server's word only a newer build stops this tab, as before there was a server to
+   * ask: a peer claiming an older build is live never does (no endpoint on desktop or `tau serve`,
+   * or a server that cannot be reached). */
+  if (claimedBuildId < buildId) {
+    transition(() => {
+      provisional = false;
+    });
+    return;
+  }
   markBuildSuperseded(claimedBuildId);
   if (answer === 'unreachable') {
     scheduleRecheck(claimedBuildId);
@@ -253,8 +261,10 @@ if (channel) {
       return;
     }
     if (!isLive && other < buildId) {
-      // A build the server replaced, or another tab owns, is not one to vouch for: a live tab answers instead.
-      if (!superseded && supersedingSource !== 'server') {
+      /* While this tab still writes, an older tab must hear it and stop, or two bundles write (DF20),
+       * even when a deploy already replaced this build. Once its own writes have stopped it is not the
+       * build to vouch for; a live tab answers instead. */
+      if (!superseded) {
         channel.postMessage(buildId);
       }
       return;

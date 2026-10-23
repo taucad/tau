@@ -246,18 +246,25 @@ describe('build-id skew guard (DF20)', () => {
     expect(heard.map((event) => event.data as unknown)).not.toContain(buildId);
   });
 
-  it('stays silent to older tabs once a deploy replaced it, even while it keeps writing', async () => {
-    const { buildId, offerReload } = await load();
-    act(() => {
-      offerReload(buildId + 1);
-    });
-    const heard = listen();
+  it.each(['a deploy offered the reload', 'the server named another build'])(
+    'still tells older tabs to stop while it keeps writing (%s), since two writing bundles is what DF20 prevents',
+    async (situation) => {
+      const { buildId, offerReload, recordLiveBuild } = await load();
+      act(() => {
+        if (situation === 'a deploy offered the reload') {
+          offerReload(buildId + 1);
+        } else {
+          recordLiveBuild(buildId + 1);
+        }
+      });
+      const heard = listen();
 
-    announce(buildId - 2);
-    await pause();
+      announce(buildId - 2);
+      await pause();
 
-    expect(heard.map((event) => event.data as unknown)).not.toContain(buildId);
-  });
+      expect(heard.map((event) => event.data as unknown)).toContain(buildId);
+    },
+  );
 
   it("withdraws a deploy's reload offer once the server names this build again", async () => {
     const { buildId, isReloadOffered, offerReload, readSupersedingBuildId } = await load();
@@ -296,6 +303,20 @@ describe('build-id skew guard (DF20)', () => {
     expect(isBuildSuperseded()).toBe(false);
     expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
   });
+
+  it.each<LiveAnswer>(['unreachable', 'spa-fallback'])(
+    "never lets an older peer's live claim stop this tab without the server's word (%s)",
+    async (answer) => {
+      const { buildId, isBuildSuperseded, isReloadOffered } = await load();
+      answerLiveBuild(answer);
+
+      announce({ buildId: buildId - 1, live: true });
+      await pause();
+
+      expect(isBuildSuperseded()).toBe(false);
+      expect(isReloadOffered()).toBe(false);
+    },
+  );
 
   it("supersedes this tab on a peer's live claim the server confirms, worded as a replacement", async () => {
     const { BuildSkewBanner, buildId, isBuildSuperseded, readSupersedingBuildId } = await load();

@@ -623,6 +623,67 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     warn.mockRestore();
   });
 
+  /* XD4: two chats whose turns open the same branch at once both run on the one checkout, whichever add wins. */
+  it('should place both of two concurrent admissions that open the same branch on one checkout', async () => {
+    const project = await createProject();
+    const base = await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
+    await commitBranch(project.port, 'feature', { files: { 'main.ts': 'export const size = 2;\n' }, parent: base });
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    const recorded = await checkoutIdOnAnotherDevice(project.port, 'feature');
+    await Promise.all(
+      ['chat-1', 'chat-2'].map(async (chatId) =>
+        project.filesystem.writeFile(
+          `.tau/chats/${chatId}/chat.json`,
+          JSON.stringify({ id: chatId, name: 'Chat', createdAt: 0, updatedAt: 0, checkoutId: recorded }),
+        ),
+      ),
+    );
+    const { placement } = project.open();
+    const second: TurnAttemptKey = { chatId: 'chat-2', turnId: 'turn-2', runId: 'run-2', attempt: 1 };
+
+    const answers = await Promise.all([
+      placement.admit({ requestId: 'admit:run-1:1', key }),
+      placement.admit({ requestId: 'admit:run-2:1', key: second }),
+    ]);
+
+    expect(answers.map((answer) => (answer.status === 'refused' ? answer.code : answer.placement.checkoutId))).toEqual([
+      recorded,
+      recorded,
+    ]);
+  });
+
+  /* XD4: an add the root never answers would hold the admission for ever: it is refused retryably after a bound. */
+  it('should refuse REVISIONS_UNAVAILABLE when the branch is not opened within the bound', async () => {
+    const project = await createProject();
+    const base = await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
+    await commitBranch(project.port, 'feature', { files: { 'main.ts': 'export const size = 2;\n' }, parent: base });
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    await writeChatRecord(project.filesystem, await checkoutIdOnAnotherDevice(project.port, 'feature'));
+    const { revisions: opened } = project.open();
+    const silent = new Proxy(opened.actor, {
+      get: (target, property): unknown => {
+        if (property === 'send') {
+          return (event: Parameters<typeof target.send>[0]) => {
+            if (event.type !== 'addCheckout') {
+              target.send(event);
+            }
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+      },
+    });
+    const placement = createTurnPlacementPort({
+      revisions: { ...opened, actor: silent },
+      openTools: ({ filesystem: view }) => view,
+      checkoutOpenBound: 50,
+    });
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'REVISIONS_UNAVAILABLE' });
+  });
+
   /* XD4: an unborn branch runs only on a checkout that already tracks it; otherwise it waits only for a remote. */
   it('should refuse an unborn branch the live checkout is not on, retryably only while a remote may bring it', async () => {
     const project = await createProject();

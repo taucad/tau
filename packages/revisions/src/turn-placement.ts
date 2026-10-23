@@ -132,7 +132,21 @@ export type TurnPlacementPortOptions<Tools> = Readonly<{
    * completion cut (the agent's last writes). A host whose feed is not complete omits it.
    */
   settle?: (() => Promise<void>) | undefined;
+  /**
+   * How long an admission waits for the checkout of a branch this device has only as a ref to open (XD4), in
+   * milliseconds; past it the admission is refused `REVISIONS_UNAVAILABLE` (`wait`). Default
+   * {@link checkoutOpenMilliseconds}.
+   */
+  checkoutOpenBound?: number | undefined;
 }>;
+
+/**
+ * How long an admission waits for a branch's checkout to open before it refuses retryably: thirty seconds (XD4). An add
+ * the root never answers would otherwise hold the chat's admission for ever.
+ *
+ * @public
+ */
+export const checkoutOpenMilliseconds = 30_000;
 
 /** A root answer the adapter waits on, per attempt. */
 type Heard =
@@ -646,13 +660,18 @@ export const createTurnPlacementPort = <Tools>(
       actor.getSnapshot().context.checkouts.find((checkout) => checkout.branch === branch)?.id;
     /* Named by the attempt, so no other session's add over this root shares it (RM-R11). */
     const requestId = `turn-placement:checkout:${attemptIdOf(key)}`;
-    const failed = Promise.withResolvers<string>();
+    const failed = Promise.withResolvers<Readonly<{ reason: string; code: string | undefined }>>();
     const subscription = actor.on('checkoutFailed', (event) => {
       if (event.requestId === requestId) {
-        failed.resolve(event.reason);
+        failed.resolve({ reason: event.reason, code: event.code });
       }
     });
     const done = new AbortController();
+    const bound = options.checkoutOpenBound ?? checkoutOpenMilliseconds;
+    const expired = Promise.withResolvers<undefined>();
+    const timer = setTimeout(() => {
+      expired.resolve(undefined);
+    }, bound); // Bound: checkoutOpenMilliseconds.
     try {
       actor.send({ type: 'addCheckout', requestId, branch, from: '' });
       /* The registry answers every add by its id (RM-R11); a stopped root ends the wait too. */
@@ -664,10 +683,34 @@ export const createTurnPlacementPort = <Tools>(
           return 'The project closed before the branch was opened.';
         }
       };
-      const reason = await Promise.race([opened(), failed.promise]);
+      type Outcome =
+        | Readonly<{ kind: 'opened'; reason: string | undefined }>
+        | Readonly<{ kind: 'failed'; reason: string; code: string | undefined }>
+        | Readonly<{ kind: 'expired'; reason?: undefined }>;
+      const waiting = opened();
+      const first = await Promise.race<Outcome>([
+        waiting.then((reason): Outcome => ({ kind: 'opened', reason })),
+        failed.promise.then((failure): Outcome => ({ kind: 'failed', ...failure })),
+        expired.promise.then((): Outcome => ({ kind: 'expired' })),
+      ]);
+      /* Another admission's add of the same branch won (`CHECKOUT_CONFLICT`): its checkout reaches this root's view
+       * just after the refusal, so this one waits for it, within the same bound. */
+      const settled =
+        first.kind === 'failed' && first.code === 'CHECKOUT_CONFLICT' && holding() === undefined
+          ? await Promise.race([waiting.then(() => first), expired.promise.then(() => first)])
+          : first;
       const checkoutId = holding();
-      return checkoutId === undefined ? { refused: reason ?? `Branch ${branch} could not be opened.` } : { checkoutId };
+      if (checkoutId !== undefined) {
+        return { checkoutId };
+      }
+      return {
+        refused:
+          settled.kind === 'expired'
+            ? `Branch ${branch} was not opened within ${String(bound)} ms.`
+            : (settled.reason ?? `Branch ${branch} could not be opened.`),
+      };
     } finally {
+      clearTimeout(timer);
       done.abort();
       subscription.unsubscribe();
     }

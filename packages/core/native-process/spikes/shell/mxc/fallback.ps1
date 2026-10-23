@@ -657,14 +657,15 @@ if ($apiOk -and $null -ne $shellPath) {
       $doneRA = Test-Path -LiteralPath (Join-Path $outA 'done-A.txt'); $doneRB = Test-Path -LiteralPath (Join-Path $outB 'done-B.txt')
       Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion (-1 = timed out and killed)' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) startedA=$startedRA doneA=$doneRA exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) startedB=$startedRB doneB=$doneRB exitB=$xRB workload=cmd.exe cmdLineLen=$($cmdLineRA.Length)/$($cmdLineRB.Length)" ($rRA -and $rRB) @{ launchA = $noteRA; launchB = $noteRB }
 
-      $readOf = { param($f) if (Test-Path -LiteralPath $f) { [string](Get-Content -LiteralPath $f -Raw) } else { '' } }
+      # Always a string: Get-Content -Raw returns $null for an EMPTY file (a refused exfil leaves one).
+      $readOf = { param($f) if (Test-Path -LiteralPath $f) { "$(Get-Content -LiteralPath $f -Raw)" } else { '' } }
       $ownRA = & $readOf (Join-Path $outA 'own-read-A.txt'); $ownRB = & $readOf (Join-Path $outB 'own-read-B.txt')
       $exfA = & $readOf (Join-Path $outA 'exfil-A.txt'); $exfB = & $readOf (Join-Path $outB 'exfil-B.txt')
       $nevA = & $readOf (Join-Path $outA 'exfil-never-A.txt'); $nevB = & $readOf (Join-Path $outB 'exfil-never-B.txt')
       $crA = $null; $crB = $null
       # The child's own stderr per attempt: context only, never the decision.
-      $crA = [pscustomobject]@{ ownRead = (& $readOf (Join-Path $outA 'own-err-A.txt')).Trim(); crossRead = (& $readOf (Join-Path $outA 'cross-err-A.txt')).Trim(); neverRead = (& $readOf (Join-Path $outA 'never-err-A.txt')).Trim() }
-      $crB = [pscustomobject]@{ ownRead = (& $readOf (Join-Path $outB 'own-err-B.txt')).Trim(); crossRead = (& $readOf (Join-Path $outB 'cross-err-B.txt')).Trim(); neverRead = (& $readOf (Join-Path $outB 'never-err-B.txt')).Trim() }
+      $crA = [pscustomobject]@{ ownRead = "$(& $readOf (Join-Path $outA 'own-err-A.txt'))".Trim(); crossRead = "$(& $readOf (Join-Path $outA 'cross-err-A.txt'))".Trim(); neverRead = "$(& $readOf (Join-Path $outA 'never-err-A.txt'))".Trim() }
+      $crB = [pscustomobject]@{ ownRead = "$(& $readOf (Join-Path $outB 'own-err-B.txt'))".Trim(); crossRead = "$(& $readOf (Join-Path $outB 'cross-err-B.txt'))".Trim(); neverRead = "$(& $readOf (Join-Path $outB 'never-err-B.txt'))".Trim() }
       $pcA = $rRA -and ($ownRA -eq $secretA); $pcB = $rRB -and ($ownRB -eq $secretB)
       Add-Check 'fallback.read.ownAllowed.A' 'session A child (running as tausbxa in its restricted token) reads its own root secret (positive control; external copy matches)' "ran=$rRA ownCopyMatches=$($ownRA -eq $secretA)" $pcA @{ childReport = $crA }
       Add-Check 'fallback.read.ownAllowed.B' 'session B child (running as tausbxb in its restricted token) reads its own root secret (positive control; external copy matches)' "ran=$rRB ownCopyMatches=$($ownRB -eq $secretB)" $pcB @{ childReport = $crB }

@@ -38,12 +38,50 @@ const identity = (provision?.identity ??
   | { mxc?: { sdk?: Record<string, unknown> }; os?: Record<string, unknown>; source?: Record<string, unknown> }
   | undefined;
 
+const arch = String(identity?.os?.['arch'] ?? process.arch);
+const isArm = arch === 'arm64';
+let gateFail = false;
+
 if (identity?.mxc?.sdk) {
   const sdk = identity.mxc.sdk;
   lines.push(
     `**MXC SDK** \`${String(sdk['name'])}@${String(sdk['installedVersion'])}\` (pinned \`${String(sdk['pinnedVersion'])}\`, licence ${String(sdk['license'])})  `,
-    `**OS build** ${String(identity.os?.['build'] ?? 'unknown')} · **user SID** ${String(identity.os?.['userSid'] ?? 'unknown')}  `,
+    `**OS build** ${String(identity.os?.['build'] ?? 'unknown')} · **arch** \`${arch}\` · **user SID** ${String(identity.os?.['userSid'] ?? 'unknown')}  `,
     `**Source** ${String(identity.source?.['run'] ?? 'local')}`,
+    '',
+  );
+} else {
+  lines.push(`**arch** \`${arch}\``, '');
+}
+
+// Non-admin context (arm64 PRIMARY lane): prove the receipts were collected without elevation.
+type NonAdminCtx = { standardUser?: string; isAdministrator?: boolean; row?: string };
+const ctxPath = join(outDir(), 'nonadmin-context.json');
+if (existsSync(ctxPath)) {
+  const ctx = JSON.parse(readFileSync(ctxPath, 'utf8')) as NonAdminCtx;
+  lines.push(
+    `**Run-as** created local user \`${String(ctx.standardUser)}\`, administrator: ${ctx.isAdministrator === false ? 'no ✅' : '⚠️ ' + String(ctx.isAdministrator)}`,
+    '',
+  );
+  if (ctx.isAdministrator !== false) {
+    gateFail = true;
+  }
+}
+
+// The non-admin launcher records this only when its own setup failed (user creation, logon, etc).
+const launcherFail = join(outDir(), 'nonadmin-runner-failed.json');
+if (existsSync(launcherFail)) {
+  const f = JSON.parse(readFileSync(launcherFail, 'utf8')) as { reason?: string };
+  lines.push(`### Non-admin launcher: ❌ failed`, '', `> ${String(f.reason ?? 'unknown')}`, '');
+  gateFail = true;
+}
+
+// Honest scope: an arm64 PSEC receipt does NOT close the x64 or consumer-SKU rows.
+if (isArm) {
+  lines.push(
+    '> **Scope caveat:** this is an **arm64** (Windows 11 Enterprise 25H2) receipt. A PSEC / isolation',
+    '> result here does **NOT** close the **x64** package row (qualified separately in W8) or any',
+    '> **consumer-SKU** row. It attests only the arm64 Enterprise host exercised above.',
     '',
   );
 }
@@ -56,9 +94,9 @@ const rows: { label: string; file: string; required: boolean }[] = [
   { label: 'PTY (ConPTY + PowerShell)', file: 'pty.receipt.json', required: true },
   { label: 'Capability probe', file: 'probe.receipt.json', required: true },
   { label: 'Two-container isolation', file: 'isolation.receipt.json', required: false },
+  { label: 'Capability-SID fallback', file: 'fallback.receipt.json', required: false },
 ];
 
-let gateFail = false;
 for (const row of rows) {
   const receipt = read(row.file);
   if (!receipt) {

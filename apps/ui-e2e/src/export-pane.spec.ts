@@ -32,19 +32,22 @@ const openSeededProject = async (): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };
 
-const selectFormat = async (format: string): Promise<void> => {
-  const button = selectors.getByRole('button', { name: new RegExp(`^${format}$`, 'iu') });
-  await target.expectVisible(button, 15_000);
-  if ((await target.getAttribute(button, 'aria-pressed')) !== 'true') {
-    await target.click(button);
+/** Pick the export format, through "More formats" when it is not one of the common formats. */
+const selectFormat = async (format: string, { isMore = false }: { readonly isMore?: boolean } = {}): Promise<void> => {
+  const picker = selectors.getByRole('button', { name: 'Export format' });
+  await target.expectVisible(picker, 15_000);
+  await target.click(picker);
+  if (isMore) {
+    await target.click(selectors.getByRole('button', { name: /^More formats/u }));
   }
+  await target.click(selectors.getByCss(`[cmdk-item][data-value="${format.toLowerCase()}"]`));
 };
 
-const optionsDisclosure = (format: string): Locator =>
-  selectors.getByRole('button', { name: new RegExp(`^${format} options (Defaults|Modified)$`, 'iu') });
+const optionsDisclosure = (): Locator =>
+  selectors.getByRole('button', { name: /^Export options (Defaults|Modified)$/u });
 
-const openOptions = async (format: string): Promise<Locator> => {
-  const disclosure = optionsDisclosure(format);
+const openOptions = async (): Promise<Locator> => {
+  const disclosure = optionsDisclosure();
   await target.expectVisible(disclosure, 15_000);
   if ((await target.getAttribute(disclosure, 'aria-expanded')) !== 'true') {
     await target.click(disclosure);
@@ -61,7 +64,7 @@ const fieldUnit = async (input: Locator): Promise<string> =>
     return adornment?.textContent.trim() ?? '';
   });
 
-test('keeps export option roots flat, disclosures independent, and the action reachable', async () => {
+test('keeps export option roots flat, collapsed per format, and the action reachable', async () => {
   await target.emulateColorScheme('light');
   await target.setViewport({ width: 1440, height: 900 });
   await openSeededProject();
@@ -71,18 +74,15 @@ test('keeps export option roots flat, disclosures independent, and the action re
   await target.expectVisible(panel, 15_000);
   await selectFormat('STL');
 
-  const stlOptions = await openOptions('STL');
+  await openOptions();
   await target.expectVisible(selectors.getByRole('button', { name: 'Group: Tessellation' }), 15_000);
   await target.expectCount(panel.getByCss('[data-slot="parameter-catalog"]'), 0);
   await target.expectCount(panel.getByCss('[data-slot="embedded-form-root"]'), 1);
 
   await selectFormat('STEP');
-  const stepOptions = await openOptions('STEP');
-  await target.expectCount(panel.getByCss('[data-slot="embedded-form-root"]'), 2);
-
-  await target.click(stlOptions);
-  await target.expectAttribute(stlOptions, 'aria-expanded', 'false');
-  await target.expectAttribute(stepOptions, 'aria-expanded', 'true');
+  await target.expectAttribute(optionsDisclosure(), 'aria-expanded', 'false');
+  const stepOptions = await openOptions();
+  await target.expectCount(panel.getByCss('[data-slot="embedded-form-root"]'), 1);
 
   const surfaceState = await target.evaluateLocator(panel, (element) => {
     const scrollBody = element.querySelector<HTMLElement>('[data-slot="export-scroll-body"]');
@@ -107,7 +107,7 @@ test('keeps export option roots flat, disclosures independent, and the action re
     embeddedRootPaddingInline: ['8px', '8px'],
     idsAreUnique: true,
   });
-  const exportAction = panel.getByRole('button', { name: /Export 2 formats/iu });
+  const exportAction = panel.getByRole('button', { name: 'Export STEP' });
   await target.expectCount(exportAction, 1);
   await target.screenshot(panel, 'export-pane-light-wide.png');
 
@@ -127,8 +127,8 @@ test('keeps PNG composite options semantic, valid, and independently editable', 
 
   const panel = selectors.getByCss('[data-slot="export-panel-body"]');
   await target.expectVisible(panel, 15_000);
-  await selectFormat('PNG');
-  await openOptions('PNG');
+  await selectFormat('PNG', { isMore: true });
+  await openOptions();
   await target.expectCount(panel.getByText(/must be|is a required property/iu), 0);
   await target.expectCount(panel.getByText(/^Option \d+$/u), 0);
 
@@ -165,7 +165,7 @@ test('mounts and exports a transcoded mesh route with its options in declared un
   await target.expectVisible(panel, 15_000);
   // Replicad has no native 3MF writer, so 3MF is the assimp route whose edge pins the glTF source options.
   await selectFormat('3MF');
-  await openOptions('3MF');
+  await openOptions();
   // Tessellation is a preset or explicit tolerances; the tolerance inputs belong to the explicit form.
   const tessellation = panel.getByRole('combobox', { name: 'Select for Tessellation' });
   await target.expectVisible(tessellation, 15_000);

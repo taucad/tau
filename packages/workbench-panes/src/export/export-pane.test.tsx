@@ -20,6 +20,9 @@ vi.mock('@taucad/ui/hooks/use-mobile', () => ({
   useIsMobile: (): boolean => false,
 }));
 
+// Cmdk scrolls focused items into view; jsdom does not ship `scrollIntoView`.
+globalThis.HTMLElement.prototype.scrollIntoView = vi.fn();
+
 const formats: ExportFormatEntry[] = [
   { format: 'glb', fidelity: 'mesh', direct: true, provider: 'replicad' },
   {
@@ -36,6 +39,7 @@ const formats: ExportFormatEntry[] = [
     },
   },
   { format: 'step', fidelity: 'brep', direct: true, provider: 'replicad' },
+  { format: 'ply', fidelity: 'mesh', direct: false, provider: 'replicad+assimp' },
 ];
 
 type SourceOverrides = Partial<Omit<ExportSource, 'useEntry'>> & {
@@ -85,6 +89,11 @@ const renderPane = (
   );
 };
 
+const pickFormat = async (name: RegExp): Promise<void> => {
+  fireEvent.click(screen.getByRole('button', { name: 'Export format' }));
+  fireEvent.click(await screen.findByRole('option', { name }));
+};
+
 describe('ExportPane', () => {
   it('should draw an empty slot when the host offers no export source', () => {
     const { container } = render(
@@ -95,14 +104,59 @@ describe('ExportPane', () => {
     expect(container.querySelector('[data-slot="export-pane"]')).toBeEmptyDOMElement();
   });
 
-  it('should name the single entry and group formats by fidelity, BREP first', () => {
+  it('should name the single entry and list common formats by fidelity, BREP first', async () => {
     const { source } = createSource();
     renderPane(source);
 
     expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('model.ts');
     expect(screen.getByRole('region', { name: 'Source' })).toHaveTextContent('Main');
-    const groups = within(screen.getByRole('region', { name: 'Formats' })).getAllByText(/^(BREP|Mesh)$/u);
-    expect(groups.map((group) => group.textContent)).toEqual(['BREP', 'Mesh']);
+    fireEvent.click(screen.getByRole('button', { name: 'Export format' }));
+    const options = await screen.findAllByRole('option');
+    expect(options.map((option) => option.dataset['value'])).toEqual(['step', 'glb', 'stl']);
+    expect(screen.getAllByText(/^(BREP|Mesh)$/u).map((group) => group.textContent)).toEqual(['BREP', 'Mesh']);
+  });
+
+  it('should pick a less common format from More formats and export only it', async () => {
+    const { source, exported } = createSource();
+    renderPane(source);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export format' }));
+    expect(screen.queryByRole('option', { name: /ply/iu })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: /More formats/u }));
+    fireEvent.click(await screen.findByRole('option', { name: /ply/iu }));
+    expect(screen.getByRole('button', { name: 'Export format' })).toHaveTextContent(/ply/iu);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export PLY' }));
+    await waitFor(() => {
+      expect(exported).toHaveBeenCalledWith(expect.objectContaining({ formats: ['ply'], zipMultiple: false }));
+    });
+  });
+
+  it('should list every format in the first list when none of them is common', async () => {
+    const { source } = createSource({
+      entry: { hasGeometry: true, formats: [{ format: 'ply', fidelity: 'mesh', direct: true, provider: 'x' }] },
+    });
+    renderPane(source);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export format' }));
+    expect(await screen.findByRole('option', { name: /ply/iu })).toBeDefined();
+    expect(screen.queryByRole('button', { name: /More formats/u })).toBeNull();
+  });
+
+  it('should replace the selection rather than add to it', async () => {
+    const preferences: ExportPreferences = { ...defaultExportPreferences, selectedFormats: ['glb', 'step'] };
+    const persist = vi.fn();
+    const { source } = createSource({
+      destinations: ['download', 'project'],
+      canZip: true,
+      usePreferences: (): ExportPreferencesState => [preferences, persist, { retry: vi.fn() }],
+    });
+    renderPane(source);
+
+    expect(screen.getByRole('button', { name: 'Export GLB' })).toBeDefined();
+    expect(screen.queryByRole('checkbox', { name: 'Zip multiple exports' })).toBeNull();
+    await pickFormat(/stl/iu);
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ selectedFormats: ['stl'] }));
   });
 
   it('should fix the only destination a host offers and export to it', async () => {
@@ -114,7 +168,7 @@ describe('ExportPane', () => {
     expect(save).toBeChecked();
     expect(save).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: /step/i }));
+    await pickFormat(/step/iu);
     fireEvent.click(screen.getByRole('button', { name: 'Export STEP' }));
 
     await waitFor(() => {
@@ -131,44 +185,24 @@ describe('ExportPane', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Exported STEP');
   });
 
-  it('should offer zip only to a host that can zip several downloads', () => {
-    const preferences: ExportPreferences = {
-      ...defaultExportPreferences,
-      selectedFormats: ['glb', 'step'],
-    };
-    const usePreferences = (): ExportPreferencesState => [preferences, vi.fn(), { retry: vi.fn() }];
-    const zipless = createSource({
-      destinations: ['download', 'project'],
-      usePreferences,
-    });
-    const view = renderPane(zipless.source);
-    expect(screen.queryByRole('checkbox', { name: 'Zip multiple exports' })).toBeNull();
-    view.unmount();
-
-    const zipping = createSource({
-      destinations: ['download', 'project'],
-      usePreferences,
-      canZip: true,
-    });
-    renderPane(zipping.source);
-    expect(screen.getByRole('checkbox', { name: 'Zip multiple exports' })).toBeDefined();
-  });
-
   it('should hand outcomes to host notices instead of the status line', async () => {
     const notices = { success: vi.fn(), error: vi.fn() };
     const { source, exported } = createSource({
       destinations: ['download'],
       notices,
     });
-    exported.mockResolvedValueOnce({ succeeded: ['glb'], failed: ['step'] });
+    exported.mockResolvedValueOnce({ succeeded: ['glb'], failed: [] });
+    exported.mockResolvedValueOnce({ succeeded: [], failed: ['step'] });
     renderPane(source);
 
-    fireEvent.click(screen.getByRole('button', { name: /glb/i }));
-    fireEvent.click(screen.getByRole('button', { name: /step/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Export 2 formats' }));
-
+    await pickFormat(/glb/iu);
+    fireEvent.click(screen.getByRole('button', { name: 'Export GLB' }));
     await waitFor(() => {
       expect(notices.success).toHaveBeenCalledWith('Exported GLB');
+    });
+    await pickFormat(/step/iu);
+    fireEvent.click(screen.getByRole('button', { name: 'Export STEP' }));
+    await waitFor(() => {
       expect(notices.error).toHaveBeenCalledWith('Failed to export STEP');
     });
     expect(screen.queryByRole('status')).toBeNull();
@@ -179,7 +213,7 @@ describe('ExportPane', () => {
     exported.mockRejectedValueOnce(new Error('radius must be positive'));
     renderPane(source);
 
-    fireEvent.click(screen.getByRole('button', { name: /glb/i }));
+    await pickFormat(/glb/iu);
     fireEvent.click(screen.getByRole('button', { name: 'Export GLB' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('radius must be positive');
@@ -248,8 +282,10 @@ describe('ExportPane', () => {
     const { source, exported } = createSource();
     renderPane(source);
 
-    fireEvent.click(screen.getByRole('button', { name: /stl/i }));
-    expect(await screen.findByRole('heading', { name: 'STL options' })).toBeDefined();
+    await pickFormat(/stl/iu);
+    expect(await screen.findByRole('heading', { name: 'Export options' })).toBeDefined();
+    expect(screen.queryByRole('switch', { name: /binary/i })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Export options/u }));
     const binary = await screen.findByRole('switch', { name: /binary/i });
     await act(async () => {
       fireEvent.click(binary);

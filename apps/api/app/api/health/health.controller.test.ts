@@ -20,6 +20,7 @@ describe('HealthController', () => {
   let redisHealth: RedisHealthIndicator;
   let databaseHealth: DatabaseHealthIndicator;
   let s3Health: S3HealthIndicator;
+  let gitToolchainHealth: GitToolchainHealthIndicator;
   let readinessFailureCount: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
@@ -58,6 +59,7 @@ describe('HealthController', () => {
     redisHealth = module.get(RedisHealthIndicator);
     databaseHealth = module.get(DatabaseHealthIndicator);
     s3Health = module.get(S3HealthIndicator);
+    gitToolchainHealth = module.get(GitToolchainHealthIndicator);
   });
 
   afterEach(() => {
@@ -84,33 +86,71 @@ describe('HealthController', () => {
       expect(result.details).toHaveProperty('memory_heap');
     });
 
-    it('should return error status when Redis is down', async () => {
-      vi.spyOn(redisHealth, 'isHealthy').mockResolvedValue({
-        redis: { status: 'down', message: 'Connection refused' },
+    it.each([
+      ['redis', 'Connection refused'],
+      ['database', 'Response time exceeds 300ms threshold'],
+      ['s3', 'Storage readiness timed out after 1500 ms'],
+    ] as const)('should stay ready when the shared %s dependency is down', async (indicator, message) => {
+      const indicators = { redis: redisHealth, database: databaseHealth, s3: s3Health };
+      vi.spyOn(indicators[indicator], 'isHealthy').mockResolvedValue({
+        [indicator]: { status: 'down', message },
       });
 
-      await expect(controller.checkReady()).rejects.toThrow();
+      const result = await controller.checkReady();
+
+      expect(result.status).toBe('ok');
+      expect(result.details[indicator]).toStrictEqual({ status: 'down', message });
+      expect(result.error).toStrictEqual({ [indicator]: { status: 'down', message } });
     });
 
-    it('should return error status when database is down', async () => {
-      vi.spyOn(databaseHealth, 'isHealthy').mockResolvedValue({
-        database: { status: 'down', message: 'Connection refused' },
-      });
-
-      await expect(controller.checkReady()).rejects.toThrow();
-    });
-
-    it('should name each down indicator in a warning, a per-indicator count and a per-indicator report', async () => {
+    it('should warn, count and report each down shared dependency without refusing', async () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       vi.spyOn(redisHealth, 'isHealthy').mockResolvedValue({
         redis: { status: 'down', message: 'Connection refused', responseTimeMs: 5 },
       });
-      vi.spyOn(databaseHealth, 'isHealthy').mockResolvedValue({
-        database: { status: 'down', message: 'Response time exceeds 300ms threshold', responseTimeMs: 412 },
+      vi.spyOn(s3Health, 'isHealthy').mockResolvedValue({
+        s3: { status: 'down', message: 'Storage readiness timed out after 1500 ms', responseTimeMs: 1500 },
       });
       const failures = [
         { indicator: 'redis', message: 'Connection refused', responseTimeMs: 5 },
+        { indicator: 's3', message: 'Storage readiness timed out after 1500 ms', responseTimeMs: 1500 },
+      ];
+
+      await expect(controller.checkReady()).resolves.toMatchObject({ status: 'ok' });
+
+      expect(warn).toHaveBeenCalledWith({ failures }, 'Readiness degraded: shared dependency check down');
+      expect(readinessFailureCount.mock.calls).toEqual([
+        [1, { 'health.indicator': 'redis' }],
+        [1, { 'health.indicator': 's3' }],
+      ]);
+      expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([[failures[0]], [failures[1]]]);
+    });
+
+    it('should refuse when the git toolchain is missing from this Machine', async () => {
+      vi.spyOn(gitToolchainHealth, 'isHealthy').mockResolvedValue({
+        git: { status: 'down', message: 'git is not installed in this image' },
+      });
+
+      const refusal = await controller.checkReady().catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(ReadinessRefusalException);
+      expect((refusal as ReadinessRefusalException).getStatus()).toBe(503);
+      expect((refusal as ReadinessRefusalException).failures).toEqual([
+        { indicator: 'git', message: 'git is not installed in this image' },
+      ]);
+    });
+
+    it('should name every down indicator in a refusal, its warning, counts and reports', async () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      vi.spyOn(databaseHealth, 'isHealthy').mockResolvedValue({
+        database: { status: 'down', message: 'Response time exceeds 300ms threshold', responseTimeMs: 412 },
+      });
+      vi.spyOn(gitToolchainHealth, 'isHealthy').mockResolvedValue({
+        git: { status: 'down', message: 'git-lfs is not installed in this image' },
+      });
+      const failures = [
         { indicator: 'database', message: 'Response time exceeds 300ms threshold', responseTimeMs: 412 },
+        { indicator: 'git', message: 'git-lfs is not installed in this image' },
       ];
 
       const refusal = await controller.checkReady().catch((error: unknown) => error);
@@ -118,10 +158,10 @@ describe('HealthController', () => {
       expect(refusal).toBeInstanceOf(ReadinessRefusalException);
       expect((refusal as ReadinessRefusalException).getStatus()).toBe(503);
       expect((refusal as ReadinessRefusalException).failures).toEqual(failures);
-      expect(warn).toHaveBeenCalledWith({ failures }, 'Readiness refused: dependency check down');
+      expect(warn).toHaveBeenCalledWith({ failures }, 'Readiness refused: Machine check down');
       expect(readinessFailureCount.mock.calls).toEqual([
-        [1, { 'health.indicator': 'redis' }],
         [1, { 'health.indicator': 'database' }],
+        [1, { 'health.indicator': 'git' }],
       ]);
       expect(vi.mocked(reportReadinessFailure).mock.calls).toEqual([[failures[0]], [failures[1]]]);
     });
@@ -131,14 +171,6 @@ describe('HealthController', () => {
 
       expect(readinessFailureCount).not.toHaveBeenCalled();
       expect(reportReadinessFailure).not.toHaveBeenCalled();
-    });
-
-    it('should return error status when S3 is down', async () => {
-      vi.spyOn(s3Health, 'isHealthy').mockResolvedValue({
-        s3: { status: 'down', message: 'Access denied' },
-      });
-
-      await expect(controller.checkReady()).rejects.toThrow();
     });
   });
 

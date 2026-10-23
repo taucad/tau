@@ -289,20 +289,15 @@ const exportToProject = async (page: Page, projectRoot: string, extension: 'glb'
   if (await exportButton.isVisible().catch(() => false)) {
     await exportButton.click();
   }
-  const formats = page.getByRole('region', { name: 'Formats' });
+  const formats = page.getByRole('region', { name: 'Format' });
   await expectVisible(formats, 30_000);
-  const requestedFormat = formats.getByRole('button', { name: extension, exact: true });
-  for (const selected of await formats.locator('button[aria-pressed="true"]').all()) {
-    // oxlint-disable-next-line no-await-in-loop -- React must observe each toggle before the next click.
-    const selectedText = await selected.textContent();
-    if (selectedText?.trim().toLowerCase() !== extension) {
-      // oxlint-disable-next-line no-await-in-loop -- See the sequencing rationale above.
-      await selected.click();
-    }
+  await formats.getByRole('button', { name: 'Export format' }).click();
+  await page.locator('[cmdk-list]').first().waitFor();
+  const requestedFormat = page.locator(`[cmdk-item][data-value="${extension}"]`);
+  if (!(await requestedFormat.isVisible())) {
+    await page.getByRole('button', { name: /^More formats/u }).click();
   }
-  if ((await requestedFormat.getAttribute('aria-pressed')) !== 'true') {
-    await requestedFormat.click();
-  }
+  await requestedFormat.click();
   const download = page.getByLabel('Download to disk');
   if (await download.isChecked()) {
     await download.click();
@@ -512,9 +507,10 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectGeometryFramed(page);
 
     await page.getByRole('button', { name: 'Export', exact: true }).click();
-    await expectVisible(page.getByRole('region', { name: 'Formats' }), 30_000);
-    await page.getByRole('button', { name: /^step$/iu }).click();
-    await expectVisible(page.getByText('STEP options', { exact: true }), 30_000);
+    await expectVisible(page.getByRole('region', { name: 'Format' }), 30_000);
+    await page.getByRole('button', { name: 'Export format' }).click();
+    await page.locator('[cmdk-item][data-value="step"]').click();
+    await expectVisible(page.getByText('Export options', { exact: true }), 30_000);
     expect(await page.getByText(/unsafe-eval/u).allTextContents()).toEqual([]);
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);
     await page.getByLabel('Download to disk').click();

@@ -40,7 +40,7 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it('prompts a reload when the server reports that a deploy superseded this build', async () => {
-    const { BuildSkewBanner, buildId, isBuildSuperseded, markBuildSuperseded, readNewestBuildId } = await load();
+    const { BuildSkewBanner, buildId, isBuildSuperseded, markBuildSuperseded, readSupersedingBuildId } = await load();
     render(<BuildSkewBanner />);
 
     act(() => {
@@ -49,16 +49,31 @@ describe('build-id skew guard (DF20)', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is available');
     expect(isBuildSuperseded()).toBe(true);
-    expect(readNewestBuildId()).toBe(buildId + 1);
+    expect(readSupersedingBuildId()).toBe(buildId + 1);
   });
 
-  it('keeps the newest build id when a rollback serves an older build', async () => {
-    const { buildId, isBuildSuperseded, markBuildSuperseded, readNewestBuildId } = await load();
+  it('names the build a rollback serves, not this one, as the build to reload into', async () => {
+    const { BuildSkewBanner, buildId, isBuildSuperseded, markBuildSuperseded, readSupersedingBuildId } = await load();
+    render(<BuildSkewBanner />);
 
-    markBuildSuperseded(buildId - 1);
+    act(() => {
+      markBuildSuperseded(buildId - 1);
+    });
 
     expect(isBuildSuperseded()).toBe(true);
-    expect(readNewestBuildId()).toBe(buildId);
+    expect(readSupersedingBuildId()).toBe(buildId - 1);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This version of Tau has been replaced. Reload to continue with the current version.',
+    );
+  });
+
+  it('lets a newer tab outrank an earlier rollback', async () => {
+    const { buildId, markBuildSuperseded, readSupersedingBuildId } = await load();
+
+    markBuildSuperseded(buildId - 1);
+    markBuildSuperseded(buildId + 1);
+
+    expect(readSupersedingBuildId()).toBe(buildId + 1);
   });
 
   it('leaves an equal or older build untouched', async () => {

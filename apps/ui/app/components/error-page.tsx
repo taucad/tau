@@ -1,11 +1,17 @@
-import { AlertCircle, ArrowLeft, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import { isStaleModuleError, recoverFromStaleBuild } from '#lib/stale-build-recovery.js';
+import {
+  buildId,
+  describeSupersession,
+  readSupersedingBuildId,
+  subscribeSupersedingBuildId,
+} from '#filesystem/build-skew.js';
+import { isStaleModuleError, recoverFromStaleBuild, reloadTimeout } from '#lib/stale-build-recovery.js';
 import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 const CollapsibleCodeBlock = lazy(async () => {
@@ -17,7 +23,15 @@ export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
   const analytics = useAnalytics();
-  const [staleOutcome, setStaleOutcome] = useState<StaleBuildOutcome>();
+  const isModuleLoadFailure = isStaleModuleError(error);
+  const [triaged, setTriaged] = useState<{ readonly error: unknown; readonly outcome: StaleBuildOutcome }>();
+  // An outcome belongs to the error it was decided for; a new error starts its own check.
+  const staleOutcome = triaged !== undefined && triaged.error === error ? triaged.outcome : undefined;
+  // The error whose automatic reload has had its time and evidently did not navigate away.
+  const [reloadRefusedFor, setReloadRefusedFor] = useState<unknown>();
+  const isReloadSettled = reloadRefusedFor === error;
+  const supersedingBuildId = useSyncExternalStore(subscribeSupersedingBuildId, readSupersedingBuildId, () => buildId);
+  const isRolledBack = supersedingBuildId < buildId;
 
   useEffect(() => {
     // Don't report 404 errors to analytics - they're expected user behavior
@@ -36,11 +50,15 @@ export function ErrorPage(): React.JSX.Element {
       // TAU-UI-6: a deploy that replaced this page's chunks is not a bug. Report only a failure the live build has.
       let isCurrent = true;
       const triage = async (): Promise<void> => {
-        const outcome = await recoverFromStaleBuild();
+        const outcome = await recoverFromStaleBuild(error);
         if (!isCurrent) {
           return;
         }
-        setStaleOutcome(outcome);
+        setTriaged((previous) =>
+          previous !== undefined && previous.error === error && previous.outcome === outcome
+            ? previous
+            : { error, outcome },
+        );
         if (outcome === 'current') {
           analytics.captureException(error, { context: { component: 'ErrorPage' } });
           void reportUiError(error);
@@ -57,6 +75,19 @@ export function ErrorPage(): React.JSX.Element {
     }
     return undefined;
   }, [error, analytics]);
+
+  useEffect(() => {
+    if (staleOutcome !== 'reloading') {
+      return undefined;
+    }
+    // A reload that has not navigated away by now was refused; let the reader try again.
+    const timer = setTimeout(() => {
+      setReloadRefusedFor(error);
+    }, reloadTimeout);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [staleOutcome, error]);
 
   const goBack = (): void => {
     void navigate(-1);
@@ -100,6 +131,17 @@ export function ErrorPage(): React.JSX.Element {
     );
   }
 
+  if (isModuleLoadFailure && staleOutcome === undefined) {
+    return (
+      <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-3 px-4 py-8'>
+        <LoaderCircle className='size-6 spin-glyph text-muted-foreground' />
+        <p role='status' className='text-sm text-muted-foreground'>
+          Checking for a newer version of Tau…
+        </p>
+      </div>
+    );
+  }
+
   if (staleOutcome === 'reloading' || staleOutcome === 'superseded') {
     return (
       <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-4 py-8'>
@@ -107,16 +149,18 @@ export function ErrorPage(): React.JSX.Element {
           <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
             <RefreshCcw className='size-6 text-feature' />
           </div>
-          <h1 className='text-lg font-semibold text-foreground'>Tau has been updated</h1>
+          <h1 className='text-lg font-semibold text-foreground'>
+            {isRolledBack ? 'Tau has been replaced' : 'Tau has been updated'}
+          </h1>
           <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
-            This page was opened on an earlier version of Tau. Reload to continue with the latest version.
+            {describeSupersession(supersedingBuildId)}
           </p>
         </div>
         <Button
           variant='default'
           size='sm'
           className='gap-2'
-          disabled={staleOutcome === 'reloading'}
+          disabled={staleOutcome === 'reloading' && !isReloadSettled}
           onClick={refreshPage}
         >
           <RefreshCcw className='size-4' />
@@ -143,7 +187,8 @@ export function ErrorPage(): React.JSX.Element {
             Our team has been notified of the error and will investigate it shortly.
           </p>
 
-          {error.stack ? (
+          {/* A module that failed to load must not be answered by loading another one. */}
+          {error.stack && !isModuleLoadFailure ? (
             <Suspense
               fallback={
                 <div className='w-full rounded-md border border-border bg-muted/30 p-3 text-left'>

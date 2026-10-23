@@ -1,10 +1,18 @@
 import { useSyncExternalStore } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
-import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
+import {
+  buildId,
+  describeSupersession,
+  isBuildSuperseded,
+  readSupersedingBuildId,
+  subscribeBuildSkew,
+  subscribeSupersedingBuildId,
+} from '#filesystem/build-skew.js';
 import { Button } from '@taucad/ui/components/button';
 import { useBrowserUpdateControlMounted } from '#components/nav/browser-update.js';
 
 const serverSnapshot = (): boolean => false;
+const serverBuildSnapshot = (): number => buildId;
 
 const reload = (): void => {
   globalThis.location.reload();
@@ -22,6 +30,11 @@ const reload = (): void => {
  */
 export function BuildSkewBanner(): React.JSX.Element | undefined {
   const superseded = useSyncExternalStore(subscribeBuildSkew, isBuildSuperseded, serverSnapshot);
+  const supersedingBuildId = useSyncExternalStore(
+    subscribeSupersedingBuildId,
+    readSupersedingBuildId,
+    serverBuildSnapshot,
+  );
   const sidebarOwnsPrompt = useBrowserUpdateControlMounted();
   if (!superseded || sidebarOwnsPrompt) {
     return undefined;
@@ -32,9 +45,7 @@ export function BuildSkewBanner(): React.JSX.Element | undefined {
       className='fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-md border bg-background p-3 shadow-lg'
     >
       <ArrowUpCircle className='size-4 shrink-0 text-muted-foreground' />
-      <div className='min-w-0 flex-1 text-sm'>
-        A newer version of Tau is available. Reload to continue with the latest version.
-      </div>
+      <div className='min-w-0 flex-1 text-sm'>{describeSupersession(supersedingBuildId)}</div>
       <Button size='sm' variant='outline' onClick={reload}>
         Reload now
       </Button>

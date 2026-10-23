@@ -119,6 +119,26 @@ describe('browser update control', () => {
     );
   });
 
+  it('words a rollback as a replacement and dates the build it serves', async () => {
+    const { BrowserUpdate, SidebarProvider, buildId, markBuildSuperseded } = await load();
+    render(
+      <SidebarProvider>
+        <BrowserUpdate />
+      </SidebarProvider>,
+    );
+    const rolledBack = buildId - 48 * 3_600_000;
+    const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+    act(() => {
+      markBuildSuperseded(rolledBack);
+    });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Tau update' });
+    expect(dialog).toHaveTextContent(`Tau · Built ${format.format(rolledBack)}`);
+    expect(dialog).toHaveTextContent('This version of Tau has been replaced.');
+    expect(dialog).not.toHaveTextContent('newer version');
+  });
+
   it('falls back to the floating prompt where no sidebar is mounted', async () => {
     const { BuildSkewBanner, buildId } = await load();
     render(<BuildSkewBanner />);

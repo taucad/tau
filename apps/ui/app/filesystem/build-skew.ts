@@ -23,21 +23,23 @@ const channelName = `${metaConfig.databasePrefix}build-id`;
 export const buildId: number = readBuildId();
 
 let superseded = false;
-let newestBuildId = buildId;
+let supersedingBuildId = buildId;
 const supersededTopic = new Topic<void>({ name: 'build-skew' });
-const newestBuildTopic = new Topic<void>({ name: 'newest-build' });
+const supersedingBuildTopic = new Topic<void>({ name: 'superseding-build' });
 
 /**
  * Mark this build superseded by another one: a newer tab announced it, or the
  * server answered with a different build after a deploy (`#lib/stale-build-recovery`).
- * A rollback serves an older build, which supersedes this one without being newer.
+ * A rollback serves an older build, which supersedes this one without being newer;
+ * a newer build heard later still outranks it.
  *
  * @param otherBuildId - The superseding build's id.
  */
 export function markBuildSuperseded(otherBuildId: number): void {
-  if (otherBuildId > newestBuildId) {
-    newestBuildId = otherBuildId;
-    newestBuildTopic.emit();
+  const isFirstRollback = otherBuildId < buildId && supersedingBuildId === buildId;
+  if (otherBuildId > supersedingBuildId || isFirstRollback) {
+    supersedingBuildId = otherBuildId;
+    supersedingBuildTopic.emit();
   }
   if (!superseded) {
     superseded = true;
@@ -70,13 +72,22 @@ if (channel) {
  */
 export const isBuildSuperseded = (): boolean => superseded;
 
-/** The newest build id heard from any tab, or this tab's own when none is newer. */
-export const readNewestBuildId = (): number => newestBuildId;
+/**
+ * The build that superseded this one: the newest heard from any tab, or the build a
+ * rollback serves (older than this one). This tab's own id while nothing superseded it.
+ */
+export const readSupersedingBuildId = (): number => supersedingBuildId;
 
-/** Subscribe to each newer build id heard after boot. */
-export const subscribeNewestBuildId = (listener: () => void): (() => void) => {
-  return newestBuildTopic.subscribe(listener);
+/** Subscribe to each change of the superseding build. */
+export const subscribeSupersedingBuildId = (listener: () => void): (() => void) => {
+  return supersedingBuildTopic.subscribe(listener);
 };
+
+/** The prompt shared by every surface that offers the reload. */
+export const describeSupersession = (superseding: number): string =>
+  superseding < buildId
+    ? 'This version of Tau has been replaced. Reload to continue with the current version.'
+    : 'A newer version of Tau is available. Reload to continue with the latest version.';
 
 /** Subscribe to the one-way transition into the superseded state. */
 export const subscribeBuildSkew = (listener: () => void): (() => void) => {

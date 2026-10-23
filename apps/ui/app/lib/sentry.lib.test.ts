@@ -152,11 +152,11 @@ describe('createBeforeSend', () => {
   it.each<StaleBuildOutcome>(['reloading', 'superseded'])(
     'should drop a module import failure a deploy explains (%s)',
     async (outcome) => {
-      const recover = vi.fn(async () => outcome);
-      const beforeSend = createBeforeSend(recover);
+      const decide = vi.fn(async (_failure: unknown) => outcome);
+      const beforeSend = createBeforeSend(decide);
 
       await expect(beforeSend(moduleImportEvent(), { originalException: moduleImportFailure })).resolves.toBeNull();
-      expect(recover).toHaveBeenCalledOnce();
+      expect(decide).toHaveBeenCalledExactlyOnceWith(moduleImportFailure);
     },
   );
 
@@ -170,13 +170,13 @@ describe('createBeforeSend', () => {
   });
 
   it('should not probe the server for any other error', () => {
-    const recover = vi.fn(async (): Promise<StaleBuildOutcome> => 'reloading');
-    const beforeSend = createBeforeSend(recover);
+    const decide = vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'reloading');
+    const beforeSend = createBeforeSend(decide);
 
     const sent = beforeSend(rejectionEvent('generic'), { originalException: new Error('boom') });
 
     expect(sent).not.toBeInstanceOf(Promise);
-    expect(recover).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
   });
 });
 

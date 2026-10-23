@@ -4,10 +4,11 @@ import { Topic } from '@taucad/events';
 import { useSidebar } from '@taucad/ui/components/sidebar';
 import {
   buildId,
+  describeSupersession,
   isBuildSuperseded,
-  readNewestBuildId,
+  readSupersedingBuildId,
   subscribeBuildSkew,
-  subscribeNewestBuildId,
+  subscribeSupersedingBuildId,
 } from '#filesystem/build-skew.js';
 import { UpdateControl } from '#components/nav/update-control.js';
 
@@ -28,9 +29,9 @@ export const useBrowserUpdateControlMounted = (): boolean =>
     serverSnapshot,
   );
 
-const builtAt = (newestBuildId: number): string | undefined =>
-  newestBuildId > 0
-    ? `Tau · Updated ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(newestBuildId)}`
+const builtAt = (supersedingBuildId: number): string | undefined =>
+  supersedingBuildId > 0
+    ? `Tau · ${supersedingBuildId < buildId ? 'Built' : 'Updated'} ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(supersedingBuildId)}`
     : undefined;
 
 /**
@@ -41,7 +42,11 @@ const builtAt = (newestBuildId: number): string | undefined =>
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
   const superseded = useSyncExternalStore(subscribeBuildSkew, isBuildSuperseded, serverSnapshot);
-  const newestBuildId = useSyncExternalStore(subscribeNewestBuildId, readNewestBuildId, serverBuildSnapshot);
+  const supersedingBuildId = useSyncExternalStore(
+    subscribeSupersedingBuildId,
+    readSupersedingBuildId,
+    serverBuildSnapshot,
+  );
   const [open, setOpen] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const { open: sidebarOpen, openMobile, isMobile, setOpen: showSidebar } = useSidebar();
@@ -74,8 +79,8 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   return (
     <UpdateControl
       title='Update ready'
-      version={builtAt(newestBuildId)}
-      detail='A newer version of Tau is available. Reload to continue with the latest version.'
+      version={builtAt(supersedingBuildId)}
+      detail={describeSupersession(supersedingBuildId)}
       icon={ArrowUpCircle}
       isProminent
       isOpen={open}

@@ -64,21 +64,21 @@ export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): Erro
   isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
 
 /**
- * The `beforeSend` hook with version-skew triage (TAU-UI-6).
+ * The `beforeSend` hook with version-skew filtering (TAU-UI-6).
  *
- * A module script that failed to load is first put to the stale-build recovery:
- * when a deploy explains it the page reloads or offers the reload, and the
- * event is dropped as expected control flow. A failure the live build still has
- * is reported like any other event.
+ * The stale-build recovery owns module load failures on its own (`installStaleBuildRecovery`);
+ * this hook only awaits its decision for the failure, which is made once per failure however
+ * many channels report it. A failure a deploy explains is dropped as expected control flow; a
+ * failure the live build still has is reported like any other event.
  *
- * @param recover - Decides what a module load failure was (`#lib/stale-build-recovery`).
+ * @param decide - The recovery's decision for one failure (`#lib/stale-build-recovery`).
  * @returns The hook to pass to `Sentry.init`.
  * @public
  */
-export const createBeforeSend = (recover: () => Promise<StaleBuildOutcome>) => {
+export const createBeforeSend = (decide: (failure: unknown) => Promise<StaleBuildOutcome>) => {
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
   const unlessDeployed = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> =>
-    (await recover()) === 'current' ? beforeSendSentryEvent(event, hint) : null;
+    (await decide(hint?.originalException)) === 'current' ? beforeSendSentryEvent(event, hint) : null;
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
   return (event: ErrorEvent, hint?: EventHint): ErrorEvent | null | Promise<ErrorEvent | null> =>
     isStaleModuleError(hint?.originalException) ? unlessDeployed(event, hint) : beforeSendSentryEvent(event, hint);

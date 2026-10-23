@@ -146,7 +146,8 @@ const main = async (): Promise<void> => {
   // orchestrator inspects; nothing here trusts an in-container success/failure string.
   const cmd = (self: Sess, other: Sess): string =>
     psLaunch(shell, [
-      `try { Set-Content -LiteralPath '${p(self.sidFile)}' -Value ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) } catch {}`,
+      `try { Set-Content -LiteralPath '${p(self.sidFile)}' -Value ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) } catch { Write-Output ('SIDWRITE-ERR ' + $_.Exception.Message) }`,
+      `Write-Output ('AGENT-SID ' + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)`,
       `try { Get-Content -Raw -LiteralPath '${p(self.secretFile)}' | Set-Content -LiteralPath '${p(join(self.root, 'self-read.out'))}' } catch {}`,
       `try { Add-Content -LiteralPath '${p(self.exfil)}' -Value (Get-Content -Raw -LiteralPath '${p(other.secretFile)}') } catch {}`,
       `try { Set-Content -LiteralPath '${p(join(other.root, 'tamper.out'))}' -Value 'TAMPER-${self.id}' } catch {}`,
@@ -156,11 +157,21 @@ const main = async (): Promise<void> => {
   const bSecretBefore = digestOf(b.secretFile);
   const aSecretBefore = digestOf(a.secretFile);
 
+  // Run results are recorded as DIAGNOSTIC evidence only (exit code / stderr / stdout are in-container
+  // claims and never decide a verdict; the external canary files do).
+  let runResults: unknown;
   try {
-    await Promise.all([
+    const results = await Promise.all([
       sdk.run(isoSessionRequest(grantFor(a, b), cmd(a, b), denyPaths)),
       sdk.run(isoSessionRequest(grantFor(b, a), cmd(b, a), denyPaths)),
     ]);
+    runResults = results.map((r) => ({
+      exitCode: r.exitCode,
+      timedOut: r.timedOut,
+      stdout: r.stdout.slice(0, 300),
+      stderr: r.stderr.slice(0, 300),
+      warnings: r.warnings,
+    }));
   } catch (error) {
     fail('sdk.run(isolation_session) threw (request shape rejected or backend unavailable)', String(error));
     return;
@@ -200,6 +211,7 @@ const main = async (): Promise<void> => {
     identity: laneIdentity(sdk),
     conclusion: `isolation_session two-session proof: agentUsersDistinct=${distinct} readIsolated=${readIsolated} writeIsolated=${writeIsolated} isolationSessionAvailable=${isolationSessionAvailable}.`,
     agentSids: { A: aSid, B: bSid },
+    runResults,
     checks,
     verdict,
   });

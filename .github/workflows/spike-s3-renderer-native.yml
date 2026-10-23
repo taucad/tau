@@ -1,0 +1,271 @@
+# Q3 attempt 4 (desktop Bash/Terminal blueprint, S3): the terminal renderer comparison on native rows.
+#
+# Runs the S3 harness (apps/ui/scripts/s3-renderer/run.mts) for xterm.js + WebGL and @aurigax-ai/ghostty-web on:
+#   MAC-A    macos-26        (arm64)  as the runner user, plus VoiceOver through Guidepup.
+#   MAC-X    macos-26-intel  (x64)    as the runner user, plus VoiceOver through Guidepup.
+#   WIN-ARM  windows-11-arm  (arm64)  as a created NON-ADMIN user (run-nonadmin.ps1, Q2's pattern), plus NVDA.
+#   LNX-VM   stock Ubuntu 24.04 cloud image under KVM (linux-vm.sh), as an ordinary user, plus Orca.
+# Each row also packages the fixture (asar, resources/ui/client, Tau's macOS fuses) and loads the harness under
+# Tau's production app:// protocol and CSP (`--packaged`).
+#
+# Hosted runners have no real GPU: every row is labelled "software/virtual GPU" (S3_GPU_LABEL) and supports no GPU
+# performance claim. A reader or non-admin launch that cannot run on a hosted runner is a typed result in the
+# drop and leaves the row red; nothing is skipped. Admin-run fallbacks are labelled `-admin` in their host label.
+name: Spike S3 (terminal renderer, native rows)
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s3-renderer-native-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NX_NO_CLOUD: 'true'
+  KINDS: xterm,aurigax
+  GPU_LABEL: software/virtual GPU (hosted runner)
+  GUIDEPUP_VERSION: 0.36.4
+  GUIDEPUP_SETUP_VERSION: 0.29.3
+
+jobs:
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            row: MAC-A
+          - os: macos-26-intel
+            row: MAC-X
+    name: S3 native (${{ matrix.row }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 200
+    env:
+      S3_HOST_LABEL: ${{ matrix.row }}
+      S3_GPU_LABEL: software/virtual GPU (hosted runner)
+      DROP: ${{ github.workspace }}/out/s3-native/${{ matrix.row }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nx
+        timeout-minutes: 20
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Build the harness and package the fixture
+        timeout-minutes: 20
+        run: |
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --kinds "$KINDS"
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --packaged --kinds "$KINDS"
+
+      - name: Core suites (integrity, disposal, R02-R07)
+        timeout-minutes: 60
+        continue-on-error: true
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out "$DROP/core"
+
+      - name: R01 at matched load (4 MiB/s)
+        timeout-minutes: 45
+        continue-on-error: true
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r01 --rounds 3 --rate 4 --out "$DROP/r01-rate4"
+
+      - name: R01 unbounded
+        timeout-minutes: 45
+        continue-on-error: true
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r01 --rounds 3 --out "$DROP/r01"
+
+      - name: Packaged app under production protocol and CSP
+        timeout-minutes: 20
+        continue-on-error: true
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --packaged --kinds "$KINDS" --suite integrity,r02,r06 --out "$DROP/packaged"
+
+      - name: Install pinned Guidepup and set up VoiceOver
+        id: guidepup
+        timeout-minutes: 15
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          mkdir -p "$DROP"
+          npm install --prefix "$RUNNER_TEMP/guidepup" --no-audit --no-fund \
+            "@guidepup/guidepup@$GUIDEPUP_VERSION" "@guidepup/setup@$GUIDEPUP_SETUP_VERSION"
+          cd "$RUNNER_TEMP/guidepup"
+          npx --no-install guidepup install 2>&1 | tee "$DROP-guidepup-install.log"
+          npx --no-install guidepup setup --ci 2>&1 | tee "$DROP-guidepup-setup.log"
+
+      - name: R04 with VoiceOver
+        timeout-minutes: 20
+        continue-on-error: true
+        env:
+          S3_GUIDEPUP_MODULE: ${{ runner.temp }}/guidepup/node_modules/@guidepup/guidepup
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r04voiceover --out "$DROP/voiceover"
+
+      - name: Summarize and gate
+        if: always()
+        timeout-minutes: 5
+        run: |
+          node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
+            core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
+            voiceover=r04voiceover | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        timeout-minutes: 10
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: s3-native-${{ matrix.row }}
+          path: out/s3-native/
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-arm:
+    name: S3 native (WIN-ARM, windows-11-arm, non-admin)
+    runs-on: windows-11-arm
+    timeout-minutes: 240
+    env:
+      S3_HOST_LABEL: WIN-ARM
+      S3_GPU_LABEL: software/virtual GPU (hosted runner)
+      GUIDEPUP_SCREEN_READERS_PATH: ${{ github.workspace }}/out/guidepup-readers
+      S3_GUIDEPUP_MODULE: ${{ github.workspace }}/out/guidepup/node_modules/@guidepup/guidepup
+      DROP: ${{ github.workspace }}/out/s3-native/WIN-ARM
+    steps:
+      - name: Preserve source bytes on Windows
+        timeout-minutes: 2
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        timeout-minutes: 10
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nx
+        timeout-minutes: 30
+        with:
+          save-pnpm-store: 'false'
+
+      - name: Build the harness and package the fixture
+        timeout-minutes: 25
+        shell: bash
+        run: |
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --kinds "$KINDS"
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --packaged --kinds "$KINDS"
+
+      - name: Install pinned Guidepup and NVDA
+        timeout-minutes: 15
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$DROP"
+          npm install --prefix out/guidepup --no-audit --no-fund \
+            "@guidepup/guidepup@$GUIDEPUP_VERSION" "@guidepup/setup@$GUIDEPUP_SETUP_VERSION"
+          cd out/guidepup
+          npx --no-install guidepup install nvda 2>&1 | tee "$DROP-guidepup-install.log"
+
+      - name: Suites as a non-admin user
+        id: nonadmin
+        timeout-minutes: 170
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          & apps/ui/scripts/s3-renderer/native/run-nonadmin.ps1 -Drop $env:DROP -TimeoutSeconds 2700 -Runs @(
+            "core=--skip-build --kinds $env:KINDS --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out `"$env:DROP/core`"",
+            "r01-rate4=--skip-build --kinds $env:KINDS --suite r01 --rounds 3 --rate 4 --out `"$env:DROP/r01-rate4`"",
+            "r01=--skip-build --kinds $env:KINDS --suite r01 --rounds 3 --out `"$env:DROP/r01`"",
+            "packaged=--skip-build --packaged --kinds $env:KINDS --suite integrity,r02,r06 --out `"$env:DROP/packaged`"",
+            "nvda=--skip-build --kinds $env:KINDS --suite r04nvda --out `"$env:DROP/nvda`""
+          )
+          exit $LASTEXITCODE
+
+      # Recorded only when the non-admin path failed: the same suites as the runner's administrator, labelled so.
+      - name: Admin-labelled fallback (core, packaged)
+        if: steps.nonadmin.outcome == 'failure'
+        timeout-minutes: 60
+        continue-on-error: true
+        shell: bash
+        env:
+          S3_HOST_LABEL: WIN-ARM-admin
+        run: |
+          node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite integrity,disposal,r02,r03,r04,r05,r06,r07 --out "$DROP-admin/core"
+          node apps/ui/scripts/s3-renderer/run.mts --skip-build --packaged --kinds "$KINDS" --suite integrity,r02,r06 --out "$DROP-admin/packaged"
+
+      - name: Admin-labelled R04 with NVDA (runner's interactive session)
+        timeout-minutes: 20
+        continue-on-error: true
+        shell: bash
+        env:
+          S3_HOST_LABEL: WIN-ARM-admin
+        run: node apps/ui/scripts/s3-renderer/run.mts --skip-build --kinds "$KINDS" --suite r04nvda --out "$DROP-admin/nvda"
+
+      - name: Summarize and gate
+        if: always()
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          status=0
+          node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
+            core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
+            nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || status=1
+          node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP-admin" nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || true
+          exit $status
+
+      - name: Upload results
+        if: always()
+        timeout-minutes: 10
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: s3-native-WIN-ARM
+          path: out/s3-native/
+          if-no-files-found: warn
+          retention-days: 14
+
+  linux-vm:
+    name: S3 native (LNX-VM, stock Ubuntu 24.04 under KVM)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 200
+    env:
+      DROP: ${{ github.workspace }}/out/s3-native/LNX-VM
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-nx
+        timeout-minutes: 20
+        with:
+          save-pnpm-store: 'false'
+
+      # Built on the host; the guest gets the checkout over 9p and runs with --skip-build.
+      - name: Build the harness and package the fixture
+        timeout-minutes: 20
+        run: |
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --kinds "$KINDS"
+          node apps/ui/scripts/s3-renderer/run.mts --suite none --skip-build --packaged --kinds "$KINDS"
+
+      - name: Boot the stock VM and run every row as an ordinary user
+        timeout-minutes: 150
+        continue-on-error: true
+        run: bash apps/ui/scripts/s3-renderer/native/linux-vm.sh
+
+      - name: Summarize and gate
+        if: always()
+        timeout-minutes: 5
+        run: |
+          node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" \
+            core=integrity,disposal,r02,r03,r04,r05,r06,r07 r01-rate4=r01 r01=r01 packaged=integrity,r02,r06 \
+            orca=r04orca | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        timeout-minutes: 10
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: s3-native-LNX-VM
+          path: out/s3-native/
+          if-no-files-found: warn
+          retention-days: 14

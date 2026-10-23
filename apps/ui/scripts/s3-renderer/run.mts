@@ -13,10 +13,11 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { BinaryLike } from 'node:crypto';
-import { copyFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { build } from 'esbuild';
@@ -41,6 +42,8 @@ const { values } = parseArgs({
     profile: { type: 'boolean', default: false },
     /** Comma-separated candidates to run, in pairing order. */
     kinds: { type: 'string', default: 'xterm,ghostty' },
+    /** Run the fixture as a packaged app (asar, `resources/ui/client`, Tau's macOS fuses) instead of `electron main.cjs`. */
+    packaged: { type: 'boolean', default: false },
     'electron-arg': { type: 'string', multiple: true, default: [] },
   },
 });
@@ -59,7 +62,11 @@ const flow = { chunkBytes: 16_384, highWater: 262_144 };
 const interactiveRate = Number(values.rate);
 /** Milliseconds between main-process metric samples. */
 const sampleInterval = 250;
-const electronPath = createRequire(path.join(root, 'apps/desktop/package.json'))('electron') as unknown as string;
+const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'));
+const electronPath = desktopRequire('electron') as unknown as string;
+const isWindows = process.platform === 'win32';
+/** Set by `--packaged`: the packaged fixture executable and the client root inside its resources. */
+let packagedApp: { executable: string; clientRoot: string } | undefined;
 
 const sleep = async (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -102,6 +109,7 @@ const prepare = async (): Promise<void> => {
     execFileSync('pnpm', ['exec', 'vite', 'build', '--config', 'apps/ui/vite.s3-renderer.config.ts'], {
       cwd: root,
       stdio: 'inherit',
+      shell: isWindows,
     });
     await rename(path.join(clientRoot, 's3-renderer-harness.html'), path.join(clientRoot, 'index.html'));
     await mkdir(path.join(clientRoot, 'fonts'), { recursive: true });
@@ -130,12 +138,80 @@ const prepare = async (): Promise<void> => {
     });
   }
   await mkdir(resultsDirectory, { recursive: true });
+  if (values.packaged) {
+    packagedApp = await packageFixture();
+  }
+};
+
+/**
+ * Package the fixture the way `package-desktop.mts` packages Tau: `@electron/packager` with an asar app, the
+ * renderer client beside it in `resources/ui/client`, and on macOS the same fuses as a non-release Tau package
+ * (`macosPackageFuses`; `--inspect` stays allowed because Playwright attaches through it, as in Tau's packaged e2e lane).
+ */
+const packageFixture = async (): Promise<{ executable: string; clientRoot: string }> => {
+  const stage = path.join(outRoot, 'packaged-stage');
+  const output = path.join(outRoot, 'packaged');
+  const isMac = process.platform === 'darwin';
+  const appRoot = path.join(output, `TauS3Fixture-${process.platform}-${process.arch}`);
+  const resources = isMac ? path.join(appRoot, 'TauS3Fixture.app/Contents/Resources') : path.join(appRoot, 'resources');
+  const executable = isMac
+    ? path.join(appRoot, 'TauS3Fixture.app/Contents/MacOS/TauS3Fixture')
+    : path.join(appRoot, isWindows ? 'TauS3Fixture.exe' : 'TauS3Fixture');
+  const packagedClient = path.join(resources, 'ui/client');
+  // With --skip-build an earlier package is reused, so a run as another user needs neither network nor write access.
+  if (values['skip-build'] && (await stat(executable).catch(() => undefined))) {
+    return { executable, clientRoot: packagedClient };
+  }
+  await rm(stage, { recursive: true, force: true });
+  await rm(output, { recursive: true, force: true });
+  await mkdir(stage, { recursive: true });
+  await copyFile(fixtureMain, path.join(stage, 'main.cjs'));
+  await writeFile(
+    path.join(stage, 'package.json'),
+    `${JSON.stringify({ name: 'tau-s3-fixture', productName: 'TauS3Fixture', version: '0.0.0', main: 'main.cjs' })}\n`,
+  );
+  const { packager } = (await import(pathToFileURL(desktopRequire.resolve('@electron/packager')).href)) as {
+    packager: (options: Record<string, unknown>) => Promise<string[]>;
+  };
+  const electronVersion = (
+    JSON.parse(await readFile(desktopRequire.resolve('electron/package.json'), 'utf8')) as { version: string }
+  ).version;
+  const [packagedRoot] = await packager({
+    dir: stage,
+    out: output,
+    overwrite: true,
+    name: 'TauS3Fixture',
+    platform: process.platform,
+    arch: process.arch,
+    electronVersion,
+    asar: true,
+    prune: false,
+  });
+  if (packagedRoot !== appRoot) {
+    throw new Error(`@electron/packager wrote ${packagedRoot ?? 'nothing'}, expected ${appRoot}`);
+  }
+  await cp(clientRoot, packagedClient, { recursive: true });
+  if (isMac) {
+    const fuses = (await import(pathToFileURL(desktopRequire.resolve('@electron/fuses')).href)) as {
+      flipFuses: (path: string, config: Record<string | number, unknown>) => Promise<unknown>;
+      FuseVersion: { V1: unknown };
+    };
+    const { macosPackageFuses } = (await import(
+      pathToFileURL(path.join(root, 'apps/desktop/scripts/macos-package-mode.mts')).href
+    )) as { macosPackageFuses: (mode: { release: boolean }) => Record<number, boolean> };
+    await fuses.flipFuses(path.join(appRoot, 'TauS3Fixture.app'), {
+      version: fuses.FuseVersion.V1,
+      resetAdHocDarwinSignature: true,
+      ...macosPackageFuses({ release: false }),
+    });
+  }
+  return { executable, clientRoot: packagedClient };
 };
 
 const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promise<Session> => {
   const scale = Number(values.scale);
   const arguments_ = [
-    fixtureMain,
+    ...(packagedApp ? [] : [fixtureMain]),
     ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     '--js-flags=--expose-gc',
     ...(scale === 1 ? [] : [`--force-device-scale-factor=${scale}`]),
@@ -143,10 +219,10 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
     ...extraArguments,
   ];
   const app = await electron.launch({
-    executablePath: electronPath,
+    executablePath: packagedApp?.executable ?? electronPath,
     args: arguments_,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
-    env: { ...process.env, S3_CLIENT_ROOT: clientRoot },
+    env: { ...process.env, S3_CLIENT_ROOT: packagedApp?.clientRoot ?? clientRoot },
     timeout: 60_000,
   });
   const page = await app.firstWindow();
@@ -266,7 +342,17 @@ const environment = async () => {
       chrome: versions['chrome'],
       v8: versions['v8'],
       os: `${os.type()} ${os.release()} ${os.arch()}`,
-      osRelease: sh('sh', ['-c', '. /etc/os-release && echo "$PRETTY_NAME"']),
+      osRelease:
+        process.platform === 'darwin'
+          ? `macOS ${sh('sw_vers', ['-productVersion'])} (${sh('sw_vers', ['-buildVersion'])})`
+          : isWindows
+            ? sh('cmd', ['/c', 'ver'])
+            : sh('sh', ['-c', '. /etc/os-release && echo "$PRETTY_NAME"']),
+      /** Which lane produced this run (workflow row label), and how its GPU should be read. */
+      host: process.env['S3_HOST_LABEL'] ?? 'local',
+      gpuLabel: process.env['S3_GPU_LABEL'] ?? 'unlabelled',
+      runAsUser: os.userInfo().username,
+      packaged: values.packaged ? { executable: packagedApp?.executable } : false,
       cpu: `${os.cpus()[0]?.model ?? 'unknown'} x${os.cpus().length}`,
       memoryGiB: Math.round(os.totalmem() / 2 ** 30),
       display: process.env['DISPLAY'] ?? 'none',
@@ -1245,11 +1331,124 @@ const r04OrcaRun = async (kind: Kind) => {
   }
 };
 
+/** The part of `@guidepup/guidepup`'s VoiceOver and NVDA drivers the screen-reader suites use. */
+type GuidepupReader = {
+  start: (options?: { capture?: boolean | 'initial' }) => Promise<void>;
+  stop: () => Promise<void>;
+  press: (key: string) => Promise<void>;
+  type: (text: string) => Promise<void>;
+  perform: (command: unknown) => Promise<void>;
+  lastSpokenPhrase: () => Promise<string>;
+  spokenPhraseLog: () => Promise<string[]>;
+  keyboardCommands: Record<string, unknown>;
+};
+const screenReaders = {
+  voiceover: { driver: 'voiceOver', readLine: 'readLine', previousLine: 'readPreviousLine' },
+  nvda: { driver: 'nvda', readLine: 'reportCurrentLineInReview', previousLine: 'moveToPreviousLineInReview' },
+} as const;
+
+/**
+ * R04 with VoiceOver (macOS) or NVDA (Windows), driven by Guidepup: the Orca run's steps, with the reader's own
+ * key handling. Receipts are the reader's spoken-phrase log sliced per step plus its last spoken phrase, so speech
+ * that no Guidepup command triggered (written output) is still caught. Guidepup is not a Tau dependency: the
+ * workflow installs a pinned copy and passes its path in `S3_GUIDEPUP_MODULE`.
+ */
+const r04ScreenReaderRun = async (kind: Kind, readerName: keyof typeof screenReaders) => {
+  const modulePath = process.env['S3_GUIDEPUP_MODULE'];
+  if (!modulePath) {
+    throw new Error('S3_GUIDEPUP_MODULE is required (path to an installed @guidepup/guidepup).');
+  }
+  const names = screenReaders[readerName];
+  const guidepup = createRequire(import.meta.url)(modulePath) as Record<string, GuidepupReader>;
+  const reader = guidepup[names.driver]!;
+  const receipts: Array<{ step: string; spoken: string[]; lastSpokenPhrase: string }> = [];
+  let readerStarted = false;
+  let session: Session | undefined;
+  try {
+    await reader.start({ capture: true });
+    readerStarted = true;
+    session = await launch(kind, ['--force-renderer-accessibility']);
+    const active = session;
+    await mount(active, { screenReaderMode: true });
+    await call(active, 'settle', 1500);
+    await main(
+      active,
+      'const [window] = electron.BrowserWindow.getAllWindows(); electron.app.focus({ steal: true }); window.show(); window.focus();',
+    );
+    await active.page.bringToFront();
+    await call(active, 'settle', 1500);
+    await active.page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
+    const step = async (name: string, action: () => Promise<void>): Promise<void> => {
+      const before = (await reader.spokenPhraseLog()).length;
+      await action();
+      await sleep(2500);
+      receipts.push({
+        step: name,
+        spoken: (await reader.spokenPhraseLog()).slice(before),
+        lastSpokenPhrase: await reader.lastSpokenPhrase(),
+      });
+    };
+    await step('focus-entry (Tab)', async () => reader.press('Tab'));
+    const focusedAfterTab = await call<boolean>(active, 'activeElementInPane');
+    await step('output written while focused', async () =>
+      call(active, 'write', '\r\nS3 READER OUTPUT LINE ALPHA\r\nS3 READER OUTPUT LINE BRAVO'),
+    );
+    await step('typing "xyz" with echo', async () => reader.type('xyz'));
+    await step(`read current line (${names.readLine})`, async () =>
+      reader.perform(reader.keyboardCommands[names.readLine]),
+    );
+    await step(`previous line (${names.previousLine})`, async () =>
+      reader.perform(reader.keyboardCommands[names.previousLine]),
+    );
+    await step('focus escape (Shift+Tab)', async () => reader.press('Shift+Tab'));
+    const focusedAfterShiftTab = await call<boolean>(active, 'activeElementInPane');
+    return {
+      kind,
+      status: 'ran',
+      kindOfEvidence: `${readerName} spoken-phrase receipts via Guidepup (real AT, hosted runner)`,
+      focusedAfterTab,
+      focusedAfterShiftTab,
+      receipts,
+    };
+  } catch (error) {
+    // A reader that cannot start or be driven on this host is a typed result, never a skipped row.
+    return {
+      kind,
+      status: readerStarted ? 'failed' : 'unavailable',
+      reason: error instanceof Error ? error.message : String(error),
+      receipts,
+    };
+  } finally {
+    await session?.app.close();
+    if (readerStarted) {
+      await reader.stop();
+    }
+  }
+};
+
 const suites: Record<string, () => Promise<unknown>> = {
   r04orca: async () => {
     const results = [];
     for (const kind of kinds) {
       results.push(await r04OrcaRun(kind));
+    }
+    return results;
+  },
+  r04voiceover: async () => {
+    const results = [];
+    for (const kind of kinds) {
+      results.push(await r04ScreenReaderRun(kind, 'voiceover'));
+    }
+    return results;
+  },
+  r04nvda: async () => {
+    const results = [];
+    for (const kind of kinds) {
+      results.push(await r04ScreenReaderRun(kind, 'nvda'));
     }
     return results;
   },
@@ -1290,9 +1489,16 @@ const suites: Record<string, () => Promise<unknown>> = {
 };
 
 await prepare();
+if (values.suite === 'none') {
+  process.exit(0);
+}
 const identity = await environment();
 await writeFile(path.join(resultsDirectory, 'environment.json'), `${JSON.stringify(identity, undefined, 2)}\n`);
-const selected = values.suite === 'all' ? Object.keys(suites) : values.suite.split(',');
+/** Screen-reader suites need their reader's session, so `all` leaves them out. */
+const selected =
+  values.suite === 'all'
+    ? Object.keys(suites).filter((name) => !name.startsWith('r04') || name === 'r04')
+    : values.suite.split(',');
 for (const name of selected) {
   const suite = suites[name];
   if (!suite) {

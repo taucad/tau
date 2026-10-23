@@ -21,6 +21,8 @@ import type {
   TauViewerReadInput,
   TauViewerReadResult,
   TauViewerDirectShare,
+  TauViewerPreviewParametersInput,
+  TauViewerPreviewResult,
   TauViewerShowResult,
   TauViewerSyncInput,
   TauViewerSyncResult,
@@ -135,6 +137,14 @@ export type TauMcpViewer = Readonly<{
     input: Readonly<{ modelId: string }>,
     options: TauMcpViewerCallOptions,
   ): Promise<TauViewerWorkbenchState | TauMcpViewerFailure>;
+  /**
+   * Render a drag's transient parameter values on a shown source's watched document; a host without watched sources
+   * leaves the tool out.
+   */
+  previewParameters?(
+    input: TauViewerPreviewParametersInput,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerPreviewResult | TauMcpViewerFailure>;
 }>;
 
 const descriptions = {
@@ -155,6 +165,8 @@ const descriptions = {
     "One folder of the project, or the files a search finds, for the Tau viewer page's Files pane. Only the viewer page calls this.",
   appOpenFile:
     'Show one project file in the Tau viewer page that asks, without changing the model show_model showed last. Only the viewer page calls this.',
+  appPreviewParameters:
+    "Render a drag's transient parameter values on the source the Tau viewer shows, without writing them. Only the viewer page calls this.",
 } as const;
 
 const showModelInputSchema = z
@@ -245,6 +257,21 @@ const appSyncInputSchema = z
 
 const appShareLinkInputSchema = z.object({ modelId: z.string().min(1) }).strict();
 
+/** Parameters one preview carries at most: a drag moves one field, a reset a group. */
+const previewParameterLimit = 256;
+
+const appPreviewParametersInputSchema = z
+  .object({
+    modelId: z.string().min(1).max(64),
+    parameters: z
+      .record(z.string().min(1).max(256), z.json())
+      .refine((parameters) => Object.keys(parameters).length <= previewParameterLimit, {
+        message: `A preview carries at most ${String(previewParameterLimit)} parameters.`,
+      })
+      .optional(),
+  })
+  .strict();
+
 const appWorkbenchStateInputSchema = z.object({ modelId: z.string().min(1).max(64) }).strict();
 const appListFilesInputSchema = z
   .object({
@@ -317,6 +344,7 @@ export const tauViewerPageInputSchemas = {
   appWorkbenchState: appWorkbenchStateInputSchema,
   appListFiles: appListFilesInputSchema,
   appOpenFile: appOpenFileInputSchema,
+  appPreviewParameters: appPreviewParametersInputSchema,
 } as const;
 
 /** The file extensions the file entrypoint claims: the page's own formats and those the server converts to GLB (W7). */
@@ -643,6 +671,29 @@ export const registerTauMcpViewer = (
           };
     },
   );
+  const appPreviewParameters = server.registerTool(
+    tauViewerToolName.appPreviewParameters,
+    {
+      description: descriptions.appPreviewParameters,
+      inputSchema: appPreviewParametersInputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: alwaysLoad,
+    },
+    async (args, extra) => {
+      const result =
+        viewer.previewParameters === undefined
+          ? { errorCode: 'NOT_SUPPORTED', message: 'This Tau server cannot preview parameters.' }
+          : await viewer.previewParameters(args, callOptions(extra));
+      return isFailure(result)
+        ? failure(result)
+        : {
+            content: [
+              { type: 'text', text: result.accepted ? 'Previewing.' : 'A newer change replaced this preview.' },
+            ],
+            structuredContent: result,
+          };
+    },
+  );
   const appListFiles = server.registerTool(
     tauViewerToolName.appListFiles,
     {
@@ -743,6 +794,10 @@ export const registerTauMcpViewer = (
       ui: { resourceUri, visibility: ['app'] },
     });
     present(appWorkbenchState, hasPage && viewer.workbenchState !== undefined, {
+      ...alwaysLoad,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    present(appPreviewParameters, hasPage && viewer.previewParameters !== undefined, {
       ...alwaysLoad,
       ui: { resourceUri, visibility: ['app'] },
     });

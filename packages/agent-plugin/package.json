@@ -97,6 +97,7 @@
     "react-dom": "catalog:",
     "tailwindcss": "catalog:",
     "three": "catalog:",
+    "uint8array-extras": "catalog:",
     "vite": "catalog:",
     "vite-plugin-singlefile": "catalog:",
     "xstate": "catalog:",

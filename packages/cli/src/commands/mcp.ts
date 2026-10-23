@@ -508,6 +508,7 @@ export const mcpCommand = defineCommand({
           checkouts,
           viewerPage,
           runtimeClient: clientFor,
+          renderTimeout: operationTimeout,
           /* The agent plugin's launcher says which rung started this CLI; `initialize` names it with this version. */
           runtime: {
             version: installedVersion(import.meta.url, { name: packageJson.name, version: packageJson.version }),

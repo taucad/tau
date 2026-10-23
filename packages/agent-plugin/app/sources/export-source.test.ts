@@ -2,13 +2,19 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
-import type { ExportEntryState, ExportSource } from '@taucad/workbench-panes/export/export-source';
+import { defaultExportPreferences } from '@taucad/workbench-panes/export/export-source';
+import type {
+  ExportEntryState,
+  ExportPreferencesState,
+  ExportSource,
+} from '@taucad/workbench-panes/export/export-source';
 // oxlint-disable-next-line no-restricted-imports -- relative import is the only portable way to load this package's own package.json (matches `packages/runtime/src/utils/package-info.ts`).
 import packageJson from '../../package.json' with { type: 'json' };
 import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge, HostView } from '#app/host-bridge.js';
 import { createExportSource, viewerExportTool } from '#app/sources/export-source.js';
 import { createExportOptionStorage } from '#app/sources/export-preferences.js';
+import { laneStoreFor } from '#app/lane-store.js';
 
 /** Option storage over an empty storage that keeps nothing, so a test starts from the defaults. */
 const memoryStorage = () =>
@@ -116,6 +122,17 @@ const readEntry = (source: ExportSource, entryPath: string): ExportEntryState =>
   return state!;
 };
 
+/** Render the source's preferences hook once, the way the pane calls it. */
+const readPreferences = (source: ExportSource): ExportPreferencesState => {
+  let state: ExportPreferencesState | undefined;
+  const probe = () => {
+    state = source.usePreferences!();
+    return null;
+  };
+  renderToString(createElement(probe));
+  return state!;
+};
+
 const request = {
   entryPath: 'gear.ts',
   formatContent: {},
@@ -125,6 +142,22 @@ const request = {
 describe('createExportSource', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("should keep the pane's choices in the shown project's lane store, apart from another project's", () => {
+    const { bridge } = createBridge('mcp-app');
+    const [, persist] = readPreferences(createExportSource(bridge, { ...model, projectKey: 'export-project-a' }));
+    persist({ ...defaultExportPreferences, selectedFormats: ['stl'], formatOptions: { stl: { binary: false } } });
+
+    const store = laneStoreFor('export-project-a');
+    expect(store.readOption('export/preferences')).toMatchObject({ selectedFormats: ['stl'] });
+    expect(store.readOption('export/stl/options')).toEqual({ binary: false });
+    /* A newer model of the same project keeps the choices; another project starts from the defaults. */
+    const newer = createExportSource(bridge, { ...model, id: 'm2', projectKey: 'export-project-a' });
+    expect(readPreferences(newer)[0].selectedFormats).toEqual(['stl']);
+    const other = createExportSource(bridge, { ...model, projectKey: 'export-project-b' });
+    expect(readPreferences(other)[0].selectedFormats).toEqual([]);
+    expect(laneStoreFor('export-project-b').readOption('export/preferences')).toBeUndefined();
   });
 
   it('should offer a download only on the loopback page', () => {

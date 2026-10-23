@@ -4814,6 +4814,116 @@
 + public MaterialTransmission? Transmission { get; init; }
 + public MaterialVolume? Volume { get; init; }
 +}
+--- a/Types/Slice.cs
++++ b/Types/Slice.cs
+@@ -402,49 +402,74 @@
+                 float fBestSqrStart = 1.0f;
+                 float fBestSqrEnd   = 1.0f;
+ 
+-                if (nCurrEnd != nCurrStart)
++                // Joins are searched among segments whose Y range overlaps
++                // a window around the current ends. Matching endpoints of
++                // neighbouring cells are identical, so a window of one pixel
++                // (fScale) finds every exact match, in the same order as a
++                // wider one. Only if an end has no exact match, the search
++                // is repeated with the full window of the 1 mm join distance,
++                // which can bridge gaps; the result is the same as always
++                // searching the full window, but at fine voxel sizes the
++                // full window spans tens of rows.
++                bool bNarrow = fScale > 0.0f && fScale < 1.0f;
++
++                for (int nPass = bNarrow ? 0 : 1; nPass < 2; nPass++)
+                 {
+-                    float fSqrDist = (oSegments[nCurrStart].m_vecStart - oSegments[nCurrEnd].m_vecEnd).LengthSquared();
+-                    if (fSqrDist < 1.0f)
++                    nBestStart      = -1;
++                    nBestEnd        = -1;
++                    fBestSqrStart   = 1.0f;
++                    fBestSqrEnd     = 1.0f;
++
++                    if (nCurrEnd != nCurrStart)
+                     {
+-                        fBestSqrEnd = fBestSqrStart = fSqrDist;
+-                        nBestStart  = nCurrEnd;
+-                        nBestEnd    = nCurrStart;
++                        float fSqrDist = (oSegments[nCurrStart].m_vecStart - oSegments[nCurrEnd].m_vecEnd).LengthSquared();
++                        if (fSqrDist < 1.0f)
++                        {
++                            fBestSqrEnd = fBestSqrStart = fSqrDist;
++                            nBestStart  = nCurrEnd;
++                            nBestEnd    = nCurrStart;
++                        }
+                     }
+-                }
+-
+-                float fMin = MathF.Floor(Math.Min(oSegments[nCurrStart].m_fMinY, oSegments[nCurrEnd].m_fMinY)) - 1.0f;
+-                float fMax = MathF.Ceiling(Math.Max(oSegments[nCurrStart].m_fMaxY, oSegments[nCurrEnd].m_fMaxY)) + 1.0f;
+ 
+-                int nSearchFrom = Math.Min(nCurrStart, nCurrEnd);
+-                while (nSearchFrom > 0)
+-                {
+-                    if (oSegments[nSearchFrom - 1].m_fMaxY >= fMin)
+-                        nSearchFrom--;
+-                    else
+-                        break;
+-                }
++                    float fLo = Math.Min(oSegments[nCurrStart].m_fMinY, oSegments[nCurrEnd].m_fMinY);
++                    float fHi = Math.Max(oSegments[nCurrStart].m_fMaxY, oSegments[nCurrEnd].m_fMaxY);
+ 
+-                for (int n = nSearchFrom; n < oSegments.Count; ++n)
+-                {
+-                    if (oSegments[n].m_bUsed)
+-                        continue;
+-                    if (oSegments[n].m_fMinY > fMax)
+-                        break;
++                    float fMin = (nPass == 0) ? fLo - fScale : MathF.Floor(fLo) - 1.0f;
++                    float fMax = (nPass == 0) ? fHi + fScale : MathF.Ceiling(fHi) + 1.0f;
+ 
+-                    float fSqrDist = (oSegments[nCurrStart].m_vecStart - oSegments[n].m_vecEnd).LengthSquared();
+-                    if (fSqrDist < fBestSqrStart)
++                    int nSearchFrom = Math.Min(nCurrStart, nCurrEnd);
++                    while (nSearchFrom > 0)
+                     {
+-                        fBestSqrStart   = fSqrDist;
+-                        nBestStart      = n;
++                        if (oSegments[nSearchFrom - 1].m_fMaxY >= fMin)
++                            nSearchFrom--;
++                        else
++                            break;
+                     }
+ 
+-                    fSqrDist = (oSegments[nCurrEnd].m_vecEnd - oSegments[n].m_vecStart).LengthSquared();
+-                    if (fSqrDist < fBestSqrEnd)
++                    for (int n = nSearchFrom; n < oSegments.Count; ++n)
+                     {
+-                        fBestSqrEnd = fSqrDist;
+-                        nBestEnd    = n;
+-                    }                        
++                        if (oSegments[n].m_bUsed)
++                            continue;
++                        if (oSegments[n].m_fMinY > fMax)
++                            break;
++
++                        float fSqrDist = (oSegments[nCurrStart].m_vecStart - oSegments[n].m_vecEnd).LengthSquared();
++                        if (fSqrDist < fBestSqrStart)
++                        {
++                            fBestSqrStart   = fSqrDist;
++                            nBestStart      = n;
++                        }
++
++                        fSqrDist = (oSegments[nCurrEnd].m_vecEnd - oSegments[n].m_vecStart).LengthSquared();
++                        if (fSqrDist < fBestSqrEnd)
++                        {
++                            fBestSqrEnd = fSqrDist;
++                            nBestEnd    = n;
++                        }
++                    }
++
++                    if ((fBestSqrStart == 0.0f) && (fBestSqrEnd == 0.0f))
++                        break; // both ends have exact matches, the full window finds the same
+                 }
+  
+                 if (nBestEnd < 0 && nBestStart < 0)
 --- a/Utils/FieldUtils.cs
 +++ b/Utils/FieldUtils.cs
 @@ -253,10 +253,7 @@

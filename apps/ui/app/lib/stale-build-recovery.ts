@@ -32,6 +32,7 @@
 import { Topic } from '@taucad/events';
 import { buildId, offerReload, recordLiveBuild } from '#filesystem/build-skew.js';
 import { askLiveBuild } from '#lib/build-identity.js';
+import { reportUiError } from '#lib/error-reporting.js';
 
 /**
  * What a module load failure turned out to be.
@@ -88,6 +89,11 @@ export type StaleBuildRecoveryOptions = {
   readonly onSuperseded: (serverBuildId: number) => void;
   /** Record the build the server reported as soon as it answers, before anything is decided. */
   readonly onLiveBuild: (serverBuildId: number) => void;
+  /**
+   * Report a failure first explained by a reload the server then took back: it named this build once
+   * the reload had stalled, so the failure is genuine after all and nothing else will report it.
+   */
+  readonly onGenuineFailure?: (failure: unknown) => void;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
@@ -121,6 +127,8 @@ const guardFor = (from: number, to: number): string => `${String(from)}>${String
  */
 export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): StaleBuildRecovery => {
   const decisions = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
+  /** Failures explained by the reload now pending; decided again if the server takes the reason back. */
+  const coveredByReload = new Set<unknown>();
   const classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
   let reloadState: ReloadState = 'idle';
   const reloadStateTopic = new Topic<void>({ name: 'stale-build-reload' });
@@ -162,13 +170,25 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
   };
 
-  const decide = async (): Promise<StaleBuildOutcome> => {
+  /** The server names this build after all: each failure the reload covered is genuine, and reported. */
+  const takeBackReload = (): void => {
+    for (const covered of coveredByReload) {
+      if (typeof covered === 'object' && covered !== null) {
+        decisions.set(covered, Promise.resolve('current'));
+      }
+      options.onGenuineFailure?.(covered);
+    }
+    coveredByReload.clear();
+  };
+
+  const decide = async (failure: unknown): Promise<StaleBuildOutcome> => {
     const { answer, replacing: serverBuildId } = await askServer();
     passOn(answer);
     if (serverBuildId === undefined) {
       return 'current';
     }
     if (reloadState === 'pending') {
+      coveredByReload.add(failure);
       return 'reloading';
     }
     if (!options.canReloadSafely() || options.storage === undefined) {
@@ -186,20 +206,24 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       return supersede(serverBuildId);
     }
     setReloadState('pending');
+    coveredByReload.add(failure);
     options.reload();
     /* A page still here after the timeout is stalled: the reload was refused or is only slow, and no
      * signal tells the two apart (the old document lives until the new one commits; Tau registers no
      * unload prompt, `use-flush-on-close`). The guard stays, and later failures are offered the reload,
      * never another automatic one. Before offering, the server is asked again: if it names this build
-     * by now, the offer would only bring back one that was withdrawn. */
+     * by now, the offer would only bring back one that was withdrawn, and each failure the reload
+     * covered is decided again as genuine and reported. */
     setTimeout(() => {
       const offerIfStillReplaced = async (): Promise<void> => {
         const { answer, replacing: stillReplacing } = await askServer();
         passOn(answer);
         if (stillReplacing === undefined) {
+          takeBackReload();
           setReloadState('idle');
           return;
         }
+        coveredByReload.clear();
         setReloadState('stalled');
         options.onSuperseded(stillReplacing);
       };
@@ -212,11 +236,11 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   return {
     async recover(failure) {
       if (typeof failure !== 'object' || failure === null) {
-        return decide();
+        return decide(failure);
       }
       let decision = decisions.get(failure);
       if (decision === undefined) {
-        decision = decide();
+        decision = decide(failure);
         decisions.set(failure, decision);
       }
       return decision;
@@ -277,6 +301,9 @@ const getPageRecovery = (): StaleBuildRecovery => {
     // A lone tab keeps writing until the user reloads; other bundles stop it through `build-skew`'s own channel.
     onSuperseded: offerReload,
     onLiveBuild: recordLiveBuild,
+    onGenuineFailure: (failure) => {
+      void reportUiError(failure);
+    },
     canReloadSafely: () => !hasUserInteracted && performance.now() <= autoReloadWindow,
   });
   return pageRecovery;

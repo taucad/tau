@@ -28,6 +28,7 @@ const setup = (overrides: Partial<Parameters<typeof createStaleBuildRecovery>[0]
   const reload = vi.fn();
   const onSuperseded = vi.fn();
   const onLiveBuild = vi.fn();
+  const onGenuineFailure = vi.fn();
   const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => deployedBuildId);
   const recovery = createStaleBuildRecovery({
     buildId: ownBuildId,
@@ -36,10 +37,11 @@ const setup = (overrides: Partial<Parameters<typeof createStaleBuildRecovery>[0]
     reload,
     onSuperseded,
     onLiveBuild,
+    onGenuineFailure,
     canReloadSafely: () => true,
     ...overrides,
   });
-  return { storage, reload, onSuperseded, onLiveBuild, fetchServerBuildId, recovery };
+  return { storage, reload, onSuperseded, onLiveBuild, onGenuineFailure, fetchServerBuildId, recovery };
 };
 
 /** A distinct failure object, as each failed `import()` produces. */
@@ -261,6 +263,36 @@ describe('createStaleBuildRecovery', () => {
 
     expect(onSuperseded).not.toHaveBeenCalled();
     expect(recovery.readReloadState()).toBe('idle');
+  });
+
+  it('should decide again, and report, the failures a stalled reload covered once the server names this build', async () => {
+    vi.useFakeTimers();
+    let served = deployedBuildId;
+    const { recovery, onGenuineFailure } = setup({ reloadTimeout: 15_000, fetchServerBuildId: async () => served });
+    const first = failure();
+    const second = failure();
+    await expect(recovery.recover(first)).resolves.toBe('reloading');
+    await expect(recovery.recover(second)).resolves.toBe('reloading');
+    expect(onGenuineFailure).not.toHaveBeenCalled();
+
+    served = ownBuildId;
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(onGenuineFailure.mock.calls).toStrictEqual([[first], [second]]);
+    await expect(recovery.recover(first)).resolves.toBe('current');
+    await expect(recovery.classify(second)).resolves.toBe('current');
+  });
+
+  it("should leave a stalled reload's failures explained while the server still names another build", async () => {
+    vi.useFakeTimers();
+    const { recovery, onGenuineFailure } = setup({ reloadTimeout: 15_000 });
+    const error = failure();
+    await recovery.recover(error);
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(onGenuineFailure).not.toHaveBeenCalled();
+    await expect(recovery.classify(error)).resolves.toBe('reloading');
   });
 
   it('should not retry a reload another page of this tab started, which may have looped', async () => {

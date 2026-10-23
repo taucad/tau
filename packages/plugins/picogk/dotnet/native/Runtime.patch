@@ -1,6 +1,6 @@
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
-@@ -747,6 +747,105 @@
+@@ -747,6 +747,106 @@
  PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
                                                              PKGUI               hSideBar);
  
@@ -90,6 +90,7 @@
 +PICOGK_API int32_t TauVoxels_CreateFromMesh(PKINSTANCE, PKMESH, int32_t, float, PKVOXELS*, PKMETADATA*) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauVoxels_RenderMesh(PKINSTANCE, PKVOXELS, PKMESH) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauVdbFile_GetField(PKINSTANCE, PKVDBFILE, int32_t, int32_t, uint64_t*, PKMETADATA*) TAU_NOEXCEPT;
++PICOGK_API int32_t TauVdbFile_GetFieldMetadata(PKINSTANCE, PKVDBFILE, int32_t, int32_t, PKMETADATA*) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauVoxels_IsEmpty(PKINSTANCE, PKVOXELS, int32_t*) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauVoxels_IsEqual(PKINSTANCE, PKVOXELS, PKVOXELS, int32_t*) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauVoxels_GetProperties(PKINSTANCE, PKVOXELS, int32_t, float*, PKBBox3*) TAU_NOEXCEPT;
@@ -3992,7 +3993,7 @@
  }
  
  PICOGK_API PKGUI Viewer_SideBar_hCreate(    PKVIEWER        hThis,
-@@ -1773,26 +1777,748 @@
+@@ -1773,26 +1777,776 @@
                                              PKColorFloat    clrBackground,
                                              PKColorFloat    clrBackgroundHv)
  {
@@ -4604,7 +4605,8 @@
 +    TauVdbFieldKind kind, uint64_t* output, PKMETADATA* metadata) noexcept {
 +    if (output) *output = 0;
 +    if (metadata) *metadata = 0;
-+    if (!output || output == metadata || index < 0 ||
++    // Without output, publish only the file grid's own metadata (SaveToFile stamps it).
++    if ((!output && !metadata) || (output && output == metadata) || index < 0 ||
 +        kind < TauVdbFieldKind::Voxels || kind > TauVdbFieldKind::Vector) return -1;
 +    return TauCheckedInvoke([&] {
 +        auto owner = Library::oLib().roGetInstance(library);
@@ -4621,10 +4623,29 @@
 +        }
 +        if (!TauHasSupportedGridTransform(*grid))
 +            throw std::invalid_argument("VDB field has an unsupported transformation");
-+        const auto publish = [&](auto field, auto& handles, const char* className) {
++        const char* className = kind == TauVdbFieldKind::Voxels ? "Voxels"
++            : kind == TauVdbFieldKind::Scalar ? "ScalarField" : "VectorField";
++        if (!output) {
++            auto fileMetadata = std::make_shared<VdbMeta>(grid, state);
++            const auto metadataHandle = owner->m_oVdbMetas.hAdd(std::move(fileMetadata));
++            try {
++                grid->insertMeta("PicoGK.Class", openvdb::StringMetadata(className));
++            } catch (...) {
++                owner->m_oVdbMetas.bDestroy(metadataHandle);
++                throw;
++            }
++            *metadata = metadataHandle;
++            return;
++        }
++        // Hand out a deep copy (MI5): an edit of the result never reaches the file or
++        // another result. Identical content keeps the file grid's generation until either changes.
++        auto copy = grid->deepCopyGrid();
++        auto copyState = TauStateFor(copy);
++        if (state->cacheable) copyState->generation = state->generation;
++        const auto publish = [&](auto field, auto& handles) {
 +            std::shared_ptr<VdbMeta> resultMetadata;
 +            if (metadata) {
-+                resultMetadata = std::make_shared<VdbMeta>(grid, state);
++                resultMetadata = std::make_shared<VdbMeta>(copy, copyState);
 +            }
 +            const auto handle = handles.hAdd(std::move(field));
 +            PKMETADATA metadataHandle = 0;
@@ -4632,7 +4653,10 @@
 +                if (metadata) metadataHandle = owner->m_oVdbMetas.hAdd(std::move(resultMetadata));
 +                // Tag only after both owners exist: installed insertMeta copies before
 +                // replacement and map insertion has the strong failure guarantee.
-+                if (metadata) grid->insertMeta("PicoGK.Class", openvdb::StringMetadata(className));
++                if (metadata) {
++                    copy->insertMeta("PicoGK.Class", openvdb::StringMetadata(className));
++                    grid->insertMeta("PicoGK.Class", openvdb::StringMetadata(className));
++                }
 +                *output = handle;
 +                if (metadata) *metadata = metadataHandle;
 +            } catch (...) {
@@ -4642,20 +4666,25 @@
 +            }
 +        };
 +        if (kind == TauVdbFieldKind::Voxels) {
-+            auto value = std::make_shared<Voxels>(gridPtrCast<FloatGrid>(grid), PICOGK_VOXEL_DEFAULTNARROWBAND, state);
++            auto value = std::make_shared<Voxels>(gridPtrCast<FloatGrid>(copy), PICOGK_VOXEL_DEFAULTNARROWBAND, copyState);
 +            value->TauBindCounters(owner->m_tauCounters);
-+            publish(std::move(value), owner->m_oVoxels, "Voxels");
++            publish(std::move(value), owner->m_oVoxels);
 +        }
 +        else if (kind == TauVdbFieldKind::Scalar)
-+            publish(std::make_shared<ScalarField>(gridPtrCast<FloatGrid>(grid), state), owner->m_oScalarFields, "ScalarField");
++            publish(std::make_shared<ScalarField>(gridPtrCast<FloatGrid>(copy), copyState), owner->m_oScalarFields);
 +        else
-+            publish(std::make_shared<VectorField>(gridPtrCast<Vec3SGrid>(grid), state), owner->m_oVectorFields, "VectorField");
++            publish(std::make_shared<VectorField>(gridPtrCast<Vec3SGrid>(copy), copyState), owner->m_oVectorFields);
 +    });
 +}
 +PICOGK_API int32_t TauVdbFile_GetField(PKINSTANCE library, PKVDBFILE file, int32_t index,
 +    int32_t kind, uint64_t* output, PKMETADATA* metadata) noexcept {
-+    if (!metadata) { if (output) *output = 0; return -1; }
++    if (!metadata || !output) { if (output) *output = 0; if (metadata) *metadata = 0; return -1; }
 +    return TauGetVdbField(library, file, index, static_cast<TauVdbFieldKind>(kind), output, metadata);
++}
++PICOGK_API int32_t TauVdbFile_GetFieldMetadata(PKINSTANCE library, PKVDBFILE file, int32_t index,
++    int32_t kind, PKMETADATA* metadata) noexcept {
++    if (!metadata) return -1;
++    return TauGetVdbField(library, file, index, static_cast<TauVdbFieldKind>(kind), nullptr, metadata);
 +}
 +PICOGK_API int32_t TauVoxels_IsEmpty(PKINSTANCE library, PKVOXELS voxels, int32_t* output) noexcept {
 +    if (!output) return -1;

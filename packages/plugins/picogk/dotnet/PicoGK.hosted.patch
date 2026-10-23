@@ -1311,7 +1311,26 @@
          /// <summary>
          /// Saves the current object with all of its attached fields to a .VDB
          /// container. Note, the order of the fields inside the file is
-@@ -198,17 +205,19 @@
+@@ -172,12 +179,14 @@
+             // so we divide the voxel size in mm by 1000 to get the voxel size
+             // in meters
+ 
++            // Stamp the file's own grids: the getters hand out copies, so stamping a
++            // field read from the file would never reach the saved grids
+             for (int n=0; n<nFieldCount(); n++)
+             {
+-                IFieldWithMetadata xData = xField(n);
+-                xData.oMetaData()._SetValue("PicoGK.Library",   Library.strName());
+-                xData.oMetaData()._SetValue("PicoGK.Version",   Library.strVersion());
+-                xData.oMetaData()._SetValue("PicoGK.VoxelSize", lib.fVoxelSize / 1000f);
++                using FieldMetadata oMetadata = TauFileFieldMetadata(n);
++                oMetadata._SetValue("PicoGK.Library",   Library.strName());
++                oMetadata._SetValue("PicoGK.Version",   Library.strVersion());
++                oMetadata._SetValue("PicoGK.VoxelSize", lib.fVoxelSize / 1000f);
+             }
+ 
+             if (!_bSaveToFile(  lib.hThis,
+@@ -198,17 +207,19 @@
          /// <exception>Throws exception if no Voxels found at index</exception>
          public Voxels voxGet(int nIndex)
          {
@@ -1342,15 +1361,22 @@
          }
  
          /// <summary>
-@@ -241,19 +250,16 @@
+@@ -241,19 +252,16 @@
          /// <returns>Index of the field inside the VdbFile object</returns>
          public int nAdd(Voxels vox, string strFieldName = "")
          {
 -            if (strFieldName == "")
--            {
++            ArgumentNullException.ThrowIfNull(vox);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            vox.TauThrowIfDisposed();
++            if (vox.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++            try
+             {
 -                // Use a unique name if none specified
 -                strFieldName = $"PicoGK.Voxels.{nFieldCount()}";
--            }
++                if (strFieldName == "") strFieldName = $"PicoGK.Voxels.{nFieldCount()}";
++                return _nAddVoxels(lib.hThis, hThis, strFieldName, vox.hThis);
+             }
 -
 -            if (vox.lib.hThis != lib.hThis)
 -                throw new Exception("Cannot mix objects from different PicoGK library instances");
@@ -1359,20 +1385,11 @@
 -                                hThis, 
 -                                strFieldName, 
 -                                vox.hThis);
-+            ArgumentNullException.ThrowIfNull(vox);
-+            ObjectDisposedException.ThrowIf(m_bDisposed, this);
-+            vox.TauThrowIfDisposed();
-+            if (vox.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
-+            try
-+            {
-+                if (strFieldName == "") strFieldName = $"PicoGK.Voxels.{nFieldCount()}";
-+                return _nAddVoxels(lib.hThis, hThis, strFieldName, vox.hThis);
-+            }
 +            finally { GC.KeepAlive(this); GC.KeepAlive(vox); }
          }
  
          /// <summary>
-@@ -266,16 +272,19 @@
+@@ -266,16 +274,19 @@
          /// <exception>Throws exception if no ScalarField found at index</exception>
          public ScalarField oGetScalarField(int nIndex)
          {
@@ -1402,31 +1419,29 @@
          }
  
          /// <summary>
-@@ -308,13 +317,16 @@
+@@ -308,13 +319,16 @@
          /// <returns>Index of the field inside the VdbFile object</returns>
          public int nAdd(ScalarField oField, string strFieldName = "")
          {
 -            if (strFieldName == "")
--            {
--                // Use a unique name if none specified
--                strFieldName = $"PicoGK.ScalarField.{nFieldCount()}";
--            }
--
--            return _nAddScalarField(lib.hThis, hThis, strFieldName, oField.hThis);
 +            ArgumentNullException.ThrowIfNull(oField);
 +            ObjectDisposedException.ThrowIf(m_bDisposed, this);
 +            oField.TauThrowIfDisposed();
 +            if (oField.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
 +            try
-+            {
+             {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.ScalarField.{nFieldCount()}";
 +                if (strFieldName == "") strFieldName = $"PicoGK.ScalarField.{nFieldCount()}";
 +                return _nAddScalarField(lib.hThis, hThis, strFieldName, oField.hThis);
-+            }
+             }
+-
+-            return _nAddScalarField(lib.hThis, hThis, strFieldName, oField.hThis);
 +            finally { GC.KeepAlive(this); GC.KeepAlive(oField); }
          }
  
          /// <summary>
-@@ -327,15 +339,19 @@
+@@ -327,15 +341,19 @@
          /// <exception>Throws exception if no ScalarField found at index</exception>
          public VectorField oGetVectorField(int nIndex)
          {
@@ -1455,31 +1470,29 @@
          }
  
          /// <summary>
-@@ -368,13 +384,16 @@
+@@ -368,13 +386,16 @@
          /// <returns>Index of the field inside the VdbFile object</returns>
          public int nAdd(VectorField oField, string strFieldName = "")
          {
 -            if (strFieldName == "")
--            {
--                // Use a unique name if none specified
--                strFieldName = $"PicoGK.VectorField.{nFieldCount()}";
--            }
--
--            return _nAddVectorField(lib.hThis, hThis, strFieldName, oField.hThis);
 +            ArgumentNullException.ThrowIfNull(oField);
 +            ObjectDisposedException.ThrowIf(m_bDisposed, this);
 +            oField.TauThrowIfDisposed();
 +            if (oField.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
 +            try
-+            {
+             {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.VectorField.{nFieldCount()}";
 +                if (strFieldName == "") strFieldName = $"PicoGK.VectorField.{nFieldCount()}";
 +                return _nAddVectorField(lib.hThis, hThis, strFieldName, oField.hThis);
-+            }
+             }
+-
+-            return _nAddVectorField(lib.hThis, hThis, strFieldName, oField.hThis);
 +            finally { GC.KeepAlive(this); GC.KeepAlive(oField); }
          }
  
          /// <summary>
-@@ -383,7 +402,14 @@
+@@ -383,7 +404,14 @@
          /// <returns>The number of fields in the VdbFile</returns>
          public int nFieldCount()
          {
@@ -1495,21 +1508,20 @@
          }
  
          /// <summary>
-@@ -396,12 +422,16 @@
+@@ -396,12 +424,16 @@
          /// </exception>
          public string strFieldName(int nIndex)
          {
 -            if (nIndex >= nFieldCount())
 -                throw new ArgumentOutOfRangeException();
--
--            StringBuilder oBuilder = new StringBuilder(Library.nStringLength);
--            _GetFieldName(lib.hThis, hThis, nIndex, oBuilder);
--            return oBuilder.ToString();
 +            try
 +            {
 +                if (nIndex < 0 || nIndex >= nFieldCount())
 +                    throw new ArgumentOutOfRangeException();
-+
+ 
+-            StringBuilder oBuilder = new StringBuilder(Library.nStringLength);
+-            _GetFieldName(lib.hThis, hThis, nIndex, oBuilder);
+-            return oBuilder.ToString();
 +                StringBuilder oBuilder = new StringBuilder(Library.nStringLength);
 +                _GetFieldName(lib.hThis, hThis, nIndex, oBuilder);
 +                return oBuilder.ToString();
@@ -1518,26 +1530,25 @@
          }
  
          /// <summary>
-@@ -413,10 +443,14 @@
+@@ -413,10 +445,14 @@
          /// </exception>
          public EFieldType eFieldType(int nIndex)
          {
 -            if (nIndex >= nFieldCount())
 -                throw new ArgumentOutOfRangeException();
--
--            return (EFieldType)_nFieldType(lib.hThis, hThis, nIndex);
 +            try
 +            {
 +                if (nIndex < 0 || nIndex >= nFieldCount())
 +                    throw new ArgumentOutOfRangeException();
-+
+ 
+-            return (EFieldType)_nFieldType(lib.hThis, hThis, nIndex);
 +                return (EFieldType)_nFieldType(lib.hThis, hThis, nIndex);
 +            }
 +            finally { GC.KeepAlive(this); }
          }
  
          /// <summary>
-@@ -429,35 +463,39 @@
+@@ -429,35 +465,39 @@
          /// </exception>
          public string strFieldType(int nIndex)
          {
@@ -1547,42 +1558,36 @@
 -            // We intentionally use the runtime function, so we can catch
 -            // values not represented by the enum (default:)
 -            switch (_nFieldType(lib.hThis, hThis, nIndex))
--            {
++            try
+             {
 -                case -1:
 -                    return "Unsupported";
--
--                case 0:
--                    return "Voxels";
--
--                 case 1:
--                    return "ScalarField";
--
--                 case 2:
--                    return "VectorField";
--
--                default:
--                    // Incompatible value returned from runtime
--                    Debug.Assert(false);
--                    return $"Unknown #{_nFieldType(lib.hThis, hThis, nIndex)}";
--            }
-+            try
-+            {
 +                if (nIndex < 0 || nIndex >= nFieldCount())
 +                    throw new ArgumentOutOfRangeException();
-+
+ 
+-                case 0:
+-                    return "Voxels";
 +                // We intentionally use the runtime function, so we can catch
 +                // values not represented by the enum (default:)
 +                switch (_nFieldType(lib.hThis, hThis, nIndex))
 +                {
 +                    case -1:
 +                        return "Unsupported";
-+
+ 
+-                 case 1:
+-                    return "ScalarField";
 +                    case 0:
 +                        return "Voxels";
-+
+ 
+-                 case 2:
+-                    return "VectorField";
 +                     case 1:
 +                        return "ScalarField";
-+
+ 
+-                default:
+-                    // Incompatible value returned from runtime
+-                    Debug.Assert(false);
+-                    return $"Unknown #{_nFieldType(lib.hThis, hThis, nIndex)}";
 +                     case 2:
 +                        return "VectorField";
 +
@@ -1591,7 +1596,7 @@
 +                        Debug.Assert(false);
 +                        return $"Unknown #{_nFieldType(lib.hThis, hThis, nIndex)}";
 +                }
-+            }
+             }
 +            finally { GC.KeepAlive(this); }
          }
  
@@ -1602,6 +1607,32 @@
                  throw new ArgumentOutOfRangeException();
  
              switch (eFieldType(nIndex))
+@@ -480,9 +520,10 @@
+             if (nFieldCount() < 1)
+                 return false; // nothing inside
+ 
+-            IFieldWithMetadata x = xField(0);
++            // Read the file's own metadata instead of copying the whole field
++            using FieldMetadata oMetadata = TauFileFieldMetadata(0);
+ 
+-            if (x.oMetaData().bGetValueAt("PicoGK.VoxelSize", out float fSize))
++            if (oMetadata.bGetValueAt("PicoGK.VoxelSize", out float fSize))
+             {
+                 if (fSize > 0f)
+                     return true;
+@@ -496,9 +537,10 @@
+             if (nFieldCount() < 1)
+                 return 0f; // nothing inside
+ 
+-            IFieldWithMetadata x = xField(0);
++            // Read the file's own metadata instead of copying the whole field
++            using FieldMetadata oMetadata = TauFileFieldMetadata(0);
+ 
+-            if (x.oMetaData().bGetValueAt("PicoGK.VoxelSize", out float fSize))
++            if (oMetadata.bGetValueAt("PicoGK.VoxelSize", out float fSize))
+             {
+                 if (fSize > 0f)
+                     return fSize * 1000f; // Meters to mm
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
 @@ -136,6 +136,7 @@
@@ -3396,7 +3427,7 @@
 +}
 --- /dev/null
 +++ b/Library/GridAdmission.cs
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,103 @@
 +// SPDX-License-Identifier: Apache-2.0
 +using System.Runtime.InteropServices;
 +namespace PicoGK;
@@ -3409,6 +3440,9 @@
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVdbFile_GetField")]
 +    private static extern int TauGetFieldNative(LibHandle library, VdbHandle file, int index, int kind,
 +        out ulong output, out VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVdbFile_GetFieldMetadata")]
++    private static extern int TauGetFieldMetadataNative(LibHandle library, VdbHandle file, int index, int kind,
++        out VdbMetaHandle metadata);
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
 +    private static extern void TauDestroyLoadedMetadata(LibHandle library, VdbMetaHandle metadata);
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Destroy")]
@@ -3435,6 +3469,32 @@
 +            {
 +                TauDestroyLoadedField(lib.hThis, kind, field);
 +                throw new InvalidOperationException("Loaded field returned incomplete ownership.");
++            }
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    // The metadata of the file's own grid at index, never a copy's: SaveToFile stamps it.
++    private FieldMetadata TauFileFieldMetadata(int index)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        if (index < 0 || index >= nFieldCount()) throw new ArgumentOutOfRangeException();
++        var kind = eFieldType(index) switch
++        {
++            EFieldType.Voxels => TauVoxelFieldKind,
++            EFieldType.ScalarField => TauScalarFieldKind,
++            EFieldType.VectorField => TauVectorFieldKind,
++            _ => throw new Exception($"Unsupported field at index {index})"),
++        };
++        try
++        {
++            var status = TauGetFieldMetadataNative(lib.hThis, hThis, index, kind, out var metadata);
++            TauCheckedCallbacks.Check(status, null, this);
++            if (metadata.Value == IntPtr.Zero) throw new Exception($"Unsupported field at index {index})");
++            try { return new FieldMetadata(lib, metadata); }
++            catch
++            {
++                TauDestroyLoadedMetadata(lib.hThis, metadata);
++                throw;
 +            }
 +        }
 +        finally { GC.KeepAlive(this); }

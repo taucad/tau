@@ -12,6 +12,7 @@ The native PicoGK build now:
 - marshals native `bool` as one byte;
 - clips a render box with a real surface instead of an unbanded cut;
 - builds `ScalarField` from Voxels into an empty field;
+- hands out copies of `OpenVdbFile` fields, so editing a field read from a file changes neither the file nor another read, while `SaveToFile` still stamps the file's own grids;
 - uses unregistered accessors for per-call queries;
 - joins slice contours within a one-pixel window;
 - builds with `-ffp-contract=off`.

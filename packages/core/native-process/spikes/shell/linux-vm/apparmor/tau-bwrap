@@ -1,0 +1,65 @@
+# Tau-scoped AppArmor profile — Spike W2, Linux stock-VM netns lane.
+#
+# PURPOSE
+# -------
+# Ubuntu 24.04 (and Debian 13) ship kernel.apparmor_restrict_unprivileged_userns=1. Under it the
+# kernel still permits unshare(CLONE_NEWUSER) for an unprivileged process, but STRIPS the
+# capabilities from the resulting user namespace UNLESS the executing binary has an AppArmor profile
+# that carries the `userns,` permission. bwrap's loopback bring-up (RTM_NEWADDR to add 127.0.0.1/8
+# to `lo` inside its fresh --unshare-net netns) needs CAP_NET_ADMIN in that namespace; with the caps
+# stripped it fails with `bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted`, and the
+# sandbox never launches. @anthropic-ai/sandbox-runtime 0.0.75 always issues --unshare-net and brings
+# loopback up even for a deny-all-egress profile, so this blocks EVERY sandboxed shell, not only
+# networked ones.
+#
+# Stock Ubuntu ships exactly this shape for the DISTRO bwrap at /usr/bin/bwrap
+# (/etc/apparmor.d/bwrap-userns-restrict: `profile bwrap /usr/bin/bwrap flags=(unconfined) { userns, }`),
+# which is why `apt install bubblewrap` + /usr/bin/bwrap keeps working. Tau does NOT run the distro
+# bwrap: an Electron desktop app ships its OWN bwrap bundled under its install prefix (/opt/<App>/…),
+# and the stock profile's attachment path (/usr/bin/bwrap) does not match that path, so Tau's bundled
+# bwrap falls under the restriction and loopback setup fails.
+#
+# This profile re-establishes the grant for TAU'S bundled bwrap path ONLY. It is the Electron-app
+# packaging pattern (Google Chrome ships /etc/apparmor.d/chrome attaching to /opt/google/chrome/chrome
+# for the identical reason). It is installed by `apparmor_parser` at .deb install time (postinst), NOT
+# by running the sandboxed workload elevated.
+#
+# WHAT IT IS NOT
+# --------------
+#   * It does NOT touch kernel.apparmor_restrict_unprivileged_userns — that stays at its stock value 1.
+#   * It does NOT weaken the system-wide default or any other binary. Attachment is a single absolute
+#     path; nothing else on the system changes behaviour.
+#   * `flags=(unconfined)` scopes the permissiveness to processes exec'd from THIS path. It mirrors the
+#     distro bwrap profile exactly; the safety comes from the narrow attachment, not from internal
+#     confinement. (A fully enumerated confined profile is possible but would have to re-derive bwrap's
+#     entire mount/cap/bind surface; the distro itself chose the unconfined+userns form.)
+#
+# WHY ONE PROFILE COVERS apply-seccomp TOO
+# ----------------------------------------
+# SRT's seccomp helper (apply-seccomp) creates its OWN nested user namespace to obtain CAP_SYS_ADMIN
+# for its PID+mount unshare. It is exec'd as a descendant INSIDE bwrap's namespace, so it runs under
+# this profile's label; `flags=(unconfined)` + `userns,` grants the nested userns the same way Chrome's
+# single profile covers its zygote/namespace children. No second profile is required. (If a future
+# packaging runs apply-seccomp as a standalone, pre-bwrap step from a distinct path, add a second
+# `profile tau-apply-seccomp /opt/Tau/resources/sandbox/apply-seccomp flags=(unconfined) { userns, }`.)
+#
+# ATTACHMENT PATH
+# ---------------
+# /opt/Tau/resources/sandbox/bwrap is the representative bundled path for a .deb that installs under
+# /opt/Tau (electron-builder's default target dir is /opt/${productName}). The lane's run-in-guest.sh
+# stages the guest's own /usr/bin/bwrap at this path (same bytes, different path → stock profile does
+# not attach) to reproduce Tau's shipping layout faithfully. Change this single path to match the real
+# productName/prefix chosen for the Tau .deb; keep it in sync with the postinst that calls
+# apparmor_parser and with the sandbox-runtime `bwrapPath` Tau passes.
+
+abi <abi/4.0>,
+
+include <tunables/global>
+
+profile tau-bwrap /opt/Tau/resources/sandbox/bwrap flags=(unconfined) {
+  userns,
+
+  # Site-local overrides (empty by default); present so an operator can tighten without editing the
+  # packaged profile, mirroring the distro bwrap profile's `include if exists <local/bwrap>`.
+  include if exists <local/tau-bwrap>
+}

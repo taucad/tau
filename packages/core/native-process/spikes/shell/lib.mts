@@ -225,13 +225,28 @@ const posixDeniedRoots = (): string[] =>
   ].filter((path) => existsSync(path));
 
 /**
+ * The directory the Linux sandbox runtime runs its own vendored `apply-seccomp` helper from. bwrap
+ * resolves that path inside the sandbox, so a helper under a denied root hides and every launch
+ * exits 127 before Bash runs. Mirrors `native-sandbox.ts` `sandboxRuntimeReadRoots`.
+ */
+const sandboxRuntimeReadRoots = (): string[] =>
+  platform() === 'linux' ? [join(sandboxRuntime().directory, 'vendor', 'seccomp')] : [];
+
+/**
  * The candidate shell profile in the sandbox runtime's own configuration shape. It mirrors the
  * fixed CAD profile's stance (deny user homes/shared temp, re-allow only granted roots, proxy-only
  * egress with an exact allowlist) and adds the S0 live-mask candidate: records are write-denied and
  * control/hidden paths are read- and write-denied.
  */
 export const shellProfile = (grant: ShellGrant): Record<string, unknown> => {
-  const readable = [grant.project, grant.home, grant.temporary, ...grant.toolchain, ...(grant.extraRead ?? [])];
+  const readable = [
+    grant.project,
+    grant.home,
+    grant.temporary,
+    ...grant.toolchain,
+    ...sandboxRuntimeReadRoots(),
+    ...(grant.extraRead ?? []),
+  ];
   const writable = [grant.project, grant.home, grant.temporary, ...(grant.extraWrite ?? [])];
   const hidden = grant.hidden ?? [];
   const domains = [...(grant.domains ?? [])];

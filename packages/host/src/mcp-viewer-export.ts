@@ -6,8 +6,7 @@
  * schemas (the same capability routes the Tau app reads from its in-browser runtime), copying finished artifacts into
  * the project's `exports/` folder so they are real deliverables, and reading an artifact's bytes in ranges for a
  * browser download on the loopback page. Every path is checked against the project folder: artifacts are read only from
- * `.tau/artifacts`, and deliverables are written only under `exports/`. The same routes say whether a shown source's
- * GLB can carry its topology ({@link shownModelContent}).
+ * `.tau/artifacts`, and deliverables are written only under `exports/`.
  */
 
 import { copyFile, mkdir, stat } from 'node:fs/promises';
@@ -262,43 +261,6 @@ const kernelOf = async (
     ...(signal ? { signal } : {}),
   });
   return kernelId;
-};
-
-/**
- * The content `show_model` exports a source's GLB with. The page reads the components and the mechanism from the GLB's
- * Tau CAD topology, so the export asks for it whenever the GLB route the runtime takes for the entry's kernel carries
- * it: the kernel's own GLB export when it has one, otherwise a transcoded one, as the runtime's export planner picks.
- * A route that cannot carry it would refuse the request, so the export asks for nothing there and the page shows the
- * mesh alone.
- *
- * @param input - How to reach the project's runtime, the project folder, the entry and the call's signal.
- * @returns `{ includeTopology: true }`, or `undefined` when the route cannot carry it or the entry has no kernel.
- */
-export const shownModelContent = async ({
-  runtimeFor,
-  root,
-  targetFile,
-  signal,
-}: Readonly<{
-  runtimeFor: McpViewerExportOptions['runtimeFor'];
-  root: string;
-  targetFile: string;
-  signal?: AbortSignal | undefined;
-}>): Promise<Readonly<{ includeTopology: true }> | undefined> => {
-  try {
-    const runtime = await runtimeFor(root);
-    const kernelId = await kernelOf(runtime, targetFile, signal);
-    if (kernelId === undefined) {
-      return undefined;
-    }
-    const glb = runtime.bestRouteFor('glb', { kernelId });
-    return Object.hasOwn(glb?.content?.schema.properties ?? {}, 'includeTopology')
-      ? { includeTopology: true }
-      : undefined;
-  } catch {
-    /* The export that follows reports why the entry could not be described. */
-    return undefined;
-  }
 };
 
 /**

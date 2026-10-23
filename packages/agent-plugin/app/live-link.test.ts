@@ -49,6 +49,7 @@ const pageOf = (overrides: Partial<LiveLinkPage>): LiveLinkPage => ({
   linked: () => false,
   toolCallId: () => undefined,
   show: vi.fn<LiveLinkPage['show']>(),
+  status: vi.fn<LiveLinkPage['status']>(),
   capture: async () => ({ error: 'unused' }),
   ...overrides,
 });
@@ -116,17 +117,22 @@ describe('startLiveLink', () => {
     expect(views[2]).toEqual(view);
   });
 
-  it('should keep a card on its model and name the tool call that opened it', async () => {
-    const { calls, callTool } = scriptedServer([{ version: 1, show: shown }]);
+  it('should hand a card the newer render of its source the server sends, its status, and name the call that opened it', async () => {
+    const status = { 'main.ts': { building: true, issues: [] } } as const;
+    const { calls, callTool } = scriptedServer([{ version: 1, show: shown, status }]);
     const show = vi.fn<LiveLinkPage['show']>();
-    links.push(startLiveLink(callTool, pageOf({ follows: () => false, toolCallId: () => 'call-7', show })));
+    const onStatus = vi.fn<LiveLinkPage['status']>();
+    links.push(
+      startLiveLink(callTool, pageOf({ follows: () => false, toolCallId: () => 'call-7', show, status: onStatus })),
+    );
 
     await vi.waitFor(() => {
       expect(calls.filter((call) => call.name === 'app_sync')).toHaveLength(2);
     });
     expect(calls[0]?.args).toMatchObject({ follow: false, toolCallId: 'call-7', wait: true });
     expect(calls[1]?.args).toMatchObject({ version: 1 });
-    expect(show).not.toHaveBeenCalled();
+    expect(show).toHaveBeenCalledWith(shown);
+    expect(onStatus).toHaveBeenCalledWith(status);
   });
 
   it('should hand a page the person opened each model shown', async () => {

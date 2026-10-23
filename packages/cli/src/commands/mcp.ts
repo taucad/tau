@@ -348,7 +348,9 @@ export const mcpCommand = defineCommand({
           operationTimeout,
         });
       };
-      /* A client whose thread exited is terminated, and replaced on its project's next call. */
+      /* A client whose thread exited is terminated, and replaced on its project's next call. The viewer's watched
+       * documents (one per shown source) live in that thread: the idle release below ends them with it, and each of
+       * their renders asks for the client again, so a source the person keeps editing counts as use. */
       const clients = keyedResource<string, ProjectRuntimeClient>(
         openClient,
         async (client) => {

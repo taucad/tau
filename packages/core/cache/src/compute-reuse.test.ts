@@ -620,6 +620,34 @@ describe('ComputeReuseService', () => {
       });
     });
 
+    it('should reuse its encoding when an interrupted task runs again, so a snapshot is taken once', async () => {
+      const { contentStore, actionStore, service, tasks } = createDeferred();
+      const publish = vi.spyOn(actionStore, 'publish');
+      const encode = vi.fn(textCodec.encode);
+      await service.evaluate({
+        action,
+        codec: { ...textCodec, encode },
+        policy: 'best-effort',
+        compute: async () => 'solved',
+      });
+      const interrupt = new AbortController();
+      const write = vi.spyOn(contentStore, 'write').mockImplementationOnce(async () => {
+        // A newly admitted operation interrupts the task after it encoded.
+        interrupt.abort(new Error('interrupted'));
+        return { status: 'stored' };
+      });
+
+      await expect(tasks[0]!.run({ signal: interrupt.signal })).rejects.toThrow('interrupted');
+      expect(publish).not.toHaveBeenCalled();
+      write.mockRestore();
+      // An interrupt during the encode itself does not abort it either.
+      expect(encode.mock.calls[0]![0].signal.aborted).toBe(false);
+      await expect(tasks[0]!.run({ signal: new AbortController().signal })).resolves.toMatchObject({
+        status: 'stored',
+      });
+      expect(encode).toHaveBeenCalledOnce();
+    });
+
     it('should report a failed encode as a skipped publication instead of throwing', async () => {
       const { service, tasks } = createDeferred();
       const codec: CacheCodec<string> = {

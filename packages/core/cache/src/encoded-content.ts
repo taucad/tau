@@ -66,7 +66,7 @@ export const ownEncodedContent = async (
   const attested =
     encoded instanceof Uint8Array ? undefined : encoded.digests?.map((value) => contentDigest({ value }));
   if (attested !== undefined && attested.length !== leaves.length) {
-    throw new TypeError('Codec digests must match its leaves.');
+    throw new TypeError('Codec digests must match leaves.');
   }
   const ranges = new Map<ArrayBuffer, Set<string>>([[root.buffer, new Set([`${root.byteOffset}:${root.byteLength}`])]]);
   const unique: Array<{ readonly leaf: Uint8Array<ArrayBuffer>; readonly digest: ContentDigest | undefined }> = [];

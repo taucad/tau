@@ -226,20 +226,19 @@ const lookupWithPolicy = async <T>(input: {
   }
 };
 
-/**
- * Why a publication did not store, for a required refusal; required work is never deferred.
- * @param publication - The unstored publication.
- * @returns Its reason.
- */
-const unstoredReason = (
-  publication: { readonly status: 'skipped'; readonly reason: string } | { readonly status: 'deferred' },
-): string => (publication.status === 'skipped' ? publication.reason : 'deferred');
+/** A computed result whose publication settled inline. */
+type PublishedResult<T> = {
+  readonly source: 'computed';
+  readonly value: T;
+  readonly actionDigest: ActionDigest;
+  readonly publication: ComputePublicationOutcome;
+};
 
 const skipped = <T>(input: {
   readonly value: T;
   readonly actionKey: ActionDigest;
   readonly reason: 'encode-failed' | 'content-store-failed' | 'action-store-failed';
-}): ComputeEvaluationResult<T> => ({
+}): PublishedResult<T> => ({
   source: 'computed',
   value: input.value,
   actionDigest: input.actionKey,
@@ -253,7 +252,7 @@ const publishComputed = async <T>(input: {
   readonly contentStore: ContentStore;
   readonly actionStore: ActionStore;
   readonly signal: AbortSignal;
-}): Promise<ComputeEvaluationResult<T>> => {
+}): Promise<PublishedResult<T>> => {
   const { evaluation, value, actionKey, contentStore, actionStore, signal } = input;
   let bytes: Uint8Array<ArrayBuffer>;
   let outputDigest: ContentDigest;
@@ -395,29 +394,39 @@ const runEvaluation = async <T>(input: {
   throwIfAborted(input.signal);
   if (input.evaluation.policy === 'best-effort' && input.schedulePublication) {
     const { evaluation, actionKey } = input;
+    // The encoding (and any snapshot in it) is taken once, under no interruptible signal, and an
+    // interrupted task reuses it when it runs again. Teardown bounds it with the drain deadline.
+    let encoded: ReturnType<CacheCodec<T>['encode']> | undefined;
+    const codec: CacheCodec<T> = {
+      ...evaluation.codec,
+      encode: async () => {
+        encoded ??= evaluation.codec.encode({ value, signal: defaultSignal });
+        return encoded;
+      },
+    };
     input.schedulePublication({
       actionDigest: actionKey,
-      ...(evaluation.signal ? { signal: evaluation.signal } : {}),
+      signal: evaluation.signal,
       run: async ({ signal }): Promise<ComputePublicationOutcome> => {
         throwIfAborted(signal);
-        const result = await publishComputed({ ...input, value, signal });
-        // A best-effort publication never throws past an abort; a computed result always carries an outcome.
-        return result.source === 'computed' && result.publication.status !== 'deferred'
-          ? result.publication
-          : { status: 'skipped', reason: 'action-store-failed' };
+        // A best-effort publication never throws past an abort.
+        const { publication } = await publishComputed({
+          ...input,
+          evaluation: { ...evaluation, codec },
+          value,
+          signal,
+        });
+        return publication;
       },
     });
     return { source: 'computed', value, actionDigest: actionKey, publication: { status: 'deferred' } };
   }
   const published = await publishComputed({ ...input, value });
-  if (input.evaluation.policy !== 'required' || published.source !== 'computed') {
+  if (input.evaluation.policy !== 'required') {
     return published;
   }
   if (published.publication.status !== 'stored') {
-    throw requiredFailure(
-      'Required publication did not store its content.',
-      new Error(unstoredReason(published.publication)),
-    );
+    throw requiredFailure('Required publication did not store its content.', new Error(published.publication.reason));
   }
   return published;
 };
@@ -473,7 +482,8 @@ const forwardPending = async <T>(input: {
       } else {
         throw requiredFailure(
           'Required publication did not store its content.',
-          new Error(unstoredReason(result.publication)),
+          // Required work is never deferred.
+          new Error(result.publication.status === 'skipped' ? result.publication.reason : 'deferred'),
         );
       }
       const retention = await promoteRequired({

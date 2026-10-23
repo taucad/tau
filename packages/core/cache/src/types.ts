@@ -153,7 +153,7 @@ export type ComputePublicationOutcome =
 export type ComputePublicationTask = {
   readonly actionDigest: ActionDigest;
   /** The signal of the evaluation that computed the value, when it supplied one. */
-  readonly signal?: AbortSignal;
+  readonly signal: AbortSignal | undefined;
   readonly run: (input: { readonly signal: AbortSignal }) => Promise<ComputePublicationOutcome>;
 };
 

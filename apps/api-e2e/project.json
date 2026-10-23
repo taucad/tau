@@ -33,6 +33,22 @@
         }
       }
     },
+    "test:deletion-races": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "metadata": {
+        "description": "Admitted Git and invitation races across two built API processes, with controlled S3/Redis transport and SQL barriers. Requires the guarded race-specific disposable database, buckets and ports."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/api-e2e",
+        "command": "../../node_modules/.bin/vitest run --config src/git/project-deletion-race.vitest.config.ts --maxWorkers=2",
+        "env": {
+          "TAU_E2E_EXTERNAL_SERVICES": "true",
+          "TAU_E2E_COMPLETED_ARTIFACT": "true"
+        }
+      }
+    },
     "test:deletion": {
       "executor": "nx:run-commands",
       "cache": false,

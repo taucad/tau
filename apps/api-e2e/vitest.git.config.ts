@@ -16,6 +16,8 @@ export default defineConfig({
   },
   test: {
     include: ['src/git/**/*.spec.ts'],
+    // Owns separate API/proxy processes and a separately guarded disposable database.
+    exclude: ['src/git/project-deletion-race.spec.ts'],
     environment: 'node',
     globalSetup: [resolve(import.meta.dirname, 'src/git/global-setup.ts')],
     testTimeout: 600_000,

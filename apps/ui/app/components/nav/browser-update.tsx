@@ -12,8 +12,28 @@ let mountedControls = 0;
 const mountedTopic = new Topic<void>({ name: 'browser-update-control' });
 
 /**
- * `true` while a sidebar update control is mounted in an open sidebar, so the
- * floating fallback (`BuildSkewBanner`) covers surfaces without a reachable one.
+ * Claim the reload prompt while `isOwning`: an update control in an open sidebar, or the
+ * error page's own "Tau has been updated" screen. The floating banner stays away meanwhile.
+ *
+ * @param isOwning - Whether the caller shows the prompt now.
+ */
+export const useReloadPromptOwner = (isOwning: boolean): void => {
+  useEffect(() => {
+    if (!isOwning) {
+      return undefined;
+    }
+    mountedControls += 1;
+    mountedTopic.emit();
+    return () => {
+      mountedControls -= 1;
+      mountedTopic.emit();
+    };
+  }, [isOwning]);
+};
+
+/**
+ * `true` while another surface owns the reload prompt ({@link useReloadPromptOwner}), so the
+ * floating fallback (`BuildSkewBanner`) covers only surfaces without one.
  */
 export const useBrowserUpdateControlMounted = (): boolean =>
   useSyncExternalStore(
@@ -40,18 +60,7 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   const [revealed, setRevealed] = useState(false);
   const { open: sidebarOpen, openMobile, isMobile, setOpen: showSidebar } = useSidebar();
   // A collapsed sidebar is inert, so only an open one can own the prompt.
-  const isReachable = isMobile ? openMobile : sidebarOpen;
-  useEffect(() => {
-    if (!isReachable) {
-      return undefined;
-    }
-    mountedControls += 1;
-    mountedTopic.emit();
-    return () => {
-      mountedControls -= 1;
-      mountedTopic.emit();
-    };
-  }, [isReachable]);
+  useReloadPromptOwner(isMobile ? openMobile : sidebarOpen);
   useEffect(
     () =>
       // The offer is worth revealing once; a remount does not replay it, and a withdrawn offer reveals nothing.

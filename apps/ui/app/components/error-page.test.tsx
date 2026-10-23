@@ -33,6 +33,8 @@ vi.mock('#components/ui/collapsible-code-block.js', () => ({
 }));
 
 const { ErrorPage } = await import('#components/error-page.js');
+const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
+const { buildId, offerReload } = await import('#filesystem/build-skew.js');
 
 /** The error WebKit raised for TAU-UI-6; a stack is set so the code block would be eligible. */
 const moduleImportFailure = (): TypeError => new TypeError('Importing a module script failed.');
@@ -115,6 +117,23 @@ describe('ErrorPage', () => {
 
     expect(reload).toHaveBeenCalledOnce();
     expect(screen.queryByText(/Our team has been notified/u)).not.toBeInTheDocument();
+  });
+
+  it('should own the reload prompt, so the floating banner does not repeat it', async () => {
+    mocks.recoverFromStaleBuild.mockResolvedValue('superseded');
+    mocks.routeError = moduleImportFailure();
+    render(
+      <MemoryRouter>
+        <ErrorPage />
+        <BuildSkewBanner />
+      </MemoryRouter>,
+    );
+    act(() => {
+      offerReload(buildId + 1);
+    });
+
+    expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('should enable the reload again when the automatic reload did not navigate away', async () => {

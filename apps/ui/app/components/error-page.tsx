@@ -7,6 +7,7 @@ import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
 import { describeSupersession } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
+import { useReloadPromptOwner } from '#components/nav/browser-update.js';
 import { isStaleModuleError, recoverFromStaleBuild, reloadTimeout } from '#lib/stale-build-recovery.js';
 import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
@@ -27,6 +28,8 @@ export function ErrorPage(): React.JSX.Element {
   const [reloadRefusedFor, setReloadRefusedFor] = useState<unknown>();
   const isReloadSettled = reloadRefusedFor === error;
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
+  // This screen is the reload prompt while it shows; the floating banner would only repeat it.
+  useReloadPromptOwner(staleOutcome === 'reloading' || staleOutcome === 'superseded');
   // Each failure is reported once, however often the effect runs again (a new `analytics`, a remount of the same error).
   const reportedError = useRef<unknown>(undefined);
 

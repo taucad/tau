@@ -14,6 +14,8 @@ import { ParametersPane } from '@taucad/workbench-panes/parameters/parameters-pa
 import type { ModelSource } from '@taucad/workbench-panes/model/model-source';
 import type { WorkbenchPaneId } from '@taucad/workbench-panes/registry/pane-registry';
 import { SharePane } from '@taucad/workbench-panes/share/share-pane';
+import type { ExportNotices } from '@taucad/workbench-panes/export/export-source';
+import { Toaster, toast } from '@taucad/ui/components/sonner';
 import type { HostBridge } from '#app/host-bridge.js';
 import type { ComponentReveal } from '#app/sources/component-menu.jsx';
 import { createExportSource } from '#app/sources/export-source.js';
@@ -21,6 +23,16 @@ import { createKinematicsSource } from '#app/sources/kinematics-source.js';
 import { createModelSource } from '#app/sources/model-source.js';
 import { createParametersSource } from '#app/sources/parameters-source.js';
 import { createShareSource } from '#app/sources/share-source.js';
+
+/** The Export pane's outcomes, as the Tau app reports them: in a toast. */
+const exportNotices: ExportNotices = {
+  success: (message) => {
+    toast.success(message);
+  },
+  error: (message) => {
+    toast.error(message);
+  },
+};
 
 /** The panes the page offers; Details, Files and Revisions belong to the agent's host (R3). */
 const offeredPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics', 'export', 'share'];
@@ -90,11 +102,22 @@ export function WorkbenchLane({
     (): WorkbenchPanesHost => ({
       useUnits: () => units,
       parameters,
-      kinematics: { ...createKinematicsSource(bridge), subscribeReveal: reveal.subscribeKinematics },
-      model: createModelSource(bridge, { componentActions, reveal: reveal.model }),
+      kinematics: {
+        ...createKinematicsSource(bridge),
+        subscribeReveal: reveal.subscribeKinematics,
+      },
+      model: createModelSource(bridge, {
+        componentActions,
+        reveal: reveal.model,
+      }),
       ...(model === undefined
         ? {}
-        : { export: createExportSource(bridge, model), share: createShareSource(bridge, model) }),
+        : {
+            export: createExportSource(bridge, model, {
+              notices: exportNotices,
+            }),
+            share: createShareSource(bridge, model),
+          }),
     }),
     [bridge, componentActions, model, parameters, reveal, units],
   );
@@ -126,6 +149,7 @@ export function WorkbenchLane({
           }
         }}
       />
+      <Toaster />
     </WorkbenchPanesHostProvider>
   );
 }

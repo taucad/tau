@@ -28,7 +28,7 @@ import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import { SceneOverlay, useOverlayDepthRestorer } from '#graphics/three/scene-overlay.jsx';
-import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.jsx';
+import { GraphicsProvider, useCameraRig, useViewCameraFraming } from '#hooks/use-graphics.jsx';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import { isViewportWebGpu } from '#graphics/three/viewport-cad-renderer.js';
@@ -2500,6 +2500,175 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       }
       cleanup();
       actor.stop();
+    }
+  },
+  120_000,
+);
+
+it.each(['webgpu', 'node-webgl2'] as const)(
+  'should preserve the saved rear planetary section through a cut reset at 5K on %s',
+  async (execution) => {
+    referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
+    referenceMode.manualPreparation = true;
+    vi.stubGlobal('devicePixelRatio', 2);
+    await page.viewport(600, 500);
+    const response = await fetch(new URL('fixtures/planetary.glb', import.meta.url));
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const cuts = [
+      { kind: 'plane', plane: 'xz', offset: 0.01, isFlipped: false },
+      { kind: 'plane', plane: 'yz', offset: 0, isFlipped: false },
+    ] as const;
+    const cameraView = {
+      frameId: 'tau:root',
+      target: [0, 0, 0.006],
+      direction: [0.5773502691896258, 0.5773502691896258, 0.5773502691896258],
+      up: [0, 0, 1],
+      verticalSpan: 0.23668560039290423,
+      perspectiveZoom: 1,
+    } as const;
+    const machine = graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) } });
+    const actor = createActor(machine, {
+      input: { enablePostProcessing: true, sectionView: { active: true, cuts: [...cuts] } },
+    }).start();
+    const sibling = createActor(machine, {
+      input: { enablePostProcessing: true, sectionView: { active: true, cuts: cuts.slice(0, 1) } },
+    }).start();
+    let state: RootState | undefined;
+    let rig: ReturnType<typeof useCameraRig> | undefined;
+    let framing: ReturnType<typeof useViewCameraFraming> | undefined;
+    const Probe = (): undefined => {
+      state = useThree();
+      rig = useCameraRig();
+      framing = useViewCameraFraming();
+      return undefined;
+    };
+    const capture = async (): Promise<Uint8ClampedArray> => {
+      await vi.waitFor(
+        () => {
+          state!.advance(performance.now(), true);
+          expect(actor.getSnapshot().context.committedSectionCuts).toEqual(actor.getSnapshot().context.sectionCuts);
+          const pending: number[] = [];
+          state!.scene.traverse((object) => {
+            const census = object.userData['sectionCapCompleteness'] as { pendingSourceCount: number } | undefined;
+            if (census) {
+              pending.push(census.pendingSourceCount);
+            }
+          });
+          expect(pending).toEqual([0]);
+        },
+        { timeout: 30_000 },
+      );
+      for (let frame = 0; frame < 4; frame++) {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => {
+            resolve();
+          });
+        });
+        state!.advance(performance.now(), true);
+      }
+      return captureRendererOutput(state!.gl);
+    };
+    try {
+      render(
+        <KeyboardProvider>
+          <div data-testid='history-root' style={{ width: 381, height: 1047 }}>
+            <GraphicsProvider graphicsRef={actor} seed={{ camera: { cameraView } }} initialVerticalFieldOfView={35}>
+              <ThreeCanvasInstance
+                graphicsBackend='webgpu'
+                upDirection='z'
+                enableGrid
+                enableAxes
+                enableGizmo
+                gizmoContainer={document.body}
+                postProcessingSettings={{ aoEnabled: true, toneMapping: 'neutral' }}
+                onRetry={() => undefined}
+              >
+                <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
+                <Probe />
+              </ThreeCanvasInstance>
+            </GraphicsProvider>
+          </div>
+          <div style={{ width: 2560, height: 1440 }}>
+            <GraphicsProvider graphicsRef={sibling} initialVerticalFieldOfView={35}>
+              <ThreeCanvasInstance
+                graphicsBackend='webgpu'
+                upDirection='z'
+                enableGrid
+                enableAxes
+                postProcessingSettings={{ aoEnabled: true, toneMapping: 'neutral' }}
+                onRetry={() => undefined}
+              >
+                <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
+              </ThreeCanvasInstance>
+            </GraphicsProvider>
+          </div>
+        </KeyboardProvider>,
+      );
+      await vi.waitFor(
+        () => {
+          expect(state?.scene.getObjectByName('Internal_Ring_Gear')).toBeDefined();
+          expect(framing?.initialized).toBe(true);
+        },
+        { timeout: 45_000 },
+      );
+      state!.setFrameloop('never');
+      const host = document.querySelector<HTMLElement>('[data-testid=history-root]')!;
+      host.style.width = '2560px';
+      host.style.height = '1440px';
+      state!.setSize(2560, 1440);
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+      state!.advance(performance.now(), true);
+      await vi.waitFor(() => {
+        state!.advance(performance.now(), true);
+        for (const prepare of referenceMode.preparations) {
+          expect(prepare()).toBe(true);
+        }
+      });
+      // Do not set the camera or inspect/compile shaders before the startup capture.
+      const before = await capture();
+      expect(Reflect.get(state!.camera, 'fov')).toBe(35);
+
+      expect([state!.gl.domElement.width, state!.gl.domElement.height]).toEqual([5120, 2880]);
+      if (!isViewportWebGpu(state!.gl)) {
+        throw new Error('Node renderer required');
+      }
+      expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+      const matrices = [...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements];
+      actor.send({ type: 'adoptSectionView', section: { active: true, cuts: cuts.slice(0, 1) } });
+      await capture();
+      actor.send({ type: 'adoptSectionView', section: { active: true, cuts: [...cuts] } });
+      rig!.actorRef.send({ type: 'setView', ...cameraView });
+      const after = await capture();
+      expect([...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements]).toEqual(matrices);
+      let changed = 0;
+      let covered = 0;
+      for (let offset = 0; offset < before.length; offset += 4) {
+        covered += Number(before[offset + 3]! > 0);
+        let difference = 0;
+        for (const background of [0, 255]) {
+          for (let channel = 0; channel < 3; channel++) {
+            const a =
+              (before[offset + channel]! * before[offset + 3]!) / 255 + background * (1 - before[offset + 3]! / 255);
+            const b =
+              (after[offset + channel]! * after[offset + 3]!) / 255 + background * (1 - after[offset + 3]! / 255);
+            difference = Math.max(difference, Math.abs(a - b));
+          }
+        }
+        changed += Number(difference > 3);
+      }
+      expect(covered).toBeGreaterThan(100_000);
+      expect(changed, 'Saved startup must match the same camera and cuts after reset within 3/255').toBe(0);
+    } finally {
+      if (state) {
+        await disposeRendererOutput(state.gl);
+      }
+      cleanup();
+      actor.stop();
+      sibling.stop();
     }
   },
   120_000,

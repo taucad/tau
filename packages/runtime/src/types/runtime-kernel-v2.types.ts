@@ -44,6 +44,13 @@ export type TessellationReport = Readonly<{
   activeVoxels?: number;
   /** Native bytes held by the fields the mesh came from; voxel kernels only. */
   memoryBytes?: number;
+  /**
+   * OpenVDB mesh adaptivity in (0, 1) the mesh was produced with; voxel kernels only, and only when above 0.
+   * Absent means the uniform mesh.
+   */
+  adaptivity?: number;
+  /** Whether the adaptive mesh relaxed disoriented triangles; voxel kernels only, present only with `adaptivity`. */
+  relax?: boolean;
   /** The requested tessellation form: a quality preset name, or `'explicit'` for explicit tolerances. */
   requested?: 'low' | 'medium' | 'high' | 'extra-high' | 'explicit';
   /** Absolute chordal deviation in millimetres the mesh was produced at, after any downgrade. */

@@ -31,7 +31,7 @@ const animationIds = (value: unknown): string[] =>
  * @param chunks - The GLB's chunks.
  * @returns The payload, or `undefined` when the GLB carries none that parses.
  */
-const topologyPayloadOf = ({ json, bin }: GlbChunks): JsonObject | undefined => {
+export const topologyPayloadOf = ({ json, bin }: GlbChunks): JsonObject | undefined => {
   const { extensions, bufferViews } = json;
   const extension = isObject(extensions) ? extensions[tauCadTopologyExtension] : undefined;
   const index = isObject(extension) ? extension['topologyBufferView'] : undefined;

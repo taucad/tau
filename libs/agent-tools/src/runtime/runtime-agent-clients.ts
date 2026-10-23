@@ -29,6 +29,7 @@ import type { RenderedArtifact } from '#runtime/glb-chunks.js';
 import { summarizeRenderedModel } from '#runtime/model-summary.js';
 import { validateExport } from '#runtime/export-validation.js';
 import type { ModelAdmissionLimits } from '#runtime/model-summary.js';
+import { poseModelGlb } from '#runtime/model-pose.js';
 
 import {
   buildCaptureExportOptions,
@@ -60,6 +61,26 @@ const withSectionGuidance = async <Result>(
       { cause: error },
     );
   }
+};
+
+/** The result `message`: what a section kept and where a pose put each coordinate, or nothing. */
+const captureMessage = (
+  section: ScreenshotSection | undefined,
+  posed: Readonly<{ coordinates: Readonly<Record<string, number>>; atLimit: readonly string[] }> | undefined,
+): Readonly<{ message?: string }> => {
+  const sentences = [
+    ...(section === undefined ? [] : [describeCaptureSection(section)]),
+    ...(posed === undefined
+      ? []
+      : [
+          `Posed: ${
+            Object.entries(posed.coordinates)
+              .map(([id, value]) => `${id} ${String(Number(value.toPrecision(6)))}`)
+              .join(', ') || 'no degrees of freedom'
+          }${posed.atLimit.length === 0 ? '' : `; at a limit: ${posed.atLimit.join(', ')}`}.`,
+        ]),
+  ];
+  return sentences.length === 0 ? {} : { message: sentences.join(' ') };
 };
 
 /** Per-call parameter values as the runtime's caller overrides; absent means the stored group alone. */
@@ -699,6 +720,13 @@ export const createRuntimeAgentClients = (
               message: `section applies to 3D views only; view ${rendering.view} is a 2D drawing. Omit section for this view.`,
             };
           }
+          if (artifact.mimeType === 'image/svg+xml' && captureInput.pose !== undefined) {
+            return {
+              success: false,
+              errorCode: rpcClientErrorCode.validationError,
+              message: `pose applies to 3D views only; view ${rendering.view} is a 2D drawing. Omit pose for this view.`,
+            };
+          }
           if (artifact.mimeType === 'image/svg+xml') {
             const files = requireImageFiles(
               await input.exportImage({
@@ -725,6 +753,10 @@ export const createRuntimeAgentClients = (
             return { success: true, images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }], ...provenance };
           }
           assertGlb(artifact.content);
+          const posed = captureInput.pose === undefined ? undefined : poseModelGlb(artifact.content, captureInput.pose);
+          if (posed?.status === 'refused') {
+            return { success: false, errorCode: rpcClientErrorCode.validationError, message: posed.message };
+          }
           const exportOptions = buildCaptureExportOptions({
             mode: captureInput.mode,
             size: captureSize,
@@ -736,6 +768,8 @@ export const createRuntimeAgentClients = (
             captureInput.section === undefined
               ? ''
               : `:section:${captureInput.section.plane}:${captureInput.section.offset}:${resolveCaptureSectionKeep(captureInput.section)}`;
+          /* A pose changes the drawn geometry, so it is part of both keys. */
+          const poseKey = captureInput.pose === undefined ? '' : `:pose:${JSON.stringify(captureInput.pose)}`;
           const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
           const names =
             captureInput.mode === 'multi_angle'
@@ -745,11 +779,11 @@ export const createRuntimeAgentClients = (
             await withSectionGuidance(captureInput.section, async () =>
               input.exportImage({
                 kind: 'capture',
-                identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}${sectionIdentity}`,
+                identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}${sectionIdentity}${poseKey}`,
                 sourceFormat: 'glb',
                 sourcePath: targetFile,
-                geometryHash: rendering.hash,
-                content: artifact.content,
+                geometryHash: `${rendering.hash}${poseKey}`,
+                content: posed?.content ?? artifact.content,
                 format: 'webp',
                 signal: context?.signal,
                 exportOptions,
@@ -766,7 +800,7 @@ export const createRuntimeAgentClients = (
                 ? canonicalCaptureViews.map(({ id }, index) => ({ ...echo, angle: id, dataUrl: dataUrls[index]! }))
                 : [{ ...echo, angle: 'isometric', dataUrl: dataUrls[0]! }],
             ...provenance,
-            ...(captureInput.section === undefined ? {} : { message: describeCaptureSection(captureInput.section) }),
+            ...captureMessage(captureInput.section, posed),
           };
         } finally {
           view.close();

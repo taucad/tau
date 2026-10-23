@@ -72,6 +72,7 @@
     "@taucad/filesystem": "workspace:*",
     "@taucad/grbl": "workspace:*",
     "@taucad/jobs": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/mcp": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
     "@taucad/parameters": "workspace:*",

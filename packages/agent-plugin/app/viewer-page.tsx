@@ -43,6 +43,7 @@ import type { ChatRoute, HostBridge, HostView } from '#app/host-bridge.js';
 import { loadModel } from '#app/model-loader.js';
 import { chatReferenceOf } from '#app/chat-reference.js';
 import { captureLiveView, startLiveLink, viewStateOf, whenDrawn } from '#app/live-link.js';
+import { applyPoseCommand, motionOf } from '#app/kinematics-link.js';
 import type { LiveLink } from '#app/live-link.js';
 import {
   createModelComponentActionMenus,
@@ -584,6 +585,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           composition: latest.current.view.composition,
           interactedAt: interactedAt.current,
           references: addedFrom(addedKeyOf(model)),
+          motion: motionOf(context.kinematicsRef, unit.unitId),
         });
         /* The display, section and measurements the server keeps in the view record. */
         const settings = liveViewSettings(graphicsRef);
@@ -608,6 +610,12 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         /* The canvas region alone: a pane may draw canvases of its own. */
         const region = rootRef.current?.querySelector(`#${canvasRegionId}`) ?? rootRef.current;
         return region === null ? { error: 'The viewer is not on screen.' } : captureLiveView(region);
+      },
+      pose(command) {
+        const unit = shownUnit();
+        if (unit !== undefined && latest.current.shown?.model.id === command.modelId) {
+          applyPoseCommand(graphicsRef.getSnapshot().context.kinematicsRef, unit.unitId, command);
+        }
       },
     });
     linkRef.current = link;

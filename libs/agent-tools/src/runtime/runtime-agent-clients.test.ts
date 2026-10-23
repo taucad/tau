@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '#runtime/runtime-agent-clients.js';
 import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/runtime-agent-clients.js';
+import { glbChunks } from '#runtime/glb-chunks.js';
+import { planetaryGlb } from '#runtime/planetary-glb.fixture.js';
 import type {
   Description,
   Evaluation,
@@ -614,6 +616,51 @@ describe('createRuntimeAgentClients per-call parameters and sections', () => {
     expect(result.success ? undefined : result.message).toContain(
       'The xy section at 0.006 m could not be rendered: parse: sections: topology: source node 1/mesh 1/primitive 0 contains a degenerate triangle. A section caps the cut',
     );
+  });
+
+  it('poses a 3D capture from the mechanism its GLB carries, keys it and lists the coordinates', async () => {
+    const fixture = runtimeFixture({
+      render: () => rendering({ mimeType: 'model/gltf-binary', content: planetaryGlb() }),
+    });
+    const clients = clientsFor(fixture);
+
+    await clients.images.captureImages({ targetFile: 'main.ts', mode: 'single' });
+    const posed = await clients.images.captureImages({
+      targetFile: 'main.ts',
+      mode: 'single',
+      pose: { animation: { id: 'four-sun-turns', time: 2 } },
+    });
+
+    expect(posed).toMatchObject({ success: true, message: 'Posed: sun 360, carrier 90.' });
+    const [plainJob, poseJob] = clients.exporter.mock.calls.map(([job]) => job);
+    expect(poseJob?.identity).not.toBe(plainJob?.identity);
+    expect(poseJob?.sourceFormat === 'glb' ? poseJob.geometryHash : undefined).not.toBe(
+      plainJob?.sourceFormat === 'glb' ? plainJob.geometryHash : undefined,
+    );
+    const nodes = glbChunks(poseJob?.content as Uint8Array<ArrayBuffer>)?.json['nodes'] as ReadonlyArray<
+      Readonly<Record<string, unknown>>
+    >;
+    expect(nodes[1]).toHaveProperty('matrix');
+  });
+
+  it('refuses a pose the mechanism cannot take before rendering an image', async () => {
+    const fixture = runtimeFixture({
+      render: () => rendering({ mimeType: 'model/gltf-binary', content: planetaryGlb() }),
+    });
+    const clients = clientsFor(fixture);
+
+    await expect(
+      clients.images.captureImages({
+        targetFile: 'main.ts',
+        mode: 'single',
+        pose: { animation: { id: 'spin', time: 0 } },
+      }),
+    ).resolves.toEqual({
+      success: false,
+      errorCode: 'VALIDATION_ERROR',
+      message: "This model's mechanism has no animation spin; it offers four-sun-turns.",
+    });
+    expect(clients.exporter).not.toHaveBeenCalled();
   });
 
   it('refuses a section on a 2D view before rendering an image', async () => {

@@ -2,6 +2,7 @@ import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { viewSettingsSchema } from '@taucad/workbench';
+import { poseModelDescription, poseModelInputSchema } from '@taucad/chat/schemas/tools/pose-model';
 import {
   resolveTauViewerPresentation,
   tauViewerReadEncodings,
@@ -23,6 +24,8 @@ import type {
   TauViewerDirectShare,
   TauViewerPreviewParametersInput,
   TauViewerPreviewResult,
+  TauViewerPoseInput,
+  TauViewerPoseResult,
   TauViewerShowResult,
   TauViewerSyncInput,
   TauViewerSyncResult,
@@ -124,6 +127,14 @@ export type TauMcpViewer = Readonly<{
     input: TauViewerCaptureReplyInput,
     options: TauMcpViewerCallOptions,
   ): Promise<Readonly<{ accepted: boolean }> | TauMcpViewerFailure>;
+  /**
+   * Drive or read the mechanism of the shown model (the model `targetFile` names, shown first when another is
+   * shown); every page showing it applies the pose. A host without it leaves `pose_model` out.
+   */
+  pose?(
+    input: TauViewerPoseInput,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerPoseResult | TauMcpViewerFailure>;
   /** A shown model's project packed for the page's direct link; a host without one leaves the tool out. */
   shareLink?(
     input: Readonly<{ modelId: string }>,
@@ -154,7 +165,7 @@ const descriptions = {
     'Open one project model file in the Tau viewer. The host calls this when the person opens a file with Tau.',
   appRead: 'Read a byte range of a model the Tau viewer shows. Only the viewer page calls this.',
   viewState:
-    'Report what the person sees in the Tau viewer: the model, the selected components and those the person added to chat (each with the component id that follows # in a @cad[<path>#<componentId>] reference, as show_model select and arrange_workbench take it), hidden and isolated components, and the camera. Call it when the person names a part they picked or added in the viewer. Set capture to also get an image of the live view.',
+    'Report what the person sees in the Tau viewer: the model, the selected components and those the person added to chat (each with the component id that follows # in a @cad[<path>#<componentId>] reference, as show_model select and arrange_workbench take it), hidden and isolated components, the camera, and the animation playback and joint coordinates of a moving model. Call it when the person names a part they picked or added in the viewer. Set capture to also get an image of the live view.',
   appSync: "The Tau viewer page's sync with the server. Only the viewer page calls this.",
   appCaptureReply: "The Tau viewer page's answer to a capture request. Only the viewer page calls this.",
   appShareLink:
@@ -241,6 +252,24 @@ const viewSchema = z
       .strict()
       .optional(),
     settings: viewSettingsSchema.optional(),
+    mechanism: z
+      .object({
+        preserved: z.boolean(),
+        joints: z.number().int().nonnegative(),
+        animations: z.array(z.string().min(1).max(128)).max(64),
+      })
+      .strict()
+      .optional(),
+    playback: z
+      .object({
+        status: z.enum(['stopped', 'playing', 'paused']),
+        animationId: z.string().min(1).max(128).optional(),
+        time: z.number().nonnegative(),
+        speed: z.number().positive(),
+      })
+      .strict()
+      .optional(),
+    coordinates: z.record(z.string().min(1).max(256), z.number()).optional(),
   })
   .strict();
 
@@ -388,6 +417,32 @@ const components = (list: readonly TauViewerComponent[], empty: string): string 
 const vector = (value: readonly number[]): string => `(${value.map((axis) => axis.toPrecision(3)).join(', ')})`;
 
 /**
+ * Coordinates as `sun 360, carrier 90`.
+ *
+ * @param coordinates - Every degree of freedom, by id.
+ * @returns One phrase.
+ */
+const describeCoordinates = (coordinates: Readonly<Record<string, number>> | undefined): string => {
+  const entries = Object.entries(coordinates ?? {});
+  return entries.length === 0
+    ? 'no degrees of freedom'
+    : entries.map(([id, value]) => `${id} ${String(Number(value.toPrecision(6)))}`).join(', ');
+};
+
+/**
+ * The playback as the model reads it.
+ *
+ * @param playback - The page's or the server's playback.
+ * @param coordinates - Every degree of freedom at the pose.
+ * @returns One sentence.
+ */
+const describePlayback = (
+  playback: NonNullable<TauViewerViewState['playback']>,
+  coordinates: Readonly<Record<string, number>> | undefined,
+): string =>
+  `Motion: ${playback.animationId === undefined ? 'no animation' : `animation ${playback.animationId}`} ${playback.status} at ${String(Number(playback.time.toPrecision(6)))} s (speed ${String(playback.speed)}); coordinates ${describeCoordinates(coordinates)}.`;
+
+/**
  * The view as the model reads it; the structured result carries the same facts.
  *
  * @param view - The page's reported view.
@@ -404,6 +459,7 @@ const describeView = (view: TauViewerViewState): string =>
       ? 'The camera has not framed the model yet.'
       : `Camera looks at ${vector(view.camera.target)} from direction ${vector(view.camera.direction)}, spanning ${view.camera.verticalSpan.toPrecision(3)} m.`,
     `Section view ${view.sectionActive ? 'on' : 'off'}; ${String(view.measurementCount)} measurements.`,
+    ...(view.playback === undefined ? [] : [describePlayback(view.playback, view.coordinates)]),
   ].join('\n');
 
 /**
@@ -732,6 +788,42 @@ export const registerTauMcpViewer = (
       return isFailure(result) ? failure(result) : shown(result, presentation);
     },
   );
+  const { pose } = viewer;
+  const poseModel =
+    pose === undefined
+      ? undefined
+      : server.registerTool(
+          tauViewerToolName.poseModel,
+          {
+            description: poseModelDescription,
+            inputSchema: poseModelInputSchema,
+            annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+            _meta: alwaysLoad,
+          },
+          async (args, extra) => {
+            const result = await pose(args, callOptions(extra));
+            if (isFailure(result)) {
+              return failure(result);
+            }
+            const name = result.model.sourceFile ?? result.model.path;
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: [
+                    `Posed ${name} (${String(result.mechanism.joints)} joints; animations ${listed(result.mechanism.animations)}).`,
+                    describePlayback(result.playback, result.coordinates),
+                    ...(result.atLimit.length === 0 ? [] : [`At a limit: ${result.atLimit.join(', ')}.`]),
+                    result.viewers === 0
+                      ? 'No viewer page is open to show it; screenshot with pose captures it.'
+                      : `${String(result.viewers)} viewer ${result.viewers === 1 ? 'page applies' : 'pages apply'} it.`,
+                  ].join('\n'),
+                },
+              ],
+              structuredContent: result,
+            };
+          },
+        );
   const pageTools = (viewer.pageTools ?? []).map((tool) =>
     server.registerTool(
       tool.name,
@@ -775,6 +867,9 @@ export const registerTauMcpViewer = (
     present(appRead, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     /* A text host's loopback page syncs over HTTP, so view_state serves every presentation. */
     present(viewState, true, { ...alwaysLoad });
+    if (poseModel !== undefined) {
+      present(poseModel, true, { ...alwaysLoad });
+    }
     present(appSync, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     present(appCaptureReply, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     /* Every page lists and opens files; a text host's loopback page reaches the same port over HTTP. */

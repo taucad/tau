@@ -61,6 +61,11 @@
       "import": "./src/schemas/tools/screenshot.tool.schema.ts",
       "default": "./src/schemas/tools/screenshot.tool.schema.ts"
     },
+    "./schemas/tools/pose-model": {
+      "types": "./src/schemas/tools/pose-model.tool.schema.ts",
+      "import": "./src/schemas/tools/pose-model.tool.schema.ts",
+      "default": "./src/schemas/tools/pose-model.tool.schema.ts"
+    },
     "./schemas/tools/export-model": {
       "types": "./src/schemas/tools/export-model.tool.schema.ts",
       "import": "./src/schemas/tools/export-model.tool.schema.ts",

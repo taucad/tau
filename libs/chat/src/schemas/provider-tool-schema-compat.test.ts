@@ -373,6 +373,7 @@ describe('provider-facing tool schema compatibility', () => {
       'mode',
       'options',
       'parameters',
+      'pose',
       'section',
       'targetFile',
       'view',

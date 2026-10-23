@@ -178,6 +178,17 @@ describe('screenshotOutputSchema stored captures (D-UI-04)', () => {
   });
 });
 
+describe('screenshotInputSchema pose', () => {
+  it('should take a pose to capture and publish it as optional on the wire', () => {
+    expect(
+      screenshotInputSchema.parse({ targetFile: 'main.ts', pose: { animation: { id: 'four-sun-turns', time: 2 } } }),
+    ).toMatchObject({ pose: { animation: { id: 'four-sun-turns', time: 2 } } });
+    const wire = z.toJSONSchema(screenshotInputSchema, { io: 'input' });
+    expect(wire).toHaveProperty(['properties', 'pose']);
+    expect(wire.required).not.toContain('pose');
+  });
+});
+
 describe('screenshot projectRoot', () => {
   it('names the absolute project root on a capture and on its MCP result', () => {
     const capture = { images: [{ view: '3d', dataUrl: 'data:image/webp;base64,AQID' }], projectRoot: '/work/gear' };

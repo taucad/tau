@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TauMcpViewerCallOptions } from '@taucad/mcp';
+import { tauViewerAcceptedViewFields } from '@taucad/mcp/viewer-protocol';
 import type { TauViewerShowResult, TauViewerSyncResult } from '@taucad/mcp/viewer-protocol';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 
@@ -438,6 +439,25 @@ describe('createLocalMcpViewer', () => {
     expect(bare.mechanism).toEqual({ preserved: false, joints: 0, animations: [] });
   });
 
+  it('should pose the model shown last, showing a named one first', async () => {
+    await expect(viewer.pose!({ coordinates: { sun: 1 } }, inline)).resolves.toMatchObject({ errorCode: 'NO_MODEL' });
+
+    await viewer.show({ targetFile: 'src/bracket.ts' }, inline);
+    const named = await viewer.pose!({ targetFile: 'models/part.glb' }, inline);
+    const again = await viewer.pose!({}, inline);
+
+    /* Neither GLB carries a mechanism; the second call poses the part the first one showed, without a render. */
+    expect(named).toMatchObject({
+      errorCode: 'NO_MECHANISM',
+      message: expect.stringContaining('models/part.glb') as string,
+    });
+    expect(again).toMatchObject({
+      errorCode: 'NO_MECHANISM',
+      message: expect.stringContaining('models/part.glb') as string,
+    });
+    expect(renderGlb).toHaveBeenCalledOnce();
+  });
+
   it('should show the main entry, then the model shown last, when no target is named', async () => {
     expect(shownModel(await viewer.show({}, inline)).model.sourceFile).toBe('src/bracket.ts');
     await viewer.show({ targetFile: 'models/part.glb' }, inline);
@@ -639,7 +659,7 @@ describe('createLocalMcpViewer', () => {
       const synced = await held;
       expect(synced.status).toBe(200);
       expect(await synced.json()).toEqual({
-        accepts: ['references', 'sourceRevision', 'settings'],
+        accepts: [...tauViewerAcceptedViewFields],
         version: 2,
         show: { ...next, select: ['component:arm'] },
       });

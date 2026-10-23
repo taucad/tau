@@ -83,6 +83,8 @@ Modes (\`mode\`, default \`single\`):
 
 Section (\`section\`, 3D views only) cuts the model with one axis plane to show its inside, e.g. { plane: 'xy', offset: 0.006 } for a horizontal cut 6 mm above the origin. The kept half defaults to the one whose cut face looks at the single-mode camera; \`keep\` names the side to retain instead, and the result \`message\` states what was kept. Cuts are capped.
 
+Pose (\`pose\`, a 3D view with a mechanism) moves the parts first: { animation: { id, time } } samples an animation from \`evaluate_model\` mechanism.animations at a time in seconds, { coordinates } sets driver joints; the result \`message\` lists every coordinate.
+
 ${parameterOverrideRule}
 
 Annotated 3D images include:

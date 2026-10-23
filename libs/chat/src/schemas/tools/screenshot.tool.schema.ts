@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { sourceRevisionSchema } from '#schemas/tools/source-revision.schema.js';
 import { parameterOverridesSchema } from '#schemas/tools/parameter.tool.schema.js';
+import { capturePoseSchema } from '#schemas/tools/pose-model.tool.schema.js';
 
 /** The axis-aligned planes a screenshot section can cut along, named as `arrange_workbench` names them. @public */
 export const screenshotSectionPlanes = ['xy', 'xz', 'yz'] as const;
@@ -90,6 +91,7 @@ export const screenshotInputSchema = z
       .optional()
       .describe('true draws edge lines over a 3D view, false leaves them out; a view without edge lines refuses true.'),
     parameters: parameterOverridesSchema.optional(),
+    pose: capturePoseSchema.optional(),
   })
   .strict();
 /** @public */

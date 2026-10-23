@@ -25,6 +25,7 @@ export const expectedTools = [
   'apply_parameter_operation',
   'show_model',
   'view_state',
+  'pose_model',
 ] as const;
 
 /**

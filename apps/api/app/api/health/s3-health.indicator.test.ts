@@ -84,7 +84,9 @@ describe('S3HealthIndicator', () => {
       expect(handler).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(1500);
       expect(settled).not.toHaveBeenCalled();
-      expect(await pending).toEqual({ s3: { status: 'down', message: 'Storage readiness timed out after 1500 ms' } });
+      const result = await pending;
+      expect(result['s3']).toMatchObject({ status: 'down', message: 'Storage readiness timed out after 1500 ms' });
+      expect(result['s3']?.['responseTimeMs']).toEqual(expect.any(Number));
       const signal: unknown = mockHeadProbe.mock.calls[0]?.[0];
       expect(signal).toBeInstanceOf(AbortSignal);
       if (!(signal instanceof AbortSignal)) {
@@ -123,5 +125,7 @@ describe('S3HealthIndicator', () => {
     const result = await indicator.isHealthy();
     expect(result['s3']?.status).toBe('down');
     expect(result['s3']?.['message']).toBe('Connection refused');
+    // A failed probe still says how long it waited, so a timeout reads differently from a refusal.
+    expect(result['s3']?.['responseTimeMs']).toEqual(expect.any(Number));
   });
 });

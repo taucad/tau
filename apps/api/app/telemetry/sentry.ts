@@ -84,3 +84,37 @@ export const reportServerError = (error: unknown, requestId?: string): void => {
     Sentry.captureException(error);
   });
 };
+
+/**
+ * One down indicator of a refused readiness probe.
+ */
+export type ReadinessFailure = {
+  /** The terminus indicator key: `redis`, `database`, `s3`, `git` or `memory_heap`. */
+  indicator: string;
+  /** The indicator's own reason, when it gave one. */
+  message?: string;
+  /** How long the indicator's probe took, when it measured one. */
+  responseTimeMs?: number;
+};
+
+/**
+ * Report one down readiness indicator as a warning grouped by that indicator.
+ *
+ * A readiness refusal is the probe working: Fly drains the Machine until the dependency answers again. Reported
+ * as the terminus `ServiceUnavailableException` it became one anonymous error group that never said which
+ * dependency failed (TAU-API-3). Each indicator now gets its own fingerprint, tag and context instead.
+ *
+ * @param failure - The down indicator.
+ */
+export const reportReadinessFailure = (failure: ReadinessFailure): void => {
+  if (!Sentry.isInitialized()) {
+    return;
+  }
+  Sentry.withScope((scope) => {
+    scope.setLevel('warning');
+    scope.setFingerprint(['health-readiness', failure.indicator]);
+    scope.setTag('health.indicator', failure.indicator);
+    scope.setContext('readiness', { ...failure });
+    Sentry.captureMessage(`Readiness check down: ${failure.indicator}`);
+  });
+};

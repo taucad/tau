@@ -37,6 +37,8 @@ const { values } = parseArgs({
     'skip-build': { type: 'boolean', default: false },
     /** Cap the R01 interactive-phase stream (MiB/s) so key latency is compared at the same output load; 0 = unbounded. */
     rate: { type: 'string', default: '0' },
+    /** Record a renderer CPU profile of each R01 throughput phase next to the results. */
+    profile: { type: 'boolean', default: false },
     'electron-arg': { type: 'string', multiple: true, default: [] },
   },
 });
@@ -347,9 +349,19 @@ const r01Run = async (kind: Kind, round: number) => {
     const idleFramesPerSecond = await call<number>(session, 'idleFrames', 3000);
     const idle = await stopSampling(session);
 
+    const cdp = values.profile ? await session.page.context().newCDPSession(session.page) : undefined;
+    if (cdp) {
+      await cdp.send('Profiler.enable');
+      await cdp.send('Profiler.start');
+    }
     await startSampling(session);
     const throughput = await call<Record<string, number>>(session, 'play', 'r01-colored-log', flow);
     const load = await stopSampling(session);
+    if (cdp) {
+      const { profile } = await cdp.send('Profiler.stop');
+      await writeFile(path.join(resultsDirectory, `r01-${kind}-round${round}.cpuprofile`), JSON.stringify(profile));
+      await cdp.detach();
+    }
     const afterStreamScreenshot = await screenshot(session, `r01-after-stream-${kind}-round${round}`);
     const retained = await call<string[]>(session, 'tail', 3000);
     const sequence = { ...sequenceCheck(retained, (await r01Lines()) - 1), lastLines: retained.slice(-8) };

@@ -3,9 +3,9 @@ import { ArrowUpCircle } from 'lucide-react';
 import {
   buildId,
   describeSupersession,
-  isBuildSuperseded,
+  isReloadOffered,
   readSupersedingBuildId,
-  subscribeBuildSkew,
+  subscribeReloadOffer,
   subscribeSupersedingBuildId,
 } from '#filesystem/build-skew.js';
 import { Button } from '@taucad/ui/components/button';
@@ -29,7 +29,7 @@ const reload = (): void => {
  * the prompt.
  */
 export function BuildSkewBanner(): React.JSX.Element | undefined {
-  const superseded = useSyncExternalStore(subscribeBuildSkew, isBuildSuperseded, serverSnapshot);
+  const superseded = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverSnapshot);
   const supersedingBuildId = useSyncExternalStore(
     subscribeSupersedingBuildId,
     readSupersedingBuildId,

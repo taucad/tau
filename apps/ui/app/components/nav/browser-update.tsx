@@ -5,9 +5,9 @@ import { useSidebar } from '@taucad/ui/components/sidebar';
 import {
   buildId,
   describeSupersession,
-  isBuildSuperseded,
+  isReloadOffered,
   readSupersedingBuildId,
-  subscribeBuildSkew,
+  subscribeReloadOffer,
   subscribeSupersedingBuildId,
 } from '#filesystem/build-skew.js';
 import { UpdateControl } from '#components/nav/update-control.js';
@@ -36,12 +36,12 @@ const builtAt = (supersedingBuildId: number): string | undefined =>
 
 /**
  * Browser counterpart of `DesktopUpdate`: a tab whose bundle has been superseded
- * by a newer one in another tab (blueprint DF20), or replaced by a deploy
- * (`#lib/stale-build-recovery`), has already stopped writing
- * durable state, so it surfaces the same sidebar control and offers a reload.
+ * by a newer one in another tab (blueprint DF20) has stopped writing durable
+ * state, and one a deploy replaced (`#lib/stale-build-recovery`) is running old
+ * code; both surface the same sidebar control and offer a reload.
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
-  const superseded = useSyncExternalStore(subscribeBuildSkew, isBuildSuperseded, serverSnapshot);
+  const superseded = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverSnapshot);
   const supersedingBuildId = useSyncExternalStore(
     subscribeSupersedingBuildId,
     readSupersedingBuildId,
@@ -65,8 +65,8 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   }, [isReachable]);
   useEffect(
     () =>
-      // Saving has stopped, so the transition is worth revealing once; a remount does not replay it.
-      subscribeBuildSkew(() => {
+      // The offer is worth revealing once; a remount does not replay it.
+      subscribeReloadOffer(() => {
         showSidebar(true);
         setRevealed(true);
         setOpen(true);

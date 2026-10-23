@@ -1,14 +1,17 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
 
 const channelName = `${metaConfig.databasePrefix}build-id`;
+
+const loaded: Array<{ readonly closeBuildSkewChannel: () => void }> = [];
 
 /** Fresh module graph per test: the skew guard captures its state at module load. */
 const load = async () => {
   vi.resetModules();
   const skew = await import('#filesystem/build-skew.js');
+  loaded.push(skew);
   const { BrowserUpdate } = await import('#components/nav/browser-update.js');
   const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
   // Same module instance as the control, so they share one sidebar context.
@@ -27,8 +30,19 @@ const announce = async (buildId: number): Promise<void> => {
   });
 };
 
+beforeEach(() => {
+  // Announcements ask the server first; unreachable, the newer announcement wins.
+  vi.stubGlobal('fetch', async () => {
+    throw new TypeError('Failed to fetch');
+  });
+});
+
 afterEach(() => {
   cleanup();
+  // An earlier test's module would otherwise keep answering this test's announcements.
+  for (const skew of loaded.splice(0)) {
+    skew.closeBuildSkewChannel();
+  }
   vi.unstubAllGlobals();
 });
 
@@ -130,7 +144,7 @@ describe('browser update control', () => {
     const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
     act(() => {
-      markBuildSuperseded(rolledBack);
+      markBuildSuperseded(rolledBack, 'server');
     });
 
     const dialog = await screen.findByRole('dialog', { name: 'Tau update' });

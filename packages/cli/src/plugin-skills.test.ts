@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -74,7 +74,7 @@ describe('pluginSkillBundles', () => {
         files: [
           {
             path: 'SKILL.md',
-            url: pathToFileURL(join(root, 'agent/cad-rustcad/SKILL.md')).href,
+            url: pathToFileURL(await realpath(join(root, 'agent/cad-rustcad/SKILL.md'))).href,
             byteLength: Buffer.byteLength(skill),
             lineCount: 6,
             contentKind: 'text',

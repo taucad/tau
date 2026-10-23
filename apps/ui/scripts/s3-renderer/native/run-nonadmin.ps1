@@ -46,9 +46,14 @@ try {
   } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Drop 'nonadmin-context.json')
   if ($isAdmin) { throw 'created user unexpectedly in Administrators; refusing to run elevated' }
 
-  # Read access to the checkout (node_modules, the built harness; the runner's ACL admits only administrators), then
-  # write access to the drop and the harness output. Inheritable grants propagate to existing children.
+  # Read access to the checkout (node_modules, the built harness; the runner's ACL admits only administrators). An
+  # inheritable grant alone left pnpm's hard-linked store files unreadable (EPERM), so every file also gets an explicit
+  # ACE (/T). The summary line and one probed file's ACL go to the log.
   cmd /c "icacls `"$env:GITHUB_WORKSPACE`" /grant `"${user}:(OI)(CI)RX`" /C /Q" | Out-Null
+  $grant = cmd /c "icacls `"$env:GITHUB_WORKSPACE`" /grant `"${user}:RX`" /T /C /Q 2>&1"
+  Write-Host "[run-nonadmin] read grant: $(($grant | Select-Object -Last 1))"
+  $probe = Join-Path $env:GITHUB_WORKSPACE 'node_modules/playwright/package.json'
+  Write-Host "[run-nonadmin] probe ACL: $((cmd /c "icacls `"$probe`"" 2>&1) -join ' | ')"
   # Write access to the drop and the harness output (packaged fixture, Electron user data stays in the profile).
   foreach ($path in @($Drop, (Join-Path $env:GITHUB_WORKSPACE 'out/s3-renderer'))) {
     cmd /c "icacls `"$path`" /grant `"${user}:(OI)(CI)M`"" | Out-Null

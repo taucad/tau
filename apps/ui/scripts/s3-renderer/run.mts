@@ -230,7 +230,8 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
       args: arguments_,
       // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
       env: { ...process.env, S3_CLIENT_ROOT: packagedApp?.clientRoot ?? clientRoot },
-      timeout: isWindows ? 120_000 : 60_000,
+      // A fresh unsigned packaged executable on Windows on Arm is scanned on first launch and has needed over 2 minutes.
+      timeout: isWindows ? (packagedApp ? 300_000 : 120_000) : 60_000,
     });
   let app: ElectronApplication;
   try {

@@ -62,7 +62,7 @@ import type {
 import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { isBuildSuperseded } from '#filesystem/build-skew.js';
+import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
@@ -1840,6 +1840,28 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       return pass;
     },
     [runDiscoveryPass],
+  );
+
+  /* DF20: a pass that ran while durable writes were stopped published without reconciling.
+   * A provisional stop lifts when the server names this build live, so run that pass again. */
+  useEffect(
+    () =>
+      subscribeBuildSkew(() => {
+        if (isBuildSuperseded()) {
+          return;
+        }
+        invalidateProjectsList();
+        const reconcile = async (): Promise<void> => {
+          try {
+            await discoverProjects();
+          } catch (error) {
+            console.warn('[ProjectManager] reconciliation after the write stop lifted failed', error);
+          }
+        };
+        // async-iife: bootstrap -- a skew listener cannot await; the pass owns its failures.
+        void reconcile();
+      }),
+    [discoverProjects, invalidateProjectsList],
   );
 
   const settleRecovery = useCallback(

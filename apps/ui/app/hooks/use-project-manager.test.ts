@@ -374,10 +374,16 @@ vi.mock('#constants/browser.constants.js', () => ({
 }));
 
 let mockBuildSuperseded = false;
+const buildSkewListeners = new Set<() => void>();
 vi.mock('#filesystem/build-skew.js', () => ({
   buildId: 1,
   isBuildSuperseded: () => mockBuildSuperseded,
-  subscribeBuildSkew: () => () => undefined,
+  subscribeBuildSkew: (listener: () => void) => {
+    buildSkewListeners.add(listener);
+    return () => {
+      buildSkewListeners.delete(listener);
+    };
+  },
 }));
 
 const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
@@ -4064,6 +4070,28 @@ describe('useProjectManager.createProject', () => {
 
     expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
+  it('runs the reconciliation it skipped once a provisional write stop lifts', async () => {
+    mockBuildSuperseded = true;
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+
+    mockBuildSuperseded = false;
+    act(() => {
+      for (const listener of buildSkewListeners) {
+        listener();
+      }
+    });
+
+    await waitFor(() => {
+      expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith('proj_ccccccccccccccccccccc');
+    });
   });
 
   it('reconciles and garbage-collects normally when this build is current', async () => {

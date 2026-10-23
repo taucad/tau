@@ -150,7 +150,7 @@ impersonation results are recorded as `info` only.
 | `fallback.s2Pty.inContainer` (S2 PTY) | `s2-bash-pty.mts` drives Git for Windows Bash in a ConPTY inside the token (tty, resize, Ctrl-C, job control, UTF-8) |
 
 S2 uses Node + node-pty as the PTY master because PowerShell stalls at startup as the sandbox user
-inside the token, while cmd.exe and native binaries start. The S2 receipt is
+inside the token while cmd.exe starts (native binaries also stall; see the status below). The S2 receipt is
 `fallback-s2-pty.receipt.json`, attributed to the sandbox user by both the driver and the Bash inside
 the pty; the UTF-8 bytes Bash wrote are re-read by the orchestrator. `WRITE_RESTRICTED` gates writes
 only, so read isolation rests on distinct sandbox users plus deny-read ACEs.

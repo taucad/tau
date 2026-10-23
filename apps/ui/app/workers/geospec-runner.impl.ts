@@ -16,6 +16,8 @@
  * @module
  */
 
+import { rpcClientErrorCode } from '@taucad/chat';
+import { geoSpecHostLimitProblem } from '@taucad/chat/constants';
 import { createGeoSpecConfigSession, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecKernelEvidence, GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
 import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
@@ -319,8 +321,10 @@ type WorkerSession = {
   runtimeClient: AppRuntimeClient;
   runner: GeoSpecRunner;
   closeEngine?: (() => void) | undefined;
-  /** The project's `geospec.config.*` for one run: read through the spec VM each run, reported once per session. */
+  /** The project's `geospec.config.*` for one run: read through the spec VM each run; an unchanged not-applied outcome is reported once. */
   readConfig: () => Promise<GeoSpecTestModelConfig>;
+  /** Host policy: the longest effective `testTimeout`; a longer one is refused, never clamped. Milliseconds. */
+  maxRunBudget?: number | undefined;
 };
 
 type QueuedRun = {
@@ -459,6 +463,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runner,
       closeEngine,
       readConfig,
+      maxRunBudget: request.maxRunBudget,
     };
     session = activeSession;
     workerScope.postMessage({ type: 'initialized', requestId: request.requestId, sessionId: request.sessionId });
@@ -523,6 +528,22 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
   try {
     const config = await activeSession.readConfig();
     const testTimeout = request.args.testTimeout ?? config.defaults?.testTimeout;
+    // The client refuses an input over the host's maximum; a project config's default is only known here.
+    const overLimit =
+      activeSession.maxRunBudget === undefined
+        ? undefined
+        : geoSpecHostLimitProblem(
+            { testTimeout },
+            { maxRunBudget: activeSession.maxRunBudget, maxWorkUnitLimit: Number.POSITIVE_INFINITY },
+          );
+    if (overLimit !== undefined) {
+      workerScope.postMessage({
+        type: 'result',
+        requestId: request.requestId,
+        result: { success: false, errorCode: rpcClientErrorCode.validationError, message: overLimit },
+      });
+      return;
+    }
     const output = await runGeoSpecTests({
       discovery: createDiscoveryFileSystem(activeSession.fileSystem),
       runner: activeSession.runner,

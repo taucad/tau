@@ -456,7 +456,7 @@ export const testModelConfigSchema = z
       .strict(),
   ])
   .describe(
-    "The project's geospec.config.* this run read. applied: its include, exclude, testNamePattern, testTimeout and bail were defaults, each replaced by the same input field when given. not-applied: the run used none of it (reported once per session); unresolved-import means it imports a package only a native run (geospec run, tau test) provides.",
+    "The project's geospec.config.* this run read. applied: its include, exclude, testNamePattern and testTimeout were defaults, each replaced by the same input field when given, and its bail: true stopped the run at the first failure (no input field sets bail). not-applied: the run used none of it; the same file, reason and message are reported once, and again after any of them changes or the config was absent or applied; unresolved-import means it imports a package only a native run (geospec run, tau test) provides.",
   );
 /**
  * Inferred project-config report of one `test_model` call.

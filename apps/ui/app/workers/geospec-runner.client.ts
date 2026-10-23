@@ -400,6 +400,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         runtimeConfig: options.runtimeConfig,
         fileSystemPort,
         maxWorkUnitLimit: hostLimits.maxWorkUnitLimit,
+        maxRunBudget: hostLimits.maxRunBudget,
       };
       worker.postMessage(request, [fileSystemPort]);
     } catch (error) {

@@ -257,6 +257,7 @@ describe('createGeoSpecWorkerRpcClient', () => {
     const messages = geoSpecWorker.postMessage.mock.calls.map(([message]) => message);
     expect(messages.find((message) => message.type === 'initialize')).toMatchObject({
       maxWorkUnitLimit: 4_000_000_000,
+      maxRunBudget: 3_600_000,
     });
     expect(messages.find((message) => message.type === 'run')).toMatchObject({
       args: { workUnitLimit: 2_000_000_000 },

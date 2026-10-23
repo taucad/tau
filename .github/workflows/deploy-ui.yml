@@ -183,6 +183,9 @@ jobs:
           TAU_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           TAU_POSTHOG_CLI_TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
           TAU_POSTHOG_CLI_ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
+          # The live deploy whose recent `/assets/*` this one keeps serving, so pages
+          # loaded before it go live keep loading their chunks (`retain-previous-assets.mts`).
+          TAU_RETAIN_ASSETS_FROM: ${{ steps.site.outputs.url }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

@@ -77,7 +77,7 @@ jobs:
             suites=$(jq -c --arg target "$1" --argjson projects "$2" \
               '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
           }
-          for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated; do
+          for target in test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated test:e2e:deploy-skew; do
             add_suites "$target" "$(pnpm nx show projects --with-target "$target" --json | tail -1)"
           done
           webgpu=$(pnpm nx show projects --with-target test:e2e:webgpu --json | tail -1)
@@ -163,16 +163,17 @@ jobs:
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
-      # `test:e2e:non-isolated` runs only PicoVoxel specs, which open no chat, so it
-      # never captures a log for the empty-capture rule to find.
+      # `test:e2e:non-isolated` runs only PicoVoxel specs and `test:e2e:deploy-skew`
+      # only the TAU-UI-6 deploy check; neither opens a chat, so neither captures a log
+      # for the empty-capture rule to find.
       - name: Setup formal toolchains
-        if: always() && matrix.suite.target != 'test:e2e:non-isolated'
+        if: always() && matrix.suite.target != 'test:e2e:non-isolated' && matrix.suite.target != 'test:e2e:deploy-skew'
         uses: ./.github/actions/setup-formal
         with:
           tools: tlc
 
       - name: Validate captured chat logs
-        if: always() && matrix.suite.target != 'test:e2e:non-isolated'
+        if: always() && matrix.suite.target != 'test:e2e:non-isolated' && matrix.suite.target != 'test:e2e:deploy-skew'
         env:
           PROJECT: ${{ matrix.suite.project }}
         run: pnpm nx run-many -t formal:logs --projects "$PROJECT"

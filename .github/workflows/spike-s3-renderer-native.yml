@@ -13,8 +13,13 @@
 # drop and leaves the row red; nothing is skipped. Admin-run fallbacks are labelled `-admin` in their host label.
 name: Spike S3 (terminal renderer, native rows)
 
+# Runs only on dispatch. The pull_request trigger exists so GitHub registers the workflow from this branch (a
+# workflow absent from the default branch cannot be dispatched until it has run once); every job is skipped there.
 on:
   workflow_dispatch: {}
+  pull_request:
+    paths:
+      - '.github/workflows/spike-s3-renderer-native.yml'
 
 permissions:
   contents: read
@@ -32,6 +37,7 @@ env:
 
 jobs:
   macos:
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -123,6 +129,7 @@ jobs:
           retention-days: 14
 
   windows-arm:
+    if: github.event_name == 'workflow_dispatch'
     name: S3 native (WIN-ARM, windows-11-arm, non-admin)
     runs-on: windows-11-arm
     timeout-minutes: 240
@@ -224,6 +231,7 @@ jobs:
           retention-days: 14
 
   linux-vm:
+    if: github.event_name == 'workflow_dispatch'
     name: S3 native (LNX-VM, stock Ubuntu 24.04 under KVM)
     runs-on: ubuntu-24.04
     timeout-minutes: 200

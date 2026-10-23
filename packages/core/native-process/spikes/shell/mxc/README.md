@@ -29,11 +29,11 @@ one `shell` tool whose description names the host language + major version; gram
 
 ### Hosted-collectable D14 receipts (windows-2025)
 
-| receipt          | file                          | what it proves                                                                    |
-| ---------------- | ----------------------------- | --------------------------------------------------------------------------------- |
-| ShellIdentity    | `shell-identity.receipt.json` | both resolution branches: pwsh 7 present, and forced 5.1 (`-HidePwsh7`)           |
-| T02-pwsh grammar | `grammar.receipt.json`        | here-string, pipeline, subexpression, exit code (gated); `&&`/`                   |     | ` + Unicode characterized |
-| PTY              | `pty.receipt.json`            | interactive PowerShell over a real ConPTY terminal (marker echoed back, external) |
+| receipt          | file                          | what it proves                                                                               |
+| ---------------- | ----------------------------- | -------------------------------------------------------------------------------------------- |
+| ShellIdentity    | `shell-identity.receipt.json` | both resolution branches: pwsh 7 present, and forced 5.1 (`-HidePwsh7`)                      |
+| T02-pwsh grammar | `grammar.receipt.json`        | here-string, pipeline, subexpression, exit code (gated); `&&`/`\|\|` + Unicode characterized |
+| PTY              | `pty.receipt.json`            | interactive PowerShell over a real ConPTY terminal (marker echoed back, external)            |
 
 The isolation receipt's new **reaping** case proves a detached native `.exe` child, a PowerShell
 `Start-Job`, and a `Start-Process` writer are ALL reaped when the foreground PowerShell exits. The

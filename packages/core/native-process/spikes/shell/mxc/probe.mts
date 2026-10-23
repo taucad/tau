@@ -216,9 +216,7 @@ const main = async (): Promise<void> => {
         false,
       ),
     );
-    checks.push(
-      check('mxc.isolationSession.available', 'isolationSessionAvailable', 'SDK unavailable', false),
-    );
+    checks.push(check('mxc.isolationSession.available', 'isolationSessionAvailable', 'SDK unavailable', false));
     checks.push(
       check('mxc.psec.createClose', 'a real processcontainer launched a child and closed', 'SDK unavailable', false),
     );

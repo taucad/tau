@@ -1,16 +1,21 @@
 /**
- * The page's Parameters pane source: the shared pane over the server's `get_parameters` and
- * `apply_parameter_operation`. An edit is a checked write of the entry's sidecar in the project, so Tau shows the same
- * value; once it commits, the page reads the record again and shows the model again, rendered with it.
+ * The page's Parameters pane source: the shared parameter controller (`@taucad/workbench-panes`) over the server's
+ * `get_parameters`, `apply_parameter_operation` and `app_preview_parameters`. An edit is a checked write of the entry's
+ * sidecar in the project, so Tau shows the same value; the server's watched document renders the write, and the newer
+ * model reaches the page through `app_sync` with the build status. A drag renders its values on that same document as a
+ * transient preview and writes nothing until release (PAR-2).
  *
  * The page cannot run a parameter-set actor: the actor reads and writes the sidecar's bytes itself, and the server
- * offers the planned operation, not the file. So each operation here is one `propose` against the manifest revision the
- * last read returned, and operations on one entry run one after another.
+ * offers the planned operation, not the file. So each operation is one `propose` against the manifest revision the last
+ * read returned, and the controller runs one entry's operations one after another.
  */
-import { useSyncExternalStore } from 'react';
 import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
 import type { FileParameterEntry } from '@taucad/types';
-import type { ParametersEntryState, ParametersSource } from '@taucad/workbench-panes/parameters/parameters-source';
+import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
+import { createParameterController } from '@taucad/workbench-panes/parameters/parameter-controller';
+import type { ParameterController, ParameterTransport } from '@taucad/workbench-panes/parameters/parameter-controller';
+import type { ParametersSource } from '@taucad/workbench-panes/parameters/parameters-source';
+import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge } from '#app/host-bridge.js';
 
 /** What `get_parameters` answers with `detail: 'full'`, as far as the page reads it. */
@@ -21,60 +26,30 @@ type ParametersAnswer = Readonly<{
   diagnostics?: ReadonlyArray<Readonly<{ code?: string; message: string }>>;
 }>;
 
-/** One `apply_parameter_operation` operation, as the tool's schema names it. */
-type ParameterOperation =
-  | Readonly<{ kind: 'native-value'; group: string; pointer: string; value: unknown }>
-  | Readonly<{ kind: 'replace-group-values'; group: string; values: Readonly<Record<string, unknown>> }>
-  | Readonly<{ kind: 'select-group'; group: string }>
-  | Readonly<{ kind: 'create-group'; group: string; values?: Readonly<Record<string, unknown>> }>
-  | Readonly<{ kind: 'rename-group'; group: string; nextGroup: string }>
-  | Readonly<{ kind: 'delete-group'; group: string }>;
-
-type EntryRecord = {
-  state: ParametersEntryState;
-  /** The manifest revision the last read returned; every proposal names it. */
-  revision: string | undefined;
-  /** Bumped by each read, so only the newest read publishes. */
-  generation: number;
-  isRequested: boolean;
-  /** The entry's operations, in order. */
-  queue: Promise<unknown>;
-  listeners: Set<() => void>;
-  subscribe: (listener: () => void) => () => void;
-};
-
-const unknownState: ParametersEntryState = { manifest: undefined, entry: undefined, failure: undefined };
-
 /**
  * The Parameters source the page hands the shared pane, and how the page reads the entries again.
  *
  * @public
  */
 export type PageParametersSource = ParametersSource &
-  Readonly<{
-    /** Read one entry, or every entry read so far, again: the shown model changed outside the pane. */
-    refresh: (entryPath?: string) => void;
-    /** What the pane shows for an entry. */
-    snapshot: (entryPath: string) => ParametersEntryState;
-    /**
-     * Observe an entry; the first observer reads it.
-     *
-     * @returns Unsubscribes.
-     */
-    subscribe: (entryPath: string, listener: () => void) => () => void;
-  }>;
+  Pick<ParameterController, 'refresh' | 'snapshot' | 'subscribe' | 'dispose'>;
 
 /**
- * What the page does around the pane's operations.
+ * What the page sets around the pane's operations.
  *
  * @public
  */
 export type ParametersSourceOptions = Readonly<{
+  /**
+   * The shown model a drag previews on: a render of the watched source. Absent, or answering `undefined`, a dragged row
+   * previews its value alone and the model renders on release.
+   */
+  modelId?: () => string | undefined;
   /** Show an operation's failure. Absent, the pane shows it above its sections. */
   onError?: (message: string) => void;
+  /** Minimum gap between two previews, in milliseconds. */
+  previewInterval?: number;
 }>;
-
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 const outcomeOf = (answer: unknown, requestId: string): ParameterSetOutcome => {
   const outcome = (answer as { outcome?: { status?: unknown } } | undefined)?.outcome;
@@ -84,218 +59,87 @@ const outcomeOf = (answer: unknown, requestId: string): ParameterSetOutcome => {
   return { status: 'rejected', requestId, code: 'NO_OUTCOME', message: 'The edit was not written (no answer).' };
 };
 
-/**
- * Wait for an operation without rethrowing: its caller sees the failure, the next operation only waits.
- *
- * @param operation - The operation to wait for.
- */
-const settled = async (operation: Promise<unknown>): Promise<void> => {
-  try {
-    await operation;
-  } catch {
-    // The caller of the operation handles it.
-  }
-};
+/** Failures that mean this model, or this server, cannot preview: the drag ends at its released value. */
+const unpreviewable = new Set(['NOT_LIVE', 'UNKNOWN_MODEL', 'UNKNOWN_TOOL', 'NOT_SUPPORTED', 'PREVIEW_UNSUPPORTED']);
 
-const committedOrThrow = (outcome: ParameterSetOutcome): void => {
-  if (outcome.status !== 'committed') {
-    throw new Error('message' in outcome ? outcome.message : `The edit was not written (${outcome.status}).`);
-  }
-};
+/**
+ * The server's parameter tools as the controller's transport.
+ *
+ * @param bridge - The page's host bridge.
+ * @param modelId - The shown model a drag previews on.
+ * @returns The transport.
+ */
+const transportOf = (bridge: HostBridge, modelId: (() => string | undefined) | undefined): ParameterTransport => ({
+  read: async ({ entryPath }) => {
+    const answer = (await bridge.callTool('get_parameters', { targetFile: entryPath, detail: 'full' })) as
+      | ParametersAnswer
+      | undefined;
+    if (answer?.status === 'resolved' && answer.manifest !== undefined && answer.current !== undefined) {
+      return { manifest: answer.manifest, current: answer.current };
+    }
+    const diagnostic = answer?.diagnostics?.[0];
+    return {
+      failure: {
+        code: diagnostic?.code ?? 'RESOLUTION_FAILED',
+        message: diagnostic?.message ?? 'This model declares no parameters.',
+      },
+    };
+  },
+  propose: async ({ entryPath, request }) =>
+    outcomeOf(
+      await bridge.callTool('apply_parameter_operation', {
+        action: 'propose',
+        targetFile: entryPath,
+        requestId: request.requestId,
+        /* The tool checks the manifest revision; a field's base is the app's own conflict check. */
+        expected: { manifestRevision: request.expected.manifestRevision },
+        pressure: request.pressure,
+        operation: request.operation,
+      }),
+      request.requestId,
+    ),
+  ...(modelId === undefined
+    ? {}
+    : {
+        preview: async ({ parameters }) => {
+          const shown = modelId();
+          if (shown === undefined) {
+            return;
+          }
+          try {
+            await bridge.callTool(tauViewerToolName.appPreviewParameters, {
+              modelId: shown,
+              ...(parameters === undefined ? {} : { parameters }),
+            });
+          } catch (error) {
+            /* A drawn file or an older server previews nothing: the row shows the value, the model renders on release. */
+            if (!(error instanceof ToolCallError && error.code !== undefined && unpreviewable.has(error.code))) {
+              throw error;
+            }
+          }
+        },
+      }),
+});
 
 /**
  * Build the page's Parameters source over the server's parameter tools.
  *
  * @param bridge - The page's host bridge.
- * @param options - What to do once an operation is written, and where failures go.
- * @returns The source, plus `refresh` for when the shown model changes.
+ * @param options - The shown model drags preview on, and where failures go.
+ * @returns The source, plus `refresh` for when the shown source changes.
  * @public
  */
 export const createParametersSource = (
   bridge: HostBridge,
   options: ParametersSourceOptions = {},
 ): PageParametersSource => {
-  const records = new Map<string, EntryRecord>();
-  let sequence = 0;
-
-  const publish = (record: EntryRecord, state: ParametersEntryState): void => {
-    record.state = state;
-    for (const listener of record.listeners) {
-      listener();
-    }
-  };
-
-  const read = async (entryPath: string): Promise<void> => {
-    const record = recordOf(entryPath);
-    record.isRequested = true;
-    const generation = ++record.generation;
-    let state: ParametersEntryState;
-    let revision: string | undefined;
-    try {
-      const answer = (await bridge.callTool('get_parameters', { targetFile: entryPath, detail: 'full' })) as
-        | ParametersAnswer
-        | undefined;
-      if (answer?.status === 'resolved' && answer.manifest !== undefined && answer.current !== undefined) {
-        revision = answer.current.identity.manifestRevision;
-        const held = record.state.manifest;
-        // An equal manifest keeps its identity, so the form does not rebuild on every read.
-        const manifest = held !== undefined && held.revision === answer.manifest.revision ? held : answer.manifest;
-        state = { manifest, entry: answer.current.entry, failure: undefined };
-      } else {
-        const diagnostic = answer?.diagnostics?.[0];
-        state = {
-          manifest: undefined,
-          entry: undefined,
-          failure: {
-            code: diagnostic?.code ?? 'RESOLUTION_FAILED',
-            message: diagnostic?.message ?? 'This model declares no parameters.',
-          },
-        };
-      }
-    } catch (error) {
-      state = {
-        manifest: undefined,
-        entry: undefined,
-        failure: { code: 'RESOLUTION_FAILED', message: errorText(error) },
-      };
-    }
-    if (generation === record.generation) {
-      record.revision = revision;
-      publish(record, state);
-    }
-  };
-
-  function recordOf(entryPath: string): EntryRecord {
-    const existing = records.get(entryPath);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const record: EntryRecord = {
-      state: unknownState,
-      revision: undefined,
-      generation: 0,
-      isRequested: false,
-      queue: Promise.resolve(),
-      listeners: new Set(),
-      subscribe: (listener) => {
-        record.listeners.add(listener);
-        if (!record.isRequested) {
-          // async-iife: bootstrap -- the read publishes to the entry's observers.
-          void read(entryPath);
-        }
-        return () => {
-          record.listeners.delete(listener);
-        };
-      },
-    };
-    records.set(entryPath, record);
-    return record;
-  }
-
-  /**
-   * Propose one final operation after the entry's earlier ones, then read the entry again.
-   *
-   * @param entryPath - The entry whose sidecar the operation writes.
-   * @param operation - What to write, as the tool's schema names it.
-   * @returns The server's outcome, after the entry has been read again.
-   */
-  const propose = async (entryPath: string, operation: ParameterOperation): Promise<ParameterSetOutcome> => {
-    const record = recordOf(entryPath);
-    const run = async (): Promise<ParameterSetOutcome> => {
-      sequence += 1;
-      const requestId = `page-${String(Date.now())}-${String(sequence)}`;
-      if (record.revision === undefined) {
-        await read(entryPath);
-      }
-      const { revision } = record;
-      if (revision === undefined) {
-        return {
-          status: 'rejected',
-          requestId,
-          code: record.state.failure?.code ?? 'RESOLUTION_FAILED',
-          message: record.state.failure?.message ?? 'Parameters are not loaded.',
-        };
-      }
-      const outcome = outcomeOf(
-        await bridge.callTool('apply_parameter_operation', {
-          action: 'propose',
-          targetFile: entryPath,
-          requestId,
-          expected: { manifestRevision: revision },
-          pressure: 'final',
-          operation,
-        }),
-        requestId,
-      );
-      /* Committed or not, the record now holds what the server holds: a refusal shows the authority value again. A
-       * committed write is a sidecar change the server's watched document renders, so the page shows it unasked. */
-      await read(entryPath);
-      return outcome;
-    };
-    const previous = record.queue;
-    const next = (async () => {
-      await previous;
-      return run();
-    })();
-    record.queue = settled(next);
-    return next;
-  };
-
-  const write = async (entryPath: string, operation: ParameterOperation): Promise<void> => {
-    committedOrThrow(await propose(entryPath, operation));
-  };
-
-  return {
-    snapshot: (entryPath) => recordOf(entryPath).state,
-    subscribe: (entryPath, listener) => recordOf(entryPath).subscribe(listener),
-    refresh: (entryPath) => {
-      for (const [path, record] of records) {
-        if ((entryPath === undefined || path === entryPath) && record.isRequested) {
-          // async-iife: bootstrap -- the read publishes to the entry's observers.
-          void read(path);
-        }
-      }
-    },
-    useEntry: (entryPath) => {
-      const record = recordOf(entryPath);
-      return useSyncExternalStore(
-        record.subscribe,
-        () => record.state,
-        () => record.state,
-      );
-    },
-    target: (entryPath) => ({ authority: 'tau-mcp', root: '', entry: entryPath }),
-    commitValue: async (entryPath, _manifest, field) => {
-      if (field.pressure === 'transient') {
-        // Each proposal is a sidecar write and a render: a drag writes its released value only.
-        sequence += 1;
-        return { status: 'cancelled-before-apply', requestId: `page-transient-${String(sequence)}` };
-      }
-      return propose(entryPath, {
-        kind: 'native-value',
-        group: field.group,
-        pointer: field.pointer,
-        value: field.value,
-      });
-    },
-    replaceValues: async (entryPath, _manifest, values) =>
-      write(entryPath, {
-        kind: 'replace-group-values',
-        group: recordOf(entryPath).state.entry?.activeGroup ?? 'default',
-        values,
-      }),
-    retry: (entryPath) => {
-      // async-iife: bootstrap -- the read publishes to the entry's observers.
-      void read(entryPath);
-    },
+  const controller = createParameterController({
+    transport: transportOf(bridge, options.modelId),
+    ...(options.previewInterval === undefined ? {} : { previewInterval: options.previewInterval }),
     ...(options.onError === undefined ? {} : { reportError: options.onError }),
-    groups: {
-      select: async (entryPath, _manifest, group) => write(entryPath, { kind: 'select-group', group }),
-      create: async (entryPath, _manifest, { group, values }) =>
-        write(entryPath, { kind: 'create-group', group, ...(values === undefined ? {} : { values }) }),
-      rename: async (entryPath, _manifest, { group, nextGroup }) =>
-        write(entryPath, { kind: 'rename-group', group, nextGroup }),
-      delete: async (entryPath, _manifest, group) => write(entryPath, { kind: 'delete-group', group }),
-    },
+  });
+  return {
+    ...controller,
+    target: (entryPath) => ({ authority: 'tau-mcp', root: '', entry: entryPath }),
   };
 };

@@ -3,7 +3,7 @@
  * Share and Files panes from `@taucad/workbench-panes`, in a lane beside the canvas, each fed by a page source over the
  * host bridge.
  */
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { TauViewerEntryStatus, TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
@@ -96,9 +96,22 @@ export function WorkbenchLane({
     (): readonly WorkbenchUnit[] => (entryPath === undefined ? [] : [{ entryPath, graphicsRef }]),
     [entryPath, graphicsRef],
   );
+  /* A drag previews on the source's newest render; the source keeps one parameters controller per bridge. */
+  const modelIdRef = useRef<string | undefined>(undefined);
+  const modelId = model?.id;
+  useEffect(() => {
+    modelIdRef.current = modelId;
+  }, [modelId]);
   /* One parameters source per bridge: it keeps each entry's last read, so a re-render does not read again. A written
-   * edit is a sidecar change the server's watched document renders, and the newer model reaches the page unasked. */
-  const parameters = useMemo(() => createParametersSource(bridge), [bridge]);
+   * edit is a sidecar change the server's watched document renders, and the newer model reaches the page unasked;
+   * the pane's own alert shows a refused operation. */
+  const parameters = useMemo(() => createParametersSource(bridge, { modelId: () => modelIdRef.current }), [bridge]);
+  useEffect(
+    () => () => {
+      parameters.dispose();
+    },
+    [parameters],
+  );
   /* One kinematics source per bridge, reading the newest status the page holds. */
   const kinematics = useMemo(() => createKinematicsSource(), []);
   useEffect(() => {
@@ -107,13 +120,14 @@ export function WorkbenchLane({
   useEffect(() => {
     files.setShownFile(entryPath);
   }, [entryPath, files]);
-  /* A model shown for another reason (the agent changed the source) may carry other parameters. */
-  const modelSha = model?.sha256;
+  /* A render of changed files (the agent's edit, or a parameter write) may carry other parameters; a drag's previews
+   * render the same files, so they read nothing again. A drawn file has no revision: its bytes name it. */
+  const revisionKey = model === undefined ? undefined : JSON.stringify(model.sourceRevision?.files ?? model.sha256);
   useEffect(() => {
-    if (modelSha !== undefined && entryPath !== undefined) {
+    if (revisionKey !== undefined && entryPath !== undefined) {
       parameters.refresh(entryPath);
     }
-  }, [entryPath, modelSha, parameters]);
+  }, [entryPath, revisionKey, parameters]);
   const host = useMemo(
     (): WorkbenchPanesHost => ({
       useUnits: () => units,

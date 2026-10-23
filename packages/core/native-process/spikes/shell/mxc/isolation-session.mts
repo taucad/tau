@@ -239,13 +239,23 @@ const main = async (): Promise<void> => {
     sidWaitMs: number;
   } = { sidWaitMs: 0 };
   try {
+    // The runs settle while the host is still in the handoff loop below; a rejection (e.g. backend
+    // unavailable) must end the loop and surface as a typed failure, not an unhandled rejection.
+    let runsSettled = false;
     const running = Promise.all([
       sdk.run(isoSessionRequest(grantFor(a, b), cmdForCmdExe(cmd(a, b)), denyPaths)),
       sdk.run(isoSessionRequest(grantFor(b, a), cmdForCmdExe(cmd(b, a)), denyPaths)),
-    ]);
+    ]).finally(() => {
+      runsSettled = true;
+    });
+    running.catch(() => undefined);
     // Handoff: wait for both agent SIDs, grant each ONLY on its own root, verify, then signal.
     const started = Date.now();
-    while (Date.now() - started < 90_000 && !(readIfPresent(a.sidFile)?.trim() && readIfPresent(b.sidFile)?.trim())) {
+    while (
+      !runsSettled &&
+      Date.now() - started < 90_000 &&
+      !(readIfPresent(a.sidFile)?.trim() && readIfPresent(b.sidFile)?.trim())
+    ) {
       await sleep(500);
     }
     hostDacls.sidWaitMs = Date.now() - started;

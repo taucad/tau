@@ -56,14 +56,20 @@ const readIfPresent = (f: string): string | undefined => (existsSync(f) ? readFi
 
 type Sess = { id: string; root: string; secret: string; secretFile: string; sidFile: string; exfil: string };
 
+/**
+ * System tools run from their fixed System32 path, never a PATH lookup: on a hosted runner Git-bash's
+ * GNU coreutils `whoami` (which rejects `/user`) can shadow the Windows one.
+ */
+const system32 = (exe: string): string => join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', exe);
+
 const icacls = (args: string[]): { code: number | null; out: string } => {
-  const r = spawnSync('icacls', args, { encoding: 'utf8', windowsHide: true });
+  const r = spawnSync(system32('icacls.exe'), args, { encoding: 'utf8', windowsHide: true });
   return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}`.trim().slice(0, 600) };
 };
 
 /** The host account SID (the orchestrator running this harness), from `whoami /user /fo csv /nh`. */
 const hostSid = (): string | undefined => {
-  const r = spawnSync('whoami', ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
+  const r = spawnSync(system32('whoami.exe'), ['/user', '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true });
   return /"(S-1-[\d-]+)"/.exec(r.stdout ?? '')?.[1];
 };
 

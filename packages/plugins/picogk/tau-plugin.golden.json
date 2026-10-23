@@ -1,7 +1,7 @@
 {
   "darwin-arm64": {
-    "closureIntegrity": "sha256-LouyfCFfpMjAcawfWBMRzdbhBTIADDH+rKNBR3FFERY=",
-    "treeIntegrity": "sha256-fh1Vu9Myzpqp/cOJkWmhu/NUoQbWmZvk6ivNv8zZlrs=",
-    "byteLength": 153740791
+    "closureIntegrity": "sha256-rK/0atavPXQH3iAOfIcnG5L15ArSwL+xK4AUK0zWsLw=",
+    "treeIntegrity": "sha256-gsa864Y8RqPlFM/UvR2WFbDiT5WoD/BkIDX1icAoZLc=",
+    "fileCount": 230
   }
 }

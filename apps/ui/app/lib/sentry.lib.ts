@@ -1,5 +1,6 @@
 import * as Sentry from '@sentry/react';
-import type { Breadcrumb, ErrorEvent } from '@sentry/react';
+import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
+import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 
@@ -29,6 +30,35 @@ export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON round trip of the same event.
   return JSON.parse(redactInvitationTokens(JSON.stringify(event))) as ErrorEvent;
 };
+
+/** The mechanism the SDK's global handlers stamp on an unhandled promise rejection. */
+const unhandledRejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
+
+/**
+ * Whether an event reports a cancellation nobody awaited: an unhandled promise rejection whose reason is an
+ * `AbortError`. Aborting on unmount, navigation or supersession is expected control flow, not an error (TAU-UI-4).
+ * Only the rejected value decides, never the event's text, so an error that merely mentions an abort still reports.
+ *
+ * @param event - The event the SDK is about to send.
+ * @param hint - The SDK's hint, carrying the rejected value as `originalException`.
+ * @returns `true` when the event should be dropped.
+ * @public
+ */
+export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | undefined): boolean =>
+  isAbortError(hint?.originalException) &&
+  (event.exception?.values?.some((value) => value.mechanism?.type === unhandledRejectionMechanism) ?? false);
+
+/**
+ * The `beforeSend` hook: drop an unhandled abort rejection, scrub everything else.
+ *
+ * @param event - The event the SDK is about to send.
+ * @param hint - The SDK's hint for the event.
+ * @returns The scrubbed event, or `null` to drop it.
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
+export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
+  isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
 
 /**
  * Longest text a console breadcrumb keeps, per logged argument and for its message (D-UI-31).
@@ -115,7 +145,7 @@ export const initSentry = (): void => {
     environment: ENV.SENTRY_ENVIRONMENT ?? ENV.NODE_ENV,
     sendDefaultPii: false,
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
-    beforeSend: scrubSentryEvent,
+    beforeSend: beforeSendSentryEvent,
     beforeBreadcrumb: scrubSentryBreadcrumb,
   });
 };

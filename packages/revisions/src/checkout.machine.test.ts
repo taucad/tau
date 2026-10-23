@@ -278,6 +278,33 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
+  it.each([
+    { treeId: nextTreeId, dirty: false },
+    { treeId: 'tree-concurrent-edit', dirty: true },
+  ])('should compare a delayed restore write after minting ($treeId)', async ({ treeId, dirty }) => {
+    const harness = start();
+    const { actor, promises, parent } = harness;
+    promises.settle('captureTree', { output: { treeId: headTreeId } });
+    await flush();
+    actor.send({ type: 'cut', requestId: 'restore-1', trigger: 'restore', restoredFrom: 'rev-old', leaseIds: [] });
+    await mintToCas(harness);
+    // Native watch delivery can lag behind the restore capture without changing its bytes.
+    actor.send({ type: 'changed', paths: ['main.scad', 'tau.json'], generation: 1 });
+    promises.settle('casHead', { output: { status: 'updated', head: 'rev-2' } });
+    await flush();
+    expect(actor.getSnapshot().matches({ dirty: 'comparing' })).toBe(true);
+    promises.settle('captureTree', { output: { treeId } });
+    await flush();
+    expect(selectCheckoutDirty(actor.getSnapshot())).toBe(dirty);
+    expect(parent.events.at(-1)).toMatchObject({
+      type: 'checkoutStatusChanged',
+      status: dirty ? 'dirty' : 'clean',
+      headRevisionId: 'rev-2',
+    });
+    expect(promises.inputsFor('writeRevision')).toHaveLength(1);
+    actor.stop();
+  });
+
   it('lands in dirty when a write arrives during the mint', async () => {
     const harness = start();
     const { actor, promises } = harness;

@@ -7,7 +7,9 @@
 # build did, and publishes the result.
 #
 #   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on a push to `main`
-#     that affects the UI since its last staging deploy.
+#     that affects the UI since its last staging deploy. It publishes to the
+#     site's `staging` alias, which costs no Netlify credits, and
+#     `netlify-staging-router` serves taucad.dev from that alias.
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way the `ci.yml` push run on `main` for
@@ -185,12 +187,31 @@ jobs:
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of
           # credits, which pauses every production deploy (taucad.dev included).
+          # Staging publishes to the `staging` alias, a draft deploy that costs no
+          # Netlify credits; the router step below serves taucad.dev from it.
+          # Production is a production deploy (15 credits).
+          if [ "$ENVIRONMENT" = staging ]; then
+            target=(--alias staging)
+            MESSAGE="$MESSAGE [staging]"
+          else
+            target=(--prod)
+          fi
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
-            --prod --context production \
+            "${target[@]}" --context production \
             --site "$SITE_ID" --message "$MESSAGE" || {
             echo "::error::Netlify refused the deploy. If it said Forbidden: check the TauCAD team's credits (Netlify > Usage & billing; production deploys pause when they run out), then that netlify_auth_token_$ENVIRONMENT on tau-cloud's tau-repo HCP workspace is a live token with access to this site."
             exit 1
           }
+
+      - name: Serve taucad.dev from the staging alias
+        if: inputs.environment == 'staging' && steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/netlify-staging-router
+        with:
+          site-id: ${{ steps.site.outputs.site_id }}
+          site-name: taucad-staging
+          public-host: taucad.dev
+          # The app's own document, not the marketing page the root serves by default.
+          verify-cookie: tau-entry=app
 
       # The plan of the next push to `main` diffs the UI against this commit.
       - name: Record this staging deploy

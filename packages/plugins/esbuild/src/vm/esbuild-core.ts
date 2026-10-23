@@ -1,6 +1,6 @@
 /** Host-selecting esbuild adapter backed by `@taucad/bundler-core`. */
 
-import type { BuildOptions, Loader, Message, OnLoadArgs, OnLoadResult, Plugin } from 'esbuild-wasm';
+import type { BuildOptions, BuildResult, Loader, Message, OnLoadArgs, OnLoadResult, Plugin } from 'esbuild-wasm';
 import type * as NativeEsbuild from 'esbuild';
 import * as wasmEsbuild from 'esbuild-wasm';
 import type * as NodeFsPromises from 'node:fs/promises';
@@ -288,6 +288,20 @@ const commonJsBanner = (modules: ReadonlyMap<string, BuiltinModule>): string => 
   return `${globals}\nconst exports = {};\nconst module = { exports };\n`;
 };
 
+/**
+ * Detach a settled build's output from its result object once the output has been read.
+ *
+ * esbuild-wasm's browser service (through 0.28.2) subscribes every call's `reject` to a promise that settles only
+ * when the service dies, so each call's promise, and the result it was fulfilled with, stays reachable for the life
+ * of the service. Emptying the result leaves that promise holding a shell instead of the output files, source map
+ * and metafile of every edit. Native esbuild does not retain results; there this only drops references early.
+ *
+ * @param result - The build result whose payload the caller has finished reading.
+ */
+const releaseBuildOutput = (result: BuildResult): void => {
+  Object.assign(result, { outputFiles: undefined, metafile: undefined, mangleCache: undefined });
+};
+
 /** Esbuild graph adapter using one compiler-neutral source host. @public */
 export class EsbuildBundler {
   readonly #builtins: Map<string, BuiltinModule>;
@@ -318,7 +332,7 @@ export class EsbuildBundler {
     signal = new AbortController().signal,
   ): Promise<{ detectedModules: string[]; dependencies: string[] }> {
     const session = this.#host.beginSession({ mode: 'detect', signal, entryPath });
-    await getEsbuild().build({
+    const result = await getEsbuild().build({
       entryPoints: [entryPath],
       bundle: true,
       write: false,
@@ -329,6 +343,7 @@ export class EsbuildBundler {
       plugins: [createSourcePlugin(session, true)],
       logLevel: 'silent',
     });
+    releaseBuildOutput(result);
     const observation = session.complete();
     return { detectedModules: observation.detectedModules, dependencies: observation.dependencies };
   }
@@ -352,6 +367,7 @@ export class EsbuildBundler {
       const result = await getEsbuild().build(options);
       const output = result.outputFiles?.find((file) => file.path.endsWith('.js')) ?? result.outputFiles?.[0];
       const sourceMap = result.outputFiles?.find((file) => file.path.endsWith('.js.map'))?.text;
+      releaseBuildOutput(result);
       const observation = session.complete();
       const issues = [
         ...result.warnings.map((warning) => issueFromMessage(warning, 'warning')),

@@ -2,8 +2,8 @@
  * The tab's workbench panes (viewer parity R1, R3): the Tau app's own Parameters, Model, Kinematics, Export and Share
  * panes from `@taucad/workbench-panes`, in a lane beside the canvas, each fed by a page source over the host bridge.
  */
-import { useEffect, useMemo, useRef } from 'react';
-import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
+import { useEffect, useMemo } from 'react';
+import type { TauViewerEntryStatus, TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
 import { ExportPane } from '@taucad/workbench-panes/export/export-pane';
@@ -14,6 +14,8 @@ import { ParametersPane } from '@taucad/workbench-panes/parameters/parameters-pa
 import type { ModelSource } from '@taucad/workbench-panes/model/model-source';
 import type { WorkbenchPaneId } from '@taucad/workbench-panes/registry/pane-registry';
 import { SharePane } from '@taucad/workbench-panes/share/share-pane';
+import type { ExportNotices } from '@taucad/workbench-panes/export/export-source';
+import { Toaster, toast } from '@taucad/ui/components/sonner';
 import type { HostBridge } from '#app/host-bridge.js';
 import type { ComponentReveal } from '#app/sources/component-menu.jsx';
 import { createExportSource } from '#app/sources/export-source.js';
@@ -21,6 +23,16 @@ import { createKinematicsSource } from '#app/sources/kinematics-source.js';
 import { createModelSource } from '#app/sources/model-source.js';
 import { createParametersSource } from '#app/sources/parameters-source.js';
 import { createShareSource } from '#app/sources/share-source.js';
+
+/** The Export pane's outcomes, as the Tau app reports them: in a toast. */
+const exportNotices: ExportNotices = {
+  success: (message) => {
+    toast.success(message);
+  },
+  error: (message) => {
+    toast.error(message);
+  },
+};
 
 /** The panes the page offers; Details, Files and Revisions belong to the agent's host (R3). */
 const offeredPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics', 'export', 'share'];
@@ -32,9 +44,9 @@ type WorkbenchLaneProps = Readonly<{
   bridge: HostBridge;
   /** The shown model; the panes show nothing until there is one. */
   model: TauViewerModel | undefined;
+  /** The server's live state of the shown sources, by project-relative path: their build and issues. */
+  status: Readonly<Record<string, TauViewerEntryStatus>> | undefined;
   graphicsRef: GraphicsRef;
-  /** Show the model again after a parameter edit is written. */
-  onParametersWritten: () => void;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
   reveal: ComponentReveal;
   /** The part menu on the Model pane's rows. */
@@ -54,8 +66,8 @@ type WorkbenchLaneProps = Readonly<{
 export function WorkbenchLane({
   bridge,
   model,
+  status,
   graphicsRef,
-  onParametersWritten,
   reveal,
   componentActions,
   openPaneRequest,
@@ -67,18 +79,14 @@ export function WorkbenchLane({
     (): readonly WorkbenchUnit[] => (entryPath === undefined ? [] : [{ entryPath, graphicsRef }]),
     [entryPath, graphicsRef],
   );
-  /* One parameters source per bridge: it keeps each entry's last read, so a re-render does not read again. */
-  const onWritten = useRef(onParametersWritten);
-  onWritten.current = onParametersWritten;
-  const parameters = useMemo(
-    () =>
-      createParametersSource(bridge, {
-        onCommitted: () => {
-          onWritten.current();
-        },
-      }),
-    [bridge],
-  );
+  /* One parameters source per bridge: it keeps each entry's last read, so a re-render does not read again. A written
+   * edit is a sidecar change the server's watched document renders, and the newer model reaches the page unasked. */
+  const parameters = useMemo(() => createParametersSource(bridge), [bridge]);
+  /* One kinematics source per bridge, reading the newest status the page holds. */
+  const kinematics = useMemo(() => createKinematicsSource(), []);
+  useEffect(() => {
+    kinematics.setStatus(status);
+  }, [kinematics, status]);
   /* A model shown for another reason (the agent changed the source) may carry other parameters. */
   const modelSha = model?.sha256;
   useEffect(() => {
@@ -90,13 +98,18 @@ export function WorkbenchLane({
     (): WorkbenchPanesHost => ({
       useUnits: () => units,
       parameters,
-      kinematics: { ...createKinematicsSource(bridge), subscribeReveal: reveal.subscribeKinematics },
+      kinematics: { useUnitStatus: kinematics.useUnitStatus, subscribeReveal: reveal.subscribeKinematics },
       model: createModelSource(bridge, { componentActions, reveal: reveal.model }),
       ...(model === undefined
         ? {}
-        : { export: createExportSource(bridge, model), share: createShareSource(bridge, model) }),
+        : {
+            export: createExportSource(bridge, model, {
+              notices: exportNotices,
+            }),
+            share: createShareSource(bridge, model),
+          }),
     }),
-    [bridge, componentActions, model, parameters, reveal, units],
+    [bridge, componentActions, kinematics, model, parameters, reveal, units],
   );
 
   return (
@@ -126,6 +139,7 @@ export function WorkbenchLane({
           }
         }}
       />
+      <Toaster />
     </WorkbenchPanesHostProvider>
   );
 }

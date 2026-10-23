@@ -22,8 +22,18 @@ const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().enco
 const snapshot: ShareProjectSnapshot = {
   entryPath: 'main.ts',
   files: [
-    { path: 'main.ts', content: bytes('export default 1;'), sha256: 'main', role: 'entry' },
-    { path: 'tau.json', content: bytes('{}'), sha256: 'manifest', role: 'project-metadata' },
+    {
+      path: 'main.ts',
+      content: bytes('export default 1;'),
+      sha256: 'main',
+      role: 'entry',
+    },
+    {
+      path: 'tau.json',
+      content: bytes('{}'),
+      sha256: 'manifest',
+      role: 'project-metadata',
+    },
   ],
   warnings: [],
 };
@@ -32,7 +42,7 @@ const directAnswer = (encodedArchive: string, warnings: TauViewerDirectShare['wa
   origin: 'https://tau.new',
   entryPath: 'main.ts',
   encodedArchive,
-  closure: 'project-files',
+  closure: 'runtime',
   fileCount: 2,
   uncompressedBytes: 19,
   archiveBytes: 200,
@@ -84,12 +94,22 @@ describe('createShareSource', () => {
     const { encodedArchive } = await shareArtifactCodec.pack(snapshot);
     const bridge = bridgeAnswering(async () => directAnswer(encodedArchive, []));
 
-    const outcome = (await shareWith(bridge, 'direct')) as { readonly url: string };
+    const outcome = (await shareWith(bridge, 'direct')) as {
+      readonly url: string;
+    };
 
-    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, { modelId: 'model-1' });
-    expect(outcome).toEqual({ url: `https://tau.new/s/direct#v=2&zip=${encodedArchive}`, warning: undefined });
+    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, {
+      modelId: 'model-1',
+    });
+    expect(outcome).toEqual({
+      url: `https://tau.new/s/direct#v=2&zip=${encodedArchive}`,
+      warning: undefined,
+    });
     const { pathname, hash } = new URL(outcome.url);
-    const { locator, secrets } = parseShareUrl({ slug: pathname.slice('/s/'.length), fragment: hash });
+    const { locator, secrets } = parseShareUrl({
+      slug: pathname.slice('/s/'.length),
+      fragment: hash,
+    });
     expect(locator).toEqual({ providerId: 'direct' });
     const opened = await shareArtifactCodec.openPlain(secrets['zip']!);
     expect(opened.files.map(({ path }) => path)).toEqual(['main.ts', 'tau.json']);
@@ -112,14 +132,20 @@ describe('createShareSource', () => {
     const { hash } = new URL(outcome.url);
     const { secrets } = parseShareUrl({ slug: 'direct', fragment: hash });
     expect(Object.keys(secrets).sort()).toEqual(['jwe', 'v']);
-    const opened = await shareArtifactCodec.openWithPassword({ compactJwe: secrets['jwe']!, password });
+    const opened = await shareArtifactCodec.openWithPassword({
+      compactJwe: secrets['jwe']!,
+      password,
+    });
     expect(opened.files.map(({ path }) => path)).toEqual(['main.ts', 'tau.json']);
   });
 
   it('should pass on a direct link refusal as the error sentence', async () => {
     await expect(
       shareWith(
-        bridgeAnswering(async () => ({ errorCode: 'SHARE_ARTIFACT_LIMIT', message: 'Too large.' })),
+        bridgeAnswering(async () => ({
+          errorCode: 'SHARE_ARTIFACT_LIMIT',
+          message: 'Too large.',
+        })),
         'direct',
       ),
     ).resolves.toEqual({ error: 'Too large.' });

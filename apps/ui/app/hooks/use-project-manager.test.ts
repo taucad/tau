@@ -1022,6 +1022,58 @@ describe('useProjectManager.createProject', () => {
     expect(mockSyncProjectRoots).toHaveBeenCalledOnce();
   });
 
+  it.each(['commit', 'roots'] as const)('should quarantine a new project while its %s is incomplete', async (phase) => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const hold = async (): Promise<void> => {
+      entered.resolve();
+      await release.promise;
+    };
+    const { result, unmount } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    if (phase === 'commit') {
+      mockCommitPendingProjectDirectory.mockImplementationOnce(async () => {
+        await hold();
+        return { status: 'committed' };
+      });
+    } else {
+      mockSyncProjectRoots.mockImplementationOnce(hold);
+    }
+    let creation: Promise<unknown> = Promise.resolve();
+    try {
+      await act(async () => {
+        creation = result.current.createProject({
+          project: fakeProject,
+          files: {},
+          location: { kind: 'home' },
+        });
+        await entered.promise;
+      });
+      mockListProjectManifests.mockResolvedValue({
+        roots: validProjectDiscovery.roots,
+        entries:
+          phase === 'commit'
+            ? [{ status: 'invalid', locator: fakeLocator, issue: { code: 'manifest-missing' } }]
+            : validProjectDiscovery.entries,
+      });
+      await expect(result.current.getProjectListing()).resolves.toMatchObject({ projects: [], conflicts: [] });
+      mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+      await act(async () => {
+        release.resolve();
+        await creation;
+      });
+      await expect(result.current.getProjectListing()).resolves.toMatchObject({
+        projects: [expect.objectContaining({ projectId: fakeProject.id })],
+        conflicts: [],
+        recoveries: [],
+      });
+    } finally {
+      release.resolve();
+      await creation;
+      unmount();
+    }
+  });
+
   it('replays journaled storage without consulting or changing creation preference', async () => {
     mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });

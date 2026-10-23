@@ -154,6 +154,10 @@ describe('native kernels from the payload store', () => {
       ({ target }) => target.runtime === 'native' && target.os === 'linux' && target.arch === 'x64',
     );
     const expectedBytes = (variant?.payloads ?? []).reduce((sum, payload) => sum + payload.byteLength, 0);
+    const picogkVariant = parsePluginDeployment(picogkNative.manifest, 'picogk').dependencies['runtime']?.find(
+      ({ target }) => target.runtime === 'native' && target.os === 'linux' && target.arch === 'x64',
+    );
+    const picogkBytes = (picogkVariant?.payloads ?? []).reduce((sum, payload) => sum + payload.byteLength, 0);
 
     const build123d = await inspectReportedClosure(requestOf(build123dNative, 'build123d'));
     const picogk = await inspectReportedClosure(requestOf(picogkNative, 'picogk'));
@@ -163,7 +167,11 @@ describe('native kernels from the payload store', () => {
       answer: { status: 'unavailable', reason: 'not-prepared', byteLength: expectedBytes },
       roots: [],
     });
-    expect(picogk).toMatchObject({ answer: { status: 'unavailable', reason: 'unsupported-target' }, roots: [] });
+    expect(picogkBytes).toBeGreaterThan(0);
+    expect(picogk).toEqual({
+      answer: { status: 'unavailable', reason: 'not-prepared', byteLength: picogkBytes },
+      roots: [],
+    });
     expect(fetchSpy).not.toHaveBeenCalled();
     const entries = await readdir(configDirectory, { recursive: true });
     expect(entries.filter((entry) => entry.includes('closures') || entry.includes('blobs'))).toEqual([]);

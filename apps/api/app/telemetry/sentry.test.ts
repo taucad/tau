@@ -1,15 +1,37 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry event and breadcrumb fields are SDK wire names. */
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as Sentry from '@sentry/node';
-import type { ErrorEvent, Scope } from '@sentry/node';
+import type { ErrorEvent } from '@sentry/node';
 import { getSentryRelease, reportReadinessFailure, reportServerError, scrubSentryEvent } from '#telemetry/sentry.js';
 
-vi.mock('@sentry/node', async (importOriginal) => ({
-  ...(await importOriginal<typeof Sentry>()),
-  isInitialized: vi.fn(() => false),
-  withScope: vi.fn(),
-  captureMessage: vi.fn(),
-}));
+/** Events a real Sentry client produced, captured in `beforeSend` and never sent. */
+const sentEvents: ErrorEvent[] = [];
+
+/**
+ * Start a real Sentry client configured as the API configures it (no OpenTelemetry setup, no default
+ * integrations), so scope behaviour is the SDK's own and not a mock of `withScope`.
+ */
+const startSentry = (): void => {
+  Sentry.init({
+    dsn: 'https://public@sentry.invalid/1',
+    skipOpenTelemetrySetup: true,
+    defaultIntegrations: false,
+    beforeSend: (event) => {
+      sentEvents.push(event);
+      return null;
+    },
+  });
+};
+
+const stopSentry = async (): Promise<void> => {
+  await Sentry.close();
+  Sentry.getCurrentScope().setClient(undefined);
+};
+
+const captured = async (): Promise<ErrorEvent[]> => {
+  await Sentry.flush(2000);
+  return sentEvents;
+};
 
 describe('scrubSentryEvent', () => {
   it('keeps the method and path and drops the query, headers, cookies, body and user', () => {
@@ -40,42 +62,77 @@ describe('scrubSentryEvent', () => {
   });
 });
 
-describe('reportServerError', () => {
-  it('is a no-op without SENTRY_DSN', () => {
-    expect(() => {
-      reportServerError(new Error('boom'), 'req_test');
-    }).not.toThrow();
+describe('without SENTRY_DSN', () => {
+  it('should report nothing from either reporter', async () => {
+    expect(Sentry.isInitialized()).toBe(false);
+
+    reportServerError(new Error('boom'), 'req_test');
+    reportReadinessFailure({ indicator: 'database' });
+
+    expect(await captured()).toStrictEqual([]);
   });
 });
 
-describe('reportReadinessFailure', () => {
-  it('is a no-op without SENTRY_DSN', () => {
-    reportReadinessFailure({ indicator: 'database' });
-
-    expect(Sentry.withScope).not.toHaveBeenCalled();
+describe('with a Sentry client', () => {
+  beforeAll(startSentry);
+  afterAll(stopSentry);
+  beforeEach(() => {
+    sentEvents.length = 0;
   });
 
-  it('reports a warning that names the indicator and groups by it', () => {
-    const scope = { setLevel: vi.fn(), setFingerprint: vi.fn(), setTag: vi.fn(), setContext: vi.fn() };
-    vi.mocked(Sentry.isInitialized).mockReturnValueOnce(true);
-    vi.mocked(Sentry.withScope).mockImplementationOnce(((callback: (scope: Scope) => unknown) =>
-      callback(scope as unknown as Scope)) as typeof Sentry.withScope);
-
+  it('should report a readiness failure as a warning that names the indicator and groups by it', async () => {
     reportReadinessFailure({
       indicator: 'database',
       message: 'Response time exceeds 300ms threshold',
       responseTimeMs: 412,
     });
 
-    expect(scope.setLevel).toHaveBeenCalledWith('warning');
-    expect(scope.setFingerprint).toHaveBeenCalledWith(['health-readiness', 'database']);
-    expect(scope.setTag).toHaveBeenCalledWith('health.indicator', 'database');
-    expect(scope.setContext).toHaveBeenCalledWith('readiness', {
-      indicator: 'database',
-      message: 'Response time exceeds 300ms threshold',
-      responseTimeMs: 412,
+    const [event] = await captured();
+    expect(event).toMatchObject({
+      message: 'Readiness check down: database',
+      level: 'warning',
+      fingerprint: ['health-readiness', 'database'],
+      tags: { 'health.indicator': 'database' },
+      contexts: {
+        readiness: {
+          indicator: 'database',
+          message: 'Response time exceeds 300ms threshold',
+          responseTimeMs: 412,
+        },
+      },
     });
-    expect(Sentry.captureMessage).toHaveBeenCalledWith('Readiness check down: database');
+  });
+
+  it('should not carry a readiness warning into the next unrelated exception (TAU-API-6)', async () => {
+    reportReadinessFailure({ indicator: 's3', message: 'Storage readiness timed out after 1500 ms' });
+    reportServerError(new Error('GIT_LEASE_OWNER_BUSY'));
+
+    const [warning, exception] = await captured();
+    expect(warning?.tags).toStrictEqual({ 'health.indicator': 's3' });
+    expect(exception?.exception?.values?.[0]?.value).toBe('GIT_LEASE_OWNER_BUSY');
+    expect(exception?.level).toBe('error');
+    expect(exception?.fingerprint).toBeUndefined();
+    expect(exception?.tags ?? {}).not.toHaveProperty('health.indicator');
+    expect(exception?.contexts ?? {}).not.toHaveProperty('readiness');
+  });
+
+  it('should tag a server error with its request id and not carry it into the next error', async () => {
+    reportServerError(new Error('first'), 'req_first');
+    reportServerError(new Error('second'));
+
+    const [first, second] = await captured();
+    expect(first?.tags).toStrictEqual({ request_id: 'req_first' });
+    expect(second?.tags ?? {}).not.toHaveProperty('request_id');
+  });
+
+  it('should not leave readiness fields on the current scope for a later direct capture', async () => {
+    reportReadinessFailure({ indicator: 'redis' });
+    Sentry.captureMessage('unrelated');
+
+    const [, unrelated] = await captured();
+    expect(unrelated?.level).toBe('info');
+    expect(unrelated?.tags ?? {}).not.toHaveProperty('health.indicator');
+    expect(unrelated?.contexts ?? {}).not.toHaveProperty('readiness');
   });
 });
 

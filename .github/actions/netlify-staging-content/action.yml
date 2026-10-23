@@ -1,0 +1,56 @@
+name: 'Netlify staging content'
+description: >-
+  Hashes a staging app's built output and reports whether the deploy Netlify serves at
+  the site's `staging` alias was published from the same bytes, so a deploy job can
+  skip publishing output that has not changed.
+
+# Run after building the app the way its Netlify build does, before `netlify deploy`.
+# The deploy job then publishes with `--message "... [staging] content:<hash>"`, and
+# the newest ready deploy carrying `[staging]` in its title is what the alias serves.
+# Nx marks docs and the marketing site affected by most pushes to `main` (any file in
+# any project they depend on, tests included), while their published files change far
+# less often. Both builds are deterministic: the same sources give the same bytes.
+#
+# A missing or unreadable record counts as changed, so the job publishes.
+
+inputs:
+  site-id:
+    description: 'Netlify site UUID'
+    required: true
+  path:
+    description: 'Built output to hash, relative to the workspace root, e.g. `apps/docs/build/client`'
+    required: true
+
+outputs:
+  hash:
+    description: 'SHA-256 of every file path and content under `path`'
+    value: ${{ steps.content.outputs.hash }}
+  unchanged:
+    description: "'true' when the staging alias already serves output with this hash"
+    value: ${{ steps.content.outputs.unchanged }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Compare the built output with the staging deploy
+      id: content
+      shell: bash
+      env:
+        SITE_ID: ${{ inputs.site-id }}
+        CONTENT_PATH: ${{ inputs.path }}
+      run: |
+        set -euo pipefail
+        [ -d "$CONTENT_PATH" ] || { echo "::error::No built output at $CONTENT_PATH" >&2; exit 1; }
+        hash=$(cd "$CONTENT_PATH" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+        echo "hash=$hash" >> "$GITHUB_OUTPUT"
+        served=$("$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" api listSiteDeploys \
+          --data "{\"site_id\": \"$SITE_ID\", \"per_page\": 50}" |
+          jq -r '[.[] | select(.state == "ready" and ((.title // "") | contains("[staging]")))] | first | .title // ""' |
+          sed -n 's/.*content:\([0-9a-f]\{64\}\).*/\1/p') || served=''
+        if [ -n "$served" ] && [ "$served" = "$hash" ]; then
+          echo "::notice::Staging already serves this output ($hash); nothing to publish."
+          echo "unchanged=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "Built output $hash; staging serves ${served:-no recorded output}."
+          echo "unchanged=false" >> "$GITHUB_OUTPUT"
+        fi

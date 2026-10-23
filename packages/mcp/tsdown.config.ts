@@ -4,7 +4,7 @@ import { defineConfig } from 'tsdown';
 import type { UserConfig } from 'tsdown';
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts', 'src/viewer-protocol.ts'],
+  entry: ['src/index.ts', 'src/viewer-protocol.ts', 'src/viewer-read.ts'],
   sourcemap: false,
   clean: true,
   dts: { eager: true },

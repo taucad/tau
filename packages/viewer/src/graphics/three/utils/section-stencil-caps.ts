@@ -26,6 +26,7 @@ import type { StripedCapStripes } from '#graphics/three/materials/striped-materi
 import { sectionCapOpenChainColor, sectionCapOpenChainWidthScale } from '#graphics/three/overlay-colors.constants.js';
 import { getBvhGeometryBounds } from '#graphics/three/utils/bvh-cache.js';
 import { resolveSectionCapStyle } from '#graphics/three/utils/section-cap-style.js';
+import type { SectionCapHatch } from '#graphics/three/utils/section-cap-stripe-angles.js';
 import type { SectionLoopCapSource } from '#graphics/three/utils/section-loop-caps.js';
 
 /** One source to cap: the meshes that bound it, as drawn, and how its cut faces look. */
@@ -42,6 +43,8 @@ export type SectionStencilCapSource = Readonly<{
   loops?: SectionLoopCapSource;
   /** The cap's tint, emphasis included. */
   tintHex: number;
+  /** The part's hatch angle and spacing; every source of one part shares it. Defaults to 45° at the cap spacing. */
+  hatch?: SectionCapHatch;
   /** The outline colour where the cut meets the source's surfaces. */
   edgeHex: number;
 }>;
@@ -674,6 +677,8 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
             tintHex: entry.source.tintHex,
             stripeFrequency: frame.stripes.stripeFrequency,
             stripeWidth: frame.stripes.stripeWidth,
+            stripeAngle: entry.source.hatch?.angle,
+            stripeSpacingScale: entry.source.hatch?.spacingScale,
           });
           for (const { face, slot } of faces) {
             takePolygon(face.plane, entry.box, face.bounds, capSlot(slot).material, capOrder, {

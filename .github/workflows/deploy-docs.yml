@@ -6,6 +6,9 @@
 #   - staging (docs.taucad.dev): `ci.yml` → `deploy-docs-staging` on a push to
 #     `main` that affects docs since its last staging deploy, once the same
 #     checks as the staging UI pass.
+#     It publishes to the site's `staging` alias, which costs no Netlify
+#     credits, only when the built site differs from what that alias serves, and
+#     `netlify-staging-router` serves docs.taucad.dev from the alias.
 #   - production (docs.tau.new): with the UI, in a `ui@x.y.z` release's
 #     `release-build.yml` run, or dispatched at the tag by
 #     `deploy-production.yml` for a rollback or redeploy.
@@ -129,16 +132,54 @@ jobs:
           job-name: Deploy docs to ${{ inputs.environment }}
           github-token: ${{ github.token }}
 
+      # Most pushes mark docs affected without changing a published byte, so a
+      # staging deploy first builds the site and skips publishing output the
+      # `staging` alias already serves. `netlify deploy` reuses this build from
+      # the Nx cache.
+      - name: Build the docs site
+        id: build
+        if: inputs.environment == 'staging' && steps.superseded.outputs.superseded != 'true'
+        env:
+          NODE_OPTIONS: --import tsx
+          NX_PREFER_NODE_STRIP_TYPES: 'true'
+        run: pnpm nx build docs
+
+      - name: Compare the docs build with staging
+        id: content
+        if: steps.build.outcome == 'success'
+        uses: ./.github/actions/netlify-staging-content
+        with:
+          site-id: ${{ steps.site.outputs.site_id }}
+          path: apps/docs/build/client
+
       - name: Build and deploy with the Netlify CLI
-        if: steps.superseded.outputs.superseded != 'true'
+        if: steps.superseded.outputs.superseded != 'true' && steps.content.outputs.unchanged != 'true'
         working-directory: apps/docs
         env:
+          ENVIRONMENT: ${{ inputs.environment }}
           SITE_ID: ${{ steps.site.outputs.site_id }}
           MESSAGE: ${{ github.workflow }} ${{ inputs.tag || github.sha }}
+          CONTENT_HASH: ${{ steps.content.outputs.hash }}
         run: |
+          # Staging publishes to the `staging` alias, a draft deploy that costs no
+          # Netlify credits; the router step below serves docs.taucad.dev from it.
+          if [ "$ENVIRONMENT" = staging ]; then
+            target=(--alias staging)
+            MESSAGE="$MESSAGE [staging] content:$CONTENT_HASH"
+          else
+            target=(--prod)
+          fi
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
-            --prod --context production \
+            "${target[@]}" --context production \
             --site "$SITE_ID" --message "$MESSAGE"
+
+      - name: Serve docs.taucad.dev from the staging alias
+        if: inputs.environment == 'staging' && steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/netlify-staging-router
+        with:
+          site-id: ${{ steps.site.outputs.site_id }}
+          site-name: taucad-docs-staging
+          public-host: docs.taucad.dev
 
       # The plan of the next push to `main` diffs docs against this commit. A tag
       # dispatch publishes some other commit, so it leaves the record alone.

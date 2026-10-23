@@ -35,6 +35,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./viewer-protocol": "./src/viewer-protocol.ts",
+    "./viewer-read": "./src/viewer-read.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -50,6 +51,11 @@
         "import": "./dist/viewer-protocol.mjs",
         "default": "./dist/viewer-protocol.mjs"
       },
+      "./viewer-read": {
+        "types": "./dist/viewer-read.d.mts",
+        "import": "./dist/viewer-read.mjs",
+        "default": "./dist/viewer-read.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -62,10 +68,12 @@
     "@modelcontextprotocol/sdk": "catalog:"
   },
   "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@taucad/chat": "workspace:*",
+    "@taucad/runtime": "workspace:*",
     "zod": "catalog:"
   }
 }

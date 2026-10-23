@@ -1,7 +1,75 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry event and breadcrumb fields are SDK wire names. */
 import { describe, expect, it } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
-import { consoleBreadcrumbTextLimit, scrubSentryBreadcrumb, scrubSentryEvent } from '#lib/sentry.lib.js';
+import {
+  beforeSendSentryEvent,
+  consoleBreadcrumbTextLimit,
+  isUnhandledAbortRejection,
+  scrubSentryBreadcrumb,
+  scrubSentryEvent,
+} from '#lib/sentry.lib.js';
+
+const rejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
+
+/** The event the browser SDK builds for an unhandled rejection whose reason has no stack, as in TAU-UI-4. */
+const rejectionEvent = (mechanism = rejectionMechanism): ErrorEvent => ({
+  type: undefined,
+  exception: {
+    values: [
+      {
+        type: 'Error',
+        value: 'AbortError: The operation was aborted.',
+        mechanism: { type: mechanism, handled: false },
+      },
+    ],
+  },
+  tags: { 'DOMException.code': '20' },
+});
+
+const abort = new DOMException('The operation was aborted.', 'AbortError');
+
+describe('isUnhandledAbortRejection', () => {
+  it('matches an unhandled rejection whose reason is an AbortError DOMException', () => {
+    expect(isUnhandledAbortRejection(rejectionEvent(), { originalException: abort })).toBe(true);
+  });
+
+  it('matches an unhandled rejection whose reason is an Error named AbortError', () => {
+    const error = Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    expect(isUnhandledAbortRejection(rejectionEvent(), { originalException: error })).toBe(true);
+  });
+
+  it.each([
+    ['an Error that mentions an abort', new Error('The operation was aborted.')],
+    ['the string AbortError', 'AbortError'],
+    ['a TimeoutError', new DOMException('Timed out', 'TimeoutError')],
+  ])('keeps an unhandled rejection whose reason is %s', (_label, reason) => {
+    expect(isUnhandledAbortRejection(rejectionEvent(), { originalException: reason })).toBe(false);
+  });
+
+  it.each(['generic', 'auto.browser.global_handlers.onerror'])(
+    'keeps an AbortError reported through the %s mechanism',
+    (mechanism) => {
+      expect(isUnhandledAbortRejection(rejectionEvent(mechanism), { originalException: abort })).toBe(false);
+    },
+  );
+
+  it('keeps an event without a hint', () => {
+    expect(isUnhandledAbortRejection(rejectionEvent(), undefined)).toBe(false);
+  });
+});
+
+describe('beforeSendSentryEvent', () => {
+  it('drops an unhandled abort rejection', () => {
+    expect(beforeSendSentryEvent(rejectionEvent(), { originalException: abort })).toBeNull();
+  });
+
+  it('scrubs and keeps any other event', () => {
+    const event: ErrorEvent = { ...rejectionEvent(), user: { email: 'person@example.com' } };
+    const sent = beforeSendSentryEvent(event, { originalException: new Error('boom') });
+    expect(sent?.exception).toStrictEqual(rejectionEvent().exception);
+    expect(sent?.user).toBeUndefined();
+  });
+});
 
 describe('scrubSentryEvent', () => {
   it('drops the query string, headers, cookies and user, and redacts invitation tokens', () => {

@@ -139,6 +139,37 @@ describe('unplaceableExecutionReason', () => {
       }
     });
 
+    /* XD2: a stale "no daemon" is asked again once, however many callers find it stale at the same moment. */
+    it('should ask the origin again once for concurrent callers after a stale answer', async () => {
+      vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
+      resetOriginAgentHostAnswer();
+      vi.stubGlobal('location', { origin: 'http://127.0.0.1:7777' });
+      const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValueOnce(new TypeError('network down'));
+      fetch.mockImplementation(
+        async () =>
+          new Response(JSON.stringify({ v: 1, agent: true, label: 'Studio', workspaceRoot: '/work' }), {
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      vi.stubGlobal('fetch', fetch);
+      try {
+        await expect(isPlacementOnThisDevice('origin')).resolves.toBe(false);
+        vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+
+        const answers = await Promise.all([
+          isPlacementOnThisDevice('origin'),
+          isPlacementOnThisDevice('origin'),
+          isPlacementOnThisDevice('origin'),
+        ]);
+
+        expect(answers).toEqual([true, true, true]);
+        expect(fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+        resetOriginAgentHostAnswer();
+      }
+    });
+
     /* XD2: a chat's load never waits on discovery: until the origin has answered, its reach is unknown. */
     it('should not know the origin’s reach without waiting until its discovery has answered', async () => {
       resetOriginAgentHostAnswer();

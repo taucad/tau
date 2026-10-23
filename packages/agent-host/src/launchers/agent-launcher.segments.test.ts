@@ -76,6 +76,7 @@ const launch = (
     runHeartbeat?: number;
     pausedRunHold?: number;
     idleEviction?: number;
+    closingWait?: number;
     publish?: NonNullable<TurnPlacementPort['publish']>;
   }> = {},
 ): AgentLauncher => {
@@ -92,6 +93,7 @@ const launch = (
       ...(options.runHeartbeat === undefined ? {} : { runHeartbeat: options.runHeartbeat }),
       ...(options.pausedRunHold === undefined ? {} : { pausedRunHold: options.pausedRunHold }),
       ...(options.idleEviction === undefined ? {} : { idleEviction: options.idleEviction }),
+      ...(options.closingWait === undefined ? {} : { closingWait: options.closingWait }),
     },
   });
   launchers.push(launcher);
@@ -322,6 +324,60 @@ describe('a chat continued on a second device', () => {
         const termOf = (runId: string): string | undefined => rows.find((row) => row.runId === runId)?.leaderEpoch;
         expect(termOf('run-desktop-2')).not.toBe(termOf('run-desktop-1'));
       });
+
+      /* A new term closes the old incarnation; a close that never finishes refuses the turn after a bound, never hangs. */
+      it('should refuse a turn WRITER_LOCKED, not hang, when the old term’s close never finishes', async () => {
+        const desktop = await workspace();
+        const phone = await workspace();
+        const store = createNodeChatStore({ workspaceRoot: desktop });
+        const hold = { closes: false };
+        const released = Promise.withResolvers<void>();
+        const binding = chatStoreBinding(store) as { openWriter: (id: string) => Promise<EventLogAppender> };
+        const open = binding.openWriter;
+        binding.openWriter = async (id) => {
+          const log = await open(id);
+          const close = log.close.bind(log);
+          return Object.assign(log, {
+            close: async () => {
+              if (hold.closes) {
+                await released.promise;
+              }
+              await close();
+            },
+          });
+        };
+        const onDesktop = launch(store, recordingModel('desktop answer').transport, { closingWait: 100 });
+        const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
+        try {
+          await turn(onDesktop, 'run-desktop-1', 'first, on the desktop');
+          await project(phone, 'device-desktop', await readFile(ownLog(desktop), 'utf8'));
+          await turn(onPhone, 'run-phone-1', 'second, on the phone');
+          await project(desktop, 'device-phone', await readFile(ownLog(phone), 'utf8'));
+          hold.closes = true;
+
+          const answer = await onDesktop.execute({
+            type: 'start',
+            commandId: key(),
+            payload: {
+              chatId,
+              runId: 'run-desktop-2',
+              trigger: 'submit',
+              message: { id: 'user-run-desktop-2', role: 'user', content: 'third, back on the desktop' },
+            },
+          });
+          const stop = await onDesktop.execute({
+            type: 'cancel',
+            commandId: key(),
+            payload: { chatId, runId: 'run-desktop-2' },
+          });
+
+          expect(answer).toMatchObject({ status: 'refused', code: 'WRITER_LOCKED' });
+          expect(stop).toMatchObject({ status: 'refused' });
+        } finally {
+          hold.closes = false;
+          released.resolve();
+        }
+      }, 10_000);
 
       it('should keep its term when nothing new came, however far behind the other device’s clock is', async () => {
         const desktop = await workspace();

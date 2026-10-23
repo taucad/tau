@@ -484,6 +484,24 @@ let originHostsAgent: { answer: Promise<boolean>; readonly askedAt: number; sett
 const originAnswerReuse = 30_000;
 
 /**
+ * The guards both reach answers share: a host that is not device-relative is not this device's placement, one this tab
+ * cannot reach is out, and a loopback daemon this tab holds a session for is in. `undefined` leaves the answer to the
+ * origin's discovery.
+ *
+ * @param hostId - The placement's host id.
+ * @returns The answer, or `undefined` for `origin` on a page a daemon may have served.
+ */
+const placementReachWithoutOrigin = (hostId: TauAgentHostId): boolean | undefined => {
+  if (hostId !== 'origin' && !hostId.startsWith(loopbackHostIdPrefix)) {
+    return false;
+  }
+  if (!isDeviceRelativeHostReachable(hostId)) {
+    return false;
+  }
+  return hostId === 'origin' ? undefined : true;
+};
+
+/**
  * {@link isPlacementOnThisDevice} as far as this tab knows without asking: `undefined` while the origin's discovery is
  * unasked, out, or its "no daemon" is stale, so a caller holds the placement instead of waiting (XD2).
  *
@@ -492,14 +510,9 @@ const originAnswerReuse = 30_000;
  * @public
  */
 export const isPlacementOnThisDeviceNow = (hostId: TauAgentHostId): boolean | undefined => {
-  if (hostId !== 'origin' && !hostId.startsWith(loopbackHostIdPrefix)) {
-    return false;
-  }
-  if (!isDeviceRelativeHostReachable(hostId)) {
-    return false;
-  }
-  if (hostId !== 'origin') {
-    return true;
+  const known = placementReachWithoutOrigin(hostId);
+  if (known !== undefined) {
+    return known;
   }
   const settled = originHostsAgent?.settled;
   if (settled === true) {
@@ -519,17 +532,16 @@ export const isPlacementOnThisDeviceNow = (hostId: TauAgentHostId): boolean | un
  * @public
  */
 export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<boolean> => {
-  if (hostId !== 'origin' && !hostId.startsWith(loopbackHostIdPrefix)) {
-    return false;
-  }
-  if (!isDeviceRelativeHostReachable(hostId)) {
-    return false;
-  }
-  if (hostId !== 'origin') {
-    return true;
+  const known = placementReachWithoutOrigin(hostId);
+  if (known !== undefined) {
+    return known;
   }
   const asked = originHostsAgent;
-  if (asked !== undefined && ((await asked.answer) || Date.now() - asked.askedAt < originAnswerReuse)) {
+  /* Decided without waiting, so callers that find a stale answer at once share the one new ask (single flight). */
+  if (
+    asked !== undefined &&
+    (asked.settled === undefined || asked.settled || Date.now() - asked.askedAt < originAnswerReuse)
+  ) {
     return asked.answer;
   }
   const previous = asked?.settled;

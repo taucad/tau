@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SimulatedClock } from 'xstate';
 
 import { createTauAgentHost } from '#host/tau-agent-host.js';
 import { createChatRunRegistry } from '#host/chat-run-registry.js';
@@ -329,6 +330,65 @@ describe('the chat-run registry (RA-S3)', () => {
 
     expect(answer).toMatchObject({ status: 'refused', code: 'WRITER_LOCKED' });
     expect(opens).toBe(1);
+  });
+
+  /* The bound runs on the clock the incarnations run on, never the process's: a simulated clock alone ends it. */
+  it('should measure the closing bound on the injected clock', async () => {
+    const clock = new SimulatedClock();
+    const closeStarted = Promise.withResolvers<void>();
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      delays: { closingWait: 50 },
+      actorOptions: { clock },
+      services: {
+        openLog: async () => ({ ledger: emptyChatLedger, repair: [] }),
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw new Error('Unexpected admission');
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          closeStarted.resolve();
+          await new Promise<never>(() => {
+            /* A close that never finishes. */
+          });
+        },
+      },
+    });
+    await registry.claim('chat-simulated-closing');
+    void registry.evict('chat-simulated-closing');
+    await closeStarted.promise;
+    const answer = registry.execute({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-simulated-closing',
+        runId: 'run-simulated-closing',
+        trigger: 'submit',
+        message: { id: 'turn-simulated-closing', role: 'user', content: 'Start.' },
+      },
+    });
+
+    const pending = Symbol('pending');
+    const early = await Promise.race([
+      answer,
+      new Promise<typeof pending>((resolve) => {
+        setTimeout(() => {
+          resolve(pending);
+        }, 150);
+      }),
+    ]);
+    expect(early).toBe(pending);
+    clock.increment(50);
+
+    await expect(answer).resolves.toMatchObject({ status: 'refused', code: 'WRITER_LOCKED' });
   });
 
   it('should refuse commands with HOST_CLOSED and open no log after close', async () => {

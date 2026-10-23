@@ -177,6 +177,8 @@ export type CreateTauAgentHostOptions = {
         runHeartbeat?: number;
         /** How long a paused run's heartbeats continue; {@link pausedRunHoldMilliseconds}. */
         pausedRunHold?: number;
+        /** How long a command waits for a chat's closing incarnation before `WRITER_LOCKED`; ten seconds. */
+        closingWait?: number;
       }>
     | undefined;
   /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
@@ -1261,6 +1263,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       dispatch.refreshed = log;
     }
   };
+  /** Close the chat's incarnation, as a term check starts it: a live run or a closed log leaves it as it is. */
+  const evictQuietly = async (chatId: string): Promise<void> => {
+    try {
+      await registry.evict(chatId);
+    } catch {
+      /* The command that follows is answered as it would be without the check. */
+    }
+  };
   /** Each chat's term check in flight: later commands for the chat wait behind it. */
   const rehomes = new Map<string, Promise<void>>();
   /**
@@ -1290,7 +1300,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if ((await log.foreignWroteSinceTermBegan?.()) !== true) {
           return;
         }
-        await registry.evict(chatId);
+        /*
+         * The close is started, not awaited: the command that follows waits for it within the registry's bound
+         * (`WRITER_LOCKED` past it), and nothing behind this check, a Stop included, waits on a close that never ends.
+         */
+        void evictQuietly(chatId);
       } catch {
         /* A live run, a closed log or an unread segment: the command is answered as it would be without this. */
       }

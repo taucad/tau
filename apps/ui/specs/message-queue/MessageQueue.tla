@@ -39,6 +39,7 @@
 \* A legacy host is adopted without leaving the synced record; a placement of unknown reach is applied
 \* at load and settled later, so admission waits for its host. Queue paths unchanged.
 \* Held placements are re-applied on one reachability signal (origin or loopback); queue paths unchanged.
+\* chat.json drops device-relative hosts in the chat store alone; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

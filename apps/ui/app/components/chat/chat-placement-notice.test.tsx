@@ -151,6 +151,25 @@ describe('ChatPlacementNotice', () => {
     });
   });
 
+  /* "Here" is this device's own Tau: a paired device is another machine, so its host id is never kept. */
+  it('should continue with Tau on this device when the last Tau choice ran on a paired device', async () => {
+    harness.lastTauExecution = {
+      kind: 'tau',
+      model: 'anthropic-claude-opus-4.8',
+      effort: 'high',
+      hostId: 'dev_studio_mini',
+    };
+    render(<ChatPlacementNotice />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue here with Tau' }));
+
+    expect(harness.setActiveExecution).toHaveBeenCalledExactlyOnceWith({
+      kind: 'tau',
+      model: 'anthropic-claude-opus-4.8',
+      effort: 'high',
+    });
+  });
+
   it('should offer no writable action on a surface that cannot change the agent', () => {
     harness.canSelectExecution = false;
 

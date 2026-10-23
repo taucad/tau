@@ -52,7 +52,7 @@ export const readChatPlacement = async (
 
 /**
  * Keep, or clear, one chat's placement on this device: one field-scoped read-modify-write of its project's
- * placements record, skipped when the record already says the same. Never throws.
+ * placements record, skipped when the record already says the same or there is no record to clear. Never throws.
  *
  * @param input - The client, the chat, and its placement (`undefined` clears it).
  * @returns `true` once the record holds the placement, `false` when it could not be written.
@@ -73,6 +73,10 @@ export const writeChatPlacement = async ({
   try {
     const current = await store.read();
     if (current.status === 'valid' && current.record.placements?.[chatId] === placement) {
+      return true;
+    }
+    /* Nothing to clear where no record exists: no empty record is written. */
+    if (current.status === 'absent' && placement === undefined) {
       return true;
     }
     await store.patch({ placements: { [chatId]: placement ?? false } });

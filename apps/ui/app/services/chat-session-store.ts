@@ -3815,7 +3815,8 @@ export class ChatSessionStore {
                 await writeChatPlacement({ client: depsRef().client, projectId, chatId: input.chatId, placement });
                 this.#placementReads.delete(projectId);
               }
-              await depsRef().patchChat(input.chatId, 'activeExecution', portableExecutionOf(input.activeExecution));
+              /* The chat store writes it portable: a device-relative host never reaches the synced record. */
+              await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
             },
           }),
           persistActiveKernelActor: createAsyncLogic({

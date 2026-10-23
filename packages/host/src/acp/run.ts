@@ -335,7 +335,7 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
   ];
 };
 
-/** How much of the chat's unseen turns one prompt carries, in characters: the most recent are kept. */
+/** How long the handoff block one prompt carries may be, in characters, header included: the most recent turns are kept. */
 const handoffCharacters = 24_000;
 
 /** A message's plain text, or `undefined` when it carries none (tool calls, media). */
@@ -434,26 +434,28 @@ export const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undef
   if (lines.length === 0) {
     return [];
   }
-  /* Most recent first within the budget; the newest message alone is cut to it, keeping its tail. */
+  /*
+   * Most recent first within the budget, counted on the block as sent: the header and each separator count. The newest
+   * message alone is cut to what is left, keeping its tail.
+   */
+  const header =
+    'Earlier turns of this chat that this session has not seen (run by Tau, or on another device), oldest first:\n\n';
+  const separator = '\n\n';
+  const budget = handoffCharacters - header.length;
   const kept: string[] = [];
   let size = 0;
   for (const line of lines.toReversed()) {
-    if (size + line.length > handoffCharacters) {
+    const cost = line.length + (kept.length === 0 ? 0 : separator.length);
+    if (size + cost > budget) {
       if (kept.length === 0) {
-        kept.unshift(tailOf(line, handoffCharacters));
+        kept.unshift(tailOf(line, budget));
       }
       break;
     }
     kept.unshift(line);
-    size += line.length;
+    size += cost;
   }
-  return [
-    contextBlock(
-      'tau://chat-handoff',
-      'text/markdown',
-      `Earlier turns of this chat that this session has not seen (run by Tau, or on another device), oldest first:\n\n${kept.join('\n\n')}`,
-    ),
-  ];
+  return [contextBlock('tau://chat-handoff', 'text/markdown', `${header}${kept.join(separator)}`)];
 };
 
 /**

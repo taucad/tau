@@ -140,6 +140,13 @@ const unreadable = (verb: string, issues: string): Error =>
     code: 'FRAME_UNREADABLE' satisfies RefusalCode,
   });
 
+/** The answer a server gives a verb it does not have: `unreadable(name, missingVerb)`, from every build since W6. */
+const missingVerb = 'no such verb';
+const isMissingVerb = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error as { readonly code?: unknown }).code === 'FRAME_UNREADABLE' &&
+  error.message.endsWith(`: ${missingVerb}`);
+
 /** Options for {@link serveTurnPlacementChannel}. @public */
 export type ServeTurnPlacementChannelOptions = Readonly<{
   /** The port the page brokered from the resident agent host. */
@@ -225,7 +232,7 @@ export const serveTurnPlacementChannel = (options: ServeTurnPlacementChannelOpti
           );
         }
         default: {
-          throw unreadable(name, 'no such verb');
+          throw unreadable(name, missingVerb);
         }
       }
     },
@@ -309,7 +316,22 @@ export const connectTurnPlacementChannel = (options: ConnectTurnPlacementChannel
     abandon: async (input) => channel.call('abandon', input),
     reconcile: async (input) => channel.call('reconcile', input),
     acknowledge: async (input) => channel.call('acknowledge', input),
-    publish: async (input) => channel.call('publish', input),
+    publish: async (input) => {
+      try {
+        return await channel.call('publish', input);
+      } catch (error) {
+        /* A placement server older than XD3 has no publish verb: it records no chat ref, so the chat is not shared. */
+        if (isMissingVerb(error)) {
+          return {
+            requestId: input.requestId,
+            status: 'refused',
+            code: 'CHAT_NOT_SHARED',
+            message: 'This placement session records no chat ref for other devices.',
+          };
+        }
+        throw error;
+      }
+    },
     settlements: ({ signal }) => channel.listen('settlements', undefined, signal),
     close: (reason) => {
       channel.close(reason);

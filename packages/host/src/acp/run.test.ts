@@ -283,6 +283,22 @@ describe('the chat handoff an ACP prompt carries', () => {
     },
   );
 
+  /* The bound is on the block as sent: its header and the separators between messages count. */
+  it('should keep the whole block within 24,000 characters for many short messages', () => {
+    const current = marked('turn-next', 'next');
+    const transcript = [
+      ...Array.from({ length: 4000 }, (_, index) =>
+        said(`short-${String(index)}`, index % 2 === 0 ? 'user' : 'assistant', 'ok'),
+      ),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), undefined));
+
+    expect(text.length).toBeGreaterThan(20_000);
+    expect(text.length).toBeLessThanOrEqual(24_000);
+  });
+
   /* A session whose own turns compaction or a rewind removed still saw the chat up to there: nothing is resent. */
   it('should send nothing for a reattached session whose own turns the history no longer holds', () => {
     const current = marked('turn-9', 'next');

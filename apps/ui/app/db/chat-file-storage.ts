@@ -375,8 +375,13 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
         if (!mutate(draft)) {
           return undefined;
         }
-        draft.updatedAt = Date.now();
-        return draft;
+        /* Written portable (see the module header), so a change that only names this device's host is no change. */
+        const portable = withPortableExecution(draft);
+        if (valuesEqual(portable, chat)) {
+          return undefined;
+        }
+        portable.updatedAt = Date.now();
+        return portable;
       },
       writeOptions,
     );
@@ -559,12 +564,10 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
           if (key === 'messages') {
             throw new Error('Chat transcript messages are host-log-owned and cannot be patched in chat.json.');
           }
-          const next =
-            key === 'activeExecution' ? (portableExecutionOf(value as Chat['activeExecution']) as typeof value) : value;
-          if (valuesEqual(chat[key], next)) {
+          if (valuesEqual(chat[key], value)) {
             return false;
           }
-          chat[key] = next;
+          chat[key] = value;
           return true;
         },
         { supersedeLegacyPlacement: key === 'activeExecution' },

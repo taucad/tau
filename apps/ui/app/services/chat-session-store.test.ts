@@ -5844,7 +5844,11 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     });
 
     await vi.waitFor(() => {
-      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5' });
+      expect(deps.patchChat).toHaveBeenCalledWith(
+        chatId,
+        'activeExecution',
+        expect.objectContaining({ kind: 'tau', model: 'openai-gpt-5.5' }),
+      );
     });
     await settle();
     expect(placementOnDisk(deps, chatId)).toBeUndefined();
@@ -5865,7 +5869,11 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     await vi.waitFor(() => {
       expect(placementOnDisk(deps, chatId)).toBe('origin');
     });
-    expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model });
+    expect(deps.patchChat).toHaveBeenCalledWith(
+      chatId,
+      'activeExecution',
+      expect.objectContaining({ kind: 'tau', model }),
+    );
     expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
       kind: 'tau',
       model,
@@ -6074,7 +6082,11 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       execution: { kind: 'tau', model: 'openai-gpt-5.5' },
     });
     await vi.waitFor(() => {
-      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5' });
+      expect(deps.patchChat).toHaveBeenCalledWith(
+        chatId,
+        'activeExecution',
+        expect.objectContaining({ kind: 'tau', model: 'openai-gpt-5.5' }),
+      );
     });
     expect(placementOnDisk(deps, chatId)).toBe('loopback:http://127.0.0.1:4100');
     store.release(chatId);
@@ -6193,7 +6205,11 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' },
     });
     await vi.waitFor(() => {
-      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5' });
+      expect(deps.patchChat).toHaveBeenCalledWith(
+        chatId,
+        'activeExecution',
+        expect.objectContaining({ kind: 'tau', model: 'openai-gpt-5.5' }),
+      );
     });
     expect(writes.mock.calls.filter(([path]) => path === placementsPath)).toHaveLength(0);
 

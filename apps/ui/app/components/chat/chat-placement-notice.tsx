@@ -27,22 +27,20 @@ const useUnplaceableExecutionReason = (execution: CadAgentExecution): string | u
 };
 
 /**
- * The last Tau choice as this tab can run it: a host only another tab or device reaches (`origin`, `desktop`, a
- * loopback daemon) is dropped, so the chat runs on this tab's own Tau instead of on a host it cannot reach.
+ * The last Tau choice as this device's own Tau: a host is kept only where it is this device's and this tab reaches it
+ * (`desktop` on Tau Desktop, the daemon that served this page, a loopback daemon this tab was handed). A paired
+ * device's host is another machine and a device-relative host this tab cannot reach is out of hand, so either is
+ * dropped and the chat runs on this tab's own Tau.
  *
  * @param execution - The last Tau execution chosen on this device.
  * @returns The execution to continue with here.
  */
 const tauHere = (execution: CadAgentExecution): CadAgentExecution => {
-  if (
-    execution.kind !== 'tau' ||
-    execution.hostId === undefined ||
-    !isDeviceRelativeHostId(execution.hostId) ||
-    isDeviceRelativeHostReachable(execution.hostId)
-  ) {
+  if (execution.kind !== 'tau' || execution.hostId === undefined) {
     return execution;
   }
-  return withoutHostId(execution);
+  const { hostId } = execution;
+  return isDeviceRelativeHostId(hostId) && isDeviceRelativeHostReachable(hostId) ? execution : withoutHostId(execution);
 };
 
 /**

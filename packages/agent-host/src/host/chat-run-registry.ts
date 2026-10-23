@@ -236,13 +236,19 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
       return true;
     }
     const bound = options.delays?.closingWait ?? chatClosingWaitMilliseconds;
+    /* On the clock the incarnations run on, so a simulated clock ends the bound as it ends their timers. */
+    const clock: NonNullable<ActorOptions<AnyActorLogic>['clock']> = options.actorOptions?.clock ?? globalThis;
+    const expired = new AbortController();
+    const timer: unknown = clock.setTimeout(() => {
+      expired.abort();
+    }, bound); // Bound: chatClosingWaitMilliseconds.
     try {
-      await waitFor(live, (snapshot) => snapshot.status !== 'active', {
-        signal: AbortSignal.timeout(bound), // Bound: chatClosingWaitMilliseconds.
-      });
+      await waitFor(live, (snapshot) => snapshot.status !== 'active', { signal: expired.signal });
       return true;
     } catch {
       return live.getSnapshot().status !== 'active';
+    } finally {
+      clock.clearTimeout(timer);
     }
   };
   const stillClosing = (commandId: string, chatId: string): RefusedAnswer =>
@@ -252,21 +258,26 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
       `Chat ${chatId} is still closing its log from an earlier session; send this again in a moment.`,
     );
 
-  const claim = async (chatId: string): Promise<ChatRunClaim> => {
-    if (closing) {
-      return { refused: refusedAnswer('claim', 'HOST_CLOSED', 'The Tau agent host is closed.') };
-    }
-    if (fenced.has(chatId)) {
-      return { refused: refusedAnswer('claim', 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`) };
-    }
-    if (!(await pastClosing(chatId))) {
-      return { refused: stillClosing('claim', chatId) };
-    }
+  /** Why a command for the chat is refused now, without opening it: a host closed, a fence, a close past its bound. */
+  const refusedNow = (commandId: string, chatId: string): RefusedAnswer | undefined => {
+    /* Read through a call: `close` or `relinquish` may land while a caller waits, which narrowing cannot see. */
     if (isClosing()) {
-      return { refused: refusedAnswer('claim', 'HOST_CLOSED', 'The Tau agent host is closed.') };
+      return refusedAnswer(commandId, 'HOST_CLOSED', 'The Tau agent host is closed.');
     }
     if (fenced.has(chatId)) {
-      return { refused: refusedAnswer('claim', 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`) };
+      return refusedAnswer(commandId, 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`);
+    }
+    return undefined;
+  };
+  /** The guard every claim and command passes before it opens the chat: refused now, or after the closing bound. */
+  const guardOpen = async (commandId: string, chatId: string): Promise<RefusedAnswer | undefined> =>
+    refusedNow(commandId, chatId) ??
+    ((await pastClosing(chatId)) ? refusedNow(commandId, chatId) : stillClosing(commandId, chatId));
+
+  const claim = async (chatId: string): Promise<ChatRunClaim> => {
+    const refused = await guardOpen('claim', chatId);
+    if (refused !== undefined) {
+      return { refused };
     }
     let fresh = actors.get(chatId)?.getSnapshot().status !== 'active';
     let actor = open(chatId);
@@ -303,21 +314,9 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
 
   const run = async (command: ChatRunCommand): Promise<CommandAnswer> => {
     const { chatId } = command.payload;
-    if (closing) {
-      return refusedAnswer(command.commandId, 'HOST_CLOSED', 'The Tau agent host is closed.');
-    }
-    if (fenced.has(chatId)) {
-      return refusedAnswer(command.commandId, 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`);
-    }
-    if (!(await pastClosing(chatId))) {
-      return stillClosing(command.commandId, chatId);
-    }
-    /* Read through a call: `close` or `relinquish` may land while the closing incarnation ends. */
-    if (isClosing()) {
-      return refusedAnswer(command.commandId, 'HOST_CLOSED', 'The Tau agent host is closed.');
-    }
-    if (fenced.has(chatId)) {
-      return refusedAnswer(command.commandId, 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`);
+    const refused = await guardOpen(command.commandId, chatId);
+    if (refused !== undefined) {
+      return refused;
     }
     let actor = open(chatId);
     await served(actor);

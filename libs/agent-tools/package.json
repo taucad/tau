@@ -48,6 +48,7 @@
     "@taucad/bambu": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/slicer": "workspace:*",
     "@taucad/types": "workspace:*",

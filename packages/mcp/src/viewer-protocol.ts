@@ -32,6 +32,8 @@ export const tauViewerToolName = {
   appOpenFile: 'app_open_file',
   /** Render transient parameter values on a shown source's watched document, for a drag in the Parameters pane. */
   appPreviewParameters: 'app_preview_parameters',
+  /** Drive and read the shown model's mechanism: play, pause, seek or reset an animation, or set coordinates. */
+  poseModel: 'pose_model',
 } as const;
 
 /**
@@ -285,6 +287,45 @@ export type TauViewerViewState = Readonly<{
    * {@link TauViewerSyncResult.accepts}; `view_state` leaves it out.
    */
   settings?: TauViewerViewSettings | undefined;
+  /** The mechanism the page's Kinematics pane loaded from the shown GLB. Sent only to a server that `accepts` it. */
+  mechanism?: TauViewerMechanism | undefined;
+  /** The animation playback. Sent only to a server that `accepts` it. */
+  playback?: TauViewerPlayback | undefined;
+  /** Every degree of freedom at the current pose, in mechanism units. Sent only to a server that `accepts` it. */
+  coordinates?: Readonly<Record<string, number>> | undefined;
+}>;
+
+/** The page's playback of one model's animation, as its Kinematics pane runs it. @public */
+export type TauViewerPlayback = Readonly<{
+  status: 'stopped' | 'playing' | 'paused';
+  /** The selected animation; absent for none. */
+  animationId?: string | undefined;
+  /** Seconds into the animation. */
+  time: number;
+  /** Playback rate; 1 is real time. */
+  speed: number;
+}>;
+
+/**
+ * A `pose_model` command for the pages that show its model: an animation action, or driver coordinates. `sequence`
+ * rises with each command, so a page applies each one once.
+ *
+ * @public
+ */
+export type TauViewerPoseCommand = Readonly<{
+  sequence: number;
+  /** The model the command poses; a page showing another model ignores it. */
+  modelId: string;
+  animation?:
+    | Readonly<{
+        id: string;
+        action: 'play' | 'pause' | 'seek' | 'reset';
+        time?: number | undefined;
+        speed?: number | undefined;
+      }>
+    | undefined;
+  /** Driver coordinates in mechanism units. */
+  coordinates?: Readonly<Record<string, number>> | undefined;
 }>;
 
 /** The fields of a `.tau/workbench` view record a viewer owns besides its camera. @public */
@@ -296,7 +337,14 @@ export type TauViewerViewSettings = ViewSettings;
  *
  * @public
  */
-export const tauViewerAcceptedViewFields = ['references', 'sourceRevision', 'settings'] as const;
+export const tauViewerAcceptedViewFields = [
+  'references',
+  'sourceRevision',
+  'settings',
+  'mechanism',
+  'playback',
+  'coordinates',
+] as const;
 
 /** Arguments of `app_sync`. @public */
 export type TauViewerSyncInput = Readonly<{
@@ -331,6 +379,8 @@ export type TauViewerSyncResult = Readonly<{
   status?: Readonly<Record<string, TauViewerEntryStatus>> | undefined;
   /** A capture of this page's view the agent is waiting for. */
   capture?: Readonly<{ requestId: string }> | undefined;
+  /** The latest `pose_model` command for the pages of this conversation. */
+  pose?: TauViewerPoseCommand | undefined;
   /**
    * The optional view fields the server takes ({@link tauViewerAcceptedViewFields}); absent from a server older than
    * them. A page may read names it does not know.
@@ -390,6 +440,26 @@ export type TauViewerViewStateResult = Readonly<{
   view: TauViewerViewState;
   /** Why the capture is missing when one was asked for. */
   captureError?: string | undefined;
+}>;
+
+/** Arguments of `pose_model`. @public */
+export type TauViewerPoseInput = Readonly<{
+  targetFile?: string | undefined;
+  animation?: TauViewerPoseCommand['animation'];
+  coordinates?: Readonly<Record<string, number>> | undefined;
+}>;
+
+/** Structured result of `pose_model`. @public */
+export type TauViewerPoseResult = Readonly<{
+  model: Readonly<{ path: string; sourceFile?: string | undefined }>;
+  mechanism: Readonly<{ joints: number; animations: readonly string[] }>;
+  playback: TauViewerPlayback;
+  /** Every degree of freedom at the pose, in mechanism units. */
+  coordinates: Readonly<Record<string, number>>;
+  /** Degrees of freedom clamped to, or outside, their limits. */
+  atLimit: readonly string[];
+  /** Open viewer pages that apply the pose. */
+  viewers: number;
 }>;
 
 /** What `initialize` told the server about its client, as far as presentation is concerned. @public */

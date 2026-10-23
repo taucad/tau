@@ -8,7 +8,7 @@ import type { StaleBuildOutcome, StaleBuildTag } from '#lib/stale-build-recovery
 const mocks = vi.hoisted(() => ({
   init: vi.fn(),
   recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'reloading'),
-  classifyStaleBuildFailure: vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded'),
+  classifyStaleBuildFailure: vi.fn((_failure: unknown): StaleBuildTag => 'superseded'),
 }));
 
 vi.mock('@sentry/react', async (importOriginal) => ({
@@ -35,7 +35,7 @@ describe('initSentry', () => {
     const { beforeSend } = options;
     const failure = new TypeError('Importing a module script failed.');
 
-    await expect(beforeSend({ type: undefined }, { originalException: failure })).resolves.toMatchObject({
+    expect(beforeSend({ type: undefined }, { originalException: failure })).toMatchObject({
       tags: { stale_build: 'superseded' },
     });
 

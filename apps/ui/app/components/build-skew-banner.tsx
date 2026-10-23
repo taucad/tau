@@ -9,14 +9,13 @@ const reload = (): void => {
 };
 
 /**
- * Persistent prompt shown in a tab whose bundle has been superseded by a newer
- * one in another tab (blueprint DF20) or replaced by a deploy
- * (`#lib/stale-build-recovery`). That tab has already stopped writing
- * durable state, so reloading is the only way to make it useful again.
+ * Floating reload prompt, shown while the reload is offered and no other surface owns the prompt.
+ * The offer stands when another bundle owns storage (blueprint DF20: this tab has stopped writing
+ * durable state) or when the server confirmed a deploy replaced this build
+ * (`#lib/stale-build-recovery`, a lone tab that still writes).
  *
- * Fallback for surfaces without the app sidebar (auth, shared pages, the
- * mobile sidebar while closed); elsewhere the sidebar's `BrowserUpdate` owns
- * the prompt.
+ * Fallback for surfaces without the app sidebar (auth, shared pages, the mobile sidebar while
+ * closed); elsewhere the sidebar's `BrowserUpdate` or the error page owns the prompt.
  */
 export function BuildSkewBanner(): React.JSX.Element | undefined {
   const superseded = useReloadOffered();

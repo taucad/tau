@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactRouter from 'react-router';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
+import type * as BuildSkew from '#filesystem/build-skew.js';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 const mocks = vi.hoisted(() => ({
@@ -15,7 +17,17 @@ const mocks = vi.hoisted(() => ({
   reloadStateListeners: new Set<() => void>(),
   outcomes: new Map<unknown, StaleBuildOutcome>(),
   outcomeListeners: new Set<() => void>(),
+  verdict: 'unknown' as ServerVerdict,
+  verdictListeners: new Set<() => void>(),
 }));
+
+/** `build-skew`'s live verdict changes, as the confirmed server answers move it. */
+const setVerdict = (verdict: ServerVerdict): void => {
+  mocks.verdict = verdict;
+  for (const listener of mocks.verdictListeners) {
+    listener();
+  }
+};
 
 /** The recovery settles (or later changes) a failure's outcome, as `createStaleBuildRecovery` does. */
 const setOutcome = (failure: unknown, outcome: StaleBuildOutcome): void => {
@@ -58,13 +70,23 @@ vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
     };
   },
 }));
+vi.mock('#filesystem/build-skew.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof BuildSkew>()),
+  readServerVerdict: () => mocks.verdict,
+  subscribeServerVerdict: (listener: () => void) => {
+    mocks.verdictListeners.add(listener);
+    return () => {
+      mocks.verdictListeners.delete(listener);
+    };
+  },
+}));
 vi.mock('#components/ui/collapsible-code-block.js', () => ({
   CollapsibleCodeBlock: ({ title }: { readonly title: string }) => <pre aria-label='Stack trace'>{title}</pre>,
 }));
 
 const { ErrorPage } = await import('#components/error-page.js');
 const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
-const { buildId, offerReload, queryLiveBuild } = await import('#filesystem/build-skew.js');
+const { buildId, offerReload } = await import('#filesystem/build-skew.js');
 const { useReloadPromptOwned } = await import('#components/nav/browser-update.js');
 
 /** A deploy explains the failure: the recovery offers the reload, as `recoverFromStaleBuild` does, and says so. */
@@ -112,11 +134,9 @@ beforeEach(() => {
   mocks.recoverFromStaleBuild.mockResolvedValue('current');
 });
 
-afterEach(async () => {
+afterEach(() => {
   cleanup();
-  // The server names this build again, which withdraws whatever offer a test left.
-  vi.stubGlobal('fetch', async () => Response.json({ buildId }));
-  await queryLiveBuild();
+  mocks.verdict = 'unknown';
   vi.clearAllMocks();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -204,7 +224,7 @@ describe('ErrorPage', () => {
     expect(button).toBeEnabled();
   });
 
-  it('should show the error once the recovery decides the failure genuine after all, leaving the report to it', async () => {
+  it('should withdraw the update prompt once the server confirms this build live, reporting nothing itself', async () => {
     supersededOutcome();
     const error = moduleImportFailure();
     const Owned = (): React.JSX.Element => <output aria-label='Prompt owned'>{String(useReloadPromptOwned())}</output>;
@@ -218,15 +238,27 @@ describe('ErrorPage', () => {
     expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('true');
 
-    // The server names this build again: the recovery moves the failure to `current` and reports it.
+    // The rollback ends: `build-skew` confirms this build live, and the page claims no update.
     act(() => {
-      setOutcome(error, 'current');
+      setVerdict('live');
     });
 
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('false');
     expect(mocks.reportUiError).not.toHaveBeenCalled();
     expect(mocks.captureException).not.toHaveBeenCalled();
+  });
+
+  it('should switch a failure first called genuine to the update prompt once the server confirms another build', async () => {
+    const error = moduleImportFailure();
+    renderPage(error);
+    expect(await screen.findByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+
+    act(() => {
+      setVerdict('replaced');
+    });
+
+    expect(screen.getByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
   });
 
   it('should show a module import failure the live build still has without reporting it or loading another chunk', async () => {

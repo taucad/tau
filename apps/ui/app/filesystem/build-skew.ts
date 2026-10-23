@@ -136,6 +136,7 @@ let phaseTimer: ReturnType<typeof setTimeout> | undefined;
 const writeStopTopic = new Topic<void>({ name: 'build-skew' });
 const reloadOfferTopic = new Topic<void>({ name: 'build-reload-offer' });
 const supersedingBuildTopic = new Topic<void>({ name: 'superseding-build' });
+const serverVerdictTopic = new Topic<void>({ name: 'server-verdict' });
 
 /** A verdict change still awaits its confirmations. */
 const isConfirming = (current: SkewState): boolean =>
@@ -147,10 +148,14 @@ const stopsWrites = (current: SkewState): boolean => current.phase !== 'idle' &&
 const hasStopped = (current: SkewState): boolean =>
   current.phase === 'peer-superseded' || current.phase === 'server-confirming' || current.phase === 'server-superseded';
 
+/** Confirming this build after a peer's claim, with nothing saying another build replaced it. */
+const isConfirmingOwnBuild = (current: SkewState): boolean =>
+  current.phase === 'server-confirming' && current.towards === 'live' && current.server !== 'replaced';
+
 const offers = (current: SkewState): boolean =>
   current.phase === 'offered' ||
   (current.phase === 'provisional' && current.resumeTo === 'offered') ||
-  hasStopped(current);
+  (hasStopped(current) && !isConfirmingOwnBuild(current));
 
 const supersedingOf = (current: SkewState): number => current.superseding?.buildId ?? buildId;
 
@@ -240,19 +245,18 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
       const checksLeft = current.checksLeft - 1;
       return checksLeft > 0 ? { ...common, phase: 'server-confirming', towards: 'live', checksLeft } : live();
     }
+    if (current.phase === 'provisional' || current.phase === 'peer-superseded') {
+      /* A peer's claim stopped writes: they resume only once the server has named this build as
+       * often as it must name another to supersede it (DF20), never on one answer an edge leaving a
+       * build may give. */
+      return { ...common, phase: 'server-confirming', towards: 'live', checksLeft: serverConfirmations };
+    }
     if (current.server === 'replaced') {
       /* The server had named another build: leaving that word takes as many answers as entering
        * it did, writes going on meanwhile (an edge may answer for a build it is leaving). */
       const checksLeft = current.pending?.towards === 'live' ? current.pending.checksLeft - 1 : serverConfirmations;
       if (checksLeft > 0) {
-        const phase =
-          current.phase === 'provisional'
-            ? current.resumeTo
-            : current.phase === 'peer-superseded'
-              ? 'offered'
-              : current.phase;
-        // Writes resume here: the announcement (if owed) goes now, and the next live claim is not answered.
-        return { ...common, phase, pending: { towards: 'live', checksLeft }, vouches: false };
+        return { ...common, phase: current.phase, pending: { towards: 'live', checksLeft } };
       }
     }
     // The server named this build live: whatever rested on a peer's word or a deploy offer is void.
@@ -260,7 +264,9 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
   }
   if (typeof answer === 'number') {
     // The prompt names the build at once; the verdict turns `replaced` only once confirmed.
-    const named: Common = { ...common, superseding: { buildId: answer, source: 'server' }, pending: undefined };
+    // An answer naming another build puts an earlier `live` in doubt until the confirmations settle it.
+    const doubted: Common = { ...common, server: current.server === 'live' ? 'unknown' : current.server };
+    const named: Common = { ...doubted, superseding: { buildId: answer, source: 'server' }, pending: undefined };
     const replaced: Common = { ...named, server: 'replaced' };
     switch (current.phase) {
       case 'server-superseded': {
@@ -288,9 +294,10 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
         }
         const checksLeft =
           current.pending?.towards === 'replaced' ? current.pending.checksLeft - 1 : serverConfirmations;
+        // Once confirmed, the reload is offered at once, whether or not a failure is waiting for it.
         return checksLeft > 0
-          ? { ...common, phase: current.phase, pending: { towards: 'replaced', checksLeft } }
-          : { ...replaced, phase: current.phase };
+          ? { ...doubted, phase: current.phase, pending: { towards: 'replaced', checksLeft } }
+          : { ...replaced, phase: 'offered', vouches: true };
       }
     }
   }
@@ -326,6 +333,9 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
     claimedBuildId: claimed,
     recheck: answer === 'unreachable',
     superseding: nameSuperseding(current.superseding, claimedBuildId, 'tab'),
+    // A newer peer while the server says nothing: an earlier `live` is no longer known to hold.
+    server: current.server === 'live' ? 'unknown' : current.server,
+    pending: undefined,
   };
 };
 
@@ -398,6 +408,28 @@ const dispatch = (event: SkewEvent): void => {
   const resumedWrites = stopsWrites(before) && !stopsWrites(next);
   if (resumedWrites && before.vouches && event.type === 'answer' && event.answer === buildId) {
     channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
+  } else if (resumedWrites && event.type === 'answer' && typeof event.answer !== 'number') {
+    // Resumed without the server, over an older peer's claim: the newer build wins, so say so plainly.
+    channel?.postMessage(buildId);
+  }
+  if (next.server !== before.server) {
+    serverVerdictTopic.emit();
+  }
+};
+
+let inFlightQuery: Promise<void> | undefined;
+
+/** One question, then the confirmations a verdict change under way needs. */
+const askAndConfirm = async (): Promise<void> => {
+  await askServer(undefined);
+  // A verdict change under way is confirmed now, `lookupConfirmDelay` apart, not at the 30 s recheck.
+  for (let check = 0; check < serverConfirmations && isConfirming(state); check += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential by definition.
+    await new Promise((resolve) => {
+      setTimeout(resolve, lookupConfirmDelay);
+    });
+    // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential by definition.
+    await askServer(undefined);
   }
 };
 
@@ -412,16 +444,15 @@ export const queryLiveBuild = async (): Promise<void> => {
   if (buildId === 0) {
     return;
   }
-  await askServer(undefined);
-  // A verdict change under way is confirmed now, `lookupConfirmDelay` apart, not at the 30 s recheck.
-  for (let check = 0; check < serverConfirmations && isConfirming(state); check += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential by definition.
-    await new Promise((resolve) => {
-      setTimeout(resolve, lookupConfirmDelay);
-    });
-    // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential by definition.
-    await askServer(undefined);
-  }
+  // One question and its confirmations at a time, shared by every caller.
+  inFlightQuery ??= (async () => {
+    try {
+      await askAndConfirm();
+    } finally {
+      inFlightQuery = undefined;
+    }
+  })();
+  await inFlightQuery;
 };
 
 /**
@@ -513,4 +544,9 @@ export const subscribeBuildSkew = (listener: () => void): (() => void) => {
  */
 export const subscribeReloadOffer = (listener: () => void): (() => void) => {
   return reloadOfferTopic.subscribe(listener);
+};
+
+/** Subscribe to each change of {@link readServerVerdict}. */
+export const subscribeServerVerdict = (listener: () => void): (() => void) => {
+  return serverVerdictTopic.subscribe(listener);
 };

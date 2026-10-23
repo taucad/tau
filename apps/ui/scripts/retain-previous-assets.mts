@@ -39,6 +39,7 @@ import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
 import { pipeline } from 'node:stream/promises';
 import { setTimeout } from 'node:timers/promises';
+import { sri } from '#scripts/subresource-integrity.mts';
 
 /** File the new deploy publishes at its root, listing every asset it serves. */
 export const servedAssetsIndexFileName = 'tau-served-assets.json';
@@ -113,9 +114,6 @@ type Transport = {
   readonly requestTimeout: number;
   readonly wait: (milliseconds: number) => Promise<void>;
 };
-
-const integrityOf = (bytes: Uint8Array<ArrayBuffer>): string =>
-  `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
 
 /** Check one live index entry, which arrives as untrusted JSON. */
 const assertServedAsset = (entry: unknown): ServedAsset => {
@@ -195,10 +193,7 @@ export const planRetention = (
   const { generations = retainedGenerations, shouldAge = true } = options;
   const step = shouldAge ? 1 : 0;
   return previous.assets
-    .filter(
-      (asset) =>
-        asset.generation + step <= generations && !ownPaths.has(asset.path) && !isNeverLoadedByPages(asset.path),
-    )
+    .filter((asset) => asset.generation + step <= generations && !ownPaths.has(asset.path))
     .map((asset) => ({ ...asset, generation: asset.generation + step }));
 };
 
@@ -365,7 +360,7 @@ const downloadAsset = async ({ origin, clientDirectory, transport }: Download, a
     );
   }
   const bytes = response.body;
-  if (integrityOf(bytes) !== asset.integrity) {
+  if (sri(bytes) !== asset.integrity) {
     throw new Error(`${asset.path} does not match its integrity in the live index; refusing to publish it.`);
   }
   const destination = join(clientDirectory, asset.path);

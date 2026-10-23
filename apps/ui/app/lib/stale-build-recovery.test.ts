@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import {
   autoReloadBudget,
+  autoReloadTimesKey,
   createStaleBuildRecovery,
   isStaleModuleError,
   preloadFollowUpDelay,
@@ -331,7 +332,7 @@ describe('createStaleBuildRecovery', () => {
     await vi.advanceTimersByTimeAsync(15_000);
 
     expect(onGenuineFailure).not.toHaveBeenCalled();
-    await expect(recovery.classify(error)).resolves.toBe('superseded');
+    expect(recovery.classify(error)).toBe('superseded');
   });
 
   describe('reporting', () => {
@@ -344,7 +345,7 @@ describe('createStaleBuildRecovery', () => {
 
       expect(reportToErrorTracker.mock.calls).toStrictEqual([[error]]);
       expect(onGenuineFailure).not.toHaveBeenCalled();
-      await expect(recovery.classify(error)).resolves.toBe('superseded');
+      expect(recovery.classify(error)).toBe('superseded');
     });
 
     it("should leave a failure Sentry's global handler captured to Sentry, never capturing it again", async () => {
@@ -395,6 +396,16 @@ describe('createStaleBuildRecovery', () => {
       expect(reportToErrorTracker.mock.calls).toStrictEqual([[error]]);
     });
 
+    it('should hand the error tracker a global failure that came before its handlers were listening', async () => {
+      const { recovery, reportToErrorTracker } = setup({ isErrorTrackerListening: () => false });
+      const error = failure();
+
+      await recovery.recover(error, 'global');
+      await recovery.recover(error, 'global');
+
+      expect(reportToErrorTracker.mock.calls).toStrictEqual([[error]]);
+    });
+
     it.each(['boundary', 'global', 'preload'] as const)(
       'should tell analytics once of a %s failure decided genuine, when it is decided',
       async (source) => {
@@ -420,7 +431,7 @@ describe('createStaleBuildRecovery', () => {
 
       expect(recovery.readOutcome(error)).toBe('superseded');
       expect(onGenuineFailure).not.toHaveBeenCalled();
-      await expect(recovery.classify(error)).resolves.toBe('superseded');
+      expect(recovery.classify(error)).toBe('superseded');
     });
 
     it.each([
@@ -433,8 +444,8 @@ describe('createStaleBuildRecovery', () => {
       await recovery.recover(decided);
       await Promise.resolve();
 
-      await expect(recovery.classify(decided)).resolves.toBe(tag);
-      await expect(recovery.classify(failure())).resolves.toBe(tag);
+      expect(recovery.classify(decided)).toBe(tag);
+      expect(recovery.classify(failure())).toBe(tag);
     });
 
     it('should keep a stalled reload explained, and offered, when the stall check gets no answer', async () => {
@@ -495,6 +506,44 @@ describe('createStaleBuildRecovery', () => {
     );
   });
 
+  it('should charge the reload budget only once the guard is written', async () => {
+    const storage = createStorage();
+    const failing = {
+      ...storage,
+      setItem: (key: string, value: string) => {
+        if (key === staleBuildReloadKey) {
+          throw new Error('QuotaExceededError');
+        }
+        storage.setItem(key, value);
+      },
+    };
+    const { recovery, reload } = setup({ storage: failing });
+
+    await expect(recovery.recover(failure())).resolves.toBe('superseded');
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(storage.entries.has(autoReloadTimesKey)).toBe(false);
+  });
+
+  it('should take the guard back, and not reload, when the budget cannot be recorded', async () => {
+    const storage = createStorage();
+    const budgetFails = {
+      ...storage,
+      setItem: (key: string, value: string) => {
+        if (key === autoReloadTimesKey) {
+          throw new Error('QuotaExceededError');
+        }
+        storage.setItem(key, value);
+      },
+    };
+    const { recovery, reload } = setup({ storage: budgetFails });
+
+    await expect(recovery.recover(failure())).resolves.toBe('superseded');
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(storage.entries.has(staleBuildReloadKey)).toBe(false);
+  });
+
   it('should not retry a reload another page of this tab started, which may have looped', async () => {
     const { recovery, reload, storage } = setup();
     storage.setItem(staleBuildReloadKey, guardFor(ownBuildId, deployedBuildId));
@@ -505,11 +554,12 @@ describe('createStaleBuildRecovery', () => {
   });
 
   describe('classify', () => {
-    it('should name a deploy without reloading or superseding anything', async () => {
-      const { recovery, reload, onSuperseded } = setup();
+    it('should tag what is known now without asking the server, reloading or superseding anything', () => {
+      const { recovery, reload, onSuperseded, fetchServerBuildId } = setup();
 
-      await expect(recovery.classify(failure())).resolves.toBe('superseded');
+      expect(recovery.classify(failure())).toBe('unknown');
 
+      expect(fetchServerBuildId).not.toHaveBeenCalled();
       expect(reload).not.toHaveBeenCalled();
       expect(onSuperseded).not.toHaveBeenCalled();
     });
@@ -519,25 +569,17 @@ describe('createStaleBuildRecovery', () => {
       const error = failure();
 
       await recovery.recover(error);
+      await Promise.resolve();
 
-      await expect(recovery.classify(error)).resolves.toBe('superseded');
+      expect(recovery.classify(error)).toBe('superseded');
       expect(fetchServerBuildId).toHaveBeenCalledOnce();
     });
 
-    it('should keep no answer of its own: each classification reads build-skew afresh', async () => {
-      const { recovery, fetchServerBuildId } = setup();
-      const error = failure();
-
-      await recovery.classify(error);
-      await recovery.classify(error);
-
-      expect(fetchServerBuildId).toHaveBeenCalledTimes(2);
-    });
-
-    it('should call a failure the live build still has current', async () => {
+    it('should tag an undecided failure from the live verdict', async () => {
       const { recovery } = setup({ fetchServerBuildId: async () => ownBuildId });
+      await recovery.recover(failure());
 
-      await expect(recovery.classify(failure())).resolves.toBe('current');
+      expect(recovery.classify(failure())).toBe('current');
     });
   });
 

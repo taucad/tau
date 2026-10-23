@@ -128,16 +128,21 @@ describe('build-id skew guard (DF20)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is available');
   });
 
-  it('lifts the provisional write stop when the server names this build live, and says so', async () => {
-    const { BuildSkewBanner, buildId, isBuildSuperseded } = await load();
-    const server = serveLiveBuild();
+  it('lifts the provisional write stop once the server has confirmed this build, and says so', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { BuildSkewBanner, buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
+    answerLiveBuild(buildId);
     const heard = listen();
     render(<BuildSkewBanner />);
 
     announce(buildId + 1);
     await pause();
+    // One answer naming this build does not lift a peer's stop: an edge may answer for a build it leaves.
     expect(isBuildSuperseded()).toBe(true);
-    await server.settle(buildId);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
+    await pause();
 
     expect(isBuildSuperseded()).toBe(false);
     expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
@@ -157,7 +162,14 @@ describe('build-id skew guard (DF20)', () => {
 
   it("resumes writing once the server names this build, when it was superseded only on a peer's word", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { BuildSkewBanner, buildId, isBuildSuperseded, readSupersedingBuildId, peerRecheckDelay } = await load();
+    const {
+      BuildSkewBanner,
+      buildId,
+      isBuildSuperseded,
+      readSupersedingBuildId,
+      peerRecheckDelay,
+      serverConfirmations,
+    } = await load();
     answerLiveBuild('unreachable');
     const heard = listen();
     render(<BuildSkewBanner />);
@@ -167,7 +179,7 @@ describe('build-id skew guard (DF20)', () => {
 
     answerLiveBuild(buildId);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (1 + serverConfirmations));
     });
     await pause();
 
@@ -283,22 +295,6 @@ describe('build-id skew guard (DF20)', () => {
     expect(isBuildSuperseded()).toBe(false);
   });
 
-  it('ignores a server answer asked for a phase the tab has already left', async () => {
-    const { buildId, isBuildSuperseded, queryLiveBuild } = await load();
-    const server = serveLiveBuild();
-    announce(buildId + 1);
-    await pause();
-    expect(isBuildSuperseded()).toBe(true);
-
-    // Another question (a module load failure's) gets this build named before the peer check's answer lands.
-    const lookup = queryLiveBuild();
-    await server.settle(buildId);
-    await lookup;
-    await server.settle(buildId + 1);
-
-    expect(isBuildSuperseded()).toBe(false);
-  });
-
   it('asks again, and resumes, when a tab on its own build appears after the server superseded it', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
@@ -323,8 +319,10 @@ describe('build-id skew guard (DF20)', () => {
     expect(isBuildSuperseded()).toBe(false);
   });
 
-  it('tells the peer whose claim stopped it once writes resume, even while the server word is still turning', async () => {
-    const { buildId, isBuildSuperseded, offerReload, queryLiveBuild } = await load();
+  it('tells the peer whose claim stopped it once writes resume', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, offerReload, queryLiveBuild, peerRecheckDelay, serverConfirmations } =
+      await load();
     await serverSays(queryLiveBuild, buildId + 1);
     act(() => {
       offerReload(buildId + 1);
@@ -333,6 +331,10 @@ describe('build-id skew guard (DF20)', () => {
     answerLiveBuild(buildId);
 
     announce(buildId + 2);
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);
@@ -362,8 +364,27 @@ describe('build-id skew guard (DF20)', () => {
     expect(isReloadOffered()).toBe(false);
   });
 
-  it("resumes writing when a later announcement's check names this build", async () => {
-    const { buildId, isBuildSuperseded } = await load();
+  it('shares one question and its confirmations among every caller of queryLiveBuild', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, queryLiveBuild, lookupConfirmDelay, serverConfirmations } = await load();
+    const fetchMock = answerLiveBuild(buildId + 1);
+
+    const first = queryLiveBuild();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(lookupConfirmDelay / 2);
+    });
+    const second = queryLiveBuild();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(lookupConfirmDelay * (serverConfirmations + 1));
+    });
+    await Promise.all([first, second]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1 + serverConfirmations);
+  });
+
+  it("resumes writing once a later announcement's check, confirmed, names this build", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
     answerLiveBuild('unreachable');
     announce(buildId + 1);
     await pause();
@@ -371,6 +392,10 @@ describe('build-id skew guard (DF20)', () => {
 
     answerLiveBuild(buildId);
     announce(buildId + 2);
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);
@@ -426,8 +451,10 @@ describe('build-id skew guard (DF20)', () => {
     },
   );
 
-  it("withdraws a deploy's reload offer once the server names this build again", async () => {
-    const { buildId, isReloadOffered, offerReload, readSupersedingBuildId } = await load();
+  it("withdraws a deploy's reload offer once the server confirms this build again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isReloadOffered, offerReload, readSupersedingBuildId, peerRecheckDelay, serverConfirmations } =
+      await load();
     act(() => {
       offerReload(buildId + 1);
     });
@@ -435,6 +462,10 @@ describe('build-id skew guard (DF20)', () => {
     answerLiveBuild(buildId);
 
     announce({ buildId: buildId + 1, live: true });
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
     await pause();
 
     expect(isReloadOffered()).toBe(false);
@@ -452,12 +483,17 @@ describe('build-id skew guard (DF20)', () => {
     expect(readSupersedingBuildId()).toBe(buildId - 1);
   });
 
-  it("checks a peer's live claim with the server and stays, without answering it with a claim of its own", async () => {
-    const { buildId, isBuildSuperseded } = await load();
+  it("checks a peer's live claim with the server and resumes once confirmed, without answering it with a claim of its own", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
     answerLiveBuild(buildId);
     const heard = listen();
 
     announce({ buildId: buildId - 1, live: true });
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);
@@ -465,7 +501,8 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it("settles in a bounded number of server checks when two tabs' edges name different builds", async () => {
-    const { buildId, isBuildSuperseded } = await load();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
     // This tab's edge names its own build.
     const fetchMock = answerLiveBuild(buildId);
     /* The other tab, on build `buildId - 1`, behind an edge that names that build: it answers each live
@@ -484,14 +521,14 @@ describe('build-id skew guard (DF20)', () => {
     // The other tab boots and announces its (older) build plainly; this tab answers with its own.
     announce(buildId - 1);
     peer.postMessage({ buildId: buildId - 1, live: true });
+    await pause();
     await act(async () => {
-      await new Promise((resolve) => {
-        setTimeout(resolve, 300);
-      });
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (serverConfirmations + 5));
     });
+    await pause();
 
     expect(isBuildSuperseded()).toBe(false);
-    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(2);
+    expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(1 + serverConfirmations);
     expect(peerChecks).toBeLessThanOrEqual(1);
   });
 

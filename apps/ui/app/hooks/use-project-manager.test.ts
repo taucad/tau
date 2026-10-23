@@ -4072,6 +4072,18 @@ describe('useProjectManager.createProject', () => {
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
   });
 
+  it('records the listing a write-stopped pass read, so route access reuses it instead of discovering again', async () => {
+    mockBuildSuperseded = true;
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    const passes = mockListProjectManifests.mock.calls.length;
+
+    await result.current.getProjectRouteAccess(fakeProject.id);
+
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(passes);
+  });
+
   it('stops writing when the stop flips while a pass is already reconciling', async () => {
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     mockGetAllProjectFileSystemConfigs.mockResolvedValue([

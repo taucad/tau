@@ -5,7 +5,8 @@ import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import { describeSupersession } from '#filesystem/build-skew.js';
+import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 import { useReloadPromptOwner } from '#components/nav/browser-update.js';
 import {
@@ -13,6 +14,7 @@ import {
   readReloadState,
   readStaleBuildOutcome,
   recoverFromStaleBuild,
+  showsUpdatePrompt,
   subscribeReloadState,
   subscribeStaleBuildOutcomes,
 } from '#lib/stale-build-recovery.js';
@@ -24,6 +26,7 @@ const CollapsibleCodeBlock = lazy(async () => {
 });
 
 const serverReloadState = (): ReloadState => 'idle';
+const serverVerdict = (): ServerVerdict => 'unknown';
 
 /**
  * Errors this page has reported, kept for the module's life rather than one mount's, so the same
@@ -48,13 +51,17 @@ export function ErrorPage(): React.JSX.Element {
   const analytics = useAnalytics();
   const isModuleLoadFailure = isStaleModuleError(error);
   /* TAU-UI-6: the recovery owns a module load failure, its outcome and its report; this page only
-   * shows the outcome, which changes when the server names this build again (genuine after all). */
+   * shows it, decided once, with the live verdict below choosing the prompt or the error. */
   const outcome = useSyncExternalStore(subscribeStaleBuildOutcomes, () => readStaleBuildOutcome(error), serverOutcome);
   const staleOutcome = isModuleLoadFailure ? outcome : undefined;
   // The recovery's own reload: the button waits while it is pending and returns once it stalls.
   const reloadState = useSyncExternalStore(subscribeReloadState, readReloadState, serverReloadState);
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
-  const isExplained = staleOutcome === 'reloading' || staleOutcome === 'superseded';
+  const verdict = useSyncExternalStore(subscribeServerVerdict, readServerVerdict, serverVerdict);
+  /* The prompt follows the live verdict: it shows while a deploy explains the failure and the server
+   * has not named this build since, or once the server confirms another build, and gives way to the
+   * error itself when the server confirms this build live (a rollback ended). */
+  const isExplained = isModuleLoadFailure && showsUpdatePrompt(staleOutcome, verdict);
   // This screen is the reload prompt while it shows; the floating banner would only repeat it.
   useReloadPromptOwner(isExplained);
 

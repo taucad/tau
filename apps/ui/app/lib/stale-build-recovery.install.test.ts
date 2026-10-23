@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
 const lookupConfirmDelay = 1000;
-vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));
+vi.mock('#lib/error-reporting.js', () => ({ reportUiError, isErrorTrackerListening: () => true }));
 
 /** This bundle's build id and the deploy that replaced it, set by {@link load} from the real module. */
 let ownBuildId = 0;

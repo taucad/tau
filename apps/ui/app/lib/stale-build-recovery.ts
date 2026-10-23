@@ -47,7 +47,7 @@ import {
   readSupersedingBuildId,
 } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import { reportUiError } from '#lib/error-reporting.js';
+import { isErrorTrackerListening, reportUiError } from '#lib/error-reporting.js';
 import { readSessionStorage } from '#lib/session-storage.js';
 
 /**
@@ -111,6 +111,11 @@ export type StaleBuildRecoveryOptions = {
   readonly reportToErrorTracker?: (failure: unknown) => void;
   /** Tell analytics, once, of a failure decided genuine (`current`) when it was decided. */
   readonly onGenuineFailure?: (failure: unknown) => void;
+  /**
+   * Whether the error tracker's own global handlers are installed now: a `global` failure before
+   * that (at boot) reaches no handler, so the recovery reports it itself. Defaults to listening.
+   */
+  readonly isErrorTrackerListening?: () => boolean;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
@@ -184,7 +189,7 @@ export type StaleBuildRecovery = {
    * What the error tracker should be told about a failure ({@link StaleBuildTag}), without acting
    * on it: from the decision already made for it, or else from the live verdict. Never reloads.
    */
-  readonly classify: (failure: unknown) => Promise<StaleBuildTag>;
+  readonly classify: (failure: unknown) => StaleBuildTag;
   /** The settled decision for a failure, or `undefined` while none is. */
   readonly readOutcome: (failure: unknown) => StaleBuildOutcome | undefined;
   /** Subscribe to each settled or changed decision ({@link StaleBuildRecovery.readOutcome}). */
@@ -219,6 +224,8 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     verdict?: ServerVerdict;
     /** Channels it arrived through ({@link FailureSource}). */
     readonly sources: Set<FailureSource>;
+    /** A sighting came through a channel the error tracker was capturing at that moment. */
+    seenByTracker: boolean;
     reportedToErrorTracker: boolean;
     reportedToAnalytics: boolean;
     /** Waiting for the channel Vite rethrows a preload failure into. */
@@ -228,7 +235,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   const recordOf = (failure: WeakKey): FailureRecord => {
     let record = records.get(failure);
     if (record === undefined) {
-      record = { sources: new Set(), reportedToErrorTracker: false, reportedToAnalytics: false };
+      record = { sources: new Set(), seenByTracker: false, reportedToErrorTracker: false, reportedToAnalytics: false };
       records.set(failure, record);
     }
     return record;
@@ -245,8 +252,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
   };
 
-  const isCapturedBySentry = (record: FailureRecord): boolean =>
-    [...record.sources].some((source) => capturedBySentry[source]);
+  const isCapturedBySentry = (record: FailureRecord): boolean => record.seenByTracker;
 
   /** Hand a failure to the error tracker once, unless a channel the tracker captures itself saw it. */
   const reportToErrorTracker = (failure: WeakKey): void => {
@@ -254,7 +260,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     if (record.reportedToErrorTracker || isCapturedBySentry(record)) {
       return;
     }
-    if (!record.sources.has('boundary')) {
+    if (record.sources.size === 1 && record.sources.has('preload')) {
       // Only Vite's preloader saw it so far: give the channel it rethrows into the chance first.
       record.preloadWait ??= setTimeout(() => {
         record.preloadWait = undefined;
@@ -286,20 +292,20 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   const now = options.now ?? Date.now;
 
   /**
-   * Spend one automatic reload from this tab's budget, or refuse. The `from>to` guard stops one
+   * This tab's automatic reload budget. The `from>to` guard stops one
    * pair looping; the budget stops a rolling deploy whose edges disagree (B, C, B, …) from reloading
    * an untouched page back and forth, since each arrival clears the guard but never the budget.
    */
-  const spendAutoReload = (storage: NonNullable<StaleBuildRecoveryOptions['storage']>): boolean => {
+  const recentAutoReloads = (storage: NonNullable<StaleBuildRecoveryOptions['storage']>): number[] => {
     const at = now();
-    const recent = (JSON.parse(storage.getItem(autoReloadTimesKey) ?? '[]') as unknown[]).filter(
+    return (JSON.parse(storage.getItem(autoReloadTimesKey) ?? '[]') as unknown[]).filter(
       (time): time is number => typeof time === 'number' && at - time < autoReloadBudgetWindow,
     );
-    if (recent.length >= autoReloadBudget) {
-      return false;
-    }
-    storage.setItem(autoReloadTimesKey, JSON.stringify([...recent, at]));
-    return true;
+  };
+  const hasAutoReloadLeft = (storage: NonNullable<StaleBuildRecoveryOptions['storage']>): boolean =>
+    recentAutoReloads(storage).length < autoReloadBudget;
+  const chargeAutoReload = (storage: NonNullable<StaleBuildRecoveryOptions['storage']>): void => {
+    storage.setItem(autoReloadTimesKey, JSON.stringify([...recentAutoReloads(storage), now()]));
   };
 
   const supersede = (serverBuildId: number): StaleBuildOutcome => {
@@ -335,12 +341,23 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     const { storage } = options;
     const guard = guardFor(options.buildId, serverBuildId);
     try {
-      if (storage.getItem(staleBuildReloadKey) === guard || !spendAutoReload(storage)) {
+      if (storage.getItem(staleBuildReloadKey) === guard || !hasAutoReloadLeft(storage)) {
         return supersede(serverBuildId);
       }
+      // The guard first: without it nothing would stop a loop, and the budget is charged only once it holds.
       storage.setItem(staleBuildReloadKey, guard);
     } catch {
-      // Without a written guard nothing would stop a reload loop.
+      return supersede(serverBuildId);
+    }
+    try {
+      chargeAutoReload(storage);
+    } catch {
+      // A reload the budget could not record must not happen; take the guard back with it.
+      try {
+        storage.removeItem(staleBuildReloadKey);
+      } catch {
+        // Nothing more to undo.
+      }
       return supersede(serverBuildId);
     }
     setReloadState('pending');
@@ -384,6 +401,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       const record = recordOf(failure);
       record.sources.add(source);
+      if (capturedBySentry[source] && (options.isErrorTrackerListening?.() ?? true)) {
+        record.seenByTracker = true;
+      }
       reportToErrorTracker(failure);
       if (record.decision === undefined) {
         const decided = decide();
@@ -395,13 +415,13 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       return record.decision;
     },
-    async classify(failure) {
-      const known = isKey(failure) ? records.get(failure)?.decision : undefined;
-      if (known !== undefined) {
-        const outcome = await known;
-        return tagOf(outcome, isKey(failure) ? records.get(failure)?.verdict : undefined);
+    classify(failure) {
+      // Passive: what is known now, from the settled outcome or else the live verdict; never asks.
+      const record = isKey(failure) ? records.get(failure) : undefined;
+      if (record?.outcome !== undefined) {
+        return tagOf(record.outcome, record.verdict);
       }
-      const verdict = await askVerdict();
+      const verdict = liveBuild.readVerdict();
       return verdict === 'replaced' ? 'superseded' : tagOf('current', verdict);
     },
     readOutcome: (failure) => (isKey(failure) ? records.get(failure)?.outcome : undefined),
@@ -464,6 +484,7 @@ const getPageRecovery = (): StaleBuildRecovery => {
     reportToErrorTracker: (failure) => {
       void reportUiError(failure);
     },
+    isErrorTrackerListening,
     onGenuineFailure: (failure) => {
       genuineForAnalytics.push(failure);
       genuineFailureTopic.emit();
@@ -527,8 +548,7 @@ export const subscribeReloadState = (listener: () => void): (() => void) =>
  * @param failure - The caught value.
  * @returns The `stale_build` tag for its event.
  */
-export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildTag> =>
-  getPageRecovery().classify(failure);
+export const classifyStaleBuildFailure = (failure: unknown): StaleBuildTag => getPageRecovery().classify(failure);
 
 /**
  * Hand a module load failure any React error boundary caught to the recovery (`hydrateRoot`'s
@@ -606,3 +626,15 @@ export const installStaleBuildRecovery = (): (() => void) => {
     }
   };
 };
+
+/**
+ * Whether the error page should show the reload prompt ("Tau has been updated") for a module load
+ * failure, from its settled outcome and the live verdict: while a deploy explains it and the server
+ * has not named this build since, or whenever the server has confirmed another build.
+ *
+ * @param outcome - The failure's settled outcome, `undefined` while it is decided.
+ * @param verdict - The live verdict (`build-skew`).
+ * @returns `true` for the prompt, `false` for the error itself.
+ */
+export const showsUpdatePrompt = (outcome: StaleBuildOutcome | undefined, verdict: ServerVerdict): boolean =>
+  outcome !== undefined && verdict !== 'live' && (outcome !== 'current' || verdict === 'replaced');

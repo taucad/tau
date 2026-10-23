@@ -1713,11 +1713,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           return manifestId !== undefined && manifestId !== claimedBy;
         });
       let result: ProjectDiscoveryResult = { ...discovered, entries };
+      // The listing this pass read is the current one, whether or not it gets to write (DF20 gates below).
+      const recordSnapshot = (): ProjectDiscoveryResult => {
+        if (epoch === discoveryEpochRef.current) {
+          discoverySnapshotRef.current = { epoch, result };
+        }
+        return result;
+      };
       if (isBuildSuperseded()) {
         // A newer bundle owns durable state now: publish what we can read and
         // write nothing (DF20).
         skippedDuringStopRef.current = true;
-        return result;
+        return recordSnapshot();
       }
       const rootStatuses = new Map(
         result.roots.map((root) => [persistentStorageRootKey(root.root), root.status] as const),
@@ -1793,7 +1800,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // DF20 again, right before writing: a newer tab may have announced itself while this pass awaited.
       if (isBuildSuperseded()) {
         skippedDuringStopRef.current = true;
-        return result;
+        return recordSnapshot();
       }
       if (epoch === discoveryEpochRef.current) {
         const worker = await getReadiedWorker();
@@ -1815,7 +1822,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
         if (isBuildSuperseded()) {
           skippedDuringStopRef.current = true;
-          return result;
+          return recordSnapshot();
         }
         await Promise.all(configDeletes.map(async (projectId) => worker.deleteProjectResources(projectId)));
       }
@@ -1831,10 +1838,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         await applyProjectFileSystemConfigChanges({ upserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();
       }
-      if (epoch === discoveryEpochRef.current) {
-        discoverySnapshotRef.current = { epoch, result };
-      }
-      return result;
+      return recordSnapshot();
     },
     [fileManager, getReadiedWorker],
   );

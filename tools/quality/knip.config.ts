@@ -364,14 +364,16 @@ const config: KnipConfig = {
       entry: ['src/types/{occt-import-js,emscripten}.d.ts'],
     },
     'packages/core/native-process': {
-      // W1 shell spike: the spike-w1-shell.yml workflow runs these .mts by path (`node …`),
-      // so they are entry points, not dead code. Removed when W2 lands. Mirrors scripts.spikes
-      // and the other per-workspace run-by-path script entries above.
-      entry: ['spikes/shell/*.mts'],
-      // node-pty is the S2 PTY probe's dependency, declared in the spike's own CI-only
-      // package.json (installed by the workflow, not a workspace member), so knip sees the
-      // import without the manifest. Not a native-process-core runtime dependency.
-      ignoreDependencies: ['node-pty'],
+      // W1 + W2 shell spikes: the spike-w*-shell/*.yml workflows run these .mts by path
+      // (`node …`), so they are entry points, not dead code. The W2 lanes live in
+      // subdirectories (spikes/shell/{mxc,reaping}/…), so the glob must recurse, matching
+      // the scripts workspace's own `spikes/**/*.{ts,mts}`. Removed when the spikes land.
+      entry: ['spikes/shell/**/*.mts'],
+      // CI-only dependencies declared in the spikes' own package.json (installed by the
+      // workflow, not workspace members), so knip sees the import without the manifest and
+      // none is a native-process-core runtime dependency: node-pty is the S2 PTY probe's;
+      // @microsoft/mxc-sdk is the W2 Windows MXC isolation spike's pinned SDK.
+      ignoreDependencies: ['node-pty', '@microsoft/mxc-sdk'],
     },
     'packages/core/python-kernel': {
       // Every Python kernel's Nx targets run these scripts from the workspace root with `--package <dir>`.

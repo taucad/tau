@@ -239,17 +239,28 @@ describe('createStaleBuildRecovery', () => {
     expect(storage.entries.get(staleBuildReloadKey)).toBe(guardFor(ownBuildId, deployedBuildId));
   });
 
-  it('should try a stalled reload once more on a later failure, since the page never left', async () => {
+  it('should offer, not retry, a stalled reload on a later failure', async () => {
     vi.useFakeTimers();
     const { recovery, reload } = setup({ reloadTimeout: 15_000 });
 
     await recovery.recover(failure());
     await vi.advanceTimersByTimeAsync(15_000);
-    await expect(recovery.recover(failure())).resolves.toBe('reloading');
-    await vi.advanceTimersByTimeAsync(15_000);
-    await expect(recovery.recover(failure())).resolves.toBe('superseded');
 
-    expect(reload).toHaveBeenCalledTimes(2);
+    await expect(recovery.recover(failure())).resolves.toBe('superseded');
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('should not offer a stalled reload once the server names this build again', async () => {
+    vi.useFakeTimers();
+    let served = deployedBuildId;
+    const { recovery, onSuperseded } = setup({ reloadTimeout: 15_000, fetchServerBuildId: async () => served });
+
+    await recovery.recover(failure());
+    served = ownBuildId;
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    expect(onSuperseded).not.toHaveBeenCalled();
+    expect(recovery.readReloadState()).toBe('idle');
   });
 
   it('should not retry a reload another page of this tab started, which may have looped', async () => {

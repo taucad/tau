@@ -58,9 +58,6 @@ export const reloadTimeout = 15_000;
 /** Where this page's own automatic reload stands: none started, waiting to leave, or stalled. */
 export type ReloadState = 'idle' | 'pending' | 'stalled';
 
-/** Automatic reloads one page may attempt for one deploy: the first, and one retry of a stall. */
-const reloadAttempts = 2;
-
 const staleModuleMessages = [
   /Importing a module script failed/u,
   /Failed to fetch dynamically imported module/u,
@@ -126,9 +123,6 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   const decisions = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
   const classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
   let reloadState: ReloadState = 'idle';
-  /** The guard this page wrote itself, and how often it reloaded under it without leaving. */
-  let ownGuard: string | undefined;
-  let attempts = 0;
   const reloadStateTopic = new Topic<void>({ name: 'stale-build-reload' });
   const setReloadState = (next: ReloadState): void => {
     if (next !== reloadState) {
@@ -149,16 +143,28 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   const replacingBuild = (serverBuildId: number | undefined): number | undefined =>
     serverBuildId === undefined || serverBuildId === options.buildId ? undefined : serverBuildId;
 
-  const decide = async (): Promise<StaleBuildOutcome> => {
+  /** Ask the server, and say which build (if any) replaced this one. A bundle without an id asks nothing. */
+  const askServer = async (): Promise<{
+    readonly answer: number | undefined;
+    readonly replacing: number | undefined;
+  }> => {
     if (options.buildId === 0) {
-      return 'current';
+      return { answer: undefined, replacing: undefined };
     }
     const answer = await options.fetchServerBuildId();
+    return { answer, replacing: replacingBuild(answer) };
+  };
+
+  /** Pass a server answer on, even one naming this build, which withdraws an offer a stale deploy left. */
+  const passOn = (answer: number | undefined): void => {
     if (answer !== undefined) {
-      // Passed on even when it names this build, which withdraws an offer a stale deploy left behind.
       options.onLiveBuild(answer);
     }
-    const serverBuildId = replacingBuild(answer);
+  };
+
+  const decide = async (): Promise<StaleBuildOutcome> => {
+    const { answer, replacing: serverBuildId } = await askServer();
+    passOn(answer);
     if (serverBuildId === undefined) {
       return 'current';
     }
@@ -171,11 +177,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     const { storage } = options;
     const guard = guardFor(options.buildId, serverBuildId);
     try {
-      const recorded = storage.getItem(staleBuildReloadKey);
-      /* The guard stops a reload that landed on a failing build from reloading again. Written by this
-       * very page, it only means the reload has not left yet: one more attempt is still loop-free. */
-      const isOwnStall = recorded === guard && ownGuard === guard && attempts < reloadAttempts;
-      if (recorded === guard && !isOwnStall) {
+      if (storage.getItem(staleBuildReloadKey) === guard) {
         return supersede(serverBuildId);
       }
       storage.setItem(staleBuildReloadKey, guard);
@@ -183,17 +185,26 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       // Without a written guard nothing would stop a reload loop.
       return supersede(serverBuildId);
     }
-    ownGuard = guard;
-    attempts += 1;
     setReloadState('pending');
     options.reload();
     /* A page still here after the timeout is stalled: the reload was refused or is only slow, and no
      * signal tells the two apart (the old document lives until the new one commits; Tau registers no
-     * unload prompt, `use-flush-on-close`). The guard stays, the reload is offered, and a later
-     * failure may try once more. */
+     * unload prompt, `use-flush-on-close`). The guard stays, and later failures are offered the reload,
+     * never another automatic one. Before offering, the server is asked again: if it names this build
+     * by now, the offer would only bring back one that was withdrawn. */
     setTimeout(() => {
-      setReloadState('stalled');
-      options.onSuperseded(serverBuildId);
+      const offerIfStillReplaced = async (): Promise<void> => {
+        const { answer, replacing: stillReplacing } = await askServer();
+        passOn(answer);
+        if (stillReplacing === undefined) {
+          setReloadState('idle');
+          return;
+        }
+        setReloadState('stalled');
+        options.onSuperseded(stillReplacing);
+      };
+      // async-iife: bootstrap -- a timer cannot await; the check acts on its own.
+      void offerIfStillReplaced();
     }, options.reloadTimeout ?? reloadTimeout);
     return 'reloading';
   };
@@ -217,10 +228,8 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         return known;
       }
       const classification = (async (): Promise<StaleBuildOutcome> => {
-        if (options.buildId === 0) {
-          return 'current';
-        }
-        return replacingBuild(await options.fetchServerBuildId()) === undefined ? 'current' : 'superseded';
+        const { replacing } = await askServer();
+        return replacing === undefined ? 'current' : 'superseded';
       })();
       if (key !== undefined) {
         classifications.set(key, classification);

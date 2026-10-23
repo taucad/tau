@@ -321,6 +321,7 @@ export const laneIdentity = (sdk?: MxcSdk): Record<string, unknown> => {
       arch: arch(),
       release: release(),
       build: osBuild(),
+      userSid: currentUserSid(),
       runnerImage: process.env['ImageOS'] ?? 'unknown',
       imageVersion: process.env['ImageVersion'] ?? 'unknown',
     },
@@ -341,6 +342,31 @@ export const laneIdentity = (sdk?: MxcSdk): Record<string, unknown> => {
       wxcExec: wxcExecDigest(sdk) ?? null,
     },
   };
+};
+
+/**
+ * The current user's SID, read via the .NET `WindowsIdentity` API through PowerShell. This is
+ * deliberately PATH-independent: it never shells out to `whoami`, so Git-bash's GNU coreutils
+ * `whoami` (which rejects `/user`) cannot shadow it. Returns 'unknown' off Windows or on any failure.
+ */
+const currentUserSid = (): string => {
+  if (!isWindows) {
+    return 'n/a';
+  }
+  const { spawnSync } = sdkRequire('node:child_process') as typeof import('node:child_process');
+  const command = '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value';
+  for (const shell of ['pwsh', 'powershell']) {
+    const result = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', command], {
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 20_000,
+    });
+    const sid = (result.stdout ?? '').trim();
+    if (result.status === 0 && /^S-\d/.test(sid)) {
+      return sid;
+    }
+  }
+  return 'unknown';
 };
 
 /** Read the Windows OS build from the registry (never from a package claim). */

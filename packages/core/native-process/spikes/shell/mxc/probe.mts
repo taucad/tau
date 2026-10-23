@@ -203,9 +203,15 @@ const main = async (): Promise<void> => {
     ),
   );
 
+  const apiPresent = Boolean(probeFacts['baseContainerApiPresent']) && psecCreateClose.available;
+  const conclusion = apiPresent
+    ? 'PSEC/processcontainer base-container API present: the two-container isolation receipt is exercisable on this row.'
+    : 'PSEC/processcontainer base-container API NOT present on this Windows build (typed-unavailable, fail-closed — not a bug). The MXC two-container isolation receipt is not exercisable here; it needs a PSEC-capable Windows build (the Win11 Eval VM lane; §RQ5 minimum-build / D9). On this row the exercisable Windows isolation path is the capability-SID fallback.';
+
   const receipt = {
     kind: 'capability-probe',
     identity: laneIdentity(sdk),
+    conclusion,
     platformSupport,
     availableBackends,
     probeFacts,

@@ -109,6 +109,15 @@ goes green on an absent prerequisite.
 Local (Windows, Node ≥ 24): `npm install` in this directory, then
 `node provision.mts && node probe.mts && node isolation.mts` (or `node fallback.mts`).
 
+## Empirical result (hosted `windows-2025`, run 39891664815)
+
+Probe reported `PSEC=false denyPaths=false conpty=true`: the MXC **base-container (PSEC) API is not
+present** on the GitHub-hosted Server 2025 runner (ConPTY works). This is a legitimate typed-
+unavailable finding (the probe fails closed, not a bug): the two-container `processcontainer`
+isolation receipt is **not exercisable on this row** and needs a PSEC-capable Windows build — the
+Win11 Eval VM lane, §RQ5 minimum-build / D9. On hosted `windows-2025` the **exercisable** Windows
+isolation path is therefore the capability-SID fallback, which is why its receipt matters here.
+
 ## Not proven / open
 
 - Microsoft publishes **no formal security-boundary commitment for the process tier**. Container-to-

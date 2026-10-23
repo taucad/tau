@@ -69,11 +69,14 @@ jobs:
 
       # Record the pin: installed version == pinned, licence (MIT), registry integrity/shasum, and
       # the resolved native wxc-exec on-disk digest + OS build.
+      # pwsh (not bash): the MXC SDK's internal `whoami /user` SID lookup resolves to
+      # C:\Windows\System32\whoami.exe under pwsh, whereas under Git-bash the GNU coreutils `whoami`
+      # shadows it on PATH and rejects `/user` ("extra operand"), crashing the step.
       - name: Provision + record (pin, licence, digest, OS build)
         id: provision
         continue-on-error: true
-        shell: bash
-        run: node "$MXC_DIR/provision.mts"
+        shell: pwsh
+        run: node "$env:MXC_DIR/provision.mts"
 
       # Capability probe: PSEC create/close (externally proven by a preflight sentinel a container
       # child writes), PSE_SUPPORT_FS_DENY, ConPTY, isolation tier, OS build. Its outcome gates the
@@ -81,16 +84,16 @@ jobs:
       - name: Capability probe (PSEC / PSE_SUPPORT_FS_DENY / ConPTY)
         id: probe
         continue-on-error: true
-        shell: bash
-        run: node "$MXC_DIR/probe.mts"
+        shell: pwsh
+        run: node "$env:MXC_DIR/probe.mts"
 
       # Core deliverable, taken only when the MXC probe passed: two concurrent containers, external
       # canaries for read/write/HOME/temp/approved-folder, proxy cross-use and descendant reaping.
       - name: Two-concurrent-container isolation receipt
         id: isolation
         if: steps.probe.outcome == 'success'
-        shell: bash
-        run: node "$MXC_DIR/isolation.mts"
+        shell: pwsh
+        run: node "$env:MXC_DIR/isolation.mts"
 
       # Fallback, taken only where the MXC probe failed on this row: the capability-SID receipt.
       - name: Capability-SID fallback receipt

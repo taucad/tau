@@ -27,7 +27,9 @@ $pinvoke = @'
 using System;
 using System.Runtime.InteropServices;
 public static class TauCap {
-  [DllImport("userenv.dll", SetLastError = true)]
+  // Exported by kernelbase.dll (NOT userenv.dll — the wrong DLL throws EntryPointNotFoundException
+  // on first call, which previously surfaced as an opaque fallback.run failure).
+  [DllImport("kernelbase.dll", SetLastError = true, CharSet = CharSet.Unicode)]
   public static extern bool DeriveCapabilitySidsFromName(string capName, out IntPtr groupSids, out int groupCount, out IntPtr sids, out int count);
   [DllImport("advapi32.dll", SetLastError = true)]
   public static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
@@ -72,9 +74,9 @@ function New-WriteRestrictedToken($capPtr) {
   $hProc = [TauCap]::GetCurrentProcess()
   $hTok = [IntPtr]::Zero
   [void][TauCap]::OpenProcessToken($hProc, [TauCap]::TOKEN_ALL, [ref]$hTok)
-  $sa = New-Object TauCap+SID_AND_ATTRIBUTES
+  $sa = New-Object 'TauCap+SID_AND_ATTRIBUTES'
   $sa.Sid = $capPtr; $sa.Attributes = 0
-  $arr = @($sa)
+  $arr = [TauCap+SID_AND_ATTRIBUTES[]]@($sa)
   $new = [IntPtr]::Zero
   if (-not [TauCap]::CreateRestrictedToken($hTok, [TauCap]::WRITE_RESTRICTED, 0, [IntPtr]::Zero, 0, [IntPtr]::Zero, 1, $arr, [ref]$new)) {
     throw "CreateRestrictedToken failed: $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error())"
@@ -89,56 +91,81 @@ if ($capApi) {
   Set-Content -Path (Join-Path $rootA 'secret.txt') -Value 'SECRET-A'
   Set-Content -Path (Join-Path $rootB 'secret.txt') -Value 'SECRET-B'
 
+  # Stage 1 — derive per-session capability SIDs. A failure here is a typed prerequisite, recorded on
+  # its own check (never an opaque crash), and the later stages are skipped.
+  $capA = $null; $capB = $null
   try {
     $capA = Get-CapabilitySidString 'tauSessionA'
     $capB = Get-CapabilitySidString 'tauSessionB'
-    Add-Check 'fallback.capabilitySid' 'per-session capability SIDs derived' "A=$($capA.str) B=$($capB.str)" $true @{ a = $capA.str; b = $capB.str }
+    Add-Check 'fallback.capabilitySid' 'per-session capability SIDs derived (DeriveCapabilitySidsFromName)' "A=$($capA.str) B=$($capB.str)" $true @{ a = $capA.str; b = $capB.str }
+  } catch {
+    Add-Check 'fallback.capabilitySid' 'per-session capability SIDs derived (DeriveCapabilitySidsFromName)' $_.Exception.Message $false $null
+  }
 
-    # Grant each session's capability SID write (M) on its OWN root (so its restricted token can write there).
+  if ($capA -and $capB) {
+    # Grant each session's capability SID write (M) on its OWN root; deny the OTHER session's
+    # capability SID read on each private root (the Tau deny-read ACEs).
     & icacls $rootA /grant "*$($capA.str):(OI)(CI)M" | Out-Null
+    $grantA = ($LASTEXITCODE -eq 0)
     & icacls $rootB /grant "*$($capB.str):(OI)(CI)M" | Out-Null
-    # Tau deny-read ACEs: deny the OTHER session's capability SID read on each private root.
+    $grantB = ($LASTEXITCODE -eq 0)
     & icacls $rootA /deny "*$($capB.str):(OI)(CI)R" | Out-Null
+    $denyA = ($LASTEXITCODE -eq 0)
     & icacls $rootB /deny "*$($capA.str):(OI)(CI)R" | Out-Null
-    $denyReadApplied = ($LASTEXITCODE -eq 0)
+    $denyB = ($LASTEXITCODE -eq 0)
+    $denyReadApplied = ($denyA -and $denyB)
+    Add-Check 'fallback.aces' 'capability-SID write grants + deny-read ACEs applied via icacls' "grants=$grantA,$grantB deny=$denyA,$denyB" ($grantA -and $grantB) @{ grantA = $grantA; grantB = $grantB; denyA = $denyA; denyB = $denyB }
 
-    $tokA = New-WriteRestrictedToken $capA.ptr
-    $tokB = New-WriteRestrictedToken $capB.ptr
-    Add-Check 'fallback.restrictedToken' 'WRITE_RESTRICTED tokens with capability restricting SIDs created' 'created' $true $null
-
-    function Try-Access($token, $sessionId, $ownRoot, $otherRoot) {
-      $result = @{ ownWrite = $false; crossWrite = $false; crossRead = $false }
-      [void][TauCap]::ImpersonateLoggedOnUser($token)
-      try { Set-Content -Path (Join-Path $ownRoot "own-$sessionId.txt") -Value 'x' -ErrorAction Stop; $result.ownWrite = $true } catch {}
-      try { Set-Content -Path (Join-Path $otherRoot "cross-$sessionId.txt") -Value 'x' -ErrorAction Stop; $result.crossWrite = $true } catch {}
-      try { $null = Get-Content -Path (Join-Path $otherRoot 'secret.txt') -ErrorAction Stop; $result.crossRead = $true } catch {}
-      [void][TauCap]::RevertToSelf()
-      return $result
+    # Stage 2 — build the WRITE_RESTRICTED tokens with the capability SIDs as restricting SIDs.
+    $tokA = $null; $tokB = $null
+    try {
+      $tokA = New-WriteRestrictedToken $capA.ptr
+      $tokB = New-WriteRestrictedToken $capB.ptr
+      Add-Check 'fallback.restrictedToken' 'WRITE_RESTRICTED tokens with capability restricting SIDs created' 'created' $true $null
+    } catch {
+      Add-Check 'fallback.restrictedToken' 'WRITE_RESTRICTED tokens with capability restricting SIDs created' $_.Exception.Message $false $null
     }
 
-    $ra = Try-Access $tokA 'A' $rootA $rootB
-    $rb = Try-Access $tokB 'B' $rootB $rootA
+    if ($tokA -and $tokB) {
+      function Try-Access($token, $sessionId, $ownRoot, $otherRoot) {
+        $result = @{ ownWrite = $false; crossWrite = $false; crossRead = $false }
+        [void][TauCap]::ImpersonateLoggedOnUser($token)
+        try { Set-Content -Path (Join-Path $ownRoot "own-$sessionId.txt") -Value 'x' -ErrorAction Stop; $result.ownWrite = $true } catch {}
+        try { Set-Content -Path (Join-Path $otherRoot "cross-$sessionId.txt") -Value 'x' -ErrorAction Stop; $result.crossWrite = $true } catch {}
+        try { $null = Get-Content -Path (Join-Path $otherRoot 'secret.txt') -ErrorAction Stop; $result.crossRead = $true } catch {}
+        [void][TauCap]::RevertToSelf()
+        return $result
+      }
 
-    # EXTERNAL verification (host thread, after RevertToSelf): inspect what actually landed on disk.
-    $ownWrites = (Test-Path (Join-Path $rootA 'own-A.txt')) -and (Test-Path (Join-Path $rootB 'own-B.txt'))
-    $crossWrites = (Test-Path (Join-Path $rootB 'cross-A.txt')) -or (Test-Path (Join-Path $rootA 'cross-B.txt'))
-    $ownObserved = if ($ownWrites) { 'both wrote' } else { 'blocked' }
-    Add-Check 'fallback.write.own' 'each session CAN write its own root (capability SID ACE)' $ownObserved $ownWrites @{ a = $ra; b = $rb }
-    $crossObserved = if (-not $crossWrites) { 'both denied' } else { 'TAMPER' }
-    Add-Check 'fallback.write.cross' "neither session can write the other's root (restricting SID isolation)" $crossObserved (-not $crossWrites) @{ crossAonB = (Test-Path (Join-Path $rootB 'cross-A.txt')); crossBonA = (Test-Path (Join-Path $rootA 'cross-B.txt')) }
-    $readIsolated = (-not $ra.crossRead) -and (-not $rb.crossRead)
-    $readObserved = if ($readIsolated) { 'both denied' } else { 'READABLE (serialize required)' }
-    Add-Check 'fallback.read.cross' "cross-reads isolated ONLY if deny-read ACE holds (else serialize per device)" $readObserved $readIsolated @{ denyReadApplied = $denyReadApplied; aReadB = $ra.crossRead; bReadA = $rb.crossRead }
-  } catch {
-    Add-Check 'fallback.run' 'capability-SID fallback probe ran to completion' $_.Exception.Message $false $null
+      $ra = Try-Access $tokA 'A' $rootA $rootB
+      $rb = Try-Access $tokB 'B' $rootB $rootA
+
+      # EXTERNAL verification (host thread, after RevertToSelf): inspect what actually landed on disk.
+      $ownWrites = (Test-Path (Join-Path $rootA 'own-A.txt')) -and (Test-Path (Join-Path $rootB 'own-B.txt'))
+      $crossWrites = (Test-Path (Join-Path $rootB 'cross-A.txt')) -or (Test-Path (Join-Path $rootA 'cross-B.txt'))
+      $ownObserved = if ($ownWrites) { 'both wrote' } else { 'blocked' }
+      Add-Check 'fallback.write.own' 'each session CAN write its own root (capability SID ACE)' $ownObserved $ownWrites @{ a = $ra; b = $rb }
+      $crossObserved = if (-not $crossWrites) { 'both denied' } else { 'TAMPER' }
+      Add-Check 'fallback.write.cross' "neither session can write the other's root (restricting SID isolation)" $crossObserved (-not $crossWrites) @{ crossAonB = (Test-Path (Join-Path $rootB 'cross-A.txt')); crossBonA = (Test-Path (Join-Path $rootA 'cross-B.txt')) }
+      $readIsolated = (-not $ra.crossRead) -and (-not $rb.crossRead)
+      $readObserved = if ($readIsolated) { 'both denied' } else { 'READABLE (serialize required)' }
+      Add-Check 'fallback.read.cross' "cross-reads isolated ONLY if deny-read ACE holds (else serialize per device)" $readObserved $readIsolated @{ denyReadApplied = $denyReadApplied; aReadB = $ra.crossRead; bReadA = $rb.crossRead }
+    }
   }
 }
 
-$verdict = if (($checks | Where-Object { $_.verdict -eq 'fail' }).Count -eq 0 -and $checks.Count -gt 0) { 'pass' } else { 'fail' }
+# The row's verdict gates on the CORE guarantee (capability SIDs + tokens + WRITE isolation).
+# fallback.read.cross is a measured, documented outcome, NOT a gate: per §RQ5, cross-reads are
+# isolated only if the deny-read ACE holds, else sessions serialize per device — a real finding
+# either way, so it is recorded but excluded from pass/fail (mirrors the probe excluding ConPTY).
+$core = $checks | Where-Object { $_.id -ne 'fallback.read.cross' }
+$verdict = if (($core | Where-Object { $_.verdict -eq 'fail' }).Count -eq 0 -and $core.Count -gt 0) { 'pass' } else { 'fail' }
+$readCheck = $checks | Where-Object { $_.id -eq 'fallback.read.cross' } | Select-Object -First 1
 $receipt = [ordered]@{
   kind = 'capability-sid-fallback'
   os = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' | Select-Object ProductName, EditionID, CurrentBuild, UBR, DisplayVersion)
   source = @{ sha = $env:GITHUB_SHA; run = $env:GITHUB_RUN_ID }
+  readIsolation = if ($null -eq $readCheck) { 'not-measured' } elseif ($readCheck.verdict -eq 'pass') { 'isolated (deny-read ACE held)' } else { 'not isolated -> serialize shell sessions per device (session-limit)' }
   checks = $checks
   verdict = $verdict
 }

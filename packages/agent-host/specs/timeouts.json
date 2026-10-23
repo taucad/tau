@@ -926,6 +926,14 @@
       "owner": "agent-plugin-workbench-parity-closeout-blueprint PAR-9"
     },
     {
+      "id": "D31",
+      "bound": "show_model on a watched source waits at most the entry's render timeout (Viewer settings, .tau/workbench/entries.json) before RENDER_TIMEOUT",
+      "site": "packages/host/src/mcp-viewer.ts",
+      "token": "AbortSignal.timeout(renderTimeout)",
+      "class": "External edge",
+      "owner": "agent-plugin-workbench-parity-closeout-blueprint PAR-8"
+    },
+    {
       "id": "M11",
       "bound": "Desktop recovery waits for actual utility settlement before replacing its service",
       "site": "apps/desktop/src/main/services-broker.ts",

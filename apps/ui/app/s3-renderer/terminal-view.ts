@@ -155,8 +155,8 @@ const announceMaxLines = 20;
 const announceRetainedLines = 100;
 
 /* ESC sequences (CSI, OSC, DCS/SOS/PM/APC, two-byte) and C0 controls other than line feed. */
-// oxlint-disable-next-line no-control-regex -- Stripping terminal control sequences is the point of this pattern.
 const controlSequences =
+  // oxlint-disable-next-line no-control-regex -- Stripping terminal control sequences is the point of this pattern.
   /\u001B(?:\[[0-?]*[ -/]*[@-~]|][^\u0007\u001B]*(?:\u0007|\u001B\\)?|[PX^_][^\u001B]*(?:\u001B\\)?|[@-Z\\-_])|[\u0000-\u0009\u000B-\u001F\u007F]/g;
 
 /**
@@ -164,8 +164,6 @@ const controlSequences =
  * Tau-side shim for an upstream gap, listed in the S3 report with the issue or PR that would retire it.
  */
 type GhosttyInternals = {
-  startRenderLoop(): void;
-  cancelRenderLoop(): void;
   readonly viewportY: number;
   readonly scrollbarOpacity: number;
   readonly wasmTerm?: unknown;
@@ -177,6 +175,17 @@ type GhosttyInternals = {
   };
   readonly inputHandler?: { readonly encoder: { setOption(option: number, value: boolean): void } };
   readonly linkDetector?: { providers: GhosttyWeb.ILinkProvider[] };
+  startRenderLoop(): void;
+  cancelRenderLoop(): void;
+};
+
+/** The parts of ghostty-web's WASM terminal the per-frame viewport read uses. */
+type GhosttyRenderable = {
+  // oxlint-disable-next-line typescript/no-restricted-types -- Mirrors the ghostty-web method it replaces.
+  getLine(y: number): GhosttyWeb.GhosttyCell[] | null;
+  getViewport(): readonly GhosttyWeb.GhosttyCell[];
+  getDimensions(): { cols: number; rows: number };
+  update(): number;
 };
 
 /** A visually hidden `role=log` region that offers new output, stripped of control sequences, to screen readers. */
@@ -272,6 +281,32 @@ const createGhosttyView = async (options: TerminalViewOptions): Promise<Terminal
     Reflect.deleteProperty(document, 'addEventListener');
   }
   const { renderer } = internals;
+  const wasmTerm = internals.wasmTerm as GhosttyRenderable | undefined;
+  if (renderer && wasmTerm) {
+    /* `getLine()` re-reads and re-parses the whole viewport for every row it returns, so a full frame costs one
+     * viewport read per row. Read it once per frame instead, as upstream PR #191 does inside the renderer. */
+    const { getLine } = wasmTerm;
+    const render = renderer.render.bind(renderer);
+    renderer.render = (...arguments_) => {
+      let viewport: readonly GhosttyWeb.GhosttyCell[] | undefined;
+      wasmTerm.getLine = (y) => {
+        const { cols, rows } = wasmTerm.getDimensions();
+        if (y < 0 || y >= rows) {
+          return null;
+        }
+        if (!viewport) {
+          wasmTerm.update();
+          viewport = wasmTerm.getViewport();
+        }
+        return viewport.slice(y * cols, (y + 1) * cols).map((cell) => ({ ...cell }));
+      };
+      try {
+        render(...arguments_);
+      } finally {
+        wasmTerm.getLine = getLine;
+      }
+    };
+  }
   const disposers: Array<() => void> = [];
   const listen = <K extends keyof DocumentEventMap>(
     target: Document | HTMLElement,

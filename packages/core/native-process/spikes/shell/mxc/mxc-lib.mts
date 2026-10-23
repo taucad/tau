@@ -198,9 +198,13 @@ export const loadSdk = async (): Promise<{ sdk?: MxcSdk; prereq: Prereq }> => {
 
 /** Locate and digest the on-disk native `wxc-exec` executable the SDK will run (the binding digest). */
 export const wxcExecDigest = (sdk?: MxcSdk): { path: string; sha256: string } | undefined => {
-  const found = sdk?.findWxcExecutable?.();
-  if (found && existsSync(found)) {
-    return { path: found, sha256: sha256File(found) };
+  try {
+    const found = sdk?.findWxcExecutable?.();
+    if (found && existsSync(found)) {
+      return { path: found, sha256: sha256File(found) };
+    }
+  } catch {
+    // findWxcExecutable can throw on hosts where the native backend is absent; treat as not-found.
   }
   return undefined;
 };

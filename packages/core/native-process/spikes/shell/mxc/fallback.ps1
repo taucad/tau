@@ -33,6 +33,7 @@ public static class TauCap {
   public static extern bool DeriveCapabilitySidsFromName(string capName, out IntPtr groupSids, out int groupCount, out IntPtr sids, out int count);
   [DllImport("advapi32.dll", SetLastError = true)]
   public static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr str);
+  [DllImport("advapi32.dll")] public static extern bool IsValidSid(IntPtr sid);
   [DllImport("kernel32.dll")] public static extern IntPtr LocalFree(IntPtr p);
   [DllImport("advapi32.dll", SetLastError = true)]
   public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
@@ -58,16 +59,33 @@ try {
 }
 
 function Get-CapabilitySidString($name) {
+  # DeriveCapabilitySidsFromName returns TWO pointer-to-array-of-PSID outputs, each with its own
+  # count: capability GROUP sids (2nd/3rd) and capability sids (4th/5th). Each element must be
+  # marshalled out of its array (ReadIntPtr at i * IntPtr.Size) and validated with IsValidSid before
+  # use — passing the outer pointer or an unvalidated element yields ERROR_INVALID_SID downstream.
   $g = [IntPtr]::Zero; $gc = 0; $s = [IntPtr]::Zero; $c = 0
   if (-not [TauCap]::DeriveCapabilitySidsFromName($name, [ref]$g, [ref]$gc, [ref]$s, [ref]$c)) {
-    throw "DeriveCapabilitySidsFromName failed: $([System.Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+    throw "DeriveCapabilitySidsFromName failed: win32=$([System.Runtime.InteropServices.Marshal]::GetLastWin32Error())"
   }
-  $first = [System.Runtime.InteropServices.Marshal]::ReadIntPtr($s)
+  $ptrSize = [IntPtr]::Size
+  $candidates = @()
+  # Prefer the capability SIDs (the S-1-15-3-* resource capability), then the capability group SIDs.
+  for ($i = 0; $i -lt $c; $i++) { $candidates += [System.Runtime.InteropServices.Marshal]::ReadIntPtr($s, $i * $ptrSize) }
+  for ($i = 0; $i -lt $gc; $i++) { $candidates += [System.Runtime.InteropServices.Marshal]::ReadIntPtr($g, $i * $ptrSize) }
+  $valid = [IntPtr]::Zero
+  foreach ($p in $candidates) {
+    if ($p -ne [IntPtr]::Zero -and [TauCap]::IsValidSid($p)) { $valid = $p; break }
+  }
+  if ($valid -eq [IntPtr]::Zero) {
+    throw "no valid capability SID derived for '$name' (capSidCount=$c groupSidCount=$gc)"
+  }
   $strPtr = [IntPtr]::Zero
-  [void][TauCap]::ConvertSidToStringSid($first, [ref]$strPtr)
+  if (-not [TauCap]::ConvertSidToStringSid($valid, [ref]$strPtr)) {
+    throw "ConvertSidToStringSid failed: win32=$([System.Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+  }
   $str = [System.Runtime.InteropServices.Marshal]::PtrToStringUni($strPtr)
   [TauCap]::LocalFree($strPtr) | Out-Null
-  return @{ str = $str; ptr = $first }
+  return @{ str = $str; ptr = $valid }
 }
 
 function New-WriteRestrictedToken($capPtr) {

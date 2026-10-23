@@ -69,14 +69,15 @@ jobs:
 
       # Record the pin: installed version == pinned, licence (MIT), registry integrity/shasum, and
       # the resolved native wxc-exec on-disk digest + OS build.
-      # pwsh (not bash): the MXC SDK's internal `whoami /user` SID lookup resolves to
-      # C:\Windows\System32\whoami.exe under pwsh, whereas under Git-bash the GNU coreutils `whoami`
-      # shadows it on PATH and rejects `/user` ("extra operand"), crashing the step.
+      # bash: provision does not exercise the SDK's getPlatformSupport/probe paths (the ones that run
+      # the SDK's internal `whoami /user`), so it is unaffected by the Git-bash whoami shadow and runs
+      # cleanly here. Its own user-SID record uses .NET WindowsIdentity (never whoami), so it is
+      # correct under either shell. probe/isolation below do call those SDK paths and so use pwsh.
       - name: Provision + record (pin, licence, digest, OS build)
         id: provision
         continue-on-error: true
-        shell: pwsh
-        run: node "$env:MXC_DIR/provision.mts"
+        shell: bash
+        run: node "$MXC_DIR/provision.mts"
 
       # Capability probe: PSEC create/close (externally proven by a preflight sentinel a container
       # child writes), PSE_SUPPORT_FS_DENY, ConPTY, isolation tier, OS build. Its outcome gates the

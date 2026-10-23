@@ -4,6 +4,7 @@ import type { FastifyReply } from 'fastify';
 import { entitlementsFromTier, storageLimitBytesByTier } from '@taucad/billing';
 import type { BillingTier } from '@taucad/billing';
 import type { DatabaseService } from '#database/database.service.js';
+import { project, projectDeletion } from '#database/schema.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { ProjectAccessService, ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
@@ -44,8 +45,26 @@ const hostedRemote = ({
   const access = mock<ProjectAccessService>({
     authorize: vi.fn(async () => ({ projectId, ownerId, role })),
   });
+  // An active reservation on the default account; keep the real lifecycle checks in the quota path.
+  const database = {
+    select: () => ({
+      from: (table: unknown) => ({
+        where: () => ({
+          limit: async () => {
+            if (table === projectDeletion) {
+              return [];
+            }
+            if (table === project) {
+              return [{ storageAccountId: null }];
+            }
+            throw new Error('Unexpected free-tier fixture query');
+          },
+        }),
+      }),
+    }),
+  } as unknown as DatabaseService['database'];
   const repositories = new GitRepositoryService(
-    mock<DatabaseService>(),
+    mock<DatabaseService>({ database }),
     mock<CommercialEntitlementsService>({ getEntitlements: vi.fn(async () => entitlements) }),
     mock<ObjectStorageService>(),
     access,

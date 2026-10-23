@@ -26,6 +26,7 @@ import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { purgeDeletedProject, projectPurgeObjectBound } from '#api/git/maintenance/project-purge.js';
 import { purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
+import { createDeletionDatabase } from '#testing/project-deletion.fixture.js';
 
 const planWrites = vi.hoisted(() => ({ calls: 0, lines: 0, maxLines: 0, maxBytes: 0 }));
 vi.mock('node:fs/promises', async (original) => {
@@ -48,27 +49,30 @@ vi.mock('node:fs/promises', async (original) => {
 
 /** Explicit owned containers only; retain fixture databases and bytes as acceptance evidence. */
 describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purge and account closure', () => {
-  let client: postgres.Sql;
+  let client: postgres.Sql | undefined;
   let database: Database;
+  let databaseUrl: string;
   let driver: ObjectStorageService;
   let store: S3RepositoryStore;
   const fencedAt = new Date('2026-08-01T00:00:00Z');
   const at = new Date('2026-10-01T00:00:00Z');
-  beforeAll(() => {
-    const url = new URL(process.env.DATABASE_URL);
-    if (url.hostname !== '127.0.0.1' || !url.pathname.startsWith('/tau_scratch_cpd_storage_')) {
-      throw new Error('Storage acceptance requires its owned scratch database');
-    }
-    client = postgres(url.toString(), { max: 2 });
-    database = drizzle(client, { schema });
-    driver = new ObjectStorageService(new ConfigService<Environment, true>(getEnvironment()));
-    if (!driver.account.bucket.startsWith('tau-staging-conformance-cpd-storage-')) {
+  beforeAll(async () => {
+    const environment = getEnvironment();
+    if (
+      !environment.TAU_S3_BUCKET.startsWith('tau-staging-conformance-cpd-storage-') ||
+      !environment.TAU_S3_PRIVATE_BUCKET.startsWith('tau-staging-conformance-cpd-storage-')
+    ) {
       throw new Error('Storage acceptance requires its owned buckets');
     }
+    const fixture = await createDeletionDatabase();
+    client = fixture.client;
+    database = fixture.database;
+    databaseUrl = fixture.url;
+    driver = new ObjectStorageService(new ConfigService<Environment, true>(environment));
     store = new S3RepositoryStore(driver);
   });
   afterAll(async () => {
-    await client.end();
+    await client?.end();
   });
 
   const seed = async () => {
@@ -207,7 +211,7 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
     expect(releasedWork?.releasedAt).toBeInstanceOf(Date);
     expect(await account()).toMatchObject([{ status: 'refused', deleted: 0 }]);
     // A fresh database connection and adapter have only durable state; the failed plan file is gone.
-    const restartedClient = postgres(process.env.DATABASE_URL, { max: 1 });
+    const restartedClient = postgres(databaseUrl, { max: 1 });
     try {
       expect(
         await purgeDeletedProject({

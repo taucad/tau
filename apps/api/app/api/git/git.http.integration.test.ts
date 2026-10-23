@@ -28,6 +28,7 @@ import { AuthGuard } from '#auth/auth.guard.js';
 import { getEnvironment } from '#config/environment.config.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { DatabaseService } from '#database/database.service.js';
+import { project, projectDeletion } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -239,36 +240,43 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
        both awaitable and chainable; an `async` member would return a promise of
        the builder rather than being one. */
     const selectBuilder = (): unknown => ({
-      from: () => ({
+      from: (table: unknown) => ({
         leftJoin: () => ({ where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }) }),
-        where: () => Object.assign(Promise.resolve([] as unknown[]), { limit: async () => rows() }),
+        where: () =>
+          Object.assign(Promise.resolve([] as unknown[]), {
+            limit: async () =>
+              table === projectDeletion ? [] : table === project ? [{ storageAccountId: null }] : rows(),
+          }),
       }),
     });
     /* oxlint-enable typescript/promise-function-async -- end of the builder stub */
+    const insert = () => ({
+      values: (values: Record<string, unknown>) => ({
+        onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
+          if (failGenerationWrites) {
+            throw new Error('database unavailable');
+          }
+          const merged = { ...values, ...change.set };
+          if (typeof merged['storageBytes'] === 'number') {
+            state.storageBytes = merged['storageBytes'];
+          }
+          if (typeof merged['generation'] === 'number') {
+            state.generation = merged['generation'];
+          }
+          if (typeof merged['derivedGeneration'] === 'number') {
+            state.derivedGeneration = merged['derivedGeneration'];
+          }
+        },
+      }),
+    });
     const databaseStub = {
       database: {
         select: selectBuilder,
-        insert: () => ({
-          values: (values: Record<string, unknown>) => ({
-            onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
-              if (failGenerationWrites) {
-                throw new Error('database unavailable');
-              }
-              const merged = { ...values, ...change.set };
-              if (typeof merged['storageBytes'] === 'number') {
-                state.storageBytes = merged['storageBytes'];
-              }
-              if (typeof merged['generation'] === 'number') {
-                state.generation = merged['generation'];
-              }
-              if (typeof merged['derivedGeneration'] === 'number') {
-                state.derivedGeneration = merged['derivedGeneration'];
-              }
-            },
-          }),
-        }),
+        insert,
         transaction: async (run: (transaction: unknown) => Promise<unknown>): Promise<unknown> =>
           run({
+            select: selectBuilder,
+            insert,
             execute: async (): Promise<void> => undefined,
             update: () => ({
               set: () => ({

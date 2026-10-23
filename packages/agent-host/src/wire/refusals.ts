@@ -275,6 +275,11 @@ export const refusals = {
   CAS_LOST: { owner: 'revisions', retry: 'wait' },
   LEASE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
   CHECKOUT_UNKNOWN: { owner: 'revisions', retry: 'never' },
+  /**
+   * The chat's branch is not on this device yet (XD4): its checkout was opened on another device and no branch here
+   * derives it. A sync can bring the branch, so re-send later; the run's ending offers "Resume".
+   */
+  BRANCH_UNAVAILABLE: { owner: 'revisions', retry: 'wait' },
   /** The branch or publish machine is busy with another verb (W5 RM-S8). */
   REVISIONS_BUSY: { owner: 'revisions', retry: 'wait' },
   /** Another root holds the turn's lease (W5, RV2-F1). */

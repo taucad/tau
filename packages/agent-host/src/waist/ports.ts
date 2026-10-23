@@ -524,6 +524,7 @@ export type TurnPlacementPort = Readonly<{
     TurnPlacementAnswer<
       Readonly<{ placement: TurnPlacementGrant }>,
       | 'CHECKOUT_UNKNOWN'
+      | 'BRANCH_UNAVAILABLE'
       | 'CHECKOUT_CONFLICT'
       | 'BASE_CUT_FAILED'
       | 'TURN_ALREADY_LEASED'

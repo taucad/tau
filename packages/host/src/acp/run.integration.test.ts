@@ -3073,6 +3073,7 @@ describe('external turns through the revision port', () => {
     });
   }, 60_000);
 
+  /* XD4: an id no checkout and no branch here derives is refused retryably, so its ending offers Resume after a sync. */
   it.each([false, true])(
     'refuses a missing persisted checkout instead of main (previous turn: %s)',
     async (previousTurn) => {
@@ -3102,7 +3103,10 @@ describe('external turns through the revision port', () => {
           type: 'run.lifecycle',
           runId: 'run-selected',
           state: 'failed',
-          detail: expect.objectContaining({ code: 'CHECKOUT_UNKNOWN' }) as unknown,
+          detail: expect.objectContaining({
+            code: 'RUN_ABANDONED',
+            details: expect.objectContaining({ code: 'BRANCH_UNAVAILABLE' }) as unknown,
+          }) as unknown,
         }),
       );
       expect(sent(harness.frames, 'session/new')).toBe(previousTurn ? 1 : 0);

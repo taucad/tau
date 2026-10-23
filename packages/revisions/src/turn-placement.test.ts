@@ -5,7 +5,7 @@
  * the revisions and their provenance, and the files the attempt's tools could write.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,9 +16,10 @@ import type { CheckedFileWrite } from '@taucad/filesystem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from 'xstate';
 
-import { revisionId } from '#algorithms/index.js';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
-import type { RevisionPort } from '#revision-port.js';
+import { digestHex } from '#object-hash.js';
+import type { Checkout, RevisionPort } from '#revision-port.js';
 import { createProjectRevisionsActor } from '#revision-effects.js';
 import type { ProjectRevisions, RevisionFileSystem } from '#revision-effects.js';
 import { createTurnPlacementPort } from '#turn-placement.js';
@@ -75,9 +76,23 @@ const createProject = async (withAuthority = false): Promise<Project> => {
       port2.close();
     });
   }
+  /* Linked checkouts live outside the project, one directory each (revisions policy rule 3). */
+  const linkedRoot = await mkdtemp(join(tmpdir(), 'tau-placement-checkouts-'));
+  roots.push(linkedRoot);
+  const linked = new Map<string, RevisionFileSystem>();
+  const linkedFilesystem = async (id: string): Promise<RevisionFileSystem> => {
+    const existing = linked.get(id);
+    if (existing !== undefined) {
+      return existing;
+    }
+    await mkdir(join(linkedRoot, id), { recursive: true });
+    const created = new NodeFsProvider(join(linkedRoot, id));
+    linked.set(id, created);
+    return created;
+  };
   const port = createIsomorphicGitRevisionPort({
     filesystem,
-    checkouts: { projectId: 'project-1', root: () => filesystem },
+    checkouts: { projectId: 'project-1', root: linkedFilesystem },
   });
   await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
   return {
@@ -87,7 +102,8 @@ const createProject = async (withAuthority = false): Promise<Project> => {
       const revisions = createProjectRevisionsActor({
         port,
         projectId: 'project-1',
-        filesystem: () => filesystem,
+        filesystem: async (checkout: Checkout) =>
+          checkout.kind === 'live' ? filesystem : linkedFilesystem(checkout.id),
       });
       revisions.actor.start();
       stops.push(async () => {
@@ -100,6 +116,46 @@ const createProject = async (withAuthority = false): Promise<Project> => {
       };
     },
   };
+};
+
+/**
+ * The checkout id another device derives for a branch (`tau-checkout\0<branch>`, both git ports): what a synced
+ * `chat.json` names when that chat last ran on a linked checkout there.
+ */
+const checkoutIdOnAnotherDevice = async (port: RevisionPort, branch: string): Promise<string> => {
+  const { objectFormat } = await port.describe();
+  return digestHex(objectFormat, new TextEncoder().encode(`tau-checkout\0${branch}`)).slice(0, 16);
+};
+
+/** Record `files` as a revision and point `branch` at it, as a pull leaves a branch this device has no checkout of. */
+const commitBranch = async (
+  port: RevisionPort,
+  branch: string,
+  { files, parent }: Readonly<{ files: Readonly<Record<string, string>>; parent?: string }>,
+): Promise<string> => {
+  const receipt = await port.writeRevision({
+    tree: new ImmutableRevisionTree(
+      Object.entries(files).map(([path, text]) => [path, new TextEncoder().encode(text)]),
+    ),
+    parents: parent === undefined ? [] : [revisionId(parent)],
+    provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+    summary: { generated: branch },
+  });
+  const head = await port.readRef(branch);
+  await port.updateRef({
+    name: `refs/heads/${branch}`,
+    expectedHead: head,
+    head: revisionId(receipt.commitId),
+  });
+  return receipt.commitId;
+};
+
+/** Write a synced chat record naming `checkoutId`, as another device left it. */
+const writeChatRecord = async (filesystem: RevisionFileSystem, checkoutId: string): Promise<void> => {
+  await filesystem.writeFile(
+    '.tau/chats/chat-1/chat.json',
+    JSON.stringify({ id: 'chat-1', name: 'Chat', createdAt: 0, updatedAt: 0, checkoutId }),
+  );
 };
 
 /** The revisions a turn attempt minted, by `turnCut`, walking first parents from the head. */
@@ -349,19 +405,80 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     },
   );
 
-  /* TS-R12 (W8.a2): with no checkout named, the chat record's is the placement intent, not the live checkout. */
+  /*
+   * TS-R12 (W8.a2): with no checkout named, the chat record's is the placement intent, not the live checkout.
+   * XD4: an id no checkout and no branch on this device answers to is refused retryably; a sync may bring the branch.
+   */
   it("should place an attempt on the chat record's checkout when the person named none", async () => {
     const project = await createProject();
-    await project.filesystem.writeFile(
-      '.tau/chats/chat-1/chat.json',
-      JSON.stringify({ id: 'chat-1', name: 'Chat', createdAt: 0, updatedAt: 0, checkoutId: 'missing-checkout' }),
-    );
+    await writeChatRecord(project.filesystem, 'missing-checkout');
     const { placement } = project.open();
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
 
-    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(answer).toMatchObject({ status: 'refused', code: 'BRANCH_UNAVAILABLE' });
     await expect(project.filesystem.readdir('.tau/runs').catch(() => [])).resolves.toEqual([]);
+  });
+
+  /*
+   * XD4: a checkout id is device state derived from its branch. A chat that last ran on another device's linked
+   * checkout of a branch this device holds only as a ref (after a pull) runs on that branch, opened here on demand.
+   */
+  it("should open the chat's branch here and run on it when this device never opened its checkout", async () => {
+    const project = await createProject();
+    const base = await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
+    await commitBranch(project.port, 'feature', { files: { 'main.ts': 'export const size = 2;\n' }, parent: base });
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    const recorded = await checkoutIdOnAnotherDevice(project.port, 'feature');
+    await writeChatRecord(project.filesystem, recorded);
+    const { revisions, placement } = project.open();
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+    if (answer.status === 'refused') {
+      throw new Error(`${answer.code}: ${answer.message}`);
+    }
+
+    /* The same id the other device recorded: chat.json needs no rewrite. */
+    expect(answer.placement).toMatchObject({ checkoutId: recorded, branch: 'feature', mode: 'candidate' });
+    await expect(answer.placement.tools.readFile('main.ts', 'utf8')).resolves.toBe('export const size = 2;\n');
+    expect(revisions.actor.getSnapshot().context.checkouts).toContainEqual(
+      expect.objectContaining({ id: recorded, kind: 'linked', branch: 'feature' }),
+    );
+
+    await answer.placement.tools.writeFile('main.ts', 'export const size = 3;\n');
+    await placement.complete({ requestId: 'complete:run-1:1', key, cut: true });
+    expect(await firstSettlement(placement)).toMatchObject({ row: { type: 'turn.finalized', branch: 'feature' } });
+    const featureHead = await project.port.readRef('feature');
+    const [result] = await project.port.log({ heads: [revisionId(featureHead ?? '')] });
+    expect(result?.provenance).toMatchObject({ runId: 'run-1', turnCut: 'result' });
+    expect(await project.port.readRef('main')).toBe(base);
+    await expect(project.filesystem.readFile('main.ts', 'utf8')).resolves.toBe('export const size = 1;\n');
+  });
+
+  /* XD4: a branch this device already has open, here the live checkout's, is where the chat runs; nothing is opened. */
+  it("should run on the checkout that already holds the chat's branch, such as the live one", async () => {
+    const project = await createProject();
+    await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    await writeChatRecord(project.filesystem, await checkoutIdOnAnotherDevice(project.port, 'main'));
+    const { revisions, placement } = project.open();
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'applied', placement: { checkoutId: 'live', mode: 'direct' } });
+    expect(revisions.actor.getSnapshot().context.checkouts.map((checkout) => checkout.kind)).toEqual(['live']);
+  });
+
+  /* XD4: a fresh device whose default branch is still unborn runs the chat on the live checkout, which tracks it. */
+  it('should run on the live checkout when the chat names the default branch this device has not recorded yet', async () => {
+    const project = await createProject();
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    await writeChatRecord(project.filesystem, await checkoutIdOnAnotherDevice(project.port, 'main'));
+    const { placement } = project.open();
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'applied', placement: { checkoutId: 'live', mode: 'direct' } });
   });
 
   it('should answer replayed and mint no second base when an attempt is admitted twice', async () => {
@@ -503,7 +620,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key, checkoutId: 'checkout-gone' });
 
-    expect(answer).toMatchObject({ requestId: 'admit:run-1:1', status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(answer).toMatchObject({ requestId: 'admit:run-1:1', status: 'refused', code: 'BRANCH_UNAVAILABLE' });
     expect(await revisions.turns.leases()).toEqual([]);
     expect(await turnCuts(project.port, key)).toEqual([]);
     expect(opened).toEqual([]);

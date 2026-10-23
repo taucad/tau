@@ -69,6 +69,7 @@ type Fact =
 type Fenced = 'SESSION_FENCED';
 type AdmitCode =
   | 'CHECKOUT_UNKNOWN'
+  | 'BRANCH_UNAVAILABLE'
   | 'CHECKOUT_CONFLICT'
   | 'BASE_CUT_FAILED'
   | 'TURN_ALREADY_LEASED'
@@ -296,6 +297,9 @@ const admitMessage = (code: AdmitCode, checkoutId: string, reason: string): stri
   switch (code) {
     case 'CHECKOUT_UNKNOWN': {
       return `Checkout ${checkoutId} no longer exists in this project, so the agent did not start. Choose another checkout for this chat.`;
+    }
+    case 'BRANCH_UNAVAILABLE': {
+      return 'This chat works on a branch this device does not have yet, so the agent did not start. Send again once this project has synced, or choose another branch for this chat.';
     }
     case 'CHECKOUT_CONFLICT': {
       return `Checkout ${checkoutId} cannot take this turn: ${reason} Resolve the checkout, then send again.`;
@@ -616,11 +620,87 @@ export const createTurnPlacementPort = <Tools>(
       return code;
     }
     if (code === 'CHECKOUT_CONFLICT' || code === 'LEASE_UNAVAILABLE') {
-      /* Today's `CHECKOUT_CONFLICT` also means "the id names no checkout"; that half has its own code (TS-S0 Q4). */
+      /*
+       * Today's `CHECKOUT_CONFLICT` also means "the id names no checkout"; that half has its own code (TS-S0 Q4). An id
+       * that reached the root unresolved names no branch on this device either (XD4), which a later sync can change.
+       */
       const known = actor.getSnapshot().context.checkouts.some((checkout) => checkout.id === checkoutId);
-      return checkoutId !== undefined && !known ? 'CHECKOUT_UNKNOWN' : 'CHECKOUT_CONFLICT';
+      return checkoutId !== undefined && !known ? 'BRANCH_UNAVAILABLE' : 'CHECKOUT_CONFLICT';
     }
     return 'REVISIONS_UNAVAILABLE';
+  };
+
+  /*
+   * XD4: open a linked checkout of `branch` through the registry, its one writer (P3), and answer with its id. Another
+   * admission that opened it first is the same answer. Nothing is branched: an unborn branch has no head to open.
+   */
+  const materialize = async (
+    key: TurnAttemptKey,
+    branch: string,
+  ): Promise<Readonly<{ checkoutId: string }> | Readonly<{ refused: string }>> => {
+    const holding = (): string | undefined =>
+      actor.getSnapshot().context.checkouts.find((checkout) => checkout.branch === branch)?.id;
+    /* Named by the attempt, so no other session's add over this root shares it (RM-R11). */
+    const requestId = `turn-placement:checkout:${attemptIdOf(key)}`;
+    const failed = Promise.withResolvers<string>();
+    const subscription = actor.on('checkoutFailed', (event) => {
+      if (event.requestId === requestId) {
+        failed.resolve(event.reason);
+      }
+    });
+    const done = new AbortController();
+    try {
+      actor.send({ type: 'addCheckout', requestId, branch, from: '' });
+      /* The registry answers every add by its id (RM-R11); a stopped root ends the wait too. */
+      const opened = async (): Promise<string | undefined> => {
+        try {
+          await waitFor(actor, () => holding() !== undefined, { signal: done.signal });
+          return undefined;
+        } catch {
+          return 'The project closed before the branch was opened.';
+        }
+      };
+      const reason = await Promise.race([opened(), failed.promise]);
+      const checkoutId = holding();
+      return checkoutId === undefined ? { refused: reason ?? `Branch ${branch} could not be opened.` } : { checkoutId };
+    } finally {
+      done.abort();
+      subscription.unsubscribe();
+    }
+  };
+
+  /*
+   * XD4: where the placement intent is on this device. A checkout id derives from its branch, so the branch is the
+   * portable fact and the checkout device state: an id this device has no checkout for runs on the checkout that holds
+   * its branch, on one opened for it, or, for an unborn default branch, on the live checkout. An id no branch here
+   * derives goes to the root unchanged, which refuses it (`BRANCH_UNAVAILABLE`, retried after a sync).
+   */
+  const placeIntent = async (
+    key: TurnAttemptKey,
+    intent: string | undefined,
+  ): Promise<Readonly<{ checkoutId: string | undefined }> | Readonly<{ refused: string }>> => {
+    if (intent === undefined) {
+      return { checkoutId: undefined };
+    }
+    try {
+      await registryAnswered();
+    } catch {
+      return { checkoutId: intent };
+    }
+    const { checkouts } = actor.getSnapshot().context;
+    if (checkouts.some((checkout) => checkout.id === intent)) {
+      return { checkoutId: intent };
+    }
+    const derived = await turns.branchOf(intent).catch(() => undefined);
+    if (derived === undefined) {
+      return { checkoutId: intent };
+    }
+    const holder = checkouts.find((checkout) => checkout.branch === derived.branch);
+    if (holder !== undefined) {
+      return { checkoutId: holder.id };
+    }
+    /* The root's own fallback is the live checkout (TS-R12). */
+    return derived.unborn ? { checkoutId: undefined } : materialize(key, derived.branch);
   };
 
   /*
@@ -698,7 +778,18 @@ export const createTurnPlacementPort = <Tools>(
         });
       }
       /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. */
-      const intent = checkoutId ?? (await recordedCheckout(key.chatId));
+      const placed = await placeIntent(key, checkoutId ?? (await recordedCheckout(key.chatId)));
+      if (isFenced()) {
+        return fencedAnswer(requestId);
+      }
+      if ('refused' in placed) {
+        return refused({
+          requestId,
+          code: 'REVISIONS_UNAVAILABLE',
+          message: admitMessage('REVISIONS_UNAVAILABLE', '', placed.refused),
+        });
+      }
+      const intent = placed.checkoutId;
       await options.settle?.();
       const heard = listen(key, (event) => (event.type === 'placed' || event.type === 'refused' ? event : undefined));
       actor.send({ type: 'admitTurn', key, ...(intent === undefined ? {} : { checkoutId: intent }) });

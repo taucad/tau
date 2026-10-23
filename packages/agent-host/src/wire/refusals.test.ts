@@ -59,6 +59,11 @@ describe('the refusal registry (D11, I17)', () => {
     expect(refusalOf('FETCH_LIMIT_EXCEEDED')).toEqual({ owner: 'revisions', retry: 'never' });
   });
 
+  /* XD4: a chat whose branch has not reached this device yet is admitted once a later sync brings it. */
+  it('should let a placement refused for a branch this device lacks be sent again later', () => {
+    expect(refusalOf('BRANCH_UNAVAILABLE')).toEqual({ owner: 'revisions', retry: 'wait' });
+  });
+
   it('should end no run with a wait code: a wait code is never resumable', () => {
     const waits = Object.entries(refusals).filter(([, entry]) => entry.retry === 'wait');
     expect(waits.length).toBeGreaterThan(0);

@@ -45,6 +45,7 @@ import {
   verifyPreparedProjectManifest,
 } from '#project-manifest-conversion.js';
 import { caseCollisions } from '#case-collisions.js';
+import { checkoutIdOfBranch } from '#checkout-id.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
@@ -446,6 +447,13 @@ export type TurnStore = Readonly<{
   retire: (key: TurnAttemptKey) => Promise<'retired' | 'absent' | 'held'>;
   /** Resolves once the root that holds the run's record has stopped; at once when none does. */
   holderReleased: (runId: string, signal: AbortSignal) => Promise<void>;
+  /**
+   * The branch a checkout id derives from, when this device knows that branch (XD4). A chat record synced from another
+   * device can name a linked checkout this device never opened; its branch is the portable fact. `unborn` when the
+   * branch has no revision here yet, which only the live checkout's or the default branch can be. `undefined` when no
+   * branch on this device derives the id: a later sync may bring it.
+   */
+  branchOf: (checkoutId: string) => Promise<Readonly<{ branch: string; unborn: boolean }> | undefined>;
 }>;
 
 /**
@@ -2822,6 +2830,24 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const name = markOf(holder);
         const locks = lockManager();
         await (locks === undefined ? heldMarks.get(name) : locks.request(name, { signal }, () => undefined));
+      },
+      branchOf: async (checkoutId) => {
+        await ensureStore();
+        const { objectFormat } = await describePort();
+        const [heads, places] = await Promise.all([port.listRefs('refs/heads'), listPlaces()]);
+        const born = new Set(heads.map((reference) => reference.name.replace(/^refs\/heads\//, '')));
+        /* An unborn branch is a candidate only where a checkout already tracks it or a new project starts on it. */
+        const candidates = new Set([
+          ...born,
+          mainBranch,
+          ...places.flatMap((place) => (place.branch === undefined ? [] : [place.branch])),
+        ]);
+        for (const branch of candidates) {
+          if (checkoutIdOfBranch(objectFormat, branch) === checkoutId) {
+            return { branch, unborn: !born.has(branch) };
+          }
+        }
+        return undefined;
       },
     },
     release: releaseMark,

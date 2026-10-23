@@ -44,7 +44,7 @@ const profile = join(here, 'session.sb');
 const prompt = 'tau-s2$ ';
 
 const run = (command: string, args: readonly string[]): string => {
-  const r = spawnSync(command, args, { encoding: 'utf8', timeout: 20_000 });
+  const r = spawnSync(command, args, { encoding: 'utf8', timeout: 20_000, killSignal: 'SIGKILL' });
   return `${r.stdout ?? ''}${r.stderr ?? ''}`.trim();
 };
 
@@ -302,6 +302,37 @@ const main = async (): Promise<void> => {
   }
 };
 
+const finish = (): never => {
+  const verdict = checks.length > 0 && checks.every((c) => c.verdict === 'pass') ? 'pass' : 'fail';
+  writeJson(join(evidenceDirectory, row, 's2.json'), {
+    spike: 'W2-reaping-s2-pty-in-sandbox',
+    identity: identity(),
+    verdict,
+    checks,
+    evidence: { resize: resizeEvidence, ctrlc: ctrlcEvidence, job: jobEvidence, exit: exitState ?? null },
+    transcriptTail: transcript.join('').slice(-6000),
+  });
+  process.stdout.write(`[${row}] s2-pty-in-sandbox: ${verdict}\n`);
+  for (const c of checks) {
+    process.stdout.write(`  ${c.verdict === 'pass' ? 'PASS' : 'FAIL'} ${c.id}: ${c.observed.slice(0, 160)}\n`);
+  }
+  process.exit(0);
+};
+
+// Driver watchdog (inside the workflow's 6-minute step bound): a stalled PTY becomes a typed failure
+// receipt with whatever checks completed, never a job timeout.
+setTimeout(() => {
+  checks.push(
+    check(
+      's2.driver-timeout',
+      'the S2 PTY driver completes within its 4-minute bound',
+      `watchdog fired; completed checks=${checks.length}`,
+      false,
+    ),
+  );
+  finish();
+}, 4 * 60_000).unref();
+
 try {
   await main();
 } catch (error) {
@@ -314,18 +345,4 @@ try {
     ),
   );
 }
-
-const verdict = checks.length > 0 && checks.every((c) => c.verdict === 'pass') ? 'pass' : 'fail';
-writeJson(join(evidenceDirectory, row, 's2.json'), {
-  spike: 'W2-reaping-s2-pty-in-sandbox',
-  identity: identity(),
-  verdict,
-  checks,
-  evidence: { resize: resizeEvidence, ctrlc: ctrlcEvidence, job: jobEvidence, exit: exitState ?? null },
-  transcriptTail: transcript.join('').slice(-6000),
-});
-process.stdout.write(`[${row}] s2-pty-in-sandbox: ${verdict}\n`);
-for (const c of checks) {
-  process.stdout.write(`  ${c.verdict === 'pass' ? 'PASS' : 'FAIL'} ${c.id}: ${c.observed.slice(0, 160)}\n`);
-}
-process.exit(0);
+finish();

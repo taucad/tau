@@ -77,7 +77,9 @@ type Strategy = 'sbmember';
 type Adversary = 'setsid' | 'daemonize' | 'double-fork' | 'sigterm-ignore';
 
 const run = (command: string, args: readonly string[]): { out: string; code: number | null } => {
-  const r = spawnSync(command, args, { encoding: 'utf8', timeout: 20_000 });
+  // SIGKILL on timeout: the default SIGTERM stays pending on a STOPPED child, so spawnSync would block
+  // forever; SIGKILL ends a stopped process too, so every synchronous call here is truly bounded.
+  const r = spawnSync(command, args, { encoding: 'utf8', timeout: 20_000, killSignal: 'SIGKILL' });
   return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, code: r.status };
 };
 
@@ -502,6 +504,39 @@ const preflight = async (): Promise<{ checks: Check[]; detail: Record<string, st
 // ── drive the matrix ───────────────────────────────────────────────────────────────────────────
 const adversaries: Adversary[] = ['setsid', 'daemonize', 'double-fork', 'sigterm-ignore'];
 
+// Driver watchdog: if anything still stalls, every adversary without a receipt gets a typed
+// `driver-timeout` FAILURE receipt and the driver exits — a hang becomes a failed receipt, never a
+// job timeout. 7 minutes sits inside the workflow's 10-minute step bound.
+const receipted = new Set<string>();
+const watchdog = setTimeout(() => {
+  for (const adversary of adversaries) {
+    if (receipted.has(adversary)) {
+      continue;
+    }
+    writeJson(join(evidenceDirectory, row, `sbmember.${adversary}.json`), {
+      spike: 'W2-reaping',
+      strategy: 'sbmember',
+      adversary,
+      identity: identity(),
+      status: 'driver-timeout',
+      verdict: 'fail',
+      reaped: false,
+      blocked: false,
+      checks: [
+        check(
+          `sbmember.${adversary}.driver-timeout`,
+          'the candidate (c) driver completes this adversary within its 7-minute bound',
+          'driver watchdog fired before this adversary produced a receipt',
+          false,
+        ),
+      ],
+    });
+  }
+  process.stdout.write(`[${row}] sbmember: driver watchdog fired; wrote driver-timeout receipts\n`);
+  process.exit(0);
+}, 7 * 60_000);
+watchdog.unref();
+
 const pre = await preflight();
 writeJson(join(evidenceDirectory, row, 'preflight-sandbox.json'), {
   spike: 'W2-reaping-sandbox-preflight',
@@ -526,6 +561,7 @@ for (const adversary of adversaries) {
       checks: [],
     };
   }
+  receipted.add(adversary);
   writeJson(join(evidenceDirectory, row, `sbmember.${adversary}.json`), {
     spike: `W2-reaping`,
     strategy: 'sbmember',

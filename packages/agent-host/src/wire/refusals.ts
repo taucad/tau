@@ -127,6 +127,11 @@ export const refusals = {
   STORAGE_SHORT_WRITE: { owner: 'log', retry: 'never' },
   /** Another writer holds the log; the OPFS open failure moves here from `STORAGE_NOT_WRITABLE`. */
   WRITER_LOCKED: { owner: 'log', retry: 'wait' },
+  /**
+   * Another device's segment of this chat exists but could not be read (XD3), so whether that device runs the chat is
+   * unknown and the cross-device fence holds. Re-send the same key; the next admission reads the segments again.
+   */
+  SEGMENTS_UNREADABLE: { owner: 'log', retry: 'wait' },
 
   // ── channel: `@taucad/rpc` ──────────────────────────────────────────────────────────────────
   /** Closed here. On a command: effect unknown, re-send the same key. */

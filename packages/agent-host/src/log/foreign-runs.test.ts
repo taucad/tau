@@ -86,6 +86,29 @@ describe('the cross-device run fence (XD3)', () => {
     ]);
   });
 
+  /* A paused run, or a long tool call, writes no content: its device's heartbeat is what keeps it holding the chat. */
+  it('should read a paused run as live from its heartbeat alone', () => {
+    const paused = [
+      lifecycle('run-paused', 0, { state: 'admitted', at: '2026-10-23T09:00:00.000Z' }),
+      lifecycle('run-paused', 1, { state: 'running', at: '2026-10-23T09:00:01.000Z' }),
+      lifecycle('run-paused', 2, { state: 'paused', at: '2026-10-23T09:01:00.000Z' }),
+    ];
+    const heartbeat = {
+      version: 1,
+      leaderEpoch: 'epoch-run-paused',
+      sequence: 3,
+      recordedAt: '2026-10-23T09:59:00.000Z',
+      runId: 'run-paused',
+      type: 'run.heartbeat',
+    } as const satisfies AgentLogEvent;
+
+    const [held] = unsettledForeignRuns([segment('device-desktop', [...paused, heartbeat])]);
+
+    expect(held).toMatchObject({ state: 'paused', lastRecordedAt: Date.parse(heartbeat.recordedAt) });
+    expect(liveForeignRun(unsettledForeignRuns([segment('device-desktop', paused)]), now)).toBeUndefined();
+    expect(liveForeignRun([held!], now)).toBe(held);
+  });
+
   it('should hold the chat for a run whose newest row is inside the bound', () => {
     expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds), now)).toBe(false);
     expect(liveForeignRun([run(now - 60_000)], now)).toEqual(run(now - 60_000));

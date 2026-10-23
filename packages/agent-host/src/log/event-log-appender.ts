@@ -2,7 +2,7 @@ import { EventLogError } from '#log/event-log-error.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
-import { unsettledParsedRuns, unsettledRunIds } from '#log/foreign-runs.js';
+import { foreignRunStaleMilliseconds, isAbandonedForeignRun, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
 import { mergeSegmentRows } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
@@ -116,6 +116,9 @@ export type EventLogAppender = {
   /**
    * The runs other devices' segments hold unsettled, each segment folded on its own ledger (XD3): what the cross-device
    * run fence reads. A run this device's own rows name is this device's, never foreign. Absent where `refresh` is.
+   *
+   * Rejected `SEGMENTS_UNREADABLE` while the segments could not be read at the last open or refresh: an unread segment
+   * may hold a live run, so the fence never reads it as none.
    */
   foreignRuns?(): Promise<readonly ForeignRun[]>;
   /** What the open kept but could not use: quarantined lines, broken term rules, conflicting copies, history. */
@@ -144,23 +147,46 @@ export type EventLogStorage = {
   /**
    * Every *other* device's segment of this chat, as sync projected it beside the log (`events/<deviceId>.jsonl`).
    * Read only; this device's own log is never among them. Absent where a log has no chat directory.
+   *
+   * A segment whose file did not change since the last call is answered with the same `bytes` object, so a refresh
+   * that finds nothing new costs no read and no fold (`readChatSegments`).
    */
   segments?(): Promise<readonly ChatLogSegment[]>;
 };
 
+/** Options for {@link createEventLogAppender}. @internal */
+export type EventLogAppenderOptions = Readonly<{
+  /** This device's time in epoch milliseconds, which the foreign-run staleness bound reads; `Date.now` by default. */
+  now?: (() => number) | undefined;
+}>;
+
 /** The own segment's device id in a merge: the empty string, which no segment file can be named. */
 const ownDeviceId = '';
 
+/* Unchanged segments come back as the same bytes (`EventLogStorage.segments`), so no byte is compared. */
 const sameSegments = (left: readonly ChatLogSegment[], right: readonly ChatLogSegment[]): boolean =>
   left.length === right.length &&
-  left.every((segment, index) => {
-    const other = right[index]!;
-    return (
-      segment.deviceId === other.deviceId &&
-      segment.bytes.byteLength === other.bytes.byteLength &&
-      segment.bytes.every((byte, offset) => byte === other.bytes[offset])
-    );
-  });
+  left.every((segment, index) => segment.deviceId === right[index]!.deviceId && segment.bytes === right[index]!.bytes);
+
+/**
+ * Whether a row of a run its device abandoned mid-flight joins this device's history (XD3): the person's own words do
+ * — the committed user turn, a steer, an external turn's message, and the rewind an edit or retry asked for — and
+ * nothing the run produced does. Its partial reply, its tool calls with no output and the host's own reminders about
+ * them stay out, so the model is never shown a call it must answer or an answer cut short.
+ *
+ * @param event - One row of the abandoned run.
+ * @returns Whether the row is kept.
+ */
+const keptOfAbandonedRun = (event: AgentLogEvent): boolean => {
+  if (event.type === 'turn.history-projection-committed' || event.type === 'history.rewound') {
+    return true;
+  }
+  if (event.type !== 'message.appended' || event.message.role !== 'user') {
+    return false;
+  }
+  const kind = event.message.metadata?.tauInternal?.['kind'];
+  return kind === undefined || kind === 'external-agent';
+};
 
 const encoder = new TextEncoder();
 
@@ -237,7 +263,11 @@ export const readEventLogBatch = (
  * @param storage - Storage primitives for one event-log file.
  * @returns An initialized appender positioned after all kept records.
  */
-export const createEventLogAppender = async (storage: EventLogStorage): Promise<EventLogAppender> => {
+export const createEventLogAppender = async (
+  storage: EventLogStorage,
+  options: EventLogAppenderOptions = {},
+): Promise<EventLogAppender> => {
+  const now = options.now ?? Date.now;
   const bytesAtOpen = await storage.read();
   const parsed = parseEventLogBytes(bytesAtOpen);
 
@@ -274,10 +304,23 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
 
   let segments: readonly ChatLogSegment[] = [];
   let foreign: readonly ParsedLogSegment[] = [];
+  /** Each segment's rows by its bytes: an unchanged segment is parsed once, whichever other segment moved. */
+  const parsedBytes = new WeakMap<Uint8Array<ArrayBuffer>, readonly AgentLogEvent[]>();
+  const parse = (bytes: Uint8Array<ArrayBuffer>): readonly AgentLogEvent[] => {
+    let events = parsedBytes.get(bytes);
+    if (events === undefined) {
+      events = parseEventLogBytes(bytes).events;
+      parsedBytes.set(bytes, events);
+    }
+    return events;
+  };
   let merged: ReturnType<typeof createEventLogReducer> | undefined;
   let mergedAnomalies: EventLogAnomaly[] = [];
   let segmentFailure: EventLogAnomaly | undefined;
+  /** When the earliest foreign run this fold held goes stale, so its user turn joins the history (XD3). */
+  let refoldAt: number | undefined;
   const fold = (): void => {
+    refoldAt = undefined;
     if (segments.length === 0) {
       foreign = [];
       merged = undefined;
@@ -286,24 +329,47 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
     }
     const next = createEventLogReducer('history');
     const found: EventLogAnomaly[] = [];
-    foreign = segments.map((segment) => ({
-      deviceId: segment.deviceId,
-      events: parseEventLogBytes(segment.bytes).events,
-    }));
-    /* XD3: a run another device has not settled stays out of the history until it does, unless it is this device's
-     * own run read back from a segment. Its dangling turn would otherwise be answered here, or its open tool calls
-     * closed here as disconnected, while that device still runs it. */
+    foreign = segments.map((segment) => ({ deviceId: segment.deviceId, events: parse(segment.bytes) }));
+    /*
+     * XD3: a run another device has not settled stays out of the history while it holds the chat, unless it is this
+     * device's own run read back from a segment: its dangling turn would otherwise be answered here, or its open tool
+     * calls closed here as disconnected, while that device still runs it. Once it is past the fence's staleness bound
+     * its device is gone, and the person's turn joins the history without what the run left half done.
+     */
     const ownRuns = new Set(ownRows.map((row) => row.runId));
-    const unsettled = unsettledRunIds(foreign);
+    const at = now();
+    const held = new Map<string, Set<string>>();
+    const abandoned = new Map<string, Set<string>>();
+    for (const run of unsettledParsedRuns(foreign)) {
+      if (ownRuns.has(run.runId)) {
+        continue;
+      }
+      const stale = isAbandonedForeignRun(run, at);
+      const into = stale ? abandoned : held;
+      const ids = into.get(run.deviceId) ?? new Set<string>();
+      ids.add(run.runId);
+      into.set(run.deviceId, ids);
+      if (!stale) {
+        const staleAt = run.lastRecordedAt + foreignRunStaleMilliseconds;
+        refoldAt = refoldAt === undefined ? staleAt : Math.min(refoldAt, staleAt);
+      }
+    }
     const parsedSegments: ParsedLogSegment[] = [
       { deviceId: ownDeviceId, events: ownRows },
       ...foreign.map((segment) => {
-        const held = unsettled.get(segment.deviceId);
-        return held === undefined || held.size === 0
+        const heldIds = held.get(segment.deviceId);
+        const abandonedIds = abandoned.get(segment.deviceId);
+        return heldIds === undefined && abandonedIds === undefined
           ? segment
           : {
               deviceId: segment.deviceId,
-              events: segment.events.filter((event) => ownRuns.has(event.runId) || !held.has(event.runId)),
+              events: segment.events.filter((event) =>
+                heldIds?.has(event.runId) === true
+                  ? false
+                  : abandonedIds?.has(event.runId) === true
+                    ? keptOfAbandonedRun(event)
+                    : true,
+              ),
             };
       }),
     ];
@@ -327,7 +393,10 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
     merged = next;
     mergedAnomalies = found;
   };
-  /* Reading never fails a chat (D16): segments that cannot be read leave the history this device's, and say so. */
+  /*
+   * Reading never fails a chat (D16): segments that cannot be read leave the history as it was, and say so. The fence
+   * does not read that as "no other device": `foreignRuns` refuses until a read succeeds.
+   */
   const readSegments = async (): Promise<void> => {
     if (storage.segments === undefined) {
       return;
@@ -342,13 +411,13 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
     } catch (error) {
       segmentFailure = {
         kind: 'history',
-        message: `The other devices' segments could not be read, so the history is this device's alone: ${
+        message: `The other devices' segments could not be read, so the history leaves out what they hold now: ${
           error instanceof Error ? error.message : String(error)
         }`,
       };
       return;
     }
-    if (!sameSegments(segments, next)) {
+    if (!sameSegments(segments, next) || (refoldAt !== undefined && now() > refoldAt)) {
       segments = next;
       fold();
     }
@@ -526,6 +595,13 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
           foreignRuns: async () =>
             enqueue(async () => {
               assertOpen();
+              if (segmentFailure !== undefined) {
+                throw new EventLogError(
+                  'SEGMENTS_UNREADABLE',
+                  "Another device's copy of this chat could not be read, so whether it is running the chat is unknown.",
+                  { cause: segmentFailure.message },
+                );
+              }
               const ownRuns = new Set(ownRows.map((row) => row.runId));
               return unsettledParsedRuns(foreign).filter((run) => !ownRuns.has(run.runId));
             }),

@@ -463,6 +463,9 @@ export type TurnCompleteInput = TurnAttemptInput & Readonly<{ cut: boolean }>;
 /** `reconcile`: list the lease records of the project, or of one chat. @public */
 export type TurnReconcileInput = Readonly<{ requestId: string; chatId?: string | undefined }>;
 
+/** `publish`: record one chat's log in its ref now, so the other devices see its run (XD3). @public */
+export type TurnPublishInput = Readonly<{ requestId: string; chatId: string }>;
+
 /** `settlements`: a listen that replays every unacknowledged fact on subscribe. @public */
 export type TurnSettlementsInput = Readonly<{ signal: AbortSignal }>;
 
@@ -550,6 +553,12 @@ export type TurnPlacementPort = Readonly<{
   acknowledge: (
     input: TurnAttemptInput,
   ) => Promise<TurnPlacementAnswer<NoResult, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | 'SESSION_FENCED'>>;
+  /**
+   * Record the chat's log in its ref now, after the host appended a run's heartbeat (XD3), so another device that syncs
+   * sees the run is still live. Fire and forget: an offline remote queues the push. Absent where nothing syncs, and on
+   * an older session.
+   */
+  publish?: ((input: TurnPublishInput) => Promise<TurnPlacementAnswer<NoResult, 'SESSION_FENCED'>>) | undefined;
 }>;
 
 /** A launcher live delta qualified by its emitting writer incarnation. @public */

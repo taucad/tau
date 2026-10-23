@@ -119,35 +119,72 @@ export const chatRecordFileName = 'chat.json';
 export const chatSegmentsDirectoryName = 'events';
 
 /**
- * The device a segment file belongs to.
+ * The device a segment file belongs to: what every reader of a chat's `events/` directory, host or page, names it.
  *
  * @param name - One entry of the chat's `events/` directory.
  * @returns The device id `chatSegmentPath` spelled it from, or `undefined` for any other entry.
- * @internal
+ * @public
  */
 export const segmentDeviceIdOf = (name: string): string | undefined =>
   /^[^/\\]+\.jsonl$/u.test(name) ? name.slice(0, -'.jsonl'.length) : undefined;
 
+/** How a platform reaches one chat's `events/` directory, for {@link createChatSegmentsReader}. @internal */
+export type ChatSegmentsSource = Readonly<{
+  /** The directory's entry names; none when it does not exist. */
+  list: () => Promise<readonly string[]>;
+  /** One entry's bytes, `undefined` when it vanished meanwhile. */
+  read: (name: string) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
+   * A fingerprint of one entry that changes whenever its bytes do (its size and modification time), read without its
+   * bytes; `undefined` when it vanished. Without it every call reads every segment.
+   */
+  version?: ((name: string) => Promise<string | undefined>) | undefined;
+}>;
+
 /**
- * Read every other device's segment of one chat.
+ * Read every other device's segment of one chat, again on each call (XD1).
  *
- * @param names - The entries of the chat's `events/` directory; none when it does not exist.
- * @param read - Reads one entry's bytes by name, `undefined` when it vanished meanwhile.
- * @returns One segment per `<deviceId>.jsonl` entry, in name order.
+ * A segment whose fingerprint did not change since the last call is answered with the same object, read once: a
+ * writer refreshes before every admission, and most refreshes find nothing new.
+ *
+ * @param source - The chat's `events/` directory on this platform.
+ * @returns A read of the segments: one per `<deviceId>.jsonl` entry, in name order.
  * @internal
  */
-export const readChatSegments = async (
-  names: readonly string[],
-  read: (name: string) => Promise<Uint8Array<ArrayBuffer> | undefined>,
-): Promise<readonly ChatLogSegment[]> => {
-  const found = await Promise.all(
-    names.toSorted().map(async (name): Promise<ChatLogSegment | undefined> => {
-      const deviceId = segmentDeviceIdOf(name);
-      const bytes = deviceId === undefined ? undefined : await read(name);
-      return deviceId === undefined || bytes === undefined ? undefined : { deviceId, bytes };
-    }),
-  );
-  return found.filter((segment) => segment !== undefined);
+export const createChatSegmentsReader = (source: ChatSegmentsSource): (() => Promise<readonly ChatLogSegment[]>) => {
+  const known = new Map<string, Readonly<{ version: string; segment: ChatLogSegment }>>();
+  return async () => {
+    const listed = await source.list();
+    const names = listed.filter((name) => segmentDeviceIdOf(name) !== undefined).toSorted();
+    for (const name of known.keys()) {
+      if (!names.includes(name)) {
+        known.delete(name);
+      }
+    }
+    const found = await Promise.all(
+      names.map(async (name): Promise<ChatLogSegment | undefined> => {
+        const deviceId = segmentDeviceIdOf(name)!;
+        const version = await source.version?.(name);
+        const prior = known.get(name);
+        if (version !== undefined && prior?.version === version) {
+          return prior.segment;
+        }
+        const bytes = await source.read(name);
+        if (bytes === undefined) {
+          known.delete(name);
+          return undefined;
+        }
+        const segment = { deviceId, bytes };
+        if (version === undefined) {
+          known.delete(name);
+        } else {
+          known.set(name, { version, segment });
+        }
+        return segment;
+      }),
+    );
+    return found.filter((segment) => segment !== undefined);
+  };
 };
 
 /**

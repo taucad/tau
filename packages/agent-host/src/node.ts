@@ -19,10 +19,10 @@ import type { AttachmentReader } from '#harness/session-record.js';
 import {
   chatRecordFileName,
   chatSegmentsDirectoryName,
+  createChatSegmentsReader,
   createChatStore,
   isPurgedChatRecord,
   purgedChatError,
-  readChatSegments,
   requireChatPathSegment,
 } from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
@@ -329,31 +329,49 @@ const syncDirectory = async (directory: string): Promise<void> => {
 };
 
 /**
- * Every other device's segment beside a chat log (XD1): `events/<deviceId>.jsonl`, as sync projected it.
+ * Every other device's segment beside a chat log (XD1): `events/<deviceId>.jsonl`, as sync projected it. A segment
+ * whose size and modification time did not change is not read again.
  *
  * @param directory - The chat's `events/` directory.
- * @returns The segments; none when the directory does not exist.
+ * @returns A read of the segments; none while the directory does not exist.
  */
-const readNodeSegments = async (directory: string): Promise<readonly ChatLogSegment[]> => {
-  let names: string[];
-  try {
-    names = await readdir(directory);
-  } catch (error) {
+const nodeSegmentsReader = (directory: string): (() => Promise<readonly ChatLogSegment[]>) => {
+  const absent = (error: unknown): boolean => {
     const { code } = error as NodeJS.ErrnoException;
-    if (code === 'ENOENT' || code === 'ENOTDIR') {
-      return [];
-    }
-    throw error;
-  }
-  return readChatSegments(names, async (name) => {
-    try {
-      return new Uint8Array(await readFile(join(directory, name)));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return undefined;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  };
+  return createChatSegmentsReader({
+    list: async () => {
+      try {
+        return await readdir(directory);
+      } catch (error) {
+        if (absent(error)) {
+          return [];
+        }
+        throw error;
       }
-      throw error;
-    }
+    },
+    version: async (name) => {
+      try {
+        const { size, mtimeMs } = await stat(join(directory, name));
+        return `${String(size)}:${String(mtimeMs)}`;
+      } catch (error) {
+        if (absent(error)) {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+    read: async (name) => {
+      try {
+        return new Uint8Array(await readFile(join(directory, name)));
+      } catch (error) {
+        if (absent(error)) {
+          return undefined;
+        }
+        throw error;
+      }
+    },
   });
 };
 
@@ -434,7 +452,7 @@ const openWriter = async (filePath: string, segmentsDirectory?: string): Promise
     },
     // The kernel lock is held for the log's life, so every section is already exclusive.
     exclusive: async (section) => section(),
-    ...(segmentsDirectory === undefined ? {} : { segments: async () => readNodeSegments(segmentsDirectory) }),
+    ...(segmentsDirectory === undefined ? {} : { segments: nodeSegmentsReader(segmentsDirectory) }),
     close: async () => {
       try {
         await file.close();

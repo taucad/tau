@@ -27,11 +27,13 @@ export type ForeignRun = Readonly<{
 /**
  * How long a foreign run may go without a new row before it no longer holds the chat: ten minutes.
  *
- * Twice the model stream's stall bound (`streamStall`, 300 s, E9): a run whose stream stays silent that long fails
- * `MODEL_STREAM_STALLED` and settles, and a running device republishes its segment while an attempt holds its lease
- * (`@taucad/revisions` turn placement, once a minute), so a live run's newest row reaches the other devices well
- * inside it. Past it the device is gone, offline or partitioned: the run is abandoned for the fence, so a dead device
- * cannot lock a chat. Its rows stay out of the model's history until it settles (see {@link unsettledRunIds}).
+ * Liveness never waits on content. The device that holds a run appends a `run.heartbeat` row once a minute while the
+ * run is admitted, running, or paused and held by an open session there (`runHeartbeatMilliseconds` in the Tau agent
+ * host), and asks its placement to record the chats after each one, so a long tool call or a paused run that writes
+ * nothing still moves the run's newest `recordedAt` and the chat's ref. Ten heartbeats fit in the bound: sync can drop
+ * several and a live run still holds. Past it the device is gone, offline or partitioned: the run is abandoned for the
+ * fence, so a dead device cannot lock a chat, and the user's turn it holds joins the history without its partial
+ * output (see `createEventLogAppender`).
  *
  * @public
  */
@@ -47,31 +49,36 @@ const timeOf = (event: AgentLogEvent): number => {
 /**
  * Every run one device's segment holds that has not settled, by that device's own ledger.
  *
+ * One pass over the rows: each unsettled run's newest time and its tip are kept as its rows go by.
+ *
  * @param segment - One device's rows, as its segment holds them.
  * @returns Its unsettled runs, in the order their rows first appear.
  * @internal
  */
 const unsettledRunsOf = (segment: ParsedLogSegment): readonly ForeignRun[] => {
   const ledger = foldChatLedger(emptyChatLedger, segment.events);
-  const runs: ForeignRun[] = [];
-  for (const [runId, entry] of Object.entries(ledger.runs)) {
-    if (entry.lifecycle === undefined || !unsettledStates.has(entry.lifecycle)) {
+  const runs = new Map<string, { state: ForeignRun['state']; lastRecordedAt: number; tip: AgentLogEvent }>();
+  for (const event of segment.events) {
+    const lifecycle = ledger.runs[event.runId]?.lifecycle;
+    if (lifecycle === undefined || !unsettledStates.has(lifecycle)) {
       continue;
     }
-    const rows = segment.events.filter((event) => event.runId === runId);
-    const tip = rows.at(-1);
-    if (tip === undefined) {
-      continue;
+    const at = timeOf(event);
+    const seen = runs.get(event.runId);
+    if (seen === undefined) {
+      runs.set(event.runId, { state: lifecycle as ForeignRun['state'], lastRecordedAt: at, tip: event });
+    } else {
+      seen.lastRecordedAt = Math.max(seen.lastRecordedAt, at);
+      seen.tip = event;
     }
-    runs.push({
-      deviceId: segment.deviceId,
-      runId,
-      state: entry.lifecycle as ForeignRun['state'],
-      lastRecordedAt: Math.max(...rows.map((row) => timeOf(row))),
-      tip: { leaderEpoch: tip.leaderEpoch, sequence: tip.sequence },
-    });
   }
-  return runs;
+  return [...runs].map(([runId, { state, lastRecordedAt, tip }]) => ({
+    deviceId: segment.deviceId,
+    runId,
+    state,
+    lastRecordedAt,
+    tip: { leaderEpoch: tip.leaderEpoch, sequence: tip.sequence },
+  }));
 };
 
 /**
@@ -108,20 +115,6 @@ export const unsettledForeignRuns = (segments: readonly ChatLogSegment[]): reado
       events: parseEventLogBytes(segment.bytes).events,
     })),
   );
-
-/**
- * The run ids each segment holds unsettled, by device: the rows the model's history leaves out until the run settles.
- *
- * A run in flight on another device is a user turn with no reply yet, or a tool call with no output yet; folded into
- * this device's history it would be answered here, or its call closed here as disconnected, while that device is still
- * running it. Once its device settles it and sync brings the settlement, it joins the history in full.
- *
- * @param segments - Other devices' segments.
- * @returns Each device id → its unsettled run ids.
- * @internal
- */
-export const unsettledRunIds = (segments: readonly ParsedLogSegment[]): ReadonlyMap<string, ReadonlySet<string>> =>
-  new Map(segments.map((segment) => [segment.deviceId, new Set(unsettledRunsOf(segment).map((run) => run.runId))]));
 
 /**
  * Whether a foreign run no longer holds the chat: its newest row is more than {@link foreignRunStaleMilliseconds} old,

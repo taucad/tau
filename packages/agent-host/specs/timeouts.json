@@ -86,9 +86,9 @@
     },
     {
       "id": "A10P",
-      "bound": "Run progress publication: record the chats once a minute while a turn attempt holds its tools, so another device sees the run before it settles (XD3)",
-      "site": "packages/revisions/src/turn-placement.ts",
-      "token": "runProgressPublishMilliseconds",
+      "bound": "Run heartbeat: a live run (admitted, running, or paused and held by an open incarnation) whose chat went a minute without a row writes a run.heartbeat and asks the placement to publish the chat's ref, so another device's run fence sees it alive (XD3)",
+      "site": "packages/agent-host/src/host/tau-agent-host.ts",
+      "token": "runHeartbeatMilliseconds",
       "class": "Debounce",
       "owner": "XD3"
     },

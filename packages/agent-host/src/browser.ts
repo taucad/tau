@@ -12,9 +12,9 @@ import { createBrowserLeadership } from '#browser/leadership.js';
 import {
   chatRecordFileName,
   chatSegmentsDirectoryName,
+  createChatSegmentsReader,
   createChatStore,
   isPurgedChatRecord,
-  readChatSegments,
   requireChatPathSegment,
 } from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
@@ -60,7 +60,7 @@ export type ProviderEventLogOptions = {
     appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
     unlink(path: string): Promise<void>;
     /** Current durable byte size; omission retains the full-read compatibility fallback. */
-    stat?(path: string, options: FileStatOptions): Promise<{ readonly size: number }>;
+    stat?(path: string, options: FileStatOptions): Promise<{ readonly size: number; readonly mtimeMs?: number }>;
     /**
      * The entry names of a directory, rejecting `ENOENT` when it does not exist. A chat store lists the chat's
      * `events/` directory with it to read the other devices' segments (XD1); without it the history is this
@@ -139,13 +139,8 @@ export function createOpfsEventLog(
 export async function createOpfsEventLog(
   options: OpfsEventLogOptions,
 ): Promise<BrowserEventLogReader | EventLogAppender> {
-  if (location.origin === 'null') {
-    throw new EventLogError(
-      'STORAGE_NOT_WRITABLE',
-      'OPFS is unavailable on a null origin. Run the dedicated worker from a real secure or localhost origin.',
-    );
-  }
   if (options.access === 'read') {
+    refuseNullOrigin();
     return readerOf(async () => {
       const file = await options.fileHandle.getFile();
       return new Uint8Array(await file.arrayBuffer());
@@ -153,6 +148,16 @@ export async function createOpfsEventLog(
   }
   return openOpfsWriter(options.fileHandle);
 }
+
+/** OPFS has no storage for a null origin: every open, read or write, is refused before it touches a handle. */
+const refuseNullOrigin = (): void => {
+  if (location.origin === 'null') {
+    throw new EventLogError(
+      'STORAGE_NOT_WRITABLE',
+      'OPFS is unavailable on a null origin. Run the dedicated worker from a real secure or localhost origin.',
+    );
+  }
+};
 
 /**
  * The write half of {@link createOpfsEventLog}.
@@ -165,12 +170,7 @@ const openOpfsWriter = async (
   fileHandle: FileSystemFileHandle,
   segments?: () => Promise<readonly ChatLogSegment[]>,
 ): Promise<EventLogAppender> => {
-  if (location.origin === 'null') {
-    throw new EventLogError(
-      'STORAGE_NOT_WRITABLE',
-      'OPFS is unavailable on a null origin. Run the dedicated worker from a real secure or localhost origin.',
-    );
-  }
+  refuseNullOrigin();
   const acquire = (fileHandle as SyncAccessCapableFileHandle).createSyncAccessHandle;
   if (typeof acquire !== 'function') {
     throw new EventLogError(
@@ -546,10 +546,18 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
       },
       /* The writer appends to this device's file only; its history also reads the other devices' segments (XD1). */
       openWriter: async (chatId) =>
-        openOpfsWriter((await opfsFile(directory, logPath(chatId), true))!, async () =>
-          readChatSegments(await opfsNames(directory, segmentsPath(chatId)), async (name) =>
-            bytesOf(`${segmentsPath(chatId)}/${name}`),
-          ),
+        openOpfsWriter(
+          (await opfsFile(directory, logPath(chatId), true))!,
+          createChatSegmentsReader({
+            list: async () => opfsNames(directory, segmentsPath(chatId)),
+            /* `getFile` reads the metadata, not the bytes. */
+            version: async (name) => {
+              const file = await opfsFile(directory, `${segmentsPath(chatId)}/${name}`, false);
+              const blob = await file?.getFile();
+              return blob === undefined ? undefined : `${String(blob.size)}:${String(blob.lastModified)}`;
+            },
+            read: async (name) => bytesOf(`${segmentsPath(chatId)}/${name}`),
+          }),
         ),
       /* OPFS's exclusive handle cannot be stolen from a frozen holder (RH-R12). */
       leadership: leadershipOf(options, false),
@@ -580,7 +588,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
       /* This open runs under the chat's Web Lock (M2), so a surviving marker is a dead or stolen holder's; the
        * per-append fence refuses that holder's appends whatever the marker says (EQ2, RH-R12). */
       await fileSystem.unlink(`${filePath}.lock`).catch(() => undefined);
-      const { readdir } = fileSystem;
+      const { readdir, stat } = fileSystem;
       const directory = segmentsPath(chatId);
       return openProviderWriter(
         {
@@ -592,22 +600,35 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
         /* The writer appends to this device's file only; its history also reads the other devices' segments (XD1). */
         readdir === undefined
           ? undefined
-          : async () => {
-              let names: readonly string[];
-              try {
-                names = await readdir.call(fileSystem, directory);
-              } catch (error) {
-                const { code } = error as { readonly code?: unknown };
-                if (code === 'ENOENT' || code === 'ENOTDIR') {
-                  return [];
+          : createChatSegmentsReader({
+              list: async () => {
+                try {
+                  return await readdir.call(fileSystem, directory);
+                } catch (error) {
+                  const { code } = error as { readonly code?: unknown };
+                  if (code === 'ENOENT' || code === 'ENOTDIR') {
+                    return [];
+                  }
+                  throw error;
                 }
-                throw error;
-              }
-              return readChatSegments(names, async (name) => {
+              },
+              ...(stat === undefined
+                ? {}
+                : {
+                    version: async (name: string) => {
+                      const path = `${directory}/${name}`;
+                      if (!(await fileSystem.exists(path))) {
+                        return undefined;
+                      }
+                      const { size, mtimeMs } = await stat.call(fileSystem, path, { content: 'head' });
+                      return `${String(size)}:${String(mtimeMs)}`;
+                    },
+                  }),
+              read: async (name) => {
                 const path = `${directory}/${name}`;
                 return (await fileSystem.exists(path)) ? fileSystem.readFile(path) : undefined;
-              });
-            },
+              },
+            }),
       );
     },
     /* The provider leg fences each append, so a steal from a silent holder can serve (RH-R12). */

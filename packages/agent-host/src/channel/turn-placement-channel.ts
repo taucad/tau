@@ -24,6 +24,7 @@ import type {
   TurnPlacementFact,
   TurnPlacementGrant,
   TurnPlacementPort,
+  TurnPublishInput,
   TurnReconcileInput,
 } from '#waist/ports.js';
 
@@ -86,6 +87,12 @@ type TurnPlacementProtocol = {
       result: Awaited<ReturnType<TurnPlacementPort['acknowledge']>>;
       wireResult: unknown;
     };
+    readonly publish: {
+      args: TurnPublishInput;
+      wireArgs: unknown;
+      result: Awaited<ReturnType<NonNullable<TurnPlacementPort['publish']>>>;
+      wireResult: unknown;
+    };
   };
   readonly notifies: Record<never, never>;
   readonly listens: {
@@ -103,6 +110,7 @@ const requests = {
   abandon: attemptSchema,
   reconcile: z.strictObject({ requestId: text, chatId: text.optional() }),
   acknowledge: attemptSchema,
+  publish: z.strictObject({ requestId: text, chatId: text }),
 } as const;
 
 /* Answers and facts are the session's own; the client checks only what it routes on. */
@@ -116,7 +124,7 @@ const call = { args: z.unknown(), result: answerSchema };
 
 const turnPlacementProtocolSchemas = {
   hello: z.strictObject({ projectId: text }),
-  calls: { admit: call, complete: call, abandon: call, reconcile: call, acknowledge: call },
+  calls: { admit: call, complete: call, abandon: call, reconcile: call, acknowledge: call, publish: call },
   notifies: {},
   listens: { settlements: { args: z.unknown(), event: factSchema } },
 };
@@ -204,6 +212,10 @@ export const serveTurnPlacementChannel = (options: ServeTurnPlacementChannelOpti
         case 'acknowledge': {
           return session.acknowledge(parse('acknowledge', args));
         }
+        case 'publish': {
+          const input = parse('publish', args);
+          return session.publish?.(input) ?? { requestId: input.requestId, status: 'applied' };
+        }
         default: {
           throw unreadable(name, 'no such verb');
         }
@@ -289,6 +301,7 @@ export const connectTurnPlacementChannel = (options: ConnectTurnPlacementChannel
     abandon: async (input) => channel.call('abandon', input),
     reconcile: async (input) => channel.call('reconcile', input),
     acknowledge: async (input) => channel.call('acknowledge', input),
+    publish: async (input) => channel.call('publish', input),
     settlements: ({ signal }) => channel.listen('settlements', undefined, signal),
     close: (reason) => {
       channel.close(reason);

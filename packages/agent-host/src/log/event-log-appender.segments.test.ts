@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { pendingToolCalls } from '#host/run-history.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import type { ChatLogSegment } from '#log/segments.js';
 import { serializeLogEvent } from '#log/serialization.js';
@@ -26,10 +27,13 @@ const segment = (deviceId: string, events: readonly AgentLogEvent[]): ChatLogSeg
   bytes: bytesOf(events),
 });
 
+/** This device's clock in these tests, unless one names another: a few minutes after the rows below. */
+const clock = { now: Date.parse('2026-10-23T10:05:00.000Z') };
+
 /** A log whose storage reads `segments` as the chat's other devices' segments, as they are when read. */
 const openLog = async (own: readonly AgentLogEvent[], segments: { current: readonly ChatLogSegment[] }) => {
   const { storage } = memoryEventLogStorage(bytesOf(own));
-  return createEventLogAppender({ ...storage, segments: async () => segments.current });
+  return createEventLogAppender({ ...storage, segments: async () => segments.current }, { now: () => clock.now });
 };
 
 const desktopTurn = [
@@ -222,6 +226,51 @@ describe('an event log with other devices’ segments (XD1)', () => {
 
       expect(await log.foreignRuns?.()).toEqual([]);
       expect(ids(await log.messages())).toEqual(['desktop-2-user']);
+    });
+
+    /* Its device went away mid-run: the person's turn rejoins, and nothing the run left half done does. */
+    it('should take the user turn of a run gone stale into the history, without its dangling call', async () => {
+      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+      const log = await openLog(phoneTurn, { current: [segment('device-desktop', [...desktopTurn, ...inFlight])] });
+      expect(ids(await log.messages())).not.toContain('desktop-2-user');
+
+      /* No new row arrives; only the time passes the bound, and the next admission's refresh sees it. */
+      clock.now = Date.parse(at(3)) + foreignRunStaleMilliseconds + 1;
+      await log.refresh?.();
+      const history = await log.messages();
+
+      expect(ids(history)).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0', 'desktop-2-user']);
+      expect(pendingToolCalls(history)).toEqual([]);
+      expect(await log.historyIntact()).toBe(true);
+      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+    });
+
+    /* A segment that is there but cannot be read may hold a live run: the fence never reads that as none. */
+    it('should refuse to answer the fence while the other devices’ segments cannot be read', async () => {
+      const { storage } = memoryEventLogStorage(bytesOf(phoneTurn));
+      let failing = true;
+      const log = await createEventLogAppender({
+        ...storage,
+        segments: async () => {
+          if (failing) {
+            throw new Error('EIO: the segment could not be read');
+          }
+          return [];
+        },
+      });
+
+      await expect(log.foreignRuns?.()).rejects.toMatchObject({ code: 'SEGMENTS_UNREADABLE' });
+      failing = false;
+      await log.refresh?.();
+      await expect(log.foreignRuns?.()).resolves.toEqual([]);
+    });
+
+    it('should have no fence to answer where the storage has no segments', async () => {
+      const { storage } = memoryEventLogStorage(bytesOf(phoneTurn));
+      const log = await createEventLogAppender(storage);
+
+      expect(log.foreignRuns).toBeUndefined();
+      expect(ids(await log.messages())).toEqual(['epoch-phone-0']);
     });
   });
 });

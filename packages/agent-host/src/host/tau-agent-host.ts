@@ -168,7 +168,14 @@ export type CreateTauAgentHostOptions = {
    * bound (E9, 300 s).
    */
   readonly delays?:
-    | Readonly<{ idleEviction?: number; driverStopBound?: number; cutRetry?: number; streamStall?: number }>
+    | Readonly<{
+        idleEviction?: number;
+        driverStopBound?: number;
+        cutRetry?: number;
+        streamStall?: number;
+        /** How long a live run's chat may go without a row before a heartbeat is written; {@link runHeartbeatMilliseconds}. */
+        runHeartbeat?: number;
+      }>
     | undefined;
   /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
   readonly clock?: HostClock | undefined;
@@ -294,7 +301,27 @@ type ChatStore = {
   externalKind?: string | undefined;
   /** The ledger the host's close left: a read after close answers from it and opens nothing (L2a D14). */
   final?: ChatLedger | undefined;
+  /** The term this host last wrote the chat under, and when: a heartbeat writes only under a term already claimed. */
+  wrote?: Readonly<{ leaderEpoch: string; at: number }> | undefined;
+  /** Cancels the armed heartbeat (XD3). */
+  heartbeat?: (() => void) | undefined;
 };
+
+/**
+ * How long a live run's chat may go without a row before its host writes a `run.heartbeat`: one minute (XD3).
+ *
+ * The cross-device run fence reads a foreign run's newest row against a ten-minute bound (`foreignRunStaleMilliseconds`),
+ * so a run that writes nothing for a while — a long tool call, a paused run waiting on its person — must still show it
+ * is alive. While the chat's incarnation is open here and its run is admitted, running or paused, a minute with no
+ * row writes one heartbeat under the incarnation's term and asks the placement to record the chat's ref
+ * (`TurnPlacementPort.publish`). A host that closes, or whose incarnation ends, writes none, and the run goes stale on
+ * the other devices like any run whose device went away.
+ *
+ * @public
+ */
+export const runHeartbeatMilliseconds = 60_000;
+
+const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
 
 type AdmissionRecord = Readonly<{
   kind: ChatRunKind;
@@ -943,6 +970,81 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   });
 
   /**
+   * Keep a live run's chat moving for the other devices (XD3, {@link runHeartbeatMilliseconds}). Armed by every write;
+   * each tick writes a heartbeat when the chat has gone a full interval without a row, then re-arms while the run is
+   * live, the incarnation that wrote under the term is still the chat's, and the host is open.
+   *
+   * @param chatId - The chat.
+   */
+  const heartbeatInterval = options.delays?.runHeartbeat ?? runHeartbeatMilliseconds;
+  /* XD3: ask the placement to record the chat's ref; a publish that fails is the next heartbeat's to repeat. */
+  const publishChat = async (chatId: string, runId: string): Promise<void> => {
+    try {
+      await options.placement?.publish?.({
+        requestId: `publish:${chatId}:${runId}:${String(now().getTime())}`,
+        chatId,
+      });
+    } catch {
+      /* An offline remote queues the push, and an older session has no such verb. */
+    }
+  };
+  const armHeartbeat = (chatId: string, heartbeatDelay?: number): void => {
+    const store = storeOf(chatId);
+    if (closed || store.heartbeat !== undefined) {
+      return;
+    }
+    const clock: HostClock = options.clock ?? globalThis;
+    const tick = async (): Promise<void> => {
+      store.heartbeat = undefined;
+      const { ledger, wrote, deliver } = store;
+      const runId = ledger?.currentRunId;
+      const leaderEpoch = registry.termOf(chatId);
+      const state = ledger === undefined ? 'none' : chatRunState(ledger);
+      /* A term this incarnation already wrote under, or a paused run it rests on: never the first row of a term that
+       * still has an orphan to abandon (RA-R9), which only a live, unsettled run at open can be. */
+      const claimed = wrote?.leaderEpoch === leaderEpoch || state === 'paused';
+      if (
+        closed ||
+        deliver === undefined ||
+        runId === undefined ||
+        leaderEpoch === undefined ||
+        !liveRunStates.has(state) ||
+        !claimed
+      ) {
+        return;
+      }
+      const quiet = wrote?.leaderEpoch === leaderEpoch ? now().getTime() - wrote.at : heartbeatInterval;
+      if (quiet < heartbeatInterval) {
+        armHeartbeat(chatId, heartbeatInterval - quiet);
+        return;
+      }
+      const heartbeat: LogRowBody = { type: 'run.heartbeat' };
+      try {
+        const committed = await serial(chatId, async () => write(chatId, leaderEpoch, [{ runId, body: heartbeat }]));
+        if (store.deliver === deliver) {
+          deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
+        }
+        /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
+        void publishChat(chatId, runId);
+      } catch {
+        /* A fenced or closed log ends the heartbeat with the incarnation that wrote it. */
+        return;
+      }
+      armHeartbeat(chatId);
+    };
+    /* The interval, or what is left of it since the chat's last row. */
+    const timer: unknown = clock.setTimeout(() => {
+      void tick();
+    }, heartbeatDelay ?? heartbeatInterval); // Bound: runHeartbeatMilliseconds.
+    /* A liveness signal never keeps a process open: a daemon that is shutting down exits on time (Node's timers). */
+    (timer as { unref?: () => void } | undefined)?.unref?.();
+    store.heartbeat = () => {
+      clock.clearTimeout(timer);
+      store.heartbeat = undefined;
+    };
+  };
+
+  /**
    * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
    * not abandoned, so this host runs nothing on the chat until it settles. A run is never moved between devices while
    * it is in flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same
@@ -953,7 +1055,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * @param log - Its log, refreshed from sync.
    */
   const refuseForeignRun = async (chatId: string, log: DurableEventLog): Promise<void> => {
-    const held = liveForeignRun((await log.foreignRuns?.()) ?? [], now().getTime());
+    /* An unread segment may hold a live run: `foreignRuns` rejects `SEGMENTS_UNREADABLE` (`wait`), never answers none. */
+    const runs = (await log.foreignRuns?.()) ?? [];
+    const held = liveForeignRun(runs, now().getTime());
     if (held === undefined) {
       return;
     }
@@ -1065,6 +1169,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         rows,
         onAppended: (row, ledger) => {
           store.ledger = ledger;
+          store.wrote = { leaderEpoch, at: now().getTime() };
           runChats.set(row.runId, chatId);
           if (row.type === 'message.appended') {
             messageIds.push(row.message.id);
@@ -1072,6 +1177,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           wake(store);
         },
       });
+      armHeartbeat(chatId);
       return { ledger, messageIds };
     } catch (error) {
       if (codedFailureDetail(error).code === 'LOG_FENCED') {
@@ -1235,6 +1341,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               });
             }
           }
+        }
+        /* XD3: a paused run this host rests on again keeps holding the chat for the other devices. */
+        if (chatRunState(ledger) === 'paused') {
+          armHeartbeat(chatId);
         }
         return { ledger, repair };
       }),
@@ -1729,6 +1839,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     closeLog: async (chatId) => {
       const store = storeOf(chatId);
       store.deliver = undefined;
+      store.heartbeat?.();
       store.live.clear();
       await closeExternalChat(chatId).catch(() => undefined);
       if (!closed && !deferredLogCloses.has(chatId)) {
@@ -2224,6 +2335,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     close: async () => {
       closing ??= (async () => {
         closed = true;
+        for (const store of stores.values()) {
+          store.heartbeat?.();
+        }
         await registry.close();
         await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));
         await drainApprovalScans();

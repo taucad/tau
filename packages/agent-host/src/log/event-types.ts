@@ -440,6 +440,20 @@ export type RunLifecycleEvent = LogEventBase & {
   readonly stopReason?: string | undefined;
 };
 
+/**
+ * A live run's liveness signal (XD3, cross-device run fence): the device that holds the run appends one while the run
+ * is admitted, running, or paused and held by an open session there, at most once per `runHeartbeatMilliseconds`, so
+ * its newest `recordedAt` keeps advancing and the chat's ref keeps changing for every other device to see.
+ *
+ * It carries nothing else and changes nothing: no run bookkeeping, no history, no projection reads it. Only the fence
+ * reads its `recordedAt`, through the run's newest row.
+ *
+ * @public
+ */
+export type RunHeartbeatEvent = LogEventBase & {
+  readonly type: 'run.heartbeat';
+};
+
 /** Records one Tau-gateway invocation identity before any provider request. @public */
 export type ModelInvocationPreparedEvent = LogEventBase & {
   readonly type: 'model.invocation-prepared';
@@ -513,6 +527,7 @@ export type AgentLogEvent =
   | TurnConflictedLogEvent
   | TurnFailedLogEvent
   | RunLifecycleEvent
+  | RunHeartbeatEvent
   | ModelInvocationPreparedEvent
   | ModelInvocationBoundEvent
   | ModelInvocationSettledEvent

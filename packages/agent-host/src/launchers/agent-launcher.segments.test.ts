@@ -27,6 +27,7 @@ import type {
   ModelStreamRequest,
   ModelTransport,
   ToolRegistry,
+  TurnPlacementPort,
 } from '#waist/ports.js';
 import { refusalOf } from '#wire/refusals.js';
 
@@ -59,7 +60,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
-const launch = (chats: ChatStore, transport: ModelTransport): AgentLauncher => {
+const launch = (
+  chats: ChatStore,
+  transport: ModelTransport,
+  options: Readonly<{ runHeartbeat?: number; publish?: NonNullable<TurnPlacementPort['publish']> }> = {},
+): AgentLauncher => {
+  const placement = fakePlacement({ registry: emptyTools }).port;
   const launcher = createAgentLauncher({
     chats,
     modelTransport: transport,
@@ -67,7 +73,8 @@ const launch = (chats: ChatStore, transport: ModelTransport): AgentLauncher => {
     model,
     systemPrompt: 'You are Tau.',
     toolRegistry: emptyTools,
-    turnPlacement: fakePlacement({ registry: emptyTools }).port,
+    turnPlacement: options.publish === undefined ? placement : { ...placement, publish: options.publish },
+    ...(options.runHeartbeat === undefined ? {} : { delays: { runHeartbeat: options.runHeartbeat } }),
   });
   launchers.push(launcher);
   return launcher;
@@ -320,7 +327,23 @@ describe('a chat continued on a second device', () => {
       ]);
     });
 
-    it('should admit a run once the other device’s run has gone stale, without its dangling turn', async () => {
+    /* A segment that is there but cannot be read may hold a live run: the fence holds, retryably, and writes nothing. */
+    it('should refuse a run while another device’s segment cannot be read', async () => {
+      const phone = await workspace();
+      const phoneModel = recordingModel('phone answer');
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
+      /* A directory where a segment file should be: listed, but every read of it fails. */
+      await mkdir(join(phone, '.tau', 'chats', chatId, 'events', 'device-desktop.jsonl'), { recursive: true });
+
+      const refused = await start(onPhone, 'run-phone-1', 'on the phone');
+
+      expect(refused).toMatchObject({ status: 'refused', code: 'SEGMENTS_UNREADABLE' });
+      expect(refusalOf('SEGMENTS_UNREADABLE').retry).toBe('wait');
+      expect(phoneModel.requests).toEqual([]);
+      expect(await readFile(ownLog(phone), 'utf8').catch(() => '')).toBe('');
+    });
+
+    it('should admit a run once the other device’s run has gone stale, with its user turn but nothing it left half done', async () => {
       const inFlight = await desktopInFlight();
       inFlight.release();
       const phone = await workspace();
@@ -338,7 +361,117 @@ describe('a chat continued on a second device', () => {
 
       await turn(onPhone, 'run-phone-1', 'second, on the phone');
 
-      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual(['user: second, on the phone']);
+      /* The person's turn on the desktop rejoins; the call it left open there does not. */
+      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual([
+        'user: in flight on the desktop',
+        'user: second, on the phone',
+      ]);
+    });
+  });
+
+  /* XD3: liveness never waits on content. The holder device writes heartbeats while its run is live, paused included. */
+  describe('while this device holds a run', () => {
+    const workspace = async (): Promise<string> => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-chat-heartbeat-'));
+      roots.push(root);
+      return root;
+    };
+    const ownLog = (root: string): string => join(root, '.tau', 'chats', chatId, 'events.jsonl');
+    const rowsUntil = async (root: string, done: (rows: AgentLogEvent[]) => boolean): Promise<AgentLogEvent[]> => {
+      for (let attempt = 0; attempt < 300; attempt++) {
+        // oxlint-disable-next-line no-await-in-loop -- polling a durable file is sequential by nature.
+        const rows = rowsOf(await readFile(ownLog(root), 'utf8').catch(() => ''));
+        if (done(rows)) {
+          return rows;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        await sleep(10);
+      }
+      throw new Error(
+        `The rows never arrived: ${JSON.stringify(rowsOf(await readFile(ownLog(root), 'utf8').catch(() => '')).map((row) => [row.type, 'state' in row ? row.state : '']))}`,
+      );
+    };
+    const heartbeatsAfter = (rows: readonly AgentLogEvent[], state: string): AgentLogEvent[] => {
+      const from = rows.findIndex((row) => row.type === 'run.lifecycle' && row.state === state);
+      return from === -1 ? [] : rows.slice(from + 1).filter((row) => row.type === 'run.heartbeat');
+    };
+
+    it('should write a heartbeat and publish the chat while its run streams nothing, then stop once it ends', async () => {
+      const root = await workspace();
+      const gate = Promise.withResolvers<void>();
+      const recorded = recordingModel('answer');
+      const published: string[] = [];
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await gate.promise;
+            yield* recorded.transport.stream(request);
+          },
+        },
+        {
+          runHeartbeat: 20,
+          publish: async ({ requestId, chatId: published_ }) => {
+            published.push(published_);
+            return { requestId, status: 'applied' };
+          },
+        },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+
+      const rows = await rowsUntil(root, (found) => heartbeatsAfter(found, 'running').length >= 2);
+      expect(heartbeatsAfter(rows, 'running')[0]).toMatchObject({ runId: 'run-1', type: 'run.heartbeat' });
+      expect(published).toContain(chatId);
+
+      gate.resolve();
+      const ended = await rowsUntil(
+        root,
+        (found) =>
+          heartbeatsAfter(found, 'completed').length > 0 ||
+          found.some((row) => row.type === 'run.lifecycle' && row.state === 'completed'),
+      );
+      await sleep(80);
+      const after = rowsOf(await readFile(ownLog(root), 'utf8'));
+      expect(ended.some((row) => row.type === 'run.lifecycle' && row.state === 'completed')).toBe(true);
+      expect(heartbeatsAfter(after, 'completed')).toEqual([]);
+    });
+
+    it('should keep a paused run alive with heartbeats while its session is open here', async () => {
+      const root = await workspace();
+      /* A stream that answers nothing until the pause aborts it. */
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          ...recordingModel('answer').transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await new Promise((resolve) => {
+              request.signal.addEventListener('abort', resolve, { once: true });
+            });
+            yield { type: 'completed', stopReason: 'aborted' };
+          },
+        },
+        { runHeartbeat: 20 },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
+      await launcher.execute({
+        type: 'interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
+      });
+
+      const rows = await rowsUntil(root, (found) => heartbeatsAfter(found, 'paused').length >= 2);
+
+      expect(heartbeatsAfter(rows, 'paused')[0]).toMatchObject({ runId: 'run-1' });
     });
   });
 

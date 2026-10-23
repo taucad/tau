@@ -224,7 +224,8 @@ export const createEventLogReducer = (
       case 'turn.finalized':
       case 'turn.conflicted':
       case 'turn.failed':
-      case 'run.lifecycle': {
+      case 'run.lifecycle':
+      case 'run.heartbeat': {
         apply = () => undefined;
         break;
       }

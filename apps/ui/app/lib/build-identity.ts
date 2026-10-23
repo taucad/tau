@@ -51,8 +51,9 @@ export const liveBuildIdTimeout = 4000;
 
 /**
  * What the server said about its live build: the build id; `none` when the host has no
- * build endpoint or names no build (the desktop and `tau serve` hosts answer this path
- * with their SPA `index.html`); `unreachable` when no answer came in time.
+ * build endpoint or names no build (a 404, or an OK non-JSON document: the desktop and
+ * `tau serve` hosts answer this path with their SPA `index.html`); `unreachable` when no
+ * answer came in time or the answer was any other failure (5xx, 408, 429, …), which may pass.
  */
 export type LiveBuildAnswer = number | 'none' | 'unreachable';
 
@@ -69,7 +70,14 @@ const requestLiveBuild = async (): Promise<LiveBuildAnswer> => {
   } catch {
     return 'unreachable';
   }
-  if (!response.ok || !(response.headers.get('content-type') ?? '').includes('application/json')) {
+  // Only a missing route or an SPA document means "no endpoint"; any other failure may pass.
+  if (response.status === 404) {
+    return 'none';
+  }
+  if (!response.ok) {
+    return 'unreachable';
+  }
+  if (!(response.headers.get('content-type') ?? '').includes('application/json')) {
     return 'none';
   }
   try {

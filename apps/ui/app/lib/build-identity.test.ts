@@ -71,8 +71,17 @@ describe('askLiveBuild', () => {
     await expect(askLiveBuild()).resolves.toBe('unreachable');
   });
 
+  it.each([502, 503, 500, 429, 408, 403])(
+    'should call a transient %i unreachable, not a host without an endpoint',
+    async (status) => {
+      vi.stubGlobal('fetch', async () => new Response('', { status }));
+
+      await expect(askLiveBuild()).resolves.toBe('unreachable');
+    },
+  );
+
   it.each([
-    ['a non-OK answer', async () => new Response('', { status: 404 })],
+    ['a 404', async () => new Response('', { status: 404 })],
     ['an answer without a build id', async () => Response.json({})],
     [
       'an SPA fallback document (desktop and tau serve have no build endpoint)',

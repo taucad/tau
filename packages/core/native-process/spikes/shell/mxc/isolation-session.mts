@@ -65,11 +65,18 @@ const makeSession = (base: string, id: string): Sess => {
  * read/write isolation, decided by EXTERNAL canaries). We therefore replace requestFor's deny/deny
  * network wholesale with the exact allow/allow/allow policy the backend demands, and keep
  * inheritDefaultEnv so the agent-user process is launchable.
+ *
+ * The isolation_session backend also rejects a processcontainer FILESYSTEM policy outright (MxcError
+ * "Isolation Session policy error: filesystem policy is not supported by the isolation session
+ * backend") — its isolation primitive is the distinct per-session AGENT USER + SID, not an allow-list
+ * of paths. So we DROP the filesystem block entirely; the agent user still needs the default env to
+ * launch, so inheritDefaultEnv stays on via the `process` field carried over from requestFor.
  */
 const isoSessionRequest = (grant: SessionGrant, command: string, denyPaths: boolean): MxcContainerRequest => {
   const base = requestFor(grant, command, '', denyPaths);
+  const { filesystem: _dropped, ...rest } = base;
   return {
-    ...base,
+    ...rest,
     containment: { type: 'isolation_session' },
     network: { egress: { default: 'allow' }, ingress: { default: 'allow', hostLoopback: 'allow' } },
   } as unknown as MxcContainerRequest;

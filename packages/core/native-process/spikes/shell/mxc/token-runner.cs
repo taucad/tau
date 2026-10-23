@@ -13,10 +13,14 @@
 //     STARTUPINFOEX attribute list holding the job (kill-on-close) and an explicit handle list of the
 //     stdio handles, STARTF_USESTDHANDLES, an explicit environment block, and lpDesktop naming the
 //     private desktop.
+//   conpty/mod.rs spawn_conpty_process_as_user: for a PTY-backed child the UNRESTRICTED runner creates
+//     the pseudoconsole + pipes, child stdio = INVALID_HANDLE, and the child is attached via
+//     PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE. The ptyBash mode below mirrors this.
 //
 // Usage: token-runner.exe <spec-file>. The spec is key=value lines (split at the first '='):
 //   cap=<S-1-5-21-...>  desktop=<WinSta0\name>  cwd=<dir>  stdout=<file>  stderr=<file>
 //   report=<file>  timeoutMs=<n>  cmd=<full command line>  env.<NAME>=<value> (any number)
+//   ptyBash=<bash.exe> s2receipt=<file>  -> PTY mode: the runner owns the ConPTY and drives Bash.
 // The runner writes <report> (JSON) with what it observed; the orchestrator decides from files.
 // Compiles with the .NET Framework csc (C# 5). Synthetic only; it never sees a password.
 using System;
@@ -74,6 +78,15 @@ public static class TauTokenRunner {
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref IntPtr size);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, IntPtr attr, IntPtr value, IntPtr size, IntPtr prev, IntPtr retSize);
   [DllImport("kernel32.dll", SetLastError = true)] static extern void DeleteProcThreadAttributeList(IntPtr list);
+
+  [StructLayout(LayoutKind.Sequential)] struct COORD { public short X; public short Y; }
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool CreatePipe(out IntPtr r, out IntPtr w, IntPtr sa, int size);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern int CreatePseudoConsole(COORD size, IntPtr hIn, IntPtr hOut, uint flags, out IntPtr hpc);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern int ResizePseudoConsole(IntPtr hpc, COORD size);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern void ClosePseudoConsole(IntPtr hpc);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadFile(IntPtr h, byte[] buf, int len, out int read, IntPtr ov);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool WriteFile(IntPtr h, byte[] buf, int len, out int written, IntPtr ov);
+  static readonly IntPtr PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (IntPtr)0x20016;
 
   const uint FLAGS = 0x1u | 0x4u | 0x8u; // token.rs:500 DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED
   const uint SE_GROUP_LOGON_ID = 0xC0000000;
@@ -170,6 +183,158 @@ public static class TauTokenRunner {
     return h;
   }
 
+  // ===== PTY mode: the UNRESTRICTED runner owns the ConPTY and pipes; only Bash runs in the token. =====
+  // This is the Codex conpty/mod.rs shape: create_conpty + PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE on the
+  // child, child stdio = INVALID_HANDLE. node-pty and MSYS bash both fail to CREATE a pipe inside the
+  // write-restricted token (ConPTY EPERM; bash signal pipe Win32 error 5), so the pipe owner must be
+  // the unrestricted runner. The runner then drives tty/resize/ctrl-c/jobcontrol/utf8 from the stream.
+  static readonly List<string> ptyChecks = new List<string>();
+  static string identityBashWhoami = null, identityBashVersion = null;
+  static readonly StringBuilder transcript = new StringBuilder();
+  static readonly object tlock = new object();
+  static IntPtr ptyOutRead = IntPtr.Zero, ptyInWrite = IntPtr.Zero, ptyHpc = IntPtr.Zero;
+
+  static void PtyCheck(string id, string expect, string observed, bool ok) {
+    ptyChecks.Add("{\"id\":" + Esc(id) + ",\"expect\":" + Esc(expect) + ",\"observed\":" + Esc(observed) + ",\"verdict\":" + (ok ? "\"pass\"" : "\"fail\"") + "}");
+  }
+  static void PtyInfo(string id, string observed) {
+    ptyChecks.Add("{\"id\":" + Esc(id) + ",\"observed\":" + Esc(observed) + ",\"verdict\":\"info\"}");
+  }
+  static string Trans() { lock (tlock) { return transcript.ToString(); } }
+  static void TermWrite(string s) { byte[] b = Encoding.UTF8.GetBytes(s); int w; WriteFile(ptyInWrite, b, b.Length, out w, IntPtr.Zero); }
+  // Wait until re appears in the transcript produced AFTER `from`; returns the Match or null.
+  static System.Text.RegularExpressions.Match WaitFor(string re, int from, int ms) {
+    var rx = new System.Text.RegularExpressions.Regex(re);
+    long end = Environment.TickCount + ms;
+    while (Environment.TickCount < end) {
+      string t = Trans(); if (t.Length > from) { var m = rx.Match(t.Substring(from)); if (m.Success) return m; }
+      System.Threading.Thread.Sleep(100);
+    }
+    return null;
+  }
+  static System.Text.RegularExpressions.Match RunLine(string line, string re, int ms) {
+    int from = Trans().Length; TermWrite(line + "\r"); return WaitFor(re, from, ms);
+  }
+
+  // Returns child exit, or -1 on timeout (job killed). Writes the S2 receipt + transcript + u8.txt.
+  static int RunPtyBash(Dictionary<string, string> spec, Dictionary<string, string> envOverrides, out string note) {
+    note = "";
+    string bash = spec["ptyBash"]; string scratch = spec["cwd"]; string receipt = spec["s2receipt"];
+    IntPtr inR, inW, outR, outW;
+    if (!CreatePipe(out inR, out inW, IntPtr.Zero, 0)) { note = "CreatePipe in err=" + Marshal.GetLastWin32Error(); return -2; }
+    if (!CreatePipe(out outR, out outW, IntPtr.Zero, 0)) { note = "CreatePipe out err=" + Marshal.GetLastWin32Error(); return -2; }
+    ptyInWrite = inW; ptyOutRead = outR;
+    COORD size; size.X = 80; size.Y = 25;
+    int hr = CreatePseudoConsole(size, inR, outW, 0, out ptyHpc);
+    if (hr != 0) { note = "CreatePseudoConsole hr=" + hr; return -2; }
+    CloseHandle(inR); CloseHandle(outW); // owned by the pseudoconsole now
+
+    // Reader thread: accumulate UTF-8 output.
+    var reader = new System.Threading.Thread(() => {
+      byte[] buf = new byte[4096]; var dec = Encoding.UTF8.GetDecoder(); char[] cb = new char[4096];
+      while (true) {
+        int n; if (!ReadFile(ptyOutRead, buf, buf.Length, out n, IntPtr.Zero) || n == 0) break;
+        int cc = dec.GetChars(buf, 0, n, cb, 0); lock (tlock) { transcript.Append(cb, 0, cc); }
+      }
+    });
+    reader.IsBackground = true; reader.Start();
+
+    IntPtr tok = MintToken(spec["cap"], out ptyLogon, out ptyElevated);
+    IntPtr job = CreateJobObject(IntPtr.Zero, null);
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION li = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();
+    li.Basic.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    SetInformationJobObject(job, 9, ref li, Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION)));
+    IntPtr asize = IntPtr.Zero; InitializeProcThreadAttributeList(IntPtr.Zero, 2, 0, ref asize);
+    IntPtr list = Marshal.AllocHGlobal(asize);
+    if (!InitializeProcThreadAttributeList(list, 2, 0, ref asize)) { note = "InitAttrList err=" + Marshal.GetLastWin32Error(); return -2; }
+    if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, ptyHpc, (IntPtr)IntPtr.Size, IntPtr.Zero, IntPtr.Zero)) { note = "UpdateAttr(PSEUDOCONSOLE) err=" + Marshal.GetLastWin32Error(); return -2; }
+    IntPtr jobs = Marshal.AllocHGlobal(IntPtr.Size); Marshal.WriteIntPtr(jobs, job);
+    UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_JOB_LIST, jobs, (IntPtr)IntPtr.Size, IntPtr.Zero, IntPtr.Zero);
+
+    STARTUPINFOEX si = new STARTUPINFOEX();
+    si.StartupInfo.cb = Marshal.SizeOf(typeof(STARTUPINFOEX));
+    si.StartupInfo.Desktop = spec["desktop"];
+    si.StartupInfo.hStdInput = (IntPtr)(-1); si.StartupInfo.hStdOutput = (IntPtr)(-1); si.StartupInfo.hStdError = (IntPtr)(-1);
+    si.lpAttributeList = list;
+    // Bash's env: HOME/TEMP/TMP=scratch, UTF-8 locale, CHERE_INVOKING; keep it off the profile.
+    envOverrides["HOME"] = scratch; envOverrides["TEMP"] = scratch; envOverrides["TMP"] = scratch;
+    envOverrides["LANG"] = "C.UTF-8"; envOverrides["LC_ALL"] = "C.UTF-8"; envOverrides["CHERE_INVOKING"] = "1"; envOverrides["PS1"] = "$ ";
+    IntPtr env = EnvBlock(envOverrides);
+    string cmd = "\"" + bash + "\" --noprofile --norc -i";
+    PROCESS_INFORMATION pi;
+    bool ok = CreateProcessAsUser(tok, null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, false,
+      CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT, env, scratch, ref si, out pi);
+    if (!ok) { int e = Marshal.GetLastWin32Error(); note = "CreateProcessAsUser(bash) err=" + e; PtyCheck("s2.bash.start", "Bash spawned in the runner-owned ConPTY in the token", "CreateProcessAsUser err=" + e, false); WritePtyReceipt(spec, -2); return -2; }
+
+    try { DriveBash(scratch); } catch (Exception e) { PtyCheck("s2.driver.error", "driver ran without throwing", e.Message, false); }
+
+    uint w2 = WaitForSingleObject(pi.hProcess, 8000);
+    int exit = -1;
+    if (w2 == 0) { uint c; GetExitCodeProcess(pi.hProcess, out c); exit = (int)c; } else { TerminateJobObject(job, 0xDEAD); }
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    ClosePseudoConsole(ptyHpc); CloseHandle(ptyInWrite); CloseHandle(ptyOutRead);
+    CloseHandle(job); CloseHandle(tok);
+    bool allPass = true; foreach (string c in ptyChecks) { if (c.Contains("\"verdict\":\"fail\"")) allPass = false; }
+    WritePtyReceipt(spec, allPass ? 0 : 1);
+    return allPass ? 0 : 1;
+  }
+
+  static string ptyLogon = null; static int ptyElevated = -1;
+
+  static void DriveBash(string scratch) {
+    var ready = RunLine("echo \"RDY_\"$((40+2))", "RDY_42", 30000);
+    PtyCheck("s2.bash.start", "Bash started in the runner-owned ConPTY inside the token and answered a marker", ready != null ? "answered RDY_42" : "no answer; tail=" + Tail(400), ready != null);
+    if (ready == null) return;
+
+    RunLine("echo \"W\"\"HO_$(whoami)_E\"\"ND\"; echo \"B\"\"V_${BASH_VERSION}_E\"\"ND\"", "BV_([^\\r\\n]*)_END", 15000);
+    var mw = new System.Text.RegularExpressions.Regex("WHO_([^\\r\\n]*?)_END").Match(Trans()); identityBashWhoami = mw.Success ? mw.Groups[1].Value : null;
+    var mv = new System.Text.RegularExpressions.Regex("BV_([^\\r\\n]*)_END").Match(Trans()); identityBashVersion = mv.Success ? mv.Groups[1].Value : null;
+
+    var tty = RunLine("if test -t 0 && test -t 1; then echo \"TTY_\"YES; else echo \"TTY_\"NO; fi", "TTY_(YES|NO)", 15000);
+    PtyCheck("s2.tty.attached", "stdin and stdout of the interactive Bash are a terminal (test -t 0/1)", tty != null ? tty.Value : "no answer", tty != null && tty.Groups[1].Value == "YES");
+
+    COORD rs; rs.X = 100; rs.Y = 40; ResizePseudoConsole(ptyHpc, rs); System.Threading.Thread.Sleep(700);
+    var sz = RunLine("echo \"S\"\"Z_$(stty size)_E\"\"ND\"", "SZ_([^\\r\\n]*)_END", 15000);
+    PtyCheck("s2.pty.resize", "after ResizePseudoConsole(100x40), stty size reports \"40 100\"", sz != null ? sz.Groups[1].Value : "no answer", sz != null && sz.Groups[1].Value.Trim() == "40 100");
+
+    int from = Trans().Length; long t0 = Environment.TickCount;
+    TermWrite("sleep 30\r"); System.Threading.Thread.Sleep(1500); TermWrite("\x03"); System.Threading.Thread.Sleep(300); TermWrite("echo \"C\"\"C_$?_E\"\"ND\"\r");
+    var cc = WaitFor("CC_(\\d+)_END", from, 20000); long ms = Environment.TickCount - t0;
+    PtyCheck("s2.ctrlc.interrupt", "0x03 interrupts a foreground sleep 30; $? is 130 and the prompt returns under 10s", "rc=" + (cc != null ? cc.Groups[1].Value : "none") + " elapsedMs=" + ms, cc != null && cc.Groups[1].Value == "130" && ms < 10000);
+
+    var jb = RunLine("sleep 300 & jobs -l; echo \"JB_\"DONE", "JB_DONE", 15000);
+    bool listed = jb != null && new System.Text.RegularExpressions.Regex("\\[1\\][^\\r\\n]*Running[^\\r\\n]*sleep 300").IsMatch(Tail(2000));
+    var kl = RunLine("kill %1; wait %1; echo \"K\"\"L_$?_E\"\"ND\"", "KL_(\\d+)_END", 15000);
+    PtyCheck("s2.jobcontrol", "background job: sleep 300 & listed Running by jobs, kill %1 terminates it (wait -> 143)", "listedRunning=" + listed + " waitRc=" + (kl != null ? kl.Groups[1].Value : "none"), listed && kl != null && kl.Groups[1].Value == "143");
+
+    int zf = Trans().Length; TermWrite("sleep 30\r"); System.Threading.Thread.Sleep(1500); TermWrite("\x1a"); System.Threading.Thread.Sleep(500); TermWrite("jobs; echo \"SZZ_\"DONE\r");
+    var z = WaitFor("SZZ_DONE", zf, 10000); bool stopped = z != null && Trans().Substring(zf).Contains("Stopped");
+    PtyInfo("s2.jobcontrol.suspend", "Ctrl-Z suspends sleep 30 (jobs shows Stopped); stopped=" + stopped);
+    RunLine("kill -9 %1 2>/dev/null; echo \"ZK_\"DONE", "ZK_DONE", 5000);
+
+    string sample = "café ✓ 日本 \U0001F600"; // ASCII-safe source: csc codepage-independent
+    var u8 = RunLine("printf '%s' '" + sample + "' > \"$HOME/u8.txt\"; echo \"U\"\"8_$(cat \"$HOME/u8.txt\")_E\"\"ND\"", "U8_([^\\r\\n]*)_END", 15000);
+    string fileHex = "";
+    try { fileHex = BitConverter.ToString(File.ReadAllBytes(Path.Combine(scratch, "u8.txt"))).Replace("-", "").ToLowerInvariant(); } catch { }
+    string wantHex = BitConverter.ToString(Encoding.UTF8.GetBytes(sample)).Replace("-", "").ToLowerInvariant();
+    bool echoed = u8 != null && u8.Groups[1].Value == sample;
+    PtyCheck("s2.unicode.utf8RoundTrip", "typed UTF-8 (accented, CJK, emoji) echoes back through the pty and lands as exact UTF-8 bytes in a file Bash wrote", "echoed=" + echoed + " fileBytesMatch=" + (fileHex == wantHex), echoed && fileHex == wantHex);
+
+    TermWrite("exit\r"); System.Threading.Thread.Sleep(1200);
+  }
+
+  static string Tail(int n) { string t = Trans(); return t.Length > n ? t.Substring(t.Length - n) : t; }
+
+  static void WritePtyReceipt(Dictionary<string, string> spec, int verdictCode) {
+    bool pass = verdictCode == 0;
+    string json = "{\"kind\":\"s2-bash-pty-in-token\",\"identity\":{\"nodeUser\":" + Esc(Environment.UserName) +
+      ",\"bashPath\":" + Esc(spec.ContainsKey("ptyBash") ? spec["ptyBash"] : null) + ",\"bashWhoami\":" + Esc(identityBashWhoami) +
+      ",\"bashVersion\":" + Esc(identityBashVersion) + ",\"ptyMaster\":\"runner-conpty\",\"logonSid\":" + Esc(ptyLogon) + ",\"tokenElevated\":" + ptyElevated + "}" +
+      ",\"checks\":[" + string.Join(",", ptyChecks.ToArray()) + "],\"transcriptTail\":" + Esc(Tail(4000)) + ",\"verdict\":" + (pass ? "\"pass\"" : "\"fail\"") + "}";
+    try { File.WriteAllText(spec["s2receipt"], json); } catch { }
+    try { File.WriteAllText(Path.Combine(spec["cwd"], "s2-bash-transcript.txt"), Trans()); } catch { }
+  }
+
   public static int Main(string[] args) {
     Dictionary<string, string> spec = new Dictionary<string, string>();
     Dictionary<string, string> envOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -185,6 +350,14 @@ public static class TauTokenRunner {
       report = spec["report"];
       File.WriteAllText(report + ".started", "runner=" + Environment.UserName);
       SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX); // inherited by the child (runner_client.rs)
+      // PTY mode: the runner owns the ConPTY and drives Bash in the token (Codex conpty/mod.rs shape).
+      if (spec.ContainsKey("ptyBash")) {
+        string pnote; int prc = RunPtyBash(spec, envOverrides, out pnote);
+        string pjson = "{\"runnerUser\":" + Esc(Environment.UserName) + ",\"mode\":\"ptyBash\",\"createOk\":" + (prc != -2 ? "true" : "false") +
+          ",\"exit\":" + prc + ",\"timedOut\":false,\"notes\":" + Esc(pnote) + "}";
+        try { File.WriteAllText(report, pjson); } catch { }
+        return prc == 0 ? 0 : 1;
+      }
       IntPtr tok = MintToken(spec["cap"], out logon, out elevated);
       IntPtr hIn = OpenInheritable("NUL", 0x80000000, 3);
       IntPtr hOut = OpenInheritable(spec["stdout"], 0x40000000, 2);

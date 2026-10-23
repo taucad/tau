@@ -81,7 +81,18 @@ jobs:
           s1=${PIPESTATUS[0]}
           clang -O2 -Wall -Wextra -o "$bin/tau-asid-enum" "$dir/tau-asid-enum.c" -lbsm 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           s2=${PIPESTATUS[0]}
-          echo "tau-setasid exit=$s1 ; tau-asid-enum exit=$s2"
+          # Candidate (a) responsibility tracking + candidate (b) kqueue tracking. The responsibility
+          # SPIs (responsibility_spawnattrs_setdisclaim / responsibility_get_pid_responsible_for_pid)
+          # are weak-imported from libSystem, so no extra -l is needed and a missing symbol does not
+          # fail the link — the probe then records candidate (a) as a documented blocker. A compile
+          # failure is likewise non-fatal: candidates.mts marks the affected candidate blocked.
+          clang -O2 -Wall -Wextra -o "$bin/tau-spawn-disclaim" "$dir/tau-spawn-disclaim.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s3=${PIPESTATUS[0]}
+          clang -O2 -Wall -Wextra -o "$bin/tau-resp-enum" "$dir/tau-resp-enum.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s4=${PIPESTATUS[0]}
+          clang -O2 -Wall -Wextra -o "$bin/tau-kqtrack" "$dir/tau-kqtrack.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s5=${PIPESTATUS[0]}
+          echo "tau-setasid exit=$s1 ; tau-asid-enum exit=$s2 ; tau-spawn-disclaim exit=$s3 ; tau-resp-enum exit=$s4 ; tau-kqtrack exit=$s5"
           ls -l "$bin" || true
 
       - name: Run reaping probe (strategies × adversaries, external canary)
@@ -94,6 +105,19 @@ jobs:
           # Fail loudly if the runner is ever elevated (the workload must never run as root).
           if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
           node packages/core/native-process/spikes/shell/reaping/probe.mts 2>&1 | tee "$RUNNER_TEMP/probe.log"
+
+      # Two further bounded candidates (responsibility tracking; continuous kqueue tracking), tested
+      # against all four adversaries (adds double-fork: reparented-but-root-alive). Writes receipts of
+      # the same shape into the same evidence directory, so the summary renders one combined matrix.
+      - name: Run reaping candidates (a) responsibility + (b) kqueue tracking
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: |
+          set -o pipefail
+          if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
+          node packages/core/native-process/spikes/shell/reaping/candidates.mts 2>&1 | tee "$RUNNER_TEMP/candidates.log"
 
       - name: Summarize
         if: always()

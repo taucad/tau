@@ -6,7 +6,7 @@
 # can `pkill -9 -f <marker>` any straggler after measuring (safety net, outside the verdict).
 #
 # Usage: adversaries.sh <kind> <sentinel-path>
-#   kind = setsid | daemonize | sigterm-ignore
+#   kind = setsid | daemonize | double-fork | sigterm-ignore
 #
 # This script is spawned as a detached session leader by the probe. On macOS `setsid(1)` is absent,
 # so session escape uses perl's POSIX::setsid, which ships on every target row. Dev-only.
@@ -43,6 +43,26 @@ case "$kind" in
     # Give the double-fork time to complete and the grandchild to reparent, then exit so the walk
     # is rooted at an already-dead launch (the realistic "already daemonized before cancel" state).
     sleep 2
+    ;;
+
+  double-fork)
+    # Double-fork like `daemonize`, so the writing grandchild reparents to launchd (ppid=1) within
+    # milliseconds — BUT the launching bash STAYS ALIVE (sleep 60). This isolates the "reparented but
+    # the launch root is still alive at cancel" case from `daemonize` (where the root has exited). A
+    # ppid walk rooted at this launch still cannot see the grandchild (ppid=1); candidates (a)
+    # responsibility and (b) kqueue tracking are the ones that can, because responsibility survives
+    # reparent and NOTE_TRACK learns the child before it detaches.
+    perl -e '
+      use POSIX;
+      my $s = $ARGV[0];
+      exit 0 if fork();          # parent perl exits; bash keeps running (sleep 60 below)
+      POSIX::setsid();           # new session
+      exit 0 if fork();          # intermediate parent exits -> grandchild reparents to launchd
+      while (1) { open(my $f, ">>", $s) or exit 1; print $f "tick\n"; close($f); select(undef,undef,undef,0.2); }
+    ' "$sentinel" &
+    echo STARTED
+    # Unlike `daemonize`, keep the launching bash ALIVE at cancel time.
+    sleep 60
     ;;
 
   sigterm-ignore)

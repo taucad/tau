@@ -48,6 +48,46 @@ Adversaries (`adversaries.sh`):
   owned as root is denied. The helper **measures**, per run, how many listed pids it could read, and
   reports `feasible=false` with the denial evidence when it can read only itself.
 
+## Follow-up candidates (`candidates.mts`): two more bounded strategies × four adversaries
+
+The baseline above leaves `daemonize` unreaped non-elevated (the open I7 gap). `candidates.mts` is a
+standalone driver (it does not touch `probe.mts`) that tests two further strategies against **four**
+adversaries — the three above plus **`double-fork`** (double-fork so the grandchild reparents to
+`launchd`, but the launching Bash **stays alive**, isolating "reparented but the launch root is still
+alive" from `daemonize`, where the root has exited). Receipts share the baseline's shape and land in
+the same evidence directory (`resp.<adversary>.json`, `kqtrack.<adversary>.json`,
+`preflight-candidates.json`, `matrix-candidates.json`), so the step-summary renders one combined
+table.
+
+- **`resp`** — (a) responsibility tracking. The shell is launched through `tau-spawn-disclaim`, which
+  sets the private `responsibility_spawnattrs_setdisclaim` spawn attribute together with
+  `POSIX_SPAWN_SETEXEC` (so the shell keeps its pid and becomes its **own** responsible process).
+  Descendants inherit the shell's responsible pid, and — the thesis — reparenting to `launchd` does
+  **not** rewrite it, nor does the responsible process's own death (it is a stored integer, not a
+  live link). At cancel, `tau-resp-enum` lists every pid whose responsible pid equals the shell's and
+  kills them. Unlike the `asid` route this reads responsibility **without the target's task port**,
+  so it may be feasible non-elevated where `task_for_pid` is denied under SIP; the receipt measures
+  that per run and fails **closed** (documented blocker) if the SPI does not resolve or cross-process
+  attribution is denied.
+- **`kqtrack`** — (b) continuous tracking during the run. `tau-kqtrack` registers a kqueue
+  `EVFILT_PROC` filter with `NOTE_FORK|NOTE_EXIT|NOTE_EXEC|NOTE_TRACK` on the shell from launch;
+  `NOTE_TRACK` makes the kernel follow forks and post `NOTE_CHILD` carrying each new pid, backed by a
+  periodic ppid re-enumeration. The aim is to learn a double-forked grandchild **before** it
+  reparents. The tracker runs the whole window and, on cancel, SIGKILLs every learned pid and reports
+  the **measured race window** (learn→reparent deltas, `NOTE_TRACKERR` escapes, and pids recovered
+  only by the backfill walk — i.e. forks `NOTE_TRACK` missed at startup).
+
+## Native helpers for the candidates
+
+- `tau-spawn-disclaim.c` — SET half of (a): `responsibility_spawnattrs_setdisclaim(+SETEXEC)` then
+  re-exec. The SPI is **weak-imported** (missing symbol ⇒ reports `spiPresent=false` and still execs,
+  so (a) is a documented blocker, never a vacuous pass).
+- `tau-resp-enum.c` — ENUMERATE half of (a): `proc_listpids(PROC_ALL_PIDS)` then, per pid,
+  `responsibility_get_pid_responsible_for_pid` (private SPI, weak-imported). Measures how many pids it
+  could attribute and reports `feasible=false` with evidence when it can read only itself.
+- `tau-kqtrack.c` — (b): the long-lived kqueue tracker; `--selftest` reports whether a kqueue can be
+  created at all.
+
 ## Known gap this probe characterizes empirically
 
 A ppid walk is rooted at the launch. A descendant that **already daemonized** (reparented to

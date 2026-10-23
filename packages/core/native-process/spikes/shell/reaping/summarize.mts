@@ -1,12 +1,22 @@
 /**
  * Render the reaping-spike receipts as a GitHub step-summary. Read-only over the evidence directory;
- * a missing receipt is reported, never silently passed.
+ * a missing receipt is reported, never silently passed. Strategies and adversaries are discovered
+ * from the receipt files present, so the baseline probe (group/walk/asid × setsid/daemonize/
+ * sigterm-ignore) and the follow-up candidates (resp/kqtrack × …/double-fork) render in one table.
  */
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const evidenceDirectory = process.env['TAU_SPIKE_OUT'] ?? join(process.cwd(), 'out', 'research', 'reaping-spike');
 const mark = (v: string): string => (v === 'pass' ? '✅' : v === 'blocked' ? '🚧' : '❌');
+
+// Preferred column/row order; anything else is appended in discovery order so nothing is hidden.
+const STRATEGY_ORDER = ['group', 'walk', 'asid', 'resp', 'kqtrack'];
+const ADVERSARY_ORDER = ['setsid', 'daemonize', 'double-fork', 'sigterm-ignore'];
+const ordered = (seen: Set<string>, pref: string[]): string[] => [
+  ...pref.filter((x) => seen.has(x)),
+  ...[...seen].filter((x) => !pref.includes(x)).sort(),
+];
 
 const lines: string[] = [];
 if (!existsSync(evidenceDirectory)) {
@@ -30,37 +40,67 @@ for (const rowDir of readdirSync(evidenceDirectory)) {
   const dir = join(evidenceDirectory, rowDir);
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
   lines.push(`## Reaping spike — ${rowDir}`, '');
-  const pre = files.includes('preflight.json')
-    ? (JSON.parse(readFileSync(join(dir, 'preflight.json'), 'utf8')) as Receipt)
-    : undefined;
-  if (pre?.identity?.os) {
-    lines.push(
-      `- OS: ${pre.identity.os.platform} ${pre.identity.os.arch} — ${pre.identity.os.build ?? '?'}`,
-      `- Helpers: setasid=${pre.identity.helpers?.['setasid'] ?? '?'} · enum=${pre.identity.helpers?.['asidEnum'] ?? '?'} · ${pre.identity.helpers?.['clang'] ?? '?'}`,
-      '',
-    );
-  }
-  if (pre) {
-    lines.push(`- Preflight: ${mark(pre.verdict)} ${pre.verdict}`, '');
+
+  for (const name of ['preflight.json', 'preflight-candidates.json']) {
+    if (!files.includes(name)) {
+      continue;
+    }
+    const pre = JSON.parse(readFileSync(join(dir, name), 'utf8')) as Receipt;
+    if (name === 'preflight.json' && pre.identity?.os) {
+      lines.push(`- OS: ${pre.identity.os.platform} ${pre.identity.os.arch} — ${pre.identity.os.build ?? '?'}`, '');
+    }
+    if (pre.identity?.helpers) {
+      const helpers = Object.entries(pre.identity.helpers)
+        .map(([k, v]) => `${k}=${v === 'absent' ? 'absent' : 'built'}`)
+        .join(' · ');
+      lines.push(`- Helpers (${name}): ${helpers}`);
+    }
+    lines.push(`- ${name}: ${mark(pre.verdict)} ${pre.verdict}`, '');
   }
 
-  lines.push('| strategy \\ adversary | setsid | daemonize | sigterm-ignore |', '| --- | --- | --- | --- |');
-  for (const strategy of ['group', 'walk', 'asid']) {
-    const cell = (adv: string): string => {
-      const f = `${strategy}.${adv}.json`;
-      if (!files.includes(f)) {
-        return '—';
-      }
-      const r = JSON.parse(readFileSync(join(dir, f), 'utf8')) as Receipt;
-      const state = r.blocked ? 'blocked' : r.verdict;
-      const c = r.canary;
-      return `${mark(state)} ${state}<br/>${c ? `${c.afterCancel}→${c.afterSettle}B` : ''}`;
-    };
-    lines.push(`| ${strategy} | ${cell('setsid')} | ${cell('daemonize')} | ${cell('sigterm-ignore')} |`);
+  // Discover the strategies and adversaries present from the `<strategy>.<adversary>.json` receipts.
+  const cells = new Map<string, Receipt>();
+  const strategiesSeen = new Set<string>();
+  const adversariesSeen = new Set<string>();
+  for (const f of files) {
+    if (f.startsWith('preflight') || f.startsWith('matrix')) {
+      continue;
+    }
+    const r = JSON.parse(readFileSync(join(dir, f), 'utf8')) as Receipt;
+    if (!r.strategy || !r.adversary) {
+      continue;
+    }
+    cells.set(`${r.strategy}.${r.adversary}`, r);
+    strategiesSeen.add(r.strategy);
+    adversariesSeen.add(r.adversary);
   }
-  lines.push('');
+  const strategies = ordered(strategiesSeen, STRATEGY_ORDER);
+  const adversaries = ordered(adversariesSeen, ADVERSARY_ORDER);
+
+  if (strategies.length > 0) {
+    lines.push(
+      `| strategy \\ adversary | ${adversaries.join(' | ')} |`,
+      `| --- | ${adversaries.map(() => '---').join(' | ')} |`,
+    );
+    for (const strategy of strategies) {
+      const cell = (adv: string): string => {
+        const r = cells.get(`${strategy}.${adv}`);
+        if (!r) {
+          return '—';
+        }
+        const state = r.blocked ? 'blocked' : r.verdict;
+        const c = r.canary;
+        return `${mark(state)} ${state}<br/>${c ? `${c.afterCancel}→${c.afterSettle}B` : ''}`;
+      };
+      lines.push(`| ${strategy} | ${adversaries.map((a) => cell(a)).join(' | ')} |`);
+    }
+    lines.push('');
+  }
 
   for (const f of files.sort()) {
+    if (f.startsWith('matrix')) {
+      continue;
+    }
     const r = JSON.parse(readFileSync(join(dir, f), 'utf8')) as Receipt;
     if (r.blocker) {
       lines.push(`- \`${f}\` blocker: ${r.blocker}`);

@@ -27,6 +27,8 @@
 \* the host's `wait` refusal of a queued admission while it holds takes the existing
 \* refused-admission path; this device's placement is written on every change and
 \* read from the open session first. Queue transitions and guards are unchanged.
+\* A legacy device-relative placement is adopted once at a session's load, through
+\* the composer record writer, before any queued item is admitted.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

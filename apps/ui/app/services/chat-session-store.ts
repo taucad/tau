@@ -184,6 +184,14 @@ export type ChatSessionDeps = {
    * any route (D1, D13).
    */
   client: ComposerRecordClient;
+  /**
+   * The device-relative placement a chat record written before placement moved to the device still names (XD2). A
+   * session's open adopts it once where it names a host on this device (`isPlacementOnThisDevice`), as this device's
+   * composer record placement, and writes the record back without it.
+   */
+  legacyChatPlacement?: ((chatId: string, projectId?: string) => Promise<TauAgentHostId | undefined>) | undefined;
+  /** Whether a device-relative placement names a host this device can reach now. Absent: none can. */
+  isPlacementOnThisDevice?: ((hostId: TauAgentHostId) => Promise<boolean>) | undefined;
   queueLock?: QueueLock;
   /** Acknowledged observation through the root owning the chat records. */
   watchRecordFile?: (
@@ -3596,6 +3604,27 @@ export class ChatSessionStore {
 
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id, projectId);
 
+    /*
+     * XD2, once per chat: a record written before placement moved to the device can name a daemon on the device that
+     * wrote it. Where that daemon is reachable from here it becomes this device's placement for the chat, through the
+     * composer record's own writer, and the chat record is written back without it, so nothing adopts it again.
+     */
+    const adoptLegacyPlacement = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
+      const deps = depsRef();
+      try {
+        const legacy = await deps.legacyChatPlacement?.(storedChat.id, projectId);
+        if (legacy === undefined || (await deps.isPlacementOnThisDevice?.(legacy)) !== true) {
+          return undefined;
+        }
+        composerRecordRef.send({ type: 'patch', fields: { placement: legacy } });
+        await deps.patchChat(storedChat.id, 'activeExecution', storedChat.activeExecution);
+        return legacy;
+      } catch {
+        /* Local placement is always reachable: a legacy pin that cannot be adopted reads as local. */
+        return undefined;
+      }
+    };
+
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
@@ -3603,7 +3632,10 @@ export class ChatSessionStore {
             run: async ({ input, signal }) => {
               const storedChat = await readChatRow(input.chatId);
               /* The chat record never holds this device's placement (XD2): its composer record does. */
-              const devicePlacement = storedChat === undefined ? undefined : await readChatPlacement(recordStore);
+              const devicePlacement =
+                storedChat === undefined
+                  ? undefined
+                  : ((await readChatPlacement(recordStore)) ?? (await adoptLegacyPlacement(storedChat)));
               signal.throwIfAborted();
               /* The persistence context holds the execution this device runs the chat on (XD2). */
               const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, devicePlacement);

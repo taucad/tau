@@ -44,8 +44,6 @@ const createStoreWithFiles = (
     readonly provider?: () => Promise<FileSystemProvider>;
     /** Paths an open writer holds, whose removal fails as OPFS's does under a sync access handle. */
     readonly held?: ReadonlySet<string>;
-    /** Which device-relative placements name a host on this device (XD2). */
-    readonly isPlacementOnThisDevice?: (hostId: string) => Promise<boolean>;
   } = {},
 ): {
   store: ReturnType<typeof createChatFileStore>;
@@ -128,12 +126,7 @@ const createStoreWithFiles = (
   const reopen = (
     projectIds: () => Promise<string[]> = async () => [...seen],
   ): ReturnType<typeof createChatFileStore> =>
-    createChatFileStore({
-      client,
-      projectIds,
-      queueLock: mutex.run.bind(mutex),
-      isPlacementOnThisDevice: options.isPlacementOnThisDevice,
-    });
+    createChatFileStore({ client, projectIds, queueLock: mutex.run.bind(mutex) });
   const store = reopen();
   return {
     store,
@@ -1221,15 +1214,17 @@ describe('chat file store — device-relative placement never reaches chat.json'
     expect(chat?.activeExecution).toEqual({ kind: 'tau', model, effort: 'high' });
   });
 
-  /* A legacy record's daemon keeps its chat on that daemon on the device where it means something, and only there. */
+  /*
+   * A legacy record's daemon is handed to the session that opens it (never adopted on a list read), and writing the
+   * chat's execution back removes it from the record, so it is adopted at most once.
+   */
   it.each([
     ['origin', 'origin'],
     ['loopback', 'loopback:http://127.0.0.1:4100'],
-  ])('should keep a legacy %s placement as this device’s own where it is reachable here', async (_label, hostId) => {
-    const reachable = createStoreWithFiles({ isPlacementOnThisDevice: async (id) => id === hostId });
+  ])('should hand over a legacy %s placement and drop it from chat.json on the next write', async (_label, hostId) => {
+    const files = createStoreWithFiles();
     const chatId = `chat_legacy_${_label}`;
-    const composer = `/.tau/composers/chats/${projectId}/${chatId}.json`;
-    await reachable.write(
+    await files.write(
       recordOf(chatId),
       `${JSON.stringify({
         id: chatId,
@@ -1240,16 +1235,19 @@ describe('chat file store — device-relative placement never reaches chat.json'
         activeExecution: { kind: 'tau', model, hostId },
       })}\n`,
     );
+    const store = files.reopen();
 
-    const chat = await reachable.reopen().getChat(chatId, projectId);
+    const listed = await store.getChatRecordsForResource(projectId);
+    expect(listed.map((chat) => chat.activeExecution)).toEqual([{ kind: 'tau', model }]);
+    await expect(files.exists(`/.tau/composers/chats/${projectId}/${chatId}.json`)).resolves.toBe(false);
+    await expect(store.legacyChatPlacement?.(chatId, projectId)).resolves.toBe(hostId);
 
-    expect(chat?.activeExecution).toEqual({ kind: 'tau', model });
-    expect((JSON.parse(await reachable.read(composer)) as { placement?: unknown }).placement).toBe(hostId);
+    /* The session's write-back of the portable execution it read is a change: the record held the host. */
+    await store.patchChat(chatId, 'activeExecution', { kind: 'tau', model });
 
-    const elsewhere = createStoreWithFiles({ isPlacementOnThisDevice: async () => false });
-    await elsewhere.write(recordOf(chatId), await reachable.read(recordOf(chatId)));
-    await elsewhere.reopen().getChat(chatId, projectId);
-    await expect(elsewhere.exists(composer)).resolves.toBe(false);
+    const written = JSON.parse(await files.read(recordOf(chatId))) as Record<string, unknown>;
+    expect(written['activeExecution']).toEqual({ kind: 'tau', model });
+    await expect(store.legacyChatPlacement?.(chatId, projectId)).resolves.toBeUndefined();
   });
 
   it('should write a local placement row as no hostId at all', async () => {

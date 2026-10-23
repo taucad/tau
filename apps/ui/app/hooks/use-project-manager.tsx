@@ -21,7 +21,7 @@ import type {
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import { consumableBytes } from '@taucad/fs-bridge';
-import type { CadAgentExecution, Chat } from '@taucad/chat';
+import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -61,7 +61,6 @@ import type {
 } from '#filesystem/handle-store.js';
 import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
-import { isPlacementOnThisDevice } from '#lib/agent-host-placement.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { chatPlacementOf } from '#utils/chat-execution.js';
 import { createComposerRecordActor, stopWhenWritesSettle } from '#hooks/composer-record.js';
@@ -294,6 +293,8 @@ type ProjectManagerContextType = {
   getAllChatRecords: (options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChatRecordsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChat: (chatId: string, projectId?: string) => Promise<Chat | undefined>;
+  /** A pre-XD2 record's device-relative placement, read once by a session's open (`ChatStorage.legacyChatPlacement`). */
+  legacyChatPlacement: (chatId: string, projectId?: string) => Promise<TauAgentHostId | undefined>;
   invalidateProjectedChats: (resourceId: string, chatIds: readonly string[]) => void;
   deleteChat: (chatId: string) => Promise<void>;
   purgeChat: (chatId: string) => Promise<void>;
@@ -753,7 +754,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         client: fileManager.recordFiles,
         projectIds: async () =>
           (queryClient.getQueryData<ProjectListing>(['projects'])?.projects ?? []).map((entry) => entry.projectId),
-        isPlacementOnThisDevice,
       }),
     [fileManager.recordFiles, queryClient],
   );
@@ -3032,6 +3032,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [metadataReadOwner],
   );
 
+  const legacyChatPlacement = useCallback(
+    async (chatId: string, projectId?: string): Promise<TauAgentHostId | undefined> =>
+      chatStore.legacyChatPlacement?.(chatId, projectId),
+    [chatStore],
+  );
+
   const deleteChat = useCallback(
     async (chatId: string): Promise<void> => {
       const chat = await chatStore.getChat(chatId);
@@ -3106,6 +3112,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       getAllChatRecords,
       getChatRecordsForResource,
       getChat,
+      legacyChatPlacement,
       invalidateProjectedChats,
       deleteChat,
       purgeChat,
@@ -3159,6 +3166,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     getAllChatRecords,
     getChatRecordsForResource,
     getChat,
+    legacyChatPlacement,
     invalidateProjectedChats,
     deleteChat,
     purgeChat,

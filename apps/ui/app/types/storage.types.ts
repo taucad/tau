@@ -1,4 +1,4 @@
-import type { Chat } from '@taucad/chat';
+import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { PartialDeep } from 'type-fest';
 import type { EditorState, EditorStateInput } from '#types/editor.types.js';
@@ -92,6 +92,12 @@ export type ChatStorage = {
    * read-modify-write race that lets one field's write undo another's.
    */
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
+  /**
+   * The device-relative Tau placement (`origin`, a `loopback:` daemon) a record written before placement moved to the
+   * device still carries, or `undefined` (XD2). Every other read drops it; a session adopts it once, on open, where it
+   * names a host on this device, and writing the chat's execution back removes it from the record.
+   */
+  legacyChatPlacement?(chatId: string, projectId?: string): Promise<TauAgentHostId | undefined>;
   /** Advance user-action recency monotonically. */
   touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined>;
   /**

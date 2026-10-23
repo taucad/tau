@@ -20,8 +20,9 @@ import {
   foldReadAnswer,
   foldProjectionFacts,
   liveForeignRun,
-  mergeLogSegments,
-  unsettledForeignRuns,
+  mergeSegmentRows,
+  parseLogSegments,
+  unsettledParsedRuns,
 } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
@@ -1046,8 +1047,10 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
     if (digest === state.remote?.digest) {
       return { state };
     }
-    const { views } = foldRunViews(mergeLogSegments(event.segments), {}, {});
-    const unsettled = unsettledForeignRuns(event.segments);
+    /* Each segment is parsed once, for the merged views and for the runs another device has not settled (XD3). */
+    const parsed = parseLogSegments(event.segments);
+    const { views } = foldRunViews(mergeSegmentRows(parsed), {}, {});
+    const unsettled = unsettledParsedRuns(parsed);
     return {
       state: {
         ...state,

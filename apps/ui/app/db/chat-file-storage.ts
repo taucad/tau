@@ -3,7 +3,7 @@ import { chatMessageQueuePath, createChatMessageQueueStore } from '#db/chat-mess
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import { safeValidateUiMessages } from '@taucad/chat';
-import type { Chat, TauAgentHostId } from '@taucad/chat';
+import type { Chat } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { parseChatRecord, serializeChatRecord } from '@taucad/chat/schemas';
 import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/revisions';
@@ -119,12 +119,6 @@ export type ChatFileStoreOptions = {
   readonly client: ChatStoreClient;
   /** Every project this profile knows about, deleted ones included. */
   readonly projectIds: () => Promise<readonly string[]>;
-  /**
-   * Whether a device-relative placement (`origin`, a `loopback:` daemon) names a host on this device now. A chat record
-   * written before placement moved to the device carries one; where this answers `true` it becomes this device's own
-   * placement for the chat, in its composer record, and elsewhere the chat runs locally (XD2). Absent: always local.
-   */
-  readonly isPlacementOnThisDevice?: ((hostId: TauAgentHostId) => Promise<boolean>) | undefined;
 };
 
 const isDeleted = (chat: Chat | ChatRecord): boolean => chat.deletedAt !== undefined;
@@ -192,37 +186,23 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     };
   };
 
-  const readRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+  /**
+   * A chat record as `chat.json` holds it, a placement written before placement moved to the device included. Only
+   * the write path and {@link ChatStorage.legacyChatPlacement} read it so: everything else reads {@link readRecord}.
+   */
+  const readStoredRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
     const text = await readText(recordPath(projectId, chatId));
     const record = text === undefined ? undefined : parseChatRecord(text);
     if (record === undefined) {
       return undefined;
     }
     located.set(record.id, projectId);
-    await adoptLegacyPlacement(projectId, record);
-    return withPortableExecution(record);
+    return record;
   };
 
-  /*
-   * XD2: a record written before placement moved to the device can name a daemon on the device that wrote it. Where
-   * that daemon is reachable from here the choice is kept as this device's placement for the chat, once, unless this
-   * device already chose one; the record itself is read, and next written, without it.
-   */
-  const adoptLegacyPlacement = async (projectId: string, record: ChatRecord): Promise<void> => {
-    const placement = chatPlacementOf(record.activeExecution);
-    if (placement === undefined || !(await options.isPlacementOnThisDevice?.(placement).catch(() => false))) {
-      return;
-    }
-    const composer = createComposerRecordStore(options.client, composerRecordPaths.chat(projectId, record.id));
-    try {
-      const current = await composer.read();
-      if (current.status === 'valid' && current.record.placement !== undefined) {
-        return;
-      }
-      await composer.patch({ placement });
-    } catch {
-      /* A record this device cannot write leaves the chat on local placement, which is always reachable. */
-    }
+  const readRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
+    const record = await readStoredRecord(projectId, chatId);
+    return record === undefined ? undefined : withPortableExecution(record);
   };
 
   const writeRecord = async (projectId: string, chat: Chat): Promise<void> => {
@@ -329,7 +309,8 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       if (projectId === undefined) {
         return undefined;
       }
-      const record = await readRecord(projectId, chatId);
+      /* As stored, so a write compares against what `chat.json` holds: a legacy device-relative host is a change. */
+      const record = await readStoredRecord(projectId, chatId);
       const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
       if (existing === undefined || existing.purgedAt !== undefined) {
         return undefined;
@@ -342,7 +323,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
         return undefined;
       }
       await writeRecord(projectId, updated);
-      return hydrate(updated);
+      return hydrate(withPortableExecution(updated));
     });
 
   /** As {@link write}, but `false` from the mutator means "nothing changed". */
@@ -508,6 +489,13 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
           ? undefined
           : { ...chat, name: trimmed },
       );
+    },
+
+    /* XD2: read only on a session's open, never on a list; the session adopts it once and writes the record back. */
+    legacyChatPlacement: async (chatId, projectId) => {
+      const owner = projectId ?? (await locate(chatId));
+      const record = owner === undefined ? undefined : await readStoredRecord(owner, chatId);
+      return chatPlacementOf(record?.activeExecution);
     },
 
     patchChat: async (chatId, key, value) =>

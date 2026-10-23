@@ -215,9 +215,10 @@ type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
  * that doesn't structurally match the typed closure fields.
  */
 type StubDeps = {
-  [K in Exclude<keyof ChatSessionDeps, 'client' | 'watchRecordFile' | 'queueLock'>]: ReturnType<
-    typeof vi.fn<ChatSessionDeps[K]>
-  >;
+  [K in Exclude<
+    keyof ChatSessionDeps,
+    'client' | 'watchRecordFile' | 'queueLock' | 'legacyChatPlacement' | 'isPlacementOnThisDevice'
+  >]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
@@ -5804,7 +5805,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
   const projectId = 'proj_handoff';
   const model = 'anthropic-claude-opus-4.8';
 
-  const openLoaded = async (deps: StubDeps, chatId: string) => {
+  const openLoaded = async (deps: ChatSessionDeps, chatId: string) => {
     const store = new ChatSessionStore({ chatSession });
     store.setDependencies(deps);
     const session = store.acquire(chatId, projectId);
@@ -5937,6 +5938,59 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     await vi.waitFor(() => {
       expect(placementOnDisk(deps, chatId)).toBe('origin');
     });
+    store.release(chatId);
+  });
+
+  /* A pre-XD2 record's daemon is adopted once, on open, where it is reachable, and written out of the chat record. */
+  it('should adopt a reachable legacy placement once on open and write the chat record back without it', async () => {
+    const chatId = 'chat_legacy_pin';
+    const deps = createStubDeps();
+    let legacy: string | undefined = 'origin';
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    deps.patchChat.mockImplementation(async () => {
+      legacy = undefined;
+      return undefined;
+    });
+    const withLegacy = {
+      ...deps,
+      legacyChatPlacement: vi.fn(async () => legacy),
+      isPlacementOnThisDevice: vi.fn(async (hostId: string) => hostId === 'origin'),
+    };
+    const { store, session } = await openLoaded(withLegacy, chatId);
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model });
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBe('origin');
+    });
+
+    /* The person picks this device's local row: nothing adopts the old pin again on the next open. */
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+    const reopened = await openLoaded(withLegacy, chatId);
+    expect(reopened.session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model });
+    reopened.store.release(chatId);
+  });
+
+  it('should leave a legacy placement that names no host here unadopted and in the chat record', async () => {
+    const chatId = 'chat_legacy_elsewhere';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(
+      { ...deps, legacyChatPlacement: async () => 'origin', isPlacementOnThisDevice: async () => false },
+      chatId,
+    );
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({ kind: 'tau', model });
+    expect(deps.patchChat).not.toHaveBeenCalled();
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
     store.release(chatId);
   });
 

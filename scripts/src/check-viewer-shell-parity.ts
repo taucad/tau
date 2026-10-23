@@ -38,6 +38,10 @@ export const requiredImports: Readonly<Record<string, readonly string[]>> = {
   'packages/agent-plugin/app/workbench-lane.tsx': [`${panes}/lane/pane-lane`],
   'apps/ui/app/routes/w.$workspace.$project/chat-stack-trace.tsx': [`${panes}/shell/viewer-issues`],
   'packages/agent-plugin/app/page-issues.tsx': [`${panes}/shell/viewer-issues`],
+  'apps/ui/app/components/geometry/cad/part-gallery.tsx': [`${panes}/model/part-gallery`],
+  'packages/agent-plugin/app/part-previews.tsx': [`${panes}/model/part-gallery`],
+  'apps/ui/app/components/geometry/cad/capture-view-control.tsx': [`${panes}/shell/capture-view-control`],
+  'packages/agent-plugin/app/viewer-chrome.tsx': [`${panes}/shell/capture-view-control`],
 };
 
 /** The host source trees the replaced code must not return to. */

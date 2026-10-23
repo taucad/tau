@@ -17,6 +17,8 @@ import { tauCadTopologyExtension } from '@taucad/runtime/types';
 
 import { markedGlb, scriptedRuntime } from '#mcp-entry-sessions.fixture.js';
 import type { ScriptedRender, ScriptedRuntime } from '#mcp-entry-sessions.fixture.js';
+import type { EntryDocument, EntrySessionRuntime } from '#mcp-entry-sessions.js';
+import { viewerSettings } from '#mcp-viewer-chrome.js';
 import { createLocalMcpViewer } from '#mcp-viewer.js';
 import type { LocalMcpViewer, LocalMcpViewerOptions } from '#mcp-viewer.js';
 
@@ -97,7 +99,7 @@ describe('createLocalMcpViewer', () => {
       page,
       namedRoot: () => root,
       workspaceRoot: root,
-      renderGlb,
+      liveRuntime,
       partThumbnails,
     });
     const tool = withThumbnails.pageTools?.find(({ name }) => name === 'app_part_thumbnails');
@@ -108,8 +110,18 @@ describe('createLocalMcpViewer', () => {
       thumbnails: [{ id: 'gear', mimeType: 'image/webp', data: 'AQID' }],
     });
     expect(partThumbnails).toHaveBeenCalledWith(
-      expect.objectContaining({ root, absolutePath: join(root, 'models', 'part.glb') }),
+      expect.objectContaining({ root, source: { absolutePath: join(root, 'models', 'part.glb') } }),
     );
+    /* A watched source's render is drawn from the session's memory, never from the project. */
+    const rendered = shownModel(await withThumbnails.show({ targetFile: 'src/bracket.ts' }, inline)).model;
+    await expect(tool?.call({ modelId: rendered.id, parts }, inline)).resolves.toMatchObject({ thumbnails: [{ id: 'gear' }] });
+    expect(partThumbnails).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        root,
+        source: { bytes: expect.any(Uint8Array) as unknown, mimeType: 'model/gltf-binary' },
+      }),
+    );
+    expect(rendered.projectKey).toBe(createHash('sha256').update(root).digest('hex').slice(0, 16));
     await expect(tool?.call({ modelId: 'unknown', parts }, inline)).resolves.toMatchObject({
       errorCode: 'UNKNOWN_MODEL',
     });
@@ -119,6 +131,54 @@ describe('createLocalMcpViewer', () => {
     expect(() => tool?.inputSchema.parse({ modelId: model.id, parts, size: 1024 })).toThrow();
     expect(viewer.pageTools?.some(({ name }) => name === 'app_part_thumbnails')).toBe(false);
     await withThumbnails.close();
+  });
+
+  it("should keep the shown entry's render timeout and save captures for the page's bar", async () => {
+    const settings = viewer.pageTools?.find(({ name }) => name === 'app_viewer_settings');
+    const capture = viewer.pageTools?.find(({ name }) => name === 'app_save_capture');
+    const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+
+    await expect(settings?.call({ modelId: model.id, renderTimeout: 45_000 }, inline)).resolves.toEqual({
+      renderTimeout: 45_000,
+      defaultRenderTimeout: 600_000,
+    });
+    await expect(capture?.call({ modelId: model.id, data: png }, inline)).resolves.toMatchObject({
+      path: 'exports/bracket-capture-1.png',
+    });
+    await expect(settings?.call({ modelId: 'unknown' }, inline)).resolves.toMatchObject({ errorCode: 'UNKNOWN_MODEL' });
+  });
+
+  it("should answer RENDER_TIMEOUT when a watched source outlasts its entry's render timeout", async () => {
+    await viewerSettings({
+      root,
+      entryPath: 'src/bracket.ts',
+      defaultRenderTimeout: 600_000,
+      request: { modelId: 'any', renderTimeout: 20 },
+    });
+    /* A runtime whose evaluation never settles until the call gives up on it. */
+    const stalled: EntrySessionRuntime = {
+      lifecycleState: 'connected',
+      capabilities: undefined,
+      open: () =>
+        ({
+          on: () => () => undefined,
+          evaluation: async ({ signal }: { signal?: AbortSignal } = {}) =>
+            new Promise((_resolve, reject) => {
+              signal?.addEventListener('abort', () => {
+                reject(signal.reason);
+              });
+            }),
+          view: () => ({ on: () => () => undefined, rendering: async () => new Promise(() => undefined), close: () => undefined }),
+          close: () => undefined,
+        }) as unknown as EntryDocument,
+    };
+    const slow = createLocalMcpViewer({ page, namedRoot: () => root, workspaceRoot: root, liveRuntime: async () => stalled });
+
+    await expect(slow.show({ targetFile: 'src/bracket.ts' }, inline)).resolves.toMatchObject({
+      errorCode: 'RENDER_TIMEOUT',
+    });
+    await slow.close();
   });
 
   it('should show a GLB exported from a source with that source, so its panes have parameters', async () => {

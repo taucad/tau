@@ -64,6 +64,7 @@ import { PageViewerIssues } from '#app/page-issues.jsx';
 import type { PageIssues } from '#app/page-issues.jsx';
 import { createLaneStore } from '#app/lane-store.js';
 import { PagePartGallery, usePartPreviews } from '#app/part-previews.jsx';
+import { usePageViewerControls } from '#app/viewer-chrome.jsx';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
 
@@ -438,13 +439,16 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     (): ViewerEnvironment => ({
       ...defaultViewerEnvironment,
       colorScheme: view.colorScheme,
+      /* The host's high-contrast theme and accent, as the Tau app passes its own (PAR-8). */
+      isHighContrast: view.isHighContrast,
+      accentColor: view.accentColor ?? defaultViewerEnvironment.accentColor,
       graphicsBackend: 'webgl',
       /* The page prints no status text of its own (E2). */
       showRenderFps: false,
       /* The view_state tool captures the live canvas (W6). */
       readableCanvas: true,
     }),
-    [view.colorScheme],
+    [view.accentColor, view.colorScheme, view.isHighContrast],
   );
   const shown = state.kind === 'ready' ? state.current : previousOf(state);
   const isInline = view.composition === 'inline';
@@ -819,6 +823,12 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       toggleRef.current?.focus();
     }
   }, [isPanelOpen]);
+  /* The page's Capture and render timeout in the shared bar, as the Tau app adds its own (PAR-8). */
+  const captureRegion = useCallback(
+    () => rootRef.current?.querySelector(`#${canvasRegionId}`) ?? rootRef.current ?? undefined,
+    [],
+  );
+  const barControls = usePageViewerControls({ bridge, model: shown?.model, captureRegion, onNotice: setNotice });
   const toggle = <WorkbenchToggleButton ref={toggleRef} isOpen={isPanelOpen} onClick={togglePanel} />;
   return (
     <ViewerEnvironmentProvider value={environment}>
@@ -873,7 +883,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                             onPrepared={showSource}
                             onNotice={setNotice}
                           >
-                            {({ segment, list }) => <ViewerControls leading={segment} aboveControls={list} />}
+                            {({ segment, list }) => <ViewerControls {...barControls} leading={segment} aboveControls={list} />}
                           </PageViewerIssues>
                         </>
                       )

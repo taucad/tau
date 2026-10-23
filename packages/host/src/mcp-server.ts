@@ -880,6 +880,11 @@ export type LocalHostMcpOptions = {
    * direct link.
    */
   readonly snapshotSource?: SourceSnapshotter | undefined;
+  /**
+   * The render timeout the server's runtime applies (`tau mcp --operation-timeout`), which the viewer page's Viewer
+   * settings shows as the default. Milliseconds. 600000 by default.
+   */
+  readonly renderTimeout?: number | undefined;
   /** The serving CLI and how it was started: the `initialize` instructions name it, and every `test_model` answer carries it as `runtime`. */
   readonly runtime?: TauMcpRuntime | undefined;
 };
@@ -1031,6 +1036,7 @@ export const serveLocalHostMcp = async (
           },
           /* A shown source is watched in its project's runtime; its renders stay in memory (PAR-1). */
           liveRuntime: options.runtimeClient,
+          ...(options.renderTimeout === undefined ? {} : { defaultRenderTimeout: options.renderTimeout }),
           snapshotSource: options.snapshotSource,
           ...(options.runtimeClient === undefined
             ? {}

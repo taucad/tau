@@ -43,6 +43,14 @@ import type { McpViewerExport } from '#mcp-viewer-export.js';
 import type { McpViewerSessionsOptions } from '#mcp-viewer-sessions.js';
 import { viewerPartThumbnailsInputSchema, viewerPartThumbnailsToolName } from '#mcp-viewer-thumbnails.js';
 import type { McpViewerPartThumbnails } from '#mcp-viewer-thumbnails.js';
+import {
+  readRenderTimeout,
+  saveCapture,
+  viewerChromeToolName,
+  viewerSaveCaptureInputSchema,
+  viewerSettings,
+  viewerSettingsInputSchema,
+} from '#mcp-viewer-chrome.js';
 import { createMcpViewerWorkbench } from '#mcp-viewer-workbench.js';
 import type { McpViewerWorkbenchOptions } from '#mcp-viewer-workbench.js';
 import type { TauViewerMechanism, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
@@ -57,6 +65,9 @@ import { slugifyTargetFile } from '@taucad/chat/rpc';
  */
 const projectKeyOf = (root: string): string =>
   createHash('sha256').update(resolvePath(root)).digest('hex').slice(0, 16);
+
+/** The render timeout `tau mcp` uses by default (its `--operation-timeout`). Milliseconds. */
+const defaultRenderTimeout = 600_000;
 
 /** Tool calls whose conversation the server remembers for the pages they open. */
 const rememberedCalls = 1024;
@@ -88,6 +99,8 @@ export type LocalMcpViewerOptions = Readonly<{
   export?: McpViewerExport | undefined;
   /** Renders the Model pane's part thumbnails; without it the page's part rows show no preview. */
   partThumbnails?: McpViewerPartThumbnails | undefined;
+  /** The render timeout an entry takes when its record names none, as Viewer settings shows it. Milliseconds. */
+  defaultRenderTimeout?: number | undefined;
   /** The folder a call works in when it names none and its conversation has shown no model: the server's start folder. */
   workspaceRoot: string;
   /**
@@ -524,7 +537,36 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       }
       /* One watched document per source: a second show of an unchanged source answers its newest render. */
       const session = await entrySessions.acquire({ root, entryPath: relativePath });
-      const render = await session.settled(callOptions.signal);
+      /* The entry's own render timeout (Viewer settings, or Tau's) bounds the wait for its render; 0 or none leaves
+       * the call's. The watched document keeps building, and a later render still reaches the pages showing it. */
+      const renderTimeout = await readRenderTimeout(root, relativePath);
+      const deadline =
+        renderTimeout === undefined || renderTimeout === 0 ? undefined : AbortSignal.timeout(renderTimeout);
+      const callSignal = callOptions.signal;
+      const signal =
+        deadline === undefined
+          ? callSignal
+          : callSignal === undefined
+            ? deadline
+            : AbortSignal.any([callSignal, deadline]);
+      const timedOut = (): TauMcpViewerFailure =>
+        failure(
+          'RENDER_TIMEOUT',
+          `${relativePath} did not render within its ${String(renderTimeout)} ms render timeout (Viewer settings).`,
+        );
+      let render: Awaited<ReturnType<typeof session.settled>>;
+      try {
+        render = await session.settled(signal);
+      } catch (error) {
+        if (deadline?.aborted === true && callSignal?.aborted !== true) {
+          render = timedOut();
+        } else {
+          throw error;
+        }
+      }
+      if (deadline?.aborted === true && callSignal?.aborted !== true && isFailure(render)) {
+        render = timedOut();
+      }
       entry = session.key;
       described = isFailure(render) ? render : describeRender(session, render);
     }
@@ -756,7 +798,73 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       },
     ];
   };
+  /** The viewer bar's render timeout and Capture, for the shown model the call names. */
+  const chromeTools = (): Array<
+    Readonly<{
+      tool: TauMcpViewerPageTool;
+      inRoot: (root: string, args: unknown, signal?: AbortSignal) => Promise<unknown>;
+    }>
+  > => {
+    const shownEntry = (args: unknown): Shown | TauMcpViewerFailure =>
+      linkedModel(args) ?? failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
+    const settings = async (_root: string, args: unknown): Promise<unknown> => {
+      const request = viewerSettingsInputSchema.parse(args);
+      const entry = shownEntry(request);
+      return isFailure(entry)
+        ? entry
+        : viewerSettings({
+            root: entry.root,
+            entryPath: entry.model.sourceFile ?? entry.model.path,
+            defaultRenderTimeout: options.defaultRenderTimeout ?? defaultRenderTimeout,
+            request,
+          });
+    };
+    const capture = async (_root: string, args: unknown): Promise<unknown> => {
+      const request = viewerSaveCaptureInputSchema.parse(args);
+      const entry = shownEntry(request);
+      return isFailure(entry)
+        ? entry
+        : saveCapture({ root: entry.root, entryPath: entry.model.sourceFile ?? entry.model.path, request });
+    };
+    const tool = ({
+      name,
+      description,
+      inputSchema,
+      inRoot,
+    }: Readonly<{
+      name: string;
+      description: string;
+      inputSchema: TauMcpViewerPageTool['inputSchema'];
+      inRoot: (root: string, args: unknown) => Promise<unknown>;
+    }>) => ({
+      inRoot,
+      tool: {
+        name,
+        description,
+        inputSchema,
+        call: async (args: Readonly<Record<string, unknown>>, callOptions: TauMcpViewerCallOptions) =>
+          (await inRoot(rootOf(callOptions.meta), args)) as Readonly<Record<string, unknown>> | TauMcpViewerFailure,
+      },
+    });
+    return [
+      tool({
+        name: viewerChromeToolName.settings,
+        description:
+          "Read or set the shown entry's render timeout, kept in .tau/workbench/entries.json, for the Tau viewer page's Viewer settings. Only the viewer page calls this.",
+        inputSchema: viewerSettingsInputSchema,
+        inRoot: settings,
+      }),
+      tool({
+        name: viewerChromeToolName.saveCapture,
+        description:
+          "Save the Tau viewer page's captured view as a PNG under the project's exports folder. Only the viewer page calls this.",
+        inputSchema: viewerSaveCaptureInputSchema,
+        inRoot: capture,
+      }),
+    ];
+  };
   const pageTools = [
+    ...chromeTools(),
     ...(options.export === undefined ? [] : exportTools(options.export)),
     ...(options.partThumbnails === undefined ? [] : thumbnailTools(options.partThumbnails)),
   ];

@@ -70,6 +70,7 @@
     "./registry/pane-registry": "./src/registry/pane-registry.ts",
     "./share/share-pane": "./src/share/share-pane.tsx",
     "./share/share-source": "./src/share/share-source.ts",
+    "./shell/capture-view-control": "./src/shell/capture-view-control.tsx",
     "./shell/viewer-header-actions": "./src/shell/viewer-header-actions.tsx",
     "./shell/viewer-issues": "./src/shell/viewer-issues.tsx",
     "./shell/viewer-stage": "./src/shell/viewer-stage.tsx",
@@ -258,6 +259,11 @@
         "types": "./dist/share/share-source.d.mts",
         "import": "./dist/share/share-source.mjs",
         "default": "./dist/share/share-source.mjs"
+      },
+      "./shell/capture-view-control": {
+        "types": "./dist/shell/capture-view-control.d.mts",
+        "import": "./dist/shell/capture-view-control.mjs",
+        "default": "./dist/shell/capture-view-control.mjs"
       },
       "./shell/viewer-header-actions": {
         "types": "./dist/shell/viewer-header-actions.d.mts",

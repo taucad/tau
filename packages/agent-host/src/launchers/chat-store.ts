@@ -128,6 +128,9 @@ export const chatSegmentsDirectoryName = 'events';
 export const segmentDeviceIdOf = (name: string): string | undefined =>
   /^[^/\\]+\.jsonl$/u.test(name) ? name.slice(0, -'.jsonl'.length) : undefined;
 
+const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
 /** How a platform reaches one chat's `events/` directory, for {@link createChatSegmentsReader}. @internal */
 export type ChatSegmentsSource = Readonly<{
   /** The directory's entry names; none when it does not exist. */
@@ -153,7 +156,7 @@ export type ChatSegmentsSource = Readonly<{
  * @internal
  */
 export const createChatSegmentsReader = (source: ChatSegmentsSource): (() => Promise<readonly ChatLogSegment[]>) => {
-  const known = new Map<string, Readonly<{ version: string; segment: ChatLogSegment }>>();
+  const known = new Map<string, Readonly<{ version: string | undefined; segment: ChatLogSegment }>>();
   return async () => {
     const listed = await source.list();
     const names = listed.filter((name) => segmentDeviceIdOf(name) !== undefined).toSorted();
@@ -175,12 +178,10 @@ export const createChatSegmentsReader = (source: ChatSegmentsSource): (() => Pro
           known.delete(name);
           return undefined;
         }
-        const segment = { deviceId, bytes };
-        if (version === undefined) {
-          known.delete(name);
-        } else {
-          known.set(name, { version, segment });
-        }
+        /* With no fingerprint to trust the bytes were read; unchanged ones keep their identity, so nothing refolds. */
+        const segment =
+          prior !== undefined && sameBytes(prior.segment.bytes, bytes) ? prior.segment : { deviceId, bytes };
+        known.set(name, { version, segment });
         return segment;
       }),
     );

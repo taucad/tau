@@ -62,6 +62,19 @@ describe('a chat’s segments, read again on each refresh (XD1)', () => {
     expect(read).toHaveBeenCalledTimes(2);
   });
 
+  /* No fingerprint means a read, but bytes that did not change keep their identity, so the history does not refold. */
+  it('should keep an unfingerprinted segment’s identity while its bytes do not change', async () => {
+    const files = new Map<string, Readonly<{ bytes: string; version: string | undefined }>>([
+      ['device-desktop.jsonl', { bytes: 'a\n', version: undefined }],
+    ]);
+    const { reader } = directory(files);
+    const [first] = await reader();
+
+    const [second] = await reader();
+
+    expect(second).toBe(first);
+  });
+
   it('should drop a segment whose file went away', async () => {
     const files = new Map([['device-desktop.jsonl', { bytes: 'a\n', version: '2:1' }]]);
     const { reader } = directory(files);

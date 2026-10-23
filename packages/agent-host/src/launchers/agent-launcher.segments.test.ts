@@ -457,6 +457,12 @@ describe('a chat continued on a second device', () => {
 
     /** A run on this device paused on an approval, its stream answering nothing until the pause aborts it. */
     const pausedRun = async (options: Parameters<typeof launch>[2]): Promise<string> => {
+      const { root } = await pausedRunOn(options);
+      return root;
+    };
+    const pausedRunOn = async (
+      options: Parameters<typeof launch>[2],
+    ): Promise<Readonly<{ root: string; launcher: AgentLauncher }>> => {
       const root = await workspace();
       const launcher = launch(
         createNodeChatStore({ workspaceRoot: root }),
@@ -482,10 +488,46 @@ describe('a chat continued on a second device', () => {
         commandId: key(),
         payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
       });
-      return root;
+      return { root, launcher };
     };
     const heartbeatCount = async (root: string): Promise<number> =>
       heartbeatsAfter(rowsOf(await readFile(ownLog(root), 'utf8')), 'paused').length;
+
+    /* A heartbeat never opens a term: an old paused chat that is only reopened writes nothing, and pushes nothing. */
+    it('should write no heartbeat for a paused run a new incarnation only reopens', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 20 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      await launcher.close();
+      const before = rowsOf(await readFile(ownLog(root), 'utf8')).length;
+      const published: string[] = [];
+      const reopened = launch(createNodeChatStore({ workspaceRoot: root }), recordingModel('answer').transport, {
+        runHeartbeat: 20,
+        publish: async ({ requestId, chatId: chat }) => {
+          published.push(chat);
+          return { requestId, status: 'applied' };
+        },
+      });
+      /* A send while the run is paused opens the chat's incarnation and is refused: the paused run holds the chat. */
+      const refused = await reopened.execute({
+        type: 'start',
+        commandId: key(),
+        payload: {
+          chatId,
+          runId: 'run-2',
+          trigger: 'submit',
+          message: { id: 'user-2', role: 'user', content: 'again' },
+        },
+      });
+      expect(refused).toMatchObject({ status: 'refused' });
+      await sleep(200);
+
+      expect(
+        rowsOf(await readFile(ownLog(root), 'utf8'))
+          .slice(before)
+          .map((row) => row.type),
+      ).not.toContain('run.heartbeat');
+      expect(published).toEqual([]);
+    });
 
     /* A forgotten pause holds the chat for a bounded time, then its device stops writing and the fence lets go. */
     it('should stop a paused run’s heartbeats once its hold is over', async () => {

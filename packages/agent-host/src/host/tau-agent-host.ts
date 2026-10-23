@@ -305,9 +305,9 @@ type ChatStore = {
   final?: ChatLedger | undefined;
   /** The term this host last wrote the chat under, and when: a heartbeat writes only under a term already claimed. */
   wrote?: Readonly<{ leaderEpoch: string; at: number }> | undefined;
-  /** Cancels the armed heartbeat (XD3). */
-  heartbeat?: (() => void) | undefined;
-  /** When this host last paused the chat's run, or rested on its paused run again: where its hold starts (XD3). */
+  /** The armed heartbeat (XD3): the incarnation it was armed for, and how to cancel it. */
+  heartbeat?: Readonly<{ deliver: ChatStore['deliver']; cancel: () => void }> | undefined;
+  /** When this host last paused the chat's run under its current term: where its hold starts (XD3). */
   pausedAt?: number | undefined;
 };
 
@@ -326,8 +326,7 @@ type ChatStore = {
 export const runHeartbeatMilliseconds = 60_000;
 
 /**
- * How long a paused run keeps holding its chat for the other devices: thirty minutes from its pause, or from the
- * incarnation that rests on it again when the chat is opened (XD3). A paused run waits on a person, who may never
+ * How long a paused run keeps holding its chat for the other devices: thirty minutes from its pause (XD3). A paused run waits on a person, who may never
  * come back to it; past this its heartbeats stop, and the other devices free the chat one staleness bound
  * (`foreignRunStaleMilliseconds`) later, so a forgotten pause costs a bounded number of rows, commits and pushes.
  * An idle incarnation's eviction (`idleEviction`) can end the hold sooner.
@@ -1006,10 +1005,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const pausedHold = options.delays?.pausedRunHold ?? pausedRunHoldMilliseconds;
   /**
    * The run a heartbeat may be written for now, under which term, or `undefined` when none may: the host is open, the
-   * chat's incarnation is the one that armed it and its log is open, its run is live, and it writes under a term
-   * already claimed — one this incarnation wrote under, or the term of a paused run it rests on (never the first row
-   * of a term that still has an orphan to abandon, RA-R9). A paused run is held for {@link pausedRunHoldMilliseconds}
-   * from its pause, or from the incarnation that rests on it again, and no longer.
+   * chat's incarnation is the one that armed it and its log is open, its run is live, and this host already wrote the
+   * chat under the incarnation's term. A heartbeat never opens a term (RA-R9: that is a person's command's to claim),
+   * so an old paused chat that is only reopened writes nothing. A paused run is held for
+   * {@link pausedRunHoldMilliseconds} from its pause, and no longer.
    *
    * @param store - The chat's state.
    * @param chatId - The chat.
@@ -1025,7 +1024,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const runId = ledger?.currentRunId;
     const leaderEpoch = registry.termOf(chatId);
     const state = ledger === undefined ? 'none' : chatRunState(ledger);
-    const claimed = wrote?.leaderEpoch === leaderEpoch || state === 'paused';
     const held = state !== 'paused' || (store.pausedAt !== undefined && now().getTime() - store.pausedAt < pausedHold);
     return closed ||
       deliver === undefined ||
@@ -1033,8 +1031,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       store.log === undefined ||
       runId === undefined ||
       leaderEpoch === undefined ||
+      wrote?.leaderEpoch !== leaderEpoch ||
       !liveRunStates.has(state) ||
-      !claimed ||
       !held
       ? undefined
       : { runId, leaderEpoch };
@@ -1042,12 +1040,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const armHeartbeat = (chatId: string, heartbeatDelay?: number): void => {
     const store = storeOf(chatId);
     const { deliver } = store;
-    if (closed || deliver === undefined || store.heartbeat !== undefined) {
+    if (closed || deliver === undefined) {
       return;
+    }
+    /* One heartbeat per chat, for its current incarnation: one an older incarnation armed is replaced, never kept. */
+    if (store.heartbeat !== undefined) {
+      if (store.heartbeat.deliver === deliver) {
+        return;
+      }
+      store.heartbeat.cancel();
     }
     const clock: HostClock = options.clock ?? globalThis;
     const tick = async (): Promise<void> => {
-      store.heartbeat = undefined;
+      if (store.heartbeat?.deliver === deliver) {
+        store.heartbeat = undefined;
+      }
       const target = heartbeatTarget(store, chatId, deliver);
       if (target === undefined) {
         return;
@@ -1088,9 +1095,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }, heartbeatDelay ?? heartbeatInterval); // Bound: runHeartbeatMilliseconds.
     /* A liveness signal never keeps a process open: a daemon that is shutting down exits on time (Node's timers). */
     (timer as { unref?: () => void } | undefined)?.unref?.();
-    store.heartbeat = () => {
-      clock.clearTimeout(timer);
-      store.heartbeat = undefined;
+    store.heartbeat = {
+      deliver,
+      cancel: () => {
+        clock.clearTimeout(timer);
+        store.heartbeat = undefined;
+      },
     };
   };
 
@@ -1394,11 +1404,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               });
             }
           }
-        }
-        /* XD3: a paused run this host rests on again keeps holding the chat for the other devices. */
-        if (chatRunState(ledger) === 'paused') {
-          store.pausedAt = now().getTime();
-          armHeartbeat(chatId);
         }
         return { ledger, repair };
       }),
@@ -1893,7 +1898,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     closeLog: async (chatId) => {
       const store = storeOf(chatId);
       store.deliver = undefined;
-      store.heartbeat?.();
+      store.heartbeat?.cancel();
       store.live.clear();
       await closeExternalChat(chatId).catch(() => undefined);
       if (!closed && !deferredLogCloses.has(chatId)) {
@@ -2390,7 +2395,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       closing ??= (async () => {
         closed = true;
         for (const store of stores.values()) {
-          store.heartbeat?.();
+          store.heartbeat?.cancel();
         }
         await registry.close();
         await Promise.allSettled([...deferredLogCloses.values()].map(async ({ done }) => done.promise));

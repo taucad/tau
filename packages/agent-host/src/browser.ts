@@ -450,6 +450,27 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
   const decoder = new TextDecoder();
 
   /** A file under the OPFS project directory, by its root-relative path; `undefined` when it is not there. */
+  /**
+   * A directory under the OPFS project directory, by its root-relative segments, each opened inside the one before.
+   *
+   * @param directory - The OPFS project directory.
+   * @param segments - The directory's path segments.
+   * @param create - Whether a missing directory is created.
+   * @returns The directory handle.
+   */
+  const opfsDirectory = async (
+    directory: FileSystemDirectoryHandle,
+    segments: readonly string[],
+    create: boolean,
+  ): Promise<FileSystemDirectoryHandle> => {
+    let parent = directory;
+    for (const segment of segments) {
+      // oxlint-disable-next-line no-await-in-loop -- each directory opens inside the one before it.
+      parent = await parent.getDirectoryHandle(segment, { create });
+    }
+    return parent;
+  };
+
   const opfsFile = async (
     directory: FileSystemDirectoryHandle,
     path: string,
@@ -458,11 +479,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     const segments = path.split('/');
     const name = segments.pop()!;
     try {
-      let parent = directory;
-      for (const segment of segments) {
-        // oxlint-disable-next-line no-await-in-loop -- each directory opens inside the one before it.
-        parent = await parent.getDirectoryHandle(segment, { create });
-      }
+      const parent = await opfsDirectory(directory, segments, create);
       return await parent.getFileHandle(name, { create });
     } catch (error) {
       if (!create && (error as { readonly name?: unknown }).name === 'NotFoundError') {
@@ -480,12 +497,9 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
    * @returns Its entry names; none when it is not there.
    */
   const opfsNames = async (directory: FileSystemDirectoryHandle, path: string): Promise<string[]> => {
-    let parent = directory;
+    let parent: FileSystemDirectoryHandle;
     try {
-      for (const segment of path.split('/')) {
-        // oxlint-disable-next-line no-await-in-loop -- each directory opens inside the one before it.
-        parent = await parent.getDirectoryHandle(segment);
-      }
+      parent = await opfsDirectory(directory, path.split('/'), false);
     } catch (error) {
       const { name } = error as { readonly name?: unknown };
       if (name === 'NotFoundError' || name === 'TypeMismatchError') {

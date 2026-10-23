@@ -17,8 +17,7 @@
  */
 
 import { createGeoSpecConfigSession, runGeoSpecTests } from '@taucad/agent-tools/geospec';
-import type { GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
-import type { GeoSpecKernelEvidence } from '@taucad/agent-tools/geospec';
+import type { GeoSpecKernelEvidence, GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
 import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
@@ -459,7 +458,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runtimeClient,
       runner,
       closeEngine,
-      readConfig: readConfig!,
+      readConfig,
     };
     session = activeSession;
     workerScope.postMessage({ type: 'initialized', requestId: request.requestId, sessionId: request.sessionId });

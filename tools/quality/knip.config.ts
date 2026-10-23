@@ -363,6 +363,16 @@ const config: KnipConfig = {
       // Module declaration for `occt-import-js` and the Emscripten types it reads through `import('…')`.
       entry: ['src/types/{occt-import-js,emscripten}.d.ts'],
     },
+    'packages/core/native-process': {
+      // W1 shell spike: the spike-w1-shell.yml workflow runs these .mts by path (`node …`),
+      // so they are entry points, not dead code. Removed when W2 lands. Mirrors scripts.spikes
+      // and the other per-workspace run-by-path script entries above.
+      entry: ['spikes/shell/*.mts'],
+      // node-pty is the S2 PTY probe's dependency, declared in the spike's own CI-only
+      // package.json (installed by the workflow, not a workspace member), so knip sees the
+      // import without the manifest. Not a native-process-core runtime dependency.
+      ignoreDependencies: ['node-pty'],
+    },
     'packages/core/python-kernel': {
       // Every Python kernel's Nx targets run these scripts from the workspace root with `--package <dir>`.
       entry: ['scripts/{generate-tau-plugin,generate-project-template,test-python}.mts'],

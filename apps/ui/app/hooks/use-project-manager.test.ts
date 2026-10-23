@@ -4112,6 +4112,34 @@ describe('useProjectManager.createProject', () => {
     });
   });
 
+  it('runs no discovery when a write stop lifts that skipped nothing', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    const passes = mockListProjectManifests.mock.calls.length;
+
+    // A peer's claim stopped writes and the server named this build before any pass ran.
+    mockBuildSuperseded = true;
+    act(() => {
+      for (const listener of buildSkewListeners) {
+        listener();
+      }
+    });
+    mockBuildSuperseded = false;
+    act(() => {
+      for (const listener of buildSkewListeners) {
+        listener();
+      }
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(passes);
+  });
+
   it('reconciles and garbage-collects normally when this build is current', async () => {
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
     mockGetAllProjectFileSystemConfigs.mockResolvedValue([

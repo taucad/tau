@@ -762,6 +762,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   /** Settle attempts per pending operation this session (DF11 retry cap). */
   const recoveryAttemptsRef = useRef(new Map<string, number>());
   const discoveryPassRef = useRef<Promise<ProjectDiscoveryResult> | undefined>(undefined);
+  /** A discovery pass skipped its writes at a DF20 gate during the current write stop; it runs again once the stop lifts. */
+  const skippedDuringStopRef = useRef(false);
   const discoveryPassEpochRef = useRef<number | undefined>(undefined);
   const connectionTraceRef = useRef<WorkspaceConnectionTrace | undefined>(undefined);
   const connectionPromiseRef = useRef<Promise<ConnectedWorkspace | undefined> | undefined>(undefined);
@@ -1714,6 +1716,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (isBuildSuperseded()) {
         // A newer bundle owns durable state now: publish what we can read and
         // write nothing (DF20).
+        skippedDuringStopRef.current = true;
         return result;
       }
       const rootStatuses = new Map(
@@ -1789,6 +1792,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // a newer pass — or another tab — has already written.
       // DF20 again, right before writing: a newer tab may have announced itself while this pass awaited.
       if (isBuildSuperseded()) {
+        skippedDuringStopRef.current = true;
         return result;
       }
       if (epoch === discoveryEpochRef.current) {
@@ -1810,6 +1814,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           }
         }
         if (isBuildSuperseded()) {
+          skippedDuringStopRef.current = true;
           return result;
         }
         await Promise.all(configDeletes.map(async (projectId) => worker.deleteProjectResources(projectId)));
@@ -1851,13 +1856,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   /* DF20: a pass that ran while durable writes were stopped published without reconciling.
-   * A provisional stop lifts when the server names this build live, so run that pass again. */
+   * A provisional stop lifts when the server names this build live, so run that pass again, and only
+   * when one was actually skipped: a stop no pass ran into left nothing to redo. */
   useEffect(
     () =>
       subscribeBuildSkew(() => {
-        if (isBuildSuperseded()) {
+        if (isBuildSuperseded() || !skippedDuringStopRef.current) {
           return;
         }
+        skippedDuringStopRef.current = false;
         invalidateProjectsList();
         const reconcile = async (): Promise<void> => {
           try {

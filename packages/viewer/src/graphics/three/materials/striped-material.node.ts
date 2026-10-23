@@ -1,7 +1,22 @@
 import { DoubleSide } from 'three';
 import type { Material } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { attribute, Fn as tslFunction, fwidth, mix, mod, mul, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
+import {
+  abs,
+  attribute,
+  clamp,
+  Fn as tslFunction,
+  fwidth,
+  max,
+  min,
+  mix,
+  mod,
+  mul,
+  smoothstep,
+  uniform,
+  vec2,
+  vec3,
+} from 'three/tsl';
 import { resolveStripedAppearance } from '#graphics/three/materials/striped-material-resolve-appearance.js';
 import type { StripedMaterialProperties } from '#graphics/three/materials/striped-material.types.js';
 
@@ -28,11 +43,17 @@ export function createVertexColoredStripedNodeMaterial(properties?: StripedMater
       .add(mul(surfacePlane.y, stripeAxis.y))
       .toVar('patternCoordinate');
 
-    const pattern = mod(patternCoordinate, uStripeFrequency).toVar('pattern');
-    const aa = mul(fwidth(pattern), 1.5).toVar('aa');
-
-    const stripeMask = smoothstep(uStripeWidth.sub(aa), uStripeWidth.add(aa), pattern);
-    return vec3(mix(stripeColor, baseColor, stripeMask));
+    // Lines a constant width in device pixels, centred on multiples of the model-space spacing and box-filtered over
+    // one pixel; where the spacing nears a few pixels the lines fade to their average coverage instead of aliasing.
+    const pixel = max(fwidth(patternCoordinate), 1e-6).toVar('pixel');
+    const halfSpacing = mul(uStripeFrequency, 0.5).toVar('halfSpacing');
+    const lineDistance = abs(mod(patternCoordinate.add(halfSpacing), uStripeFrequency).sub(halfSpacing))
+      .div(pixel)
+      .toVar('lineDistance');
+    const lineCoverage = clamp(mul(uStripeWidth, 0.5).add(0.5).sub(lineDistance), 0, 1).mul(min(uStripeWidth, 1));
+    const periodPixels = uStripeFrequency.div(pixel).toVar('periodPixels');
+    const lineMask = mix(min(uStripeWidth.div(periodPixels), 1), lineCoverage, smoothstep(2, 4, periodPixels));
+    return vec3(mix(baseColor, stripeColor, lineMask));
   })();
 
   stripeUniformsByMaterial.set(material, { frequency: uStripeFrequency, width: uStripeWidth });

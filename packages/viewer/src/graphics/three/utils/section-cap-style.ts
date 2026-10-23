@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { resolveStripedAppearance } from '#graphics/three/materials/striped-material-resolve-appearance.js';
 import type { PackedSectionCapGeometryBuffers } from '#graphics/three/utils/section-cap-packed-geometry.js';
 
@@ -7,19 +8,24 @@ export const sectionCapOverlapStripeHex = 0xfd_e0_47;
 export const sectionCapNormalRegionKind = 0;
 export const sectionCapOverlapRegionKind = 1;
 
-const colorByteRange = 256;
-const redChannelDivisor = 65_536;
-const maxColorByte = 255;
+const scratchColor = new THREE.Color();
 
-export const colorToComponents = (hex: number): readonly [number, number, number] => [
-  (Math.floor(hex / redChannelDivisor) % colorByteRange) / maxColorByte,
-  (Math.floor(hex / colorByteRange) % colorByteRange) / maxColorByte,
-  (hex % colorByteRange) / maxColorByte,
-];
+/**
+ * An sRGB hex colour as the linear components the cap shader mixes, so a cap shows its part's colour: the output
+ * colour-space conversion would otherwise brighten bytes written as if they were linear.
+ */
+export const colorToComponents = (hex: number): readonly [number, number, number] => {
+  scratchColor.setHex(hex);
+  return [scratchColor.r, scratchColor.g, scratchColor.b];
+};
 
-export const stripeAxisForAngle = (stripeAngle: number): readonly [number, number] => [
-  Math.sin(stripeAngle),
-  Math.cos(stripeAngle),
+/**
+ * The plane-coordinate axis the stripes are measured along. Its length is the inverse of the spacing scale, so a part
+ * hatched at a share of the cap spacing draws its lines that much closer, at the same share of the line width.
+ */
+export const stripeAxisForAngle = (stripeAngle: number, spacingScale = 1): readonly [number, number] => [
+  Math.sin(stripeAngle) / spacingScale,
+  Math.cos(stripeAngle) / spacingScale,
 ];
 
 export const colorsForSectionCapTint = (
@@ -47,6 +53,8 @@ export const resolveSectionCapStyle = (options: {
   stripeFrequency: number;
   stripeWidth: number;
   stripeAngle?: number;
+  /** The part's spacing as a share of `stripeFrequency`. Defaults to 1. */
+  stripeSpacingScale?: number;
 }): Readonly<{
   normalBaseColor: readonly [number, number, number];
   normalStripeColor: readonly [number, number, number];
@@ -67,7 +75,7 @@ export const resolveSectionCapStyle = (options: {
     normalStripeColor: colorToComponents(normalColors.stripeColor),
     overlapBaseColor: colorToComponents(sectionCapOverlapBaseHex),
     overlapStripeColor: colorToComponents(sectionCapOverlapStripeHex),
-    normalStripeAxis: stripeAxisForAngle(stripeAppearance.stripeAngle),
+    normalStripeAxis: stripeAxisForAngle(stripeAppearance.stripeAngle, options.stripeSpacingScale),
     overlapStripeAxis: stripeAxisForAngle(stripeAppearance.stripeAngle + Math.PI / 2),
   };
 };

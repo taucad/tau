@@ -56,7 +56,7 @@ export function SectionViewScene({ innerRef, snapshotRef, children }: SectionVie
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const liveCutSet = useLiveSectionCutSet();
   const committedPieces = useSectionPieces();
-  const { stripeFrequency, stripeWidth } = useSectionStripes();
+  const { stripeFrequency } = useSectionStripes();
   const commit = React.useCallback(
     (cuts: readonly SectionCut[]): void => {
       flushSync(() => {
@@ -79,7 +79,6 @@ export function SectionViewScene({ innerRef, snapshotRef, children }: SectionVie
             innerRef={innerRef}
             snapshotRef={snapshotRef}
             stripeFrequency={stripeFrequency}
-            stripeWidth={stripeWidth}
             onCommit={commit}
           />
         ) : null}

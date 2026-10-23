@@ -20,6 +20,8 @@ import type { SectionCapStencilDiagnostics } from '#graphics/three/utils/section
 import { createSectionLoopCaps } from '#graphics/three/utils/section-loop-caps.js';
 import type { SectionLoopCapFace, SectionLoopCapSource } from '#graphics/three/utils/section-loop-caps.js';
 import { createSectionOpenBackFaces } from '#graphics/three/utils/section-open-back-faces.js';
+import { assignSectionCapStripeAnglesForSources } from '#graphics/three/utils/section-cap-stripe-angles.js';
+import type { SectionCapHatch } from '#graphics/three/utils/section-cap-stripe-angles.js';
 import { createSectionStencilCaps, resolveSectionExitHalfSpaces } from '#graphics/three/utils/section-stencil-caps.js';
 import type { SectionStencilCapSource } from '#graphics/three/utils/section-stencil-caps.js';
 import {
@@ -47,8 +49,8 @@ export type SectionContourFillsProperties = Readonly<{
   /** The live cut list and its pieces in the render frame, committed once the sources it may cut are known. */
   cutSet: SectionCutSet;
   enabled: boolean;
+  /** The hatch spacing, in render units. */
   stripeFrequency: number;
-  stripeWidth: number;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   innerRef: React.RefObject<THREE.Group | null>;
   snapshotRef: React.RefObject<SectionViewSafeSnapshotStore>;
@@ -63,6 +65,9 @@ export type SectionContourFillsProperties = Readonly<{
 export const sectionCapRenderPriority = 1.2;
 
 const noCuts: readonly SectionCut[] = [];
+
+/** The hatch line width, in CSS pixels: constant on screen, as drafting keeps one pen weight for section lining. */
+export const sectionCapLineWidthCssPixels = 1;
 
 /** A pending source counts nothing into the stencil, so it is cut and outlined but not capped. */
 const uncappedLoops: SectionLoopCapSource = { matrix: new THREE.Matrix4(), bySlot: new Map() };
@@ -152,7 +157,6 @@ export function SectionContourFills({
   enabled,
   innerRef,
   stripeFrequency,
-  stripeWidth,
   snapshotRef,
   onCommit,
 }: SectionContourFillsProperties): React.JSX.Element {
@@ -173,6 +177,14 @@ export function SectionContourFills({
   const awaitedTreesRef = React.useRef(new Set<Promise<unknown>>());
   /** The sources of the committed cut list, which the caps draw until another list commits. */
   const committedRecordsRef = React.useRef<readonly SectionSourceRecord[]>([]);
+  /**
+   * Each part's hatch, assigned once per set of sources so that moving a cut never re-hatches a part; emphasis changes
+   * only the tint, so a highlighted part keeps its hatch.
+   */
+  const hatchesRef = React.useRef<Readonly<{ sourceIdentity: string; byOwnerKey: Map<string, SectionCapHatch> }>>({
+    sourceIdentity: '',
+    byOwnerKey: new Map(),
+  });
   const reportedCutsRef = React.useRef<readonly SectionCut[] | undefined>(undefined);
   const reportedGradesRef = React.useRef(new Map<string, string>());
   const diagnosticsRef = React.useRef<SectionCapStencilDiagnostics>({ sequence: 0, latest: undefined, loops: [] });
@@ -204,7 +216,7 @@ export function SectionContourFills({
     if (enabled) {
       invalidate();
     }
-  }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, stripeFrequency, stripeWidth]);
+  }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, stripeFrequency]);
 
   /** Records a source's grade and what its per-loop slices found, once per change, as telemetry. */
   const reportGrade = (record: SectionSourceRecord, closedLoopCount: number, openChainCount: number): void => {
@@ -274,6 +286,9 @@ export function SectionContourFills({
         cutSet,
       });
       committedRecordsRef.current = records;
+      if (hatchesRef.current.sourceIdentity !== sourceIdentity) {
+        hatchesRef.current = { sourceIdentity, byOwnerKey: assignSectionCapStripeAnglesForSources(records) };
+      }
       const perLoop = records.filter(({ grade }) => grade === 'per-loop');
       loopCaps.retain(new Set(perLoop.map(({ key }) => key)));
       // Only per-loop sources: a pending source is usually graded exact a moment later, and switching its materials
@@ -324,6 +339,7 @@ export function SectionContourFills({
         ownerKey: record.ownerKey,
         meshes: record.meshes,
         tintHex: mixModelEmphasisTint(record.baseTintHex, emphasis),
+        hatch: hatchesRef.current.byOwnerKey.get(record.ownerKey),
         edgeHex: resolveSectionCapOutlineColor(emphasis, edgeColor),
         loops,
       };
@@ -335,7 +351,7 @@ export function SectionContourFills({
       camera,
       pieces: committed.cutSet.pieces,
       sources,
-      stripes: { stripeFrequency, stripeWidth },
+      stripes: { stripeFrequency, stripeWidth: sectionCapLineWidthCssPixels * gl.getPixelRatio() },
       outlineWidthPixels: gltfEdgeLineWidth * gl.getPixelRatio(),
       viewportHeightPixels: drawingBufferSize.y,
     });

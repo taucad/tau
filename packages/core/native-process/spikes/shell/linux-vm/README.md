@@ -51,7 +51,23 @@ and `apparmor_parser.log`). The decisive proof is **A blocked + B launches, sysc
 The repro and harness run as an **unprivileged user** (`tau`), not root: the AppArmor restriction only
 strips capabilities from _unprivileged_ user namespaces, so running as root (cloud-init's default) would
 bypass the restriction and make every phase spuriously succeed. The guest also installs the repo's Node
-(>= 24) because the harness is invoked as `node fs-net-probe.mts` and only Node 24 strips `.mts` natively.
+(>= 24, because the harness runs `node fs-net-probe.mts` and only Node 24 strips `.mts` natively) and
+`ripgrep` (a hard `SandboxManager.initialize` dependency).
+
+### Two bwrap paths: the direct repro vs. the harness
+
+The **direct loopback repro** execs Tau's bundled bwrap at the phase's own path (`/opt/Tau/...` for A/B,
+the AppImage mount path for C) — it tests exactly the path-scoped behaviour the profile targets.
+
+The **harness** reuses the UNMODIFIED `supervisor.mts`, which spawns the sandbox with a hardcoded
+`env PATH=/usr/bin:/bin`. SRT therefore always resolves `bwrap` to **`/usr/bin/bwrap`**, regardless of
+where Tau's bundled copy lives, and `shellProfile` in `lib.mts` sets no `bwrapPath` the spike could
+override without editing a non-owned file. So to obtain the full-sandbox S0/S1 receipt for goal 2, Phase
+B also loads a **spike-only** profile granting `userns,` to `/usr/bin/bwrap` (`tau-bwrap-spike-usrbin`,
+generated in `run-in-guest.sh`, unloaded before Phase C). In **production** this shim is unnecessary: Tau
+points SRT at its bundled bwrap (via `bwrapPath` or `PATH`) and the shipped `apparmor/tau-bwrap` profile —
+attached to the bundled path — applies. The mechanism (grant `userns,` to the bwrap binary the sandbox
+execs, via `apparmor_parser` at install time, sysctl untouched) is identical.
 
 ## The Tau-scoped AppArmor profile
 

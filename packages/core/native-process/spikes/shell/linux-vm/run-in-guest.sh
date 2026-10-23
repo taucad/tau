@@ -66,6 +66,12 @@ log "apparmor_restrict_unprivileged_userns=$sysctl_val  aa_enabled=$aa_enabled"
 if [[ "$sysctl_val" != "1" ]]; then
   log "WARNING: sysctl is not the expected stock 1 — results below are recorded with this caveat."
 fi
+# Baseline AppArmor state for the distro bwrap (which the UNMODIFIED harness actually execs — see the
+# supervisor note below). Proves whether /usr/bin/bwrap carries a stock userns-granting profile here.
+{
+  echo "=== /etc/apparmor.d (bwrap-related) ==="; ls -la /etc/apparmor.d 2>&1 | grep -iE 'bwrap|userns' || echo "(none)"
+  echo "=== aa-status (bwrap) ==="; aa-status 2>&1 | grep -i bwrap || echo "(no bwrap profile loaded)"
+} > "$DROP/aa-baseline.txt" 2>&1
 
 # ── Provision: bubblewrap + socat (stock apt) and a pinned Node for `node *.mts` ────────────────────
 log "apt install bubblewrap socat"
@@ -163,17 +169,41 @@ phase_json LNX-VM-NOPROFILE "loopback RTM_NEWADDR EPERM; sandbox-unavailable (sy
 
 # ── PHASE B — install the Tau-scoped profile (postinst pattern), sysctl UNCHANGED ──────────────────
 log "=== PHASE B (LNX-VM-PROFILE) ==="
-# This is the exact command a .deb postinst runs; it loads a profile attached to the bundled path only.
+# (1) Load the SHIPPED, production-faithful profile for Tau's BUNDLED bwrap path. This is the exact
+# command a .deb postinst runs; it drives the direct loopback repro below.
 apparmor_parser -r -W "$LANE_DIR/apparmor/tau-bwrap" 2>&1 | tee "$DROP/apparmor_parser.log" || blocker "apparmor_parser failed to load tau-bwrap"
-# Re-assert the sysctl was not touched by the profile install.
+
+# (2) SPIKE-ONLY shim for the distro bwrap path. The spike reuses the UNMODIFIED supervisor.mts, which
+# spawns the sandbox with a hardcoded `env PATH=/usr/bin:/bin`, so SRT always resolves `bwrap` to
+# /usr/bin/bwrap regardless of where Tau's bundled copy lives. To obtain the FULL-sandbox S0/S1 receipt
+# for goal 2, we must therefore also grant userns to the path the harness actually execs. In PRODUCTION
+# this profile is unnecessary: Tau points SRT at its bundled bwrap and the shipped tau-bwrap profile
+# (bundled path) applies. We do NOT touch any stock /usr/bin/bwrap profile on real systems — this shim
+# exists only inside the disposable spike VM. Named distinctly so it never collides with a distro profile.
+SPIKE_PROFILE=/tmp/tau-bwrap-spike-usrbin
+cat > "$SPIKE_PROFILE" <<'AA'
+abi <abi/4.0>,
+include <tunables/global>
+profile tau-bwrap-spike-usrbin /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}
+AA
+apparmor_parser -r -W "$SPIKE_PROFILE" 2>&1 | tee -a "$DROP/apparmor_parser.log" || log "WARN: spike /usr/bin/bwrap profile load reported an issue (see apparmor_parser.log)"
+
+# Re-assert the sysctl was not touched by either profile install.
 echo "post-install sysctl apparmor_restrict_unprivileged_userns=$(cat "$SYSCTL_PATH" 2>/dev/null || echo absent)" >> "$DROP/apparmor_parser.log"
-aa-status 2>/dev/null | grep -i tau-bwrap >> "$DROP/apparmor_parser.log" || true
+aa-status 2>/dev/null | grep -iE 'tau-bwrap' >> "$DROP/apparmor_parser.log" || true
+
 direct_loopback_repro "$BUNDLE_BWRAP" "B-loopback-profile"; b_loop=$?
 run_harness "$BUNDLE_DIR" "LNX-VM-PROFILE"; b_h=$?
 b_status="$(harness_status LNX-VM-PROFILE)"
 # Expectation: loopback repro succeeds (zero) AND harness produced real verdicts (status ok).
 if [[ $b_loop -eq 0 && "$b_status" == "ok" ]]; then b_verdict="launches-with-sysctl-1"; else b_verdict="unexpected"; fi
 phase_json LNX-VM-PROFILE "loopback succeeds; real S0/S1 (sysctl still $(cat "$SYSCTL_PATH" 2>/dev/null))" "$b_loop" "$b_status" "$b_verdict"
+
+# Unload both profiles so Phase C starts from the stock (unprofiled) posture.
+apparmor_parser -R "$LANE_DIR/apparmor/tau-bwrap" 2>/dev/null || true
+apparmor_parser -R "$SPIKE_PROFILE" 2>/dev/null || true
 
 # ── PHASE C — AppImage: no .deb, no postinst, no profile ────────────────────────────────────────────
 log "=== PHASE C (LNX-VM-APPIMAGE) ==="

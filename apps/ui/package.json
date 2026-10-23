@@ -116,7 +116,11 @@
     "@types/pluralize": "^0.0.33",
     "@types/web-app-manifest": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "@xterm/addon-fit": "catalog:",
+    "@xterm/addon-webgl": "catalog:",
+    "@xterm/xterm": "catalog:",
     "bson": "^6.10.4",
+    "ghostty-web": "catalog:",
     "oxc-transform-react": "catalog:",
     "vite": "catalog:"
   },

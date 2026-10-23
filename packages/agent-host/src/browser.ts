@@ -56,6 +56,7 @@ export type ProviderEventLogOptions = {
   readonly lockName?: string | undefined;
   readonly fileSystem: {
     exists(path: string): Promise<boolean>;
+    /** A file's bytes, rejecting `ENOENT` (or `ENOTDIR`) when it does not exist. */
     readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
     appendFile?(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
@@ -622,20 +623,17 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
               ...(stat === undefined
                 ? {}
                 : {
-                    version: async (name: string) => {
-                      const path = `${directory}/${name}`;
-                      if (!(await fileSystem.exists(path))) {
-                        return undefined;
-                      }
-                      const { size, mtimeMs } = await stat.call(fileSystem, path, { content: 'head' });
-                      /* Size alone cannot tell a rewrite of the same length: with no modification time, read the bytes. */
-                      return mtimeMs !== undefined && mtimeMs > 0 ? `${String(size)}:${String(mtimeMs)}` : undefined;
-                    },
+                    version: async (name: string) =>
+                      readOrAbsent(async () => {
+                        const { size, mtimeMs } = await stat.call(fileSystem, `${directory}/${name}`, {
+                          content: 'head',
+                        });
+                        /* Size alone cannot tell a rewrite of the same length: with no modification time, read the bytes. */
+                        return mtimeMs !== undefined && mtimeMs > 0 ? `${String(size)}:${String(mtimeMs)}` : undefined;
+                      }, undefined),
                   }),
-              read: async (name) => {
-                const path = `${directory}/${name}`;
-                return (await fileSystem.exists(path)) ? fileSystem.readFile(path) : undefined;
-              },
+              /* One round trip: a segment that went away is the read's `ENOENT`. */
+              read: async (name) => readOrAbsent(async () => fileSystem.readFile(`${directory}/${name}`), undefined),
             }),
       );
     },

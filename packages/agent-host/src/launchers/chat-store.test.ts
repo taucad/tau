@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createChatSegmentsReader, segmentDeviceIdOf } from '#launchers/chat-store.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 
 const encoder = new TextEncoder();
 
@@ -83,5 +84,73 @@ describe('a chat’s segments, read again on each refresh (XD1)', () => {
     files.delete('device-desktop.jsonl');
 
     expect(await reader()).toEqual([]);
+  });
+
+  it('should answer the segments in device-id order, which is not always their file names’ order', async () => {
+    const files = new Map([
+      ['a.jsonl', { bytes: 'a\n', version: '2:1' }],
+      ['a-b.jsonl', { bytes: 'b\n', version: '2:1' }],
+    ]);
+    const { reader } = directory(files);
+
+    const segments = await reader();
+
+    expect(segments.map((segment) => segment.deviceId)).toEqual(['a', 'a-b']);
+  });
+
+  /*
+   * XD3: a segment that is there but cannot be read may hold a live run, so the read fails while that can still be so.
+   * A live run keeps its device's segment changing (heartbeats and publishes), so one that has not changed and has
+   * not read for a whole staleness bound holds no live run: it is left out, and says why, instead of locking the chat.
+   */
+  describe('a segment that cannot be read', () => {
+    const unreadable = (version: () => string | undefined) => {
+      let clock = 1_000_000;
+      const reader = createChatSegmentsReader(
+        {
+          list: async () => ['device-desktop.jsonl'],
+          version: async () => version(),
+          read: async () => {
+            throw Object.assign(new Error('EISDIR: illegal operation on a directory'), { code: 'EISDIR' });
+          },
+        },
+        { now: () => clock },
+      );
+      return {
+        reader,
+        advance: (milliseconds: number) => {
+          clock += milliseconds;
+        },
+      };
+    };
+
+    it('should fail the read for a staleness bound, then leave the segment out and say why', async () => {
+      const { reader, advance } = unreadable(() => '0:1');
+
+      await expect(reader()).rejects.toThrow('EISDIR');
+      advance(foreignRunStaleMilliseconds - 1);
+      await expect(reader()).rejects.toThrow('EISDIR');
+      advance(2);
+      const [segment] = await reader();
+
+      expect(segment?.deviceId).toBe('device-desktop');
+      expect(segment?.unreadable).toContain('EISDIR');
+      expect(segment!.bytes.byteLength).toBe(0);
+      const [again] = await reader();
+      expect(again).toBe(segment);
+    });
+
+    it('should start the bound again whenever the unreadable segment changes', async () => {
+      let version = '0:1';
+      const { reader, advance } = unreadable(() => version);
+
+      await expect(reader()).rejects.toThrow('EISDIR');
+      advance(foreignRunStaleMilliseconds - 1);
+      version = '0:2';
+      await expect(reader()).rejects.toThrow('EISDIR');
+      advance(foreignRunStaleMilliseconds - 1);
+
+      await expect(reader()).rejects.toThrow('EISDIR');
+    });
   });
 });

@@ -48,6 +48,11 @@ export type ChatLogSegment = {
   readonly deviceId: string;
   /** The segment file's bytes. A malformed tail is dropped, as on a single log. */
   readonly bytes: Uint8Array<ArrayBuffer>;
+  /**
+   * Why the segment is left out, when it could not be read for longer than the foreign-run staleness bound while it
+   * did not change (XD3); its `bytes` are then empty.
+   */
+  readonly unreadable?: string | undefined;
 };
 
 /** @public */

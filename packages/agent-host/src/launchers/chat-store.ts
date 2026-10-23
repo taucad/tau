@@ -8,6 +8,7 @@ import type { AttachmentReader } from '#harness/session-record.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { EventLogError } from '#log/event-log-error.js';
 import type { StorageDurabilityClass } from '#log/event-types.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import type { ChatLogSegment } from '#log/segments.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
@@ -172,29 +173,76 @@ export type ChatSegmentsSource = Readonly<{
  * A segment whose fingerprint did not change since the last call is answered with the same object, read once: a
  * writer refreshes before every admission, and most refreshes find nothing new.
  *
+ * A segment that is listed but cannot be read (a directory in its place, a denied read) may hold a live run, so the
+ * whole read rejects while that can still be so (XD3). A live run keeps its device's segment changing — a row, a
+ * heartbeat or a publish at least every `runHeartbeatMilliseconds` — so a segment whose fingerprint has not changed
+ * while it failed for a whole {@link foreignRunStaleMilliseconds} holds no live run: it is answered empty, with
+ * `unreadable` saying why, and the chat is no longer held on it. Any change to it starts the bound again. Without a
+ * fingerprint the bound runs from the first failure.
+ *
  * @param source - The chat's `events/` directory on this platform.
- * @returns A read of the segments: one per `<deviceId>.jsonl` entry, in name order.
+ * @param options - `now`, this device's clock in epoch milliseconds (`Date.now` by default).
+ * @returns A read of the segments: one per `<deviceId>.jsonl` entry, in device-id order.
  * @internal
  */
-export const createChatSegmentsReader = (source: ChatSegmentsSource): (() => Promise<readonly ChatLogSegment[]>) => {
+export const createChatSegmentsReader = (
+  source: ChatSegmentsSource,
+  options: Readonly<{ now?: (() => number) | undefined }> = {},
+): (() => Promise<readonly ChatLogSegment[]>) => {
+  const now = options.now ?? Date.now;
   const known = new Map<string, Readonly<{ version: string | undefined; segment: ChatLogSegment }>>();
+  /** Each segment failing to read now: its fingerprint, since when it has failed under it, and its empty answer. */
+  const failing = new Map<
+    string,
+    Readonly<{ version: string | undefined; since: number; segment?: ChatLogSegment | undefined }>
+  >();
+  const unreadable = (name: string, version: string | undefined, error: unknown): ChatLogSegment => {
+    const prior = failing.get(name);
+    const since = prior !== undefined && prior.version === version ? prior.since : now();
+    if (now() - since <= foreignRunStaleMilliseconds) {
+      failing.set(name, { version, since });
+      throw error;
+    }
+    const segment = prior?.segment ?? {
+      deviceId: segmentDeviceIdOf(name)!,
+      bytes: new Uint8Array(),
+      unreadable: error instanceof Error ? error.message : String(error),
+    };
+    failing.set(name, { version, since, segment });
+    return segment;
+  };
   return async () => {
     const listed = await source.list();
-    const names = listed.filter((name) => segmentDeviceIdOf(name) !== undefined).toSorted();
-    for (const name of known.keys()) {
-      if (!names.includes(name)) {
-        known.delete(name);
+    const names = listed
+      .filter((name) => segmentDeviceIdOf(name) !== undefined)
+      .toSorted((left, right) => {
+        const leftId = segmentDeviceIdOf(left)!;
+        const rightId = segmentDeviceIdOf(right)!;
+        return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+      });
+    for (const map of [known, failing]) {
+      for (const name of map.keys()) {
+        if (!names.includes(name)) {
+          map.delete(name);
+        }
       }
     }
     const found = await Promise.all(
       names.map(async (name): Promise<ChatLogSegment | undefined> => {
         const deviceId = segmentDeviceIdOf(name)!;
-        const version = await source.version?.(name);
+        const version = await source.version?.(name).catch(() => undefined);
         const prior = known.get(name);
         if (version !== undefined && prior?.version === version) {
           return prior.segment;
         }
-        const bytes = await source.read(name);
+        let bytes: Uint8Array<ArrayBuffer> | undefined;
+        try {
+          bytes = await source.read(name);
+        } catch (error) {
+          known.delete(name);
+          return unreadable(name, version, error);
+        }
+        failing.delete(name);
         if (bytes === undefined) {
           known.delete(name);
           return undefined;

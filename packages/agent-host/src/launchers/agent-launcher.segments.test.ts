@@ -455,6 +455,57 @@ describe('a chat continued on a second device', () => {
       expect(heartbeatsAfter(after, 'completed')).toEqual([]);
     });
 
+    /* A run that writes a row more often than the heartbeat interval never goes quiet, so it writes no heartbeat: its
+     * rows still have to reach the other devices on the heartbeat's cadence, or they see it stale and run beside it. */
+    it('should publish a chatty run’s chat at least once every heartbeat interval while it writes rows', async () => {
+      const root = await workspace();
+      const heartbeatInterval = 60;
+      const steps = 24;
+      const published: number[] = [];
+      let calls = 0;
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          funding: { type: 'unfunded' },
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            calls += 1;
+            await sleep(15);
+            if (calls <= steps) {
+              yield { type: 'tool-input', toolCallId: `call-${String(calls)}`, toolName: 'missing', input: {} };
+              yield { type: 'completed', stopReason: 'toolUse' };
+              return;
+            }
+            yield { type: 'text-delta', text: 'done' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        {
+          runHeartbeat: heartbeatInterval,
+          publish: async ({ requestId }) => {
+            published.push(Date.now());
+            return { requestId, status: 'applied' };
+          },
+        },
+      );
+      const startedAt = Date.now();
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      const rows = await rowsUntil(root, (found) =>
+        found.some((row) => row.type === 'run.lifecycle' && row.state === 'completed'),
+      );
+      const completedAt = Date.parse(rows.findLast((row) => row.type === 'run.lifecycle')!.recordedAt);
+
+      const whileLive = published.filter((at) => at < completedAt);
+      expect(whileLive.length).toBeGreaterThanOrEqual(2);
+      const gaps = [startedAt, ...whileLive].slice(1).map((at, index) => at - [startedAt, ...whileLive][index]!);
+      /* Timer slack on a loaded machine, never a missed interval. */
+      expect(Math.max(...gaps)).toBeLessThan(heartbeatInterval * 3);
+      expect(heartbeatsAfter(rows, 'running')).toEqual([]);
+    });
+
     /** A run on this device paused on an approval, its stream answering nothing until the pause aborts it. */
     const pausedRun = async (options: Parameters<typeof launch>[2]): Promise<string> => {
       const { root } = await pausedRunOn(options);
@@ -551,6 +602,39 @@ describe('a chat continued on a second device', () => {
       expect(await heartbeatCount(root)).toBe(settled);
     });
 
+    /*
+     * Past its hold a paused run stops holding the chat, and another device may run it. The person's later approval
+     * would continue the paused run beside that one, so it is refused while another device holds the chat, and the
+     * paused run stays as it was.
+     */
+    it('should refuse to continue a paused run on an approval while another device runs the chat', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 30 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      await sleep(100);
+      const recordedAt = new Date().toISOString();
+      const foreign = (sequence: number, state: string): string =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt, runId: 'run-phone', type: 'run.lifecycle', state })}\n`;
+      const segments = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(segments, { recursive: true });
+      await writeFile(join(segments, 'device-phone.jsonl'), foreign(0, 'admitted') + foreign(1, 'running'));
+      const before = rowsOf(await readFile(ownLog(root), 'utf8')).length;
+
+      const answer = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+
+      expect(answer).toMatchObject({
+        status: 'refused',
+        code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+        effect: 'not-applied',
+        details: { deviceId: 'device-phone', runId: 'run-phone' },
+      });
+      const after = rowsOf(await readFile(ownLog(root), 'utf8')).slice(before);
+      expect(after.filter((row) => row.type !== 'run.heartbeat')).toEqual([]);
+    });
+
     it('should keep a paused run alive with heartbeats while its session is open here', async () => {
       const root = await workspace();
       /* A stream that answers nothing until the pause aborts it. */
@@ -631,6 +715,23 @@ describe('a chat continued on a second device', () => {
       ]);
       const own = rowsOf(phone.files.get(ownLog)!);
       expect(new Set(own.map((row) => row.runId))).toEqual(new Set(['run-phone-1']));
+    });
+
+    /* A segment read is one provider round trip: a missing file is the read's `ENOENT`, never an `exists` first. */
+    it('should read the other devices’ segments without asking whether each one exists', async () => {
+      const phone = listingFileSystem();
+      const asked: string[] = [];
+      const { exists } = phone;
+      phone.exists = async (path) => {
+        asked.push(path);
+        return exists(path);
+      };
+      phone.files.set(`.tau/chats/${chatId}/events/device-desktop.jsonl`, new TextEncoder().encode(''));
+      const onPhone = launch(store(phone, 'phone-tab'), recordingModel('phone answer').transport);
+
+      await turn(onPhone, 'run-phone-1', 'on the phone');
+
+      expect(asked.filter((path) => path.includes('/events/'))).toEqual([]);
     });
   });
 });

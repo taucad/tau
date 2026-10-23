@@ -309,6 +309,8 @@ type ChatStore = {
   heartbeat?: Readonly<{ deliver: ChatStore['deliver']; cancel: () => void }> | undefined;
   /** When this host last paused the chat's run under its current term: where its hold starts (XD3). */
   pausedAt?: number | undefined;
+  /** When this host last asked the placement to publish the chat's ref for its live run (XD3). */
+  publishedAt?: number | undefined;
 };
 
 /**
@@ -318,7 +320,9 @@ type ChatStore = {
  * so a run that writes nothing for a while — a long tool call, a paused run waiting on its person — must still show it
  * is alive. While the chat's incarnation is open here and its run is admitted, running or paused, a minute with no
  * row writes one heartbeat under the incarnation's term and asks the placement to record the chat's ref
- * (`TurnPlacementPort.publish`). A host that closes, or whose incarnation ends, writes none, and the run goes stale on
+ * (`TurnPlacementPort.publish`). A run that keeps writing rows needs no heartbeat, but its rows reach the other devices
+ * only through a publish: while it is live, the chat is published at least once an interval whenever rows were
+ * written since the last publish. A host that closes, or whose incarnation ends, writes none, and the run goes stale on
  * the other devices like any run whose device went away.
  *
  * @public
@@ -985,7 +989,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   /**
    * Keep a live run's chat moving for the other devices (XD3, {@link runHeartbeatMilliseconds}). Armed by every write;
-   * each tick writes a heartbeat when the chat has gone a full interval without a row, then re-arms while the run is
+   * each tick writes a heartbeat when the chat has gone a full interval without a row, and otherwise publishes rows written
+   * since the last publish once an interval has passed since it, then re-arms while the run is
    * live, the incarnation that wrote under the term is still the chat's, and the host is open.
    *
    * @param chatId - The chat.
@@ -1060,9 +1065,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         return;
       }
       const { wrote } = store;
-      const quiet = wrote?.leaderEpoch === target.leaderEpoch ? now().getTime() - wrote.at : heartbeatInterval;
+      const at = now().getTime();
+      const quiet = wrote?.leaderEpoch === target.leaderEpoch ? at - wrote.at : heartbeatInterval;
       if (quiet < heartbeatInterval) {
-        armHeartbeat(chatId, heartbeatInterval - quiet);
+        /* Rows were written within the interval, so no heartbeat; those rows are published on the same cadence, or a
+         * busy run's chat would reach the other devices only when it settles and look stale there (XD3). */
+        const sincePublish = store.publishedAt === undefined ? heartbeatInterval : at - store.publishedAt;
+        const unpublished = wrote !== undefined && (store.publishedAt === undefined || wrote.at > store.publishedAt);
+        let nextPublish = heartbeatInterval;
+        if (unpublished && sincePublish >= heartbeatInterval) {
+          store.publishedAt = at;
+          void publishChat(chatId, target.runId);
+        } else if (unpublished) {
+          nextPublish = heartbeatInterval - sincePublish;
+        }
+        armHeartbeat(chatId, Math.min(heartbeatInterval - quiet, nextPublish));
         return;
       }
       const heartbeat: LogRowBody = { type: 'run.heartbeat' };
@@ -1082,6 +1099,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           deliver({ type: 'rowsCommitted', ledger: committed.ledger, messageIds: committed.messageIds });
         }
         /* Fire and forget: an offline remote queues the push, and an older session has no such verb. */
+        store.publishedAt = now().getTime();
         void publishChat(chatId, target.runId);
       } catch {
         /* A fenced or closed log ends the heartbeat with the incarnation that wrote it. */
@@ -1134,6 +1152,48 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         },
       },
     );
+  };
+
+  /**
+   * The cross-device fence on an approval (XD3). A paused run's driver continues on an approval without a resume, and
+   * a pause stops holding the chat after {@link pausedRunHoldMilliseconds}, so another device may be running the chat
+   * by then: the approval is refused, before any row, while another device holds it. A denial or a cancellation ends
+   * the paused run and is never refused. A chat whose log is not open here has no driver waiting; its run continues
+   * only through a resume, which the fence already covers.
+   *
+   * @param commandId - The approval's command.
+   * @param chatId - Its chat.
+   * @returns The refusal, or `undefined` to apply it.
+   */
+  const refuseApprovalForeignRun = async (commandId: string, chatId: string): Promise<CommandAnswer | undefined> => {
+    const store = stores.get(chatId);
+    const opened = store?.log;
+    if (opened === undefined) {
+      return undefined;
+    }
+    try {
+      const log = await opened;
+      await log.refresh?.();
+      await refuseForeignRun(chatId, log);
+      return undefined;
+    } catch (error) {
+      const { code, message, details } = codedFailureDetail(error);
+      if (code !== 'RUN_ACTIVE_ON_ANOTHER_DEVICE' && code !== 'SEGMENTS_UNREADABLE') {
+        return undefined;
+      }
+      return {
+        commandId,
+        generation: store?.ledger?.maxEpoch ?? 0,
+        status: 'refused',
+        effect: 'not-applied',
+        code,
+        message:
+          code === 'RUN_ACTIVE_ON_ANOTHER_DEVICE'
+            ? `${message} This paused turn stopped holding the chat, and another device has taken it over; deny the request or resume the turn once that run finishes.`
+            : message,
+        ...(details === undefined ? {} : { details }),
+      };
+    }
   };
 
   const messagesOf = async (chatId: string): ReturnType<DurableEventLog['messages']> => {
@@ -2016,6 +2076,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (command.type === 'start') {
       /* Known before any row, so a legacy cancel of a reserving run finds its chat. */
       runChats.set(command.payload.runId, command.payload.chatId);
+    }
+    if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
+      const held = await refuseApprovalForeignRun(command.commandId, command.payload.chatId);
+      if (held !== undefined) {
+        return held;
+      }
     }
     const answer = registry.execute(command);
     if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {

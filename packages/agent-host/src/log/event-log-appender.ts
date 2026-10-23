@@ -149,7 +149,9 @@ export type EventLogStorage = {
    * Read only; this device's own log is never among them. Absent where a log has no chat directory.
    *
    * A segment whose file did not change since the last call is answered with the same `bytes` object, so a refresh
-   * that finds nothing new costs no read and no fold (`readChatSegments`).
+   * that finds nothing new costs no read and no fold (`readChatSegments`). The segments come in device-id order, the
+   * merge's deterministic tie-break, and are not sorted again here. A segment that could not be read for longer than
+   * the staleness bound comes back empty with `unreadable` set; one that may still hold a live run rejects the read.
    */
   segments?(): Promise<readonly ChatLogSegment[]>;
 };
@@ -472,10 +474,7 @@ export const createEventLogAppender = async (
     }
     let next: readonly ChatLogSegment[];
     try {
-      const read = await storage.segments();
-      next = read.toSorted((left, right) =>
-        left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0,
-      );
+      next = await storage.segments();
       segmentFailure = undefined;
     } catch (error) {
       segmentFailure = {
@@ -645,7 +644,19 @@ export const createEventLogAppender = async (
     historyIntact: async () => enqueue(async () => history().historyIntact() && parsed.quarantined.length === 0),
     anomalies: async () =>
       enqueue(async () => {
-        const failure = segmentFailure === undefined ? [] : [segmentFailure];
+        const failure: EventLogAnomaly[] = [
+          ...(segmentFailure === undefined ? [] : [segmentFailure]),
+          ...segments.flatMap((segment): EventLogAnomaly[] =>
+            segment.unreadable === undefined
+              ? []
+              : [
+                  {
+                    kind: 'history',
+                    message: `The segment from "${segment.deviceId}" has not read, nor changed, for longer than the run staleness bound, so the history leaves it out: ${segment.unreadable}`,
+                  },
+                ],
+          ),
+        ];
         if (merged === undefined) {
           return [...anomalies, ...failure];
         }

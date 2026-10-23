@@ -281,6 +281,21 @@ describe('an event log with other devices’ segments (XD1)', () => {
       await expect(log.foreignRuns?.()).resolves.toEqual([]);
     });
 
+    /* A segment left out after the staleness bound releases the fence, and the history says why it is missing. */
+    it('should answer the fence and name a segment the storage left out as unreadable', async () => {
+      const { storage } = memoryEventLogStorage(bytesOf(phoneTurn));
+      const log = await createEventLogAppender({
+        ...storage,
+        segments: async () => [{ deviceId: 'device-desktop', bytes: new Uint8Array(), unreadable: 'EISDIR' }],
+      });
+
+      await expect(log.foreignRuns?.()).resolves.toEqual([]);
+      const anomalies = await log.anomalies();
+      expect(
+        anomalies.some((anomaly) => anomaly.kind === 'history' && /"device-desktop".*EISDIR/.test(anomaly.message)),
+      ).toBe(true);
+    });
+
     it('should have no fence to answer where the storage has no segments', async () => {
       const { storage } = memoryEventLogStorage(bytesOf(phoneTurn));
       const log = await createEventLogAppender(storage);

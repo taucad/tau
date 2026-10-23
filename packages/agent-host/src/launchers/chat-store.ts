@@ -9,6 +9,7 @@ import type { EventLogAppender } from '#log/event-log-appender.js';
 import { EventLogError } from '#log/event-log-error.js';
 import type { StorageDurabilityClass } from '#log/event-types.js';
 import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
+import { compareSegmentDeviceIds } from '#log/segments.js';
 import type { ChatLogSegment } from '#log/segments.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
@@ -215,11 +216,9 @@ export const createChatSegmentsReader = (
     const listed = await source.list();
     const names = listed
       .filter((name) => segmentDeviceIdOf(name) !== undefined)
-      .toSorted((left, right) => {
-        const leftId = segmentDeviceIdOf(left)!;
-        const rightId = segmentDeviceIdOf(right)!;
-        return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
-      });
+      .toSorted((left, right) =>
+        compareSegmentDeviceIds({ deviceId: segmentDeviceIdOf(left)! }, { deviceId: segmentDeviceIdOf(right)! }),
+      );
     for (const map of [known, failing]) {
       for (const name of map.keys()) {
         if (!names.includes(name)) {

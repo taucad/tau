@@ -162,6 +162,19 @@ export type EventLogAppenderOptions = Readonly<{
   now?: (() => number) | undefined;
 }>;
 
+/** Whether `next` is `prior`'s parsed bytes with more appended after them. */
+const grewFrom = (prior: Uint8Array<ArrayBuffer>, validByteLength: number, next: Uint8Array<ArrayBuffer>): boolean => {
+  if (next.byteLength <= prior.byteLength || validByteLength === 0) {
+    return false;
+  }
+  for (let index = 0; index < validByteLength; index++) {
+    if (prior[index] !== next[index]) {
+      return false;
+    }
+  }
+  return true;
+};
+
 /** The own segment's device id in a merge: the empty string, which no segment file can be named. */
 const ownDeviceId = '';
 
@@ -222,9 +235,10 @@ const withoutAbandonedOutput = (
       return [];
     }
     said.add(admitted.id);
-    const { version, leaderEpoch, sequence, recordedAt, runId, epoch } = event;
-    return [
-      {
+    let rejoined = rejoinedAdmissions.get(event);
+    if (rejoined === undefined) {
+      const { version, leaderEpoch, sequence, recordedAt, runId, epoch } = event;
+      rejoined = {
         version,
         leaderEpoch,
         sequence,
@@ -233,10 +247,15 @@ const withoutAbandonedOutput = (
         ...(epoch === undefined ? {} : { epoch }),
         type: 'message.appended',
         message: admitted,
-      },
-    ];
+      };
+      rejoinedAdmissions.set(event, rejoined);
+    }
+    return [rejoined];
   });
 };
+
+/* One rejoined message per admission row, so a refold that changes nothing about it replays the same row object. */
+const rejoinedAdmissions = new WeakMap<AgentLogEvent, AgentLogEvent>();
 
 /**
  * The person's message an admission row carries, when it carries one.
@@ -377,16 +396,38 @@ export const createEventLogAppender = async (
   let foreign: readonly ParsedLogSegment[] = [];
   /** Every run the foreign segments hold unsettled, as the last fold read them (XD3). */
   let foreignUnsettled: readonly ForeignRun[] = [];
-  /** Each segment's rows by its bytes: an unchanged segment is parsed once, whichever other segment moved. */
-  const parsedBytes = new WeakMap<Uint8Array<ArrayBuffer>, readonly AgentLogEvent[]>();
-  const parse = (bytes: Uint8Array<ArrayBuffer>): readonly AgentLogEvent[] => {
-    let events = parsedBytes.get(bytes);
-    if (events === undefined) {
-      events = parseEventLogBytes(bytes).events;
-      parsedBytes.set(bytes, events);
+  /*
+   * Each device's segment as last parsed. An unchanged segment is parsed once, whichever other segment moved; one that
+   * only grew (a row, a heartbeat) parses its new lines alone and keeps the rows it already had, so the fold can replay
+   * just what was appended.
+   */
+  const parsedSegments = new Map<
+    string,
+    Readonly<{ bytes: Uint8Array<ArrayBuffer>; events: readonly AgentLogEvent[]; validByteLength: number }>
+  >();
+  const parse = (deviceId: string, bytes: Uint8Array<ArrayBuffer>): readonly AgentLogEvent[] => {
+    const prior = parsedSegments.get(deviceId);
+    if (prior?.bytes === bytes) {
+      return prior.events;
     }
-    return events;
+    let next: Readonly<{ bytes: Uint8Array<ArrayBuffer>; events: readonly AgentLogEvent[]; validByteLength: number }>;
+    if (prior !== undefined && grewFrom(prior.bytes, prior.validByteLength, bytes)) {
+      const tail = parseEventLogBytes(bytes.slice(prior.validByteLength));
+      next = {
+        bytes,
+        events: tail.events.length === 0 ? prior.events : [...prior.events, ...tail.events],
+        validByteLength: prior.validByteLength + tail.validByteLength,
+      };
+    } else {
+      const whole = parseEventLogBytes(bytes);
+      next = { bytes, events: whole.events, validByteLength: whole.validByteLength };
+    }
+    parsedSegments.set(deviceId, next);
+    return next.events;
   };
+  /** The rows the merged fold replayed, in order: a fold whose rows extend them replays only the rest. */
+  let mergedRows: AgentLogEvent[] = [];
+  let mergedReplayAnomalies: EventLogAnomaly[] = [];
   let merged: ReturnType<typeof createEventLogReducer> | undefined;
   let mergedAnomalies: EventLogAnomaly[] = [];
   let segmentFailure: EventLogAnomaly | undefined;
@@ -398,12 +439,21 @@ export const createEventLogAppender = async (
       foreign = [];
       foreignUnsettled = [];
       merged = undefined;
+      mergedRows = [];
+      mergedReplayAnomalies = [];
       mergedAnomalies = [];
       return;
     }
-    const next = createEventLogReducer('history');
-    const found: EventLogAnomaly[] = [];
-    foreign = segments.map((segment) => ({ deviceId: segment.deviceId, events: parse(segment.bytes) }));
+    const conflicts: EventLogAnomaly[] = [];
+    for (const deviceId of parsedSegments.keys()) {
+      if (!segments.some((segment) => segment.deviceId === deviceId)) {
+        parsedSegments.delete(deviceId);
+      }
+    }
+    foreign = segments.map((segment) => ({
+      deviceId: segment.deviceId,
+      events: parse(segment.deviceId, segment.bytes),
+    }));
     /*
      * XD3: a run another device has not settled stays out of the history while it holds the chat, unless it is this
      * device's own run read back from a segment: its dangling turn would otherwise be answered here, or its open tool
@@ -428,7 +478,7 @@ export const createEventLogAppender = async (
         refoldAt = refoldAt === undefined ? standing.changesAt : Math.min(refoldAt, standing.changesAt);
       }
     }
-    const parsedSegments: ParsedLogSegment[] = [
+    const toMerge: ParsedLogSegment[] = [
       { deviceId: ownDeviceId, events: ownRows },
       ...foreign.map((segment) => {
         const heldIds = held.get(segment.deviceId);
@@ -444,9 +494,9 @@ export const createEventLogAppender = async (
             };
       }),
     ];
-    const rows = mergeSegmentRows(parsedSegments, {
+    const rows = mergeSegmentRows(toMerge, {
       onConflict: ({ key, keptDeviceId, droppedDeviceId }) => {
-        found.push({
+        conflicts.push({
           kind: 'conflict',
           message: `Leader epoch "${key.leaderEpoch}" sequence ${key.sequence} differs between devices; the copy from "${
             keptDeviceId || 'this device'
@@ -454,15 +504,22 @@ export const createEventLogAppender = async (
         });
       },
     });
-    for (const row of rows) {
+    /* Only what the rows add past those already replayed, when they extend them; otherwise the whole merge again. */
+    const extends_ =
+      merged !== undefined && rows.length >= mergedRows.length && mergedRows.every((row, index) => rows[index] === row);
+    const next = extends_ ? merged! : createEventLogReducer('history');
+    const replayAnomalies = extends_ ? mergedReplayAnomalies : [];
+    for (const row of rows.slice(extends_ ? mergedRows.length : 0)) {
       const replayed = next.replay(row);
       if (replayed.anomaly) {
         const cursor = cursorOf.get(row);
-        found.push({ ...replayed.anomaly, ...(cursor === undefined ? {} : { cursor }) });
+        replayAnomalies.push({ ...replayed.anomaly, ...(cursor === undefined ? {} : { cursor }) });
       }
     }
     merged = next;
-    mergedAnomalies = found;
+    mergedRows = [...rows];
+    mergedReplayAnomalies = replayAnomalies;
+    mergedAnomalies = [...conflicts, ...replayAnomalies];
   };
   /*
    * Reading never fails a chat (D16): segments that cannot be read leave the history as it was, and say so. The fence
@@ -497,8 +554,38 @@ export const createEventLogAppender = async (
    *
    * @returns The fold whose messages are the chat's history.
    */
-  const history = (): ReturnType<typeof createEventLogReducer> =>
-    merged === undefined || (!merged.historyIntact() && own.historyIntact()) ? own : merged;
+  const history = (): ReturnType<typeof createEventLogReducer> => {
+    if (merged !== undefined && (merged.historyIntact() || !own.historyIntact())) {
+      return merged;
+    }
+    return ownWithoutGone() ?? own;
+  };
+  /*
+   * XD1: this device's rows, written over the merged history, can name another device's messages. With no merge to
+   * read they do not fold alone. While the segments cannot be read that history is unknown, never invalid: the fence
+   * refuses `SEGMENTS_UNREADABLE` (`wait`) until a read succeeds. Once the read succeeds and no segment holds those
+   * messages (a device removed from the project took its segment), the history is this device's rows with the names
+   * of what is gone left out, and says so.
+   */
+  const historyUnknown = (): boolean => merged === undefined && segmentFailure !== undefined && !own.historyIntact();
+  let lenient: ReturnType<typeof createEventLogReducer> | undefined;
+  const ownWithoutGone = (): ReturnType<typeof createEventLogReducer> | undefined => {
+    if (storage.segments === undefined || merged !== undefined || segmentFailure !== undefined || own.historyIntact()) {
+      return undefined;
+    }
+    if (lenient === undefined) {
+      lenient = createEventLogReducer('log', { missingMessages: 'skip' });
+      for (const event of events) {
+        lenient.replay(event);
+      }
+    }
+    return lenient;
+  };
+  const gone: EventLogAnomaly = {
+    kind: 'history',
+    message:
+      "This device's rows name messages no segment here holds (another device's segment is gone); the history leaves those names out.",
+  };
   const divergence: EventLogAnomaly = {
     kind: 'history',
     message: "The other devices' segments do not fold onto this device's log; the history is this device's rows alone.",
@@ -616,11 +703,16 @@ export const createEventLogAppender = async (
         await guardedAppend(bytes);
         term.commit();
         transition.commit();
+        /* Rebuilt from the log when next needed, with this row. */
+        lenient = undefined;
         /* The other fold follows tolerantly: a row naming another device's message does not apply to `own`. */
         if (folding !== own) {
           own.replay(transition.event);
         } else if (merged !== undefined) {
           merged.replay(transition.event);
+        }
+        if (merged !== undefined) {
+          mergedRows.push(transition.event);
         }
         events.push(transition.event);
         ownRows.push(transition.event);
@@ -641,7 +733,8 @@ export const createEventLogAppender = async (
         return readEventLogBatch(events, opaqueRows, { cursor, limit, maxBytes, last });
       }),
     messages: async () => enqueue(async () => history().messages()),
-    historyIntact: async () => enqueue(async () => history().historyIntact() && parsed.quarantined.length === 0),
+    historyIntact: async () =>
+      enqueue(async () => (historyUnknown() || history().historyIntact()) && parsed.quarantined.length === 0),
     anomalies: async () =>
       enqueue(async () => {
         const failure: EventLogAnomaly[] = [
@@ -658,7 +751,9 @@ export const createEventLogAppender = async (
           ),
         ];
         if (merged === undefined) {
-          return [...anomalies, ...failure];
+          return history() === lenient
+            ? [...anomalies.filter((anomaly) => anomaly.kind !== 'history'), gone, ...failure]
+            : [...anomalies, ...failure];
         }
         if (history() === own) {
           return [...anomalies, divergence, ...failure];

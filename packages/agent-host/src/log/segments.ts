@@ -55,6 +55,19 @@ export type ChatLogSegment = {
   readonly unreadable?: string | undefined;
 };
 
+/**
+ * The order segments are read and digested in: by device id, the merge's deterministic tie-break (XD1).
+ *
+ * @param left - One segment.
+ * @param right - Another.
+ * @returns Negative, zero or positive, as `Array.prototype.sort` takes it.
+ * @public
+ */
+export const compareSegmentDeviceIds = (
+  left: Readonly<{ deviceId: string }>,
+  right: Readonly<{ deviceId: string }>,
+): number => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0);
+
 /** @public */
 export type MergeLogSegmentsOptions = Readonly<{
   /** Two segments hold different rows under one key; the copy from the term's device is kept. */

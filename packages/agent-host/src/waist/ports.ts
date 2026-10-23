@@ -554,11 +554,14 @@ export type TurnPlacementPort = Readonly<{
     input: TurnAttemptInput,
   ) => Promise<TurnPlacementAnswer<NoResult, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | 'SESSION_FENCED'>>;
   /**
-   * Record the chat's log in its ref now, after the host appended a run's heartbeat (XD3), so another device that syncs
-   * sees the run is still live. Fire and forget: an offline remote queues the push. Absent where nothing syncs, and on
-   * an older session.
+   * Record the chat's log in its ref now, for a live run (XD3), so another device that syncs sees the run is still
+   * live. An offline remote queues the push. Refused `CHAT_NOT_SHARED` where the project syncs with no remote: no other
+   * device reads the chat, and the host then writes no `run.heartbeat` row, which builds older than XD3 read as an
+   * opaque row of the run. Absent on an older session.
    */
-  publish?: ((input: TurnPublishInput) => Promise<TurnPlacementAnswer<NoResult, 'SESSION_FENCED'>>) | undefined;
+  publish?:
+    | ((input: TurnPublishInput) => Promise<TurnPlacementAnswer<NoResult, 'SESSION_FENCED' | 'CHAT_NOT_SHARED'>>)
+    | undefined;
 }>;
 
 /** A launcher live delta qualified by its emitting writer incarnation. @public */

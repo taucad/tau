@@ -996,18 +996,29 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * @param chatId - The chat.
    */
   const heartbeatInterval = options.delays?.runHeartbeat ?? runHeartbeatMilliseconds;
-  /* XD3: ask the placement to record the chat's ref; a publish that fails is the next heartbeat's to repeat. */
-  const publishChat = async (chatId: string, runId: string): Promise<void> => {
+  /*
+   * XD3: ask the placement to record the chat's ref; a publish that fails is the next heartbeat's to repeat. Answers
+   * whether the chat reaches another device: `false` only when the placement refuses `CHAT_NOT_SHARED`.
+   */
+  const publishChat = async (chatId: string, runId: string): Promise<boolean> => {
     try {
-      await options.placement?.publish?.({
+      const answer = await options.placement?.publish?.({
         requestId: `publish:${chatId}:${runId}:${String(now().getTime())}`,
         chatId,
       });
+      return !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED');
     } catch {
       /* An offline remote queues the push, and an older session has no such verb. */
+      return true;
     }
   };
   const pausedHold = options.delays?.pausedRunHold ?? pausedRunHoldMilliseconds;
+  /** Whether the chat's current run is paused here and still inside its hold (XD3). */
+  const pauseHeld = (store: ChatStore | undefined): boolean =>
+    store?.ledger !== undefined &&
+    chatRunState(store.ledger) === 'paused' &&
+    store.pausedAt !== undefined &&
+    now().getTime() - store.pausedAt < pausedHold;
   /**
    * The run a heartbeat may be written for now, under which term, or `undefined` when none may: the host is open, the
    * chat's incarnation is the one that armed it and its log is open, its run is live, and this host already wrote the
@@ -1029,7 +1040,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const runId = ledger?.currentRunId;
     const leaderEpoch = registry.termOf(chatId);
     const state = ledger === undefined ? 'none' : chatRunState(ledger);
-    const held = state !== 'paused' || (store.pausedAt !== undefined && now().getTime() - store.pausedAt < pausedHold);
+    const held = state !== 'paused' || pauseHeld(store);
     return closed ||
       deliver === undefined ||
       store.deliver !== deliver ||
@@ -1080,6 +1091,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           nextPublish = heartbeatInterval - sincePublish;
         }
         armHeartbeat(chatId, Math.min(heartbeatInterval - quiet, nextPublish));
+        return;
+      }
+      /*
+       * A heartbeat is for the other devices, and builds older than XD3 read it as an opaque row of the run, so none is
+       * written while the placement says the chat reaches no other device. Asked again each interval: a remote can be
+       * added while the run is live.
+       */
+      if (!(await publishChat(chatId, target.runId))) {
+        store.publishedAt = now().getTime();
+        armHeartbeat(chatId);
         return;
       }
       const heartbeat: LogRowBody = { type: 'run.heartbeat' };
@@ -1179,6 +1200,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     } catch (error) {
       const { code, message, details } = codedFailureDetail(error);
       if (code !== 'RUN_ACTIVE_ON_ANOTHER_DEVICE' && code !== 'SEGMENTS_UNREADABLE') {
+        return undefined;
+      }
+      /* Inside its own hold the paused run still holds the chat for every device: an unreadable segment cannot be
+       * another device's run on it, since that device's fence refuses while this run's heartbeats are fresh. */
+      if (code === 'SEGMENTS_UNREADABLE' && pauseHeld(store)) {
         return undefined;
       }
       return {

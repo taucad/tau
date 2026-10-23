@@ -106,6 +106,14 @@ const unsequenced = (): ReturnType<typeof createEventSequence> => ({
  */
 export const createEventLogReducer = (
   mode: EventLogReducerMode = 'log',
+  options: Readonly<{
+    /**
+     * `skip`: a row naming a message this history does not hold drops that name instead of rejecting the history. A
+     * chat log's rows can name another device's messages (XD1); once that device's segment is gone, those names have
+     * nothing to apply to, and the rest of the history still folds. `fail` (the default) rejects it (`HISTORY_INVALID`).
+     */
+    missingMessages?: 'fail' | 'skip';
+  }> = {},
 ): {
   prepare(candidate: AgentLogEvent): EventLogTransition;
   /**
@@ -130,6 +138,10 @@ export const createEventLogReducer = (
   const settledInvocations = new Set<string>();
   let messages: ProviderMessage[] = [];
   let intact = true;
+  const skipMissing = options.missingMessages === 'skip';
+  /** The ids a row names, less those this history does not hold when missing names are skipped. */
+  const held = (messageIds: readonly string[]): readonly string[] =>
+    skipMissing ? messageIds.filter((id) => messages.some((message) => message.id === id)) : messageIds;
 
   /** The history rules for one known row: returns its effect, or throws `HISTORY_INVALID`. */
   const transitionOf = (event: AgentLogEvent): (() => void) => {
@@ -144,6 +156,10 @@ export const createEventLogReducer = (
         break;
       }
       case 'message.envelope-replaced': {
+        if (held([event.messageId]).length === 0) {
+          apply = () => undefined;
+          break;
+        }
         const index = messageIndex(messages, event.messageId);
         assertSameEnvelopeIdentity(messages[index]!, event.replacement, event.messageId);
         apply = () => {
@@ -156,9 +172,9 @@ export const createEventLogReducer = (
         if (evictedIds.size !== event.evictedMessageIds.length) {
           failHistory('A compaction event cannot evict the same message id twice.');
         }
-        const indexes = indexesFor(messages, event.evictedMessageIds);
+        const indexes = indexesFor(messages, held(event.evictedMessageIds));
         assertNewMessageId(knownMessageIds, event.summary);
-        const insertionIndex = Math.min(...indexes);
+        const insertionIndex = indexes.length === 0 ? messages.length : Math.min(...indexes);
         apply = () => {
           messages = messages.filter((message) => !evictedIds.has(message.id));
           messages.splice(insertionIndex, 0, event.summary);
@@ -167,23 +183,28 @@ export const createEventLogReducer = (
         break;
       }
       case 'history.rewound': {
-        if (event.retainedMessageIds.length > messages.length) {
+        const retainedMessageIds = held(event.retainedMessageIds);
+        if (retainedMessageIds.length > messages.length) {
           failHistory('A history rewind cannot retain more messages than current history contains.');
         }
-        for (let index = 0; index < event.retainedMessageIds.length; index++) {
-          if (messages[index]!.id !== event.retainedMessageIds[index]) {
+        for (const [index, id] of retainedMessageIds.entries()) {
+          if (messages[index]!.id !== id) {
             failHistory('A history rewind must retain an unchanged, ordered history prefix.');
           }
         }
         apply = () => {
-          for (const removed of messages.slice(event.retainedMessageIds.length)) {
+          for (const removed of messages.slice(retainedMessageIds.length)) {
             knownMessageIds.delete(removed.id);
           }
-          messages = messages.slice(0, event.retainedMessageIds.length);
+          messages = messages.slice(0, retainedMessageIds.length);
         };
         break;
       }
       case 'snapshot-context.refreshed': {
+        if (held([event.messageId]).length === 0) {
+          apply = () => undefined;
+          break;
+        }
         const index = messageIndex(messages, event.messageId);
         apply = () => {
           messages[index] = { ...messages[index]!, content: event.content };
@@ -191,16 +212,17 @@ export const createEventLogReducer = (
         break;
       }
       case 'turn.history-projection-committed': {
-        if (event.retainedMessageIds.length > messages.length) {
+        const retainedMessageIds = held(event.retainedMessageIds);
+        if (retainedMessageIds.length > messages.length) {
           failHistory('A start-of-turn projection cannot retain more messages than current history contains.');
         }
-        for (let index = 0; index < event.retainedMessageIds.length; index++) {
-          if (messages[index]!.id !== event.retainedMessageIds[index]) {
+        for (const [index, id] of retainedMessageIds.entries()) {
+          if (messages[index]!.id !== id) {
             failHistory('A start-of-turn projection must retain an unchanged, ordered history prefix.');
           }
         }
         assertNewMessageId(knownMessageIds, event.message);
-        const projected = [...messages.slice(0, event.retainedMessageIds.length), event.message];
+        const projected = [...messages.slice(0, retainedMessageIds.length), event.message];
         apply = () => {
           messages = projected;
           knownMessageIds.add(event.message.id);

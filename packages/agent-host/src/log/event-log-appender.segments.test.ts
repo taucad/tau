@@ -75,6 +75,83 @@ describe('an event log with other devices’ segments (XD1)', () => {
     expect(new TextDecoder().decode(bytes())).toBe(new TextDecoder().decode(bytesOf([...phoneTurn, rewound])));
   });
 
+  /*
+   * A row this device wrote over the merged history can name another device's message. When that segment cannot be
+   * read, this device's rows alone do not fold: the history is unknown, not invalid, and the chat waits for the read.
+   */
+  describe('when this device’s rows build on another device’s segment', () => {
+    const builtOn: readonly AgentLogEvent[] = [
+      ...phoneTurn,
+      {
+        ...base('epoch-phone', 1, '2026-10-23T09:00:01.000Z'),
+        type: 'history.rewound',
+        trigger: 'retry',
+        retainedMessageIds: ['epoch-desktop-0'],
+      },
+      said({ leaderEpoch: 'epoch-phone', sequence: 2, at: '2026-10-23T09:00:02.000Z', text: 'phone retries' }),
+    ];
+
+    it('should refuse retryably, never read an invalid history, while that segment cannot be read', async () => {
+      const { storage } = memoryEventLogStorage(bytesOf(builtOn));
+      const log = await createEventLogAppender({
+        ...storage,
+        segments: async () => {
+          throw new Error('EIO: the segments could not be listed');
+        },
+      });
+
+      expect(await log.historyIntact()).toBe(true);
+      await expect(log.foreignRuns?.()).rejects.toMatchObject({ code: 'SEGMENTS_UNREADABLE' });
+    });
+
+    /* A device removed from the project takes its segment with it: what this device's rows named of it is gone. */
+    it('should keep the history it can and name what is missing once that segment is gone', async () => {
+      const log = await openLog(builtOn, { current: [] });
+
+      expect(await log.historyIntact()).toBe(true);
+      expect(ids(await log.messages())).toEqual(['epoch-phone-2']);
+      await expect(log.foreignRuns?.()).resolves.toEqual([]);
+      const anomalies = await log.anomalies();
+      expect(
+        anomalies.some((anomaly) => anomaly.kind === 'history' && anomaly.message.includes('no segment here holds')),
+      ).toBe(true);
+    });
+
+    it('should fold the merged history again once the segment is back', async () => {
+      const segments: { current: readonly ChatLogSegment[] } = { current: [] };
+      const log = await openLog(builtOn, segments);
+
+      segments.current = [segment('device-desktop', desktopTurn)];
+      await log.refresh?.();
+
+      expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-phone-2']);
+      expect(await log.anomalies()).toEqual([]);
+    });
+  });
+
+  /* A heartbeat appends one row to one device's segment every minute: the rows already read are neither parsed nor
+   * replayed again, so the history keeps the very messages it held. */
+  it('should fold only what a segment appended, keeping the history it already held', async () => {
+    const segments: { current: readonly ChatLogSegment[] } = { current: [segment('device-desktop', desktopTurn)] };
+    const log = await openLog(phoneTurn, segments);
+    const before = await log.messages();
+
+    segments.current = [
+      segment('device-desktop', [
+        ...desktopTurn,
+        {
+          ...base('epoch-desktop', 2, '2026-10-23T09:30:00.000Z'),
+          type: 'run.heartbeat',
+        },
+      ]),
+    ];
+    await log.refresh?.();
+    const after = await log.messages();
+
+    expect(ids(after)).toEqual(ids(before));
+    expect(after[0]).toBe(before[0]);
+  });
+
   it('should count this device’s rows once when a segment repeats them', async () => {
     const log = await openLog(phoneTurn, {
       current: [segment('device-desktop', desktopTurn), segment('device-phone-former-actor', phoneTurn)],

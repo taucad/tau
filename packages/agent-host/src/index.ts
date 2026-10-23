@@ -12,7 +12,7 @@ export type { FoldProjectionFactsInput } from '#log/chat-ledger.js';
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
-export { mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segments.js';
+export { compareSegmentDeviceIds, mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segments.js';
 export type { ChatLogSegment, MergeLogSegmentsOptions, ParsedLogSegment } from '#log/segments.js';
 export {
   foreignRunStaleMilliseconds,

@@ -506,6 +506,45 @@ describe('a chat continued on a second device', () => {
       expect(heartbeatsAfter(rows, 'running')).toEqual([]);
     });
 
+    /* A heartbeat is for the other devices, and builds older than XD3 read it as an opaque row of the run: where the
+     * placement says no other device reads the chat, none is written. */
+    it('should write no heartbeat where the placement says the chat reaches no other device', async () => {
+      const root = await workspace();
+      const gate = Promise.withResolvers<void>();
+      const recorded = recordingModel('answer');
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await gate.promise;
+            yield* recorded.transport.stream(request);
+          },
+        },
+        {
+          runHeartbeat: 20,
+          publish: async ({ requestId }) => ({
+            requestId,
+            status: 'refused',
+            code: 'CHAT_NOT_SHARED',
+            message: 'No remote.',
+          }),
+        },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
+
+      await sleep(200);
+      const rows = rowsOf(await readFile(ownLog(root), 'utf8'));
+      gate.resolve();
+
+      expect(heartbeatsAfter(rows, 'running')).toEqual([]);
+    });
+
     /** A run on this device paused on an approval, its stream answering nothing until the pause aborts it. */
     const pausedRun = async (options: Parameters<typeof launch>[2]): Promise<string> => {
       const { root } = await pausedRunOn(options);
@@ -633,6 +672,96 @@ describe('a chat continued on a second device', () => {
       });
       const after = rowsOf(await readFile(ownLog(root), 'utf8')).slice(before);
       expect(after.filter((row) => row.type !== 'run.heartbeat')).toEqual([]);
+    });
+
+    /* Inside its own hold the paused run still holds the chat: a segment it cannot read does not block its approval. */
+    it('should apply an approval inside the paused run’s hold while another device’s segment cannot be read', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 60_000 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      await mkdir(join(root, '.tau', 'chats', chatId, 'events', 'device-phone.jsonl'), { recursive: true });
+
+      const answer = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+
+      expect(answer).toMatchObject({ status: 'applied' });
+    });
+
+    /*
+     * A native pause has no driver: its attempt ended at the pause (TS-R10). An approval only records the answer; the
+     * turn goes on through a resume, which reads the history again, merged with what another device ran meanwhile.
+     */
+    it('should continue a paused run approved after another device’s turn on the merged history', async () => {
+      const root = await workspace();
+      const requests: ModelStreamRequest[] = [];
+      let approved = false;
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          funding: { type: 'unfunded' },
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            requests.push(request);
+            if (!approved) {
+              await new Promise((resolve) => {
+                request.signal.addEventListener('abort', resolve, { once: true });
+              });
+              yield { type: 'completed', stopReason: 'aborted' };
+              return;
+            }
+            yield { type: 'text-delta', text: 'continued' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        { runHeartbeat: 10, pausedRunHold: 30 },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
+      await launcher.execute({
+        type: 'interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      /* Past the hold, the phone ran a whole turn on the chat; sync brought its segment here. */
+      const at = new Date(Date.now() + 1000).toISOString();
+      const phone = (sequence: number, body: Record<string, unknown>): string =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt: at, runId: 'run-phone', ...body })}\n`;
+      const segments = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(segments, { recursive: true });
+      await writeFile(
+        join(segments, 'device-phone.jsonl'),
+        phone(0, { type: 'run.lifecycle', state: 'admitted' }) +
+          phone(1, {
+            type: 'message.appended',
+            message: { id: 'phone-user', role: 'user', content: 'from the phone' },
+          }) +
+          phone(2, { type: 'run.lifecycle', state: 'completed' }),
+      );
+
+      approved = true;
+      const approval = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+      expect(approval).toMatchObject({ status: 'applied' });
+      const resumed = await launcher.execute({
+        type: 'resume',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1' },
+      });
+      expect(resumed).toMatchObject({ status: 'applied' });
+      await rowsUntil(root, (found) =>
+        found.some((row) => row.runId === 'run-1' && row.type === 'run.lifecycle' && row.state === 'completed'),
+      );
+
+      expect(transcriptOf(requests.at(-1))).toContain('user: from the phone');
     });
 
     it('should keep a paused run alive with heartbeats while its session is open here', async () => {

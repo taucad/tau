@@ -31,9 +31,14 @@ permissions:
   actions: read
   pull-requests: read
 
+# Per-commit group, non-cancelling: the macOS runners take minutes to start, and this spike's files
+# live in the PR diff, so every push to a shared feature branch (by any session) re-fires the
+# pull_request event. With a branch-wide group + cancel-in-progress those slow jobs are cancelled
+# before they can run (observed: three runs cancelled < 2 min in). Keying the group to the commit SHA
+# and never cancelling lets each commit's run complete; the live-host proof still never cache-hits.
 concurrency:
-  group: spike-w2-macos-reaping-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: spike-w2-macos-reaping-${{ github.sha }}
+  cancel-in-progress: false
 
 jobs:
   reaping:

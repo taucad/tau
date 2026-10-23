@@ -1,0 +1,363 @@
+/**
+ * Shared pieces of the W2 Windows MXC processcontainer S1 isolation spike (desktop Bash/Terminal
+ * blueprint, ratification §RQ5).
+ *
+ * Dev-only evidence harness: nothing here is exported by the package or shipped. It drives the
+ * pinned Microsoft MXC Node SDK (`@microsoft/mxc-sdk/v1`, pinned in `pin.json`) directly and writes
+ * JSON receipts binding every observation to the MXC revision, SDK digest, licence, OS build and
+ * source SHA. A missing prerequisite is a typed `prerequisite` state and a failed receipt — never a
+ * skip, never a green. Isolation is a receipt decided by an external out-of-container observer,
+ * never a trusted in-container error string.
+ *
+ * Read-only reuse of the W1 harness: this module imports pure helpers from `../lib.mts` (check,
+ * identity, writeJson, sha256File, sleep, waitFor). It owns no W1 file and edits none.
+ */
+import { createHash, randomBytes } from 'node:crypto';
+import { createServer, type Server } from 'node:http';
+import { createRequire } from 'node:module';
+import { arch, platform, release } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+
+import { type Check, check, sha256File, sleep, waitFor, writeJson } from '../lib.mts';
+
+export { check, sha256File, sleep, waitFor, writeJson };
+export type { Check };
+
+export const mxcDirectory = dirname(new URL(import.meta.url).pathname);
+/** Resolve the MXC SDK (and its own package.json) from this spike's node_modules only. */
+const sdkRequire = createRequire(join(mxcDirectory, 'package.json'));
+
+export const isWindows = platform() === 'win32';
+
+/** The pinned identity this lane admits, loaded from the committed `pin.json`. */
+export type Pin = {
+  nodeSdk: {
+    name: string;
+    version: string;
+    integrity: string;
+    shasum: string;
+    license: string;
+    entry: string;
+  };
+  spec: { upstreamRepo: string; upstreamRevisionPrefix: string; brainCommit: string };
+  target: { backend: string; runner: string; os: string };
+};
+
+export const readPin = (): Pin => JSON.parse(readFileSync(join(mxcDirectory, 'pin.json'), 'utf8')) as Pin;
+
+/**
+ * A typed prerequisite state. An absent capability, a missing SDK or an off-Windows host is NEVER a
+ * green row: it is recorded as `{ available: false, reason }` and turned into a failed check.
+ */
+export type Prereq = { readonly available: boolean; readonly reason?: string; readonly detail?: unknown };
+
+export const prereqCheck = (id: string, what: string, prereq: Prereq): Check =>
+  check(
+    id,
+    `${what} available`,
+    prereq.available ? 'available' : (prereq.reason ?? 'unavailable'),
+    prereq.available,
+    prereq.detail,
+  );
+
+/**
+ * Minimal structural view of the pinned SDK's `/v1` surface, feature-detected at load time. We do
+ * not statically depend on the SDK's types (it is a native, Windows-only, optional dependency); we
+ * assert the exports we use are present and record anything missing as a prerequisite failure.
+ */
+export type MxcSdk = {
+  readonly resolvedPath: string;
+  readonly packageVersion: string;
+  readonly getPlatformSupport: () => MxcPlatformSupport;
+  readonly getAvailableBackends: () => MxcAvailableBackend[];
+  readonly probe: (request?: unknown) => MxcProbeOutput;
+  readonly run: (request: MxcContainerRequest, options?: unknown) => Promise<MxcExecutionResult>;
+  readonly spawnWithPty?: (request: MxcContainerRequest, options?: unknown) => unknown;
+  readonly findWxcExecutable?: () => string | null;
+  /** Names of the exports the loader expected but did not find. */
+  readonly missingExports: string[];
+};
+
+export type MxcPlatformSupport = {
+  isSupported: boolean;
+  reason?: string;
+  availableMethods: string[];
+  isolationTier?: string;
+  isolationWarnings?: string[];
+  uiCapabilities?: Record<string, boolean>;
+};
+
+export type MxcAvailableBackend = { backend: string; tier?: string; capabilities: string[]; warnings: string[] };
+
+export type MxcProbeFacts = {
+  baseContainerApiPresent: boolean;
+  baseContainerSupportsDenyPaths: boolean;
+  baseContainerSupportsEnumeratePaths: boolean;
+  baseContainerSupportsIngressHostLoopbackAllow: boolean;
+  baseContainerSupportsIdentitylessLoopbackProxy: boolean;
+  isolationSessionAvailable: boolean;
+  uiCapabilities: Record<string, boolean>;
+};
+
+export type MxcProbeOutput = {
+  tier?: string;
+  needsDaclAugmentation?: boolean;
+  warnings: string[];
+  probes: MxcProbeFacts;
+  error?: string;
+};
+
+export type MxcExecutionResult = {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+  warnings: string[];
+};
+
+/** A ContainerRequest for the processcontainer backend. Shape mirrors the pinned SDK's v1 types. */
+export type MxcContainerRequest = {
+  command: string;
+  containment?: { type: 'processcontainer'; config?: Record<string, unknown> };
+  filesystem?: {
+    readwritePaths?: string[];
+    readonlyPaths?: string[];
+    deniedPaths?: string[];
+    clearPolicyOnExit?: boolean;
+  };
+  network?: {
+    egress?: { default?: 'allow' | 'deny'; allow?: unknown[]; deny?: unknown[] };
+    ingress?: { default?: 'allow' | 'deny'; hostLoopback?: 'allow' | 'deny' };
+    runtimeConfig?: { networkProxy?: string };
+  };
+  timeoutMs?: number;
+  containerName?: string;
+  workingDirectory?: string;
+  environment?: Record<string, string>;
+};
+
+/**
+ * Load the pinned SDK's `/v1` entry. Returns a prerequisite failure (never throws) when the package
+ * is absent, when it cannot be imported on this host, or when an export we rely on is missing.
+ */
+export const loadSdk = async (): Promise<{ sdk?: MxcSdk; prereq: Prereq }> => {
+  let entryPath: string;
+  try {
+    entryPath = sdkRequire.resolve('@microsoft/mxc-sdk/v1');
+  } catch (error) {
+    return { prereq: { available: false, reason: '@microsoft/mxc-sdk not installed', detail: String(error) } };
+  }
+  let packageVersion = 'unknown';
+  try {
+    const pkgPath = sdkRequire.resolve('@microsoft/mxc-sdk/package.json');
+    packageVersion = (JSON.parse(readFileSync(pkgPath, 'utf8')) as { version: string }).version;
+  } catch {
+    /* recorded below via the version mismatch gate in provision.mts */
+  }
+  let mod: Record<string, unknown>;
+  try {
+    mod = (await import(pathToFileURL(entryPath).href)) as Record<string, unknown>;
+  } catch (error) {
+    return {
+      prereq: { available: false, reason: 'SDK import failed (native library unavailable?)', detail: String(error) },
+    };
+  }
+  const required = ['getPlatformSupport', 'getAvailableBackends', 'probe', 'run'] as const;
+  const missingExports = required.filter((name) => typeof mod[name] !== 'function');
+  if (missingExports.length > 0) {
+    return {
+      prereq: {
+        available: false,
+        reason: `SDK missing exports: ${missingExports.join(', ')}`,
+        detail: { packageVersion },
+      },
+    };
+  }
+  const sdk: MxcSdk = {
+    resolvedPath: entryPath,
+    packageVersion,
+    getPlatformSupport: mod['getPlatformSupport'] as MxcSdk['getPlatformSupport'],
+    getAvailableBackends: mod['getAvailableBackends'] as MxcSdk['getAvailableBackends'],
+    probe: mod['probe'] as MxcSdk['probe'],
+    run: mod['run'] as MxcSdk['run'],
+    spawnWithPty:
+      typeof mod['spawnWithPty'] === 'function' ? (mod['spawnWithPty'] as MxcSdk['spawnWithPty']) : undefined,
+    findWxcExecutable:
+      typeof mod['findWxcExecutable'] === 'function'
+        ? (mod['findWxcExecutable'] as MxcSdk['findWxcExecutable'])
+        : undefined,
+    missingExports: [],
+  };
+  return { sdk, prereq: { available: true } };
+};
+
+/** Locate and digest the on-disk native `wxc-exec` executable the SDK will run (the binding digest). */
+export const wxcExecDigest = (sdk?: MxcSdk): { path: string; sha256: string } | undefined => {
+  const found = sdk?.findWxcExecutable?.();
+  if (found && existsSync(found)) {
+    return { path: found, sha256: sha256File(found) };
+  }
+  return undefined;
+};
+
+export const sha256 = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
+export const nonce = (): string => randomBytes(16).toString('hex');
+
+/** A per-session grant: private roots, a read-only toolchain root, the other session's roots to deny. */
+export type SessionGrant = {
+  readonly id: string;
+  readonly project: string;
+  readonly home: string;
+  readonly temporary: string;
+  readonly readOnly: string;
+  /** Paths that MUST be denied (the other session's private roots and approved folders). */
+  readonly deny: readonly string[];
+  /** host:port the session's own proxy listens on, and the bearer token it accepts. */
+  readonly proxy: { host: string; port: number; token: string };
+};
+
+/** Build a processcontainer ContainerRequest for one session's grant, running `command`. */
+export const requestFor = (
+  grant: SessionGrant,
+  command: string,
+  proxyUrl: string,
+  denyPathsSupported: boolean,
+): MxcContainerRequest => ({
+  command,
+  containment: { type: 'processcontainer', config: { learningMode: false } },
+  containerName: `tau-session-${grant.id}`,
+  filesystem: {
+    readwritePaths: [grant.project, grant.home, grant.temporary],
+    readonlyPaths: [grant.readOnly],
+    // deniedPaths need PSE_SUPPORT_FS_DENY. When absent, omit them and let the probe record that the
+    // read-isolation assertion is governed by the ambient DACL (a typed limit), not by MXC deny.
+    ...(denyPathsSupported ? { deniedPaths: [...grant.deny] } : {}),
+    clearPolicyOnExit: true,
+  },
+  network: {
+    egress: { default: 'deny' },
+    // Loopback is bidirectional between MXC containers; the per-session credential proxy is Tau's job.
+    ingress: { default: 'deny', hostLoopback: 'allow' },
+    runtimeConfig: { networkProxy: proxyUrl },
+  },
+  environment: { TAU_SESSION: grant.id, TAU_PROXY_TOKEN: grant.proxy.token },
+  timeoutMs: 60_000,
+});
+
+/**
+ * A credential-authenticated loopback canary: an out-of-container HTTP listener that serves a secret
+ * token ONLY to requests carrying the matching bearer token. Cross-session use is proven denied by
+ * this listener's own log (external observation), not by any in-container error.
+ */
+export type ProxyCanary = {
+  readonly server: Server;
+  readonly port: number;
+  readonly token: string;
+  readonly secret: string;
+  /** Every request seen: whether it presented the right token and was served. */
+  readonly log: { authorization: string | undefined; served: boolean; at: number }[];
+  readonly close: () => Promise<void>;
+};
+
+export const startProxyCanary = async (sessionId: string): Promise<ProxyCanary> => {
+  const token = nonce();
+  const secret = `secret-of-${sessionId}-${nonce()}`;
+  const log: ProxyCanary['log'] = [];
+  const server = createServer((req, res) => {
+    const authorization = req.headers['authorization'];
+    const served = authorization === `Bearer ${token}`;
+    log.push({ authorization, served, at: Date.now() });
+    if (served) {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end(secret);
+    } else {
+      res.writeHead(401, { 'content-type': 'text/plain' });
+      res.end('denied');
+    }
+  });
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  return {
+    server,
+    port,
+    token,
+    secret,
+    log,
+    close: () => new Promise<void>((done) => server.close(() => done())),
+  };
+};
+
+/** Ensure a per-run fixture directory exists and return its realpath-safe absolute path. */
+export const ensureDir = (path: string): string => {
+  mkdirSync(path, { recursive: true });
+  return resolve(path);
+};
+
+export const outDir = (): string => {
+  const base = process.env['TAU_SPIKE_OUT'] ?? join(process.env['RUNNER_TEMP'] ?? mxcDirectory, 'mxc-spike');
+  return ensureDir(base);
+};
+
+/** Lane identity recorded in every receipt (binds MXC revision + SDK digest + licence + OS + SHA). */
+export const laneIdentity = (sdk?: MxcSdk): Record<string, unknown> => {
+  const pin = readPin();
+  return {
+    lane: 'spike-w2-win-mxc',
+    source: {
+      sha: process.env['GITHUB_SHA'] ?? 'local',
+      ref: process.env['GITHUB_REF'] ?? 'local',
+      run: process.env['GITHUB_RUN_ID']
+        ? `${process.env['GITHUB_SERVER_URL']}/${process.env['GITHUB_REPOSITORY']}/actions/runs/${process.env['GITHUB_RUN_ID']}/attempts/${process.env['GITHUB_RUN_ATTEMPT']}`
+        : 'local',
+    },
+    os: {
+      platform: platform(),
+      arch: arch(),
+      release: release(),
+      build: osBuild(),
+      runnerImage: process.env['ImageOS'] ?? 'unknown',
+      imageVersion: process.env['ImageVersion'] ?? 'unknown',
+    },
+    node: { version: process.version, abi: process.versions.modules },
+    mxc: {
+      specRevisionPrefix: pin.spec.upstreamRevisionPrefix,
+      specRepo: pin.spec.upstreamRepo,
+      brainCommit: pin.spec.brainCommit,
+      sdk: {
+        name: pin.nodeSdk.name,
+        pinnedVersion: pin.nodeSdk.version,
+        installedVersion: sdk?.packageVersion ?? 'not-loaded',
+        integrity: pin.nodeSdk.integrity,
+        shasum: pin.nodeSdk.shasum,
+        license: pin.nodeSdk.license,
+        resolvedPath: sdk?.resolvedPath ?? null,
+      },
+      wxcExec: wxcExecDigest(sdk) ?? null,
+    },
+  };
+};
+
+/** Read the Windows OS build from the registry (never from a package claim). */
+const osBuild = (): string => {
+  if (!isWindows) {
+    return `${platform()} ${release()}`;
+  }
+  try {
+    const { execFileSync } = sdkRequire('node:child_process') as typeof import('node:child_process');
+    const key = String.raw`HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`;
+    const out = execFileSync('reg', ['query', key], { encoding: 'utf8', windowsHide: true });
+    const value = (name: string): string =>
+      out
+        .split('\n')
+        .find((row) => row.includes(name))
+        ?.trim()
+        .split(/\s{2,}/)
+        .at(-1) ?? '';
+    return ['ProductName', 'EditionID', 'CurrentBuild', 'UBR', 'DisplayVersion'].map(value).filter(Boolean).join(' ');
+  } catch (error) {
+    return `windows (build read failed: ${String(error)})`;
+  }
+};

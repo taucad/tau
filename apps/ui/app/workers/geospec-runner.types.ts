@@ -62,6 +62,8 @@ export type GeoSpecRunnerWorkerProgressResponse = {
   type: 'progress';
   requestId: string;
   event: GeoSpecRunProgressEvent;
+  /** On `run-start`: the run's effective `testTimeout`, the input's or else the project config's. */
+  testTimeout?: number;
 };
 
 export type GeoSpecRunnerWorkerErrorResponse = {

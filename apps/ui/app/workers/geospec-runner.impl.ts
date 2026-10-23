@@ -521,13 +521,20 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
   locallyEstablishedCandidates = [];
 
   try {
+    const config = await activeSession.readConfig();
+    const testTimeout = request.args.testTimeout ?? config.defaults?.testTimeout;
     const output = await runGeoSpecTests({
       discovery: createDiscoveryFileSystem(activeSession.fileSystem),
       runner: activeSession.runner,
       args: request.args,
-      config: await activeSession.readConfig(),
+      config,
       onProgress: (event) => {
-        workerScope.postMessage({ type: 'progress', requestId: request.requestId, event });
+        workerScope.postMessage({
+          type: 'progress',
+          requestId: request.requestId,
+          event,
+          ...(event.type === 'run-start' && testTimeout !== undefined ? { testTimeout } : {}),
+        });
       },
       kernelEvidence: async (sourcePath) => describeKernelEvidence(activeSession.runtimeClient, sourcePath),
     });

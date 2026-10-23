@@ -15,8 +15,14 @@ import { createNodeVmFileSystem } from '#runner/node/node-vm-filesystem.js';
 import { installGeoSpecVitest } from '#vitest/adapter.js';
 import type { GeoSpecVitestAdapter } from '#vitest/adapter.js';
 
-/** Options for {@link setupGeoSpecVitestProject}. @public */
-export type SetupGeoSpecVitestProjectOptions = Omit<GeoSpecAssertionClientOptions, 'engine'> & {
+/**
+ * Options for {@link setupGeoSpecVitestProject}. The work-unit maximum stays the host default, because the model
+ * loader and the matchers must enforce the same one. @public
+ */
+export type SetupGeoSpecVitestProjectOptions = Omit<
+  GeoSpecAssertionClientOptions,
+  'engine' | 'maximumWorkUnitLimit'
+> & {
   /** Absolute project root: `loadModel({ file })` resolves against it and its `geospec.config.*` is read. */
   readonly projectPath: string;
   /** Explicit config file, resolved relative to the project unless absolute. */

@@ -451,7 +451,7 @@ The GeoSpec runner owns recursive model and specification discovery from the roo
 
 A model's exporter comes from the host (Tau's runtime on Tau projects) or from the project's executable `geospec.config.*`; specs never select an engine or exporter. The exporter id and the extensions it claims are agent-visible vocabulary, and every host reports a config's outcome in one shape: `config` in the `test_model` result names the file and, when it was not applied, `GEOSPEC_CONFIG_NOT_APPLIED` with reason `unresolved-import` or `invalid`, once per session. Tau projects configure their runtime in `tau.config.ts` and never set GeoSpec exporters.
 
-**Why**: One source of exporters keeps verdicts identical across the CLI, Vitest, the UI worker and the host, and an author-visible engine selector would let a spec pick the engine that passes it.
+**Why**: One source of exporters keeps verdicts identical wherever the same exporters are bound: on a Tau project the CLI's `tauExporter()`, the UI worker and the host all export through Tau's runtime, while a non-Tau project's config exporter serves `geospec run` and Vitest. An author-visible engine selector would let a spec pick the engine that passes it.
 
 CORRECT:
 

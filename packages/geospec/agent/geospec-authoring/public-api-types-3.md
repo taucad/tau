@@ -492,7 +492,7 @@ GeoSpecVitestProject: GeoSpecVitestAdapter & {
   readonly binding: GeoSpecEngineBinding | undefined
 
 // Options for {@link setupGeoSpecVitestProject}
-SetupGeoSpecVitestProjectOptions: Omit<GeoSpecAssertionClientOptions, 'engine'> & {
+SetupGeoSpecVitestProjectOptions: Omit<GeoSpecAssertionClientOptions, 'engine' | 'maximumWorkUnitLimit'> & {
     /** Absolute project root: `loadModel({ file })` resolves against it and its `geospec.config.*` is read. */
     readonly projectPath: string;
     /** Explicit config file, resolved relative to the project unless absolute. */
@@ -514,9 +514,6 @@ SetupGeoSpecVitestProjectOptions: Omit<GeoSpecAssertionClientOptions, 'engine'> 
   readonly subjectSlot?: string
 
   readonly workUnitLimit?: number
-
-  // The largest `workUnitLimit` a spec may author in `loadModel` or `expectGeo` options
-  readonly maximumWorkUnitLimit?: number
 
   // Absolute project root
   readonly projectPath: string

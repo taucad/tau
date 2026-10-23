@@ -64,6 +64,7 @@
     "./paneview/paneview-header": "./src/paneview/paneview-header.tsx",
     "./paneview/resize-handle": "./src/paneview/resize-handle.ts",
     "./paneview/use-resize-handles": "./src/paneview/use-resize-handles.ts",
+    "./parameters/parameter-controller": "./src/parameters/parameter-controller.ts",
     "./parameters/parameters-pane": "./src/parameters/parameters-pane.tsx",
     "./parameters/parameters-source": "./src/parameters/parameters-source.ts",
     "./records/view-record": "./src/records/view-record.ts",
@@ -229,6 +230,11 @@
         "types": "./dist/paneview/use-resize-handles.d.mts",
         "import": "./dist/paneview/use-resize-handles.mjs",
         "default": "./dist/paneview/use-resize-handles.mjs"
+      },
+      "./parameters/parameter-controller": {
+        "types": "./dist/parameters/parameter-controller.d.mts",
+        "import": "./dist/parameters/parameter-controller.mjs",
+        "default": "./dist/parameters/parameter-controller.mjs"
       },
       "./parameters/parameters-pane": {
         "types": "./dist/parameters/parameters-pane.d.mts",

@@ -963,7 +963,12 @@ const checkoutMachineDefinition = setup({
         },
         done: { type: 'final' },
       },
-      onDone: ({ context }) => ({ target: context.exit ?? 'dirty' }),
+      // A delayed watch event may describe the tree just recorded. Compare before
+      // leaving it modified; a concurrent edit stays dirty until its own cut.
+      onDone: ({ context }) => ({
+        target: context.exit ?? 'dirty',
+        ...(context.exit === 'dirty' ? { context: { comparison: 'pending' } } : {}),
+      }),
     },
     stale: {
       tags: ['dirty'],

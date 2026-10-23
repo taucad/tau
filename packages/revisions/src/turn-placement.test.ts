@@ -490,8 +490,8 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(answer).toMatchObject({ status: 'refused', code: 'BRANCH_UNAVAILABLE' });
   });
 
-  /* XD4: a device that cannot tell where an id's branch is never waits on it. */
-  it('should refuse for good when this device cannot read its branches', async () => {
+  /* XD4: a device that cannot tell where an id's branch refuses for now; only a recorded removal refuses for good. */
+  it('should refuse retryably when this device cannot read its branches', async () => {
     const project = await createProject();
     await writeChatRecord(project.filesystem, 'missing-checkout');
     const opened = withRemote(project.open().revisions);
@@ -508,7 +508,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
 
-    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(answer).toMatchObject({ status: 'refused', code: 'REVISIONS_UNAVAILABLE' });
   });
 
   /*
@@ -594,8 +594,9 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(checkoutsOf().map((checkout) => checkout.id)).not.toContain(opened);
   });
 
-  /* XD4: a removal record this device cannot read is never read as "nothing removed", nor written over. */
-  it('should refuse for good, and keep the record, when the removed-checkout record cannot be parsed', async () => {
+  /* XD4: a removal record this device cannot read is never read as "nothing removed", nor written over, nor as a
+   * removal: the checkout is refused until the record reads again. */
+  it('should refuse retryably, and keep the record, when the removed-checkout record cannot be parsed', async () => {
     const project = await createProject();
     const base = await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
     await commitBranch(project.port, 'feature', { files: { 'main.ts': 'export const size = 2;\n' }, parent: base });
@@ -606,7 +607,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
 
-    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(answer).toMatchObject({ status: 'refused', code: 'REVISIONS_UNAVAILABLE' });
     expect(revisions.actor.getSnapshot().context.checkouts.map((checkout) => checkout.kind)).toEqual(['live']);
     await expect(project.filesystem.readFile('.git/tau-removed-checkouts.json', 'utf8')).resolves.toBe('{ torn');
   });

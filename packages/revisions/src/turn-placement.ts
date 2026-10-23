@@ -686,7 +686,8 @@ export const createTurnPlacementPort = <Tools>(
    * its branch, or on one opened for it. Never on a checkout this device removed, or one of a branch it saw removed:
    * that intent is refused for good (`CHECKOUT_UNKNOWN`), never opened again. An id no local branch derives, or one
    * that derives an unborn branch no checkout holds, waits (`BRANCH_UNAVAILABLE`) only while a remote may still bring
-   * the branch; otherwise, and whenever this device cannot tell, it is `CHECKOUT_UNKNOWN`.
+   * the branch; otherwise it is `CHECKOUT_UNKNOWN`. A device that cannot read its branches or its removal record
+   * refuses retryably (`REVISIONS_UNAVAILABLE`): a read failure is never taken for a removal.
    */
   const placeIntent = async (
     key: TurnAttemptKey,
@@ -704,8 +705,14 @@ export const createTurnPlacementPort = <Tools>(
     if (checkouts.some((checkout) => checkout.id === intent)) {
       return { checkoutId: intent };
     }
-    /* A device that cannot read its branches cannot tell: it answers as for a removed one. */
-    const derived: Awaited<ReturnType<typeof turns.branchOf>> = await turns.branchOf(intent).catch(() => 'removed');
+    /* A device that cannot read its branches, or its record of removed checkouts, cannot tell yet: it refuses for now.
+     * Only a recorded removal refuses for good. */
+    let derived: Awaited<ReturnType<typeof turns.branchOf>>;
+    try {
+      derived = await turns.branchOf(intent);
+    } catch {
+      return { refused: 'The branches could not be read.', code: 'REVISIONS_UNAVAILABLE' };
+    }
     const missing: Readonly<{ refused: string; code: AdmitCode }> = {
       refused: '',
       code: branchMayArrive() ? 'BRANCH_UNAVAILABLE' : 'CHECKOUT_UNKNOWN',

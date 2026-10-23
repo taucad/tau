@@ -202,6 +202,60 @@ describe('build-id skew guard (DF20)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1 + serverConfirmations);
   });
 
+  it("confirms the server's first naming of another build even when it comes from a recheck after no answer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, readSupersedingBuildId, peerRecheckDelay, serverConfirmations } = await load();
+    answerLiveBuild('unreachable');
+    announce(buildId + 1);
+    await pause();
+
+    const fetchMock = answerLiveBuild(buildId - 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (serverConfirmations + 3));
+    });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readSupersedingBuildId()).toBe(buildId - 1);
+    expect(fetchMock).toHaveBeenCalledTimes(1 + serverConfirmations);
+  });
+
+  it('resumes when a confirmation that follows a recheck after no answer names this build', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, peerRecheckDelay } = await load();
+    answerLiveBuild('unreachable');
+    announce(buildId + 1);
+    await pause();
+    answerLiveBuild(buildId - 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    await pause();
+
+    answerLiveBuild(buildId);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
+  });
+
+  it('ignores a server answer asked for a phase the tab has already left', async () => {
+    const { buildId, isBuildSuperseded, recordLiveBuild } = await load();
+    const server = serveLiveBuild();
+    announce(buildId + 1);
+    await pause();
+    expect(isBuildSuperseded()).toBe(true);
+
+    act(() => {
+      recordLiveBuild(buildId);
+    });
+    await server.settle(buildId + 1);
+
+    expect(isBuildSuperseded()).toBe(false);
+  });
+
   it("resumes writing when a later announcement's check names this build", async () => {
     const { buildId, isBuildSuperseded } = await load();
     answerLiveBuild('unreachable');
@@ -347,11 +401,14 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it("keeps the server's word over a later tab announcement it could not check", async () => {
-    const { buildId, markBuildSuperseded, readSupersedingBuildId, recordLiveBuild } = await load();
+    const { buildId, isBuildSuperseded, readSupersedingBuildId, recordLiveBuild } = await load();
+    answerLiveBuild('unreachable');
 
     recordLiveBuild(buildId - 1);
-    markBuildSuperseded(buildId + 5);
+    announce(buildId + 5);
+    await pause();
 
+    expect(isBuildSuperseded()).toBe(true);
     expect(readSupersedingBuildId()).toBe(buildId - 1);
   });
 

@@ -2254,9 +2254,11 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       runChats.set(command.payload.runId, command.payload.chatId);
     }
     /* A command behind a term check waits for it, so the chat's commands keep their order (a Stop after a Send). */
-    const checking = rehomes.get(command.payload.chatId);
-    if (checking !== undefined) {
+    /* Until none is in flight: a command that waited may let an earlier Send install another check ahead of it. */
+    for (let checking = rehomes.get(command.payload.chatId); checking !== undefined; ) {
+      // oxlint-disable-next-line no-await-in-loop -- each check orders the commands behind it, one after another.
       await checking;
+      checking = rehomes.get(command.payload.chatId);
     }
     /* One dispatch of this command: what it refreshes is not refreshed again within it, and only within it. */
     const dispatch: { refreshed?: DurableEventLog } = {};

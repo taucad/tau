@@ -379,6 +379,77 @@ describe('a chat continued on a second device', () => {
         }
       }, 10_000);
 
+      /* A chat's commands keep their order through every term check: a Stop never overtakes the Send before it. */
+      it('should apply a Stop after the Send before it when two term checks run ahead of them', async () => {
+        const desktop = await workspace();
+        const store = createNodeChatStore({ workspaceRoot: desktop });
+        const hold = { refresh: false };
+        const released = Promise.withResolvers<void>();
+        const binding = chatStoreBinding(store) as { openWriter: (id: string) => Promise<EventLogAppender> };
+        const open = binding.openWriter;
+        binding.openWriter = async (id) => {
+          const log = await open(id);
+          const { refresh } = log;
+          return refresh === undefined
+            ? log
+            : Object.assign(log, {
+                refresh: async () => {
+                  if (hold.refresh) {
+                    hold.refresh = false;
+                    await released.promise;
+                  }
+                  await refresh.call(log);
+                },
+              });
+        };
+        const gate = Promise.withResolvers<void>();
+        const recorded = recordingModel('answer');
+        let streams = 0;
+        const onDesktop = launch(store, {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            streams += 1;
+            if (streams > 1) {
+              await gate.promise;
+            }
+            yield* recorded.transport.stream(request);
+          },
+        });
+        try {
+          await turn(onDesktop, 'run-desktop-1', 'first');
+          hold.refresh = true;
+
+          const first = onDesktop.execute({
+            type: 'resume',
+            commandId: key(),
+            payload: { chatId, runId: 'run-absent' },
+          });
+          const send = onDesktop.execute({
+            type: 'start',
+            commandId: key(),
+            payload: {
+              chatId,
+              runId: 'run-desktop-2',
+              trigger: 'submit',
+              message: { id: 'user-run-desktop-2', role: 'user', content: 'second' },
+            },
+          });
+          const stop = onDesktop.execute({
+            type: 'cancel',
+            commandId: key(),
+            payload: { chatId, runId: 'run-desktop-2' },
+          });
+          released.resolve();
+          await first;
+
+          await expect(send).resolves.toMatchObject({ status: 'applied' });
+          const stopped = await stop;
+          expect(stopped, JSON.stringify(stopped)).toMatchObject({ status: 'applied' });
+        } finally {
+          gate.resolve();
+        }
+      });
+
       it('should keep its term when nothing new came, however far behind the other device’s clock is', async () => {
         const desktop = await workspace();
         const phone = await workspace();

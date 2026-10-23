@@ -58,6 +58,11 @@ const silentSocket = (): WebSocket => {
   } as unknown as WebSocket;
 };
 
+/* The origin's reach is recorded for the page's life: each test is a new page. */
+afterEach(() => {
+  resetOriginAgentHostAnswer();
+});
+
 describe('discoverOriginAgentHost', () => {
   it('reads the same-origin descriptor without sending anything of its own', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(descriptor));
@@ -148,6 +153,22 @@ describe('shouldAutoOfferCloudPlacement', () => {
 });
 
 describe('listAgentHostPlacements', () => {
+  /* XD2: a daemon is a daemon for the page's life: a later listing whose probe fails keeps it, and never re-asks. */
+  it('should keep a settled origin daemon through a later listing whose probe would fail', async () => {
+    resetOriginAgentHostAnswer();
+    await listAgentHostPlacements({ discoverOrigin: async () => descriptor, listHosts: async () => [] });
+    const failing = vi.fn(async () => {
+      throw new TypeError('network blip');
+    });
+
+    const listed = await listAgentHostPlacements({ discoverOrigin: failing, listHosts: async () => [] });
+
+    expect(failing).not.toHaveBeenCalled();
+    expect(listed.map((target) => target.hostId)).toContain('origin');
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(true);
+    resetOriginAgentHostAnswer();
+  });
+
   /* XD2: one recorder of the origin's reach: the listing's discovery answers every later reader, the notice's too. */
   it('should record the origin it discovers, so a reader without the network knows it', async () => {
     resetOriginAgentHostAnswer();

@@ -491,6 +491,22 @@ type OriginAsk = {
 let originHostsAgent: OriginAsk | undefined;
 
 /**
+ * The origin's descriptor for a listing: a daemon already found stays found for the page's life and is not asked
+ * again, and an ask in flight is shared; only an unknown or "no daemon" answer is asked again, so a failed probe never
+ * turns a found daemon into none.
+ *
+ * @param discover - How to ask; {@link discoverOriginAgentHost} unless a test stands in.
+ * @returns The descriptor, or `undefined` when the origin serves no agent.
+ */
+const originForListing = async (discover?: typeof discoverOriginAgentHost): Promise<TauHostDescriptor | undefined> => {
+  const asked = originHostsAgent;
+  if (asked !== undefined && asked.settled !== false) {
+    return asked.descriptor;
+  }
+  return askOrigin(discover).descriptor;
+};
+
+/**
  * Ask this page's origin whether it is a daemon, and record the answer: the one recorder of the origin's reach, which
  * the listing, a chat's load and the composer's notice all read. A held placement is checked again when an answer
  * differs from the last one.
@@ -819,8 +835,8 @@ export const listAgentHostPlacements = async (
   const bridge = (options.bridge ?? desktopBridge)();
   restoreLoopbackAdmissions();
   const [origin, paired, desktopAgents, loopbackTargets] = await Promise.all([
-    /* Recorded as it is asked: every reader of the origin's reach shares this answer. */
-    askOrigin(options.discoverOrigin).descriptor,
+    /* Recorded as it is asked, and shared: a daemon already found, or an ask in flight, answers without asking again. */
+    originForListing(options.discoverOrigin),
     (options.listHosts ?? listRemoteHosts)().catch((error: unknown) => {
       directoryOutage = error instanceof Error ? error.message : 'Tau could not reach your paired computers.';
       return [];

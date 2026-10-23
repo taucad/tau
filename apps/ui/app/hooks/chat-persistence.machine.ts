@@ -49,7 +49,19 @@ type ChatPersistenceMachineEvents =
   | { type: 'clearPersistedError' }
   | { type: 'turnRequested' }
   | { type: 'setActiveExecution'; execution: CadAgentExecution | undefined }
+  /* This tab can now reach this device's held placement for the chat: run on it, persisting nothing (XD2). */
+  | { type: 'placementReachable'; execution: CadAgentExecution }
   | { type: 'setActiveKernel'; kernel: KernelId | undefined };
+
+/**
+ * The held placement a newly chosen execution leaves standing: only while the chat stays on this tab's local Tau,
+ * which is what the held placement explains. Any other choice — a daemon, a paired device, an external agent — ends it.
+ */
+const stillHeld = (
+  context: ChatPersistenceMachineContext,
+  execution: CadAgentExecution | undefined,
+): TauAgentHostId | undefined =>
+  execution?.kind === 'tau' && execution.hostId === undefined ? context.heldPlacement : undefined;
 
 const loadChatActor = createAsyncLogic<ChatLoadOutput, { chatId: string }>({
   run: async () => {
@@ -178,8 +190,14 @@ export const chatPersistenceMachine = setup({
           on: {
             setActiveExecution: ({ context, event }) =>
               hasValidChatId(context)
-                ? { target: 'persisting', context: { activeExecution: event.execution } }
+                ? {
+                    target: 'persisting',
+                    context: { activeExecution: event.execution, heldPlacement: stillHeld(context, event.execution) },
+                  }
                 : undefined,
+            placementReachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: undefined },
+            }),
           },
         },
         persisting: {
@@ -192,8 +210,15 @@ export const chatPersistenceMachine = setup({
           on: {
             setActiveExecution: ({ context, event }) =>
               hasValidChatId(context)
-                ? { target: 'persisting', reenter: true, context: { activeExecution: event.execution } }
+                ? {
+                    target: 'persisting',
+                    reenter: true,
+                    context: { activeExecution: event.execution, heldPlacement: stillHeld(context, event.execution) },
+                  }
                 : undefined,
+            placementReachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: undefined },
+            }),
           },
         },
       },

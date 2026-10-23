@@ -18,8 +18,13 @@ vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
   },
 }));
 
-const { daemonPlacementOf, isPlacementOnThisDevice, resetLoopbackAgentHosts, unplaceableExecutionReason } =
-  await import('#lib/agent-host-placement.js');
+const {
+  daemonPlacementOf,
+  isPlacementOnThisDevice,
+  resetLoopbackAgentHosts,
+  resetOriginAgentHostAnswer,
+  unplaceableExecutionReason,
+} = await import('#lib/agent-host-placement.js');
 
 const model = 'anthropic-claude-opus-4.8';
 /** Every device-relative Tau placement a chat record can carry from the device that wrote it, and none. */
@@ -104,6 +109,31 @@ describe('unplaceableExecutionReason', () => {
 
     it('should leave a page a daemon may have served to discovery', () => {
       expect(unplaceableExecutionReason(originCodex)).toBeUndefined();
+    });
+
+    /* XD2: a failed discovery is no answer about the origin: it is asked again, and a daemon found later counts. */
+    it('should ask the origin again after a failed discovery, and keep a daemon it finds', async () => {
+      vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
+      resetOriginAgentHostAnswer();
+      vi.stubGlobal('location', { origin: 'http://127.0.0.1:7777' });
+      const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValueOnce(new TypeError('network down'));
+      fetch.mockResolvedValue(
+        new Response(JSON.stringify({ v: 1, agent: true, label: 'Studio', workspaceRoot: '/work' }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+      vi.stubGlobal('fetch', fetch);
+      try {
+        await expect(isPlacementOnThisDevice('origin')).resolves.toBe(false);
+        vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+
+        await expect(isPlacementOnThisDevice('origin')).resolves.toBe(true);
+        await expect(isPlacementOnThisDevice('origin')).resolves.toBe(true);
+        expect(fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+        resetOriginAgentHostAnswer();
+      }
     });
 
     /* XD2: a legacy chat record's `origin` placement is no host on a page no daemon serves. */

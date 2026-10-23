@@ -19,6 +19,7 @@ import {
   emptyChatLedger,
   foldReadAnswer,
   foldProjectionFacts,
+  foreignRunStanding,
   liveForeignRun,
   mergeSegmentRows,
   parseLogSegments,
@@ -1275,6 +1276,10 @@ export const selectCurrentRun = (
   return runId === undefined || run === undefined ? undefined : { runId, ...run };
 };
 
+/** Unsettled runs in other devices' segments that are not this device's own runs read back. */
+const foreignUnsettledRuns = (projection: ChatProjection): readonly ForeignRun[] =>
+  (projection.remote?.unsettled ?? []).filter((run) => projection.ledger.runs[run.runId] === undefined);
+
 /**
  * The run another device is running on this chat now, if any (XD3): unsettled in that device's synced segment, not
  * this device's own run, and not past the staleness bound at `now`. The host refuses a new run while it holds; it is
@@ -1286,10 +1291,28 @@ export const selectCurrentRun = (
  * @public
  */
 export const selectRunElsewhere = (projection: ChatProjection, now: number): ForeignRun | undefined =>
-  liveForeignRun(
-    (projection.remote?.unsettled ?? []).filter((run) => projection.ledger.runs[run.runId] === undefined),
-    now,
-  );
+  liveForeignRun(foreignUnsettledRuns(projection), now);
+
+/**
+ * When `selectRunElsewhere` next changes with the clock alone, if it can (XD3): the earliest moment an unsettled
+ * foreign run crosses the staleness bound (`foreignRunStanding`). No store announces that moment, so a reader arms one
+ * timeout for it; `undefined` means only new segment bytes can change the answer.
+ *
+ * @param projection - The chat's projection.
+ * @param now - This device's time, in epoch milliseconds.
+ * @returns The epoch milliseconds of the next change, or `undefined`.
+ * @public
+ */
+export const selectRunElsewhereChangesAt = (projection: ChatProjection, now: number): number | undefined => {
+  let soonest: number | undefined;
+  for (const run of foreignUnsettledRuns(projection)) {
+    const at = foreignRunStanding(run, now).changesAt;
+    if (at !== undefined && (soonest === undefined || at < soonest)) {
+      soonest = at;
+    }
+  }
+  return soonest;
+};
 
 /** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */
 export const selectTranscriptSource = (

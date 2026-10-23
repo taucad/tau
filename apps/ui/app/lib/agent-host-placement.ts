@@ -348,6 +348,11 @@ type LoopbackAdmission = { readonly origin: string; readonly session: string };
 
 /** Loopback daemons this page holds a session for, by host id. */
 const loopbackAdmissions = new Map<TauAgentHostId, LoopbackAdmission>();
+/** Test-only: forget what this page's origin answered. @internal */
+export const resetOriginAgentHostAnswer = (): void => {
+  originHostsAgent = undefined;
+};
+
 const loopbackChanges = new Topic<void>({ name: 'agentHostPlacement.loopbackChanges' });
 /* Per tab: a reload keeps the daemon, a new tab is handed one of its own. */
 const loopbackStorageKey = 'tau:loopback-agent-hosts';
@@ -446,8 +451,13 @@ export const isDeviceRelativeHostReachable = (hostId: TauAgentHostId): boolean =
   return true;
 };
 
-/** Whether this page's origin is a daemon, asked once per page. */
-let originHostsAgent: Promise<boolean> | undefined;
+/**
+ * Whether this page's origin is a daemon, as last asked. A daemon is a daemon for the page's life; "no daemon" may be
+ * a request that failed (the page cannot tell them apart), so it is asked again after {@link originAnswerReuse}.
+ */
+let originHostsAgent: Readonly<{ answer: Promise<boolean>; askedAt: number }> | undefined;
+/** How long a "no daemon" answer about this page's origin stands before it is asked again, in milliseconds. */
+const originAnswerReuse = 30_000;
 
 /**
  * Whether a device-relative placement names a host this tab can reach, here and now (XD2): `origin` on a page a
@@ -469,14 +479,19 @@ export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<b
   if (hostId !== 'origin') {
     return true;
   }
-  originHostsAgent ??= (async (): Promise<boolean> => {
+  const asked = originHostsAgent;
+  if (asked !== undefined && ((await asked.answer) || Date.now() - asked.askedAt < originAnswerReuse)) {
+    return asked.answer;
+  }
+  const answer = (async (): Promise<boolean> => {
     try {
       return (await discoverOriginAgentHost()) !== undefined;
     } catch {
       return false;
     }
   })();
-  return originHostsAgent;
+  originHostsAgent = { answer, askedAt: Date.now() };
+  return answer;
 };
 
 /**

@@ -59,7 +59,12 @@ import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
-import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
+import {
+  selectCaughtUp,
+  selectCurrentRun,
+  selectRunElsewhere,
+  selectRunElsewhereChangesAt,
+} from '#machines/chat-projection.logic.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -830,21 +835,39 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
   return canResume() ? resume : undefined;
 }
 
-/** How often a held chat re-reads the clock, so a run that went stale on another device frees the composer. */
-const runElsewhereRecheckMilliseconds = 30_000;
-
 /**
  * The run another device holds this chat with, kept current (XD3): it changes when sync brings that device's segment,
- * and the clock is re-read on an interval, because a run that goes stale changes nothing a store would announce.
+ * and when a foreign run's standing changes with the clock alone (`selectRunElsewhereChangesAt`), which no store announces. One
+ * timeout is armed for the next such moment, and only while the chat has a foreign run that has not settled.
  */
 function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
   const store = useChatSessionStore();
   const subscribe = useCallback(
     (listener: () => void) => {
-      const unsubscribe = store.subscribeProjection(chatId, listener);
-      const timer = setInterval(listener, runElsewhereRecheckMilliseconds);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const arm = (): void => {
+        clearTimeout(timer);
+        timer = undefined;
+        const now = Date.now();
+        const projection = store.getProjection(chatId);
+        const next = projection === undefined ? undefined : selectRunElsewhereChangesAt(projection, now);
+        if (next !== undefined) {
+          timer = setTimeout(
+            () => {
+              listener();
+              arm();
+            },
+            Math.max(0, next - now),
+          );
+        }
+      };
+      const unsubscribe = store.subscribeProjection(chatId, () => {
+        listener();
+        arm();
+      });
+      arm();
       return () => {
-        clearInterval(timer);
+        clearTimeout(timer);
         unsubscribe();
       };
     },

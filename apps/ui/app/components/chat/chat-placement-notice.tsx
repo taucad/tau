@@ -48,7 +48,7 @@ export function ChatPlacementNotice(): React.JSX.Element | undefined {
   const { lastTauExecution } = useModels();
   const reason = useUnplaceableExecutionReason(execution);
   /* A Tau chat whose placement on this device this tab cannot reach runs here; the composer says so (XD2). */
-  if (execution.kind === 'tau' && heldPlacement !== undefined) {
+  if (execution.kind === 'tau' && execution.hostId === undefined && heldPlacement !== undefined) {
     return (
       <ChatErrorCard
         role='status'

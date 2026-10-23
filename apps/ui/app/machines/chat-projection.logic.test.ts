@@ -29,6 +29,7 @@ import {
   selectCaughtUp,
   selectOpenInterrupts,
   selectRunElsewhere,
+  selectRunElsewhereChangesAt,
   selectRunFailure,
   selectPosition,
   selectRunPhase,
@@ -532,6 +533,25 @@ describe('chatProjectionLogic (PV-S7)', () => {
 
       expect(selectRunElsewhere(settled, at)).toBeUndefined();
       expect(selectRunElsewhere(running, at + foreignRunStaleMilliseconds + 1)).toBeUndefined();
+    });
+
+    it('names the moment the answer next changes with the clock, and none once nothing is unsettled', () => {
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
+      }).state;
+      const settled = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'completed', 'run_other')]),
+      }).state;
+      const changesAt = selectRunElsewhereChangesAt(running, at + 60_000);
+
+      expect(changesAt).toBe(at + foreignRunStaleMilliseconds + 1);
+      expect(selectRunElsewhere(running, changesAt! - 1)).toBeDefined();
+      expect(selectRunElsewhere(running, changesAt!)).toBeUndefined();
+      expect(selectRunElsewhereChangesAt(running, changesAt!)).toBeUndefined();
+      expect(selectRunElsewhereChangesAt(settled, at)).toBeUndefined();
+      expect(selectRunElsewhereChangesAt(initialChatProjection, at)).toBeUndefined();
     });
 
     it('never names this device’s own run, read back from a segment', () => {

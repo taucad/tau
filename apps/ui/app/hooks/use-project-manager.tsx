@@ -63,6 +63,7 @@ import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { chatPlacementOf } from '#utils/chat-execution.js';
+import { writeChatPlacement } from '#db/chat-placements.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
@@ -1284,13 +1285,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (placement === undefined) {
         return;
       }
-      try {
-        await createComposerRecordStore(fileManager.recordFiles, composerRecordPaths.placements(projectId)).patch({
-          placements: { [chatId]: placement },
-        });
-      } catch {
-        /* The chat opens on this device's default placement. */
-      }
+      await writeChatPlacement({ client: fileManager.recordFiles, projectId, chatId, placement });
     },
     [fileManager.recordFiles],
   );

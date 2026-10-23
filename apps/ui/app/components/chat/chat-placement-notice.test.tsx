@@ -94,6 +94,16 @@ describe('ChatPlacementNotice', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('should not say a chat runs in this tab once it is placed on a host', () => {
+    harness.execution = { kind: 'tau', model: 'anthropic-claude-opus-4.8', hostId: 'dev_studio_mini' };
+    harness.unplaceable = undefined;
+    harness.heldPlacement = 'loopback:http://127.0.0.1:4100';
+
+    const { container } = render(<ChatPlacementNotice />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('should explain where the agent runs, without changing the chat’s agent', () => {
     render(<ChatPlacementNotice />);
 

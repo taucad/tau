@@ -316,7 +316,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   const write = async (
     chatId: string,
     mutate: (chat: Chat) => Chat | undefined,
-    writeOptions: Readonly<{ dropLegacyPlacement?: boolean }> = {},
+    writeOptions: Readonly<{ dropLegacyPlacement?: TauAgentHostId }> = {},
   ): Promise<Chat | undefined> =>
     mutex.run(chatId, async () => {
       const projectId = await locate(chatId);
@@ -325,7 +325,12 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       }
       const stored = await readStoredRecord(projectId, chatId);
       /* Mutators see the portable record; a legacy host rides along untouched unless this write adopts it. */
-      const legacy = writeOptions.dropLegacyPlacement === true ? undefined : chatPlacementOf(stored?.activeExecution);
+      const storedLegacy = chatPlacementOf(stored?.activeExecution);
+      /* An adopting write drops only the host it was asked to, still there under the lock; anything else aborts it. */
+      if (writeOptions.dropLegacyPlacement !== undefined && storedLegacy !== writeOptions.dropLegacyPlacement) {
+        return undefined;
+      }
+      const legacy = writeOptions.dropLegacyPlacement === undefined ? storedLegacy : undefined;
       const record = stored === undefined ? undefined : withPortableExecution(stored);
       const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
       if (existing === undefined || existing.purgedAt !== undefined) {
@@ -525,7 +530,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
           adopted = legacy;
           return chat;
         },
-        { dropLegacyPlacement: true },
+        { dropLegacyPlacement: legacy },
       );
       return adopted;
     },

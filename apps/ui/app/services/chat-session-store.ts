@@ -65,6 +65,7 @@ import {
 } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import { readChatPlacement, readChatPlacements, writeChatPlacement } from '#db/chat-placements.js';
 import type { ComposerRecord, ComposerRecordClient } from '#db/composer-record-store.js';
 import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
@@ -198,6 +199,11 @@ export type ChatSessionDeps = {
     | undefined;
   /** Whether a device-relative placement names a host this device can reach now. Absent: none can. */
   isPlacementOnThisDevice?: ((hostId: TauAgentHostId) => Promise<boolean>) | undefined;
+  /**
+   * Hear when what this tab can reach may have changed (a loopback daemon handed to it later), so a held placement is
+   * checked again. Returns an unsubscribe.
+   */
+  onPlacementReachabilityChanged?: ((listener: () => void) => () => void) | undefined;
   queueLock?: QueueLock;
   /** Acknowledged observation through the root owning the chat records. */
   watchRecordFile?: (
@@ -207,46 +213,8 @@ export type ChatSessionDeps = {
   ) => ObservationWatch;
 };
 
-/**
- * This device's placement for one chat, from its project's placements record (XD2). An absent, unreadable or failing
- * record reads as none, so the chat takes this device's default placement.
- */
-const readChatPlacement = async (
-  client: ComposerRecordClient,
-  projectId: string,
-  chatId: string,
-): Promise<TauAgentHostId | undefined> => {
-  try {
-    const result = await createComposerRecordStore(client, composerRecordPaths.placements(projectId)).read();
-    return result.status === 'valid' ? result.record.placements?.[chatId] : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-/**
- * Keep, or clear, this device's placement for one chat: one field-scoped read-modify-write of its project's
- * placements record, as the unread record is written. A failed write leaves the chat on the placement it had.
- */
-const writeChatPlacement = async ({
-  client,
-  projectId,
-  chatId,
-  placement,
-}: Readonly<{
-  client: ComposerRecordClient;
-  projectId: string;
-  chatId: string;
-  placement: TauAgentHostId | undefined;
-}>): Promise<void> => {
-  try {
-    await createComposerRecordStore(client, composerRecordPaths.placements(projectId)).patch({
-      placements: { [chatId]: placement ?? false },
-    });
-  } catch {
-    /* The record keeps the placement it had; the next choice writes again. */
-  }
-};
+/** How long one read of a project's placements serves the chats a connect pass asks about, in milliseconds. */
+const placementReadReuse = 1000;
 
 /** This device's placement for a chat when this tab can reach it now, else `undefined`: local placement (XD2). */
 const reachablePlacement = async (
@@ -710,6 +678,11 @@ export class ChatSessionStore {
   readonly #observed = new Map<string, ObservedChat>();
   readonly #projectHostConnectors = new Map<string, ProjectHostConnector>();
   readonly #remoteReadVersions = new Map<string, number>();
+  /** Each project's placements record as one connect pass read it (XD2): read once for all its chats, briefly. */
+  readonly #placementReads = new Map<
+    string,
+    Readonly<{ at: number; read: Promise<Readonly<Record<string, TauAgentHostId>>> }>
+  >();
   readonly #remoteReadCompletedVersions = new Map<string, number>();
   readonly #remoteHistoryPresence = new WeakMap<NonNullable<ChatProjection['remote']>['views'], boolean>();
   readonly #remoteObservations = new Map<string, ObservationService<void>>();
@@ -1022,7 +995,7 @@ export class ChatSessionStore {
     const placement =
       live?.activeChatId === chatId && !live.isLoadingChat && live.loadError === undefined
         ? chatPlacementOf(live.activeExecution)
-        : await reachablePlacement(this.#deps, await readChatPlacement(this.#deps.client, chat.resourceId, chatId));
+        : await this.#storedPlacement(chat.resourceId, chatId);
     return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
   }
 
@@ -3656,14 +3629,15 @@ export class ChatSessionStore {
     const adoptLegacyPlacement = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
       const deps = depsRef();
       try {
+        /* The placement is written, and confirmed, before the chat record drops the host: a failed write drops nothing. */
         const adopted = await deps.adoptLegacyChatPlacement?.(
           storedChat.id,
           projectId,
-          async (hostId) => (await deps.isPlacementOnThisDevice?.(hostId)) === true,
+          async (hostId) =>
+            (await deps.isPlacementOnThisDevice?.(hostId)) === true &&
+            (await writeChatPlacement({ client: deps.client, projectId, chatId: storedChat.id, placement: hostId })),
         );
-        if (adopted !== undefined) {
-          await writeChatPlacement({ client: deps.client, projectId, chatId: storedChat.id, placement: adopted });
-        }
+        this.#placementReads.delete(projectId);
         return adopted;
       } catch {
         /* Local placement is always reachable: a legacy pin that cannot be adopted reads as local. */
@@ -3790,6 +3764,7 @@ export class ChatSessionStore {
               const placement = chatPlacementOf(input.activeExecution);
               if (placement !== undefined || heldPlacement === undefined) {
                 await writeChatPlacement({ client: depsRef().client, projectId, chatId: input.chatId, placement });
+                this.#placementReads.delete(projectId);
               }
               await depsRef().patchChat(input.chatId, 'activeExecution', portableExecutionOf(input.activeExecution));
             },
@@ -3874,6 +3849,22 @@ export class ChatSessionStore {
     persistenceActorRef.start();
     draftActorRef.start();
     composerRecordRef.start();
+    /* A held placement becomes this tab's once it can reach it, as when a loopback daemon is handed to it (XD2). */
+    const applyHeldPlacement = async (held: TauAgentHostId): Promise<void> => {
+      if ((await reachablePlacement(depsRef(), held)) !== held || heldPlacement !== held) {
+        return;
+      }
+      heldPlacement = undefined;
+      const placed = withChatPlacement(persistenceActorRef.getSnapshot().context.activeExecution, held);
+      if (placed !== undefined) {
+        persistenceActorRef.send({ type: 'placementReachable', execution: placed });
+      }
+    };
+    const unsubscribeReachability = depsRef().onPlacementReachabilityChanged?.(() => {
+      if (heldPlacement !== undefined) {
+        void applyHeldPlacement(heldPlacement);
+      }
+    });
 
     // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
@@ -3930,6 +3921,7 @@ export class ChatSessionStore {
       status: chat.status,
       turnSubscriptions: [],
       dispose: () => {
+        unsubscribeReachability?.();
         messageQueueRef.stop();
         session.presentationHold = undefined;
         session.observationRelease?.();
@@ -4136,6 +4128,29 @@ export class ChatSessionStore {
       this.#membershipNotifyScheduled = false;
       this.#membershipTopic.emit();
     });
+  }
+
+  /**
+   * A project's placements, read once for every chat a pass asks about and kept for `placementReadReuse`; a
+   * placement this store writes forgets the project's read.
+   *
+   * @param projectId - The project.
+   * @returns Each chat id → its placement on this device.
+   */
+  async #placementsOf(projectId: string): Promise<Readonly<Record<string, TauAgentHostId>>> {
+    const cached = this.#placementReads.get(projectId);
+    if (cached !== undefined && Date.now() - cached.at < placementReadReuse) {
+      return cached.read;
+    }
+    const read = readChatPlacements(this.#deps.client, projectId);
+    this.#placementReads.set(projectId, { at: Date.now(), read });
+    return read;
+  }
+
+  /** This device's stored placement for a chat, when this tab reaches it (XD2). */
+  async #storedPlacement(projectId: string, chatId: string): Promise<TauAgentHostId | undefined> {
+    const placements = await this.#placementsOf(projectId);
+    return reachablePlacement(this.#deps, placements[chatId]);
   }
 
   async #readRemoteSegments(chatId: string, projectId: string, fence?: ObservationRead): Promise<void> {

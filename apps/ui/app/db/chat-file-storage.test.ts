@@ -1264,6 +1264,35 @@ describe('chat file store — device-relative placement never reaches chat.json'
     },
   );
 
+  /* The host is accepted outside the chat's lock; a different one found under the lock is not dropped. */
+  it('should not drop a legacy host that changed between its acceptance and the adopting write', async () => {
+    const files = createStoreWithFiles();
+    const chatId = 'chat_legacy_race';
+    const record = (hostId: string): string =>
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'Pinned',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId },
+      })}\n`;
+    await files.write(recordOf(chatId), record('origin'));
+    const store = files.reopen();
+
+    const adopted = await store.adoptLegacyChatPlacement?.(chatId, projectId, async () => {
+      /* Sync brings the record another device rewrote, naming another daemon, while this one is being accepted. */
+      await files.write(recordOf(chatId), record('loopback:http://127.0.0.1:4100'));
+      return true;
+    });
+
+    expect(adopted).toBeUndefined();
+    expect(
+      (JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: { hostId?: unknown } }).activeExecution
+        ?.hostId,
+    ).toBe('loopback:http://127.0.0.1:4100');
+  });
+
   it('should write a local placement row as no hostId at all', async () => {
     const files = createStoreWithFiles();
     const chat = await files.store.createChat(projectId, {

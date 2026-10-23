@@ -2,7 +2,7 @@ import * as Sentry from '@sentry/react';
 import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
-import { buildId } from '#filesystem/build-skew.js';
+import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
 import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
@@ -176,7 +176,7 @@ export const initSentry = (): void => {
   Sentry.init({
     dsn,
     environment: ENV.SENTRY_ENVIRONMENT ?? ENV.NODE_ENV,
-    release: sentryRelease(buildId),
+    release: sentryRelease(readBuildId()),
     sendDefaultPii: false,
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
     beforeSend: createBeforeSend(classifyStaleBuildFailure),

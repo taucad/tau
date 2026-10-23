@@ -2,18 +2,11 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
 import { Topic } from '@taucad/events';
 import { useSidebar } from '@taucad/ui/components/sidebar';
-import {
-  buildId,
-  describeSupersession,
-  isReloadOffered,
-  readSupersedingBuildId,
-  subscribeReloadOffer,
-  subscribeSupersedingBuildId,
-} from '#filesystem/build-skew.js';
+import { describeSupersession, isReloadOffered, subscribeReloadOffer } from '#filesystem/build-skew.js';
 import { UpdateControl } from '#components/nav/update-control.js';
+import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
 const serverSnapshot = (): boolean => false;
-const serverBuildSnapshot = (): number => buildId;
 
 let mountedControls = 0;
 const mountedTopic = new Topic<void>({ name: 'browser-update-control' });
@@ -29,9 +22,9 @@ export const useBrowserUpdateControlMounted = (): boolean =>
     serverSnapshot,
   );
 
-const builtAt = (supersedingBuildId: number): string | undefined =>
+const builtAt = (supersedingBuildId: number, isRolledBack: boolean): string | undefined =>
   supersedingBuildId > 0
-    ? `Tau · ${supersedingBuildId < buildId ? 'Built' : 'Updated'} ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(supersedingBuildId)}`
+    ? `Tau · ${isRolledBack ? 'Built' : 'Updated'} ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(supersedingBuildId)}`
     : undefined;
 
 /**
@@ -42,11 +35,7 @@ const builtAt = (supersedingBuildId: number): string | undefined =>
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
   const superseded = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverSnapshot);
-  const supersedingBuildId = useSyncExternalStore(
-    subscribeSupersedingBuildId,
-    readSupersedingBuildId,
-    serverBuildSnapshot,
-  );
+  const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
   const [open, setOpen] = useState(false);
   const [revealed, setRevealed] = useState(false);
   const { open: sidebarOpen, openMobile, isMobile, setOpen: showSidebar } = useSidebar();
@@ -79,7 +68,7 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   return (
     <UpdateControl
       title='Update ready'
-      version={builtAt(supersedingBuildId)}
+      version={builtAt(supersedingBuildId, isRolledBack)}
       detail={describeSupersession(supersedingBuildId)}
       icon={ArrowUpCircle}
       isProminent

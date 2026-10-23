@@ -1,16 +1,12 @@
 import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import {
-  buildId,
-  describeSupersession,
-  readSupersedingBuildId,
-  subscribeSupersedingBuildId,
-} from '#filesystem/build-skew.js';
+import { describeSupersession } from '#filesystem/build-skew.js';
+import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 import { isStaleModuleError, recoverFromStaleBuild, reloadTimeout } from '#lib/stale-build-recovery.js';
 import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
@@ -30,10 +26,22 @@ export function ErrorPage(): React.JSX.Element {
   // The error whose automatic reload has had its time and evidently did not navigate away.
   const [reloadRefusedFor, setReloadRefusedFor] = useState<unknown>();
   const isReloadSettled = reloadRefusedFor === error;
-  const supersedingBuildId = useSyncExternalStore(subscribeSupersedingBuildId, readSupersedingBuildId, () => buildId);
-  const isRolledBack = supersedingBuildId < buildId;
+  const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
+  // Each failure is reported once, however often the effect runs again (a new `analytics`, a remount of the same error).
+  const reportedError = useRef<unknown>(undefined);
 
   useEffect(() => {
+    const reportOnce = (captured: Error, toErrorTracker: boolean): void => {
+      if (reportedError.current === error) {
+        return;
+      }
+      reportedError.current = error;
+      analytics.captureException(captured, { context: { component: 'ErrorPage' } });
+      if (toErrorTracker) {
+        void reportUiError(captured);
+      }
+    };
+
     // Don't report 404 errors to analytics - they're expected user behavior
     if (isRouteErrorResponse(error) && error.status === 404) {
       return;
@@ -42,11 +50,8 @@ export function ErrorPage(): React.JSX.Element {
     if (isRouteErrorResponse(error)) {
       const routeError = new Error(`${error.status} ${error.statusText}`);
       routeError.name = 'route_error';
-      analytics.captureException(routeError, { context: { component: 'ErrorPage' } });
-      if (error.status >= 500) {
-        void reportUiError(routeError);
-      }
-    } else if (isStaleModuleError(error)) {
+      reportOnce(routeError, error.status >= 500);
+    } else if (error instanceof Error && isStaleModuleError(error)) {
       // TAU-UI-6: a deploy that replaced this page's chunks is not a bug. Report only a failure the live build has.
       let isCurrent = true;
       const triage = async (): Promise<void> => {
@@ -60,8 +65,7 @@ export function ErrorPage(): React.JSX.Element {
             : { error, outcome },
         );
         if (outcome === 'current') {
-          analytics.captureException(error, { context: { component: 'ErrorPage' } });
-          void reportUiError(error);
+          reportOnce(error, true);
         }
       };
       // async-iife: bootstrap -- an effect cannot await; the boundary renders the outcome once it settles.
@@ -70,8 +74,7 @@ export function ErrorPage(): React.JSX.Element {
         isCurrent = false;
       };
     } else if (error instanceof Error) {
-      analytics.captureException(error, { context: { component: 'ErrorPage' } });
-      void reportUiError(error);
+      reportOnce(error, true);
     }
     return undefined;
   }, [error, analytics]);

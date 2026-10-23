@@ -18,7 +18,11 @@ vi.mock('react-router', async (importOriginal) => ({
   useRouteError: () => mocks.routeError,
 }));
 const analytics = { captureException: mocks.captureException };
-vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => analytics }));
+/** `false` models a provider that hands out a new analytics object on every render. */
+let isAnalyticsStable = true;
+vi.mock('#hooks/use-analytics.js', () => ({
+  useAnalytics: () => (isAnalyticsStable ? analytics : { captureException: mocks.captureException }),
+}));
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError: mocks.reportUiError }));
 vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
   ...(await importOriginal<typeof StaleBuildRecovery>()),
@@ -170,6 +174,36 @@ describe('ErrorPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Checking for a newer version of Tau');
     await outcome.settle('current');
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['a module import failure the live build still has', moduleImportFailure],
+    ['any other error', () => new Error('controlled render failure')],
+  ])('should report %s once, however often the page renders', async (_label, makeError) => {
+    isAnalyticsStable = false;
+    try {
+      const error = makeError();
+      const view = renderPage(error);
+      await waitFor(() => {
+        expect(mocks.reportUiError).toHaveBeenCalledWith(error);
+      });
+
+      view.rerender(
+        <MemoryRouter>
+          <ErrorPage />
+        </MemoryRouter>,
+      );
+      await act(async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 20);
+        });
+      });
+
+      expect(mocks.reportUiError).toHaveBeenCalledOnce();
+      expect(mocks.captureException).toHaveBeenCalledOnce();
+    } finally {
+      isAnalyticsStable = true;
+    }
   });
 
   it('should report any other error without asking the server', async () => {

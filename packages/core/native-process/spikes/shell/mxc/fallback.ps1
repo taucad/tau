@@ -440,6 +440,16 @@ function New-SessionTemp([string]$name) {
 }
 
 function Build-ChildCmd([string]$app, [string]$payload) { '"' + $app + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "' + $payload + '"' }
+# Sandbox-user children (run 40023733988: profile + env block loaded, yet pwsh never reached its first
+# statement). A WRITE_RESTRICTED token cannot write the sandbox user's own profile (its DACL names the
+# user SID, not a restricting SID), and pwsh init writes there (module analysis cache, telemetry id).
+# A cmd.exe prelude first drops a breadcrumb (separates "process started" from "pwsh init stalled"),
+# then points every per-user write location at the session's writable scratch dir before pwsh starts.
+$cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
+function Build-UserChildCmd([string]$shell, [string]$payload, [string]$scratch, [string]$crumb) {
+  $pre = "echo STARTED>`"$crumb`"&& set `"LOCALAPPDATA=$scratch`"&& set `"APPDATA=$scratch`"&& set `"USERPROFILE=$scratch`"&& set `"TEMP=$scratch`"&& set `"TMP=$scratch`"&& set `"PSModuleAnalysisCachePath=$scratch\pmac.clixml`"&& set POWERSHELL_TELEMETRY_OPTOUT=1&& set POWERSHELL_UPDATECHECK=Off&& "
+  '"' + $cmdExe + '" /d /s /c "' + $pre + (Build-ChildCmd $shell $payload) + '"'
+}
 
 # Resolve the D14 inner shell for the children (fixed paths only).
 $pwsh7 = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
@@ -625,16 +635,17 @@ if ($apiOk -and $null -ne $shellPath) {
       $payloadRA = "Set-Content -LiteralPath '$outA\started-A.txt' -Value STARTED; `$env:TEMP='$outA'; `$env:TMP='$outA'; & '$canaryChild' -SessionId A -OwnSecret '$fA' -OtherSecret '$fB' -NeverSecret '$fN' -OutDir '$outA'"
       $payloadRB = "Set-Content -LiteralPath '$outB\started-B.txt' -Value STARTED; `$env:TEMP='$outB'; `$env:TMP='$outB'; & '$canaryChild' -SessionId B -OwnSecret '$fB' -OtherSecret '$fA' -NeverSecret '$fN' -OutDir '$outB'"
       $eRA = 0; $eRB = 0
-      $hRA = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, (Build-ChildCmd $childShell $payloadRA), $cap1, $logonSid, $env:SystemRoot, $deskRA, [ref]$eRA)
+      $hRA = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, (Build-UserChildCmd $childShell $payloadRA $outA "$outA\cmd-started-A.txt"), $cap1, $logonSid, $env:SystemRoot, $deskRA, [ref]$eRA)
       $noteRA = [TauRestrict]::LastLaunchNote
-      $hRB = [TauRestrict]::LaunchAsUser($sandboxB.Name, $sandboxB.Secure, $childShell, (Build-ChildCmd $childShell $payloadRB), $cap2, $logonSid, $env:SystemRoot, $deskRB, [ref]$eRB)
+      $hRB = [TauRestrict]::LaunchAsUser($sandboxB.Name, $sandboxB.Secure, $cmdExe, (Build-UserChildCmd $childShell $payloadRB $outB "$outB\cmd-started-B.txt"), $cap2, $logonSid, $env:SystemRoot, $deskRB, [ref]$eRB)
       $noteRB = [TauRestrict]::LastLaunchNote
       $xRA = $null; $xRB = $null
       if ($hRA -ne [IntPtr]::Zero) { $xRA = [TauRestrict]::Wait($hRA, 120000); if ($xRA -eq -1) { [TauRestrict]::Kill($hRA) }; [TauRestrict]::Close($hRA) }
       if ($hRB -ne [IntPtr]::Zero) { $xRB = [TauRestrict]::Wait($hRB, 120000); if ($xRB -eq -1) { [TauRestrict]::Kill($hRB) }; [TauRestrict]::Close($hRB) }
       $rRA = ($xRA -eq 0); $rRB = ($xRB -eq 0)
       $startedRA = Test-Path -LiteralPath (Join-Path $outA 'started-A.txt'); $startedRB = Test-Path -LiteralPath (Join-Path $outB 'started-B.txt')
-      Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion (-1 = timed out and killed)' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) startedA=$startedRA exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) startedB=$startedRB exitB=$xRB shell=$childShell" ($rRA -and $rRB) @{ launchA = $noteRA; launchB = $noteRB }
+      $cmdRA = Test-Path -LiteralPath (Join-Path $outA 'cmd-started-A.txt'); $cmdRB = Test-Path -LiteralPath (Join-Path $outB 'cmd-started-B.txt')
+      Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion (-1 = timed out and killed)' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) cmdStartedA=$cmdRA pwshStartedA=$startedRA exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) cmdStartedB=$cmdRB pwshStartedB=$startedRB exitB=$xRB shell=$childShell" ($rRA -and $rRB) @{ launchA = $noteRA; launchB = $noteRB }
 
       $readOf = { param($f) if (Test-Path -LiteralPath $f) { [string](Get-Content -LiteralPath $f -Raw) } else { '' } }
       $ownRA = & $readOf (Join-Path $outA 'own-read-A.txt'); $ownRB = & $readOf (Join-Path $outB 'own-read-B.txt')
@@ -679,7 +690,7 @@ if ($apiOk -and $null -ne $shellPath) {
       $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
       $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
       Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
-      $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
+      $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, (Build-UserChildCmd $childShell $payloadS2 $tmpS2 "$tmpS2\cmd-started-s2.txt"), $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
       $noteS2 = [TauRestrict]::LastLaunchNote
       $s2LaunchPath = if ($hS2 -eq [IntPtr]::Zero) { "asUser-failed(err=$errS2)" } else { 'asSandboxUser' }
     } else {
@@ -688,8 +699,8 @@ if ($apiOk -and $null -ne $shellPath) {
     }
     if ($hS2 -ne [IntPtr]::Zero) {
       $exitS2 = [TauRestrict]::Wait($hS2, 180000); if ($exitS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2)
-      $startedS2 = Test-Path -LiteralPath (Join-Path $tmpS2 'started-s2.txt')
-      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1 = timed out and killed; -1073741502 = 0xC0000142)' "exit=$exitS2 started=$startedS2 launch=$s2LaunchPath shell=$childShell" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2 }
+      $startedS2 = Test-Path -LiteralPath (Join-Path $tmpS2 'started-s2.txt'); $cmdS2Started = Test-Path -LiteralPath (Join-Path $tmpS2 'cmd-started-s2.txt')
+      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1 = timed out and killed; -1073741502 = 0xC0000142)' "exit=$exitS2 cmdStarted=$cmdS2Started pwshStarted=$startedS2 launch=$s2LaunchPath shell=$childShell" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2 }
     } else {
       Add-Check 'fallback.s2Pty.launch' 'S2 PTY child launched under the write-restricted sandbox token' "launch failed err=$errS2 path=$s2LaunchPath" $false $null
     }

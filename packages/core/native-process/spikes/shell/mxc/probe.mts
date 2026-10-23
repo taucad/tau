@@ -238,6 +238,9 @@ const main = async (): Promise<void> => {
   const isolationSessionAvailable = Boolean(probeFacts['isolationSessionAvailable']);
   // GENERATED FROM FACTS (receipt-integrity): never hand-write PSEC prose. Distinguish API-present
   // from live-exercise so a config/parse failure is never mislabelled E_NOTIMPL.
+  // PSEC is recorded as a backend only when a live child was externally proven; otherwise it is
+  // "not-available" and the Codex restricted-token fallback (fallback.ps1) is the default backend.
+  const psecBackend = liveRan ? 'available' : 'not-available';
   const createCloseDetail = JSON.stringify(psecCreateClose.detail ?? null).slice(0, 400);
   const verdict4 = liveRan
     ? 'PSEC processcontainer base-container launched AND closed a real child (external sentinel written): native Windows containment is LIVE on this build.'
@@ -250,6 +253,7 @@ const main = async (): Promise<void> => {
     `baseContainerSupportsDenyPaths=${denyPathsFact}`,
     `isolationSessionAvailable=${isolationSessionAvailable}`,
     `isolationTier=${tier ?? 'unknown'}`,
+    `psecBackend=${psecBackend} (default backend: Codex restricted-token fallback)`,
     verdict4,
   ].join(' | ');
 
@@ -273,6 +277,8 @@ const main = async (): Promise<void> => {
     tier,
     conpty,
     psecCreateClose,
+    psecBackend,
+    defaultBackend: 'codex-restricted-token-fallback',
     checks,
     verdict,
     sdkAvailable: prereq.available,

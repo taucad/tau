@@ -37,8 +37,7 @@ one `shell` tool whose description names the host language + major version; gram
 
 The isolation receipt's new **reaping** case proves a detached native `.exe` child, a PowerShell
 `Start-Job`, and a `Start-Process` writer are ALL reaped when the foreground PowerShell exits. The
-capability-SID fallback is concluded exercisable-but-unreceipted on hosted Server 2025 and is not
-re-run here.
+restricted-token fallback (below) is receipted on both hosted rows.
 
 ## What is pinned (`pin.json`)
 
@@ -115,20 +114,46 @@ When `baseContainerSupportsDenyPaths` is **false**, `deniedPaths` are omitted fr
 `iso.read.cross` is annotated: the read isolation then reflects the ambient DACL, not an MXC deny
 list — a typed limit, not a silent pass.
 
-## Fallback (`fallback.mts` + `fallback.ps1`) — taken where the MXC probe fails on the row
+## Fallback (`fallback.mts` + `fallback.ps1`) — the default Windows backend
 
-Proves Codex's elevated-backend design instead: a **`WRITE_RESTRICTED` token per session whose
-restricting SIDs include a per-session capability SID** (derived via
-`DeriveCapabilitySidsFromName`), plus **Tau deny-read ACEs** for the other session's capability SID.
-Verified externally (host thread, after `RevertToSelf`):
+PSEC is **not available** on either hosted row (see the probe's `psecBackend`), so the Codex
+restricted-token model (`openai/codex` `codex-rs/windows-sandbox-rs`) is the default backend. The
+earlier AppContainer capability-SID model (`DeriveCapabilitySidsFromName` SIDs as restricting SIDs)
+was wrong: those SIDs are not valid restricting SIDs and `CreateRestrictedToken` returned
+`ERROR_INVALID_SID`. It is kept only as the documented rejected alternative in `fallback.ps1`.
 
-- `fallback.write.own` / `fallback.write.cross` — a write lands only where the capability SID has an
-  ACE, so writes are isolated **without** deny ACEs.
-- `fallback.read.cross` — `WRITE_RESTRICTED` does not gate reads, so cross-reads are isolated **only
-  if the deny-read ACE holds**; where it does not, sessions must serialize per device
-  (`session-limit`). This is exactly the ratification's caveat.
+What `fallback.ps1` builds, per session:
 
-A missing capability API is a typed prerequisite failure, not a green.
+- a **random `S-1-5-21-…` cap SID** (`cap.rs` `make_random_cap_sid_string`) used as a restricting SID
+  of a **`WRITE_RESTRICTED`** token: flags `DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED`
+  = `0x0D` (`token.rs:500`), with the default DACL and `SeChangeNotifyPrivilege` set as Codex does
+  (`token.rs:56-110`, `518-519`); the token is LUA-filtered, never elevated;
+- a **private desktop** plus a window-station ACE for the session SIDs (`desktop.rs`), all revoked at
+  teardown (`fallback.grants.revoked`: window-station DACL restored byte-for-byte, desktops closed);
+- ALLOW-write ACEs for the cap SID on the session roots and deny-read ACEs on the other session and
+  the never-grantable set (`acl.rs`);
+- two non-admin **sandbox users** provisioned with elevation; the workload always runs as them.
+
+Every denial counts only when a child **running inside its restricted token** attempts the cross
+access, is refused, an external canary confirms nothing leaked or landed, and the **same child**
+passed its own-root positive control in the same run. Otherwise the check reads `NOT EXERCISED` and
+fails; `summarize.mts` also flags any such vacuous pass as an integrity violation. Orchestrator
+impersonation results are recorded as `info` only.
+
+| check                                 | proven by                                                                                                            |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `fallback.write.ownAllowed.*`         | each pwsh child (same account, different cap SID) writes its own root                                                |
+| `fallback.write.crossDenied.*`        | the same child's write to the other root is refused; no canary lands there                                           |
+| `fallback.read.ownAllowed.*`          | each cmd.exe child, as its own sandbox user, copies its own secret out (exact match)                                 |
+| `fallback.read.crossDenied.*`         | the other session's secret never appears in that child's exfil file                                                  |
+| `fallback.read.neverGrantable`        | the never-grantable secret never appears in either child's exfil file                                                |
+| `fallback.s2Pty.inContainer` (S2 PTY) | `s2-bash-pty.mts` drives Git for Windows Bash in a ConPTY inside the token (tty, resize, Ctrl-C, job control, UTF-8) |
+
+S2 uses Node + node-pty as the PTY master because PowerShell stalls at startup as the sandbox user
+inside the token, while cmd.exe and native binaries start. The S2 receipt is
+`fallback-s2-pty.receipt.json`, attributed to the sandbox user by both the driver and the Bash inside
+the pty; the UTF-8 bytes Bash wrote are re-read by the orchestrator. `WRITE_RESTRICTED` gates writes
+only, so read isolation rests on distinct sandbox users plus deny-read ACEs.
 
 ## Running
 
@@ -140,7 +165,7 @@ goes green on an absent prerequisite.
 Local (Windows, Node ≥ 24): `npm install` in this directory, then
 `node provision.mts && node probe.mts && node isolation.mts` (or `node fallback.mts`).
 
-## Empirical result (hosted `windows-2025`, run 39891664815)
+## Empirical result (hosted `windows-2025`, run 39891664815; superseded for PSEC by later runs)
 
 Probe reported `PSEC=false denyPaths=false conpty=true`: the MXC **base-container (PSEC) API is not
 present** on the GitHub-hosted Server 2025 runner (ConPTY works). This is a legitimate typed-

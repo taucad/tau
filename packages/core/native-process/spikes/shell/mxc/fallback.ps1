@@ -866,25 +866,30 @@ if ($apiOk -and $null -ne $shellPath) {
     $bashExe = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
     $prereqS2 = "node=$(Test-Path -LiteralPath $s2Node) nodePty=$(Test-Path -LiteralPath $s2NodePty) bash=$(Test-Path -LiteralPath $bashExe) driver=$(Test-Path -LiteralPath $s2Driver)"
     Add-Check 'fallback.s2Pty.prereq' 'S2 driver staged readable for the sandbox user: node.exe, node-pty (ConPTY binding), Git for Windows bash.exe, s2-bash-pty.mts' $prereqS2 ($prereqS2 -notlike '*False*') @{ node = $s2Node; bash = $bashExe; stageNote = $stageNote }
-    # The driver runs as the sandbox user inside the token through the Codex-shaped runner (stdio files,
-    # kill-on-close job, error mode, private desktop), with the env variant node started under.
+    # The runner itself is the ConPTY master: node-pty and MSYS bash both fail to CREATE a pipe inside
+    # the write-restricted token (ConPTY EPERM; bash signal pipe Win32 error 5; run 40037048316), so the
+    # unrestricted runner owns the pseudoconsole and pipes (Codex conpty/mod.rs) and only Bash runs in
+    # the token, attached via PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE. The runner drives the terminal checks.
     $expectUser = if ($mode -eq 'elevated') { $sandboxA.Name } else { $env:USERNAME }
     $s2LaunchPath = 'not-launched'
-    if (($prereqS2 -notlike '*False*') -and ($mode -eq 'elevated') -and (Test-Path -LiteralPath $runnerExe)) {
+    if (($mode -eq 'elevated') -and (Test-Path -LiteralPath $runnerExe) -and (Test-Path -LiteralPath $bashExe)) {
       $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
       $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
       Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
-      $envS2 = @{}
-      $nodeEnv = if ($chosenEnv.ContainsKey('node')) { $chosenEnv['node'] } else { $envCodex }
-      foreach ($k in $nodeEnv.Keys) { $envS2[$k] = $nodeEnv[$k] }
-      $envS2['TEMP'] = $tmpS2; $envS2['TMP'] = $tmpS2
-      $cmdS2 = '"' + $s2Node + '" "' + $s2Driver + '" "' + $s2Out + '" "' + $bashExe + '" "' + $tmpS2 + '"'
-      $wS2 = Wait-TokenRunner (Start-TokenRunner 's2-driver' $sandboxA $cap1 $deskS2 $cmdS2 $envS2 180000 $tmpS2)
-      $s2LaunchPath = 'runner-asSandboxUser'
-      $driverStarted = Test-Path -LiteralPath (Join-Path $tmpS2 'driver-started.txt')
-      Add-Check 'fallback.s2Pty.exit' 'S2 driver (node, as the sandbox user in the token via the runner) exit code recorded (0 = all checks pass; timedOut = killed with its job)' "driverStarted=$driverStarted $(Get-RunnerSummary $wS2)" (($wS2.Report.createOk -eq $true) -and ($wS2.Report.exit -eq 0)) @{ launchPath = $s2LaunchPath }
+      # ptyBash + s2receipt keys put the runner into PTY mode; cmd is ignored (it spawns bash -i itself).
+      $base = Join-Path $runDir 's2-pty'
+      $specLines = @("cap=$cap1", "desktop=$deskS2", "cwd=$tmpS2", "stdout=$base.out.txt", "stderr=$base.err.txt", "report=$base.report.json", "timeoutMs=180000", "cmd=unused", "ptyBash=$bashExe", "s2receipt=$s2Out")
+      Set-Content -LiteralPath "$base.spec" -Value $specLines
+      $eS2 = 0
+      $hS2 = [TauRestrict]::LaunchRunner($sandboxA.Name, $sandboxA.Secure, $runnerExe, ('"' + $runnerExe + '" "' + $base + '.spec"'), $env:SystemRoot, [ref]$eS2)
+      $s2LaunchPath = 'runner-conpty-asSandboxUser'
+      $xS2 = $null
+      if ($hS2 -ne [IntPtr]::Zero) { $xS2 = [TauRestrict]::Wait($hS2, 240000); if ($xS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2) }
+      $s2RunnerReport = $null
+      try { $s2RunnerReport = Get-Content -LiteralPath "$base.report.json" -Raw | ConvertFrom-Json } catch {}
+      Add-Check 'fallback.s2Pty.exit' 'S2 ConPTY driver (runner owns the pseudoconsole; Bash runs in the token) exit recorded (0 = all terminal checks pass)' "launchErr=$eS2 runnerExit=$xS2 createOk=$($s2RunnerReport.createOk) notes=$($s2RunnerReport.notes)" (($hS2 -ne [IntPtr]::Zero) -and ($xS2 -eq 0)) @{ launchPath = $s2LaunchPath }
     } else {
-      Add-Check 'fallback.s2Pty.launch' 'S2 driver launched as the sandbox user under the write-restricted token via the runner' "prereq=$prereqS2 mode=$mode runner=$(Test-Path -LiteralPath $runnerExe)" $false $null
+      Add-Check 'fallback.s2Pty.launch' 'S2 ConPTY driver launched as the sandbox user via the runner' "mode=$mode runner=$(Test-Path -LiteralPath $runnerExe) bash=$(Test-Path -LiteralPath $bashExe)" $false $null
     }
     if (Test-Path -LiteralPath $s2Out) { try { Copy-Item -LiteralPath $s2Out -Destination $s2Final -Force } catch {} }
     if (Test-Path -LiteralPath $s2Final) {

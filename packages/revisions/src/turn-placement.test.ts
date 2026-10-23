@@ -594,22 +594,33 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(checkoutsOf().map((checkout) => checkout.id)).not.toContain(opened);
   });
 
-  /* XD4: a removal record this device cannot read is never read as "nothing removed", nor written over, nor as a
-   * removal: the checkout is refused until the record reads again. */
-  it('should refuse retryably, and keep the record, when the removed-checkout record cannot be parsed', async () => {
+  /*
+   * XD4: a removal record that cannot be parsed would refuse every checkout for ever and never be repaired. It is moved
+   * aside, kept whole, and the device carries on with no removal markers: losing one only lets a removed checkout's id
+   * open its branch again, or wait on it, instead of refusing it for good.
+   */
+  it('should move an unparseable removed-checkout record aside, keep it, and place the turn', async () => {
     const project = await createProject();
     const base = await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
     await commitBranch(project.port, 'feature', { files: { 'main.ts': 'export const size = 2;\n' }, parent: base });
     await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
     await project.filesystem.writeFile('.git/tau-removed-checkouts.json', '{ torn');
     await writeChatRecord(project.filesystem, await checkoutIdOnAnotherDevice(project.port, 'feature'));
-    const { revisions, placement } = project.open();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { placement } = project.open();
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
 
-    expect(answer).toMatchObject({ status: 'refused', code: 'REVISIONS_UNAVAILABLE' });
-    expect(revisions.actor.getSnapshot().context.checkouts.map((checkout) => checkout.kind)).toEqual(['live']);
-    await expect(project.filesystem.readFile('.git/tau-removed-checkouts.json', 'utf8')).resolves.toBe('{ torn');
+    if (answer.status === 'refused') {
+      throw new Error(`${answer.code}: ${answer.message}`);
+    }
+    expect(answer.placement).toMatchObject({ branch: 'feature' });
+    const entries = await project.filesystem.readdir('.git');
+    const aside = entries.filter((name) => name.startsWith('tau-removed-checkouts.json.corrupt-'));
+    expect(aside).toHaveLength(1);
+    await expect(project.filesystem.readFile(`.git/${aside[0]!}`, 'utf8')).resolves.toBe('{ torn');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('tau-removed-checkouts.json'));
+    warn.mockRestore();
   });
 
   /* XD4: an unborn branch runs only on a checkout that already tracks it; otherwise it waits only for a remote. */
@@ -810,7 +821,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
   /* XD3: another device sees a run before it settles; the host's heartbeats keep it current through `publish`. */
   it('should record the chats when an attempt is admitted and each time the host publishes, never on its own', async () => {
     const project = await createProject();
-    const { revisions, syncs } = observeSyncs(project.open().revisions);
+    const { revisions, syncs } = observeSyncs(withRemote(project.open().revisions));
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
@@ -834,6 +845,20 @@ describe('createTurnPlacementPort (TS-S3)', () => {
       code: 'SESSION_FENCED',
     });
     expect(syncs).toHaveLength(before + 1);
+  });
+
+  /* XD3: a heartbeat row is for the other devices; a project that syncs with no remote has none to tell. Older builds
+   * read the row as opaque, so the host writes none where the publish says the chat reaches no other device. */
+  it('should refuse a publish CHAT_NOT_SHARED, and record nothing, where the project syncs with no remote', async () => {
+    const project = await createProject();
+    const { revisions, syncs } = observeSyncs(project.open().revisions);
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+    expect(await placement.publish({ requestId: 'publish:1', chatId: key.chatId })).toMatchObject({
+      status: 'refused',
+      code: 'CHAT_NOT_SHARED',
+    });
+    expect(syncs).toEqual([]);
   });
 
   it('should record nothing for an attempt the root refused', async () => {

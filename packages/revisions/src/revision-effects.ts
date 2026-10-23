@@ -1732,17 +1732,35 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * branch here again forgets it. Device state in a control-plane file no tree records, like the record devices.
    */
   const removedCheckoutsPath = '.git/tau-removed-checkouts.json';
-  /* Absent is none; a file this device cannot read or parse throws, so nothing reads it as none or writes over it. */
+  /*
+   * Absent is none, and a read that fails throws (the caller refuses retryably). A file that reads but does not parse
+   * as a list of ids would refuse every checkout for ever and is never repaired by a write, so it is moved aside whole
+   * (`.corrupt-<time>`, never written over), reported, and read as none: losing a removal marker only lets that
+   * checkout's id open its branch again, or wait on it, instead of refusing it for good.
+   */
   const readRemovedCheckouts = async (): Promise<ReadonlySet<string>> => {
     const records = await recordsFileSystem();
     if (!(await records.exists(removedCheckoutsPath))) {
       return new Set();
     }
-    const stored: unknown = JSON.parse(await records.readFile(removedCheckoutsPath, 'utf8'));
-    if (!Array.isArray(stored) || stored.some((id) => typeof id !== 'string')) {
-      throw new RevisionPortError('INVALID_REPOSITORY', `${removedCheckoutsPath} is not a list of checkout ids.`);
+    const text = await records.readFile(removedCheckoutsPath, 'utf8');
+    let stored: unknown;
+    try {
+      stored = JSON.parse(text);
+    } catch {
+      stored = undefined;
     }
-    return new Set(stored as string[]);
+    if (Array.isArray(stored) && stored.every((id) => typeof id === 'string')) {
+      return new Set(stored);
+    }
+    const aside = `${removedCheckoutsPath}.corrupt-${String(Date.now())}`;
+    try {
+      await records.rename(removedCheckoutsPath, aside);
+      console.warn(`[revisions] ${removedCheckoutsPath} is not a list of checkout ids; kept as ${aside}.`);
+    } catch {
+      /* Another reader moved it aside first, or a writer replaced it: the next read answers from what is there. */
+    }
+    return new Set();
   };
   let removedWrites: Promise<void> = Promise.resolve();
   /* Written whole beside the file, then renamed over it, as the record devices are: a torn write leaves the old list. */

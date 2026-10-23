@@ -96,7 +96,9 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
   settlements: (input: Readonly<{ signal: AbortSignal }>) => AsyncIterable<Fact>;
   acknowledge: (input: Request) => Promise<Answer<Nothing, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | Fenced>>;
   /** Record a chat's ref now, after its host wrote a live run's heartbeat (XD3). */
-  publish: (input: Readonly<{ requestId: string; chatId: string }>) => Promise<Answer<Nothing, Fenced>>;
+  publish: (
+    input: Readonly<{ requestId: string; chatId: string }>,
+  ) => Promise<Answer<Nothing, Fenced | 'CHAT_NOT_SHARED'>>;
   /**
    * End this session (TS-R6): its later requests are refused `SESSION_FENCED`, its tools are revoked once their
    * accepted writes land, and its `settlements` listens end. The root keeps every turn actor.
@@ -1050,6 +1052,14 @@ export const createTurnPlacementPort = <Tools>(
     publish: async ({ requestId }) => {
       if (fenced) {
         return fencedAnswer(requestId);
+      }
+      /* No remote, no other device to tell: the host then writes no heartbeat, which older builds read as opaque. */
+      if (!branchMayArrive()) {
+        return refused({
+          requestId,
+          code: 'CHAT_NOT_SHARED',
+          message: 'This project syncs with no remote, so no other device reads its chats.',
+        });
       }
       recordsChanged();
       return { requestId, status: 'applied' };

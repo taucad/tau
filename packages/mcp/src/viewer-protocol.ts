@@ -4,6 +4,7 @@
  * The page imports this module, so it holds names, shapes and pure helpers
  * only: no SDK, no zod and no Node built-ins. The runtime's issue and source revision types are imported as types only.
  */
+import type { ComponentDisplay, ViewSettings, WorkbenchView } from '@taucad/workbench';
 
 import type { KernelIssue, SourceRevision } from '@taucad/runtime/types';
 
@@ -25,6 +26,8 @@ export const tauViewerToolName = {
   appCaptureReply: 'app_capture_reply',
   /** The shown model's project packed for the page's direct share link. */
   appShareLink: 'app_share_link',
+  /** The view the project's `.tau/workbench` records keep for a shown model, which the page restores. */
+  appWorkbenchState: 'app_workbench_state',
 } as const;
 
 /** Name of one viewer tool. @public */
@@ -214,7 +217,16 @@ export type TauViewerViewState = Readonly<{
    * plain text.
    */
   sourceRevision?: Readonly<{ entry: string; files: Readonly<Record<string, string>> }> | undefined;
+  /**
+   * The view's display, grid, field of view, up direction, section and pinned measurements, which the server keeps in
+   * the view record. A page sends it only to a server whose `app_sync` lists it under
+   * {@link TauViewerSyncResult.accepts}; `view_state` leaves it out.
+   */
+  settings?: TauViewerViewSettings | undefined;
 }>;
+
+/** The fields of a `.tau/workbench` view record a viewer owns besides its camera. @public */
+export type TauViewerViewSettings = ViewSettings;
 
 /**
  * The optional {@link TauViewerViewState} fields this server's `app_sync` takes. Its schema is strict, so a page sends
@@ -222,7 +234,7 @@ export type TauViewerViewState = Readonly<{
  *
  * @public
  */
-export const tauViewerAcceptedViewFields = ['references', 'sourceRevision'] as const;
+export const tauViewerAcceptedViewFields = ['references', 'sourceRevision', 'settings'] as const;
 
 /** Arguments of `app_sync`. @public */
 export type TauViewerSyncInput = Readonly<{
@@ -262,6 +274,27 @@ export type TauViewerSyncResult = Readonly<{
    * them. A page may read names it does not know.
    */
   accepts?: readonly string[] | undefined;
+}>;
+
+/** Arguments of `app_workbench_state`. @public */
+export type TauViewerWorkbenchStateInput = Readonly<{ modelId: string }>;
+
+/**
+ * Structured result of `app_workbench_state`: what the project's `.tau/workbench` records keep for the shown model's
+ * entry, which the page seeds its viewer from before the first frame, as the Tau app does. Each part is absent when
+ * there is no record, or the record is invalid or from a newer Tau.
+ *
+ * @public
+ */
+export type TauViewerWorkbenchState = Readonly<{
+  /** The view the entry's layout shows first, its camera the active kernel view's when one is selected. */
+  view?:
+    | Readonly<Omit<WorkbenchView, 'version' | 'entryPath' | 'name' | 'kernelViews' | 'selectedKernelView'>>
+    | undefined;
+  /** That view's id in `.tau/workbench/views`. */
+  viewId?: string | undefined;
+  /** The entry's component display in `.tau/workbench/entries.json`. */
+  components?: Readonly<Pick<ComponentDisplay, 'hidden' | 'isolated'>> | undefined;
 }>;
 
 /** One captured image of the live view. @public */

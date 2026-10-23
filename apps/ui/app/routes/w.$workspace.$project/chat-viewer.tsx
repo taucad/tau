@@ -23,7 +23,7 @@ import { useFileContent } from '#hooks/use-file-content.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { useLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
-import { newViewRecord } from '#workbench-records/projection.js';
+import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { CadProvider, useCad, useCadSelector } from '#hooks/use-cad.js';
 import { GraphicsProvider, useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';

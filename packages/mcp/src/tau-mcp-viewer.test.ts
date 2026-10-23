@@ -429,6 +429,22 @@ describe('Tau MCP viewer', () => {
     const values: Readonly<Record<(typeof tauViewerAcceptedViewFields)[number], unknown>> = {
       references: [{ componentId: 'component:arm', label: 'Arm', kind: 'part' }],
       sourceRevision: { entry: 'main.ts', files: { 'main.ts': `sha256:${'a'.repeat(64)}` } },
+      settings: {
+        fieldOfView: 45,
+        upDirection: 'z',
+        display: {
+          surfaces: true,
+          lines: true,
+          gizmo: true,
+          grid: false,
+          axes: true,
+          matcap: false,
+          postProcessing: false,
+        },
+        grid: { unit: 'mm' },
+        section: { active: false, cuts: [] },
+        measurements: [],
+      },
     };
     for (const field of tauViewerAcceptedViewFields) {
       // oxlint-disable-next-line no-await-in-loop -- one field at a time.
@@ -439,6 +455,54 @@ describe('Tau MCP viewer', () => {
     const rejected = await sync({ playback: { playing: true } });
     expect(rejected.isError).toBe(true);
     await client.close();
+  });
+
+  it("should leave the page's view settings out of what view_state tells the model", async () => {
+    const settings: NonNullable<TauViewerViewState['settings']> = {
+      fieldOfView: 45,
+      upDirection: 'z',
+      display: {
+        surfaces: true,
+        lines: true,
+        gizmo: true,
+        grid: false,
+        axes: true,
+        matcap: false,
+        postProcessing: false,
+      },
+      grid: { unit: 'mm' },
+      section: { active: false, cuts: [] },
+      measurements: [],
+    };
+    const viewer = { ...createViewer(), viewState: async () => ({ view: { ...view, settings } }) };
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const result = await client.callTool({ name: 'view_state', arguments: {} });
+    expect(result.structuredContent).toEqual({ view });
+    await client.close();
+  });
+
+  it('should serve the saved view to the page alone, only from a host that keeps one', async () => {
+    const saved = { viewId: 'front', components: { hidden: ['component:bolt'], isolated: [] } };
+    const workbenchState = vi.fn<NonNullable<TauMcpViewer['workbenchState']>>(async () => saved);
+    const client = await connect(clients.claudeDesktop, { ...createViewer(), workbenchState });
+
+    const { tools } = await client.listTools();
+    expect(tools.find((tool) => tool.name === tauViewerToolName.appWorkbenchState)?._meta).toEqual({
+      'anthropic/alwaysLoad': true,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    const result = await client.callTool({ name: 'app_workbench_state', arguments: { modelId: 'model-1' } });
+    expect(result.structuredContent).toEqual(saved);
+    expect(workbenchState).toHaveBeenCalledWith({ modelId: 'model-1' }, expect.anything());
+    const malformed = await client.callTool({ name: 'app_workbench_state', arguments: {} });
+    expect(malformed.isError).toBe(true);
+    await client.close();
+
+    const without = await connect(clients.claudeDesktop);
+    const listed = await without.listTools();
+    expect(listed.tools.map((tool) => tool.name)).not.toContain(tauViewerToolName.appWorkbenchState);
+    await without.close();
   });
 
   it('should check what the page sends to app_sync and app_capture_reply', async () => {

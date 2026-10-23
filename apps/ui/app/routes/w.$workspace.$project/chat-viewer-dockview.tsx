@@ -19,7 +19,7 @@ import { idPrefix, tauFileDragMime, tauEditorPanelDragMime, tauViewerPanelDragMi
 import { generatePrefixedId } from '@taucad/utils/id';
 import { fromDockview, mintViewRecordId, toDockview } from '#workbench-records/converters.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
-import { graphicsSettingsForView, newViewRecord } from '#workbench-records/projection.js';
+import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { createStaticDataSource } from '#components/files/file-selector.js';

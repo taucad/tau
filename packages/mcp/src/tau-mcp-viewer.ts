@@ -1,6 +1,7 @@
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { viewSettingsSchema } from '@taucad/workbench';
 import {
   resolveTauViewerPresentation,
   tauViewerReadEncodings,
@@ -23,6 +24,7 @@ import type {
   TauViewerSyncResult,
   TauViewerViewState,
   TauViewerViewStateInput,
+  TauViewerWorkbenchState,
 } from '#viewer-protocol.js';
 
 /** A failure a viewer port returns instead of throwing. @public */
@@ -112,6 +114,14 @@ export type TauMcpViewer = Readonly<{
     input: Readonly<{ modelId: string }>,
     options: TauMcpViewerCallOptions,
   ): Promise<TauViewerDirectShare | TauMcpViewerFailure>;
+  /**
+   * What the project's `.tau/workbench` records keep for a shown model's entry, for the page to restore; a host without
+   * one leaves the tool out.
+   */
+  workbenchState?(
+    input: Readonly<{ modelId: string }>,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerWorkbenchState | TauMcpViewerFailure>;
 }>;
 
 const descriptions = {
@@ -127,6 +137,8 @@ const descriptions = {
   appCaptureReply: "The Tau viewer page's answer to a capture request. Only the viewer page calls this.",
   appShareLink:
     "The shown model's project packed for the Tau viewer page's direct share link. Only the viewer page calls this.",
+  appWorkbenchState:
+    "The view the project's Tau workbench records keep for a shown model, which the Tau viewer page restores. Only the viewer page calls this.",
 } as const;
 
 const showModelInputSchema = z
@@ -200,6 +212,7 @@ const viewSchema = z
       })
       .strict()
       .optional(),
+    settings: viewSettingsSchema.optional(),
   })
   .strict();
 
@@ -215,6 +228,8 @@ const appSyncInputSchema = z
   .strict();
 
 const appShareLinkInputSchema = z.object({ modelId: z.string().min(1) }).strict();
+
+const appWorkbenchStateInputSchema = z.object({ modelId: z.string().min(1).max(64) }).strict();
 
 /** A capture travels base64 in one reply; 8 MiB of base64 is a 6 MiB image, far above a 1280 px frame. */
 const captureDataLimit = 8 * 1024 * 1024;
@@ -267,6 +282,7 @@ export const tauViewerPageInputSchemas = {
   appSync: appSyncInputSchema,
   appCaptureReply: appCaptureReplyInputSchema,
   appShareLink: appShareLinkInputSchema,
+  appWorkbenchState: appWorkbenchStateInputSchema,
 } as const;
 
 /** The file extensions the file entrypoint claims: the page's own formats and those the server converts to GLB (W7). */
@@ -515,7 +531,9 @@ export const registerTauMcpViewer = (
       if (isFailure(result)) {
         return failure(result);
       }
-      const { view, image, captureError } = result;
+      /* The view's settings are the page's record of its display for the server to keep, not what the model reads. */
+      const { view: reported, image, captureError } = result;
+      const { settings: _settings, ...view } = reported;
       return {
         content: [
           {
@@ -584,6 +602,27 @@ export const registerTauMcpViewer = (
           };
     },
   );
+  const appWorkbenchState = server.registerTool(
+    tauViewerToolName.appWorkbenchState,
+    {
+      description: descriptions.appWorkbenchState,
+      inputSchema: appWorkbenchStateInputSchema,
+      annotations: liveLinkAnnotations,
+      _meta: alwaysLoad,
+    },
+    async (args, extra) => {
+      const result =
+        viewer.workbenchState === undefined
+          ? { errorCode: 'NOT_SUPPORTED', message: 'This Tau server keeps no workbench records.' }
+          : await viewer.workbenchState(args, callOptions(extra));
+      return isFailure(result)
+        ? failure(result)
+        : {
+            content: [{ type: 'text', text: result.view === undefined ? 'No saved view.' : 'The saved view.' }],
+            structuredContent: result,
+          };
+    },
+  );
   const pageTools = (viewer.pageTools ?? []).map((tool) =>
     server.registerTool(
       tool.name,
@@ -630,6 +669,10 @@ export const registerTauMcpViewer = (
       present(tool, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     }
     present(appShareLink, hasPage && viewer.shareLink !== undefined, {
+      ...alwaysLoad,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    present(appWorkbenchState, hasPage && viewer.workbenchState !== undefined, {
       ...alwaysLoad,
       ui: { resourceUri, visibility: ['app'] },
     });

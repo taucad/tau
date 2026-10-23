@@ -62,6 +62,7 @@
     "./paneview/use-resize-handles": "./src/paneview/use-resize-handles.ts",
     "./parameters/parameters-pane": "./src/parameters/parameters-pane.tsx",
     "./parameters/parameters-source": "./src/parameters/parameters-source.ts",
+    "./records/view-record": "./src/records/view-record.ts",
     "./registry/pane-registry": "./src/registry/pane-registry.ts",
     "./share/share-pane": "./src/share/share-pane.tsx",
     "./share/share-source": "./src/share/share-source.ts",
@@ -213,6 +214,11 @@
         "import": "./dist/parameters/parameters-source.mjs",
         "default": "./dist/parameters/parameters-source.mjs"
       },
+      "./records/view-record": {
+        "types": "./dist/records/view-record.d.mts",
+        "import": "./dist/records/view-record.mjs",
+        "default": "./dist/records/view-record.mjs"
+      },
       "./registry/pane-registry": {
         "types": "./dist/registry/pane-registry.d.mts",
         "import": "./dist/registry/pane-registry.mjs",
@@ -268,6 +274,7 @@
     "@taucad/parameters": "workspace:*",
     "@taucad/project-core": "workspace:*",
     "@taucad/units": "workspace:*",
+    "@taucad/workbench": "workspace:*",
     "class-variance-authority": "catalog:",
     "dockview-react": "^8.2.0",
     "lucide-react": "catalog:",
@@ -280,6 +287,7 @@
     "@xstate/react": "^7.0.0-alpha.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "three": "^0.184.0",
     "xstate": "^6.0.0-alpha.59",
     "zod": "^4.1.0"
   },
@@ -298,6 +306,7 @@
     "@xstate/react": "7.0.0-alpha.3",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "three": "^0.184.0",
     "xstate": "catalog:",
     "zod": "catalog:"
   }

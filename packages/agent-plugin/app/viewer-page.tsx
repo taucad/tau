@@ -16,6 +16,7 @@ import type {
   TauViewerModel,
   TauViewerShowResult,
   TauViewerEntryStatus,
+  TauViewerWorkbenchState,
 } from '@taucad/mcp/viewer-protocol';
 import type { Artifact } from '@taucad/runtime';
 import type { GeometryComponentReference } from '@taucad/types';
@@ -53,6 +54,7 @@ import { ViewerStage } from '@taucad/workbench-panes/shell/viewer-stage';
 import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
 import { createComponentReveal, createPageComponentActions } from '#app/sources/component-menu.jsx';
 import { WorkbenchLane } from '#app/workbench-lane.jsx';
+import { entryPathOf, liveViewSettings, readWorkbenchState, seedViewer } from '#app/workbench-state.js';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
 
@@ -107,12 +109,17 @@ const chatNotice = (route: ChatRoute, added?: Readonly<{ count: number; isRepeat
 /** The parts the person added to chat from one shown model, keyed `path#componentId`, in the order added. */
 type AddedParts = Readonly<{ modelKey: string; parts: ReadonlyMap<string, GeometryComponentReference> }>;
 
+/** Seeds the viewer from a model's saved view before the model is drawn (PAR-3). */
+type SeedViewer = (model: TauViewerModel, saved: TauViewerWorkbenchState | undefined) => void;
+
 /**
- * Follows the bridge: shows each model it hands over, keeping the last one on screen while the next loads. The
- * returned `show` takes a model the live link heard of; `select` is the agent's latest selection request.
+ * Follows the bridge: shows each model it hands over, keeping the last one on screen while the next loads, and seeds
+ * the viewer from the model's saved view before it is drawn. The returned `show` takes a model the live link heard of;
+ * `select` is the agent's latest selection request.
  */
 function useShownModel(
   bridge: HostBridge,
+  seedRef: React.RefObject<SeedViewer | undefined>,
 ): readonly [PageState, HostView, React.RefObject<((result: TauViewerShowResult) => void) | undefined>, SelectRequest] {
   const [state, setState] = useState<PageState>({ kind: 'waiting' });
   const [view, setView] = useState<HostView>(() => bridge.view());
@@ -136,12 +143,16 @@ function useShownModel(
       setState((previous) => ({ kind: 'loading', model, loaded: 0, previous: previousOf(previous) }));
       const load = async (): Promise<void> => {
         try {
-          const artifact = await loadModel(bridge.callTool, model, (loaded) => {
-            if (request === current) {
-              setState((previous) => (previous.kind === 'loading' ? { ...previous, loaded } : previous));
-            }
-          });
+          const [artifact, saved] = await Promise.all([
+            loadModel(bridge.callTool, model, (loaded) => {
+              if (request === current) {
+                setState((previous) => (previous.kind === 'loading' ? { ...previous, loaded } : previous));
+              }
+            }),
+            readWorkbenchState(bridge.callTool, model),
+          ]);
           if (request === current) {
+            seedRef.current?.(model, saved);
             setState({ kind: 'ready', current: { model, artifact } });
           }
         } catch (error) {
@@ -174,7 +185,7 @@ function useShownModel(
       showRef.current = undefined;
       unsubscribe();
     };
-  }, [bridge]);
+  }, [bridge, seedRef]);
 
   return [state, view, showRef, select] as const;
 }
@@ -304,7 +315,8 @@ const addedKeyOf = (model: TauViewerModel): string => model.sourceFile ?? model.
  * @returns The viewer in the composition the host asks for.
  */
 export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.JSX.Element {
-  const [state, view, showRef, select] = useShownModel(bridge);
+  const seedRef = useRef<SeedViewer | undefined>(undefined);
+  const [state, view, showRef, select] = useShownModel(bridge, seedRef);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
@@ -320,6 +332,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       graphicsBackend: 'webgl',
     },
   });
+  seedRef.current = (model, saved) => {
+    seedViewer(graphicsRef, entryPathOf(model), saved);
+  };
   const environment = useMemo(
     (): ViewerEnvironment => ({
       ...defaultViewerEnvironment,
@@ -401,7 +416,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 perspectiveZoom: cameraView.perspectiveZoom,
               };
         const { context } = graphicsRef.getSnapshot();
-        return viewStateOf({
+        const reported = viewStateOf({
           model,
           unit: unit.unit,
           camera,
@@ -411,6 +426,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           interactedAt: interactedAt.current,
           references: addedFrom(addedKeyOf(model)),
         });
+        /* The display, section and measurements the server keeps in the view record. */
+        const settings = liveViewSettings(graphicsRef);
+        return settings === undefined ? reported : { ...reported, settings };
       },
       follows: () => latest.current.view.follows,
       linked: () => latest.current.view.linked,

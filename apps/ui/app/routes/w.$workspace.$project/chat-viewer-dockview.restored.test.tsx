@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkbenchView } from '@taucad/workbench';
-import { newViewRecord } from '#workbench-records/projection.js';
+import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 
 const fixture = vi.hoisted(() => ({
   projectSend: vi.fn(),

@@ -1450,4 +1450,126 @@ describe('the viewer page from a text host', () => {
     },
     kernelCallLimit,
   );
+
+  it(
+    'should restore an arranged view and the camera the person left after a reload (PAR-3)',
+    async () => {
+      const records = join(project, '.tau/workbench');
+      await rm(records, { recursive: true, force: true });
+      onTestFinished(async () => {
+        await rm(records, { recursive: true, force: true });
+      });
+      const client = await connect('claude-code', claudeCodeCapabilities);
+      const { viewerUrl } = shown(await callTool(client, 'show_model', { targetFile: 'small.glb' }));
+      const page = await launched().newPage({ viewport: { width: 1200, height: 800 } });
+      page.on('pageerror', (error) => {
+        pageErrors.push(error.message);
+      });
+      await page.goto(viewerUrl ?? '');
+      await drawn(page, 'Export');
+      const viewNow = async (): Promise<TauViewerViewState> => {
+        const result = await callTool(client, 'view_state', {});
+        expect(result.isError).toBeFalsy();
+        return (result.structuredContent as { view: TauViewerViewState }).view;
+      };
+      const canvas = await page.getByRole('application', { name: 'Model viewer' }).boundingBox();
+      if (canvas === null) {
+        throw new Error('The canvas region has no box.');
+      }
+      const middle = { x: canvas.x + canvas.width / 2, y: canvas.y + canvas.height / 2 };
+      /* The person picks the surface, once it is under the pointer, so its component id is known. */
+      await page.mouse.move(middle.x, middle.y, { steps: 4 });
+      await expect
+        .poll(async () => page.getByTestId('model-component-name-badge').textContent(), { timeout: 30_000 })
+        .toBe('surface');
+      await page.mouse.click(middle.x, middle.y);
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            return view.selected.length;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(0);
+      const picked = await viewNow();
+      const [surface] = picked.selected;
+
+      /* The agent arranges a view from the top with a section, a measurement and the surface hidden. */
+      const arranged = await callTool(client, 'arrange_workbench', {
+        views: [
+          {
+            id: 'saved',
+            entryPath: 'small.glb',
+            camera: { kind: 'preset', preset: 'top' },
+            section: { active: true, cuts: [{ kind: 'plane', plane: 'xy', offset: 0, isFlipped: false }] },
+            measurements: [{ id: 'gap', startPoint: [0, 0, 0], endPoint: [1, 0, 0] }],
+          },
+        ],
+        entries: [{ path: 'small.glb', components: { hidden: [surface?.componentId] } }],
+      });
+      expect(arranged.isError).toBeFalsy();
+
+      await page.reload();
+      await drawn(page, 'Export');
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            /* The reloaded page has had no input yet; the page before it had. */
+            return {
+              fresh: view.interactedAt === 0,
+              direction: view.camera?.direction.map((axis) => Math.round(axis * 1000) / 1000),
+              sectionActive: view.sectionActive,
+              measurementCount: view.measurementCount,
+              hidden: view.hidden,
+            };
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual({
+          fresh: true,
+          direction: [0, 0, 1],
+          sectionActive: true,
+          measurementCount: 1,
+          hidden: [surface?.componentId],
+        });
+      await capture(page, 'restored-arranged');
+
+      /* The person orbits; once the pose is kept, a reload opens on it. */
+      /* Away from the middle, where the measurement's label sits and a press would act on it. */
+      const corner = { x: canvas.x + canvas.width / 4, y: canvas.y + (canvas.height * 3) / 4 };
+      await page.mouse.move(corner.x, corner.y);
+      await page.mouse.down();
+      await page.mouse.move(corner.x + 120, corner.y - 60, { steps: 8 });
+      await page.mouse.up();
+      const savedPose = async (): Promise<unknown> => {
+        const text = await readFile(join(records, 'views/saved.json'), 'utf8').catch(() => '{}');
+        return (JSON.parse(text) as { camera?: { kind?: string } }).camera?.kind;
+      };
+      await expect.poll(savedPose, { timeout: 30_000 }).toBe('pose');
+      const { camera: orbited } = await viewNow();
+      expect(orbited?.direction.map((axis) => Math.round(axis * 1000) / 1000)).not.toEqual([0, 0, 1]);
+
+      await page.reload();
+      await drawn(page, 'Export');
+      await expect
+        .poll(
+          async () => {
+            const view = await viewNow();
+            return view.interactedAt === 0
+              ? view.camera?.direction.map((axis) => Math.round(axis * 100) / 100)
+              : 'stale';
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual(orbited?.direction.map((axis) => Math.round(axis * 100) / 100));
+      const restored = await viewNow();
+      expect(restored).toMatchObject({ sectionActive: true, measurementCount: 1, hidden: [surface?.componentId] });
+      expect(restored.camera?.verticalSpan).toBeCloseTo(orbited?.verticalSpan ?? 0, 3);
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
 });

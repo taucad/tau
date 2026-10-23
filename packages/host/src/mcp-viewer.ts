@@ -762,6 +762,12 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     async captureReply(input) {
       return sessions.captureReply(input);
     },
+    async workbenchState(input) {
+      const entry = shown.get(input.modelId);
+      return entry === undefined
+        ? failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.')
+        : workbench.state({ root: entry.root, entryPath: entry.model.sourceFile ?? entry.model.path });
+    },
     /* Without the runtime's source closure the page has no direct link to offer. */
     ...(snapshotSource === undefined
       ? {}
@@ -868,6 +874,8 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       port.captureReply(tauViewerPageInputSchemas.appCaptureReply.parse(args), loopbackCall),
     [tauViewerToolName.appShareLink]: async (args) =>
       port.shareLink?.(tauViewerPageInputSchemas.appShareLink.parse(args), loopbackCall),
+    [tauViewerToolName.appWorkbenchState]: async (args) =>
+      port.workbenchState?.(tauViewerPageInputSchemas.appWorkbenchState.parse(args), loopbackCall),
   };
 
   const handleLoopback = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {

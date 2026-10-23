@@ -423,7 +423,7 @@ describe('createLocalMcpViewer', () => {
       const synced = await held;
       expect(synced.status).toBe(200);
       expect(await synced.json()).toEqual({
-        accepts: ['references', 'sourceRevision'],
+        accepts: ['references', 'sourceRevision', 'settings'],
         version: 2,
         show: { ...next, select: ['component:arm'] },
       });

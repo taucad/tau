@@ -64,6 +64,14 @@ const serveLiveBuild = (): {
   };
 };
 
+/** The server names `answer`, and the tab asks it, as the recovery's lookups do (`queryLiveBuild`). */
+const serverSays = async (queryLiveBuild: () => Promise<void>, answer: LiveAnswer): Promise<void> => {
+  answerLiveBuild(answer);
+  await act(async () => {
+    await queryLiveBuild();
+  });
+};
+
 /** The server answers every `/health/build` at once with `answer`. */
 const answerLiveBuild = (answer: LiveAnswer): ReturnType<typeof vi.fn> => {
   const fetchMock = vi.fn(async () => respond(answer));
@@ -276,15 +284,16 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it('ignores a server answer asked for a phase the tab has already left', async () => {
-    const { buildId, isBuildSuperseded, recordLiveBuild } = await load();
+    const { buildId, isBuildSuperseded, queryLiveBuild } = await load();
     const server = serveLiveBuild();
     announce(buildId + 1);
     await pause();
     expect(isBuildSuperseded()).toBe(true);
 
-    act(() => {
-      recordLiveBuild(buildId);
-    });
+    // Another question (a module load failure's) gets this build named before the peer check's answer lands.
+    const lookup = queryLiveBuild();
+    await server.settle(buildId);
+    await lookup;
     await server.settle(buildId + 1);
 
     expect(isBuildSuperseded()).toBe(false);
@@ -312,6 +321,45 @@ describe('build-id skew guard (DF20)', () => {
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);
+  });
+
+  it('tells the peer whose claim stopped it once writes resume, even while the server word is still turning', async () => {
+    const { buildId, isBuildSuperseded, offerReload, queryLiveBuild } = await load();
+    await serverSays(queryLiveBuild, buildId + 1);
+    act(() => {
+      offerReload(buildId + 1);
+    });
+    const heard = listen();
+    answerLiveBuild(buildId);
+
+    announce(buildId + 2);
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
+    expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
+  });
+
+  it('keeps counting back to this build when a recheck gets no answer', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isReloadOffered, offerReload, queryLiveBuild, peerRecheckDelay, serverConfirmations } =
+      await load();
+    await serverSays(queryLiveBuild, buildId + 1);
+    act(() => {
+      offerReload(buildId + 1);
+    });
+    await serverSays(queryLiveBuild, buildId);
+
+    answerLiveBuild('unreachable');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    answerLiveBuild(buildId);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (serverConfirmations + 1));
+    });
+    await pause();
+
+    expect(isReloadOffered()).toBe(false);
   });
 
   it("resumes writing when a later announcement's check names this build", async () => {
@@ -361,14 +409,14 @@ describe('build-id skew guard (DF20)', () => {
   it.each(['a deploy offered the reload', 'the server named another build'])(
     'still tells older tabs to stop while it keeps writing (%s), since two writing bundles is what DF20 prevents',
     async (situation) => {
-      const { buildId, offerReload, recordLiveBuild } = await load();
-      act(() => {
-        if (situation === 'a deploy offered the reload') {
+      const { buildId, offerReload, queryLiveBuild } = await load();
+      if (situation === 'a deploy offered the reload') {
+        act(() => {
           offerReload(buildId + 1);
-        } else {
-          recordLiveBuild(buildId + 1);
-        }
-      });
+        });
+      } else {
+        await serverSays(queryLiveBuild, buildId + 1);
+      }
       const heard = listen();
 
       announce(buildId - 2);
@@ -490,10 +538,10 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it("keeps the server's word over a later tab announcement it could not check", async () => {
-    const { buildId, isBuildSuperseded, readSupersedingBuildId, recordLiveBuild } = await load();
+    const { buildId, isBuildSuperseded, readSupersedingBuildId, queryLiveBuild } = await load();
+    await serverSays(queryLiveBuild, buildId - 1);
     answerLiveBuild('unreachable');
 
-    recordLiveBuild(buildId - 1);
     announce(buildId + 5);
     await pause();
 
@@ -515,23 +563,21 @@ describe('build-id skew guard (DF20)', () => {
   });
 
   it("withdraws a deploy's reload offer when the server names this build through the recovery", async () => {
-    const { buildId, isReloadOffered, offerReload, readSupersedingBuildId, recordLiveBuild } = await load();
+    const { buildId, isReloadOffered, offerReload, readSupersedingBuildId, queryLiveBuild } = await load();
     act(() => {
       offerReload(buildId + 1);
     });
 
-    act(() => {
-      recordLiveBuild(buildId);
-    });
+    await serverSays(queryLiveBuild, buildId);
 
     expect(isReloadOffered()).toBe(false);
     expect(readSupersedingBuildId()).toBe(buildId);
   });
 
   it('records the live build for the prompt without superseding this tab yet', async () => {
-    const { buildId, isBuildSuperseded, readSupersedingBuildId, recordLiveBuild } = await load();
+    const { buildId, isBuildSuperseded, readSupersedingBuildId, queryLiveBuild } = await load();
 
-    recordLiveBuild(buildId - 1);
+    await serverSays(queryLiveBuild, buildId - 1);
 
     expect(readSupersedingBuildId()).toBe(buildId - 1);
     expect(isBuildSuperseded()).toBe(false);

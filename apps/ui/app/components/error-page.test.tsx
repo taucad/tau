@@ -64,7 +64,7 @@ vi.mock('#components/ui/collapsible-code-block.js', () => ({
 
 const { ErrorPage } = await import('#components/error-page.js');
 const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
-const { buildId, offerReload, recordLiveBuild } = await import('#filesystem/build-skew.js');
+const { buildId, offerReload, queryLiveBuild } = await import('#filesystem/build-skew.js');
 const { useReloadPromptOwned } = await import('#components/nav/browser-update.js');
 
 /** A deploy explains the failure: the recovery offers the reload, as `recoverFromStaleBuild` does, and says so. */
@@ -112,10 +112,11 @@ beforeEach(() => {
   mocks.recoverFromStaleBuild.mockResolvedValue('current');
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   // The server names this build again, which withdraws whatever offer a test left.
-  recordLiveBuild(buildId);
+  vi.stubGlobal('fetch', async () => Response.json({ buildId }));
+  await queryLiveBuild();
   vi.clearAllMocks();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();

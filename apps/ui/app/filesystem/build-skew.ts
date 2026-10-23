@@ -241,7 +241,8 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
             : current.phase === 'peer-superseded'
               ? 'offered'
               : current.phase;
-        return { ...common, phase, liveChecksLeft };
+        // Writes resume here: the announcement (if owed) goes now, and the next live claim is not answered.
+        return { ...common, phase, liveChecksLeft, vouches: false };
       }
     }
     // The server named this build live: whatever rested on a peer's word or a deploy offer is void.
@@ -285,7 +286,7 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
   if (current.phase === 'server-confirming') {
     // An unanswered check counts towards supersession (the earlier word stands), never back to live.
     if (current.towards === 'live') {
-      return { ...current };
+      return current;
     }
     const checksLeft = current.checksLeft - 1;
     return checksLeft > 0
@@ -353,6 +354,10 @@ const dispatch = (event: SkewEvent): void => {
   const before = state;
   const next = reduce(before, event);
   if (next === before) {
+    // An answer that changes nothing (no reply while confirming) still owes the next recheck.
+    if (event.type === 'answer' && phaseTimer === undefined) {
+      startPhaseTimer(state);
+    }
     return;
   }
   state = next;
@@ -373,7 +378,11 @@ const dispatch = (event: SkewEvent): void => {
   if (offers(next) !== offers(before) || hasStopped(next) !== hasStopped(before)) {
     reloadOfferTopic.emit();
   }
-  if (next.phase === 'idle' && before.phase !== 'idle' && next.server === 'live' && before.vouches) {
+  /* Writes resumed because the server named this build: tell the peer whose claim stopped them, so
+   * it checks in turn (DF20). Keyed on the writes resuming, whatever phase they resume into; never
+   * in answer to a live claim (`vouches`), which bounds two tabs behind disagreeing edges. */
+  const resumedWrites = stopsWrites(before) && !stopsWrites(next);
+  if (resumedWrites && before.vouches && event.type === 'answer' && event.answer === buildId) {
     channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
   }
   if (next.server !== before.server) {
@@ -393,15 +402,6 @@ export const queryLiveBuild = async (): Promise<void> => {
     await askServer(undefined);
   }
 };
-
-/**
- * Apply a server answer obtained elsewhere, as {@link queryLiveBuild} would.
- *
- * @param liveBuildId - The server's build id (`/health/build`).
- */
-export function recordLiveBuild(liveBuildId: number): void {
-  dispatch({ type: 'answer', answer: liveBuildId, claimedBuildId: undefined });
-}
 
 /**
  * Offer the reload into a build a deploy put live, without stopping writes: in a

@@ -20,7 +20,9 @@
  *   cheap global signal for pending work (agent turns and edits flush on close, not
  *   on demand), so the window and the absence of input stand in for it.
  *   The guard is the `from>to` build pair in `sessionStorage`, cleared once the page
- *   runs the target build, so a deploy that cannot serve its own chunks never loops.
+ *   runs the target build, so a deploy that cannot serve its own chunks never loops; and
+ *   a tab makes at most `autoReloadBudget` automatic reloads per `autoReloadBudgetWindow`,
+ *   never cleared on arrival, so a rolling deploy whose edges disagree cannot either.
  * - A different build otherwise: the sidebar update control (`BrowserUpdate`) or banner
  *   offers the reload (`superseded`). Writes go on: in a lone tab no other bundle shares
  *   storage, and another tab's bundle stops them through `build-skew`'s channel.
@@ -113,6 +115,8 @@ export type StaleBuildRecoveryOptions = {
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
   readonly reloadTimeout?: number;
+  /** The wall clock, for the reload budget across page loads; defaults to `Date.now`. */
+  readonly now?: () => number;
 };
 
 /**
@@ -134,10 +138,36 @@ export type LiveBuildSource = {
 export type GenuineReportDestinations = { readonly sentry: boolean; readonly analytics: boolean };
 
 /**
- * Where a failure was caught: by a React boundary (the route error page, `onCaughtError`), whose
- * errors reach no global handler, or by a global listener, which error reporting also hears.
+ * The channel a failure arrived through. Whether Sentry captures that channel itself decides
+ * whether the recovery must report a genuine failure to Sentry:
+ *
+ * | Channel                                   | Source     | Sentry captures it?                            |
+ * | ----------------------------------------- | ---------- | ---------------------------------------------- |
+ * | `window` `error`                          | `global`   | Yes (`GlobalHandlers` `onerror`)               |
+ * | `window` `unhandledrejection`             | `global`   | Yes (`GlobalHandlers` `onunhandledrejection`)  |
+ * | `window` `vite:preloadError`              | `preload`  | No: a Vite event Sentry never listens to       |
+ * | React boundary (route page, `onCaughtError`) | `boundary` | No: a caught error reaches no global handler |
+ *
+ * Vite rethrows a preload failure into the import that asked for it, so a `preload` sighting is
+ * usually followed by a `boundary` or `unhandledrejection` one; the recovery waits
+ * {@link preloadFollowUpDelay} for it before deciding Sentry has not seen the failure.
  */
-export type FailureSource = 'boundary' | 'global';
+export type FailureSource = 'boundary' | 'global' | 'preload';
+
+/** Whether Sentry's own handlers capture failures from each channel (see {@link FailureSource}). */
+const capturedBySentry: Readonly<Record<FailureSource, boolean>> = { global: true, preload: false, boundary: false };
+
+/** Milliseconds a failure only `vite:preloadError` reported waits for the channel Vite rethrows it into. */
+export const preloadFollowUpDelay = 1000;
+
+/** Automatic reloads one tab may make within {@link autoReloadBudgetWindow}, however its builds move. */
+export const autoReloadBudget = 2;
+
+/** Milliseconds over which {@link autoReloadBudget} counts automatic reloads. */
+export const autoReloadBudgetWindow = 10 * 60_000;
+
+/** `sessionStorage` key holding this tab's recent automatic reload times; never cleared on arrival. */
+export const autoReloadTimesKey = 'tau-stale-build-auto-reloads';
 
 /** The recovery of one page. */
 export type StaleBuildRecovery = {
@@ -175,19 +205,42 @@ const isKey = (failure: unknown): failure is WeakKey => typeof failure === 'obje
  */
 export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): StaleBuildRecovery => {
   const { liveBuild } = options;
-  /** The decision for each failure, made (and acted on) once. */
-  const decisions = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
-  /** The settled outcome of each decided failure; `current` never changes again. */
-  const outcomes = new WeakMap<WeakKey, StaleBuildOutcome>();
-  const sources = new WeakMap<WeakKey, FailureSource>();
-  /** Failures `classify` called a deploy's, so Sentry dropped their events. */
-  const droppedBySentry = new WeakSet();
-  /** Failures each destination of {@link StaleBuildRecoveryOptions.onGenuineFailure} has heard. */
-  const reportedToSentry = new WeakSet();
-  const reportedToAnalytics = new WeakSet();
+  /** Everything known about one failure. */
+  type FailureRecord = {
+    /** The decision, made (and acted on) once. */
+    decision?: Promise<StaleBuildOutcome>;
+    /** The settled outcome; `current` never changes again. */
+    outcome?: StaleBuildOutcome;
+    /** Channels it arrived through ({@link FailureSource}). */
+    readonly sources: Set<FailureSource>;
+    /** `classify` called it a deploy's, so Sentry dropped its event. */
+    droppedBySentry: boolean;
+    reportedToSentry: boolean;
+    reportedToAnalytics: boolean;
+    /** Waiting for the channel Vite rethrows a preload failure into. */
+    preloadWait?: ReturnType<typeof setTimeout>;
+    /** The wait is over: no channel Sentry captures followed the preload failure. */
+    preloadSettled: boolean;
+  };
+  const records = new WeakMap<WeakKey, FailureRecord>();
+  const recordOf = (failure: WeakKey): FailureRecord => {
+    let record = records.get(failure);
+    if (record === undefined) {
+      record = {
+        sources: new Set(),
+        droppedBySentry: false,
+        reportedToSentry: false,
+        reportedToAnalytics: false,
+        preloadSettled: false,
+      };
+      records.set(failure, record);
+    }
+    return record;
+  };
   /**
-   * Failures a deploy explains (decided, or only classified), re-derived together when the server
-   * names this build. Held weakly: an error nothing else keeps is not pinned for this.
+   * Failures a deploy explains (decided, or only classified), re-derived together when the verdict
+   * turns `live`. Iterated, because a failure no page displays (`onCaughtError`, a global listener,
+   * a Sentry-only one) must still be reported then; held weakly, so it pins no error.
    */
   const explained = new Set<WeakRef<WeakKey>>();
   let stallTimer: ReturnType<typeof setTimeout> | undefined;
@@ -203,35 +256,48 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
   };
 
-  /** Report a genuine failure to analytics, and to Sentry when `toSentry`, each at most once. */
-  const reportGenuine = (failure: WeakKey, toSentry: boolean): void => {
-    const sentry = toSentry && !reportedToSentry.has(failure);
-    const analytics = !reportedToAnalytics.has(failure);
+  /** Whether Sentry still needs the recovery's report of a genuine failure (see {@link FailureSource}). */
+  const sentryNeedsReport = (record: FailureRecord): boolean =>
+    record.droppedBySentry || ![...record.sources].some((source) => capturedBySentry[source]);
+
+  /** Report a genuine failure to analytics, and to Sentry if it has not seen it, each at most once. */
+  const reportGenuine = (failure: WeakKey): void => {
+    const record = recordOf(failure);
+    if (record.outcome !== 'current') {
+      return;
+    }
+    const onlyPreload = record.sources.size > 0 && [...record.sources].every((source) => source === 'preload');
+    // Vite rethrows a preload failure into the import that asked; give that channel the chance first.
+    const isAwaitingFollowUp = onlyPreload && !record.preloadSettled && !record.droppedBySentry;
+    if (isAwaitingFollowUp) {
+      record.preloadWait ??= setTimeout(() => {
+        record.preloadWait = undefined;
+        record.preloadSettled = true;
+        reportGenuine(failure);
+      }, preloadFollowUpDelay);
+    }
+    const sentry = !isAwaitingFollowUp && sentryNeedsReport(record) && !record.reportedToSentry;
+    const analytics = !record.reportedToAnalytics;
     if (!sentry && !analytics) {
       return;
     }
-    if (sentry) {
-      reportedToSentry.add(failure);
-    }
-    if (analytics) {
-      reportedToAnalytics.add(failure);
-    }
+    record.reportedToSentry ||= sentry;
+    record.reportedToAnalytics = true;
     options.onGenuineFailure?.(failure, { sentry, analytics });
   };
 
-  /** Sentry has not heard a genuine failure unless its own handler saw it and `classify` let it through. */
-  const sentryMissed = (failure: WeakKey): boolean =>
-    sources.get(failure) === 'boundary' || droppedBySentry.has(failure);
-
   /** Record a settled decision against the live verdict now; a genuine one is reported. */
   const settle = (failure: WeakKey, decided: StaleBuildOutcome): void => {
+    const record = recordOf(failure);
     const outcome = decided !== 'current' && liveBuild.readVerdict() === 'live' ? 'current' : decided;
     if (outcome !== decided) {
-      decisions.set(failure, Promise.resolve('current'));
+      record.decision = Promise.resolve('current');
+      // Sentry heard (if at all) a deploy's failure and dropped it: this report is the one that stands.
+      record.droppedBySentry = true;
     }
-    outcomes.set(failure, outcome);
+    record.outcome = outcome;
     if (outcome === 'current') {
-      reportGenuine(failure, sentryMissed(failure) || outcome !== decided);
+      reportGenuine(failure);
     } else {
       explained.add(new WeakRef(failure));
     }
@@ -253,15 +319,36 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     for (const reference of explained) {
       const failure = reference.deref();
       if (failure !== undefined) {
-        decisions.set(failure, Promise.resolve('current'));
-        outcomes.set(failure, 'current');
+        const record = recordOf(failure);
+        record.decision = Promise.resolve('current');
+        record.outcome = 'current';
         // Sentry dropped it as a deploy's, or never heard it: this report is the one that stands.
-        reportGenuine(failure, true);
+        record.droppedBySentry = true;
+        reportGenuine(failure);
       }
     }
     explained.clear();
     outcomeTopic.emit();
   });
+
+  const now = options.now ?? Date.now;
+
+  /**
+   * Spend one automatic reload from this tab's budget, or refuse. The `from>to` guard stops one
+   * pair looping; the budget stops a rolling deploy whose edges disagree (B, C, B, …) from reloading
+   * an untouched page back and forth, since each arrival clears the guard but never the budget.
+   */
+  const spendAutoReload = (storage: NonNullable<StaleBuildRecoveryOptions['storage']>): boolean => {
+    const at = now();
+    const recent = (JSON.parse(storage.getItem(autoReloadTimesKey) ?? '[]') as unknown[]).filter(
+      (time): time is number => typeof time === 'number' && at - time < autoReloadBudgetWindow,
+    );
+    if (recent.length >= autoReloadBudget) {
+      return false;
+    }
+    storage.setItem(autoReloadTimesKey, JSON.stringify([...recent, at]));
+    return true;
+  };
 
   const supersede = (serverBuildId: number): StaleBuildOutcome => {
     options.onSuperseded(serverBuildId);
@@ -296,7 +383,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     const { storage } = options;
     const guard = guardFor(options.buildId, serverBuildId);
     try {
-      if (storage.getItem(staleBuildReloadKey) === guard) {
+      if (storage.getItem(staleBuildReloadKey) === guard || !spendAutoReload(storage)) {
         return supersede(serverBuildId);
       }
       storage.setItem(staleBuildReloadKey, guard);
@@ -333,38 +420,35 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       if (!isKey(failure)) {
         return decide();
       }
-      if (sources.get(failure) !== 'boundary') {
-        /* A boundary's word wins over a global listener's: Vite's `vite:preloadError` reports a failure
-         * before the boundary that catches it does, and no global handler reports a caught one. */
-        sources.set(failure, source);
-        if (source === 'boundary' && outcomes.get(failure) === 'current') {
-          reportGenuine(failure, true);
-        }
+      const record = recordOf(failure);
+      const isNewChannel = !record.sources.has(source);
+      record.sources.add(source);
+      if (isNewChannel && record.outcome === 'current') {
+        // A later channel may be the one Sentry never captures: reporting follows every channel seen.
+        reportGenuine(failure);
       }
-      let decision = decisions.get(failure);
-      if (decision === undefined) {
-        decision = decide();
-        decisions.set(failure, decision);
-        const decided = decision;
+      if (record.decision === undefined) {
+        const decided = decide();
+        record.decision = decided;
         // async-iife: bootstrap -- the settled outcome is published once the decision lands.
         void (async () => {
           const outcome = await decided;
           // A later decision (the server took a deploy's reason back) has replaced this one meanwhile.
-          if (decisions.get(failure) === decided) {
+          if (record.decision === decided) {
             settle(failure, outcome);
           }
         })();
       }
-      return decision;
+      return record.decision;
     },
     async classify(failure) {
       if (!isKey(failure)) {
         return (await isReplaced()) ? 'superseded' : 'current';
       }
-      const known = decisions.get(failure);
+      const known = records.get(failure)?.decision;
       const outcome = known === undefined ? ((await isReplaced()) ? 'superseded' : 'current') : await known;
       if (outcome !== 'current') {
-        droppedBySentry.add(failure);
+        recordOf(failure).droppedBySentry = true;
         if (known === undefined) {
           // Only Sentry saw it: re-derived with the decided ones when the server names this build.
           explained.add(new WeakRef(failure));
@@ -372,7 +456,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       return outcome;
     },
-    readOutcome: (failure) => (isKey(failure) ? outcomes.get(failure) : undefined),
+    readOutcome: (failure) => (isKey(failure) ? records.get(failure)?.outcome : undefined),
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
     readReloadState,
     subscribeReloadState: (listener) => reloadStateTopic.subscribe(listener),
@@ -535,38 +619,51 @@ export const recoverFromCaughtError = (error: unknown): void => {
  */
 export const installStaleBuildRecovery = (): (() => void) => {
   getPageRecovery().confirmArrival();
-  // Any of these may be the start of work a reload would lose; count them all, whoever dispatched them.
-  const onInput = (): void => {
-    hasUserInteracted = true;
-  };
-  const recoverFrom = (failure: unknown): void => {
+  const recoverFrom = (failure: unknown, source: FailureSource): void => {
     if (isStaleModuleError(failure)) {
       // async-iife: bootstrap -- an event listener cannot await; the decision acts on its own.
-      void recoverFromStaleBuild(failure, 'global');
+      void recoverFromStaleBuild(failure, source);
     }
   };
   const onPreloadError = (event: Event): void => {
-    recoverFrom((event as Event & { payload?: unknown }).payload);
+    recoverFrom((event as Event & { payload?: unknown }).payload, 'preload');
   };
   const onRejection = (event: PromiseRejectionEvent): void => {
-    recoverFrom(event.reason);
+    recoverFrom(event.reason, 'global');
   };
   const onError = (event: ErrorEvent): void => {
-    recoverFrom(event.error);
+    recoverFrom(event.error, 'global');
   };
-  const listeners = [
-    ...(['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'] as const).map(
-      (type) => [type, onInput] as const,
-    ),
+  const failureListeners = [
     ['vite:preloadError', onPreloadError],
     ['unhandledrejection', onRejection],
     ['error', onError],
   ] as const;
-  for (const [type, listener] of listeners) {
+  const inputTypes = ['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'] as const;
+  let inputWindow: ReturnType<typeof setTimeout> | undefined;
+  /* Any of these may be the start of work a reload would lose; count them all, whoever dispatched
+   * them. Only the first matters, and none after the auto-reload window, so the listeners go then. */
+  const stopWatchingInput = (): void => {
+    clearTimeout(inputWindow);
+    inputWindow = undefined;
+    for (const type of inputTypes) {
+      globalThis.removeEventListener(type, onInput, { capture: true });
+    }
+  };
+  function onInput(): void {
+    hasUserInteracted = true;
+    stopWatchingInput();
+  }
+  for (const type of inputTypes) {
+    globalThis.addEventListener(type, onInput, { capture: true });
+  }
+  inputWindow = setTimeout(stopWatchingInput, Math.max(0, autoReloadWindow - performance.now()));
+  for (const [type, listener] of failureListeners) {
     globalThis.addEventListener(type, listener as EventListener, { capture: true });
   }
   return () => {
-    for (const [type, listener] of listeners) {
+    stopWatchingInput();
+    for (const [type, listener] of failureListeners) {
       globalThis.removeEventListener(type, listener as EventListener, { capture: true });
     }
   };

@@ -29,11 +29,12 @@ describe('useSupersedingBuild', () => {
   });
 
   it('should follow the build the server names, a rollback included', async () => {
-    const { buildId, recordLiveBuild, useSupersedingBuild } = await load();
+    const { buildId, queryLiveBuild, useSupersedingBuild } = await load();
     const { result } = renderHook(() => useSupersedingBuild());
+    vi.stubGlobal('fetch', async () => Response.json({ buildId: buildId - 1 }));
 
-    act(() => {
-      recordLiveBuild(buildId - 1);
+    await act(async () => {
+      await queryLiveBuild();
     });
 
     expect(result.current).toStrictEqual({ supersedingBuildId: buildId - 1, isRolledBack: true });

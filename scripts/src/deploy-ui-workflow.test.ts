@@ -11,7 +11,9 @@ const root = resolve(import.meta.dirname, '../..');
 type Inputs = Record<string, { type?: string; default?: unknown; required?: boolean }>;
 const workflow = load(readFileSync(join(root, '.github/workflows/deploy-ui.yml'), 'utf8')) as {
   on: { workflow_call: { inputs: Inputs }; workflow_dispatch: { inputs: Inputs } };
-  jobs: { deploy: { steps: Step[] } };
+  jobs: {
+    deploy: { steps: Step[]; concurrency?: { group?: string; 'cancel-in-progress'?: boolean } };
+  };
 };
 const validation = workflow.jobs.deploy.steps.find((step) => step.id === 'posthog');
 if (!validation?.run) {
@@ -201,5 +203,13 @@ describe('UI asset retention escape hatch', () => {
       /skip_asset_retention:\n\s+description: .+\n\s+required: false\n\s+type: boolean\n\s+default: false/u,
     );
     expect(production).toContain('-f skip_asset_retention=true');
+  });
+});
+
+describe('UI deploy serialization', () => {
+  it('should run one deploy per environment at a time, so each reads the index of the deploy that is live', () => {
+    // The retention script runs inside `netlify deploy`'s build in this job, before it publishes.
+    expect(workflow.jobs.deploy.concurrency?.group).toMatch(/^deploy-ui-\$\{\{ inputs\.environment \}\}$/u);
+    expect(workflow.jobs.deploy.concurrency?.['cancel-in-progress']).toBe(false);
   });
 });

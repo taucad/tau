@@ -228,4 +228,24 @@ describe('installStaleBuildRecovery', () => {
     expect(skew.isReloadOffered()).toBe(true);
     expect(reportUiError).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['after the first input', 'input'],
+    ['once the auto-reload window has passed', 'window'],
+  ])('should stop listening for input %s', async (_label, trigger) => {
+    vi.useFakeTimers();
+    const { installStaleBuildRecovery, autoReloadWindow } = await load();
+    const removed = vi.spyOn(globalThis, 'removeEventListener');
+    uninstall = installStaleBuildRecovery();
+
+    if (trigger === 'input') {
+      globalThis.dispatchEvent(new Event('keydown'));
+    } else {
+      vi.advanceTimersByTime(autoReloadWindow);
+    }
+
+    const inputTypes = ['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'];
+    expect(removed.mock.calls.map(([type]) => type).toSorted()).toStrictEqual(inputTypes.toSorted());
+    vi.useRealTimers();
+  });
 });

@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
 import { createBeforeSend } from '#lib/sentry.lib.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import { createStaleBuildRecovery, isStaleModuleError, staleBuildReloadKey } from '#lib/stale-build-recovery.js';
+import {
+  autoReloadBudget,
+  createStaleBuildRecovery,
+  isStaleModuleError,
+  preloadFollowUpDelay,
+  staleBuildReloadKey,
+} from '#lib/stale-build-recovery.js';
 import type { LiveBuildSource } from '#lib/stale-build-recovery.js';
 
 /** In-memory `sessionStorage` stand-in. */
@@ -27,7 +33,9 @@ const ownBuildId = 1_792_726_000_000;
 const deployedBuildId = 1_792_730_113_029;
 const guardFor = (from: number, to: number): string => `${String(from)}>${String(to)}`;
 
-type SetupOptions = Partial<Omit<Parameters<typeof createStaleBuildRecovery>[0], 'liveBuild'>> & {
+type SetupOptions = Partial<Omit<Parameters<typeof createStaleBuildRecovery>[0], 'liveBuild' | 'storage'>> & {
+  /** Per-tab storage shared across page loads, or one that throws; a fresh one by default. */
+  readonly storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
   /** What the server answers each question (`/health/build`), as `build-skew` would ask it. */
   readonly fetchServerBuildId?: () => Promise<number | undefined>;
 };
@@ -37,9 +45,9 @@ type SetupOptions = Partial<Omit<Parameters<typeof createStaleBuildRecovery>[0],
  * answer (the confirmation rule is `build-skew`'s own, tested there). `confirmLive` is the server
  * naming this build after the confirmations.
  */
-const createLiveBuild = (fetchServerBuildId: () => Promise<number | undefined>) => {
+const createLiveBuild = (fetchServerBuildId: () => Promise<number | undefined>, own = ownBuildId) => {
   let verdict: ServerVerdict = 'unknown';
-  let replacing = ownBuildId;
+  let replacing = own;
   const listeners = new Set<() => void>();
   /** Bumped when the server names this build, so an answer asked before it is dropped, as `build-skew` does. */
   let version = 0;
@@ -47,7 +55,7 @@ const createLiveBuild = (fetchServerBuildId: () => Promise<number | undefined>) 
     if (answer === undefined) {
       return;
     }
-    const next: ServerVerdict = answer === ownBuildId ? 'live' : 'replaced';
+    const next: ServerVerdict = answer === own ? 'live' : 'replaced';
     if (next === 'replaced') {
       replacing = answer;
     }
@@ -79,22 +87,23 @@ const createLiveBuild = (fetchServerBuildId: () => Promise<number | undefined>) 
     source,
     confirmLive: () => {
       version += 1;
-      apply(ownBuildId);
+      apply(own);
     },
   };
 };
 
 const setup = ({ fetchServerBuildId: answers, ...overrides }: SetupOptions = {}) => {
+  // The returned storage is the fresh one; a test that passes its own keeps its own handle.
   const storage = createStorage();
   const reload = vi.fn();
   const onSuperseded = vi.fn();
   const onGenuineFailure = vi.fn();
   const fetchServerBuildId = vi.fn(answers ?? (async (): Promise<number | undefined> => deployedBuildId));
-  const liveBuild = createLiveBuild(fetchServerBuildId);
+  const liveBuild = createLiveBuild(fetchServerBuildId, overrides.buildId ?? ownBuildId);
   const recovery = createStaleBuildRecovery({
     buildId: ownBuildId,
     liveBuild: liveBuild.source,
-    storage,
+    storage: overrides.storage ?? storage,
     reload,
     onSuperseded,
     onGenuineFailure,
@@ -469,21 +478,48 @@ describe('createStaleBuildRecovery', () => {
       expect(onSuperseded).not.toHaveBeenCalled();
     });
 
-    it('should report a genuine failure a global listener saw first once a boundary catches it', async () => {
+    it("should report a genuine failure Vite's preloader saw first to Sentry once a boundary catches it", async () => {
+      vi.useFakeTimers();
       const { recovery, onGenuineFailure } = setup({ fetchServerBuildId: async () => ownBuildId });
       const error = failure();
-      await recovery.recover(error, 'global');
-      await Promise.resolve();
-      // Analytics hears it now; Sentry's own handler would hear a global failure, but Vite's preload event is not one.
+      await recovery.recover(error, 'preload');
+      await vi.advanceTimersByTimeAsync(0);
+      // Analytics hears it now; Sentry waits for the channel Vite rethrows the failure into.
       expect(onGenuineFailure.mock.calls).toStrictEqual([[error, { sentry: false, analytics: true }]]);
 
       await recovery.recover(error, 'boundary');
-      await recovery.recover(error, 'boundary');
+      await vi.advanceTimersByTimeAsync(preloadFollowUpDelay);
 
       expect(onGenuineFailure.mock.calls).toStrictEqual([
         [error, { sentry: false, analytics: true }],
         [error, { sentry: true, analytics: false }],
       ]);
+    });
+
+    it("should report a genuine failure only Vite's preloader saw to Sentry itself, exactly once", async () => {
+      vi.useFakeTimers();
+      const { recovery, onGenuineFailure } = setup({ fetchServerBuildId: async () => ownBuildId });
+      const error = failure();
+      await recovery.recover(error, 'preload');
+
+      await vi.advanceTimersByTimeAsync(preloadFollowUpDelay * 3);
+
+      expect(onGenuineFailure.mock.calls).toStrictEqual([
+        [error, { sentry: false, analytics: true }],
+        [error, { sentry: true, analytics: false }],
+      ]);
+    });
+
+    it('should leave Sentry a preload failure that then reached its unhandled-rejection handler', async () => {
+      vi.useFakeTimers();
+      const { recovery, onGenuineFailure } = setup({ fetchServerBuildId: async () => ownBuildId });
+      const error = failure();
+      await recovery.recover(error, 'preload');
+      await recovery.recover(error, 'global');
+
+      await vi.advanceTimersByTimeAsync(preloadFollowUpDelay * 3);
+
+      expect(onGenuineFailure.mock.calls).toStrictEqual([[error, { sentry: false, analytics: true }]]);
     });
 
     it('should keep a stalled reload explained, and offered, when the stall check gets no answer', async () => {
@@ -566,6 +602,33 @@ describe('createStaleBuildRecovery', () => {
 
       expect(onGenuineFailure.mock.calls).toStrictEqual([[error, { sentry: true, analytics: true }]]);
     });
+  });
+
+  it('should stop reloading on its own when a rolling deploy keeps moving the tab between two builds', async () => {
+    const storage = createStorage();
+    const reloads: number[] = [];
+    const outcomes: string[] = [];
+    let builds: readonly [number, number] = [ownBuildId, deployedBuildId];
+    for (let page = 0; page < 6; page += 1) {
+      const [own, served] = builds;
+      // oxlint-disable-next-line no-await-in-loop -- Each page load follows the previous one's reload.
+      const { recovery, reload } = setup({
+        buildId: own,
+        storage,
+        fetchServerBuildId: async () => served,
+        now: () => 1_000_000 + page * 1000,
+      });
+      recovery.confirmArrival();
+      // oxlint-disable-next-line no-await-in-loop -- Each page load follows the previous one's reload.
+      outcomes.push(await recovery.recover(failure()));
+      reloads.push(reload.mock.calls.length);
+      builds = [served, own];
+    }
+
+    expect(reloads.reduce((total, count) => total + count, 0)).toBe(autoReloadBudget);
+    expect(outcomes.slice(autoReloadBudget)).toStrictEqual(
+      Array.from({ length: 6 - autoReloadBudget }, () => 'superseded'),
+    );
   });
 
   it('should not retry a reload another page of this tab started, which may have looped', async () => {

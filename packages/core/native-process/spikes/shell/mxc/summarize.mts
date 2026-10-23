@@ -8,13 +8,18 @@
  * facts. The cc3b970b probe shipped a hand-written conclusion claiming "PSEC not present / E_NOTIMPL"
  * while its probeFacts said baseContainerApiPresent=TRUE; that hidden contradiction nearly misled the
  * evidence. The integrity gate below makes any such drift a hard red, for EVERY mxc receipt.
+ *
+ * A denial check (`*.crossDenied.*`, `*.read.cross`, `*.write.cross`, `*.neverGrantable`) that passes
+ * while the same session positive control failed is a VACUOUS pass (nothing ran to be refused) and is
+ * also an integrity violation. Checks with verdict `info` are evidence only: shown, never gated, never
+ * counted as a pass (e.g. orchestrator impersonation results, which are not a running child).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { outDir } from './mxc-lib.mts';
 
-type Check = { id: string; expect: string; observed: string; verdict: 'pass' | 'fail'; detail?: unknown };
+type Check = { id: string; expect: string; observed: string; verdict: 'pass' | 'fail' | 'info'; detail?: unknown };
 type Receipt = {
   kind?: string;
   verdict?: string;
@@ -30,7 +35,46 @@ const read = (name: string): Receipt | undefined => {
   return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Receipt) : undefined;
 };
 
-const icon = (v?: string): string => (v === 'pass' ? '✅' : '❌');
+const icon = (v?: string): string => (v === 'pass' ? '✅' : v === 'info' ? 'ℹ️ info (not gated)' : '❌');
+
+/**
+ * Vacuous-denial detection: a passing denial whose same-session positive control did not pass.
+ * `fallback.write.crossDenied.AtoB` pairs with `fallback.write.ownAllowed.A`; `isoSession.read.cross`
+ * pairs with every `isoSession.control.*`; `fallback.read.neverGrantable` pairs with both read controls.
+ */
+const vacuousDenials = (checks: Check[]): string[] => {
+  const byId = new Map(checks.map((c) => [c.id, c]));
+  const passed = (id: string): boolean => byId.get(id)?.verdict === 'pass';
+  const out: string[] = [];
+  for (const c of checks) {
+    if (c.verdict !== 'pass') {
+      continue;
+    }
+    const cross = /^(.*)\.crossDenied\.([A-Za-z0-9]+)to[A-Za-z0-9]+$/.exec(c.id);
+    if (cross) {
+      const control = `${cross[1]}.ownAllowed.${cross[2]}`;
+      if (!passed(control)) {
+        out.push(`\`${c.id}\` passes but its positive control \`${control}\` did not (vacuous denial)`);
+      }
+      continue;
+    }
+    if (/\.neverGrantable$/.test(c.id)) {
+      const prefix = c.id.replace(/\.neverGrantable$/, '');
+      const controls = checks.filter((x) => x.id.startsWith(`${prefix}.ownAllowed.`));
+      if (controls.length === 0 || controls.some((x) => x.verdict !== 'pass')) {
+        out.push(`\`${c.id}\` passes without passing own-root positive controls (vacuous denial)`);
+      }
+      continue;
+    }
+    if (/^isoSession\.(read|write)\.cross$/.test(c.id)) {
+      const controls = checks.filter((x) => x.id.startsWith('isoSession.control.'));
+      if (controls.length === 0 || controls.some((x) => x.verdict !== 'pass')) {
+        out.push(`\`${c.id}\` passes without passing positive controls (vacuous denial)`);
+      }
+    }
+  }
+  return out;
+};
 
 /**
  * Receipt integrity: the prose narrative MUST agree with the structured facts. Returns the list of
@@ -52,17 +96,35 @@ const integrityViolations = (label: string, r: Receipt): string[] => {
       }
     }
     if (Boolean(facts['baseContainerApiPresent']) === true) {
-      if (/e_notimpl|not present|not enabled|api[^.]*absent|psec[^.]*absent/i.test(concl) && !/live-exercise|is present/i.test(concl)) {
+      if (
+        /e_notimpl|not present|not enabled|api[^.]*absent|psec[^.]*absent/i.test(concl) &&
+        !/live-exercise|is present/i.test(concl)
+      ) {
         v.push('conclusion claims PSEC absent / E_NOTIMPL while `baseContainerApiPresent=true`');
       }
     }
   }
   // A create/close live-success must not coexist with an API-absent narrative.
-  if (r.psecCreateClose?.available === true && concl && /not present|e_notimpl/i.test(concl) && !/is present|live/i.test(concl)) {
+  if (
+    r.psecCreateClose?.available === true &&
+    concl &&
+    /not present|e_notimpl/i.test(concl) &&
+    !/is present|live/i.test(concl)
+  ) {
     v.push('conclusion claims API not present while `psecCreateClose.available=true`');
   }
   if (concl && /\bverdict\s*=\s*pass\b/i.test(concl) && r.verdict === 'fail') {
     v.push('conclusion says verdict=pass but receipt verdict=fail');
+  }
+  v.push(...vacuousDenials(r.checks ?? []));
+  // A conclusion claiming an isolation is proven must agree with the gated checks.
+  if (
+    concl &&
+    /\b(write|read)IsolationProven=true\b/.test(concl) &&
+    r.verdict !== 'pass' &&
+    (r.checks ?? []).some((c) => /crossDenied/.test(c.id) && c.verdict !== 'pass')
+  ) {
+    v.push('conclusion says an isolation is proven while a crossDenied check did not pass');
   }
   return v.map((m) => `${label}: ${m}`);
 };
@@ -159,7 +221,10 @@ for (const row of rows) {
     gateFail = true;
     allViolations.push(...violations);
   }
-  lines.push(`### ${row.label}: ${icon(receipt.verdict)} ${receipt.verdict ?? 'unknown'}${violations.length ? ' · ⚠️ INTEGRITY' : ''}`, '');
+  lines.push(
+    `### ${row.label}: ${icon(receipt.verdict)} ${receipt.verdict ?? 'unknown'}${violations.length ? ' · ⚠️ INTEGRITY' : ''}`,
+    '',
+  );
   if (receipt.conclusion) {
     lines.push(`> ${receipt.conclusion}`, '');
   }

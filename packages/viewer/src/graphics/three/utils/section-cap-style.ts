@@ -19,9 +19,13 @@ export const colorToComponents = (hex: number): readonly [number, number, number
   return [scratchColor.r, scratchColor.g, scratchColor.b];
 };
 
-export const stripeAxisForAngle = (stripeAngle: number): readonly [number, number] => [
-  Math.sin(stripeAngle),
-  Math.cos(stripeAngle),
+/**
+ * The plane-coordinate axis the stripes are measured along. Its length is the inverse of the spacing scale, so a part
+ * hatched at a share of the cap spacing draws its lines that much closer, at the same share of the line width.
+ */
+export const stripeAxisForAngle = (stripeAngle: number, spacingScale = 1): readonly [number, number] => [
+  Math.sin(stripeAngle) / spacingScale,
+  Math.cos(stripeAngle) / spacingScale,
 ];
 
 export const colorsForSectionCapTint = (
@@ -49,6 +53,8 @@ export const resolveSectionCapStyle = (options: {
   stripeFrequency: number;
   stripeWidth: number;
   stripeAngle?: number;
+  /** The part's spacing as a share of `stripeFrequency`. Defaults to 1. */
+  stripeSpacingScale?: number;
 }): Readonly<{
   normalBaseColor: readonly [number, number, number];
   normalStripeColor: readonly [number, number, number];
@@ -69,7 +75,7 @@ export const resolveSectionCapStyle = (options: {
     normalStripeColor: colorToComponents(normalColors.stripeColor),
     overlapBaseColor: colorToComponents(sectionCapOverlapBaseHex),
     overlapStripeColor: colorToComponents(sectionCapOverlapStripeHex),
-    normalStripeAxis: stripeAxisForAngle(stripeAppearance.stripeAngle),
+    normalStripeAxis: stripeAxisForAngle(stripeAppearance.stripeAngle, options.stripeSpacingScale),
     overlapStripeAxis: stripeAxisForAngle(stripeAppearance.stripeAngle + Math.PI / 2),
   };
 };

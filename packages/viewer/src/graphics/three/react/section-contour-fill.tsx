@@ -21,6 +21,7 @@ import { createSectionLoopCaps } from '#graphics/three/utils/section-loop-caps.j
 import type { SectionLoopCapFace, SectionLoopCapSource } from '#graphics/three/utils/section-loop-caps.js';
 import { createSectionOpenBackFaces } from '#graphics/three/utils/section-open-back-faces.js';
 import { assignSectionCapStripeAnglesForSources } from '#graphics/three/utils/section-cap-stripe-angles.js';
+import type { SectionCapHatch } from '#graphics/three/utils/section-cap-stripe-angles.js';
 import { createSectionStencilCaps, resolveSectionExitHalfSpaces } from '#graphics/three/utils/section-stencil-caps.js';
 import type { SectionStencilCapSource } from '#graphics/three/utils/section-stencil-caps.js';
 import {
@@ -174,8 +175,11 @@ export function SectionContourFills({
   const awaitedTreesRef = React.useRef(new Set<Promise<unknown>>());
   /** The sources of the committed cut list, which the caps draw until another list commits. */
   const committedRecordsRef = React.useRef<readonly SectionSourceRecord[]>([]);
-  /** Each part's hatch angle, assigned once per set of sources so that moving a cut never re-hatches a part. */
-  const stripeAnglesRef = React.useRef<Readonly<{ sourceIdentity: string; byOwnerKey: Map<string, number> }>>({
+  /**
+   * Each part's hatch, assigned once per set of sources so that moving a cut never re-hatches a part; emphasis changes
+   * only the tint, so a highlighted part keeps its hatch.
+   */
+  const hatchesRef = React.useRef<Readonly<{ sourceIdentity: string; byOwnerKey: Map<string, SectionCapHatch> }>>({
     sourceIdentity: '',
     byOwnerKey: new Map(),
   });
@@ -280,8 +284,8 @@ export function SectionContourFills({
         cutSet,
       });
       committedRecordsRef.current = records;
-      if (stripeAnglesRef.current.sourceIdentity !== sourceIdentity) {
-        stripeAnglesRef.current = { sourceIdentity, byOwnerKey: assignSectionCapStripeAnglesForSources(records) };
+      if (hatchesRef.current.sourceIdentity !== sourceIdentity) {
+        hatchesRef.current = { sourceIdentity, byOwnerKey: assignSectionCapStripeAnglesForSources(records) };
       }
       const perLoop = records.filter(({ grade }) => grade === 'per-loop');
       loopCaps.retain(new Set(perLoop.map(({ key }) => key)));
@@ -333,7 +337,7 @@ export function SectionContourFills({
         ownerKey: record.ownerKey,
         meshes: record.meshes,
         tintHex: mixModelEmphasisTint(record.baseTintHex, emphasis),
-        stripeAngle: stripeAnglesRef.current.byOwnerKey.get(record.ownerKey),
+        hatch: hatchesRef.current.byOwnerKey.get(record.ownerKey),
         edgeHex: resolveSectionCapOutlineColor(emphasis, edgeColor),
         loops,
       };

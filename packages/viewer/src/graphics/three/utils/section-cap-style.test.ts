@@ -79,4 +79,15 @@ describe('resolveSectionCapStyle', () => {
     expect(style(0, Math.PI / 6).normalStripeAxis).toEqual([Math.sin(Math.PI / 6), Math.cos(Math.PI / 6)]);
     expect(style(0).normalStripeAxis).toEqual([Math.SQRT1_2, Math.SQRT1_2].map((value) => expect.closeTo(value)));
   });
+
+  it('should draw a part at a share of the cap spacing by lengthening its stripe axis', () => {
+    const { normalStripeAxis } = resolveSectionCapStyle({
+      tintHex: 0,
+      stripeFrequency: 2,
+      stripeWidth: 0.1,
+      stripeAngle: Math.PI / 2,
+      stripeSpacingScale: 0.5,
+    });
+    expect(normalStripeAxis).toEqual([2, expect.closeTo(0)]);
+  });
 });

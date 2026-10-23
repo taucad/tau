@@ -60,7 +60,7 @@ The CAD `execution` field is a discriminated union for `tau`, `acp`, or `paseo`.
 
 Validate the relationship between `agent.profile`, `admission`, and `execution` at the request-envelope boundary. Do not infer placement from a model name, URL, feature flag, or legacy server graph.
 
-A chat owns its intent; each device owns its placement. A turn's execution names the host the sending device placed it on, but a chat's persisted `activeExecution` keeps only a portable host (a paired device id): `origin`, `desktop` and `loopback:` ids are dropped on write and read as local placement on every device, and a device's non-default choice lives in its composer record. An external-agent execution keeps its host; a device that cannot reach it refuses the turn with a typed reason instead of moving the chat.
+A chat owns its intent; each device owns its placement. A turn's execution names the host the sending device placed it on, but a chat's persisted `activeExecution` keeps only a portable host (a paired device id): `origin`, `desktop` and `loopback:` ids are dropped on write and read as local placement on every device, and a device's non-default choice lives in its composer record. An external-agent execution keeps its host; a device that knows it cannot reach it refuses the turn at once with a typed reason instead of moving the chat, and the composer offers Tau as an explicit choice. A chat's `activeKernel` this runtime cannot execute stays on the chat; the device runs its own kernel and the composer says which.
 
 ### 7. Use the browser placement transport for CAD
 

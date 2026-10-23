@@ -10,7 +10,7 @@ import type { StripedMaterialProperties } from '#graphics/three/materials/stripe
 /* oxlint-disable-next-line no-barrel-files/no-barrel-files -- façade consumers resolve the type here */
 export type { StripedMaterialProperties } from '#graphics/three/materials/striped-material.types.js';
 
-/** The stripe spacing and width of a cap material, in plane-local render units. */
+/** The stripe spacing of a cap material, in plane-local render units, and its line width, in device pixels. */
 export type StripedCapStripes = Readonly<{ stripeFrequency: number; stripeWidth: number }>;
 
 /*
@@ -53,10 +53,16 @@ varying vec2 vCapStripeAxis;
 void main() {
   #include <clipping_planes_fragment>
   #include <logdepthbuf_fragment>
-  float pattern = mod(dot(vSurfacePos, vCapStripeAxis), uStripeFrequency);
-  float aa = fwidth(pattern) * 1.5;
-  float stripeMask = smoothstep(uStripeWidth - aa, uStripeWidth + aa, pattern);
-  gl_FragColor = vec4(mix(vCapStripeColor, vCapBaseColor, stripeMask), 1.0);
+  // Lines a constant width in device pixels, centred on multiples of the model-space spacing and box-filtered over one
+  // pixel; where the spacing nears a few pixels the lines fade to their average coverage instead of aliasing.
+  float coordinate = dot(vSurfacePos, vCapStripeAxis);
+  float pixel = max(fwidth(coordinate), 1e-6);
+  float halfSpacing = 0.5 * uStripeFrequency;
+  float lineDistance = abs(mod(coordinate + halfSpacing, uStripeFrequency) - halfSpacing) / pixel;
+  float lineMask = clamp(0.5 * uStripeWidth + 0.5 - lineDistance, 0.0, 1.0) * min(uStripeWidth, 1.0);
+  float periodPixels = uStripeFrequency / pixel;
+  lineMask = mix(min(uStripeWidth / periodPixels, 1.0), lineMask, smoothstep(2.0, 4.0, periodPixels));
+  gl_FragColor = vec4(mix(vCapBaseColor, vCapStripeColor, lineMask), 1.0);
   #include <colorspace_fragment>
 }`;
 

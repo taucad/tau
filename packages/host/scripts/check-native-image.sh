@@ -75,7 +75,7 @@ if tau inspect -- prepare --inspect --json; then
   picogk=$(node -e 'const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const c=r.closures.find((x)=>x.package==="@taucad/picogk");console.log(c?.state)' "$evidence/inspect.out")
   [[ "$build123d" == ready ]] && verdict=pass
 fi
-check 'prepare --inspect under --network none' "$verdict" "build123d=${build123d:-?} picogk=${picogk:-?} (PicoGK ships darwin-arm64 only)"
+check 'prepare --inspect under --network none' "$verdict" "build123d=${build123d:-?} picogk=${picogk:-?}"
 
 verdict=fail
 tau prepare -- prepare build123d --json && grep -q '"status":"ready"' "$evidence/prepare.out" && verdict=pass

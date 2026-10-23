@@ -28,7 +28,7 @@ describe('section cap stripes', () => {
     for (const chunk of ['#include <clipping_planes_fragment>', '#include <logdepthbuf_fragment>']) {
       expect(material.fragmentShader.split(chunk)).toHaveLength(2);
     }
-    expect(material.fragmentShader).toContain('fwidth(pattern)');
+    expect(material.fragmentShader).toContain('fwidth(coordinate)');
     expect(material.uniforms['uStripeFrequency']!.value).toBe(3);
   });
 

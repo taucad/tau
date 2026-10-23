@@ -1,0 +1,110 @@
+name: 'Netlify staging router'
+description: >-
+  Serves a staging site's custom domain from its `staging` alias deploy. Publishes,
+  when missing or outdated, a production deploy whose edge function forwards every
+  request to the alias, then clears the site's CDN cache and checks the custom domain
+  serves the build the alias serves.
+
+# Netlify bills 15 credits for each production deploy and nothing for a draft
+# (`--alias`) deploy. Staging therefore publishes every build to the `staging` alias
+# (`https://staging--<site>.netlify.app`) and keeps one production deploy per site:
+# this router. A custom domain always serves the site's production deploy, and DNS
+# cannot select an alias because Netlify picks the deploy from the Host header, so the
+# router's edge function (`router.ts`) fetches each request from the alias. A
+# `_redirects` 200 proxy would skip the alias's own edge functions (observed
+# 2026-10-23: taucad.dev served the app at `/` instead of marketing). The router is
+# republished only when its version, target or public host changes; once in place a
+# staging deploy costs no credits.
+#
+# The router adds `X-Tau-Public-Host` to each request so code behind it can name the
+# domain the visitor used (`apps/ui/netlify/edge-functions/marketing.ts`), and moves
+# redirects to the alias onto that domain. Every run purges the site's CDN cache.
+#
+# If the domain does not serve the alias's build after a router publish, the step
+# restores the production deploy that was published before it (a rollback costs no
+# credits) and fails.
+
+inputs:
+  site-id:
+    description: 'Netlify site UUID'
+    required: true
+  site-name:
+    description: 'Netlify site name, the `<name>` of `<name>.netlify.app`'
+    required: true
+  public-host:
+    description: 'Custom domain the router serves, e.g. `taucad.dev`'
+    required: true
+  verify-path:
+    description: 'Path whose HTML must reference the same `/assets/` files on the domain and the alias'
+    required: false
+    default: '/'
+  verify-cookie:
+    description: 'Cookie header sent with the verification requests'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Route the custom domain to the staging alias
+      shell: bash
+      env:
+        SITE_ID: ${{ inputs.site-id }}
+        SITE_NAME: ${{ inputs.site-name }}
+        PUBLIC_HOST: ${{ inputs.public-host }}
+        VERIFY_PATH: ${{ inputs.verify-path }}
+        VERIFY_COOKIE: ${{ inputs.verify-cookie }}
+      run: |
+        set -euo pipefail
+        netlify="$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify"
+        target="https://staging--$SITE_NAME.netlify.app"
+        expected=$(jq -cn --arg target "$target" --arg host "$PUBLIC_HOST" '{version: 2, target: $target, host: $host}')
+        current=$(curl --silent --fail --max-time 30 "https://$SITE_NAME.netlify.app/__tau-staging-router" || true)
+
+        previous=''
+        if [ "$current" != "$expected" ]; then
+          site=$("$netlify" api getSite --data "{\"site_id\": \"$SITE_ID\"}")
+          previous=$(jq -r '.published_deploy.id // empty' <<< "$site")
+          # The CLI applies the site's UI base directory (`apps/ui`, `apps/docs`) under the
+          # repository root and drops the site when that directory is missing, so the router
+          # lives at the same base inside a repository of its own.
+          root="$RUNNER_TEMP/staging-router-$SITE_NAME"
+          router="$root/$(jq -r '.build_settings.base // ""' <<< "$site")"
+          rm -rf "$root" && mkdir -p "$router" && git init --quiet "$root"
+          mkdir -p "$router/netlify/edge-functions"
+          printf '[build]\npublish = "."\n' > "$router/netlify.toml"
+          printf '%s\n' "$expected" > "$router/router.json"
+          sed -e "s|__TAU_ROUTER_TARGET__|$target|" -e "s|__TAU_ROUTER_PUBLIC_HOST__|$PUBLIC_HOST|" \
+            "$GITHUB_ACTION_PATH/router.ts" > "$router/netlify/edge-functions/router.ts"
+          echo "Publishing the staging router (one production deploy) for $PUBLIC_HOST -> $target"
+          (cd "$router" && "$netlify" deploy --prod --no-build --dir . --site "$SITE_ID" \
+            --message "Staging router: $PUBLIC_HOST -> $target")
+        fi
+
+        "$netlify" api purgeCache --data "{\"body\": {\"site_id\": \"$SITE_ID\"}}" > /dev/null
+
+        assets() {
+          curl --silent --fail --max-time 60 ${VERIFY_COOKIE:+--cookie "$VERIFY_COOKIE"} "$1$VERIFY_PATH" |
+            grep -o '/assets/[^"'"'"' )>]*' | sort -u || true
+        }
+        expected_assets=$(assets "$target")
+        if [ -z "$expected_assets" ]; then
+          echo "::error::$target$VERIFY_PATH references no /assets/ files"
+          exit 1
+        fi
+        for attempt in 1 2 3 4 5 6 7 8 9 10; do
+          if [ "$(assets "https://$PUBLIC_HOST")" = "$expected_assets" ]; then
+            echo "https://$PUBLIC_HOST serves the staging alias's build."
+            exit 0
+          fi
+          echo "Attempt $attempt: https://$PUBLIC_HOST does not serve the alias's build yet."
+          sleep 15
+        done
+
+        if [ -n "$previous" ]; then
+          echo "::error::https://$PUBLIC_HOST does not serve $target after the router publish; restoring deploy $previous."
+          "$netlify" api restoreSiteDeploy --data "{\"site_id\": \"$SITE_ID\", \"deploy_id\": \"$previous\"}" > /dev/null
+        else
+          echo "::error::https://$PUBLIC_HOST does not serve the build at $target."
+        fi
+        exit 1

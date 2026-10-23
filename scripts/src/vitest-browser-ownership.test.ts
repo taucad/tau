@@ -185,7 +185,6 @@ describe('Vitest Browser test-runner ownership', () => {
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
     // The docs deployment gate installs Chromium on the Netlify builder unless one is supplied.
     // The SSR browser gate and its README install the pinned Chromium used by production audits and Lighthouse.
-    // The staging billing harness workflow installs Chromium for the hosted Checkout its rows pay.
     // The pkg.pr.new consumer leg, the publish workflow's release gate and the publish dry-run spike install Chromium
     // for check-pack-install's browser checks.
     // The S31 and S32 native-dependency spikes install the three engines they measure.
@@ -193,7 +192,6 @@ describe('Vitest Browser test-runner ownership', () => {
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
-        '.github/workflows/billing-staging-e2e.yml',
         '.github/workflows/ci.yml',
         '.github/workflows/e2e-nightly.yml',
         '.github/workflows/preview-packages.yml',

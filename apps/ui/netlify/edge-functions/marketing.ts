@@ -90,13 +90,29 @@ export function rewriteLocation(location: string, upstream: URL, requestUrl: URL
   return new URL(`${target.pathname}${target.search}${target.hash}`, requestUrl.origin).toString();
 }
 
+/**
+ * The URL the visitor requested. Staging serves its custom domain through a router deploy that proxies every
+ * request to the `staging--<site>.netlify.app` alias (`.github/actions/netlify-staging-router`), so this function
+ * sees the alias hostname there; the router names the visitor's domain in `X-Tau-Public-Host`. The header is
+ * honoured only on a `netlify.app` hostname, which is how the router reaches the alias, never on a custom domain.
+ */
+export function publicRequestUrl(request: Request): URL {
+  const url = new URL(request.url);
+  const publicHost = request.headers.get('x-tau-public-host');
+  if (publicHost && url.hostname.endsWith('.netlify.app') && /^[a-z\d.-]+$/u.test(publicHost)) {
+    url.protocol = 'https:';
+    url.host = publicHost;
+  }
+  return url;
+}
+
 function readSiteVariable(name: string): string | undefined {
   const runtime = Reflect.get(globalThis, 'Netlify') as NetlifyRuntime | undefined;
   return runtime?.env.get(name);
 }
 
 export default async function marketing(request: Request, context: EdgeContext): Promise<Response> {
-  const requestUrl = new URL(request.url);
+  const requestUrl = publicRequestUrl(request);
   const origin = readSiteVariable('MARKETING_ORIGIN');
   // Keep app crawl exclusions authoritative; advertise marketing only when routing is enabled.
   if (requestUrl.pathname === '/robots.txt') {

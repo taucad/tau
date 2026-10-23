@@ -153,6 +153,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // The UI asset-integrity gate (ruling X31) serves the built client, tampers a WASM byte and times the loader in
       // a module worker in three engines, which Browser Mode cannot host.
       'apps/ui/scripts/check-asset-integrity.mts',
+      // The S3 renderer comparison (D18) drives a dev-only Electron fixture served through Tau's app protocol to measure
+      // paint, GPU loss and Orca receipts, which Browser Mode cannot host; it is dispatch-only and ships nothing.
+      'apps/ui/scripts/s3-renderer/run.mts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       // Production SSR audits own isolated no-JavaScript contexts and graphics failure injection.

@@ -8,6 +8,7 @@ import { projectToManifest, projectManifestSchemaUrl } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { cookieName } from '#constants/cookie.constants.js';
+import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
@@ -204,7 +205,7 @@ const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
   cloudListing: {
     isFailed: false,
     isFetching: false,
-    current: [] as Array<{ id: string; name: string; role: 'owner' | 'write' | 'read'; updatedAt?: number }>,
+    current: [] as CloudProject[],
   },
   mockOpenCloudProject: vi.fn(async () => undefined),
 }));
@@ -254,6 +255,10 @@ describe('ProjectLibrary', () => {
     mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
     mockTrashedProjects = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json(cloudListing.current)),
+    );
     cloudListing.current = [];
     cloudListing.isFailed = false;
     cloudListing.isFetching = false;
@@ -334,6 +339,37 @@ describe('ProjectLibrary', () => {
       expect(cloudOnly).toHaveTextContent('Tau Cloud');
       expect(cloudOnly).not.toHaveTextContent('Backed up on');
       expect(within(cloudOnly).getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+    });
+
+    it.each(['grid', 'table'])('should carry pending cloud rows in %s without any Open action', (viewMode) => {
+      mockCookieValues = { [cookieName.projectViewMode]: viewMode };
+      cloudListing.current = [
+        {
+          id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+          name: 'Gearbox Alpha',
+          role: 'owner',
+          cloudState: 'deleting',
+          canDeleteCloud: false,
+        },
+        {
+          id: 'proj_ddddddddddddddddddddd',
+          name: 'Hinge Delta',
+          role: 'owner',
+          cloudState: 'deleting',
+          canDeleteCloud: false,
+        },
+      ];
+      renderLibrary();
+      expect(screen.queryByRole('link', { name: 'Open Gearbox Alpha' })).not.toBeInTheDocument();
+      if (viewMode === 'grid') {
+        expect(screen.getByRole('button', { name: 'Open Gearbox Alpha' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeDisabled();
+      } else {
+        expect(screen.getByRole('button', { name: 'Deleting from Tau Cloud… Hinge Delta' })).toBeDisabled();
+      }
+      expect(screen.getByRole('button', { name: 'Actions for Hinge Delta' })).toBeInTheDocument();
+      expect(screen.getAllByText('Deleting from Tau Cloud…').length).toBeGreaterThanOrEqual(2);
+      expect(mockOpenCloudProject).not.toHaveBeenCalled();
     });
 
     it('should never offer a project in this device’s Trash as Tau Cloud’s alone', () => {

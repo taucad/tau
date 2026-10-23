@@ -86,7 +86,7 @@ import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
-import { useCloudProjects } from '#hooks/use-cloud-projects.js';
+import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
 import {
@@ -241,6 +241,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
   const handleOpenCloudProject = useCallback(
     async (entry: CloudProject): Promise<void> => {
       try {
+        await assertCloudProjectActive(entry.id);
         await openCloudProject(entry);
       } catch (error) {
         toast.error(`Could not open ${entry.name} from Tau Cloud`, {
@@ -988,7 +989,7 @@ function UnifiedProjectList({
 }
 
 type ProjectLibraryCardProps = {
-  readonly project: ProjectListItem & { readonly onCloud?: boolean };
+  readonly project: ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
@@ -1022,8 +1023,9 @@ export function ProjectLibraryCard({
 
   return (
     <ProjectCard
-      to={projectUrl}
-      isOpening={isOpening}
+      {...(project.cloud?.cloudState === 'deleting'
+        ? { onOpen: () => undefined, isOpening: true }
+        : { to: projectUrl, isOpening })}
       linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${project.name}`}
       className={cn('flex flex-col', isSelected && 'ring-3 ring-primary')}
     >
@@ -1081,7 +1083,11 @@ export function ProjectLibraryCard({
               >
                 <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
-                {project.onCloud === true ? <OnTauCloudMark /> : undefined}
+                {project.cloud?.cloudState === 'deleting' ? (
+                  <span role='status'>Deleting from Tau Cloud…</span>
+                ) : project.onCloud === true ? (
+                  <OnTauCloudMark />
+                ) : undefined}
               </div>
             </TooltipTrigger>
             <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>

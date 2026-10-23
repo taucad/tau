@@ -2,7 +2,7 @@
 import { createProjectFixture } from '#lib/project.fixture.js';
 import { mock } from 'vitest-mock-extended';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 
@@ -103,6 +103,17 @@ describe('toLibraryRows', () => {
     }
   });
 
+  it('should carry the explicit cloud association into a local Trash row without changing local metadata', () => {
+    const original = structuredClone(trashed);
+    const association: CloudProject = { ...cloud[1]!, canDeleteCloud: true, cloudState: 'active' };
+    const rows = toLibraryRows({ projects: [trashed], held: [trashed], cloud: [association], includeCloudOnly: false });
+    expect(rows).toEqual([{ ...trashed, onCloud: true, cloud: association }]);
+    expect(trashed).toEqual(original);
+    expect(toLibraryRows({ projects: [trashed], held: [trashed], cloud: [], includeCloudOnly: false })).toEqual([
+      original,
+    ]);
+  });
+
   it('should sort a Tau-Cloud-only row by its update time', () => {
     const rows = toLibraryRows({ projects: [], held: [], cloud, includeCloudOnly: true });
 
@@ -123,8 +134,12 @@ describe('toLibraryRows', () => {
 });
 
 describe('useMaterializeCloudProjects', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json([...cloud, newcomer]));
     localStorage.clear();
     materializeOnSignIn.set(undefined);
     auth.current = 'authed';
@@ -409,5 +424,97 @@ describe('useMaterializeCloudProjects', () => {
     });
     await settle();
     expect(mockCreateProject).toHaveBeenCalledOnce();
+  });
+});
+
+describe('deletion during materialization', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+    materializeOnSignIn.set({ kind: 'home' });
+    auth.current = 'authed';
+    mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
+  });
+  it('should never create a listed pending project', async () => {
+    renderHook(() => {
+      useMaterializeCloudProjects({
+        cloud: [{ ...newcomer, cloudState: 'deleting' }],
+        isSettled: true,
+        isFetching: false,
+        held: [],
+        isLoading: false,
+      });
+    });
+    await settle();
+    expect(mockCreateProject).not.toHaveBeenCalled();
+  });
+  it('should recheck a stale listing before creating a shell', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json([]));
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    renderHook(() => {
+      useMaterializeCloudProjects({
+        cloud: [newcomer],
+        isSettled: true,
+        isFetching: false,
+        held: [],
+        isLoading: false,
+      });
+    });
+    await waitFor(() => {
+      expect(diagnostic).toHaveBeenCalled();
+    });
+    expect(mockCreateProject).not.toHaveBeenCalled();
+    expect(tauCloudIntent.get(newcomer.id)).toBeUndefined();
+  });
+  it('should retain a shell and edits but clear its cloud intent if deletion wins during creation', async () => {
+    const creation = Promise.withResolvers<{ id: string }>();
+    mockCreateProject.mockReturnValue(creation.promise);
+    const request = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json([newcomer]));
+    renderHook(() => {
+      useMaterializeCloudProjects({
+        cloud: [newcomer],
+        isSettled: true,
+        isFetching: false,
+        held: [],
+        isLoading: false,
+      });
+    });
+    await waitFor(() => {
+      expect(mockCreateProject).toHaveBeenCalledOnce();
+    });
+    expect(tauCloudIntent.get(newcomer.id)).toBe('open');
+    localStorage.setItem('dirty-edit', 'retained');
+    request.mockImplementation(async () => Response.json([]));
+    creation.resolve({ id: newcomer.id });
+    await waitFor(() => {
+      expect(tauCloudIntent.get(newcomer.id)).toBeUndefined();
+    });
+    expect(localStorage.getItem('dirty-edit')).toBe('retained');
+    expect(materializedCloudProjects.has(newcomer.id)).toBe(true);
+  });
+  it('should keep first-open recovery owed when post-creation revalidation loses the network', async () => {
+    const creation = Promise.withResolvers<{ id: string }>();
+    mockCreateProject.mockReturnValue(creation.promise);
+    const request = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json([newcomer]));
+    renderHook(() => {
+      useMaterializeCloudProjects({
+        cloud: [newcomer],
+        isSettled: true,
+        isFetching: false,
+        held: [],
+        isLoading: false,
+      });
+    });
+    await waitFor(() => {
+      expect(mockCreateProject).toHaveBeenCalledOnce();
+    });
+    request.mockRejectedValue(new TypeError('offline'));
+    creation.resolve({ id: newcomer.id });
+    await settle();
+    expect(tauCloudIntent.get(newcomer.id)).toBe('open');
+    expect(materializedCloudProjects.has(newcomer.id)).toBe(true);
   });
 });

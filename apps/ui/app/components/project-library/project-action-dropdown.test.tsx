@@ -155,4 +155,28 @@ describe('ProjectActionDropdown', () => {
     await user.click(screen.getByRole('menuitem', { name: 'Delete permanently' }));
     expect(actions.handlePermanentlyDelete).toHaveBeenCalledWith(trashedProject);
   });
+  it.each([undefined, 5])(
+    'should keep cloud deletion separate from local actions with Trash timestamp %s',
+    async (deletedAt) => {
+      const user = userEvent.setup();
+      const actions = createActions();
+      render(
+        <ProjectActionDropdown
+          project={{
+            ...project,
+            deletedAt,
+            cloud: { id: project.id, name: project.name, role: 'owner', canDeleteCloud: true, cloudState: 'active' },
+          }}
+          actions={actions}
+        />,
+      );
+      await user.click(screen.getByRole('button', { name: 'Actions for Readable Project' }));
+      expect(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('menuitem', { name: deletedAt === undefined ? 'Move to Trash' : 'Restore' }),
+      ).toBeInTheDocument();
+      expect(actions.handleDelete).not.toHaveBeenCalled();
+      expect(actions.handlePermanentlyDelete).not.toHaveBeenCalled();
+    },
+  );
 });

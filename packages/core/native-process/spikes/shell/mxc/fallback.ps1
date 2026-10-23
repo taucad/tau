@@ -42,6 +42,11 @@
 #   (C) S2 interactive PTY IN-CONTAINER: s2-bash-pty.mts (Node + node-pty as the ConPTY master) runs
 #       Git for Windows Bash in a pseudoconsole as the non-admin sandbox user inside the write-
 #       restricted token and drives tty/resize/ctrl-c/job-control/UTF-8 from the terminal stream.
+#   (R) CODEX-SHAPED SPAWN: sandbox-user workloads (pwsh start probe, pwsh write/read proofs, S2) go
+#       through token-runner.cs, the Codex elevated runner shape: CreateProcessWithLogonW starts the
+#       runner as the sandbox user, which mints the token from its own logon and CreateProcessAsUserW's
+#       the workload with STARTUPINFOEX (handle list + kill-on-close job), stdio files, the error mode
+#       and the private desktop. The receipt check fallback.codexParity records each difference.
 #   (D) WORKLOAD NON-ELEVATED: the restricted token is LUA-filtered (not elevated) and the sandbox
 #       accounts are not members of Administrators.
 #
@@ -126,6 +131,25 @@ public static class TauRestrict {
   [DllImport("userenv.dll", SetLastError=true)] static extern bool CreateEnvironmentBlock(out IntPtr env, IntPtr tok, bool inherit);
   [DllImport("userenv.dll", SetLastError=true)] static extern bool DestroyEnvironmentBlock(IntPtr env);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr h, uint code);
+  [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool CreateProcessWithLogonW(string user, string domain, IntPtr pw, uint logonFlags, string app, StringBuilder cmd, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+  [DllImport("kernel32.dll")] static extern uint SetErrorMode(uint mode);
+
+  // Codex elevated/runner_client.rs spawn_runner_transport: start the (unrestricted) runner AS the
+  // sandbox user with CreateProcessWithLogonW, logon flags 0 (no profile), CREATE_NO_WINDOW |
+  // CREATE_UNICODE_ENVIRONMENT, a null environment (built by seclogon from the user), a null desktop,
+  // STARTF_FORCEOFFFEEDBACK, and SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX) around
+  // the call. The runner then mints the restricted token from its own logon (token-runner.cs).
+  public static IntPtr LaunchRunner(string user, SecureString pw, string app, string cmdline, string cwd, out int err) {
+    err = 0; IntPtr pwPtr = Marshal.SecureStringToGlobalAllocUnicode(pw);
+    uint prev = SetErrorMode(0x1 | 0x2);
+    try {
+      STARTUPINFO si = new STARTUPINFO(); si.cb = Marshal.SizeOf(typeof(STARTUPINFO)); si.dwFlags = 0x80; // STARTF_FORCEOFFFEEDBACK
+      PROCESS_INFORMATION pi;
+      bool ok = CreateProcessWithLogonW(user, ".", pwPtr, 0, app, new StringBuilder(cmdline), CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, IntPtr.Zero, cwd, ref si, out pi);
+      if (!ok) { err = Marshal.GetLastWin32Error(); return IntPtr.Zero; }
+      CloseHandle(pi.hThread); return pi.hProcess;
+    } finally { SetErrorMode(prev); Marshal.ZeroFreeGlobalAllocUnicode(pwPtr); }
+  }
 
   // token.rs:42-44: DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED == 0x01 | 0x04 | 0x08.
   public const uint FLAGS = 0x1u | 0x4u | 0x8u; // 0x0D
@@ -442,6 +466,32 @@ try {
 } catch { $stageNote += "node-pty-copy-failed: $($_.Exception.Message)" }
 $canaryChild = Join-Path $scriptsDir 'cross-session-canary.ps1'
 $s2Driver = Join-Path $scriptsDir 's2-bash-pty.mts'
+# The Codex-shaped runner (token-runner.cs), compiled with the in-box .NET Framework csc into the
+# readable staging dir. It runs as the sandbox user (unrestricted) and spawns the workload in the token.
+$runnerExe = Join-Path $scriptsDir 'token-runner.exe'
+$runnerBuild = 'not-attempted'
+try {
+  $csc = @((Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'), (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  if ($csc) { $runnerBuild = "csc=$csc " + ((& $csc /nologo /target:exe /platform:anycpu "/out:$runnerExe" (Join-Path $PSScriptRoot 'token-runner.cs') 2>&1 | Out-String).Trim()) }
+  else { $runnerBuild = 'csc not found' }
+} catch { $runnerBuild = "build threw: $($_.Exception.Message)" }
+Add-Check 'fallback.runner.built' 'the Codex-shaped token runner (token-runner.cs) compiles with the in-box .NET Framework csc' "exists=$(Test-Path -LiteralPath $runnerExe) $runnerBuild" (Test-Path -LiteralPath $runnerExe) $null
+
+# Source diff against openai/codex codex-rs/windows-sandbox-rs (read as reference, not vendored). Each
+# entry: what Codex does, what this harness did before (runs up to 40034047709), and the state now.
+Add-Info 'fallback.codexParity' 'token creation and spawn compared with Codex (token.rs, process.rs, elevated/runner_client.rs, desktop.rs, utils/pty win/job.rs)' 'see detail' ([ordered]@{
+  defaultDacl = 'same: logon SID GENERIC_ALL + OWNER RIGHTS READ_CONTROL (token.rs set_default_dacl)'
+  restrictingSids = 'same set (cap..., logon, Everyone; token.rs:483-509), but the logon SID came from a LogonUser interactive logon; now it is the runner''s own CreateProcessWithLogonW logon, as in Codex'
+  spawnApi = 'Codex: unrestricted runner as the sandbox user (CreateProcessWithLogonW, logon flags 0) then CreateProcessAsUserW from the runner''s own token. Before: CreateProcessWithTokenW straight from the admin. Now: Codex shape'
+  handleInheritance = 'Codex: bInheritHandles=TRUE, STARTF_USESTDHANDLES, PROC_THREAD_ATTRIBUTE_HANDLE_LIST of the stdio handles. Before: no stdio handles, no attribute list. Now: Codex shape (stdin NUL, stdout/stderr files)'
+  jobObject = 'Codex: job via PROC_THREAD_ATTRIBUTE_JOB_LIST with KILL_ON_JOB_CLOSE, no JOB_OBJECT_UILIMIT_* flags. Before: no job. Now: same; a timeout terminates the whole job tree'
+  desktop = 'both set lpDesktop to an explicit WinSta0\private desktop; Codex DACL owner ALL + sandbox user participant, ours additionally lists the session cap SID and adds a revoked window-station ACE'
+  creationFlags = 'Codex: CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW. Before: CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT (no STARTUPINFOEX). Now: Codex flags'
+  environment = 'Codex: explicit block from the runner env map, profile not loaded. Before: LoadUserProfile + CreateEnvironmentBlock. Now: runner env (seclogon-built, no profile) plus TEMP/TMP overrides'
+  errorMode = 'Codex: SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX) around the runner launch, inherited by children. Before: none, so a hard-error box on the invisible private desktop would block silently. Now: same as Codex (orchestrator and runner)'
+  startupFeedback = 'Codex: STARTF_FORCEOFFFEEDBACK on the runner launch. Before: none. Now: same'
+  nullDevice = 'Codex: allow_null_device grants the cap SID RWX on \\.\NUL. Not ported: the child gets an already-open NUL stdin handle from the runner'
+})
 
 $ADMINS = 'S-1-5-32-544'
 $EVERYONE_RW = 'S-1-1-0'
@@ -552,6 +602,90 @@ if ($apiOk -and $null -ne $shellPath) {
       $sandboxB = New-TauSandboxUser -Name 'tausbxb'
       $createdUsers = @($sandboxA.Name, $sandboxB.Name)
       Add-Check 'fallback.sandbox.provisioned' 'two non-admin sandbox users provisioned with elevation (admin phase); workload runs as them, never elevated' "A=$($sandboxA.Name)/$($sandboxA.Sid) B=$($sandboxB.Name)/$($sandboxB.Sid)" (($sandboxA.IsAdministrator -eq $false) -and ($sandboxB.IsAdministrator -eq $false)) @{ a = $sandboxA.Sid; b = $sandboxB.Sid }
+    }
+
+    # ================= (R) Codex-shaped runner: start probes for pwsh, node and bash in the token ======
+    # Each probe: the runner starts as the sandbox user (unrestricted), mints the WRITE_RESTRICTED token
+    # from its own logon and spawns the program in it with stdio files, a kill-on-close job and the
+    # private desktop. The program prints a marker plus its user name; the orchestrator reads the files.
+    $runDir = New-SessionTemp 'sess-temp-runner'
+    function Start-TokenRunner([string]$name, $user, [string]$cap, [string]$desktop, [string]$cmd, [hashtable]$envMap, [int]$timeoutMs, [string]$cwd) {
+      $base = Join-Path $script:runDir $name
+      $lines = @("cap=$cap", "desktop=$desktop", "cwd=$cwd", "stdout=$base.out.txt", "stderr=$base.err.txt", "report=$base.report.json", "timeoutMs=$timeoutMs", "cmd=$cmd")
+      foreach ($k in $envMap.Keys) { $lines += "env.$k=$($envMap[$k])" }
+      Set-Content -LiteralPath "$base.spec" -Value $lines
+      $e = 0
+      $h = [TauRestrict]::LaunchRunner($user.Name, $user.Secure, $script:runnerExe, ('"' + $script:runnerExe + '" "' + $base + '.spec"'), $env:SystemRoot, [ref]$e)
+      [pscustomobject]@{ Name = $name; Base = $base; Handle = $h; LaunchErr = $e; TimeoutMs = $timeoutMs }
+    }
+    function Wait-TokenRunner($r) {
+      $x = $null
+      if ($r.Handle -ne [IntPtr]::Zero) { $x = [TauRestrict]::Wait($r.Handle, $r.TimeoutMs + 30000); if ($x -eq -1) { [TauRestrict]::Kill($r.Handle) }; [TauRestrict]::Close($r.Handle) }
+      $rep = $null
+      try { $rep = Get-Content -LiteralPath "$($r.Base).report.json" -Raw | ConvertFrom-Json } catch {}
+      $rd = { param($f) if (Test-Path -LiteralPath $f) { "$(Get-Content -LiteralPath $f -Raw)".Trim() } else { '<absent>' } }
+      [pscustomobject]@{ Name = $r.Name; LaunchErr = $r.LaunchErr; RunnerExit = $x; RunnerStarted = (Test-Path -LiteralPath "$($r.Base).report.json.started"); Report = $rep; Stdout = (& $rd "$($r.Base).out.txt"); Stderr = (& $rd "$($r.Base).err.txt") }
+    }
+    function Get-RunnerSummary($w) {
+      $rp = $w.Report
+      "launchErr=$($w.LaunchErr) runnerStarted=$($w.RunnerStarted) runnerExit=$($w.RunnerExit) createOk=$($rp.createOk) createErr=$($rp.createErr) childExit=$($rp.exit) timedOut=$($rp.timedOut) job=$($rp.jobMode) tokenElevated=$($rp.tokenElevated) stdout=$($w.Stdout) stderr=$($w.Stderr) notes=$($rp.notes)"
+    }
+    $envCodex = @{ TEMP = $runDir; TMP = $runDir }
+    $envRedir = @{ TEMP = $runDir; TMP = $runDir; LOCALAPPDATA = $runDir; APPDATA = $runDir; HOME = $runDir; PSModuleAnalysisCachePath = "$runDir\pmac.clixml"; POWERSHELL_TELEMETRY_OPTOUT = '1'; POWERSHELL_UPDATECHECK = 'Off' }
+    $pwshExe = if (Test-Path -LiteralPath $pwsh7) { $pwsh7 } else { $shellPath }
+    $bashExe = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+    $chosenEnv = @{}
+    if ($mode -eq 'elevated' -and (Test-Path -LiteralPath $runnerExe)) {
+      $gP = Grant-WinstaSession 'probe' @($sandboxA.Sid, $cap1)
+      $deskP = New-SessionDesktop 'probe' @($sandboxA.Sid, $cap1)
+      $probeDefs = [ordered]@{
+        pwsh = @{ marker = 'PWSH_OK'; cmd = '"' + $pwshExe + '" -NoLogo -NoProfile -NonInteractive -Command "[Console]::Out.WriteLine(''PWSH_OK '' + $PSVersionTable.PSVersion + '' '' + [Environment]::UserName)"' }
+        node = @{ marker = 'NODE_OK'; cmd = '"' + $s2Node + '" -e "console.log(''NODE_OK'', process.version, require(''os'').userInfo().username)"' }
+        bash = @{ marker = 'BASH_OK'; cmd = '"' + $bashExe + '" --noprofile --norc -c "echo BASH_OK $BASH_VERSION $(whoami)"' }
+      }
+      foreach ($exe in $probeDefs.Keys) {
+        foreach ($variant in @('codex', 'redirected')) {
+          if ($chosenEnv.ContainsKey($exe)) { break }
+          $envMap = if ($variant -eq 'codex') { $envCodex } else { $envRedir }
+          $w = Wait-TokenRunner (Start-TokenRunner "probe-$exe-$variant" $sandboxA $cap1 $deskP $probeDefs[$exe].cmd $envMap 30000 $runDir)
+          $ok = ($w.Report.createOk -eq $true) -and ($w.Report.timedOut -eq $false) -and ($w.Report.exit -eq 0) -and ($w.Stdout -like "*$($probeDefs[$exe].marker)*") -and ($w.Stdout -match [regex]::Escape($sandboxA.Name))
+          if ($ok) { $chosenEnv[$exe] = $envMap }
+          Add-Info "fallback.runner.startProbe.$exe.$variant" "$exe starts as the sandbox user inside the write-restricted token via the Codex-shaped runner and prints its marker + user (30s bound; env variant $variant)" "started=$ok $(Get-RunnerSummary $w)" @{ cmd = $probeDefs[$exe].cmd; env = @($envMap.Keys) }
+        }
+      }
+      $pwshVariant = if ($chosenEnv.ContainsKey('pwsh')) { if ($chosenEnv['pwsh'] -eq $envCodex) { 'codex' } else { 'redirected' } } else { 'none' }
+      Add-Check 'fallback.pwsh.startsInToken' 'D14: PowerShell starts as the non-admin sandbox user inside the write-restricted token (marker + sandbox user name read from its stdout file)' "pwsh=$($chosenEnv.ContainsKey('pwsh')) envVariant=$pwshVariant node=$($chosenEnv.ContainsKey('node')) bash=$($chosenEnv.ContainsKey('bash')) desk=$deskP winsta=$gP" $chosenEnv.ContainsKey('pwsh') $null
+
+      # ---- (A') WRITE ISOLATION with pwsh as the workload, as the sandbox user via the runner ----
+      # Both children run as tausbxa and differ ONLY by the cap SID; each root grants tausbxa + its own cap.
+      $sw1 = New-Dir (Join-Path $drop 'sw-root-1')
+      $sw2 = New-Dir (Join-Path $drop 'sw-root-2')
+      Set-ExplicitAcl $sw1 @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap1; Rights = 'Modify'; Type = 'Allow' })
+      Set-ExplicitAcl $sw2 @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap2; Rights = 'Modify'; Type = 'Allow' })
+      if ($chosenEnv.ContainsKey('pwsh')) {
+        $gSW = Grant-WinstaSession 'pwsh-write-B' @($cap2)
+        $deskSW1 = New-SessionDesktop 'pwsh-write-A' @($sandboxA.Sid, $cap1)
+        $deskSW2 = New-SessionDesktop 'pwsh-write-B' @($sandboxA.Sid, $cap2)
+        $cmdSA = '"' + $pwshExe + '" -NoLogo -NoProfile -NonInteractive -File "' + $canaryChild + '" -SessionId SA -OwnRoot "' + $sw1 + '" -OtherRoot "' + $sw2 + '"'
+        $cmdSB = '"' + $pwshExe + '" -NoLogo -NoProfile -NonInteractive -File "' + $canaryChild + '" -SessionId SB -OwnRoot "' + $sw2 + '" -OtherRoot "' + $sw1 + '"'
+        $rSA = Start-TokenRunner 'pwsh-write-A' $sandboxA $cap1 $deskSW1 $cmdSA $chosenEnv['pwsh'] 90000 $runDir
+        $rSB = Start-TokenRunner 'pwsh-write-B' $sandboxA $cap2 $deskSW2 $cmdSB $chosenEnv['pwsh'] 90000 $runDir
+        $wSA = Wait-TokenRunner $rSA; $wSB = Wait-TokenRunner $rSB
+        $ranSA = ($wSA.Report.createOk -eq $true) -and ($wSA.Report.exit -eq 0); $ranSB = ($wSB.Report.createOk -eq $true) -and ($wSB.Report.exit -eq 0)
+        $repSA = $null; $repSB = $null
+        try { $repSA = Get-Content -LiteralPath (Join-Path $sw1 'child-report-SA.json') -Raw | ConvertFrom-Json } catch {}
+        try { $repSB = Get-Content -LiteralPath (Join-Path $sw2 'child-report-SB.json') -Raw | ConvertFrom-Json } catch {}
+        $attrSA = "$($repSA.user)" -like "*\$($sandboxA.Name)"; $attrSB = "$($repSB.user)" -like "*\$($sandboxA.Name)"
+        $exSA = $ranSA -and $attrSA -and (Test-Path -LiteralPath (Join-Path $sw1 'canary-from-SA.txt'))
+        $exSB = $ranSB -and $attrSB -and (Test-Path -LiteralPath (Join-Path $sw2 'canary-from-SB.txt'))
+        $xSA = Test-Path -LiteralPath (Join-Path $sw2 'canary-from-SA.txt'); $xSB = Test-Path -LiteralPath (Join-Path $sw1 'canary-from-SB.txt')
+        Add-Check 'fallback.write.pwsh.ownAllowed.A' 'pwsh child A (tausbxa, cap1 token, via the runner) writes its own root (positive control; identity from its report)' "ran=$ranSA user=$($repSA.user) canary=$exSA | $(Get-RunnerSummary $wSA)" $exSA $null
+        Add-Check 'fallback.write.pwsh.ownAllowed.B' 'pwsh child B (tausbxa, cap2 token, via the runner) writes its own root (positive control; identity from its report)' "ran=$ranSB user=$($repSB.user) canary=$exSB | $(Get-RunnerSummary $wSB)" $exSB $null
+        Add-Check 'fallback.write.pwsh.crossDenied.AtoB' 'the same running pwsh child A is refused writing root B (external canary absent; same account, only the cap SID differs)' $(if ($exSA) { "exercised; sw2/canary-from-SA.txt exists=$xSA; child says $($repSA.crossWrite)" } else { 'NOT EXERCISED' }) ($exSA -and -not $xSA) $null
+        Add-Check 'fallback.write.pwsh.crossDenied.BtoA' 'the same running pwsh child B is refused writing root A (external canary absent; same account, only the cap SID differs)' $(if ($exSB) { "exercised; sw1/canary-from-SB.txt exists=$xSB; child says $($repSB.crossWrite)" } else { 'NOT EXERCISED' }) ($exSB -and -not $xSB) $null
+      } else {
+        Add-Check 'fallback.write.pwsh.ownAllowed.A' 'pwsh write-isolation children as the sandbox user via the runner' 'NOT EXERCISED (pwsh did not start in the token)' $false $null
+      }
     }
     # WRITE ISOLATION: both concurrent children run under the orchestrator OWN token restricted-of-
     # caller (LUA-filtered, NON-elevated). They differ ONLY by their random S-1-5-21 write-restricting
@@ -690,6 +824,31 @@ if ($apiOk -and $null -ne $shellPath) {
       $iBO = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fB); $iBX = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fA)
       $iAN = [TauRestrict]::TryReadAs($sandboxA.Name, $sandboxA.Secure, $fN); $iBN = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fN)
       Add-Info 'fallback.read.impersonation' 'orchestrator impersonation of each sandbox user opening the secrets (0=allowed, 5=denied); informational, not gated, not a proof' "AOwn=$iAO ACross=$iAX BOwn=$iBO BCross=$iBX ANever=$iAN BNever=$iBN" $null
+
+      # ---- (B') the same read proof with pwsh as the workload, each sandbox user via the runner ----
+      if ($chosenEnv.ContainsKey('pwsh')) {
+        $cmdPA = '"' + $pwshExe + '" -NoLogo -NoProfile -NonInteractive -File "' + $canaryChild + '" -SessionId PA -OwnSecret "' + $fA + '" -OtherSecret "' + $fB + '" -NeverSecret "' + $fN + '" -OutDir "' + $outA + '"'
+        $cmdPB = '"' + $pwshExe + '" -NoLogo -NoProfile -NonInteractive -File "' + $canaryChild + '" -SessionId PB -OwnSecret "' + $fB + '" -OtherSecret "' + $fA + '" -NeverSecret "' + $fN + '" -OutDir "' + $outB + '"'
+        $rPA = Start-TokenRunner 'pwsh-read-A' $sandboxA $cap1 $deskRA $cmdPA $chosenEnv['pwsh'] 90000 $runDir
+        $rPB = Start-TokenRunner 'pwsh-read-B' $sandboxB $cap2 $deskRB $cmdPB $chosenEnv['pwsh'] 90000 $runDir
+        $wPA = Wait-TokenRunner $rPA; $wPB = Wait-TokenRunner $rPB
+        $repPA = $null; $repPB = $null
+        try { $repPA = Get-Content -LiteralPath (Join-Path $outA 'child-report-PA.json') -Raw | ConvertFrom-Json } catch {}
+        try { $repPB = Get-Content -LiteralPath (Join-Path $outB 'child-report-PB.json') -Raw | ConvertFrom-Json } catch {}
+        $ranPA = ($wPA.Report.createOk -eq $true) -and ($wPA.Report.exit -eq 0) -and ("$($repPA.user)" -like "*\$($sandboxA.Name)")
+        $ranPB = ($wPB.Report.createOk -eq $true) -and ($wPB.Report.exit -eq 0) -and ("$($repPB.user)" -like "*\$($sandboxB.Name)")
+        $pcPA = $ranPA -and ((& $readOf (Join-Path $outA 'own-read-PA.txt')) -eq $secretA)
+        $pcPB = $ranPB -and ((& $readOf (Join-Path $outB 'own-read-PB.txt')) -eq $secretB)
+        $lPAB = (& $readOf (Join-Path $outA 'exfil-PA.txt')).Contains($secretB); $lPBA = (& $readOf (Join-Path $outB 'exfil-PB.txt')).Contains($secretA)
+        $lPN = (& $readOf (Join-Path $outA 'exfil-never-PA.txt')).Contains($secretN) -or (& $readOf (Join-Path $outB 'exfil-never-PB.txt')).Contains($secretN)
+        Add-Check 'fallback.read.pwsh.ownAllowed.A' 'pwsh child A (tausbxa in its restricted token, via the runner) reads its own secret (positive control; external copy matches; identity from its report)' "ran=$ranPA user=$($repPA.user) ownCopyMatches=$pcPA | $(Get-RunnerSummary $wPA)" $pcPA $null
+        Add-Check 'fallback.read.pwsh.ownAllowed.B' 'pwsh child B (tausbxb in its restricted token, via the runner) reads its own secret (positive control; external copy matches; identity from its report)' "ran=$ranPB user=$($repPB.user) ownCopyMatches=$pcPB | $(Get-RunnerSummary $wPB)" $pcPB $null
+        Add-Check 'fallback.read.pwsh.crossDenied.AtoB' 'the same running pwsh child A is refused session B secret (absent from its exfil file)' $(if ($pcPA) { "exercised; leak=$lPAB; child says $($repPA.crossRead)" } else { 'NOT EXERCISED' }) ($pcPA -and -not $lPAB) $null
+        Add-Check 'fallback.read.pwsh.crossDenied.BtoA' 'the same running pwsh child B is refused session A secret (absent from its exfil file)' $(if ($pcPB) { "exercised; leak=$lPBA; child says $($repPB.crossRead)" } else { 'NOT EXERCISED' }) ($pcPB -and -not $lPBA) $null
+        Add-Check 'fallback.read.pwsh.neverGrantable' 'both running pwsh children are refused the never-grantable secret' $(if ($pcPA -and $pcPB) { "exercised; leak=$lPN; A says $($repPA.neverRead) B says $($repPB.neverRead)" } else { 'NOT EXERCISED' }) ($pcPA -and $pcPB -and -not $lPN) $null
+      } else {
+        Add-Check 'fallback.read.pwsh.ownAllowed.A' 'pwsh read-isolation children as the sandbox users via the runner' 'NOT EXERCISED (pwsh did not start in the token)' $false $null
+      }
     } else {
       Add-Check 'fallback.read.requiresElevated' 'cross-session READ denial requires the elevated per-account sandbox backend (distinct sandbox logons + deny-read ACEs); WRITE_RESTRICTED gates writes only' "mode=$mode (non-elevated)" $false $null
     }
@@ -707,48 +866,25 @@ if ($apiOk -and $null -ne $shellPath) {
     $bashExe = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
     $prereqS2 = "node=$(Test-Path -LiteralPath $s2Node) nodePty=$(Test-Path -LiteralPath $s2NodePty) bash=$(Test-Path -LiteralPath $bashExe) driver=$(Test-Path -LiteralPath $s2Driver)"
     Add-Check 'fallback.s2Pty.prereq' 'S2 driver staged readable for the sandbox user: node.exe, node-pty (ConPTY binding), Git for Windows bash.exe, s2-bash-pty.mts' $prereqS2 ($prereqS2 -notlike '*False*') @{ node = $s2Node; bash = $bashExe; stageNote = $stageNote }
-    # Driver stdio is redirected to files (stdin from NUL) so a stall on an absent console handle is
-    # ruled out and anything Node prints before the receipt is kept.
-    $cmdS2 = '"' + $cmdExe + '" /d /s /c "echo STARTED>"' + $tmpS2 + '\cmd-started-s2.txt" && "' + $s2Node + '" "' + $s2Driver + '" "' + $s2Out + '" "' + $bashExe + '" "' + $tmpS2 + '" < NUL > "' + $tmpS2 + '\driver-out.txt" 2> "' + $tmpS2 + '\driver-err.txt""'
-    # Separate in-token start probes (same user, token and desktop as the driver), each bounded at 30s,
-    # so a stall is attributed to node.exe or bash.exe themselves with their own stdout/stderr.
-    function Invoke-S2StartProbe([string]$name, [string]$inner) {
-      $o = Join-Path $tmpS2 "probe-$name"
-      $line = '"' + $cmdExe + '" /d /s /c "echo STARTED>"' + $o + '-started.txt" & ' + $inner + ' < NUL > "' + $o + '-out.txt" 2> "' + $o + '-err.txt" & echo done>"' + $o + '-done.txt""'
-      $e = 0
-      $h = if ($mode -eq 'elevated') { [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, $line, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$e) } else { [TauRestrict]::LaunchSelf($cmdExe, $line, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$e) }
-      $x = $null
-      if ($h -ne [IntPtr]::Zero) { $x = [TauRestrict]::Wait($h, 30000); if ($x -eq -1) { [TauRestrict]::Kill($h) }; [TauRestrict]::Close($h) }
-      $rd = { param($f) if (Test-Path -LiteralPath $f) { "$(Get-Content -LiteralPath $f -Raw)".Trim() } else { '<absent>' } }
-      $obs = "launch=$($h -ne [IntPtr]::Zero)(err=$e) exit=$x started=$(Test-Path -LiteralPath "$o-started.txt") done=$(Test-Path -LiteralPath "$o-done.txt") out=$(& $rd "$o-out.txt") err=$(& $rd "$o-err.txt")"
-      Add-Info "fallback.s2Pty.startProbe.$name" "$name starts as the sandbox user inside the write-restricted token and prints (bounded 30s; exit -1 = timed out and killed)" $obs @{ line = $line }
-    }
-    $errS2 = 0; $hS2 = [IntPtr]::Zero
-    $s2LaunchPath = 'self'
+    # The driver runs as the sandbox user inside the token through the Codex-shaped runner (stdio files,
+    # kill-on-close job, error mode, private desktop), with the env variant node started under.
     $expectUser = if ($mode -eq 'elevated') { $sandboxA.Name } else { $env:USERNAME }
-    if ($prereqS2 -notlike '*False*') {
-      if ($mode -eq 'elevated') {
-        $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
-        $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
-        Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
-        Invoke-S2StartProbe 'node' ('"' + $s2Node + '" -e "console.log(process.version, require(''os'').userInfo().username)"')
-        Invoke-S2StartProbe 'bash' ('"' + $bashExe + '" --noprofile --norc -c "whoami; echo $BASH_VERSION"')
-        $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
-        $noteS2 = [TauRestrict]::LastLaunchNote
-        $s2LaunchPath = if ($hS2 -eq [IntPtr]::Zero) { "asUser-failed(err=$errS2)" } else { 'asSandboxUser' }
-      } else {
-        $deskS2 = New-SessionDesktop 's2' @($cap1)
-        Invoke-S2StartProbe 'node' ('"' + $s2Node + '" -e "console.log(process.version, require(''os'').userInfo().username)"')
-        Invoke-S2StartProbe 'bash' ('"' + $bashExe + '" --noprofile --norc -c "whoami; echo $BASH_VERSION"')
-        $hS2 = [TauRestrict]::LaunchSelf($cmdExe, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
-      }
-      if ($hS2 -ne [IntPtr]::Zero) {
-        $exitS2 = [TauRestrict]::Wait($hS2, 180000); if ($exitS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2)
-        $cmdS2Started = Test-Path -LiteralPath (Join-Path $tmpS2 'cmd-started-s2.txt'); $driverStarted = Test-Path -LiteralPath (Join-Path $tmpS2 'driver-started.txt')
-        Add-Check 'fallback.s2Pty.exit' 'S2 driver exit code recorded (0 = all checks pass; -1 = timed out and killed)' "exit=$exitS2 cmdStarted=$cmdS2Started driverStarted=$driverStarted launch=$s2LaunchPath cmdLineLen=$($cmdS2.Length)" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2; driverStdout = $(if (Test-Path -LiteralPath "$tmpS2\driver-out.txt") { "$(Get-Content -LiteralPath "$tmpS2\driver-out.txt" -Raw)" } else { '<absent>' }); driverStderr = $(if (Test-Path -LiteralPath "$tmpS2\driver-err.txt") { "$(Get-Content -LiteralPath "$tmpS2\driver-err.txt" -Raw)" } else { '<absent>' }) }
-      } else {
-        Add-Check 'fallback.s2Pty.launch' 'S2 driver launched under the write-restricted sandbox token' "launch failed err=$errS2 path=$s2LaunchPath" $false $null
-      }
+    $s2LaunchPath = 'not-launched'
+    if (($prereqS2 -notlike '*False*') -and ($mode -eq 'elevated') -and (Test-Path -LiteralPath $runnerExe)) {
+      $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
+      $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
+      Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
+      $envS2 = @{}
+      $nodeEnv = if ($chosenEnv.ContainsKey('node')) { $chosenEnv['node'] } else { $envCodex }
+      foreach ($k in $nodeEnv.Keys) { $envS2[$k] = $nodeEnv[$k] }
+      $envS2['TEMP'] = $tmpS2; $envS2['TMP'] = $tmpS2
+      $cmdS2 = '"' + $s2Node + '" "' + $s2Driver + '" "' + $s2Out + '" "' + $bashExe + '" "' + $tmpS2 + '"'
+      $wS2 = Wait-TokenRunner (Start-TokenRunner 's2-driver' $sandboxA $cap1 $deskS2 $cmdS2 $envS2 180000 $tmpS2)
+      $s2LaunchPath = 'runner-asSandboxUser'
+      $driverStarted = Test-Path -LiteralPath (Join-Path $tmpS2 'driver-started.txt')
+      Add-Check 'fallback.s2Pty.exit' 'S2 driver (node, as the sandbox user in the token via the runner) exit code recorded (0 = all checks pass; timedOut = killed with its job)' "driverStarted=$driverStarted $(Get-RunnerSummary $wS2)" (($wS2.Report.createOk -eq $true) -and ($wS2.Report.exit -eq 0)) @{ launchPath = $s2LaunchPath }
+    } else {
+      Add-Check 'fallback.s2Pty.launch' 'S2 driver launched as the sandbox user under the write-restricted token via the runner' "prereq=$prereqS2 mode=$mode runner=$(Test-Path -LiteralPath $runnerExe)" $false $null
     }
     if (Test-Path -LiteralPath $s2Out) { try { Copy-Item -LiteralPath $s2Out -Destination $s2Final -Force } catch {} }
     if (Test-Path -LiteralPath $s2Final) {
@@ -772,7 +908,7 @@ if ($apiOk -and $null -ne $shellPath) {
         Add-Check 'fallback.s2Pty.inContainer' 'S2 driver receipt parseable' $_.Exception.Message $false $null
       }
     } else {
-      Add-Check 'fallback.s2Pty.inContainer' 'S2 driver receipt produced by the in-token child' 'no receipt from the in-token S2 driver' $false @{ launchErr = $errS2 }
+      Add-Check 'fallback.s2Pty.inContainer' 'S2 driver receipt produced by the in-token child' 'no receipt from the in-token S2 driver' $false @{ launchPath = $s2LaunchPath }
     }
   } catch {
     Add-Check 'fallback.orchestration' 'fallback orchestration completed without an unhandled error' $_.Exception.Message $false $null

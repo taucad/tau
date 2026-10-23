@@ -170,7 +170,7 @@ public static class TauRestrict {
     } catch (Exception) { return -99; }
   }
 
-  static STARTUPINFO NewSi() { STARTUPINFO si = new STARTUPINFO(); si.cb = Marshal.SizeOf(typeof(STARTUPINFO)); si.Desktop = "winsta0\\default"; return si; }
+  static STARTUPINFO NewSi() { STARTUPINFO si = new STARTUPINFO(); si.cb = Marshal.SizeOf(typeof(STARTUPINFO)); /* Desktop left null: inherit the parent desktop. Forcing winsta0\\default from the runner service session denies the restricted child its desktop and it dies in user32 init (0xC0000142). */ return si; }
 
   // Launch a write-restricted child from the caller OWN token (restricted-of-caller: no privilege
   // required, works non-elevated). The LUA_TOKEN flag filters it to a non-elevated token.
@@ -366,8 +366,10 @@ if ($apiOk -and $null -ne $shellPath) {
     $hB = [TauRestrict]::LaunchSelf($shellPath, $cmdB, $cap2, $logonSid, $env:SystemRoot, [ref]$errB)
     $launched = ($hA -ne [IntPtr]::Zero) -and ($hB -ne [IntPtr]::Zero)
     Add-Check 'fallback.concurrency' 'two sessions launched CONCURRENTLY under write-restricted tokens before either is awaited' "launchedA=$($hA -ne [IntPtr]::Zero)(err=$errA) launchedB=$($hB -ne [IntPtr]::Zero)(err=$errB)" $launched @{ errA = $errA; errB = $errB }
-    if ($hA -ne [IntPtr]::Zero) { [void][TauRestrict]::Wait($hA, 60000); [TauRestrict]::Close($hA) }
-    if ($hB -ne [IntPtr]::Zero) { [void][TauRestrict]::Wait($hB, 60000); [TauRestrict]::Close($hB) }
+    $exitA = $null; $exitB = $null
+    if ($hA -ne [IntPtr]::Zero) { $exitA = [TauRestrict]::Wait($hA, 60000); [TauRestrict]::Close($hA) }
+    if ($hB -ne [IntPtr]::Zero) { $exitB = [TauRestrict]::Wait($hB, 60000); [TauRestrict]::Close($hB) }
+    Add-Check 'fallback.children.exit' 'write-isolation children ran to completion (exit codes recorded; -1073741502 = 0xC0000142 DLL init failure)' "exitA=$exitA exitB=$exitB" (($exitA -eq 0) -and ($exitB -eq 0)) @{ exitA = $exitA; exitB = $exitB }
 
     if ($launched) {
       # External observation: which canary files actually materialized decides each claim.
@@ -445,7 +447,8 @@ if ($apiOk -and $null -ne $shellPath) {
       $hS2 = [TauRestrict]::LaunchSelf($shellPath, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
     }
     if ($hS2 -ne [IntPtr]::Zero) {
-      [void][TauRestrict]::Wait($hS2, 180000); [TauRestrict]::Close($hS2)
+      $exitS2 = [TauRestrict]::Wait($hS2, 180000); [TauRestrict]::Close($hS2)
+      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1073741502 = 0xC0000142 DLL init failure)' "exit=$exitS2 launch=$s2LaunchPath" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath }
     } else {
       Add-Check 'fallback.s2Pty.launch' 'S2 PTY child launched under the write-restricted sandbox token' "launch failed err=$errS2" $false $null
     }

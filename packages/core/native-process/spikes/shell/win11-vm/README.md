@@ -77,17 +77,17 @@ green without a real VM run (desktop-spike testing rule 6: an unavailable prereq
 
 ## Files
 
-| File | Role |
-| --- | --- |
-| `../../../../../.github/workflows/spike-w2-win11-vm.yml` | The workflow (triggers: `workflow_dispatch` + `pull_request`). |
-| `preflight-kvm.sh` | Fails the row if `/dev/kvm` is absent (recorded blocker, never a skip). |
-| `acquire-iso.sh` | Fetch + digest-verify the operator ISO, or record the image-unavailable blocker. |
-| `make-seed-iso.sh` | Build the `autounattend.xml` seed CD. |
-| `autounattend.xml` | Unattended Win11 install; stock security; built-in Administrator provisions. |
-| `provision.ps1` | (elevated, RID-500) Node + pinned Git Bash + `srt-win install`; creates `spikeuser`; `pnpm install`; arms the harness as `spikeuser`. |
-| `run-harness.ps1` | (standard `spikeuser`) runs the unmodified probe with `RUNNER_TEMP` cleared; drops receipts + `DONE`. |
-| `boot-vm.sh` | Host driver: QEMU/KVM + OVMF + swtpm + slirp-SMB; waits for `DONE`; collects receipts; fail-closed on timeout. |
-| `summarize-vm.sh` | Renders the WIN11 row into the step summary. |
+| File                                                     | Role                                                                                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `../../../../../.github/workflows/spike-w2-win11-vm.yml` | The workflow (triggers: `workflow_dispatch` + `pull_request`).                                                                        |
+| `preflight-kvm.sh`                                       | Fails the row if `/dev/kvm` is absent (recorded blocker, never a skip).                                                               |
+| `acquire-iso.sh`                                         | Fetch + digest-verify the operator ISO, or record the image-unavailable blocker.                                                      |
+| `make-seed-iso.sh`                                       | Build the `autounattend.xml` seed CD.                                                                                                 |
+| `autounattend.xml`                                       | Unattended Win11 install; stock security; built-in Administrator provisions.                                                          |
+| `provision.ps1`                                          | (elevated, RID-500) Node + pinned Git Bash + `srt-win install`; creates `spikeuser`; `pnpm install`; arms the harness as `spikeuser`. |
+| `run-harness.ps1`                                        | (standard `spikeuser`) runs the unmodified probe with `RUNNER_TEMP` cleared; drops receipts + `DONE`.                                 |
+| `boot-vm.sh`                                             | Host driver: QEMU/KVM + OVMF + swtpm + slirp-SMB; waits for `DONE`; collects receipts; fail-closed on timeout.                        |
+| `summarize-vm.sh`                                        | Renders the WIN11 row into the step summary.                                                                                          |
 
 ## Verification status
 

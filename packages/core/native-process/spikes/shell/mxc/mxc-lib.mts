@@ -135,10 +135,14 @@ export type MxcContainerRequest = {
     ingress?: { default?: 'allow' | 'deny'; hostLoopback?: 'allow' | 'deny' };
     runtimeConfig?: { networkProxy?: string };
   };
+  // MXC launches the in-container process from `process.env` VERBATIM when `inheritDefaultEnv` is
+  // false; a Windows process cannot start without SYSTEMROOT/LOCALAPPDATA, so a request that sets only
+  // a couple of custom vars fails with "missing the required variable(s): SYSTEMROOT, LOCALAPPDATA".
+  // inheritDefaultEnv=true layers our vars on top of the default user environment (the fix).
+  process?: { inheritDefaultEnv?: boolean; env?: Record<string, string> };
   timeoutMs?: number;
   containerName?: string;
   workingDirectory?: string;
-  environment?: Record<string, string>;
 };
 
 /**
@@ -343,7 +347,12 @@ export const requestFor = (
     // is nothing to proxy and the parse then succeeds.
     ...(proxyUrl ? { runtimeConfig: { networkProxy: proxyUrl } } : {}),
   },
-  environment: { TAU_SESSION: grant.id, TAU_PROXY_TOKEN: grant.proxy.token },
+  // inheritDefaultEnv=true so the container gets a launchable Windows environment (SYSTEMROOT,
+  // LOCALAPPDATA, …) with our session vars layered on top. Without it the base-container launch throws
+  // "missing the required variable(s): SYSTEMROOT, LOCALAPPDATA" and createClose/isolation never run,
+  // which is what masked the otherwise-present PSEC base-container API on windows-11-arm after the
+  // networkProxy parse error was fixed. Our vars go under process.env (the SDK's canonical location).
+  process: { inheritDefaultEnv: true, env: { TAU_SESSION: grant.id, TAU_PROXY_TOKEN: grant.proxy.token } },
   timeoutMs: 60_000,
 });
 

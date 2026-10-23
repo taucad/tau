@@ -99,7 +99,8 @@ public sealed partial class WorkerTests
             var tree = CSharpSyntaxTree.ParseText(SourceText.From(source, Encoding.UTF8), path: "main.cs");
             var fresh = CSharpCompilation.Create("TauUserModel", [tree], references, options);
             var derived = template.AddSyntaxTrees(tree);
-            Assert.Equal(Describe(fresh.GetDiagnostics()), Describe(derived.GetDiagnostics()));
+            // Method bodies bind concurrently, so even one compilation's diagnostic order varies run to run; compare the set.
+            Assert.Equal(Describe(fresh.GetDiagnostics()).Order(), Describe(derived.GetDiagnostics()).Order());
             var (freshEmit, freshBytes) = Emit(fresh);
             var (derivedEmit, derivedBytes) = Emit(derived);
             Assert.Equal(freshEmit.Success, derivedEmit.Success);

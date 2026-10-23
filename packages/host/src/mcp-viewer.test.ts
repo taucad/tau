@@ -203,6 +203,37 @@ describe('createLocalMcpViewer', () => {
     expect(syncedOf(await heldOther).show).toBeUndefined();
   });
 
+  it('should watch a shown source again when a page syncs after its runtime was released', async () => {
+    const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+    const card = {
+      pageId: 'card-source',
+      follow: false,
+      view: {
+        model: { id: model.id, title: model.title, path: model.path, sourceFile: model.sourceFile },
+        selected: [],
+        hidden: [],
+        isolated: [],
+        sectionActive: false,
+        measurementCount: 0,
+        composition: 'inline',
+        interactedAt: 1,
+      },
+    } as const;
+    const first = syncedOf(await viewer.sync({ ...card, version: 0, wait: false }, inline));
+    runtime.terminate();
+    runtime = scriptedRuntime({ render: (entryPath, count) => renderOf(entryPath, count) });
+
+    await viewer.sync({ ...card, version: first.version, wait: false }, inline);
+    await vi.waitFor(() => {
+      expect(runtime.documents).toHaveLength(1);
+    });
+    await runtime.edit('src/bracket.ts');
+    const synced = syncedOf(await viewer.sync({ ...card, version: first.version, wait: false }, inline));
+
+    expect(liveRuntime).toHaveBeenLastCalledWith(root);
+    expect(synced.show?.model).toMatchObject({ path: 'src/bracket.ts', sha256: sha(markedGlb(2)) });
+  });
+
   it('should answer a page following show_model a newer render of the source it was shown last', async () => {
     await viewer.show({ targetFile: 'src/bracket.ts' }, inline);
     const caughtUp = syncedOf(await viewer.sync({ pageId: 'tab', version: 0, follow: true, wait: false }, inline));

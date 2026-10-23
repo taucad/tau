@@ -487,6 +487,20 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
           },
         });
 
+  /**
+   * Watch a source again. A source that cannot open leaves the page on its last render.
+   *
+   * @param root - The project folder.
+   * @param entryPath - The source.
+   */
+  const reopen = async (root: string, entryPath: string): Promise<void> => {
+    try {
+      await entrySessions?.acquire({ root, entryPath });
+    } catch {
+      /* The next show reports why. */
+    }
+  };
+
   const startLoopback = async (): Promise<{ server: Server; origin: string }> => {
     const server = createServer((request, response) => {
       void handleLoopback(request, response);
@@ -728,6 +742,11 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       const scope =
         conversationOf(callOptions.meta) ??
         (input.toolCallId === undefined ? undefined : conversationByCall.get(input.toolCallId));
+      /* The runtime's idle release or the session limit ended the watch: a page still showing the source opens it
+       * again under the same key, so its next render reaches the page. */
+      if (entry?.kind === 'render' && entrySessions?.get(entry.session.key) === undefined) {
+        void reopen(entry.root, entry.session.entryPath);
+      }
       return sessions.sync(input, {
         scope,
         signal: callOptions.signal,

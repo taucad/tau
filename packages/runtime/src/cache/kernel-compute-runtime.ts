@@ -567,13 +567,8 @@ export const createComputeCapabilityHost = (input: {
       permitted: false,
       startedAt: undefined,
     };
-    // A newer result for the same action replaces a queued one that has not started.
-    const replaced = deferred.find(
-      (queued) => queued.task.actionDigest === task.actionDigest && queued !== running?.entry,
-    );
-    if (replaced) {
-      settleDeferred(replaced, 'dropped', 'replaced');
-    }
+    // Results of one action stay queued side by side: a repeated evaluation may reuse the first
+    // one's native handle and dispose its own, so either may be the one that can still encode.
     deferred.push(entry);
     const active = running?.entry;
     while (deferred.length > maxDeferredPublications) {
@@ -602,6 +597,14 @@ export const createComputeCapabilityHost = (input: {
         // oxlint-disable-next-line no-await-in-loop -- deferred publications run one at a time, in order.
         const outcome = await entry.task.run({ signal: controller.signal });
         settleDeferred(entry, outcome.status, outcome.status === 'skipped' ? outcome.reason : undefined);
+        if (outcome.status === 'stored') {
+          // oxlint-disable-next-line unicorn/no-useless-spread -- settleDeferred mutates the queue.
+          for (const queued of [...deferred]) {
+            if (queued.task.actionDigest === entry.task.actionDigest) {
+              settleDeferred(queued, 'dropped', 'duplicate');
+            }
+          }
+        }
       } catch (error) {
         if (!controller.signal.aborted) {
           settleDeferred(entry, 'skipped', error instanceof Error ? error.message : String(error));

@@ -752,6 +752,7 @@ describe('deferred whole-action publication (D1)', () => {
   const createDeferredHost = (options?: {
     readonly idle?: () => boolean;
     readonly encodeGate?: () => Promise<void>;
+    readonly unencodable?: string;
   }) => {
     const settled: Settled[] = [];
     const encoded: string[] = [];
@@ -759,6 +760,10 @@ describe('deferred whole-action publication (D1)', () => {
       ...textCodec,
       encode: async ({ value }) => {
         encoded.push(value);
+        if (value === options?.unencodable) {
+          // A native handle disposed before idle has no snapshot to take.
+          throw new Error('native handle disposed');
+        }
         await options?.encodeGate?.();
         return new TextEncoder().encode(value);
       },
@@ -770,12 +775,16 @@ describe('deferred whole-action publication (D1)', () => {
       onPublicationSettled: ({ actionDigest, status, reason }) =>
         settled.push({ actionDigest, status, ...(reason === undefined ? {} : { reason }) }),
     });
-    const evaluate = async (input: { readonly value: number; readonly signal?: AbortSignal }) =>
+    const evaluate = async (input: {
+      readonly value: number;
+      readonly signal?: AbortSignal;
+      readonly label?: string;
+    }) =>
       onCapability(host.capability(input.signal ?? signal)).evaluate({
         action: action(input.value),
         codec,
         policy: 'best-effort',
-        compute: async () => `brep-${input.value}`,
+        compute: async () => input.label ?? `brep-${input.value}`,
       });
     return { host, settled, encoded, evaluate };
   };
@@ -803,6 +812,28 @@ describe('deferred whole-action publication (D1)', () => {
     expect(encoded).toEqual(['brep-1']);
     await expect(evaluate({ value: 1 })).resolves.toMatchObject({ source: 'cache', value: 'brep-1' });
   });
+
+  // A repeated evaluation of the same build can reuse the first one's native handle and dispose
+  // its own, so whichever result still has a live handle must be able to publish.
+  it.each(['first', 'second'])(
+    'should keep every queued result of one action until one stores, when the %s cannot encode',
+    async (unencodable) => {
+      const { host, settled, encoded, evaluate } = createDeferredHost({ unencodable });
+      await evaluate({ value: 5, label: 'first' });
+      await evaluate({ value: 5, label: 'second' });
+
+      host.permitPublication();
+      await vi.waitFor(() => {
+        expect(settled.map(({ status }) => status)).toContain('stored');
+      });
+      await nextMacrotask();
+      expect(settled.filter(({ status }) => status === 'stored')).toHaveLength(1);
+      expect(encoded, 'a stored action is not encoded again').toEqual(
+        unencodable === 'first' ? ['first', 'second'] : ['first'],
+      );
+      await expect(evaluate({ value: 5 })).resolves.toMatchObject({ source: 'cache' });
+    },
+  );
 
   it('should never publish a result whose operation was cancelled before its delivery', async () => {
     const { host, settled, encoded, evaluate } = createDeferredHost();

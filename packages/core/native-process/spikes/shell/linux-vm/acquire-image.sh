@@ -53,16 +53,21 @@ if [[ -n "$IMAGE_SHA256" ]]; then
   fi
   echo "verify:  matches operator-pinned IMAGE_SHA256"
 else
-  # Trust-on-publish: verify against Ubuntu's SHA256SUMS from the same directory.
-  if curl -fsSL --retry 3 -o "$DROP/SHA256SUMS" "$sums_url" && grep -qi "  \*\?$base\$" "$DROP/SHA256SUMS"; then
-    if grep -qi "^$actual  \*\?$base\$" "$DROP/SHA256SUMS"; then
-      echo "verify:  matches Ubuntu SHA256SUMS ($sums_url)"
-    else
-      record_blocker "digest does not match Ubuntu SHA256SUMS for $base"
+  # Trust-on-publish: verify against the publisher's SHA256SUMS in the same directory. The checksum
+  # line is `<sha>  <name>` (text) or `<sha> *<name>` (binary) — whitespace and a leading `*` vary, so
+  # match the filename field with awk rather than a brittle fixed-space grep.
+  if curl -fsSL --retry 3 -o "$DROP/SHA256SUMS" "$sums_url"; then
+    want="$(awk -v f="$base" '$2 ~ ("^[*]?" f "$") {print $1}' "$DROP/SHA256SUMS" | head -1)"
+    if [[ -z "$want" ]]; then
+      record_blocker "SHA256SUMS at $sums_url has no entry for $base (set IMAGE_SHA256 to pin manually)"
+      exit 1
+    elif [[ "$want" != "$actual" ]]; then
+      record_blocker "digest does not match publisher SHA256SUMS for $base (want=$want got=$actual)"
       exit 1
     fi
+    echo "verify:  matches publisher SHA256SUMS ($sums_url)"
   else
-    record_blocker "could not fetch/parse SHA256SUMS from $sums_url (set IMAGE_SHA256 to pin manually)"
+    record_blocker "could not fetch SHA256SUMS from $sums_url (set IMAGE_SHA256 to pin manually)"
     exit 1
   fi
 fi

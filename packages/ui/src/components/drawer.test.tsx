@@ -45,10 +45,14 @@ const renderDrawer = (field: React.ReactNode): HTMLElement => {
 };
 
 describe('DrawerContent', () => {
-  it('should give list rows a 44px touch height and keep the caller className', () => {
+  it('should give list rows and their filter field a 44px touch height and keep the caller className', () => {
     const content = renderDrawer(undefined);
 
-    expect(content).toHaveClass('[&_[data-slot=command-item]]:min-h-10', 'custom-drawer');
+    expect(content).toHaveClass(
+      '[&_[data-slot=command-item]]:min-h-10',
+      '[&_[data-slot=command-input]]:h-10',
+      'custom-drawer',
+    );
   });
 
   it('should keep fields selectable inside the unselectable drawer', () => {

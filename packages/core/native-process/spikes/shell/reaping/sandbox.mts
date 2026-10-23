@@ -162,7 +162,7 @@ const launchSession = (kind: Adversary, makeCommand: (sentinel: string) => strin
   const stderrFd = openSync(stderrPath, 'a');
   const session: Session = { mark, marker, sentinel, dir, pid: undefined, stderr: '', stderrPath };
   const child = spawn(
-    'sandbox-exec',
+    '/usr/bin/sandbox-exec',
     [
       '-f',
       profile,
@@ -441,7 +441,7 @@ const preflight = async (): Promise<{ checks: Check[]; detail: Record<string, st
     // Run bash under the profile (not bare /bin/sleep), so the control exercises the SAME image as the
     // real workload — if bash cannot start under session.sb, the positive control catches it here.
     const sleeper = spawn(
-      'sandbox-exec',
+      '/usr/bin/sandbox-exec',
       [
         '-f',
         profile,

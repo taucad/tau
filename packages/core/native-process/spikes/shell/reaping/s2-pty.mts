@@ -146,7 +146,7 @@ const main = async (): Promise<void> => {
 
   let terminal: Terminal;
   try {
-    const t = pty.spawn('sandbox-exec', argv, { name: 'xterm-256color', cols: 80, rows: 24, cwd: dir, env });
+    const t = pty.spawn('/usr/bin/sandbox-exec', argv, { name: 'xterm-256color', cols: 80, rows: 24, cwd: dir, env });
     terminal = {
       write: (d) => t.write(d),
       resize: (c, r) => t.resize(c, r),

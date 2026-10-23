@@ -23,6 +23,7 @@ const channelName = `${metaConfig.databasePrefix}build-id`;
 export const buildId: number = readBuildId();
 
 let superseded = false;
+let newestBuildId = buildId;
 const supersededTopic = new Topic<void>({ name: 'build-skew' });
 
 const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName);
@@ -39,6 +40,7 @@ if (channel) {
       channel.postMessage(buildId);
       return;
     }
+    newestBuildId = Math.max(newestBuildId, other);
     if (!superseded) {
       superseded = true;
       supersededTopic.emit();
@@ -52,6 +54,9 @@ if (channel) {
  * stop; reads are unaffected.
  */
 export const isBuildSuperseded = (): boolean => superseded;
+
+/** The newest build id heard from any tab, or this tab's own when none is newer. */
+export const readNewestBuildId = (): number => newestBuildId;
 
 /** Subscribe to the one-way transition into the superseded state. */
 export const subscribeBuildSkew = (listener: () => void): (() => void) => {

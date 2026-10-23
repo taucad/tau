@@ -20,6 +20,12 @@ export type SceneDigest = `sha256:${string}` & { readonly [sceneDigestBrand]: tr
 export type EncodedContent = {
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly content: ReadonlyArray<Uint8Array<ArrayBuffer>>;
+  /**
+   * Digests of `content`, index for index, attested by a codec that already
+   * owns each leaf and hashed it in this realm. Publication then neither copies
+   * nor re-hashes those leaves; the store authority still verifies every write.
+   */
+  readonly digests?: readonly ContentDigest[];
 };
 
 /** Versioned serializer for one reusable compute result type. @public */
@@ -124,8 +130,32 @@ export type ComputeEvaluationResult<T> =
         | {
             readonly status: 'skipped';
             readonly reason: 'encode-failed' | 'content-store-failed' | 'action-store-failed';
-          };
+          }
+        /** A best-effort result handed to the service's publication scheduler; nothing is stored yet. */
+        | { readonly status: 'deferred' };
     };
+
+/** Outcome of one deferred publication. @public */
+export type ComputePublicationOutcome =
+  | { readonly status: 'stored'; readonly contentDigest: ContentDigest }
+  | {
+      readonly status: 'skipped';
+      readonly reason: 'encode-failed' | 'content-store-failed' | 'action-store-failed';
+    };
+
+/**
+ * One best-effort publication deferred past result delivery.
+ *
+ * `run` encodes and publishes the computed value. It resolves to the outcome
+ * and rejects only when its signal aborts, so a scheduler may run it again.
+ * @public
+ */
+export type ComputePublicationTask = {
+  readonly actionDigest: ActionDigest;
+  /** The signal of the evaluation that computed the value, when it supplied one. */
+  readonly signal?: AbortSignal;
+  readonly run: (input: { readonly signal: AbortSignal }) => Promise<ComputePublicationOutcome>;
+};
 
 /** Coordinates lookup, compute, serialization, and transactional cache publication. @public */
 export type ComputeReuseService = {

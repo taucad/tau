@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { digestContent } from '#digest.js';
 import { createMemoryActionStore, createMemoryContentStore } from '#memory-store.js';
@@ -24,6 +24,20 @@ describe('memory content store', () => {
       status: 'hit',
       bytes: bytes(1, 2, 3),
     });
+  });
+
+  it('should take ownership of producer-hashed writes without hashing or copying them again', async () => {
+    const store = createMemoryContentStore({ maxBytes: 8192, ownsProducerWrites: true });
+    const source = new Uint8Array(4096).fill(3);
+    const digest = await digestContent({ bytes: source });
+    const hash = vi.spyOn(globalThis.crypto.subtle, 'digest');
+    try {
+      await expect(store.write({ digest, bytes: source })).resolves.toEqual({ status: 'stored' });
+      expect(hash).not.toHaveBeenCalled();
+    } finally {
+      hash.mockRestore();
+    }
+    await expect(store.read({ digest })).resolves.toEqual({ status: 'hit', bytes: source });
   });
 
   it('evicts least-recently-used bytes without exceeding the byte budget', async () => {

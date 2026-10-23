@@ -9,6 +9,8 @@ import type {
   ComputeAction,
   ComputeEvaluationInput,
   ComputeEvaluationResult,
+  ComputePublicationOutcome,
+  ComputePublicationTask,
   ComputeReuseService,
   ContentDigest,
 } from '#types.js';
@@ -38,6 +40,15 @@ export type ComputeReuseServiceOptions = {
    * required work at all, and every `required` evaluation is refused.
    */
   readonly promote?: ComputeDurablePromotion;
+  /**
+   * Defer best-effort publication past result delivery.
+   *
+   * When present, a best-effort miss returns as soon as its computation does,
+   * with publication status `deferred`, and this receives the task that encodes
+   * and publishes it. The scheduler decides when, and whether, to run it.
+   * Required evaluations always publish before they resolve.
+   */
+  readonly schedulePublication?: (task: ComputePublicationTask) => void;
 };
 
 type PendingEvaluation = {
@@ -215,6 +226,15 @@ const lookupWithPolicy = async <T>(input: {
   }
 };
 
+/**
+ * Why a publication did not store, for a required refusal; required work is never deferred.
+ * @param publication - The unstored publication.
+ * @returns Its reason.
+ */
+const unstoredReason = (
+  publication: { readonly status: 'skipped'; readonly reason: string } | { readonly status: 'deferred' },
+): string => (publication.status === 'skipped' ? publication.reason : 'deferred');
+
 const skipped = <T>(input: {
   readonly value: T;
   readonly actionKey: ActionDigest;
@@ -268,11 +288,13 @@ const publishComputed = async <T>(input: {
       throw new Error('Content store rejected the encoded result.');
     }
     throwIfAborted(signal);
+    // The store verified each digest as it wrote it, so nothing is hashed again here. A bounded
+    // store may still evict an earlier leaf during publication, and a record must never commit an
+    // incomplete closure, so each declared leaf is checked for presence only.
     for (const digest of requiredContent) {
       // oxlint-disable-next-line no-await-in-loop -- bounded stores may evict earlier leaves during publication
       const leaf = await contentStore.read({ digest, signal });
-      // oxlint-disable-next-line no-await-in-loop -- validate each declared leaf before the action commit point
-      if (leaf.status === 'miss' || (await digestContent({ bytes: leaf.bytes })) !== digest) {
+      if (leaf.status === 'miss') {
         throw new CacheCorruptionError('Encoded content closure is unavailable before publication.');
       }
       throwIfAborted(signal);
@@ -357,6 +379,7 @@ const runEvaluation = async <T>(input: {
   readonly contentStore: ContentStore;
   readonly actionStore: ActionStore;
   readonly signal: AbortSignal;
+  readonly schedulePublication: ((task: ComputePublicationTask) => void) | undefined;
 }): Promise<ComputeEvaluationResult<T>> => {
   const lookup = await lookupWithPolicy(input);
   if (lookup.status === 'hit') {
@@ -370,12 +393,33 @@ const runEvaluation = async <T>(input: {
   throwIfAborted(input.signal);
   const value = await input.evaluation.compute({ signal: input.signal });
   throwIfAborted(input.signal);
+  if (input.evaluation.policy === 'best-effort' && input.schedulePublication) {
+    const { evaluation, actionKey, contentStore, actionStore } = input;
+    input.schedulePublication({
+      actionDigest: actionKey,
+      ...(evaluation.signal ? { signal: evaluation.signal } : {}),
+      run: async ({ signal }): Promise<ComputePublicationOutcome> => {
+        throwIfAborted(signal);
+        const result = await publishComputed({ evaluation, value, actionKey, contentStore, actionStore, signal });
+        // A best-effort publication never throws past an abort; a computed result always carries an outcome.
+        return result.source === 'computed' && result.publication.status !== 'deferred'
+          ? result.publication.status === 'stored'
+            ? { status: 'stored', contentDigest: result.publication.contentDigest }
+            : result.publication
+          : { status: 'skipped', reason: 'action-store-failed' };
+      },
+    });
+    return { source: 'computed', value, actionDigest: actionKey, publication: { status: 'deferred' } };
+  }
   const published = await publishComputed({ ...input, value });
   if (input.evaluation.policy !== 'required' || published.source !== 'computed') {
     return published;
   }
   if (published.publication.status !== 'stored') {
-    throw requiredFailure('Required publication did not store its content.', new Error(published.publication.reason));
+    throw requiredFailure(
+      'Required publication did not store its content.',
+      new Error(unstoredReason(published.publication)),
+    );
   }
   return published;
 };
@@ -429,7 +473,10 @@ const forwardPending = async <T>(input: {
       } else if (result.publication.status === 'stored') {
         outputDigest = result.publication.contentDigest;
       } else {
-        throw requiredFailure('Required publication did not store its content.', new Error(result.publication.reason));
+        throw requiredFailure(
+          'Required publication did not store its content.',
+          new Error(unstoredReason(result.publication)),
+        );
       }
       const retention = await promoteRequired({
         retention: input.evaluation.retention,
@@ -489,6 +536,7 @@ export const createComputeReuseService = (options: ComputeReuseServiceOptions): 
               contentStore: options.contentStore,
               actionStore: options.actionStore,
               signal: controller.signal,
+              schedulePublication: options.schedulePublication,
             });
           } finally {
             if (pendingEvaluations.get(flightKey)?.controller === controller) {

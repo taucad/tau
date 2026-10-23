@@ -5,7 +5,7 @@ import { createComputeReuseService } from '#compute-reuse.js';
 import { contentDigest, digestAction, digestContent } from '#digest.js';
 import { createMemoryActionStore, createMemoryContentStore } from '#memory-store.js';
 import { unsupportedCacheMaintenance } from '#store.js';
-import type { CacheCodec, CacheRetention, ComputeAction } from '#types.js';
+import type { CacheCodec, CacheRetention, ComputeAction, ComputePublicationTask, EncodedContent } from '#types.js';
 import type { ActionStore, ContentStore } from '#store.js';
 
 const textCodec: CacheCodec<string> = {
@@ -563,6 +563,134 @@ describe('ComputeReuseService', () => {
     await expect(
       service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: async () => 'solved' }),
     ).rejects.toBeInstanceOf(CacheRequiredError);
+  });
+
+  describe('deferred publication', () => {
+    const createDeferred = () => {
+      const contentStore = createMemoryContentStore({ maxBytes: 1024 * 1024 });
+      const actionStore = createMemoryActionStore({ maxBytes: 1024 * 1024 });
+      const tasks: ComputePublicationTask[] = [];
+      const service = createComputeReuseService({
+        contentStore,
+        actionStore,
+        promote,
+        schedulePublication: (task) => {
+          tasks.push(task);
+        },
+      });
+      return { contentStore, actionStore, service, tasks };
+    };
+
+    it('should return a best-effort miss before anything is published, then publish when the task runs', async () => {
+      const { actionStore, service, tasks } = createDeferred();
+      const publish = vi.spyOn(actionStore, 'publish');
+      const encode = vi.fn(textCodec.encode);
+      const codec = { ...textCodec, encode };
+
+      const first = await service.evaluate({ action, codec, policy: 'best-effort', compute: async () => 'solved' });
+
+      expect(first).toMatchObject({ source: 'computed', value: 'solved', publication: { status: 'deferred' } });
+      expect(encode).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]!.actionDigest).toBe(await digestAction({ action }));
+
+      await expect(tasks[0]!.run({ signal: new AbortController().signal })).resolves.toMatchObject({
+        status: 'stored',
+      });
+      const compute = vi.fn(async () => 'unused');
+      await expect(service.evaluate({ action, codec, policy: 'best-effort', compute })).resolves.toMatchObject({
+        source: 'cache',
+        value: 'solved',
+      });
+      expect(compute).not.toHaveBeenCalled();
+    });
+
+    it('should publish nothing and reject when its task is aborted, so the scheduler can retry it', async () => {
+      const { actionStore, service, tasks } = createDeferred();
+      const publish = vi.spyOn(actionStore, 'publish');
+      await service.evaluate({ action, codec: textCodec, policy: 'best-effort', compute: async () => 'solved' });
+      const controller = new AbortController();
+      controller.abort(new Error('superseded'));
+
+      await expect(tasks[0]!.run({ signal: controller.signal })).rejects.toThrow('superseded');
+      expect(publish).not.toHaveBeenCalled();
+      await expect(tasks[0]!.run({ signal: new AbortController().signal })).resolves.toMatchObject({
+        status: 'stored',
+      });
+    });
+
+    it('should report a failed encode as a skipped publication instead of throwing', async () => {
+      const { service, tasks } = createDeferred();
+      const codec: CacheCodec<string> = {
+        ...textCodec,
+        encode: () => {
+          throw new Error('snapshot unavailable');
+        },
+      };
+      await service.evaluate({ action, codec, policy: 'best-effort', compute: async () => 'solved' });
+
+      await expect(tasks[0]!.run({ signal: new AbortController().signal })).resolves.toEqual({
+        status: 'skipped',
+        reason: 'encode-failed',
+      });
+    });
+
+    it('should keep publishing a required miss inline before it resolves', async () => {
+      const { service, tasks } = createDeferred();
+
+      await expect(
+        service.evaluate({ action, codec: textCodec, policy: 'required', retention, compute: async () => 'solved' }),
+      ).resolves.toMatchObject({ source: 'computed', publication: { status: 'stored' } });
+      expect(tasks).toHaveLength(0);
+    });
+  });
+
+  it('should hash each codec-attested leaf once, at the producer, before publication', async () => {
+    const leafBytes = new Uint8Array(4096).fill(7);
+    const leafDigest = await digestContent({ bytes: leafBytes });
+    const leafCodec: CacheCodec<string> = {
+      ...textCodec,
+      id: 'test/leaf',
+      encode: (): EncodedContent => ({
+        bytes: new TextEncoder().encode(leafDigest),
+        content: [leafBytes],
+        digests: [leafDigest],
+      }),
+      decode: async ({ bytes }) => new TextDecoder().decode(bytes),
+    };
+    const leafAction = { ...action, codec: { id: leafCodec.id, version: leafCodec.version } };
+    const written: unknown[] = [];
+    const stored = new Map<unknown, Uint8Array<ArrayBuffer>>();
+    const contentStore: ContentStore = {
+      read: async ({ digest }) => {
+        const bytes = stored.get(digest);
+        return bytes ? { status: 'hit', bytes } : { status: 'miss' };
+      },
+      write: async ({ digest, bytes }) => {
+        written.push(digest);
+        stored.set(digest, bytes);
+        return { status: 'stored' };
+      },
+      maintenance: unsupportedCacheMaintenance,
+    };
+    const actionStore: ActionStore = {
+      read: async () => ({ status: 'miss' }),
+      publish: async () => ({ status: 'published' }),
+      maintenance: unsupportedCacheMaintenance,
+    };
+    const digest = vi.spyOn(globalThis.crypto.subtle, 'digest');
+    try {
+      const service = createComputeReuseService({ contentStore, actionStore });
+      await expect(
+        service.evaluate({ action: leafAction, codec: leafCodec, policy: 'best-effort', compute: async () => 'x' }),
+      ).resolves.toMatchObject({ publication: { status: 'stored' } });
+      const leafHashes = digest.mock.calls.filter(([, data]) => (data as ArrayBufferView).byteLength === 4096);
+      expect(leafHashes).toHaveLength(0);
+      expect(written).toContain(leafDigest);
+    } finally {
+      digest.mockRestore();
+    }
   });
 
   it('rejects a codec whose identity differs from the action key', async () => {

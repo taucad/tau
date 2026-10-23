@@ -775,6 +775,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** One serialized lane for kernel/cache/watch/native state. */
   private operationTail: Promise<void> = Promise.resolve();
+  /** Operations admitted to the lane, running or queued. Zero is the worker's idle (D3). */
+  private admittedOperations = 0;
   private readonly documentTasks = new Set<Promise<void>>();
   /** Serializes authoritative watch rereads before they enter the operation lane. */
   private watchReconciliationTail: Promise<void> = Promise.resolve();
@@ -2123,8 +2125,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const previous = this.operationTail;
     const next = Promise.withResolvers<void>();
     this.operationTail = next.promise;
-    await previous;
+    this.admittedOperations += 1;
+    // Background publication yields to every admitted operation at its next await.
+    this.computeHost?.interruptPublication();
     try {
+      await previous;
       this.operationSignal = signal;
       this.currentOperationId = ++this.operationSequence;
       // One probe per path per operation (W22/D15): an operation is the coherence window the
@@ -2141,7 +2146,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       // where every surviving reference to a native handle lives in a worker
       // field. Anything else the operation created is garbage.
       this.disposeUnreachableNativeHandles();
+      this.admittedOperations -= 1;
       next.resolve();
+      if (this.admittedOperations === 0) {
+        this.computeHost?.notifyIdle();
+      }
     }
   }
 
@@ -2384,6 +2393,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     await this.watchReconciliationTail;
     await this.operationTail;
     await Promise.allSettled(this.documentTasks);
+    // Delivered results publish within the drain budget while their native handles still live:
+    // a build's snapshot reads its handle, and cleanup releases every handle next.
+    await this.computeHost?.drain();
     await this.performCleanup();
   }
 
@@ -7077,6 +7089,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       workspace: 'worker',
       onDiagnostic: (message) => {
         this.logger.warn(message);
+      },
+      isIdle: () => this.admittedOperations === 0,
+      onPublicationSettled: ({ actionDigest, operationId, status, reason, duration }) => {
+        this.tracer.startSpan('kernel.compute.publication', { operationId }).end({
+          actionDigest,
+          status,
+          duration,
+          ...(reason === undefined ? {} : { reason }),
+        });
       },
       onScopeSettled: ({ operationId, generation, settlement }) => {
         this.tracer.startSpan('kernel.compute.reuse', { operationId }).end({

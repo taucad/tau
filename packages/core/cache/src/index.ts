@@ -40,6 +40,8 @@ export type {
   ComputeActionInput,
   ComputeEvaluationInput,
   ComputeEvaluationResult,
+  ComputePublicationOutcome,
+  ComputePublicationTask,
   ComputeReuseService,
   ContentDigest,
   EncodedContent,

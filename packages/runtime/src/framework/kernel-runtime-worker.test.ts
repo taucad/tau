@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ExportFile } from '@taucad/types';
 import type { WatchEvent } from '@taucad/filesystem';
 import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
+import { contentDigest } from '@taucad/cache-core';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
@@ -3662,5 +3663,167 @@ describe('installWorkerCrashTrap', () => {
       fixture.channel.port1.close();
       fixture.channel.port2.close();
     };
+  });
+});
+
+describe('KernelRuntimeWorker idle publication (D1, D3)', () => {
+  /**
+   * A whole-build reuse middleware that, like the geometry cache, serialises the native-handle
+   * snapshot only when its codec encodes a publication. It is kernel-agnostic: any kernel that
+   * defines `serializeHandle` goes through it.
+   */
+  const createSnapshotReuse = () => {
+    const encodes: unknown[] = [];
+    const plugin = defineMiddleware({
+      id: 'snapshot-reuse',
+      name: 'Snapshot reuse',
+      version: '1.0.0',
+      async wrapEvaluate(input, handler, { compute, dependencyHash }) {
+        if (compute.status !== 'on') {
+          return handler(input);
+        }
+        const codec = { id: 'test.snapshot', version: '1', mediaType: 'application/json' } as const;
+        const result = await compute.evaluate({
+          action: {
+            schemaVersion: 1,
+            namespace: 'test.snapshot-reuse',
+            producer: { id: 'test.snapshot-reuse', version: '1', implementationAssets: [] },
+            operation: 'evaluate',
+            inputs: [
+              {
+                kind: 'content',
+                role: 'runtime-dependency-set',
+                digest: contentDigest({ value: `sha256:${dependencyHash}` }),
+              },
+            ],
+            arguments: {},
+            environment: {},
+            codec,
+          },
+          codec: {
+            ...codec,
+            encode: ({ value }) => {
+              if (!value.success) {
+                throw new Error('Failed builds are not reusable.');
+              }
+              const snapshot = value.serializeHandleSnapshot?.();
+              if (snapshot === undefined) {
+                throw new Error('A reusable build requires its snapshot.');
+              }
+              encodes.push(snapshot);
+              return textEncoder.encode(JSON.stringify(snapshot));
+            },
+            decode: ({ bytes }) => ({
+              success: true,
+              data: {},
+              issues: [],
+              serializedHandle: JSON.parse(textDecoder.decode(bytes)) as unknown,
+            }),
+          },
+          policy: 'best-effort',
+          compute: async () => handler(input),
+        });
+        return result.value;
+      },
+    })();
+    return { plugin, encodes };
+  };
+
+  const createSnapshotKernel = (serializeHandle: (input: { handle: unknown }) => unknown) =>
+    createMockKernelDefinition('idle-snapshot-kernel', {
+      evaluate: async ({ parameters }: { parameters: Record<string, unknown> }) => ({
+        geometry: gltfGeometry('display'),
+        handle: { label: `live-${JSON.stringify(parameters['width'] ?? 1)}` },
+        issues: [] as KernelIssue[],
+      }),
+      serializeHandle: serializeHandle as AnyKernelDefinitionV2['serializeHandle'],
+      deserializeHandle: ({ serialized }: { serialized: unknown }) => serialized,
+    } as Partial<AnyKernelDefinitionV2>);
+
+  it('should deliver the evaluation before it serialises the snapshot, then take it once the worker is idle', async () => {
+    const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
+    const reuse = createSnapshotReuse();
+    await seedTestFileSystem({ 'model.mock': '' });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'idle-snapshot-kernel', extensions: ['mock'], definition: createSnapshotKernel(serializeHandle) }],
+      [],
+      [reuse.plugin],
+    );
+    worker.setComputeBinding({ mode: 'memory' });
+    try {
+      await openWorkerDocument(worker, 'idle-document', 'model.mock');
+      expect(serializeHandle, 'no snapshot on the result path').not.toHaveBeenCalled();
+      expect(reuse.encodes).toHaveLength(0);
+
+      worker.permitComputePublication();
+      await vi.waitFor(() => {
+        expect(reuse.encodes).toEqual([{ label: 'live-1' }]);
+      });
+      expect(serializeHandle).toHaveBeenCalledOnce();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should never serialise a snapshot when compute reuse is off', async () => {
+    const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
+    const reuse = createSnapshotReuse();
+    await seedTestFileSystem({ 'model.mock': '' });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'idle-snapshot-kernel', extensions: ['mock'], definition: createSnapshotKernel(serializeHandle) }],
+      [],
+      [reuse.plugin],
+    );
+    worker.setComputeBinding({ mode: 'off' });
+    try {
+      await openWorkerDocument(worker, 'off-document', 'model.mock');
+      worker.permitComputePublication();
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(serializeHandle).not.toHaveBeenCalled();
+      expect(reuse.encodes).toHaveLength(0);
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('should wait for a queued edit and skip the superseded snapshot without touching its disposed handle', async () => {
+    const serializeHandle = vi.fn(({ handle }: { handle: unknown }) => ({ label: handleLabel(handle) }));
+    const reuse = createSnapshotReuse();
+    await seedTestFileSystem({ 'model.mock': '' });
+    const worker = await createMultiKernelWorker(
+      [{ id: 'idle-snapshot-kernel', extensions: ['mock'], definition: createSnapshotKernel(serializeHandle) }],
+      [],
+      [reuse.plugin],
+    );
+    worker.setComputeBinding({ mode: 'memory' });
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    try {
+      await openWorkerDocumentWithParameters(worker, {
+        documentId: 'edited-document',
+        file: 'model.mock',
+        parameters: { width: 1 },
+      });
+      worker.onEvaluated = (event) => {
+        evaluated.push(event);
+      };
+      // The delivery permits the first build's publication, but the next edit is admitted before
+      // the worker is idle; the first build's handle is gone by the time it could run.
+      worker.permitComputePublication();
+      worker.handleUpdateDocument({ documentId: 'edited-document', intent: 2, parameters: { width: 2 } });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(serializeHandle).not.toHaveBeenCalled();
+
+      worker.permitComputePublication();
+      await vi.waitFor(() => {
+        expect(reuse.encodes).toEqual([{ label: 'live-2' }]);
+      });
+      expect(serializeHandle.mock.calls.map(([input]) => handleLabel(input.handle))).toEqual(['live-2']);
+    } finally {
+      await worker.cleanup();
+    }
   });
 });

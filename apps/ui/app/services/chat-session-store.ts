@@ -186,10 +186,9 @@ export type ChatSessionDeps = {
    */
   client: ComposerRecordClient;
   /**
-   * Adopt the device-relative placement a chat record written before placement moved to the device still names (XD2),
-   * once, on a session's open: when `accept` holds for it, the record is written without it and it is answered, to
-   * become this device's placement for the chat once that write has committed. An explicit write of the chat's
-   * execution drops it too; every other write keeps it in the record.
+   * The device-relative placement a chat record written before placement moved to the device still names (XD2), when
+   * `accept` holds for it: this device adopts it into its own placements record. The chat record keeps it (no device
+   * can prove the host is its own) until a write of the chat's execution supersedes it.
    */
   adoptLegacyChatPlacement?:
     | ((
@@ -3633,72 +3632,74 @@ export class ChatSessionStore {
      * wrote it. Where that daemon is reachable from here the chat store drops it from the chat record, in the one write
      * that does (`adoptLegacyChatPlacement`), and it becomes this device's placement for the chat.
      */
-    const adoptLegacyPlacement = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
+    /*
+     * XD2: a record written before placement moved to the device can name a device-relative host (`origin`, a
+     * `loopback:` daemon). It is relative to a device no tab can prove it is, so it is never removed from the synced
+     * record by adopting it: each device that reaches a host of that name adopts it into its own placements record,
+     * and the record keeps it until an explicit choice of the chat's execution supersedes it. Read from the record
+     * the load already read, and asked without the network: only a host known unreachable is declined.
+     */
+    const legacyPlacementOf = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
       const deps = depsRef();
       try {
-        /*
-         * The placement is written only once the chat record's drop has committed under its lock, so it never names a
-         * host the record no longer held. A placement write that fails then costs only this pin: the next open reads
-         * the chat as local, which every tab reaches.
-         */
-        const adopted = await deps.adoptLegacyChatPlacement?.(
-          storedChat.id,
-          projectId,
-          async (hostId) => (await deps.isPlacementOnThisDevice?.(hostId)) === true,
+        return await deps.adoptLegacyChatPlacement?.(storedChat.id, projectId, async (hostId) =>
+          deps.isPlacementOnThisDeviceNow === undefined
+            ? (await deps.isPlacementOnThisDevice?.(hostId)) === true
+            : deps.isPlacementOnThisDeviceNow(hostId) !== false,
         );
-        if (adopted !== undefined) {
-          await writeChatPlacement({ client: deps.client, projectId, chatId: storedChat.id, placement: adopted });
-          this.#placementReads.delete(projectId);
-        }
-        return adopted;
       } catch {
-        /* Local placement is always reachable: a legacy pin that cannot be adopted reads as local. */
+        /* Local placement is always reachable: a legacy pin that cannot be read reads as local. */
         return undefined;
       }
+    };
+    const adoptInto = async (chatId: string, placement: TauAgentHostId): Promise<void> => {
+      await writeChatPlacement({ client: depsRef().client, projectId, chatId, placement });
+      this.#placementReads.delete(projectId);
     };
     /* Assigned once the persistence actor exists; the load only calls it after its first await. */
-    let applyHeldAfterLoad: (held: TauAgentHostId) => Promise<void> = async () => undefined;
-    /*
-     * An adoption is two writes: this device's placement, then the chat record's drop. A drop that did not land leaves
-     * the legacy host in the record; the next open finishes it, but only for the host this device's placement already
-     * names, so a placement chosen since is never replaced by the stale host.
-     */
-    const finishAdoption = async (storedChat: ChatEntity, placement: TauAgentHostId): Promise<void> => {
-      const deps = depsRef();
-      try {
-        await deps.adoptLegacyChatPlacement?.(
-          storedChat.id,
-          projectId,
-          async (hostId) => hostId === placement && (await deps.isPlacementOnThisDevice?.(hostId)) === true,
-        );
-      } catch {
-        /* The record keeps the host until a later open drops it. */
-      }
-    };
-    const placementOnOpen = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
+    let settleAfterLoad: (placement: TauAgentHostId, adopting: string | undefined) => Promise<void> = async () =>
+      undefined;
+    const placementOnOpen = async (
+      storedChat: ChatEntity,
+    ): Promise<Readonly<{ placement: TauAgentHostId | undefined; adopting: boolean }>> => {
       const placement = await readChatPlacement(depsRef().client, projectId, storedChat.id);
-      if (placement === undefined) {
-        return adoptLegacyPlacement(storedChat);
+      if (placement !== undefined) {
+        return { placement, adopting: false };
       }
-      /* After the load, never ahead of it: it reads the chat record again, only for a chat this device placed. */
-      void finishAdoption(storedChat, placement);
-      return placement;
+      const legacy = await legacyPlacementOf(storedChat);
+      return { placement: legacy, adopting: legacy !== undefined };
     };
     /*
-     * The placement this tab runs the chat on at load, without waiting on the network: one whose reach is not known yet
-     * (the origin's discovery still out) is held, and applied once that answer says this tab reaches it.
+     * The placement this tab runs the chat on at load, never waiting on the network. Known reachable: applied (and an
+     * adopted legacy host written to this device's placements record). Known unreachable: this device's own placement
+     * is held and the chat runs locally; a legacy host is another device's, and the chat simply runs locally. Not
+     * known yet (the origin's discovery still out): applied, so admission waits for that host rather than running
+     * here, and settled once the answer comes.
      */
-    const placementAtLoad = async (placement: TauAgentHostId | undefined): Promise<TauAgentHostId | undefined> => {
+    const placementAtLoad = async (
+      chatId: string,
+      placement: TauAgentHostId | undefined,
+      adopting: boolean,
+    ): Promise<Readonly<{ applied: TauAgentHostId | undefined; held: TauAgentHostId | undefined }>> => {
       const deps = depsRef();
-      if (placement === undefined || deps.isPlacementOnThisDeviceNow === undefined) {
-        return reachablePlacement(deps, placement);
+      if (placement === undefined) {
+        return { applied: undefined, held: undefined };
       }
-      const known = deps.isPlacementOnThisDeviceNow(placement);
+      const known =
+        deps.isPlacementOnThisDeviceNow === undefined
+          ? (await reachablePlacement(deps, placement)) === placement
+          : deps.isPlacementOnThisDeviceNow(placement);
       if (known === undefined) {
-        void applyHeldAfterLoad(placement);
-        return undefined;
+        void settleAfterLoad(placement, adopting ? chatId : undefined);
+        return { applied: placement, held: undefined };
       }
-      return known ? placement : undefined;
+      if (known) {
+        if (adopting) {
+          void adoptInto(chatId, placement);
+        }
+        return { applied: placement, held: undefined };
+      }
+      return { applied: undefined, held: adopting ? undefined : placement };
     };
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
@@ -3707,12 +3708,14 @@ export class ChatSessionStore {
             run: async ({ input, signal }) => {
               const storedChat = await readChatRow(input.chatId);
               /* The chat record never holds this device's placement (XD2): its placements record does. */
-              const devicePlacement = storedChat === undefined ? undefined : await placementOnOpen(storedChat);
-              /* A placement this tab cannot reach is held, not applied: the chat runs locally and the composer says so. */
-              const reachable = await placementAtLoad(devicePlacement);
-              /* This device's placement the open tab cannot reach: kept in the record for the tab that can (XD2). The
-               * persistence context holds it from here; it is the one copy. */
-              const heldPlacement = reachable === undefined ? devicePlacement : undefined;
+              const opened = storedChat === undefined ? undefined : await placementOnOpen(storedChat);
+              /* A placement this tab cannot reach is held, not applied: the chat runs locally and the composer says so.
+               * The persistence context holds it from here; it is the one copy. */
+              const { applied: reachable, held: heldPlacement } = await placementAtLoad(
+                input.chatId,
+                opened?.placement,
+                opened?.adopting === true,
+              );
               signal.throwIfAborted();
               /* The persistence context holds the execution this device runs the chat on (XD2). */
               const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, reachable);
@@ -3902,10 +3905,26 @@ export class ChatSessionStore {
     composerRecordRef.start();
     /* A held placement becomes this tab's once it can reach it, as when a loopback daemon is handed to it (XD2). */
     const heldNow = (): TauAgentHostId | undefined => persistenceActorRef.getSnapshot().context.heldPlacement;
-    /* A placement held at load because its reach was not known yet: applied once the load is in and the answer is. */
-    applyHeldAfterLoad = async (held: TauAgentHostId): Promise<void> => {
+    /* A placement applied at load before its reach was known: kept (and an adopted legacy host recorded) once the
+     * answer says this tab reaches it; otherwise this device's own placement is held and a legacy one let go. */
+    settleAfterLoad = async (placement: TauAgentHostId, adopting: string | undefined): Promise<void> => {
+      const reachable = (await reachablePlacement(depsRef(), placement)) === placement;
       await waitFor(persistenceActorRef, (snapshot) => !snapshot.context.isLoadingChat).catch(() => undefined);
-      await applyHeldPlacement(held);
+      if (reachable) {
+        if (adopting !== undefined) {
+          await adoptInto(adopting, placement);
+        }
+        return;
+      }
+      const { activeExecution } = persistenceActorRef.getSnapshot().context;
+      if (chatPlacementOf(activeExecution) !== placement) {
+        return;
+      }
+      persistenceActorRef.send({
+        type: 'placementUnreachable',
+        execution: portableExecutionOf(activeExecution)!,
+        ...(adopting === undefined ? { heldPlacement: placement } : {}),
+      });
     };
     const applyHeldPlacement = async (held: TauAgentHostId): Promise<void> => {
       if ((await reachablePlacement(depsRef(), held)) !== held || heldNow() !== held) {

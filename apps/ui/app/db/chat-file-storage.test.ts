@@ -1223,7 +1223,7 @@ describe('chat file store — device-relative placement never reaches chat.json'
     ['origin', 'origin'],
     ['loopback', 'loopback:http://127.0.0.1:4100'],
   ])(
-    'should keep a legacy %s placement through unrelated writes and drop it only when adopted',
+    'should keep a legacy %s placement through unrelated writes and through every device that adopts it',
     async (_label, hostId) => {
       const files = createStoreWithFiles();
       const chatId = `chat_legacy_${_label}`;
@@ -1251,12 +1251,13 @@ describe('chat file store — device-relative placement never reaches chat.json'
       await store.updateChat(chatId, { name: 'Renamed' });
       expect(await storedHost()).toBe(hostId);
 
-      /* A device that cannot reach it never adopts it; the one that can, does, once. */
+      /* A device that cannot reach it never adopts it; every one that can adopts it into its own placements, and the
+       * synced record keeps it for the device it was really written on (no device can prove it is that one). */
       await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => false)).resolves.toBeUndefined();
       expect(await storedHost()).toBe(hostId);
       await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBe(hostId);
-      expect(await storedHost()).toBeUndefined();
-      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
+      expect(await storedHost()).toBe(hostId);
+      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBe(hostId);
     },
   );
 
@@ -1287,33 +1288,54 @@ describe('chat file store — device-relative placement never reaches chat.json'
     await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
   });
 
-  /* The host is accepted outside the chat's lock; a different one found under the lock is not dropped. */
-  it('should not drop a legacy host that changed between its acceptance and the adopting write', async () => {
+  /* A session's open reads the chat record once: the legacy host is answered from that read, not a second one. */
+  it('should answer the legacy host from the record the open already read', async () => {
     const files = createStoreWithFiles();
-    const chatId = 'chat_legacy_race';
-    const record = (hostId: string): string =>
+    const chatId = 'chat_legacy_read_once';
+    await files.write(
+      recordOf(chatId),
       `${JSON.stringify({
         id: chatId,
         resourceId: projectId,
         name: 'Pinned',
         createdAt: 1,
         updatedAt: 1,
-        activeExecution: { kind: 'tau', model, hostId },
-      })}\n`;
-    await files.write(recordOf(chatId), record('origin'));
+        activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      })}\n`,
+    );
+    const store = files.reopen();
+    await store.getChat(chatId, projectId);
+    const before = files.reads.filter((path) => path.endsWith(`${chatId}/chat.json`)).length;
+
+    await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBe('origin');
+
+    expect(files.reads.filter((path) => path.endsWith(`${chatId}/chat.json`)).length).toBe(before);
+  });
+
+  /* Every writer that sets the chat's execution supersedes a legacy pin, not just a patch of it. */
+  it('should drop a legacy placement when an update sets a new execution', async () => {
+    const files = createStoreWithFiles();
+    const chatId = 'chat_legacy_updated';
+    await files.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'Pinned',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      })}\n`,
+    );
     const store = files.reopen();
 
-    const adopted = await store.adoptLegacyChatPlacement?.(chatId, projectId, async () => {
-      /* Sync brings the record another device rewrote, naming another daemon, while this one is being accepted. */
-      await files.write(recordOf(chatId), record('loopback:http://127.0.0.1:4100'));
-      return true;
-    });
+    await store.updateChat(chatId, { activeExecution: { kind: 'tau', model: 'openai-gpt-5.5' } });
 
-    expect(adopted).toBeUndefined();
-    expect(
-      (JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: { hostId?: unknown } }).activeExecution
-        ?.hostId,
-    ).toBe('loopback:http://127.0.0.1:4100');
+    expect((JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: unknown }).activeExecution).toEqual({
+      kind: 'tau',
+      model: 'openai-gpt-5.5',
+    });
+    await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
   });
 
   it('should write a local placement row as no hostId at all', async () => {

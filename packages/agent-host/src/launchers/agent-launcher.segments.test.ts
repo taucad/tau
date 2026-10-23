@@ -17,7 +17,9 @@ import type { MemoryFileSystem } from '#browser/leadership.fixture.js';
 import { fakePlacement } from '#host/tau-agent-host.fixture.js';
 import { createAgentLauncher } from '#launchers/agent-launcher.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
+import { chatStoreBinding } from '#launchers/chat-store.js';
 import type { ChatStore } from '#launchers/chat-store.js';
+import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import { createNodeChatStore } from '#node.js';
@@ -101,14 +103,8 @@ const key = (): string => {
   return `cmd-${String(keys)}`;
 };
 
-/** Start one user turn and wait until its run completes. */
-const turn = async (launcher: AgentLauncher, runId: string, text: string): Promise<HostRunSnapshot | undefined> => {
-  const answer = await launcher.execute({
-    type: 'start',
-    commandId: key(),
-    payload: { chatId, runId, trigger: 'submit', message: { id: `user-${runId}`, role: 'user', content: text } },
-  });
-  expect(answer.status).toBe('applied');
+/** Wait until a run completes. */
+const settleRun = async (launcher: AgentLauncher, runId: string): Promise<HostRunSnapshot> => {
   for (let attempt = 0; attempt < 300; attempt++) {
     // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
     const attached = await launcher.execute({ type: 'attach', commandId: key(), payload: { chatId } });
@@ -123,6 +119,17 @@ const turn = async (launcher: AgentLauncher, runId: string, text: string): Promi
     await sleep(10);
   }
   throw new Error(`Run ${runId} never completed.`);
+};
+
+/** Start one user turn and wait until its run completes. */
+const turn = async (launcher: AgentLauncher, runId: string, text: string): Promise<HostRunSnapshot | undefined> => {
+  const answer = await launcher.execute({
+    type: 'start',
+    commandId: key(),
+    payload: { chatId, runId, trigger: 'submit', message: { id: `user-${runId}`, role: 'user', content: text } },
+  });
+  expect(answer.status).toBe('applied');
+  return settleRun(launcher, runId);
 };
 
 /** What the model was shown, as `role: text` lines. */
@@ -145,11 +152,15 @@ const transcriptOf = (request: ModelStreamRequest | undefined): string[] =>
     return text === '' ? [] : [`${message.role}: ${text}`];
   });
 
-const rowsOf = (bytes: Uint8Array<ArrayBuffer> | string): AgentLogEvent[] =>
-  (typeof bytes === 'string' ? bytes : decoder.decode(bytes))
+/* Whole lines only: a log read while its writer appends can end in a line still being written. */
+const rowsOf = (bytes: Uint8Array<ArrayBuffer> | string): AgentLogEvent[] => {
+  const text = typeof bytes === 'string' ? bytes : decoder.decode(bytes);
+  return text
+    .slice(0, text.lastIndexOf('\n') + 1)
     .split('\n')
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as AgentLogEvent);
+};
 
 describe('a chat continued on a second device', () => {
   describe('on the Node host', () => {
@@ -214,19 +225,24 @@ describe('a chat continued on a second device', () => {
       await turn(onPhone, 'run-phone-1', 'second, on the phone');
       await project(desktop, 'device-phone', await readFile(ownLog(phone), 'utf8'));
       await turn(onDesktop, 'run-desktop-2', 'third, back on the desktop');
-      /* The last turn's settlement may still be landing: the next one is sent once the chat is free. */
+      /* The last turn's settlement may still be landing (`settling`): the next one is sent once the chat is free. */
       await vi.waitFor(
         async () => {
-          const answer = await onDesktop.execute({ type: 'attach', commandId: key(), payload: { chatId } });
-          const snapshot =
-            answer.status === 'applied' && answer.effect === 'not-applied'
-              ? (answer.details as { readonly snapshot?: HostRunSnapshot }).snapshot
-              : undefined;
-          expect(snapshot?.state).toBe('completed');
+          const probe = await onDesktop.execute({
+            type: 'start',
+            commandId: key(),
+            payload: {
+              chatId,
+              runId: 'run-desktop-3',
+              trigger: 'submit',
+              message: { id: 'user-run-desktop-3', role: 'user', content: 'fourth, still on the desktop' },
+            },
+          });
+          expect(probe).toMatchObject({ status: 'applied' });
         },
-        { timeout: 3000, interval: 10 },
+        { timeout: 3000, interval: 20 },
       );
-      await turn(onDesktop, 'run-desktop-3', 'fourth, still on the desktop');
+      await settleRun(onDesktop, 'run-desktop-3');
 
       const inOrder = [
         'user: first, on the desktop',
@@ -251,6 +267,55 @@ describe('a chat continued on a second device', () => {
         'assistant: desktop answer',
         'user: fifth, on the phone',
       ]);
+    });
+
+    /* The term check and the admission after it read what sync brought once, not twice, per command. */
+    it('should read the other devices’ segments once per admission', async () => {
+      const desktop = await workspace();
+      const phone = await workspace();
+      const store = createNodeChatStore({ workspaceRoot: desktop });
+      let refreshes = 0;
+      /* The launcher opens writers through the store's binding: count the refreshes of the logs it hands out. */
+      const binding = chatStoreBinding(store) as { openWriter: (id: string) => Promise<EventLogAppender> };
+      const open = binding.openWriter;
+      binding.openWriter = async (id) => {
+        const log = await open(id);
+        const { refresh } = log;
+        return refresh === undefined
+          ? log
+          : Object.assign(log, {
+              refresh: async () => {
+                refreshes += 1;
+                await refresh.call(log);
+              },
+            });
+      };
+      const onDesktop = launch(store, recordingModel('desktop answer').transport);
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
+      await turn(onPhone, 'run-phone-1', 'first, on the phone');
+      await project(desktop, 'device-phone', await readFile(ownLog(phone), 'utf8'));
+      await turn(onDesktop, 'run-desktop-1', 'second, on the desktop');
+      refreshes = 0;
+
+      await vi.waitFor(
+        async () => {
+          const answer = await onDesktop.execute({
+            type: 'start',
+            commandId: key(),
+            payload: {
+              chatId,
+              runId: 'run-desktop-2',
+              trigger: 'submit',
+              message: { id: 'user-run-desktop-2', role: 'user', content: 'third, on the desktop' },
+            },
+          });
+          expect(answer).toMatchObject({ status: 'applied' });
+        },
+        { timeout: 3000, interval: 20 },
+      );
+
+      expect(refreshes).toBe(1);
+      await settleRun(onDesktop, 'run-desktop-2');
     });
 
     it('should append only this device’s rows to its own events.jsonl', async () => {
@@ -608,9 +673,10 @@ describe('a chat continued on a second device', () => {
       expect(heartbeatsAfter(rows, 'running')).toEqual([]);
     });
 
-    /* Only an applied publish says the chat is shared: a fenced or failing placement leaves it unknown, and no
-     * heartbeat row is written on it; it is asked again the next interval. */
-    it('should write no heartbeat while the placement only fails or refuses the publish', async () => {
+    /* A heartbeat row is this device's own liveness: only a definite CHAT_NOT_SHARED stops it. A fenced or failing
+     * publish leaves sharing unknown, and the rows keep being written and published again, or the run would read as
+     * gone on the other devices after the staleness bound of publish trouble. */
+    it('should keep writing heartbeats while the placement only fails or refuses the publish', async () => {
       const root = await workspace();
       const gate = Promise.withResolvers<void>();
       const recorded = recordingModel('answer');
@@ -645,7 +711,7 @@ describe('a chat continued on a second device', () => {
       const rows = rowsOf(await readFile(ownLog(root), 'utf8'));
       gate.resolve();
 
-      expect(heartbeatsAfter(rows, 'running')).toEqual([]);
+      expect(heartbeatsAfter(rows, 'running').length).toBeGreaterThanOrEqual(2);
       expect(asked).toBeGreaterThan(2);
     });
 
@@ -690,8 +756,15 @@ describe('a chat continued on a second device', () => {
       const whileUnshared = published.length - whileShared;
       gate.resolve();
 
-      /* While shared: one publish per heartbeat row, plus the first tick's for the rows the run began with. */
+      /* While shared: one publish per heartbeat row, plus the one that asks at the run's start and the one that carries
+       * the rows its first attempt wrote after that. */
       expect(whileShared).toBeLessThanOrEqual(heartbeats + 2);
+      /* And never two in one tick: no probe right before a heartbeat's own publish. */
+      const gaps = published
+        .slice(0, whileShared)
+        .slice(1)
+        .map((call, index) => call.at - published[index]!.at);
+      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(5);
       /* Once unshared, at most the one heartbeat whose publish said so, then none. */
       expect(heartbeatsAfter(after, 'running').length - heartbeats).toBeLessThanOrEqual(1);
       /* Asked at most about once an interval while unshared (300 ms at 40 ms), never twice a tick. */

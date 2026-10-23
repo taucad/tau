@@ -196,7 +196,11 @@ describe('ACP attachment materialisation (D23)', () => {
 });
 
 describe('the chat handoff an ACP prompt carries', () => {
-  const marked = (id: string, content: string, acpSessionId?: string): ProviderMessage => ({
+  const marked = (
+    id: string,
+    content: string,
+    session: Readonly<{ acpSessionId?: string; hostId?: string }> = {},
+  ): ProviderMessage => ({
     id,
     role: 'user',
     content,
@@ -205,7 +209,7 @@ describe('the chat handoff an ACP prompt carries', () => {
         kind: 'external-agent',
         agentId: 'codex',
         runKind: 'acp',
-        ...(acpSessionId === undefined ? {} : { acpSessionId }),
+        ...session,
       },
     },
   });
@@ -220,7 +224,7 @@ describe('the chat handoff an ACP prompt carries', () => {
   it('should carry only the foreign turn after a session ran turns 1–3 with bare markers on 2 and 3', () => {
     const current = marked('turn-4', 'fourth');
     const transcript = [
-      marked('turn-1', 'first', 'session-1'),
+      marked('turn-1', 'first', { acpSessionId: 'session-1' }),
       said('answer-1', 'assistant', 'one'),
       marked('turn-2', 'second'),
       said('answer-2', 'assistant', 'two'),
@@ -237,6 +241,38 @@ describe('the chat handoff an ACP prompt carries', () => {
     expect(text).toContain('phone answer');
     expect(text).not.toContain('second');
     expect(text).not.toContain('three');
+  });
+
+  /* Two devices' sessions of one agent interleave: a bare marker continues its own host's named session. */
+  it('should credit a bare marker to its own host’s session when devices interleave', () => {
+    const current = marked('turn-a2', 'a again', { hostId: 'host-a' });
+    const transcript = [
+      marked('turn-b1', 'b opens', { acpSessionId: 'session-b', hostId: 'host-b' }),
+      said('answer-b1', 'assistant', 'b one'),
+      marked('turn-a1', 'a opens', { acpSessionId: 'session-a', hostId: 'host-a' }),
+      said('answer-a1', 'assistant', 'a one'),
+      marked('turn-b2', 'b continues', { hostId: 'host-b' }),
+      said('answer-b2', 'assistant', 'b two'),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), 'session-a'));
+
+    expect(text).toContain('b continues');
+    expect(text).toContain('b two');
+    expect(text).not.toContain('a opens');
+  });
+
+  /* A session whose own turns compaction or a rewind removed still saw the chat up to there: nothing is resent. */
+  it('should send nothing for a reattached session whose own turns the history no longer holds', () => {
+    const current = marked('turn-9', 'next');
+    const transcript = [
+      said('summary', 'assistant', 'summary of earlier turns'),
+      said('phone-1', 'user', 'old phone'),
+      current,
+    ];
+
+    expect(handoffBlocks(turnOf(transcript, current), 'session-gone')).toEqual([]);
   });
 
   /* The block is bounded whatever the newest message's size: its tail is kept, and says it was cut. */

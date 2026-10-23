@@ -359,10 +359,11 @@ const messageText = (message: ProviderMessage): string | undefined => {
 /**
  * Where the vendor session `sessionId` ran its last turn in a transcript: the index of that turn's user message, or -1.
  * A session's opening turn names it on its marker; a later turn's marker may carry no id, and then continues the
- * agent's most recently named session.
+ * session its own host (`hostId`) most recently named.
  */
 const lastTurnOfSession = (transcript: readonly ProviderMessage[], agentId: string, sessionId: string): number => {
-  let session: string | undefined;
+  /* Each host's most recently named session: two devices' sessions of one agent interleave in a merged chat. */
+  const named = new Map<string, string>();
   let last = -1;
   for (const [index, message] of transcript.entries()) {
     const marker = message.metadata?.tauInternal;
@@ -374,11 +375,12 @@ const lastTurnOfSession = (transcript: readonly ProviderMessage[], agentId: stri
     ) {
       continue;
     }
-    const named = marker['acpSessionId'];
-    if (typeof named === 'string' && named !== '') {
-      session = named;
+    const host = typeof marker['hostId'] === 'string' ? marker['hostId'] : '';
+    const opened = marker['acpSessionId'];
+    if (typeof opened === 'string' && opened !== '') {
+      named.set(host, opened);
     }
-    if (session === sessionId) {
+    if (named.get(host) === sessionId) {
       last = index;
     }
   }
@@ -414,11 +416,14 @@ export const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undef
   let start = 0;
   if (sessionId !== undefined) {
     const own = lastTurnOfSession(prior, turn.agentId, sessionId);
-    if (own !== -1) {
-      start = own + 1;
-      while (start < prior.length && prior[start]!.role !== 'user') {
-        start++;
-      }
+    if (own === -1) {
+      /* The session's own turns are gone from the history (compacted or rewound away): it saw the chat up to there,
+       * and what came after cannot be told from what it saw, so nothing is resent rather than everything. */
+      return [];
+    }
+    start = own + 1;
+    while (start < prior.length && prior[start]!.role !== 'user') {
+      start++;
     }
   }
   const lines = prior.slice(start).flatMap((entry) => {

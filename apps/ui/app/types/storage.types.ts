@@ -93,10 +93,11 @@ export type ChatStorage = {
    */
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
   /**
-   * Adopt the device-relative Tau placement (`origin`, a `loopback:` daemon) a record written before placement moved
-   * to the device still carries (XD2). Asked once, by a session's open: when `accept` holds for the host, the record is
-   * written without it and the host is answered; otherwise nothing is written. An explicit write of the chat's
-   * `activeExecution` drops the host too (it is superseded); every other write keeps it.
+   * The device-relative Tau placement (`origin`, a `loopback:` daemon) a record written before placement moved to the
+   * device still carries (XD2), when `accept` holds for it: the caller adopts it into this device's placements. The
+   * record is never written by this: no device can prove the host is its own. Answered from the record's last read
+   * where there is one. A write that sets the chat's `activeExecution` drops the host (it is superseded); every other
+   * write keeps it.
    */
   adoptLegacyChatPlacement?(
     chatId: string,

@@ -51,6 +51,9 @@ type ChatPersistenceMachineEvents =
   | { type: 'setActiveExecution'; execution: CadAgentExecution | undefined }
   /* This tab can now reach this device's held placement for the chat: run on it, persisting nothing (XD2). */
   | { type: 'placementReachable'; execution: CadAgentExecution }
+  /** A placement applied before its reach was known turned out unreachable: the chat runs here, holding it if it is
+   * this device's own (XD2). */
+  | { type: 'placementUnreachable'; execution: CadAgentExecution; heldPlacement?: TauAgentHostId }
   | { type: 'setActiveKernel'; kernel: KernelId | undefined };
 
 /**
@@ -203,6 +206,9 @@ export const chatPersistenceMachine = setup({
             placementReachable: ({ event }) => ({
               context: { activeExecution: event.execution, heldPlacement: undefined },
             }),
+            placementUnreachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
+            }),
           },
         },
         persisting: {
@@ -227,6 +233,9 @@ export const chatPersistenceMachine = setup({
                 : undefined,
             placementReachable: ({ event }) => ({
               context: { activeExecution: event.execution, heldPlacement: undefined },
+            }),
+            placementUnreachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
             }),
           },
         },

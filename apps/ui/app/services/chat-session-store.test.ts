@@ -5991,32 +5991,16 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     reopened.store.release(chatId);
   });
 
-  /* An adoption whose placement write landed but whose drop from the chat record did not is finished on a later open. */
-  it('should drop a legacy placement this device already adopted when the chat record still holds it', async () => {
-    const chatId = 'chat_legacy_half_adopted';
+  /* A device that already placed the chat never reads, or touches, the record's legacy host again. */
+  it('should leave the chat record’s legacy host alone once this device placed the chat', async () => {
+    const chatId = 'chat_legacy_already_placed';
     const deps = createStubDeps();
     seedPlacement(deps, chatId, 'origin');
-    let legacy: string | undefined = 'origin';
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    const { store, session } = await openLoaded(
-      {
-        ...deps,
-        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
-          if (legacy === undefined || !(await accept(legacy))) {
-            return undefined;
-          }
-          const adopted = legacy;
-          legacy = undefined;
-          return adopted;
-        },
-      },
-      chatId,
-    );
+    const adopt = vi.fn<NonNullable<ChatSessionDeps['adoptLegacyChatPlacement']>>(async () => 'origin');
+    const { store, session } = await openLoaded({ ...deps, adoptLegacyChatPlacement: adopt }, chatId);
 
-    await vi.waitFor(() => {
-      expect(legacy).toBeUndefined();
-    });
-    expect(placementOnDisk(deps, chatId)).toBe('origin');
+    expect(adopt).not.toHaveBeenCalled();
     expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
       kind: 'tau',
       model,
@@ -6154,19 +6138,15 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     expect(listeners.size).toBe(0);
   });
 
-  /* The placement is written only once the chat record's drop has committed: a drop the lock refuses writes none. */
-  it('should write this device’s placement only after the chat record dropped the legacy host', async () => {
+  /* A legacy host the chat store declines (the tab knows it cannot reach it) is never written as this device's. */
+  it('should write no placement for a legacy host the chat store declines', async () => {
     const chatId = 'chat_legacy_drop_refused';
     const deps = createStubDeps();
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
     const { store, session } = await openLoaded(
       {
         ...deps,
-        /* Accepted, then refused under the lock: another device rewrote the record meanwhile. */
-        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
-          await accept('origin');
-          return undefined;
-        },
+        adoptLegacyChatPlacement: async () => undefined,
       },
       chatId,
     );
@@ -6176,8 +6156,8 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     store.release(chatId);
   });
 
-  /* A placement write that fails after the drop leaves the chat local on the next open: always reachable, never lost
-   * to a host the record no longer names. */
+  /* A placement write that fails costs nothing: the chat record still names the legacy host, and the next open adopts
+   * it again. */
   it('should run this session on an adopted host even when its placement cannot be written', async () => {
     const chatId = 'chat_legacy_unwritable';
     const deps = createStubDeps();
@@ -6223,36 +6203,47 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     store.release(chatId);
   });
 
-  /* Opening a chat never waits on the network: a placement whose reach is not known yet is held, then applied. */
-  it('should load without waiting for the origin probe, and apply the placement once the probe answers', async () => {
-    const chatId = 'chat_probe_pending';
-    const deps = createStubDeps();
-    seedPlacement(deps, chatId, 'origin');
-    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    const probe = Promise.withResolvers<boolean>();
-    const { store, session } = await openLoaded(
-      {
-        ...deps,
-        isPlacementOnThisDevice: async () => probe.promise,
-        isPlacementOnThisDeviceNow: () => undefined,
-      },
-      chatId,
-    );
-    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBe('origin');
-
-    probe.resolve(true);
-
-    await vi.waitFor(() => {
+  /*
+   * Opening a chat never waits on the network, and never falls back to this tab while it does not know: a placement
+   * whose reach is not known yet is applied, so admission waits for that host, and it is held only once the answer
+   * says this tab cannot reach it.
+   */
+  it.each([
+    [true, { kind: 'tau', model, hostId: 'origin' }, undefined],
+    [false, { kind: 'tau', model }, 'origin'],
+  ] as const)(
+    'should apply a placement whose reach is unknown at load, and settle it when the probe answers %s',
+    async (answer, settled, held) => {
+      const chatId = `chat_probe_${String(answer)}`;
+      const deps = createStubDeps();
+      seedPlacement(deps, chatId, 'origin');
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+      const probe = Promise.withResolvers<boolean>();
+      const { store, session } = await openLoaded(
+        {
+          ...deps,
+          isPlacementOnThisDevice: async () => probe.promise,
+          isPlacementOnThisDeviceNow: () => undefined,
+        },
+        chatId,
+      );
       expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
         kind: 'tau',
         model,
         hostId: 'origin',
       });
-    });
-    store.release(chatId);
-  });
+      expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBeUndefined();
 
-  /* Finishing a half adoption reads the chat record again: it runs after the load, never ahead of it. */
+      probe.resolve(answer);
+
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual(settled);
+      });
+      expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBe(held);
+      store.release(chatId);
+    },
+  );
+
   it('should not hold the load on finishing a half-done legacy adoption', async () => {
     const chatId = 'chat_adoption_slow';
     const deps = createStubDeps();

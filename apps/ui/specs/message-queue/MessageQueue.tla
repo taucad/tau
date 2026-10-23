@@ -36,6 +36,8 @@
 \* A half-finished legacy adoption is finished on a later open; queue paths are unchanged.
 \* A chat's load never waits on the origin probe or on finishing an adoption; queue paths unchanged.
 \* An adopted placement is written only after the chat record's drop commits; queue paths unchanged.
+\* A legacy host is adopted without leaving the synced record; a placement of unknown reach is applied
+\* at load and settled later, so admission waits for its host. Queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -186,6 +186,9 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     };
   };
 
+  /** The legacy device-relative host each chat's record held when this store last read or wrote it (XD2). */
+  const legacyHosts = new Map<string, TauAgentHostId | undefined>();
+
   /**
    * A chat record as `chat.json` holds it, a placement written before placement moved to the device included. Only
    * the write path and {@link ChatStorage.adoptLegacyChatPlacement} read it so: everything else reads {@link readRecord}.
@@ -194,9 +197,11 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     const text = await readText(recordPath(projectId, chatId));
     const record = text === undefined ? undefined : parseChatRecord(text);
     if (record === undefined) {
+      legacyHosts.delete(chatId);
       return undefined;
     }
     located.set(record.id, projectId);
+    legacyHosts.set(record.id, chatPlacementOf(record.activeExecution));
     return record;
   };
 
@@ -316,7 +321,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   const write = async (
     chatId: string,
     mutate: (chat: Chat) => Chat | undefined,
-    writeOptions: Readonly<{ dropLegacyPlacement?: TauAgentHostId; supersedeLegacyPlacement?: boolean }> = {},
+    writeOptions: Readonly<{ supersedeLegacyPlacement?: boolean }> = {},
   ): Promise<Chat | undefined> =>
     mutex.run(chatId, async () => {
       const projectId = await locate(chatId);
@@ -324,17 +329,8 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
         return undefined;
       }
       const stored = await readStoredRecord(projectId, chatId);
-      /* Mutators see the portable record; a legacy host rides along untouched unless this write adopts it. */
+      /* Mutators see the portable record; a legacy host rides along untouched unless this write supersedes it. */
       const storedLegacy = chatPlacementOf(stored?.activeExecution);
-      /* An adopting write drops only the host it was asked to, still there under the lock; anything else aborts it. */
-      if (writeOptions.dropLegacyPlacement !== undefined && storedLegacy !== writeOptions.dropLegacyPlacement) {
-        return undefined;
-      }
-      /* An explicit choice of the chat's execution supersedes a legacy pin: only an untouched record keeps it. */
-      const legacy =
-        writeOptions.dropLegacyPlacement === undefined && writeOptions.supersedeLegacyPlacement !== true
-          ? storedLegacy
-          : undefined;
       const record = stored === undefined ? undefined : withPortableExecution(stored);
       const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
       if (existing === undefined || existing.purgedAt !== undefined) {
@@ -346,6 +342,15 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
         mutated === undefined && writeOptions.supersedeLegacyPlacement === true && storedLegacy !== undefined
           ? existing
           : mutated;
+      /*
+       * Any write that sets the chat's execution supersedes a legacy pin, whichever writer: an explicit choice (a
+       * patch of `activeExecution`, even to the same value) or a new execution in an update. Only a write that leaves
+       * the execution alone keeps it.
+       */
+      const supersedes =
+        writeOptions.supersedeLegacyPlacement === true ||
+        (updated !== undefined && !valuesEqual(portableExecutionOf(updated.activeExecution), existing.activeExecution));
+      const legacy = supersedes ? undefined : storedLegacy;
       if (updated === undefined) {
         /* A no-op is reported as `undefined`, exactly as the object store's
          * `writeChatAtomic` did: the caller's cache invalidation is keyed on a
@@ -353,6 +358,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
         return undefined;
       }
       await writeRecord(projectId, updated, legacy);
+      legacyHosts.set(chatId, legacy);
       return hydrate(withPortableExecution(updated));
     });
 
@@ -534,22 +540,16 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
      * this one, and only once `accept` (asked outside the chat's lock) says the host is this device's to adopt.
      */
     adoptLegacyChatPlacement: async (chatId, projectId, accept) => {
-      const owner = projectId ?? (await locate(chatId));
-      const stored = owner === undefined ? undefined : await readStoredRecord(owner, chatId);
-      const legacy = chatPlacementOf(stored?.activeExecution);
-      if (legacy === undefined || !(await accept(legacy))) {
-        return undefined;
+      /* The record the session's load just read answers, with no read of its own; a chat not read yet is read once. */
+      let legacy = legacyHosts.get(chatId);
+      if (!legacyHosts.has(chatId)) {
+        const owner = projectId ?? (await locate(chatId));
+        legacy = chatPlacementOf(
+          (owner === undefined ? undefined : await readStoredRecord(owner, chatId))?.activeExecution,
+        );
       }
-      let adopted: TauAgentHostId | undefined;
-      await write(
-        chatId,
-        (chat) => {
-          adopted = legacy;
-          return chat;
-        },
-        { dropLegacyPlacement: legacy },
-      );
-      return adopted;
+      /* Never written out of the synced record: no device can prove the host is its own (XD2). */
+      return legacy !== undefined && (await accept(legacy)) ? legacy : undefined;
     },
 
     patchChat: async (chatId, key, value) =>

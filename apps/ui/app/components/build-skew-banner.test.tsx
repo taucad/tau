@@ -169,6 +169,39 @@ describe('build-id skew guard (DF20)', () => {
     expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
   });
 
+  it('resumes when a later check names this build after an edge briefly named another', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, peerRecheckDelay } = await load();
+    answerLiveBuild(buildId - 1);
+    announce(buildId + 1);
+    await pause();
+    expect(isBuildSuperseded()).toBe(true);
+
+    answerLiveBuild(buildId);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
+  });
+
+  it('stops asking once the server has named another build on every confirmation', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
+    const fetchMock = answerLiveBuild(buildId - 1);
+    announce(buildId + 1);
+    await pause();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (serverConfirmations + 3));
+    });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1 + serverConfirmations);
+  });
+
   it("resumes writing when a later announcement's check names this build", async () => {
     const { buildId, isBuildSuperseded } = await load();
     answerLiveBuild('unreachable');
@@ -205,6 +238,19 @@ describe('build-id skew guard (DF20)', () => {
     announce(buildId + 1);
     await pause();
     expect(isBuildSuperseded()).toBe(true);
+    const heard = listen();
+
+    announce(buildId - 2);
+    await pause();
+
+    expect(heard.map((event) => event.data as unknown)).not.toContain(buildId);
+  });
+
+  it('stays silent to older tabs once a deploy replaced it, even while it keeps writing', async () => {
+    const { buildId, offerReload } = await load();
+    act(() => {
+      offerReload(buildId + 1);
+    });
     const heard = listen();
 
     announce(buildId - 2);

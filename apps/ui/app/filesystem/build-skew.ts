@@ -19,7 +19,9 @@
  *
  * - The server names this tab's build: the stop is lifted and the tab answers
  *   `{ buildId, live: true }`, so the announcer checks in turn and steps aside.
- * - The server names another build: the tab is superseded by that build for good.
+ * - The server names another build: the tab is superseded by that build. It asks
+ *   `serverConfirmations` more times, a `peerRecheckDelay` apart, in case an edge was
+ *   answering for a build it is leaving, and resumes if the server then names its build.
  * - No answer: the peer's word stands and the tab is superseded by it, but only
  *   until the server answers. The tab asks again every `peerRecheckDelay` and on the
  *   next announcement; when the server then names this build, the tab resumes.
@@ -170,14 +172,29 @@ const resumeAsLive = (): void => {
   channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
 };
 
+/**
+ * Rechecks after a server answer named another build. During a deploy or rollback an edge may
+ * briefly answer for the build it is leaving, so the tab asks again before the answer stands;
+ * writes stay stopped meanwhile.
+ */
+export const serverConfirmations = 2;
+
+let serverChecksLeft = 0;
+
 /** Act on the server's answer about which build is live (`#lib/build-identity`). */
-const settleWithServer = (answer: LiveBuildAnswer, claimedBuildId: number): void => {
+const settleWithServer = (answer: LiveBuildAnswer, claimedBuildId: number, isRecheck = false): void => {
   if (answer === buildId) {
     resumeAsLive();
     return;
   }
   if (typeof answer === 'number') {
     markBuildSuperseded(answer, 'server');
+    if (!isRecheck) {
+      serverChecksLeft = serverConfirmations;
+    }
+    if (serverChecksLeft > 0) {
+      scheduleRecheck(claimedBuildId);
+    }
     return;
   }
   // No endpoint (desktop, `tau serve`): newer wins, as before there was a server to ask.
@@ -187,18 +204,27 @@ const settleWithServer = (answer: LiveBuildAnswer, claimedBuildId: number): void
   }
 };
 
-/** Ask the server again later while only a peer's word supersedes this tab and the server was unreachable. */
+/**
+ * Ask the server again later: indefinitely while only a peer's word supersedes this tab (the server
+ * was unreachable), and `serverConfirmations` times after the server named another build.
+ */
 const scheduleRecheck = (claimedBuildId: number): void => {
   if (recheckTimer !== undefined) {
     return;
   }
   recheckTimer = setTimeout(() => {
     recheckTimer = undefined;
-    if (!superseded || supersedingSource !== 'tab') {
+    if (!superseded) {
       return;
     }
+    if (supersedingSource === 'server') {
+      if (serverChecksLeft <= 0) {
+        return;
+      }
+      serverChecksLeft -= 1;
+    }
     const recheck = async (): Promise<void> => {
-      settleWithServer(await askLiveBuild(), claimedBuildId);
+      settleWithServer(await askLiveBuild(), claimedBuildId, true);
     };
     // async-iife: bootstrap -- a timer cannot await; the check acts on its own.
     void recheck();
@@ -227,8 +253,8 @@ if (channel) {
       return;
     }
     if (!isLive && other < buildId) {
-      // A build the server replaced is not one to vouch for: let a live tab answer instead.
-      if (!isSupersededByServer()) {
+      // A build the server replaced, or another tab owns, is not one to vouch for: a live tab answers instead.
+      if (!superseded && supersedingSource !== 'server') {
         channel.postMessage(buildId);
       }
       return;

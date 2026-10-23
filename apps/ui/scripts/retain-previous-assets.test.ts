@@ -66,12 +66,17 @@ const startLiveDeploy = async (
       response.writeHead(fault.status, fault.retryAfter === undefined ? {} : { 'retry-after': fault.retryAfter }).end();
       return;
     }
-    const body = path === servedAssetsIndexFileName && index ? JSON.stringify(index) : files[path];
+    if (path === servedAssetsIndexFileName && index) {
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(index));
+      return;
+    }
+    const body = files[path];
     if (body === undefined) {
       response.writeHead(404, { 'content-type': 'text/html' }).end('<!DOCTYPE html>');
       return;
     }
-    response.writeHead(200).end(body);
+    // A file named like the index but not served as one is an HTML page, as an app's catch-all answers.
+    response.writeHead(200, path === servedAssetsIndexFileName ? { 'content-type': 'text/html' } : {}).end(body);
   });
   await new Promise<void>((resolve) => {
     server.listen(0, '127.0.0.1', resolve);
@@ -203,6 +208,18 @@ describe('retainPreviousAssets', () => {
 
   it('should publish an index of its own assets when the live deploy has none yet', async () => {
     const live = await startLiveDeploy({}, undefined);
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+
+    expect(result.retained).toBe(0);
+    expect(await readIndex(client)).toStrictEqual(
+      indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+    );
+  });
+
+  it('should treat an HTML page where the index should be as no index yet (a pre-retention host)', async () => {
+    const live = await startLiveDeploy({ [servedAssetsIndexFileName]: '<!DOCTYPE html><title>Tau</title>' }, undefined);
     const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
 
     const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin });

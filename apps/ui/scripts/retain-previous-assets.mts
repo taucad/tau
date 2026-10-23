@@ -196,6 +196,9 @@ const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAs
   }));
 };
 
+/** One finished request: its status, content type and whole body. */
+type Fetched = { readonly status: number; readonly contentType: string; readonly body: Uint8Array<ArrayBuffer> };
+
 /** Milliseconds a `Retry-After` may ask for before the wait is capped. */
 const retryAfterCap = 30_000;
 
@@ -221,10 +224,7 @@ const retryAfterWait = (header: string | undefined): number | undefined => {
  * One request, its body read within the timeout. A network error, a 408, a 429 or a 5xx is
  * retried after the backoff, or after the wait a `Retry-After` names (capped).
  */
-const fetchWithRetry = async (
-  url: string,
-  transport: Transport,
-): Promise<{ readonly status: number; readonly body: Uint8Array<ArrayBuffer> }> => {
+const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetched> => {
   let lastError: unknown;
   let requestedWait: number | undefined;
   for (const backoff of [0, ...retryBackoff]) {
@@ -241,7 +241,7 @@ const fetchWithRetry = async (
       // oxlint-disable-next-line no-await-in-loop -- The body belongs to this attempt.
       const body = new Uint8Array(await response.arrayBuffer());
       if (!isRetryable(response.status)) {
-        return { status: response.status, body };
+        return { status: response.status, contentType: response.headers.get('content-type') ?? '', body };
       }
       requestedWait = retryAfterWait(response.headers.get('retry-after') ?? undefined);
       lastError = new Error(`${url} answered ${String(response.status)}`);
@@ -253,14 +253,16 @@ const fetchWithRetry = async (
 };
 
 const readLiveIndex = async (origin: string, transport: Transport): Promise<ServedAssetsIndex | undefined> => {
-  let response: { readonly status: number; readonly body: Uint8Array<ArrayBuffer> };
+  let response: Fetched;
   try {
     response = await fetchWithRetry(`${origin}/${servedAssetsIndexFileName}`, transport);
   } catch (error) {
     console.warn(`::warning::No assets retained: ${origin} could not be reached (${String(error)}).`);
     return undefined;
   }
-  if (response.status === 404) {
+  /* No index yet: a 404, or an OK page that is not JSON. A host from before retention answers this
+   * path with its app's HTML (production on Fly answered 200 text/html on 2026-10-23). */
+  if (response.status === 404 || (response.status === 200 && !response.contentType.includes('application/json'))) {
     console.log(`→ ${origin} publishes no ${servedAssetsIndexFileName} yet; nothing to retain.`);
     return undefined;
   }

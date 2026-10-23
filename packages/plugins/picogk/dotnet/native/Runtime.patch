@@ -8900,3 +8900,788 @@ diff --git a/openvdb/openvdb/openvdb/io/Archive.cc b/openvdb/openvdb/openvdb/io/
      mImpl->mNotifier = notifier;
  }
  
+diff --git a/openvdb/openvdb/openvdb/tools/VolumeToMesh.h b/openvdb/openvdb/openvdb/tools/VolumeToMesh.h
+--- a/openvdb/openvdb/openvdb/tools/VolumeToMesh.h
++++ b/openvdb/openvdb/openvdb/tools/VolumeToMesh.h
+@@ -22,8 +22,11 @@
+ #include <tbb/parallel_reduce.h>
+ #include <tbb/task_arena.h>
+ 
++#include <algorithm>
+ #include <cmath> // for std::isfinite()
++#include <cstdint>
+ #include <cstring> // for std::memset
++#include <limits>
+ #include <map>
+ #include <memory>
+ #include <set>
+@@ -1577,7 +1580,15 @@
+         }
+ 
+         IndexType pointOffset = IndexType(mNodeOffsets[n]);
++        // Region voxels: ids below kSmallRegionIds (every id MergeVoxelRegions assigns; a
++        // leaf has at most 73 regions) are bucketed in fixed arrays, any other id in the map.
++        // Points are emitted in ascending id order and region voxels in iteration order,
++        // as with the map alone.
+         IndexArrayMap regions;
++        static constexpr IndexType kSmallRegionIds = 128;
++        Index smallOffsets[Index32LeafNodeType::SIZE];
++        IndexType smallIds[Index32LeafNodeType::SIZE];
++        Index smallCount = 0;
+ 
+         auto*       const pidxData = pointIndexNode.buffer().data();
+         const auto* const sfData = signFlagsNode.buffer().data();
+@@ -1589,7 +1600,12 @@
+ 
+             if (id != 0) {
+                 if (id != IndexType(util::INVALID_IDX)) {
+-                    regions[id].push_back(offset);
++                    if (id < kSmallRegionIds) {
++                        smallIds[smallCount] = id;
++                        smallOffsets[smallCount++] = offset;
++                    } else {
++                        regions[id].push_back(offset);
++                    }
+                 }
+                 continue;
+             }
+@@ -1665,12 +1681,11 @@
+         }
+ 
+         // generate collapsed region points
+-        for (auto it = regions.begin(); it != regions.end(); ++it)
++        const auto emitRegion = [&](const Index* voxels, const size_t numVoxels)
+         {
+             Vec3d avg(0.0);
+ 
+-            const IndexArray& voxels = it->second;
+-            for (size_t i = 0, I = voxels.size(); i < I; ++i) {
++            for (size_t i = 0, I = numVoxels; i < I; ++i) {
+ 
+                 const Index offset = voxels[i];
+                 ijk = Index32LeafNodeType::offsetToLocalCoord(offset);
+@@ -1693,8 +1708,8 @@
+                 avg[2] += double(ijk[2]) + points[0][2];
+             }
+ 
+-            if (voxels.size() > 1) {
+-                const double w = 1.0 / double(voxels.size());
++            if (numVoxels > 1) {
++                const double w = 1.0 / double(numVoxels);
+                 avg *= w;
+             }
+ 
+@@ -1706,6 +1721,25 @@
+             pos[2] = float(avg[2]);
+ 
+             ++pointOffset;
++        };
++
++        if (smallCount > 0) {
++            // stable counting sort of the small ids
++            Index bucketStart[kSmallRegionIds + 1];
++            std::fill(bucketStart, bucketStart + kSmallRegionIds + 1, Index(0));
++            for (Index i = 0; i < smallCount; ++i) ++bucketStart[smallIds[i] + 1];
++            for (IndexType id = 1; id <= kSmallRegionIds; ++id) bucketStart[id] += bucketStart[id - 1];
++            Index sorted[Index32LeafNodeType::SIZE];
++            Index fill[kSmallRegionIds];
++            std::copy(bucketStart, bucketStart + kSmallRegionIds, fill);
++            for (Index i = 0; i < smallCount; ++i) sorted[fill[smallIds[i]]++] = smallOffsets[i];
++            for (IndexType id = 1; id < kSmallRegionIds; ++id) {
++                const Index b = bucketStart[id], e = bucketStart[id + 1];
++                if (b != e) emitRegion(sorted + b, e - b);
++            }
++        }
++        for (auto it = regions.begin(); it != regions.end(); ++it) {
++            emitRegion(it->second.data(), it->second.size());
+         }
+     }
+ } // ComputePoints::operator()
+@@ -2050,6 +2084,506 @@
+ ////////////////////////////////////////
+ 
+ 
++// Exact fast path for MergeVoxelRegions (float grids, uniform adaptivity per leaf).
++//
++// It makes the same merge decisions, assigns the same region ids and writes the same
++// point-index values as the generic loop in MergeVoxelRegions::operator(), so the
++// mesh is byte-identical. What changes is how the decisions are computed:
++//  - One dense 10^3 copy of the input (the leaf plus a one-voxel apron, read once
++//    from the leaf and its neighbours) serves every manifold test and gradient,
++//    instead of 27 accessor reads per isNonManifold() call and 6 per gradient.
++//  - Inside/outside signs and point-index activity are kept as bit rows along z, so
++//    the 64 dimension-2 manifold tests and the missing-neighbour-point mask run four
++//    or eight voxels per integer operation.
++//  - The dimension-2 isNonManifold() result of the pre-pass is reused by the merge
++//    loop, which upstream evaluates a second time on the same input.
++//  - isMergeable() fails iff some pair (i, j) has (1.0 - dot) > adaptivity. That
++//    expression is monotone in the float dot, so the test is equivalent to
++//    dot < T for the smallest float T that passes (computed exactly below). Pairs
++//    are visited once (dot is symmetric), and pairs inside a child block that has
++//    already merged are skipped: a 4- or 8-block is only tested when all of its
++//    children merged, with the same threshold, so those pairs already passed.
++//  - Before the pair loop, a block of at least 12 normals, all unit length, passes
++//    when they lie within angle t of their sum and cos(2t) >= T + 1e-5. A normal
++//    that normalize() scaled has |n| = 1 +- 4e-7, so every pair's real dot is then
++//    >= T + 1e-5 - 2.1e-6, and its float dot (three products, two sums, error at
++//    most 3u|n_i||n_j| < 1.8e-7) is >= T: the generic loop passes too. The cone
++//    angle is bounded from the double-precision cosines minus 2e-6. When the cone
++//    test is inconclusive the exact pair loop decides.
++// Leaves whose gradients are not finite fall back to the generic code.
++
++/// @internal Test hook: when false, MergeVoxelRegions uses the generic merge loop for
++/// every leaf, so tests can compare the fast path with it. Not meant to be changed
++/// while meshing runs.
++inline bool& exactMergeFastPathEnabled()
++{
++    static bool enabled = true;
++    return enabled;
++}
++
++struct ExactMergeScratch
++{
++    float v[1000];           // input values, local (-1..8)^3, index ((x+1)*10 + y+1)*10 + z+1
++    float nx[512], ny[512], nz[512]; // normals grouped by 2x2x2 block, see exactMergeGroup()
++    int start[65];           // normals of group g are [start[g], start[g+1])
++    float threshold = 0.0f;  // T for thresholdFor
++    float thresholdFor = -1.0f;
++};
++
++/// Group index of the 2x2x2 block holding local voxel (x, y, z): the 4x4x4 block in the
++/// high three bits, the 2-block within it in the low three, so each 4-block's children
++/// are contiguous.
++inline int exactMergeGroup(int x, int y, int z)
++{
++    return ((((x >> 2) << 2) | ((y >> 2) << 1) | (z >> 2)) << 3)
++        | (((x >> 1) & 1) << 2) | (((y >> 1) & 1) << 1) | ((z >> 1) & 1);
++}
++
++/// Smallest float T with !((1.0 - double(T)) > double(adaptivity)), for finite adaptivity.
++inline float exactMergeThreshold(float adaptivity)
++{
++    const auto passes = [adaptivity](float d) { return !((1.0 - double(d)) > double(adaptivity)); };
++    float t = float(1.0 - double(adaptivity));
++    if (passes(t)) {
++        for (;;) {
++            const float p = std::nextafter(t, -std::numeric_limits<float>::infinity());
++            if (!passes(p)) break;
++            t = p;
++        }
++    } else {
++        do { t = std::nextafter(t, std::numeric_limits<float>::infinity()); } while (!passes(t));
++    }
++    return t;
++}
++
++/// True when every pair (i, j), i in [b, e), j in [jb, je), has dot >= T.
++inline bool exactMergeRowsPass(const ExactMergeScratch& S, int b, int e, int jb, int je, float T)
++{
++    const float* const X = S.nx;
++    const float* const Y = S.ny;
++    const float* const Z = S.nz;
++    for (int i = b; i < e; ++i) {
++        const float xi = X[i], yi = Y[i], zi = Z[i];
++        int bad = 0;
++        for (int j = jb; j < je; ++j) {
++            const float d = xi * X[j] + yi * Y[j] + zi * Z[j];
++            bad |= int(d < T);
++        }
++        if (bad) return false;
++    }
++    return true;
++}
++
++/// Cone test over unit normals [b, e): true only if every pair's float dot is >= T
++/// (sufficient, not necessary).
++inline bool exactMergeConeAccepts(const ExactMergeScratch& S, int b, int e, float T)
++{
++    double mx = 0.0, my = 0.0, mz = 0.0;
++    for (int i = b; i < e; ++i) { mx += S.nx[i]; my += S.ny[i]; mz += S.nz[i]; }
++    const double ml = std::sqrt(mx * mx + my * my + mz * mz);
++    if (!(ml > 1e-3)) return false;
++    double cmin = 2.0 * ml;
++    for (int i = b; i < e; ++i) {
++        const double c = double(S.nx[i]) * mx + double(S.ny[i]) * my + double(S.nz[i]) * mz;
++        cmin = std::min(cmin, c);
++    }
++    const double c = cmin / ml - 2e-6;
++    if (!(c > 0.0)) return false;
++    return 2.0 * c * c - 1.0 >= double(T) + 1e-5;
++}
++
++/// Exact test of the pairs of block [S.start[g0], S.start[g0 + 8 * stride]) that cross its
++/// eight children, each child being stride consecutive groups.
++inline bool exactMergeCrossPass(const ExactMergeScratch& S, int g0, int stride, bool unit, float T)
++{
++    const int b = S.start[g0], e = S.start[g0 + 8 * stride];
++    if (e - b < 2) return true;
++    if (unit && e - b >= 12 && exactMergeConeAccepts(S, b, e, T)) return true;
++    for (int c = 0; c < 7; ++c) {
++        const int cb = S.start[g0 + c * stride], ce = S.start[g0 + (c + 1) * stride];
++        if (cb != ce && !exactMergeRowsPass(S, cb, ce, ce, e, T)) return false;
++    }
++    return true;
++}
++
++/// 64-bit group mask of the 2x2x2 blocks that hold at least one voxel of the rows
++/// rows[x][y] (bit z).
++inline uint64_t exactMergeBlocksOf(const uint8_t rows[8][8])
++{
++    uint64_t out = 0;
++    for (int x = 0; x < 8; x += 2) {
++        for (int y = 0; y < 8; y += 2) {
++            unsigned r = unsigned(rows[x][y] | rows[x + 1][y] | rows[x][y + 1] | rows[x + 1][y + 1]);
++            r = (r | (r >> 1)) & 0x55u;
++            for (; r; r &= r - 1) {
++                const int z = int(util::FindLowestOn(uint32_t(r)));
++                out |= uint64_t(1) << exactMergeGroup(x, y, z);
++            }
++        }
++    }
++    return out;
++}
++
++template<typename InputTreeAccessor, typename Index32TreeAccessor,
++    typename Int16LeafNodeType, typename Index32LeafNodeType, typename BoolLeafNodeType>
++inline bool
++exactFastMergeLeaf(ExactMergeScratch& S,
++    InputTreeAccessor& inputAcc,
++    Index32TreeAccessor& pointIndexAcc,
++    const Int16LeafNodeType& signFlagsNode,
++    Index32LeafNodeType& pointIndexNode,
++    const BoolLeafNodeType* maskLeaf,
++    const float iso,
++    const float adaptivity,
++    const bool invertGradientDir)
++{
++    using Vec3sType = math::Vec3<float>;
++    using InputLeafNodeType =
++        typename std::remove_const<typename InputTreeAccessor::TreeType>::type::LeafNodeType;
++    const Coord& origin = pointIndexNode.origin();
++
++    // Voxels whose 2x2x2 block is masked before the merge, as rows (bit z): seam or
++    // adaptivity mask, ambiguous sign configurations, missing neighbour points.
++    uint8_t bad[8][8], edges[8][8], xEdge[8][8], yEdge[8][8], zEdge[8][8];
++    std::memset(bad, 0, sizeof(bad));
++    std::memset(edges, 0, sizeof(edges));
++    std::memset(xEdge, 0, sizeof(xEdge));
++    std::memset(yEdge, 0, sizeof(yEdge));
++    std::memset(zEdge, 0, sizeof(zEdge));
++
++    if (maskLeaf) {
++        const auto& m = maskLeaf->getValueMask();
++        for (int x = 0; x < 8; ++x) {
++            const uint64_t w = m.template getWord<uint64_t>(x);
++            for (int y = 0; y < 8; ++y) bad[x][y] = uint8_t(w >> (y * 8));
++        }
++    }
++
++    const auto& signMask = signFlagsNode.getValueMask();
++    const Int16* const sfData = signFlagsNode.buffer().data();
++    bool anyEdges = false;
++    for (int x = 0; x < 8; ++x) {
++        for (uint64_t w = signMask.template getWord<uint64_t>(x); w; w &= w - 1) {
++            const int b = int(util::FindLowestOn(w));
++            const int y = b >> 3, z = b & 7;
++            const int flags = int(sfData[(x << 6) | b]);
++            const unsigned char signs = static_cast<unsigned char>(SIGNS & flags);
++            const unsigned bit = 1u << z;
++            const bool ambiguous = (flags & SEAM) || !sAdaptable[signs] || sEdgeGroupTable[signs][0] > 1;
++            const unsigned e = ambiguous ? 0u : bit;
++            bad[x][y] |= uint8_t(ambiguous ? bit : 0u);
++            edges[x][y] |= uint8_t((flags & EDGES) ? e : 0u);
++            xEdge[x][y] |= uint8_t((flags & XEDGE) ? e : 0u);
++            yEdge[x][y] |= uint8_t((flags & YEDGE) ? e : 0u);
++            zEdge[x][y] |= uint8_t((flags & ZEDGE) ? e : 0u);
++        }
++    }
++
++    for (int x = 0; x < 8; ++x)
++        for (int y = 0; y < 8; ++y) anyEdges |= edges[x][y] != 0;
++    if (anyEdges) {
++        // Point-index activity rows P[x+1][y+1] over local x, y in -1..7, bit z+1 for
++        // z in -1..7, from this leaf and the neighbours at -x, -y, -z, -xy, -xz, -yz.
++        struct Neighbour { const Index32LeafNodeType* leaf; uint64_t fill; };
++        const auto neighbour = [&](int dx, int dy, int dz) -> Neighbour {
++            const Coord o = origin.offsetBy(dx * 8, dy * 8, dz * 8);
++            if (const Index32LeafNodeType* n = pointIndexAcc.probeConstLeaf(o)) return {n, 0};
++            return {nullptr, pointIndexAcc.isValueOn(o) ? ~uint64_t(0) : uint64_t(0)};
++        };
++        const auto word = [](const Neighbour& n, int x) -> uint64_t {
++            return n.leaf ? n.leaf->getValueMask().template getWord<uint64_t>(x) : n.fill;
++        };
++        const auto row = [](uint64_t w, int y) -> unsigned { return unsigned((w >> (y * 8)) & 0xFFu); };
++        const Neighbour nx = neighbour(-1, 0, 0), nxz = neighbour(-1, 0, -1), nxy = neighbour(-1, -1, 0);
++        const Neighbour nz = neighbour(0, 0, -1), ny = neighbour(0, -1, 0), nyz = neighbour(0, -1, -1);
++        const auto& pm = pointIndexNode.getValueMask();
++
++        uint16_t P[9][9];
++        {
++            const uint64_t wx = word(nx, 7), wxz = word(nxz, 7), wxy = word(nxy, 7);
++            for (int y = 0; y < 8; ++y) {
++                P[0][y + 1] = uint16_t((row(wx, y) << 1) | ((row(wxz, y) >> 7) & 1u));
++            }
++            P[0][0] = uint16_t(row(wxy, 7) << 1); // (x-1, y-1, z-1) is never read
++        }
++        for (int x = 0; x < 8; ++x) {
++            const uint64_t ws = pm.template getWord<uint64_t>(x), wz = word(nz, x);
++            const uint64_t wy = word(ny, x), wyz = word(nyz, x);
++            P[x + 1][0] = uint16_t((row(wy, 7) << 1) | ((row(wyz, 7) >> 7) & 1u));
++            for (int y = 0; y < 8; ++y) {
++                P[x + 1][y + 1] = uint16_t((row(ws, y) << 1) | ((row(wz, y) >> 7) & 1u));
++            }
++        }
++        for (int x = 0; x < 8; ++x) {
++            for (int y = 0; y < 8; ++y) {
++                if (!edges[x][y]) continue;
++                const unsigned c = P[x + 1][y + 1], ym = P[x + 1][y], xm = P[x][y + 1], xym = P[x][y];
++                // bit z of (row >> 1) is voxel z, bit z of row is voxel z - 1
++                unsigned miss = edges[x][y] & ~(c >> 1);
++                miss |= xEdge[x][y] & ~((ym >> 1) & ym & c);
++                miss |= yEdge[x][y] & ~(c & xm & (xm >> 1));
++                miss |= zEdge[x][y] & ~((ym >> 1) & (xym >> 1) & (xm >> 1));
++                bad[x][y] |= uint8_t(miss);
++            }
++        }
++    }
++
++    uint64_t masked = exactMergeBlocksOf(bad);
++
++    // Dense copy of the input over local (-1..8)^3, leaf by leaf. Only the cells that are
++    // read are filled: the manifold tests read (0..8)^3, the gradients step one voxel
++    // along one axis, so the apron edges and corners on the negative side stay unused,
++    // and so do the negative faces when no gradient is taken.
++    const bool needGradients = adaptivity < 1.0f && !(adaptivity < 1e-6);
++    float* const v = S.v;
++    for (int dx = -1; dx <= 1; ++dx) {
++        const int x0 = dx < 0 ? 0 : (dx == 0 ? 1 : 9), x1 = dx < 0 ? 1 : (dx == 0 ? 9 : 10);
++        for (int dy = -1; dy <= 1; ++dy) {
++            const int y0 = dy < 0 ? 0 : (dy == 0 ? 1 : 9), y1 = dy < 0 ? 1 : (dy == 0 ? 9 : 10);
++            for (int dz = -1; dz <= 1; ++dz) {
++                const int negatives = (dx < 0) + (dy < 0) + (dz < 0);
++                if (negatives > 1 || (negatives == 1
++                        && (!needGradients || (dx != 0) + (dy != 0) + (dz != 0) > 1))) {
++                    continue;
++                }
++                const int z0 = dz < 0 ? 0 : (dz == 0 ? 1 : 9), z1 = dz < 0 ? 1 : (dz == 0 ? 9 : 10);
++                const Coord nodeOrigin = origin.offsetBy(dx * 8, dy * 8, dz * 8);
++                const InputLeafNodeType* node = inputAcc.probeConstLeaf(nodeOrigin);
++                if (node) {
++                    const float* const data = node->buffer().data();
++                    for (int bx = x0; bx < x1; ++bx) {
++                        const int lx = bx - 1 - dx * 8;
++                        for (int by = y0; by < y1; ++by) {
++                            const int base = ((lx << 6) | ((by - 1 - dy * 8) << 3)) - 1 - dz * 8;
++                            float* const out = v + (bx * 10 + by) * 10;
++                            if (dz == 0) {
++                                std::memcpy(out + 1, data + base + 1, 8 * sizeof(float));
++                            } else {
++                                out[z0] = data[base + z0];
++                            }
++                        }
++                    }
++                } else {
++                    const float tile = float(inputAcc.getValue(nodeOrigin.offsetBy(
++                        x0 - 1 - dx * 8, y0 - 1 - dy * 8, z0 - 1 - dz * 8)));
++                    for (int bx = x0; bx < x1; ++bx)
++                        for (int by = y0; by < y1; ++by)
++                            for (int bz = z0; bz < z1; ++bz) v[(bx * 10 + by) * 10 + bz] = tile;
++                }
++            }
++        }
++    }
++
++    // isInsideValue() rows over local (0..8)^3: R[x][y] bit z.
++    unsigned R[9][9];
++    for (int x = 0; x < 9; ++x) {
++        for (int y = 0; y < 9; ++y) {
++            const float* const row = v + ((x + 1) * 10 + y + 1) * 10 + 1;
++            unsigned r = 0;
++            for (int z = 0; z < 9; ++z) r |= unsigned(row[z] < iso) << z;
++            R[x][y] = r;
++        }
++    }
++
++    // isNonManifold() for one block on the sign rows; same tests as upstream.
++    const auto nonManifold = [&R](int i, int j, int k, int dim) -> bool {
++        const auto I = [&R](int x, int y, int z) -> bool { return (R[x][y] >> z) & 1u; };
++        const int h = dim >> 1, ip = i + h, ipp = i + dim, jp = j + h, jpp = j + dim, kp = k + h, kpp = k + dim;
++        const bool p0 = I(i, j, k), p1 = I(ipp, j, k), p2 = I(ipp, j, kpp), p3 = I(i, j, kpp);
++        const bool p4 = I(i, jpp, k), p5 = I(ipp, jpp, k), p6 = I(ipp, jpp, kpp), p7 = I(i, jpp, kpp);
++        const unsigned signs = unsigned(p0) | unsigned(p1) << 1 | unsigned(p2) << 2 | unsigned(p3) << 3
++            | unsigned(p4) << 4 | unsigned(p5) << 5 | unsigned(p6) << 6 | unsigned(p7) << 7;
++        if (!sAdaptable[signs]) return true;
++        bool m;
++        m = I(ip, j, k);     if (p0 != m && p1 != m) return true;
++        m = I(ipp, j, kp);   if (p1 != m && p2 != m) return true;
++        m = I(ip, j, kpp);   if (p2 != m && p3 != m) return true;
++        m = I(i, j, kp);     if (p0 != m && p3 != m) return true;
++        m = I(ip, jpp, k);   if (p4 != m && p5 != m) return true;
++        m = I(ipp, jpp, kp); if (p5 != m && p6 != m) return true;
++        m = I(ip, jpp, kpp); if (p6 != m && p7 != m) return true;
++        m = I(i, jpp, kp);   if (p7 != m && p4 != m) return true;
++        m = I(i, jp, k);     if (p0 != m && p4 != m) return true;
++        m = I(ipp, jp, k);   if (p1 != m && p5 != m) return true;
++        m = I(ipp, jp, kpp); if (p2 != m && p6 != m) return true;
++        m = I(i, jp, kpp);   if (p3 != m && p7 != m) return true;
++        m = I(ip, jp, k);    if (p0 != m && p1 != m && p4 != m && p5 != m) return true;
++        m = I(ipp, jp, kp);  if (p1 != m && p2 != m && p5 != m && p6 != m) return true;
++        m = I(ip, jp, kpp);  if (p2 != m && p3 != m && p6 != m && p7 != m) return true;
++        m = I(i, jp, kp);    if (p0 != m && p3 != m && p4 != m && p7 != m) return true;
++        m = I(ip, j, kp);    if (p0 != m && p1 != m && p2 != m && p3 != m) return true;
++        m = I(ip, jpp, kp);  if (p4 != m && p5 != m && p6 != m && p7 != m) return true;
++        m = I(ip, jp, kp);
++        return p0 != m && p1 != m && p2 != m && p3 != m && p4 != m && p5 != m && p6 != m && p7 != m;
++    };
++
++    // Dimension-2 isNonManifold() for the four blocks along z at once: block k's corner
++    // values sit at bit k (z = k), its far corners at bit k of row >> 2 and its mid-plane
++    // at bit k of row >> 1, for k = 0, 2, 4, 6.
++    for (int i = 0; i < 8; i += 2) {
++        for (int j = 0; j < 8; j += 2) {
++            const unsigned A = R[i][j], B = R[i + 2][j], C = R[i][j + 2], D = R[i + 2][j + 2];
++            const unsigned Mx = R[i + 1][j], My = R[i][j + 1], Mxy = R[i + 1][j + 1];
++            const unsigned Bx = R[i + 2][j + 1], Cy = R[i + 1][j + 2];
++            const unsigned p0 = A, p1 = B, p2 = B >> 2, p3 = A >> 2;
++            const unsigned p4 = C, p5 = D, p6 = D >> 2, p7 = C >> 2;
++            unsigned m, nm = 0;
++            m = Mx;        nm |= (p0 ^ m) & (p1 ^ m);
++            m = B >> 1;    nm |= (p1 ^ m) & (p2 ^ m);
++            m = Mx >> 2;   nm |= (p2 ^ m) & (p3 ^ m);
++            m = A >> 1;    nm |= (p0 ^ m) & (p3 ^ m);
++            m = Cy;        nm |= (p4 ^ m) & (p5 ^ m);
++            m = D >> 1;    nm |= (p5 ^ m) & (p6 ^ m);
++            m = Cy >> 2;   nm |= (p6 ^ m) & (p7 ^ m);
++            m = C >> 1;    nm |= (p7 ^ m) & (p4 ^ m);
++            m = My;        nm |= (p0 ^ m) & (p4 ^ m);
++            m = Bx;        nm |= (p1 ^ m) & (p5 ^ m);
++            m = Bx >> 2;   nm |= (p2 ^ m) & (p6 ^ m);
++            m = My >> 2;   nm |= (p3 ^ m) & (p7 ^ m);
++            m = Mxy;       nm |= (p0 ^ m) & (p1 ^ m) & (p4 ^ m) & (p5 ^ m);
++            m = Bx >> 1;   nm |= (p1 ^ m) & (p2 ^ m) & (p5 ^ m) & (p6 ^ m);
++            m = Mxy >> 2;  nm |= (p2 ^ m) & (p3 ^ m) & (p6 ^ m) & (p7 ^ m);
++            m = My >> 1;   nm |= (p0 ^ m) & (p3 ^ m) & (p4 ^ m) & (p7 ^ m);
++            m = Mx >> 1;   nm |= (p0 ^ m) & (p1 ^ m) & (p2 ^ m) & (p3 ^ m);
++            m = Cy >> 1;   nm |= (p4 ^ m) & (p5 ^ m) & (p6 ^ m) & (p7 ^ m);
++            m = Mxy >> 1;
++            nm |= (p0 ^ m) & (p1 ^ m) & (p2 ^ m) & (p3 ^ m) & (p4 ^ m) & (p5 ^ m) & (p6 ^ m) & (p7 ^ m);
++            for (int k = 0; k < 8; k += 2) {
++                const unsigned signs = ((p0 >> k) & 1u) | ((p1 >> k) & 1u) << 1 | ((p2 >> k) & 1u) << 2
++                    | ((p3 >> k) & 1u) << 3 | ((p4 >> k) & 1u) << 4 | ((p5 >> k) & 1u) << 5
++                    | ((p6 >> k) & 1u) << 6 | ((p7 >> k) & 1u) << 7;
++                if (((nm >> k) & 1u) || !sAdaptable[signs]) {
++                    masked |= uint64_t(1) << exactMergeGroup(i, j, k);
++                }
++            }
++        }
++    }
++
++    const bool useGradients = adaptivity < 1.0f;
++    uint64_t pass2 = ~masked;
++    uint8_t pass4 = 0;
++    bool pass8 = false;
++
++    if (useGradients && adaptivity < 1e-6) { // isMergeable() rejects every block
++        return true;
++    }
++
++    // group g's 2-block origin (local)
++    const auto groupX = [](int g) { return ((g >> 5) & 1) * 4 + ((g >> 2) & 1) * 2; };
++    const auto groupY = [](int g) { return ((g >> 4) & 1) * 4 + ((g >> 1) & 1) * 2; };
++    const auto groupZ = [](int g) { return ((g >> 3) & 1) * 4 + (g & 1) * 2; };
++
++    if (useGradients) {
++        if (S.thresholdFor != adaptivity) {
++            S.threshold = exactMergeThreshold(adaptivity);
++            S.thresholdFor = adaptivity;
++        }
++        const float T = S.threshold;
++        uint64_t nonUnit = 0;
++        int n = 0;
++        for (int g = 0; g < 64; ++g) {
++            S.start[g] = n;
++            if ((masked >> g) & 1) continue;
++            const int gx = groupX(g), gy = groupY(g), gz = groupZ(g);
++            const uint64_t w0 = signMask.template getWord<uint64_t>(gx);
++            const uint64_t w1 = signMask.template getWord<uint64_t>(gx + 1);
++            const unsigned sh0 = unsigned(gy * 8 + gz), sh1 = sh0 + 8;
++            // the block's active voxels, bit q = (x - gx) << 2 | (y - gy) << 1 | (z - gz)
++            const unsigned act = unsigned((w0 >> sh0) & 3u) | unsigned((w0 >> sh1) & 3u) << 2
++                | unsigned((w1 >> sh0) & 3u) << 4 | unsigned((w1 >> sh1) & 3u) << 6;
++            for (unsigned a = act; a; a &= a - 1) {
++                const int q = int(util::FindLowestOn(uint32_t(a)));
++                const int x = gx + (q >> 2), y = gy + ((q >> 1) & 1), z = gz + (q & 1);
++                const int c = ((x + 1) * 10 + y + 1) * 10 + z + 1;
++                // math::ISGradient<math::CD_2ND> on the dense copy, then as upstream
++                Vec3sType dir((v[c + 100] - v[c - 100]) * 0.5f,
++                              (v[c + 10] - v[c - 10]) * 0.5f,
++                              (v[c + 1] - v[c - 1]) * 0.5f);
++                dir.normalize();
++                if (invertGradientDir) dir = -dir;
++                if (!std::isfinite(dir[0]) || !std::isfinite(dir[1]) || !std::isfinite(dir[2])) {
++                    return false; // generic path
++                }
++                const float self = dir.dot(dir);
++                if (!(self >= T)) pass2 &= ~(uint64_t(1) << g); // the i == j pair
++                if (!(self > 0.25f)) nonUnit |= uint64_t(1) << g; // normalize() left it as is
++                S.nx[n] = dir[0];
++                S.ny[n] = dir[1];
++                S.nz[n] = dir[2];
++                ++n;
++            }
++        }
++        S.start[64] = n;
++
++        for (int g = 0; g < 64; ++g) {
++            if (!((pass2 >> g) & 1)) continue;
++            const int b = S.start[g], e = S.start[g + 1];
++            for (int i = b; i + 1 < e; ++i) {
++                if (!exactMergeRowsPass(S, i, i + 1, i + 1, e, T)) {
++                    pass2 &= ~(uint64_t(1) << g);
++                    break;
++                }
++            }
++        }
++
++        for (int B = 0; B < 8; ++B) {
++            if (((pass2 >> (B * 8)) & 0xFF) != 0xFF) continue;
++            if (nonManifold(((B >> 2) & 1) * 4, ((B >> 1) & 1) * 4, (B & 1) * 4, 4)) continue;
++            if (exactMergeCrossPass(S, B * 8, 1, ((nonUnit >> (B * 8)) & 0xFF) == 0, T)) {
++                pass4 |= uint8_t(1u << B);
++            }
++        }
++        pass8 = pass4 == 0xFF && !nonManifold(0, 0, 0, 8)
++            && exactMergeCrossPass(S, 0, 8, nonUnit == 0, T);
++    } else {
++        for (int B = 0; B < 8; ++B) {
++            if (((pass2 >> (B * 8)) & 0xFF) == 0xFF
++                && !nonManifold(((B >> 2) & 1) * 4, ((B >> 1) & 1) * 4, (B & 1) * 4, 4)) {
++                pass4 |= uint8_t(1u << B);
++            }
++        }
++        pass8 = pass4 == 0xFF && !nonManifold(0, 0, 0, 8);
++    }
++
++    if (pass2 == 0) return true;
++
++    // Region ids in the generic loop's order: 2-blocks, then 4-blocks, then the 8-block,
++    // each in x, y, z order; the last merge covering a voxel wins.
++    using IndexType = typename Index32LeafNodeType::ValueType;
++    IndexType id2[64], id4[8];
++    IndexType regionId = 1;
++    for (int x = 0; x < 8; x += 2)
++        for (int y = 0; y < 8; y += 2)
++            for (int z = 0; z < 8; z += 2) {
++                const int g = exactMergeGroup(x, y, z);
++                if ((pass2 >> g) & 1) id2[g] = regionId++;
++            }
++    for (int B = 0; B < 8; ++B) {
++        if ((pass4 >> B) & 1) id4[B] = regionId++;
++    }
++
++    IndexType* const ids = pointIndexNode.buffer().data();
++    if (pass8) {
++        std::fill(ids, ids + Index32LeafNodeType::SIZE, regionId);
++        return true;
++    }
++    for (int g = 0; g < 64; ++g) {
++        const bool in4 = (pass4 >> (g >> 3)) & 1;
++        if (!in4 && !((pass2 >> g) & 1)) continue;
++        const IndexType id = in4 ? id4[g >> 3] : id2[g];
++        const int gx = groupX(g), gy = groupY(g), gz = groupZ(g);
++        for (int x = gx; x < gx + 2; ++x) {
++            for (int y = gy; y < gy + 2; ++y) {
++                IndexType* const row = ids + ((x << 6) | (y << 3) | gz);
++                row[0] = id;
++                row[1] = id;
++            }
++        }
++    }
++    return true;
++}
++
++
+ template <typename InputGridType>
+ struct MergeVoxelRegions
+ {
+@@ -2180,6 +2714,7 @@
+ 
+     const bool invertGradientDir = mInvertSurfaceOrientation || isBoolValue<InputValueType>();
+     std::unique_ptr<Vec3sLeafNodeType> gradientNode;
++    std::unique_ptr<ExactMergeScratch> exactScratch;
+ 
+     Coord ijk, end;
+     const int LeafDim = InputLeafNodeType::DIM;
+@@ -2208,6 +2743,17 @@
+         float adaptivity = (refSignFlagsAcc && !refSignFlagsAcc->probeConstLeaf(origin)) ?
+             mInternalAdaptivity : mSurfaceAdaptivity;
+ 
++        if constexpr (std::is_same<InputValueType, float>::value) {
++            if (!spatialAdaptivityAcc && exactMergeFastPathEnabled()) {
++                if (!exactScratch) exactScratch.reset(new ExactMergeScratch());
++                const BoolLeafNodeType* maskLeaf = maskAcc ? maskAcc->probeConstLeaf(origin) : nullptr;
++                if (exactFastMergeLeaf(*exactScratch, inputAcc, pointIndexAcc, signFlagsNode,
++                        pointIndexNode, maskLeaf, mIsovalue, adaptivity, invertGradientDir)) {
++                    continue;
++                }
++            }
++        }
++
+         bool useGradients = adaptivity < 1.0f;
+ 
+         // Set region adaptivity
+@@ -2385,7 +2931,9 @@
+ };
+ 
+ 
+-// Constructs qudas and triangles
++// Constructs qudas and triangles. Each leaf's primitives are built in scratch arrays
++// reused across leaves, then copied into the pool at their exact size: one allocation
++// per array instead of an upper-bound allocation and a trimming reallocation.
+ struct AdaptivePrimBuilder
+ {
+     AdaptivePrimBuilder() : mQuadIdx(0), mTriangleIdx(0), mPolygonPool(nullptr) {}
+@@ -2393,9 +2941,12 @@
+     void init(const size_t upperBound, PolygonPool& polygonPool)
+     {
+         mPolygonPool = &polygonPool;
+-        mPolygonPool->resetQuads(upperBound);
+-        mPolygonPool->resetTriangles(upperBound);
+-
++        if (mQuads.size() < upperBound) {
++            mQuads.resize(upperBound);
++            mQuadFlags.resize(upperBound);
++            mTriangles.resize(upperBound);
++            mTriangleFlags.resize(upperBound);
++        }
+         mQuadIdx = 0;
+         mTriangleIdx = 0;
+     }
+@@ -2405,35 +2956,35 @@
+     {
+         if (verts[0] != verts[1] && verts[0] != verts[2] && verts[0] != verts[3]
+             && verts[1] != verts[2] && verts[1] != verts[3] && verts[2] != verts[3]) {
+-            mPolygonPool->quadFlags(mQuadIdx) = flags;
++            mQuadFlags[mQuadIdx] = flags;
+             addQuad(verts, reverse);
+         } else if (
+             verts[0] == verts[3] &&
+             verts[1] != verts[2] &&
+             verts[1] != verts[0] &&
+             verts[2] != verts[0]) {
+-            mPolygonPool->triangleFlags(mTriangleIdx) = flags;
++            mTriangleFlags[mTriangleIdx] = flags;
+             addTriangle(verts[0], verts[1], verts[2], reverse);
+         } else if (
+             verts[1] == verts[2] &&
+             verts[0] != verts[3] &&
+             verts[0] != verts[1] &&
+             verts[3] != verts[1]) {
+-            mPolygonPool->triangleFlags(mTriangleIdx) = flags;
++            mTriangleFlags[mTriangleIdx] = flags;
+             addTriangle(verts[0], verts[1], verts[3], reverse);
+         } else if (
+             verts[0] == verts[1] &&
+             verts[2] != verts[3] &&
+             verts[2] != verts[0] &&
+             verts[3] != verts[0]) {
+-            mPolygonPool->triangleFlags(mTriangleIdx) = flags;
++            mTriangleFlags[mTriangleIdx] = flags;
+             addTriangle(verts[0], verts[2], verts[3], reverse);
+         } else if (
+             verts[2] == verts[3] &&
+             verts[0] != verts[1] &&
+             verts[0] != verts[2] &&
+             verts[1] != verts[2]) {
+-            mPolygonPool->triangleFlags(mTriangleIdx) = flags;
++            mTriangleFlags[mTriangleIdx] = flags;
+             addTriangle(verts[0], verts[1], verts[2], reverse);
+         }
+     }
+@@ -2441,8 +2992,21 @@
+ 
+     void done()
+     {
+-        mPolygonPool->trimQuads(mQuadIdx, /*reallocate=*/true);
+-        mPolygonPool->trimTrinagles(mTriangleIdx, /*reallocate=*/true);
++        if (mQuadIdx > 0) {
++            mPolygonPool->resetQuads(mQuadIdx);
++            std::copy(mQuads.begin(), mQuads.begin() + mQuadIdx, &mPolygonPool->quad(0));
++            std::copy(mQuadFlags.begin(), mQuadFlags.begin() + mQuadIdx, &mPolygonPool->quadFlags(0));
++        } else {
++            mPolygonPool->clearQuads();
++        }
++        if (mTriangleIdx > 0) {
++            mPolygonPool->resetTriangles(mTriangleIdx);
++            std::copy(mTriangles.begin(), mTriangles.begin() + mTriangleIdx, &mPolygonPool->triangle(0));
++            std::copy(mTriangleFlags.begin(), mTriangleFlags.begin() + mTriangleIdx,
++                &mPolygonPool->triangleFlags(0));
++        } else {
++            mPolygonPool->clearTriangles();
++        }
+     }
+ 
+ private:
+@@ -2451,9 +3015,9 @@
+     void addQuad(const math::Vec4<IndexType>& verts, bool reverse)
+     {
+         if (!reverse) {
+-            mPolygonPool->quad(mQuadIdx) = verts;
++            mQuads[mQuadIdx] = verts;
+         } else {
+-            Vec4I& quad = mPolygonPool->quad(mQuadIdx);
++            Vec4I& quad = mQuads[mQuadIdx];
+             quad[0] = verts[3];
+             quad[1] = verts[2];
+             quad[2] = verts[1];
+@@ -2464,7 +3028,7 @@
+ 
+     void addTriangle(unsigned v0, unsigned v1, unsigned v2, bool reverse)
+     {
+-        Vec3I& prim = mPolygonPool->triangle(mTriangleIdx);
++        Vec3I& prim = mTriangles[mTriangleIdx];
+ 
+         prim[1] = v1;
+ 
+@@ -2480,6 +3044,10 @@
+ 
+     size_t mQuadIdx, mTriangleIdx;
+     PolygonPool *mPolygonPool;
++    std::vector<Vec4I> mQuads;
++    std::vector<char> mQuadFlags;
++    std::vector<Vec3I> mTriangles;
++    std::vector<char> mTriangleFlags;
+ };
+ 
+ 
+@@ -3925,6 +4493,9 @@
+ 
+             size_t count = 0;
+ 
++            // ids below 128 (all MergeVoxelRegions assigns) in a bitset, others in the set
++            uint64_t smallRegions[2] = {0, 0};
++            size_t numSmallRegions = 0;
+             std::set<IndexType> uniqueRegions;
+ 
+             for (typename PointIndexLeafNode::ValueOnCIter it = node.cbeginValueOn(); it; ++it) {
+@@ -3934,11 +4505,18 @@
+                 if (id == 0) {
+                     count += size_t(sEdgeGroupTable[(SIGNS & signNode.getValue(it.pos()))][0]);
+                 } else if (id != IndexType(util::INVALID_IDX)) {
+-                    uniqueRegions.insert(id);
++                    if (id < IndexType(128)) {
++                        uint64_t& word = smallRegions[id >> 6];
++                        const uint64_t bit = uint64_t(1) << (id & 63);
++                        numSmallRegions += (word & bit) ? 0 : 1;
++                        word |= bit;
++                    } else {
++                        uniqueRegions.insert(id);
++                    }
+                 }
+             }
+ 
+-            mData[n] = Index32(count + uniqueRegions.size());
++            mData[n] = Index32(count + numSmallRegions + uniqueRegions.size());
+         }
+     }
+ 

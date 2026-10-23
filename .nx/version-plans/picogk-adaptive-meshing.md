@@ -15,6 +15,7 @@ The native PicoGK build now:
 - hands out copies of `OpenVdbFile` fields, so editing a field read from a file changes neither the file nor another read, while `SaveToFile` still stamps the file's own grids;
 - uses unregistered accessors for per-call queries;
 - joins slice contours within a one-pixel window;
+- merges adaptive mesh regions through an exact OpenVDB `VolumeToMesh` fast path that makes the generic merge's decisions in less time, so adaptive meshes stay byte-identical;
 - builds with `-ffp-contract=off`.
 
 The worker's compile, edge-adjacency, validation and frame-parsing paths also do less work, with identical output. The published layers pinned in `tau-plugin.json` keep running until a release rebuilds them and a follow-up re-pins them.

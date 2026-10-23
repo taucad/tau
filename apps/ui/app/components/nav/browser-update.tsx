@@ -2,7 +2,12 @@ import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'reac
 import { ArrowUpCircle } from 'lucide-react';
 import { Topic } from '@taucad/events';
 import { useSidebar } from '@taucad/ui/components/sidebar';
-import { describeSupersession, isReloadOffered, subscribeReloadOffer } from '#filesystem/build-skew.js';
+import {
+  describeSupersession,
+  haveWritesStopped,
+  isReloadOffered,
+  subscribeReloadOffer,
+} from '#filesystem/build-skew.js';
 import { UpdateControl } from '#components/nav/update-control.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
@@ -62,19 +67,22 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   const { open: sidebarOpen, openMobile, isMobile, setOpen: showSidebar } = useSidebar();
   // A collapsed sidebar is inert, so only an open one can own the prompt.
   useReloadPromptOwner(isMobile ? openMobile : sidebarOpen);
-  useEffect(
-    () =>
-      // The offer is worth revealing once; a remount does not replay it, and a withdrawn offer reveals nothing.
-      subscribeReloadOffer(() => {
-        if (!isReloadOffered()) {
-          return;
-        }
+  useEffect(() => {
+    /* Opened for the user only once writes have stopped. An offer alone (a deploy in a lone tab that
+     * still writes) shows the control where it is, without opening the sidebar. A remount does not
+     * replay a reveal, and a withdrawn offer reveals nothing. */
+    let wasStopped = isReloadOffered() && haveWritesStopped();
+    const reveal = (): void => {
+      const isStopped = isReloadOffered() && haveWritesStopped();
+      if (isStopped && !wasStopped) {
         showSidebar(true);
         setRevealed(true);
         setOpen(true);
-      }),
-    [showSidebar],
-  );
+      }
+      wasStopped = isStopped;
+    };
+    return subscribeReloadOffer(reveal);
+  }, [showSidebar]);
   if (!superseded) {
     return undefined;
   }

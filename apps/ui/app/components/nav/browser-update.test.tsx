@@ -134,7 +134,7 @@ describe('browser update control', () => {
   });
 
   it('words a rollback as a replacement and dates the build it serves', async () => {
-    const { BrowserUpdate, SidebarProvider, buildId, markBuildSuperseded } = await load();
+    const { BrowserUpdate, SidebarProvider, buildId } = await load();
     render(
       <SidebarProvider>
         <BrowserUpdate />
@@ -143,9 +143,9 @@ describe('browser update control', () => {
     const rolledBack = buildId - 48 * 3_600_000;
     const format = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-    act(() => {
-      markBuildSuperseded(rolledBack, 'server');
-    });
+    // A newer tab announces itself, and the server names the older build it rolled back to.
+    vi.stubGlobal('fetch', async () => Response.json({ buildId: rolledBack }));
+    await announce(buildId + 1);
 
     const dialog = await screen.findByRole('dialog', { name: 'Tau update' });
     expect(dialog).toHaveTextContent(`Tau · Built ${format.format(rolledBack)}`);
@@ -153,8 +153,53 @@ describe('browser update control', () => {
     expect(dialog).not.toHaveTextContent('newer version');
   });
 
-  it('does not open the sidebar again when the offer is withdrawn', async () => {
+  it("shows a lone tab's deploy offer without opening the sidebar while the tab still writes", async () => {
+    const { BrowserUpdate, SidebarProvider, useSidebar, buildId, offerReload, isBuildSuperseded } = await load();
+    const SidebarState = (): React.JSX.Element => {
+      const { open } = useSidebar();
+      return <output aria-label='Sidebar' data-open={String(open)} />;
+    };
+    render(
+      <SidebarProvider defaultOpen={false}>
+        <SidebarState />
+        <BrowserUpdate />
+      </SidebarProvider>,
+    );
+
+    act(() => {
+      offerReload(buildId + 1);
+    });
+
+    expect(isBuildSuperseded()).toBe(false);
+    expect(screen.getByRole('button', { name: 'Update ready' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Sidebar' })).toHaveAttribute('data-open', 'false');
+    expect(screen.queryByRole('dialog', { name: 'Tau update' })).not.toBeInTheDocument();
+  });
+
+  it('opens the sidebar once writes stop, even after the offer was already shown', async () => {
     const { BrowserUpdate, SidebarProvider, useSidebar, buildId, offerReload } = await load();
+    const SidebarState = (): React.JSX.Element => {
+      const { open } = useSidebar();
+      return <output aria-label='Sidebar' data-open={String(open)} />;
+    };
+    render(
+      <SidebarProvider defaultOpen={false}>
+        <SidebarState />
+        <BrowserUpdate />
+      </SidebarProvider>,
+    );
+    act(() => {
+      offerReload(buildId + 1);
+    });
+
+    await announce(buildId + 2);
+
+    expect(screen.getByRole('status', { name: 'Sidebar' })).toHaveAttribute('data-open', 'true');
+    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toBeInTheDocument();
+  });
+
+  it('does not open the sidebar again when the offer is withdrawn', async () => {
+    const { BrowserUpdate, SidebarProvider, useSidebar, buildId } = await load();
     const SidebarState = (): React.JSX.Element => {
       const { open, setOpen } = useSidebar();
       return (
@@ -174,9 +219,7 @@ describe('browser update control', () => {
         <BrowserUpdate />
       </SidebarProvider>,
     );
-    act(() => {
-      offerReload(buildId + 1);
-    });
+    await announce(buildId + 1);
     const collapse = screen.getByRole('button', { name: 'Collapse sidebar' });
     expect(collapse).toHaveAttribute('data-open', 'true');
     fireEvent.click(collapse);

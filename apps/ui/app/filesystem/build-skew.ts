@@ -20,7 +20,9 @@
  * - The server names this tab's build: the stop is lifted and the tab answers
  *   `{ buildId, live: true }`, so the announcer checks in turn and steps aside.
  * - The server names another build: the tab is superseded by that build for good.
- * - No answer: the peer's word stands and the tab is superseded by it.
+ * - No answer: the peer's word stands and the tab is superseded by it, but only
+ *   until the server answers. The tab asks again every `peerRecheckDelay` and on the
+ *   next announcement; when the server then names this build, the tab resumes.
  *
  * A peer's `live` claim is checked the same way, never taken on trust. Once the
  * server has spoken, its build outranks anything a tab says.
@@ -137,24 +139,75 @@ type LiveAnnouncement = { readonly buildId: number; readonly live: true };
 const isLiveAnnouncement = (message: unknown): message is LiveAnnouncement =>
   typeof message === 'object' && message !== null && 'live' in message && message.live === true;
 
-let liveBuildProbe: Promise<number | undefined> | undefined;
-
-/** One `/health/build` request at a time, shared by the announcements waiting on it. */
+/** The server's live build, or `undefined` without an answer; concurrent callers share one request. */
 const askServer = async (): Promise<number | undefined> => {
-  const probe = async (): Promise<number | undefined> => {
-    try {
-      return await fetchLiveBuildId();
-    } catch {
-      return undefined;
-    } finally {
-      liveBuildProbe = undefined;
-    }
-  };
-  liveBuildProbe ??= probe();
-  return liveBuildProbe;
+  try {
+    return await fetchLiveBuildId();
+  } catch {
+    return undefined;
+  }
 };
 
 const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName);
+
+/** Milliseconds between server checks while this tab is superseded only on a peer's word. */
+export const peerRecheckDelay = 30_000;
+
+let recheckTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** The server named this build: drop a supersession that rested only on a peer's word, and say so. */
+const resumeAsLive = (): void => {
+  const wasStopped = isBuildSuperseded();
+  const wasOffered = isReloadOffered();
+  if (superseded && supersedingSource === 'tab') {
+    superseded = false;
+    supersedingBuildId = buildId;
+    supersedingSource = undefined;
+    supersedingBuildTopic.emit();
+  }
+  provisional = false;
+  if (wasStopped !== isBuildSuperseded()) {
+    writeStopTopic.emit();
+  }
+  if (wasOffered !== isReloadOffered()) {
+    reloadOfferTopic.emit();
+  }
+  if (!superseded) {
+    channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
+  }
+};
+
+/** Act on the server's answer about which build is live. */
+const settleWithServer = (liveBuildId: number | undefined, claimedBuildId: number): void => {
+  if (liveBuildId === buildId) {
+    resumeAsLive();
+    return;
+  }
+  if (liveBuildId !== undefined) {
+    markBuildSuperseded(liveBuildId, 'server');
+    return;
+  }
+  markBuildSuperseded(claimedBuildId);
+  scheduleRecheck(claimedBuildId);
+};
+
+/** Ask the server again later while only a peer's word supersedes this tab. */
+const scheduleRecheck = (claimedBuildId: number): void => {
+  if (recheckTimer !== undefined) {
+    return;
+  }
+  recheckTimer = setTimeout(() => {
+    recheckTimer = undefined;
+    if (!superseded || supersedingSource !== 'tab') {
+      return;
+    }
+    const recheck = async (): Promise<void> => {
+      settleWithServer(await askServer(), claimedBuildId);
+    };
+    // async-iife: bootstrap -- a timer cannot await; the check acts on its own.
+    void recheck();
+  }, peerRecheckDelay);
+};
 
 /** Settle a peer's claim that another build owns storage, stopping writes until the server answers. */
 const checkPeerClaim = async (claimedBuildId: number): Promise<void> => {
@@ -162,19 +215,7 @@ const checkPeerClaim = async (claimedBuildId: number): Promise<void> => {
     return;
   }
   setProvisional(true);
-  const liveBuildId = await askServer();
-  if (liveBuildId === buildId) {
-    setProvisional(false);
-    if (!superseded) {
-      channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
-    }
-    return;
-  }
-  if (liveBuildId === undefined) {
-    markBuildSuperseded(claimedBuildId);
-    return;
-  }
-  markBuildSuperseded(liveBuildId, 'server');
+  settleWithServer(await askServer(), claimedBuildId);
 };
 
 if (channel) {
@@ -200,6 +241,8 @@ if (channel) {
 /** Stop listening to other tabs. A page never needs this; tests that load the module afresh do. */
 export const closeBuildSkewChannel = (): void => {
   channel?.close();
+  clearTimeout(recheckTimer);
+  recheckTimer = undefined;
 };
 
 /**
@@ -224,7 +267,10 @@ export const subscribeBuildSkew = (listener: () => void): (() => void) => {
   return writeStopTopic.subscribe(listener);
 };
 
-/** Subscribe to the one-way transition into offering the reload ({@link isReloadOffered}). */
+/**
+ * Subscribe to each change of the reload offer ({@link isReloadOffered}). It is withdrawn only
+ * when the server names this build after a peer alone had superseded it.
+ */
 export const subscribeReloadOffer = (listener: () => void): (() => void) => {
   return reloadOfferTopic.subscribe(listener);
 };

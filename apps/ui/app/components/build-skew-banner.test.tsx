@@ -94,6 +94,7 @@ afterEach(() => {
   for (const skew of loaded.splice(0)) {
     skew.closeBuildSkewChannel();
   }
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -141,6 +142,42 @@ describe('build-id skew guard (DF20)', () => {
 
     expect(isBuildSuperseded()).toBe(true);
     expect(readSupersedingBuildId()).toBe(buildId + 1);
+  });
+
+  it("resumes writing once the server names this build, when it was superseded only on a peer's word", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { BuildSkewBanner, buildId, isBuildSuperseded, readSupersedingBuildId, peerRecheckDelay } = await load();
+    answerLiveBuild('unreachable');
+    const heard = listen();
+    render(<BuildSkewBanner />);
+    announce(buildId + 1);
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(isBuildSuperseded()).toBe(true);
+
+    answerLiveBuild(buildId);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
+    expect(readSupersedingBuildId()).toBe(buildId);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
+  });
+
+  it("resumes writing when a later announcement's check names this build", async () => {
+    const { buildId, isBuildSuperseded } = await load();
+    answerLiveBuild('unreachable');
+    announce(buildId + 1);
+    await pause();
+    expect(isBuildSuperseded()).toBe(true);
+
+    answerLiveBuild(buildId);
+    announce(buildId + 2);
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
   });
 
   it('names the build the server serves, not the announcing tab, when the server knows better', async () => {

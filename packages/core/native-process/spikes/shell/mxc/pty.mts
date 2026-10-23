@@ -127,9 +127,9 @@ const main = async (): Promise<void> => {
   writeJson(join(out, 'pty.receipt.json'), receipt);
   // eslint-disable-next-line no-console
   console.log(`[mxc:pty] ${receipt.verdict} — conpty interactive ${shell.kind} marker=${seen}`);
-  if (!seen) {
-    process.exitCode = 1;
-  }
+  // The receipt is written synchronously above; exit now so node-pty's ConPTY teardown does not emit
+  // its benign conpty_console_list_agent AttachConsole stack trace to the step log (cosmetic noise).
+  process.exit(seen ? 0 : 1);
 };
 
 await main();

@@ -69,6 +69,7 @@ if (-not $HidePwsh7 -and $pwsh7.present -and $pwsh7.trusted) {
 $kind = if ($null -ne $selected) { $selected.kind } else { 'shell-missing' }
 $identity = [ordered]@{
   kind = $kind
+  trusted = ($null -ne $selected)
   path = if ($selected) { $selected.path } else { $null }
   version = if ($selected) { $selected.version } else { $null }
   sha256 = if ($selected) { $selected.sha256 } else { $null }

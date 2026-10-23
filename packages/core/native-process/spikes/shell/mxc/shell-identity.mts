@@ -99,7 +99,12 @@ const main = (): void => {
   const forced = runProbe(shellExe, ps1, join(out, 'shell-identity.51.json'), true);
 
   const defKind = 'kind' in def ? def.kind : 'error';
-  const defTrusted = 'kind' in def && def.kind !== 'shell-missing' && def.trusted === true;
+  // Resolution success IS trust: shell-identity.ps1 only ever SELECTS a present+trusted candidate, so
+  // a non-'shell-missing' kind means a trusted fixed-path shell was chosen. Do NOT additionally gate
+  // on a top-level `trusted` (the ps1 records trust per-candidate, not top-level) — that was the
+  // verdict bug that red-flagged a correctly-resolved pwsh7. version/sha256/SID are recorded as
+  // evidence, never gated (a hosted image legitimately may lack one).
+  const defTrusted = 'kind' in def && def.kind !== 'shell-missing';
   checks.push(
     check(
       'shell.default.resolved',

@@ -19,6 +19,8 @@ import { SharePane } from '@taucad/workbench-panes/share/share-pane';
 import type { ExportNotices } from '@taucad/workbench-panes/export/export-source';
 import { Toaster, toast } from '@taucad/ui/components/sonner';
 import type { HostBridge } from '#app/host-bridge.js';
+import type { LaneStore } from '#app/lane-store.js';
+import type { PartThumbnails } from '#app/part-previews.jsx';
 import type { ComponentReveal } from '#app/sources/component-menu.jsx';
 import { createExportSource } from '#app/sources/export-source.js';
 import type { PageFilesSource } from '#app/sources/files-source.js';
@@ -52,6 +54,12 @@ type WorkbenchLaneProps = Readonly<{
   graphicsRef: GraphicsRef;
   /** The Files pane's source: the shown model's project, and how this page opens another of its files. */
   files: PageFilesSource;
+  /** The project's lane store: the lane's tabs and width and the Model pane's sections. */
+  store: LaneStore;
+  /** The shown model's part previews. */
+  thumbnails: PartThumbnails | undefined;
+  /** Opens the page's part gallery. */
+  openPartGallery: NonNullable<ModelSource['openPartGallery']>;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
   reveal: ComponentReveal;
   /** The part menu on the Model pane's rows. */
@@ -74,6 +82,9 @@ export function WorkbenchLane({
   status,
   graphicsRef,
   files,
+  store,
+  thumbnails,
+  openPartGallery,
   reveal,
   componentActions,
   openPaneRequest,
@@ -108,7 +119,7 @@ export function WorkbenchLane({
       useUnits: () => units,
       parameters,
       kinematics: { useUnitStatus: kinematics.useUnitStatus, subscribeReveal: reveal.subscribeKinematics },
-      model: createModelSource(bridge, { componentActions, reveal: reveal.model }),
+      model: createModelSource({ store, thumbnails, openPartGallery, componentActions, reveal: reveal.model }),
       files,
       ...(model === undefined
         ? {}
@@ -119,14 +130,18 @@ export function WorkbenchLane({
             share: createShareSource(bridge, model),
           }),
     }),
-    [bridge, componentActions, files, kinematics, model, parameters, reveal, units],
+    [bridge, componentActions, files, kinematics, model, openPartGallery, parameters, reveal, store, thumbnails, units],
   );
+  /* Read once per store: the lane restores what it last showed in this project. */
+  const initialLayout = useMemo(() => store.readLane(), [store]);
 
   return (
     <WorkbenchPanesHostProvider value={host}>
       <PaneLane
         panes={offeredPanes}
         initialOpen={openingPanes}
+        initialLayout={initialLayout}
+        onLayoutChange={store.writeLaneLayout}
         openRequest={openPaneRequest}
         headerEnd={headerEnd}
         renderPane={(pane) => {

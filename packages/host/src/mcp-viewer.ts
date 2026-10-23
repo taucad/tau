@@ -41,11 +41,22 @@ import {
 } from '#mcp-viewer-export.js';
 import type { McpViewerExport } from '#mcp-viewer-export.js';
 import type { McpViewerSessionsOptions } from '#mcp-viewer-sessions.js';
+import { viewerPartThumbnailsInputSchema, viewerPartThumbnailsToolName } from '#mcp-viewer-thumbnails.js';
+import type { McpViewerPartThumbnails } from '#mcp-viewer-thumbnails.js';
 import { createMcpViewerWorkbench } from '#mcp-viewer-workbench.js';
 import type { McpViewerWorkbenchOptions } from '#mcp-viewer-workbench.js';
 import type { TauViewerMechanism, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
 import { readGlbMechanism } from '@taucad/agent-tools/runtime';
 import { slugifyTargetFile } from '@taucad/chat/rpc';
+
+/**
+ * The opaque per-project key a shown model carries: the first 16 hex digits of the SHA-256 of the project folder.
+ *
+ * @param root - The project folder.
+ * @returns The key.
+ */
+const projectKeyOf = (root: string): string =>
+  createHash('sha256').update(resolvePath(root)).digest('hex').slice(0, 16);
 
 /** Tool calls whose conversation the server remembers for the pages they open. */
 const rememberedCalls = 1024;
@@ -75,6 +86,8 @@ export type LocalMcpViewerOptions = Readonly<{
   snapshotSource?: SourceSnapshotter | undefined;
   /** The Export pane's handlers; without them the page offers no Export pane tools. */
   export?: McpViewerExport | undefined;
+  /** Renders the Model pane's part thumbnails; without it the page's part rows show no preview. */
+  partThumbnails?: McpViewerPartThumbnails | undefined;
   /** The folder a call works in when it names none and its conversation has shown no model: the server's start folder. */
   workspaceRoot: string;
   /**
@@ -374,6 +387,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       mimeType,
       byteLength: bytes.length,
       sha256,
+      projectKey: projectKeyOf(root),
     };
     shown.set(id, { kind: 'file', model, absolutePath, root, identity });
     return mimeType === 'model/gltf-binary' ? { model, mechanism: mechanismOf(bytes) } : { model };
@@ -392,6 +406,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       mimeType: render.mimeType,
       byteLength: render.bytes.length,
       sha256: render.sha256,
+      projectKey: projectKeyOf(session.root),
       ...(render.sourceRevision === undefined ? {} : { sourceRevision: render.sourceRevision }),
       ...(render.issues.length === 0 ? {} : { issues: render.issues }),
     };
@@ -696,7 +711,55 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       }),
     ];
   };
-  const pageTools = options.export === undefined ? [] : exportTools(options.export);
+  /** The Model pane's part thumbnails, rendered from the shown model the call names. */
+  const thumbnailTools = (
+    render: McpViewerPartThumbnails,
+  ): Array<
+    Readonly<{
+      tool: TauMcpViewerPageTool;
+      inRoot: (root: string, args: unknown, signal?: AbortSignal) => Promise<unknown>;
+    }>
+  > => {
+    const inRoot = async (_root: string, args: unknown, signal?: AbortSignal): Promise<unknown> => {
+      const request = viewerPartThumbnailsInputSchema.parse(args);
+      const entry = shown.get(request.modelId);
+      if (entry === undefined) {
+        return failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
+      }
+      if (entry.kind === 'file') {
+        return render({ root: entry.root, source: { absolutePath: entry.absolutePath }, request, signal });
+      }
+      /* A watched source's render is in memory; one that gave way to a newer render is not drawn from. */
+      const shownRender = entry.session.bytesOf(request.modelId);
+      return shownRender === undefined
+        ? failure('MODEL_CHANGED', `${entry.model.path} changed since it was shown; the newer model is on its way.`)
+        : render({
+            root: entry.root,
+            source: { bytes: shownRender.bytes, mimeType: shownRender.mimeType },
+            request,
+            signal,
+          });
+    };
+    return [
+      {
+        inRoot,
+        tool: {
+          name: viewerPartThumbnailsToolName,
+          description:
+            "Render part thumbnails of the shown model for the Tau viewer page's Model pane. Only the viewer page calls this.",
+          inputSchema: viewerPartThumbnailsInputSchema,
+          call: async (args, callOptions) =>
+            (await inRoot(rootOf(callOptions.meta), args, callOptions.signal)) as
+              | Readonly<Record<string, unknown>>
+              | TauMcpViewerFailure,
+        },
+      },
+    ];
+  };
+  const pageTools = [
+    ...(options.export === undefined ? [] : exportTools(options.export)),
+    ...(options.partThumbnails === undefined ? [] : thumbnailTools(options.partThumbnails)),
+  ];
   const { snapshotSource } = options;
 
   const port: LocalMcpViewer = {

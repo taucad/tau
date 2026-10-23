@@ -53,6 +53,8 @@ import { createLocalMcpViewer } from '#mcp-viewer.js';
 import { createMcpViewerExport } from '#mcp-viewer-export.js';
 import type { EntrySessionRuntime } from '#mcp-entry-sessions.js';
 import type { ViewerExportRuntime } from '#mcp-viewer-export.js';
+import { createMcpViewerPartThumbnails } from '#mcp-viewer-thumbnails.js';
+import type { ViewerThumbnailRuntime } from '#mcp-viewer-thumbnails.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
 
@@ -870,7 +872,9 @@ export type LocalHostMcpOptions = {
    * runtime document whose renders refresh every page showing it, and the viewer page's Export pane lists the entry's
    * formats and their options; without it, the viewer draws GLB and SVG files only and offers no Export pane tools.
    */
-  readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime & EntrySessionRuntime>) | undefined;
+  readonly runtimeClient?:
+    | ((root: string) => Promise<ViewerExportRuntime & EntrySessionRuntime & ViewerThumbnailRuntime>)
+    | undefined;
   /**
    * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page offers no
    * direct link.
@@ -1034,6 +1038,7 @@ export const serveLocalHostMcp = async (
                 export: createMcpViewerExport({
                   runtimeFor: options.runtimeClient,
                 }),
+                partThumbnails: createMcpViewerPartThumbnails(options.runtimeClient),
               }),
           /* The loopback page's panes reach the same host tools an MCP App page reaches through `tools/call`. */
           hostCall: async ({ root, call, signal }) =>

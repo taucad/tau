@@ -62,6 +62,8 @@ import { WorkbenchLane } from '#app/workbench-lane.jsx';
 import { entryPathOf, liveViewSettings, readWorkbenchState, seedViewer } from '#app/workbench-state.js';
 import { PageViewerIssues } from '#app/page-issues.jsx';
 import type { PageIssues } from '#app/page-issues.jsx';
+import { createLaneStore } from '#app/lane-store.js';
+import { PagePartGallery, usePartPreviews } from '#app/part-previews.jsx';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
 
@@ -448,6 +450,17 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   const isInline = view.composition === 'inline';
   /* The tab opens with its panes beside a wide canvas; a narrow one keeps the canvas whole until asked. */
   const [isPanelOpen, setIsPanelOpen] = useState(() => globalThis.innerWidth >= 720);
+  /* What the lane remembers per project (PAR-7): once the shown model names its project, the lane opens as it was. */
+  const projectKey = shown?.model.projectKey;
+  const laneStore = useMemo(() => createLaneStore(projectKey), [projectKey]);
+  useEffect(() => {
+    const { isOpen } = laneStore.readLane();
+    if (isOpen !== undefined) {
+      // oxlint-disable-next-line react/set-state-in-effect -- the project's saved lane state arrives with its model.
+      setIsPanelOpen(isOpen);
+    }
+  }, [laneStore]);
+  const previews = usePartPreviews(bridge, shown?.model);
   /* What the canvas draws follows the graphics actor, so Viewer settings and the panes change it as in the app. */
   const enableGrid = useSelector(graphicsRef, (snapshot) => snapshot.context.enableGrid);
   const enableAxes = useSelector(graphicsRef, (snapshot) => snapshot.context.enableAxes);
@@ -679,11 +692,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   >(undefined);
   /* Request ids only grow, so a request made after the lane closed still reads as new. */
   const paneRequests = useRef(0);
-  const openPane = useCallback((pane: WorkbenchPaneId) => {
-    paneRequests.current += 1;
-    setIsPanelOpen(true);
-    setOpenPaneRequest({ pane, requestId: paneRequests.current });
-  }, []);
+  const openPane = useCallback(
+    (pane: WorkbenchPaneId) => {
+      paneRequests.current += 1;
+      laneStore.writeLaneOpen(true);
+      setIsPanelOpen(true);
+      setOpenPaneRequest({ pane, requestId: paneRequests.current });
+    },
+    [laneStore],
+  );
   /* One verb for the part menu, the Model pane's rows and the card: the part joins the set, the chat gets it along
    * the host's route, and the next sync reports the set to view_state (D2). */
   const addPartToChat = useCallback(
@@ -739,8 +756,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         addToChatLabel: chatAction[view.chatRoute],
         openPane,
         reveal,
+        openPreview: previews.openPartGallery,
       }),
-    [addPartToChat, openPane, reveal, view.chatRoute],
+    [addPartToChat, openPane, previews.openPartGallery, reveal, view.chatRoute],
   );
   const rowMenus = useMemo(() => createModelComponentActionMenus(componentActions), [componentActions]);
   /* The selected part is the graphics actor's first selected component, whichever surface picked it. */
@@ -792,8 +810,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       setOpenPaneRequest(undefined);
     }
     isToggleFocusPending.current = toggleRef.current !== null && toggleRef.current === document.activeElement;
+    laneStore.writeLaneOpen(!isPanelOpen);
     setIsPanelOpen(!isPanelOpen);
-  }, [isPanelOpen]);
+  }, [isPanelOpen, laneStore]);
   useEffect(() => {
     if (isToggleFocusPending.current) {
       isToggleFocusPending.current = false;
@@ -913,11 +932,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 </div>
                 {isInline || !isPanelOpen ? null : (
                   <WorkbenchLane
+                    key={projectKey}
                     bridge={bridge}
                     model={shown?.model}
                     status={liveStatus}
                     graphicsRef={graphicsRef}
                     files={files}
+                    store={laneStore}
+                    thumbnails={previews.thumbnails}
+                    openPartGallery={previews.openPartGallery}
                     reveal={reveal}
                     componentActions={rowMenus}
                     openPaneRequest={openPaneRequest}
@@ -947,6 +970,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                   ) : null}
                 </div>
               ) : null}
+              {previews.galleryRequest === undefined ? null : (
+                <PagePartGallery
+                  key={`${previews.galleryRequest.unitId}:${previews.galleryRequest.componentId}`}
+                  thumbnails={previews.thumbnails}
+                  request={previews.galleryRequest}
+                  actions={componentActions}
+                  onClose={previews.closePartGallery}
+                />
+              )}
             </main>
           </GraphicsProvider>
         </TooltipProvider>

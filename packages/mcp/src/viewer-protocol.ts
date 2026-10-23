@@ -82,6 +82,11 @@ export type TauViewerModel = Readonly<{
   sourceRevision?: SourceRevision | undefined;
   /** What the runtime reported while rendering the source, such as warnings; absent when it reported nothing. */
   issues?: readonly TauViewerIssue[] | undefined;
+  /**
+   * An opaque key for the model's project (the first 16 hex digits of the SHA-256 of its folder), so the page keeps
+   * its own per-project state without seeing the path. An older server omits it.
+   */
+  projectKey?: string | undefined;
 }>;
 
 /** What a shown GLB carries of its source's mechanism, for the page's Kinematics pane. @public */

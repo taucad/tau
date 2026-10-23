@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PaneLane } from '#lane/pane-lane.jsx';
@@ -142,5 +142,29 @@ describe('PaneLane', () => {
     const toggle = screen.getByRole('button', { name: 'Toggle Workbench lane' });
     expect(plus.compareDocumentPosition(toggle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(toggle.parentElement).toBe(screen.getByRole('tablist').parentElement);
+  });
+
+  it('should restore a saved layout, dropping panes it no longer offers and clamping the width', () => {
+    renderLane({
+      panes: ['parameters', 'model', 'export'],
+      initialLayout: { open: ['export', 'share', 'model'], active: 'model', width: 9000 },
+    });
+
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Export', 'Model']);
+    expect(screen.getByRole('tab', { name: 'Model' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('separator', { name: 'Resize workbench' })).toHaveAttribute('aria-valuenow', '640');
+  });
+
+  it('should report each layout change, not the layout it mounted with', async () => {
+    const user = userEvent.setup();
+    const onLayoutChange = vi.fn();
+    renderLane({ onLayoutChange });
+    expect(onLayoutChange).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('tab', { name: 'Model' }));
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ open: ['parameters', 'model'], active: 'model', width: 340 });
+    fireEvent.keyDown(screen.getByRole('separator', { name: 'Resize workbench' }), { key: 'ArrowLeft' });
+
+    expect(onLayoutChange).toHaveBeenLastCalledWith({ open: ['parameters', 'model'], active: 'model', width: 356 });
   });
 });

@@ -58,6 +58,7 @@
     "./lane/pane-lane": "./src/lane/pane-lane.tsx",
     "./model/model-pane": "./src/model/model-pane.tsx",
     "./model/model-source": "./src/model/model-source.ts",
+    "./model/part-gallery": "./src/model/part-gallery.tsx",
     "./paneview/dockview-theme": "./src/paneview/dockview-theme.ts",
     "./paneview/paneview": "./src/paneview/paneview.tsx",
     "./paneview/paneview-header": "./src/paneview/paneview-header.tsx",
@@ -197,6 +198,11 @@
         "types": "./dist/model/model-source.d.mts",
         "import": "./dist/model/model-source.mjs",
         "default": "./dist/model/model-source.mjs"
+      },
+      "./model/part-gallery": {
+        "types": "./dist/model/part-gallery.d.mts",
+        "import": "./dist/model/part-gallery.mjs",
+        "default": "./dist/model/part-gallery.mjs"
       },
       "./paneview/dockview-theme": {
         "types": "./dist/paneview/dockview-theme.d.mts",

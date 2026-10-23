@@ -61,6 +61,7 @@ describe('page component menu', () => {
       addToChatLabel: 'Add to chat',
       openPane,
       reveal,
+      openPreview: vi.fn(),
     });
     const target = targetOf('bracket.ts');
 
@@ -88,6 +89,7 @@ describe('page component menu', () => {
       addToChatLabel: 'Add to chat',
       openPane,
       reveal,
+      openPreview: vi.fn(),
     });
 
     actions.showKinematics?.(targetOf('bracket.ts'), 'component:link');
@@ -104,13 +106,15 @@ describe('page component menu', () => {
     expect(later).not.toHaveBeenCalled();
   });
 
-  it("hands the reference to the page under the route's label and offers no part preview", () => {
+  it("hands the reference to the page under the route's label and opens the page's part preview", () => {
     const addToChat = vi.fn();
+    const openPreview = vi.fn();
     const actions = createPageComponentActions({
       addToChat,
       addToChatLabel: 'Copy reference',
       openPane: vi.fn(),
       reveal: createComponentReveal(),
+      openPreview,
     });
     const reference: GeometryComponentReference = {
       scheme: 'tau-cad',
@@ -125,7 +129,7 @@ describe('page component menu', () => {
 
     expect(addToChat).toHaveBeenCalledWith(reference);
     expect(actions.addToChatLabel).toBe('Copy reference');
-    expect(actions.openPreview).toBeUndefined();
+    expect(actions.openPreview).toBe(openPreview);
   });
 
   it('does nothing for a part whose model names no file', () => {
@@ -135,6 +139,7 @@ describe('page component menu', () => {
       addToChatLabel: 'Add to chat',
       openPane,
       reveal: createComponentReveal(),
+      openPreview: vi.fn(),
     });
     const target = targetOf(undefined);
 

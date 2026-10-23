@@ -83,9 +83,42 @@ describe('createLocalMcpViewer', () => {
       mimeType: 'model/gltf-binary',
       byteLength: glb.length,
       sha256: sha(glb),
+      projectKey: createHash('sha256').update(root).digest('hex').slice(0, 16),
     });
     expect(viewerUrl).toBeUndefined();
     expect(runtime.documents).toHaveLength(0);
+  });
+
+  it("should render the shown model's part thumbnails through its page tool, refusing a model it did not show", async () => {
+    const partThumbnails = vi.fn<NonNullable<LocalMcpViewerOptions['partThumbnails']>>(async ({ request }) => ({
+      thumbnails: request.parts.map(({ id }) => ({ id, mimeType: 'image/webp', data: 'AQID' })),
+    }));
+    const withThumbnails = createLocalMcpViewer({
+      page,
+      namedRoot: () => root,
+      workspaceRoot: root,
+      renderGlb,
+      partThumbnails,
+    });
+    const tool = withThumbnails.pageTools?.find(({ name }) => name === 'app_part_thumbnails');
+    const { model } = shownModel(await withThumbnails.show({ targetFile: 'models/part.glb' }, inline));
+    const parts = [{ id: 'gear', primitives: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }] }];
+
+    await expect(tool?.call({ modelId: model.id, parts }, inline)).resolves.toEqual({
+      thumbnails: [{ id: 'gear', mimeType: 'image/webp', data: 'AQID' }],
+    });
+    expect(partThumbnails).toHaveBeenCalledWith(
+      expect.objectContaining({ root, absolutePath: join(root, 'models', 'part.glb') }),
+    );
+    await expect(tool?.call({ modelId: 'unknown', parts }, inline)).resolves.toMatchObject({
+      errorCode: 'UNKNOWN_MODEL',
+    });
+    expect(() =>
+      tool?.inputSchema.parse({ modelId: model.id, parts: Array.from({ length: 5 }, () => parts[0]) }),
+    ).toThrow();
+    expect(() => tool?.inputSchema.parse({ modelId: model.id, parts, size: 1024 })).toThrow();
+    expect(viewer.pageTools?.some(({ name }) => name === 'app_part_thumbnails')).toBe(false);
+    await withThumbnails.close();
   });
 
   it('should show a GLB exported from a source with that source, so its panes have parameters', async () => {

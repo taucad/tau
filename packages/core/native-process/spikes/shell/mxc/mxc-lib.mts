@@ -334,7 +334,14 @@ export const requestFor = (
     egress: { default: 'deny' },
     // Loopback is bidirectional between MXC containers; the per-session credential proxy is Tau's job.
     ingress: { default: 'deny', hostLoopback: 'allow' },
-    runtimeConfig: { networkProxy: proxyUrl },
+    // MXC parses runtimeConfig.networkProxy as a WHATWG URL: an empty or relative string throws
+    // "Configuration parse error: runtimeConfig.networkProxy is invalid: relative URL without a base"
+    // and the container never launches (this is exactly what sank the cc3b970b preflight sentinel on
+    // windows-11-arm, masking an otherwise-present base-container API). Include it ONLY when an
+    // ABSOLUTE proxy URL is supplied (the isolation receipt passes http://127.0.0.1:<port>); OMIT it
+    // entirely otherwise — the preflight sentinel needs no egress (egress default is deny), so there
+    // is nothing to proxy and the parse then succeeds.
+    ...(proxyUrl ? { runtimeConfig: { networkProxy: proxyUrl } } : {}),
   },
   environment: { TAU_SESSION: grant.id, TAU_PROXY_TOKEN: grant.proxy.token },
   timeoutMs: 60_000,

@@ -1787,6 +1787,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const orphanCandidates = [...configs.values()];
       // Only the newest epoch may prune: an older snapshot would delete configs
       // a newer pass — or another tab — has already written.
+      // DF20 again, right before writing: a newer tab may have announced itself while this pass awaited.
+      if (isBuildSuperseded()) {
+        return result;
+      }
       if (epoch === discoveryEpochRef.current) {
         const worker = await getReadiedWorker();
         for (const config of orphanCandidates) {
@@ -1805,8 +1809,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             configDeletes.push(config.projectId);
           }
         }
+        if (isBuildSuperseded()) {
+          return result;
+        }
         await Promise.all(configDeletes.map(async (projectId) => worker.deleteProjectResources(projectId)));
       }
+      // Once resources are deleted their config rows must follow, so no gate splits the two.
       if (configUpserts.length > 0 || configDeletes.length > 0) {
         await applyProjectFileSystemConfigChanges({ upserts: configUpserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();

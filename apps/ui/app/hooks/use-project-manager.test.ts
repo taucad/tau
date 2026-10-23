@@ -4072,6 +4072,24 @@ describe('useProjectManager.createProject', () => {
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
   });
 
+  it('stops writing when the stop flips while a pass is already reconciling', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    mockListWorkspaces.mockImplementation(async () => {
+      // A newer tab announces itself while this pass is between its gate and its writes.
+      mockBuildSuperseded = true;
+      return [];
+    });
+
+    await result.current.getProjectListing();
+
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
   it('runs the reconciliation it skipped once a provisional write stop lifts', async () => {
     mockBuildSuperseded = true;
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);

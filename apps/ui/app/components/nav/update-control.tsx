@@ -3,6 +3,7 @@ import { ArrowUpRight, ChevronRight, LoaderCircle, X } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { SidebarMenu, SidebarMenuItem, SidebarMenuButton } from '@taucad/ui/components/sidebar';
+import { cn } from '@taucad/ui/utils/cn';
 
 export type UpdateControlAction = {
   readonly label: string;
@@ -22,6 +23,7 @@ export function UpdateControl({
   detail,
   icon: Icon,
   isFailed = false,
+  isProminent = false,
   releasePage,
   action,
   isOpen,
@@ -33,6 +35,8 @@ export function UpdateControl({
   readonly detail: string;
   readonly icon: LucideIcon;
   readonly isFailed?: boolean;
+  /** Fills the row with the brand color when an update is ready to apply. */
+  readonly isProminent?: boolean;
   readonly releasePage?: string;
   readonly action?: UpdateControlAction;
   readonly isOpen: boolean;
@@ -45,10 +49,17 @@ export function UpdateControl({
       <SidebarMenuItem>
         <Popover open={isOpen} onOpenChange={onOpenChange}>
           <PopoverTrigger asChild>
-            <SidebarMenuButton className='data-[state=open]:bg-sidebar-accent' aria-label={title}>
-              <Icon className={isFailed ? 'text-destructive' : 'text-muted-foreground'} />
+            <SidebarMenuButton
+              className={cn(
+                isProminent
+                  ? 'bg-primary! text-primary-foreground! hover:bg-(image:--primary-action-glint) data-[state=open]:bg-(image:--primary-action-glint)'
+                  : 'data-[state=open]:bg-sidebar-accent',
+              )}
+              aria-label={title}
+            >
+              <Icon className={isProminent ? undefined : isFailed ? 'text-destructive' : 'text-muted-foreground'} />
               <span>{title}</span>
-              <ChevronRight className='ml-auto text-muted-foreground' />
+              <ChevronRight className={cn('ml-auto', !isProminent && 'text-muted-foreground')} />
             </SidebarMenuButton>
           </PopoverTrigger>
           <PopoverContent

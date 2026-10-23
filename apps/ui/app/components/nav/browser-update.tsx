@@ -61,8 +61,9 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
     <UpdateControl
       title='Update ready'
       version={builtAt(readNewestBuildId())}
-      detail='A newer version of Tau is open in another tab. This tab has paused saving — reload to continue with the latest version.'
+      detail='A newer version of Tau is open in another tab. Reload to continue with the latest version.'
       icon={ArrowUpCircle}
+      isProminent
       isOpen={open}
       shouldFocusOnOpen={!revealed}
       action={{

@@ -141,6 +141,7 @@ export function DesktopUpdateControl({
       detail={detail}
       icon={Icon}
       isFailed={failed}
+      isProminent={phase === 'ready' && !actionFailed}
       releasePage={snapshot.releasePage}
       isOpen={open}
       action={

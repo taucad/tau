@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { AlertCircle } from 'lucide-react';
+import { ArrowUpCircle } from 'lucide-react';
 import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { Button } from '@taucad/ui/components/button';
 import { useBrowserUpdateControlMounted } from '#components/nav/browser-update.js';
@@ -28,12 +28,14 @@ export function BuildSkewBanner(): React.JSX.Element | undefined {
   return (
     <div
       role='alert'
-      className='fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-md border border-warning/40 bg-background p-3 shadow-lg'
+      className='fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-md border bg-background p-3 shadow-lg'
     >
-      <AlertCircle className='size-4 shrink-0 text-warning' />
-      <div className='min-w-0 flex-1 text-sm'>A newer version of Tau is running — reload to use it.</div>
+      <ArrowUpCircle className='size-4 shrink-0 text-muted-foreground' />
+      <div className='min-w-0 flex-1 text-sm'>
+        A newer version of Tau is open in another tab. Reload to continue with the latest version.
+      </div>
       <Button size='sm' variant='outline' onClick={reload}>
-        Reload
+        Reload now
       </Button>
     </div>
   );

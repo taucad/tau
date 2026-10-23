@@ -59,7 +59,9 @@ describe('browser update control', () => {
     await announce(buildId + 1);
 
     expect(screen.getByRole('button', { name: 'Update ready' })).toBeInTheDocument();
-    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toHaveTextContent('This tab has paused saving');
+    expect(await screen.findByRole('dialog', { name: 'Tau update' })).toHaveTextContent(
+      'Reload to continue with the latest version.',
+    );
     expect(screen.getByRole('textbox', { name: 'Model draft' })).toHaveFocus();
     // The sidebar owns the prompt, so the floating fallback stays away.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -74,6 +76,6 @@ describe('browser update control', () => {
 
     await announce(buildId + 1);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('A newer version of Tau is running');
+    expect(screen.getByRole('alert')).toHaveTextContent('A newer version of Tau is open in another tab');
   });
 });

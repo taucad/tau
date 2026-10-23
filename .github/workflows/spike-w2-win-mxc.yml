@@ -23,8 +23,8 @@
 # Evidence discipline (mirrors spike-w1): a preflight sentinel proves the probe really ran inside a
 # container; an unavailable prerequisite is a TYPED state and a failed row, never a skip and never an
 # unsupported-platform green. Where the MXC probe fails on a row, the job instead proves the
-# capability-SID fallback (a WRITE_RESTRICTED token with per-session capability restricting SIDs plus
-# Tau deny-read ACEs) — so the row is still a real receipt, never a vacuous pass.
+# capability-SID fallback (a WRITE_RESTRICTED token with per-session random S-1-5-21 restricting SIDs
+# plus Tau ALLOW-write / deny-read ACEs) — so the row is still a real receipt, never a vacuous pass.
 #
 # One dispatch runs both rows (matrix, fail-fast off). The Win11-consumer x64 MXC confirmation rides
 # the separate parked Win11 Eval VM lane; the mxc/ scripts are standalone so they are reusable there.
@@ -63,7 +63,7 @@ jobs:
         os: [windows-11-arm, windows-2025]
     name: Windows MXC containment (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 55
     steps:
       - name: Preserve source bytes on Windows
         run: git config --global core.autocrlf false
@@ -118,7 +118,7 @@ jobs:
       # PTY row: interactive PowerShell over a ConPTY terminal (the D14 Terminal-pane argv).
       # Step-level timeout backstop: if the ConPTY teardown ever hangs despite the in-process
       # watchdog + hardExit, the STEP fails (gate red, artifacts still upload) instead of the whole
-      # job being cancelled at the 40-min job timeout with nothing.
+      # job being cancelled at the job timeout with nothing.
       - name: PTY (ConPTY + interactive PowerShell)
         id: pty
         if: matrix.os == 'windows-2025'
@@ -128,9 +128,11 @@ jobs:
         run: node "$env:MXC_DIR/pty.mts"
 
       # Capability probe: PSEC create/close (external preflight sentinel), PSE_SUPPORT_FS_DENY, ConPTY,
-      # isolation tier, OS build. On hosted Server 2025 PSEC is absent, so this is a typed-unavailable
-      # RED by design (recorded, fail-closed) — the capability-SID fallback is concluded exercisable-
-      # but-unreceipted here and is NOT re-run.
+      # isolation tier, OS build. The preflight sentinel now OMITS runtimeConfig.networkProxy when no
+      # proxy is needed (mxc-lib.mts fix), so a present base-container API is actually exercised rather
+      # than failing on a "relative URL without a base" config parse. The probe conclusion is generated
+      # from the structured facts (receipt-integrity), so it can never mislabel a live-exercise failure
+      # as E_NOTIMPL.
       - name: Capability probe (PSEC / PSE_SUPPORT_FS_DENY / ConPTY)
         id: probe
         if: matrix.os == 'windows-2025'
@@ -155,7 +157,7 @@ jobs:
       # present) or the capability-SID fallback when MXC is absent. arch=arm64 is in every receipt.
       # continue-on-error so Summarize remains the single gate; the launcher only surfaces its own
       # infrastructure failure (recorded as a typed non-pass receipt). ---------------------------------
-      # Step-level timeout backstop, well under the 40-min job timeout: the per-child run-as timeouts
+      # Step-level timeout backstop, well under the job timeout: the per-child run-as timeouts
       # inside run-nonadmin.ps1 bound the worst case to ~22 min, so 28 leaves room for the always-run
       # Summarize + Upload to still land the artifact even if this block is force-ended.
       - name: Full S0-S2 receipts as a non-admin user (arm64)
@@ -166,8 +168,44 @@ jobs:
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:MXC_DIR/run-nonadmin.ps1"
 
-      # Single gate: prints the summary AND exits nonzero if any produced receipt is not pass (so the
-      # row stays red while PSEC is absent). Collects every receipt regardless of earlier failures.
+      # ---- Corrected Codex-ELEVATED containment fallback + WIN-ARM S2-in-token PTY + isolation_session
+      # (added W2, both rows). These run in the ADMIN phase (GitHub steps are elevated), which is
+      # exactly the ratified model: the orchestrator provisions the NON-ADMIN sandbox user(s) with
+      # elevation, and the sandboxed WORKLOAD (write-restricted children, the S2 ConPTY, the
+      # isolation_session agent users) runs NON-elevated. On arm64 the corrected fallback.ps1 (MODE A)
+      # overwrites the MODE B fallback.receipt.json produced non-elevated inside run-nonadmin.ps1 with
+      # the authoritative two-account proof. continue-on-error so Summarize stays the single gate; each
+      # writes a typed, fail-closed receipt.
+      - name: Provision sandbox users (elevated admin phase)
+        id: sandbox_provision
+        continue-on-error: true
+        shell: pwsh
+        env:
+          MXC_SANDBOX_PROVISION_OUT: ${{ runner.temp }}/mxc-spike/sandbox-provision.receipt.json
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:MXC_DIR/provision-sandbox-users.ps1"
+
+      - name: Corrected restricted-token fallback (write isolation + cross-read denial + S2-in-token PTY)
+        id: fallback_corrected
+        continue-on-error: true
+        timeout-minutes: 15
+        shell: pwsh
+        env:
+          MXC_FALLBACK_OUT: ${{ runner.temp }}/mxc-spike/fallback.receipt.json
+        run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:MXC_DIR/fallback.ps1"
+
+      # isolation_session (PSEC-independent per-session agent-user backend): two concurrent sessions,
+      # distinct agent-user SIDs, external-canary read/write isolation. Fail-closed if the backend or
+      # request shape is unavailable.
+      - name: isolation_session two-session proof
+        id: isolation_session
+        continue-on-error: true
+        timeout-minutes: 12
+        shell: pwsh
+        run: node "$env:MXC_DIR/isolation-session.mts"
+
+      # Single gate: prints the summary AND exits nonzero if any produced receipt is not pass OR fails
+      # receipt integrity (prose disagreeing with structured facts). Collects every receipt regardless
+      # of earlier failures.
       - name: Summarize + gate
         if: always()
         shell: bash

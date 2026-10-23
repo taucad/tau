@@ -140,6 +140,7 @@ export function WorkbenchLane({
         : {
             export: createExportSource(bridge, model, {
               notices: exportNotices,
+              storage: store,
             }),
             share: createShareSource(bridge, model),
           }),

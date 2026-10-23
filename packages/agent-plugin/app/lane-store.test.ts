@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createLaneStore } from '#app/lane-store.js';
+import { createLaneStore, laneStoreFor } from '#app/lane-store.js';
 
 /** A `localStorage` stand-in over a map. */
 const memoryStorage = () => {
@@ -83,5 +83,19 @@ describe('createLaneStore', () => {
     store.writeOption('export/stl/options', undefined);
 
     expect(store.readOption('export/stl/options')).toBeUndefined();
+  });
+});
+
+describe('laneStoreFor', () => {
+  it("hands every surface of a project one store, so the lane's writes and the Export pane's keep each other's", () => {
+    const store = laneStoreFor('shared-project');
+    expect(laneStoreFor('shared-project')).toBe(store);
+    expect(laneStoreFor('other-project')).not.toBe(store);
+
+    store.writeLaneLayout({ open: ['export'], active: 'export', width: 360 });
+    laneStoreFor('shared-project').writeOption('export/preferences', { selectedFormats: ['stl'] });
+
+    expect(store.readLane()).toMatchObject({ open: ['export'], width: 360 });
+    expect(store.readOption('export/preferences')).toEqual({ selectedFormats: ['stl'] });
   });
 });

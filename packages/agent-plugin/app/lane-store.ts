@@ -149,6 +149,27 @@ export function createLaneStore(
   };
 }
 
+/** The page's lane stores, one per project, so every surface of a project writes through one memory copy. */
+const pageStores = new Map<string, LaneStore>();
+
+/**
+ * The page's lane store for one project: the same store each time, so the lane, its panes and the Export pane's
+ * options share one record and never write over each other's values.
+ *
+ * @param projectKey - The shown model's `projectKey`; an older `tau` names none, and every project then shares one key.
+ * @returns The project's store over the frame's `localStorage`.
+ */
+export function laneStoreFor(projectKey: string | undefined): LaneStore {
+  const name = projectKey ?? 'default';
+  const existing = pageStores.get(name);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const store = createLaneStore(projectKey);
+  pageStores.set(name, store);
+  return store;
+}
+
 /**
  * A paneview's saved section layout over the lane store, in the shape `ModelSource.usePanelLayout` returns: the
  * saved sections on mount, and every later layout change written back, as desktop's `usePaneviewPersistence` does.

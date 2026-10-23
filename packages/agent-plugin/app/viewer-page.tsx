@@ -62,7 +62,7 @@ import { WorkbenchLane } from '#app/workbench-lane.jsx';
 import { entryPathOf, liveViewSettings, readWorkbenchState, seedViewer } from '#app/workbench-state.js';
 import { PageViewerIssues } from '#app/page-issues.jsx';
 import type { PageIssues } from '#app/page-issues.jsx';
-import { createLaneStore } from '#app/lane-store.js';
+import { laneStoreFor } from '#app/lane-store.js';
 import { PagePartGallery, usePartPreviews } from '#app/part-previews.jsx';
 import { usePageViewerControls } from '#app/viewer-chrome.jsx';
 
@@ -456,7 +456,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   const [isPanelOpen, setIsPanelOpen] = useState(() => globalThis.innerWidth >= 720);
   /* What the lane remembers per project (PAR-7): once the shown model names its project, the lane opens as it was. */
   const projectKey = shown?.model.projectKey;
-  const laneStore = useMemo(() => createLaneStore(projectKey), [projectKey]);
+  const laneStore = useMemo(() => laneStoreFor(projectKey), [projectKey]);
   useEffect(() => {
     const { isOpen } = laneStore.readLane();
     if (isOpen !== undefined) {
@@ -883,7 +883,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                             onPrepared={showSource}
                             onNotice={setNotice}
                           >
-                            {({ segment, list }) => <ViewerControls {...barControls} leading={segment} aboveControls={list} />}
+                            {({ segment, list }) => (
+                              <ViewerControls {...barControls} leading={segment} aboveControls={list} />
+                            )}
                           </PageViewerIssues>
                         </>
                       )

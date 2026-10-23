@@ -14,6 +14,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type { TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
 import type { ChatReference } from '#app/chat-reference.js';
+import { computeDocumentColor, hostThemeOf, prefersMoreContrast } from '#app/host-theme.js';
 
 /** Which composition the page draws (blueprint "Composition per presentation"). */
 export type ViewerComposition = 'inline' | 'tab';
@@ -43,6 +44,10 @@ export type HostView = Readonly<{
   /** The id of the `tools/call` whose result opened the page (`toolInfo.id`), when a tool result did. */
   toolCallId: string | undefined;
   colorScheme: 'light' | 'dark';
+  /** Whether the host's theme is a high-contrast one, or the system asks for more contrast. */
+  isHighContrast: boolean;
+  /** The host's accent as a CSS hex colour, or `undefined` to keep Tau's. */
+  accentColor: string | undefined;
   /** Whether the page may offer its own fullscreen action: Claude hosts want one, Codex draws its own (E3). */
   canRequestFullscreen: boolean;
   /** The route "Add to chat" takes on this host; text hosts copy. */
@@ -279,6 +284,11 @@ const connectMcpApp = async (): Promise<HostBridge> => {
       linked: false,
       toolCallId: toolCallId === undefined ? undefined : String(toolCallId),
       colorScheme: context?.theme === 'dark' ? 'dark' : 'light',
+      ...hostThemeOf({
+        variables: context?.styles?.variables as Readonly<Record<string, string | undefined>> | undefined,
+        compute: computeDocumentColor,
+        prefersMoreContrast: prefersMoreContrast(),
+      }),
       canRequestFullscreen:
         !isCodex && context?.displayMode === 'inline' && (context.availableDisplayModes ?? []).includes('fullscreen'),
       chatRoute: chatRouteOf(app.getHostCapabilities()),
@@ -416,6 +426,8 @@ const connectLoopback = (): HostBridge => {
     linked: modelId !== null,
     toolCallId: undefined,
     colorScheme: prefersDark.matches ? 'dark' : 'light',
+    isHighContrast: prefersMoreContrast(),
+    accentColor: undefined,
     canRequestFullscreen: false,
     chatRoute: 'clipboard',
     maxHeight: undefined,

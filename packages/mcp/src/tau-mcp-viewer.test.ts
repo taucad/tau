@@ -117,6 +117,7 @@ const viewerTools = async (client: Client) => {
           'app_capture_reply',
           'app_list_files',
           'app_open_file',
+          'app_preview_parameters',
         ].includes(tool.name),
       )
       .map((tool) => [tool.name, tool._meta]),
@@ -241,6 +242,41 @@ describe('Tau MCP viewer', () => {
     ]);
     expect(result.structuredContent).toMatchObject({ hint });
     await client.close();
+  });
+
+  it("should offer app_preview_parameters to the page only, when the viewer previews, and pass the drag's values", async () => {
+    const previewParameters = vi.fn<NonNullable<TauMcpViewer['previewParameters']>>(async () => ({ accepted: true }));
+    const client = await connect(clients.claudeDesktop, { ...createViewer(), previewParameters });
+
+    const tools = await viewerTools(client);
+    expect(tools[tauViewerToolName.appPreviewParameters]).toEqual({
+      'anthropic/alwaysLoad': true,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    const result = await client.callTool({
+      name: tauViewerToolName.appPreviewParameters,
+      arguments: { modelId: 'model-1', parameters: { faceWidth: 16 } },
+    });
+    expect(result.structuredContent).toEqual({ accepted: true });
+    expect(previewParameters).toHaveBeenCalledWith(
+      { modelId: 'model-1', parameters: { faceWidth: 16 } },
+      expect.anything(),
+    );
+    const ended = await client.callTool({
+      name: tauViewerToolName.appPreviewParameters,
+      arguments: { modelId: 'model-1' },
+    });
+    expect(ended.isError).toBeFalsy();
+    const extra = await client.callTool({
+      name: tauViewerToolName.appPreviewParameters,
+      arguments: { modelId: 'model-1', commit: true },
+    });
+    expect(extra.isError).toBe(true);
+    await client.close();
+
+    const text = await connect(clients.codexCli, { ...createViewer(), previewParameters });
+    expect(Object.keys(await viewerTools(text))).not.toContain(tauViewerToolName.appPreviewParameters);
+    await text.close();
   });
 
   it('should treat the Codex CLI as a text host', async () => {

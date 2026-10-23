@@ -3626,6 +3626,9 @@ importers:
       three:
         specifier: 'catalog:'
         version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
       vite:
         specifier: 'catalog:'
         version: 8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)

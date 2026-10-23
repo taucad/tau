@@ -20,7 +20,8 @@ import type {
 import packageJson from '../../package.json' with { type: 'json' };
 import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge } from '#app/host-bridge.js';
-import { createExportOptionStorage, createExportPreferences } from '#app/sources/export-preferences.js';
+import { laneStoreFor } from '#app/lane-store.js';
+import { createExportPreferences } from '#app/sources/export-preferences.js';
 import type { ExportOptionStorage } from '#app/sources/export-preferences.js';
 
 /**
@@ -192,16 +193,13 @@ const download = (bytes: Uint8Array<ArrayBuffer>, name: string, mimeType: string
 
 /** What the page hands the Export pane besides its bridge and model. */
 export type ExportSourceOptions = Readonly<{
-  /** Where the pane's choices persist; the frame's `localStorage` by default. */
+  /** Where the pane's choices persist; the shown model's project lane store (`laneStoreFor`) by default. */
   storage?: ExportOptionStorage | undefined;
   /** The page's toasts; without them the pane reports outcomes under its export button. */
   notices?: ExportNotices | undefined;
   /** The icon the page draws for a file name. */
   FileIcon?: ExportSource['FileIcon'];
 }>;
-
-/** One storage for every source the page makes, so the choices outlive a model change. */
-let pageStorage: ExportOptionStorage | undefined;
 
 /**
  * The Export pane's source on the viewer page. The page has no kernel: formats come from `app_export_formats` (the
@@ -317,8 +315,9 @@ export function createExportSource(
     return { succeeded, failed };
   };
 
-  pageStorage ??= createExportOptionStorage();
-  const storage = options.storage ?? pageStorage;
+  /* The project's lane store, the same for every source of the project, so the choices outlive a model change and
+   * each project keeps its own (PAR-7). */
+  const storage = options.storage ?? laneStoreFor(model.projectKey);
 
   return {
     useEntry,

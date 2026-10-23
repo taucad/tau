@@ -5,14 +5,20 @@
  * following the default view offer with the render content (the CAD topology, so the page has components and the
  * mechanism). Every file or parameter change the runtime sees re-evaluates the document and renders again; each
  * render is kept here, in memory, behind an opaque version id, and never written to the project. A session is keyed by
- * the project folder, the entry and the parameters it was opened with, so pages of one source share one document.
- * Sessions end with the project's runtime thread: the server releases an idle thread, which ends its documents.
+ * the project folder and the entry, so pages of one source share one document, and the Parameters pane's drag previews
+ * reach that document as transient updates (PAR-2) that never replace its committed parameters. Sessions end with the
+ * project's runtime thread: the server releases an idle thread, which ends its documents.
  */
 
 import { createHash } from 'node:crypto';
 
 import type { TauMcpViewerFailure } from '@taucad/mcp';
-import type { TauViewerEntryStatus, TauViewerIssue, TauViewerMimeType } from '@taucad/mcp/viewer-protocol';
+import type {
+  TauViewerEntryStatus,
+  TauViewerIssue,
+  TauViewerMimeType,
+  TauViewerPreviewResult,
+} from '@taucad/mcp/viewer-protocol';
 import type {
   Description,
   DocumentStatus,
@@ -38,13 +44,11 @@ export type EntrySessionRuntime = Readonly<{
         >;
       }>
     | undefined;
-  open(
-    input: Readonly<{ source: { path: string }; parameters?: Readonly<Record<string, unknown>>; watch: true }>,
-  ): EntryDocument;
+  open(input: Readonly<{ source: { path: string }; watch: true }>): EntryDocument;
 }>;
 
 /** The part of a runtime document a session uses. */
-export type EntryDocument = Pick<RuntimeDocument, 'on' | 'evaluation' | 'close'> &
+export type EntryDocument = Pick<RuntimeDocument, 'on' | 'evaluation' | 'update' | 'close'> &
   Readonly<{ view(id: string, request?: WideViewRequest): EntryView }>;
 
 /** The part of a view subscription a session uses. */
@@ -69,7 +73,7 @@ export type EntrySessionEvent =
 
 /** One watched source. */
 export type EntrySession = Readonly<{
-  /** The registry key: project folder, entry and parameters digest. */
+  /** The registry key: project folder and entry. */
   key: string;
   root: string;
   /** Project-relative entry path. */
@@ -85,6 +89,14 @@ export type EntrySession = Readonly<{
    * @param signal - The calling tool's cancellation.
    */
   settled(signal?: AbortSignal): Promise<EntryRender | TauMcpViewerFailure>;
+  /**
+   * Render transient parameter values over the committed ones, as the Tau app renders a drag; they never reach the
+   * sidecar. Without values, the preview ends and the committed values render again.
+   *
+   * @param parameters - Partial values over the committed ones, or `undefined` to end the preview.
+   * @returns Whether the evaluation ran, or `false` when a newer preview or a change superseded it.
+   */
+  preview(parameters: Readonly<Record<string, unknown>> | undefined): Promise<TauViewerPreviewResult>;
 }>;
 
 /** What {@link createMcpEntrySessions} needs. */
@@ -103,9 +115,7 @@ export type McpEntrySessionsOptions = Readonly<{
 /** The watched sources of one server process. */
 export type McpEntrySessions = Readonly<{
   /** The session of one source, opened on first use. */
-  acquire(
-    input: Readonly<{ root: string; entryPath: string; parameters?: Readonly<Record<string, unknown>> | undefined }>,
-  ): Promise<EntrySession>;
+  acquire(input: Readonly<{ root: string; entryPath: string }>): Promise<EntrySession>;
   /** An open session by its key. */
   get(key: string): EntrySession | undefined;
   /** Close every session. */
@@ -129,40 +139,13 @@ const drawnMimeTypes = new Set<string>(['model/gltf-binary', 'image/svg+xml']);
 const isDrawn = (mimeType: string): mimeType is TauViewerMimeType => drawnMimeTypes.has(mimeType);
 
 /**
- * JSON with sorted object keys, so equal parameters digest equally.
- *
- * @param value - A JSON value.
- * @returns Its canonical text.
- */
-const canonicalJson = (value: unknown): string => {
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
-  }
-  if (typeof value === 'object' && value !== null) {
-    const entries = Object.entries(value as Record<string, unknown>).toSorted(([left], [right]) =>
-      left.localeCompare(right),
-    );
-    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`;
-  }
-  /* `undefined` has no JSON text; a parameter set holds JSON values, so this is only the defensive case. */
-  return value === undefined ? 'null' : JSON.stringify(value);
-};
-
-/**
  * The registry key of one watched source.
  *
- * @param input - The project folder, the entry and the parameters it is opened with.
+ * @param input - The project folder and the entry.
  * @returns The key.
  */
-export const entrySessionKey = (
-  input: Readonly<{ root: string; entryPath: string; parameters?: Readonly<Record<string, unknown>> | undefined }>,
-): string => {
-  const digest =
-    input.parameters === undefined || Object.keys(input.parameters).length === 0
-      ? ''
-      : createHash('sha256').update(canonicalJson(input.parameters)).digest('hex').slice(0, 16);
-  return `${input.root}\0${input.entryPath}\0${digest}`;
-};
+export const entrySessionKey = (input: Readonly<{ root: string; entryPath: string }>): string =>
+  `${input.root}\0${input.entryPath}`;
 
 const severityRank: Readonly<Record<KernelIssue['severity'], number>> = { error: 0, warning: 1, info: 2 };
 
@@ -235,7 +218,7 @@ type OpenedSession = EntrySession & Readonly<{ isClosed(): boolean; close(): voi
 /**
  * Open one watched source.
  *
- * @param input - Its key, project, entry, parameters, runtime and listener.
+ * @param input - Its key, project, entry, runtime and listener.
  * @returns The session.
  */
 const openSession = (
@@ -243,7 +226,6 @@ const openSession = (
     key: string;
     root: string;
     entryPath: string;
-    parameters: Readonly<Record<string, unknown>> | undefined;
     runtime: EntrySessionRuntime;
     touch: () => void;
     emit: (session: EntrySession, event: EntrySessionEvent) => void;
@@ -251,11 +233,7 @@ const openSession = (
   }>,
 ): OpenedSession => {
   const { key, root, entryPath, runtime } = input;
-  const document = runtime.open({
-    source: { path: entryPath },
-    ...(input.parameters === undefined ? {} : { parameters: input.parameters }),
-    watch: true,
-  });
+  const document = runtime.open({ source: { path: entryPath }, watch: true });
   let kernelId: string | undefined;
   let view: EntryView | undefined;
   let viewKey = '';
@@ -268,11 +246,14 @@ const openSession = (
   let renders: EntryRender[] = [];
   let closed = false;
   let lastStatus = '';
+  /* A drag preview evaluates and renders like any change, but the source is not being built: the pane already shows
+   * the dragged value, so the page's "Building" stays for committed changes. Set from a preview until its render. */
+  let isPreviewing = false;
 
   const status = (): TauViewerEntryStatus => {
     const shownRevision = renders.at(-1)?.sourceRevision;
     return {
-      building: !closed && (documentStatus === 'evaluating' || viewStatus === 'rendering'),
+      building: !closed && !isPreviewing && (documentStatus === 'evaluating' || viewStatus === 'rendering'),
       ...(shownRevision === undefined ? {} : { sourceRevision: shownRevision }),
       issues: distinct([...evaluationIssues, ...renderIssues]).toSorted(bySeverity),
     };
@@ -339,6 +320,12 @@ const openSession = (
         ? []
         : [
             view.on('rendered', (rendering) => {
+              /* The render is done; the runtime reports the view ready just after, and a status between the two
+               * would say the preview is building. */
+              viewStatus = rendering.success ? 'ready' : 'error';
+              if (rendering.transient) {
+                isPreviewing = false;
+              }
               record(rendering);
               reportStatus();
             }),
@@ -370,6 +357,10 @@ const openSession = (
       ({ kernelId } = description);
     }),
     document.on('evaluated', (evaluation) => {
+      if (evaluation.transient && !evaluation.success) {
+        /* A preview that fails to evaluate renders nothing; the failure shows in the issues. */
+        isPreviewing = false;
+      }
       evaluationIssues = tauViewerIssuesOf(evaluation.issues);
       if (!evaluation.success) {
         /* No render follows a failed evaluation: what the last render said no longer holds. */
@@ -398,6 +389,23 @@ const openSession = (
     status,
     isClosed: () => closed,
     close,
+    async preview(parameters) {
+      if (closed) {
+        return { accepted: false };
+      }
+      isPreviewing = parameters !== undefined;
+      reportStatus();
+      try {
+        /* An empty update ends a preview: the document renders its committed values again, as the Tau app restores. */
+        const outcome = await document.update(parameters === undefined ? {} : { parameters, transient: true });
+        return { accepted: !outcome.superseded };
+      } catch {
+        /* Cancelled with the document, or timed out: the next preview or change renders again. */
+        isPreviewing = false;
+        reportStatus();
+        return { accepted: false };
+      }
+    },
     async settled(signal) {
       for (;;) {
         if (closed) {
@@ -466,10 +474,7 @@ export const createMcpEntrySessions = (options: McpEntrySessionsOptions): McpEnt
     }
   };
 
-  const open = async (
-    input: Readonly<{ root: string; entryPath: string; parameters?: Readonly<Record<string, unknown>> | undefined }>,
-    key: string,
-  ): Promise<OpenedSession> => {
+  const open = async (input: Readonly<{ root: string; entryPath: string }>, key: string): Promise<OpenedSession> => {
     const runtime = await options.runtimeFor(input.root);
     if (isClosed) {
       throw new Error('The viewer is closing.');
@@ -478,7 +483,6 @@ export const createMcpEntrySessions = (options: McpEntrySessionsOptions): McpEnt
       key,
       root: input.root,
       entryPath: input.entryPath,
-      parameters: input.parameters,
       runtime,
       touch: () => {
         /* Asking for the client again counts as use; a released thread is not started again for it. */

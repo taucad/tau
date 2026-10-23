@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
-import { localDatabaseName } from '@taucad/utils/worktree-database';
+import { tauDatabaseCommand } from '#support/tau-account.js';
 import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
 
 /**
@@ -25,26 +25,10 @@ import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
 const execFileAsync = promisify(execFile);
 const workspaceRoot = resolve(import.meta.dirname, '../../../../..');
 
-/** Run one statement against the development Postgres and return its trimmed output. */
+/** Run one statement against the same run-owned database as account seeding. */
 const psql = async (statement: string): Promise<string> => {
-  const { stdout } = await execFileAsync(
-    'docker',
-    [
-      'exec',
-      'tau-postgres',
-      'psql',
-      '-qtAX',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-U',
-      'dev_user',
-      '-d',
-      localDatabaseName(),
-      '-c',
-      statement,
-    ],
-    { encoding: 'utf8' },
-  );
+  const { file, args } = tauDatabaseCommand(statement);
+  const { stdout } = await execFileAsync(file, [...args, '-qtAX'], { encoding: 'utf8' });
   return stdout.trim();
 };
 

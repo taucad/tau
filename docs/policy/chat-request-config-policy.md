@@ -3,7 +3,7 @@ title: 'Chat Request Config Policy'
 description: 'Shared chat-turn envelope, profile configuration, admission, and execution placement across browser, daemon, and API clients'
 status: active
 created: '2026-05-18'
-updated: '2026-09-05'
+updated: '2026-10-23'
 related:
   - docs/research/chat-metadata-first-class-architecture.md
   - docs/research/chat-edit-message-metadata-stripping.md
@@ -59,6 +59,8 @@ Do not silently recompute admission from current UI state after the request has 
 The CAD `execution` field is a discriminated union for `tau`, `acp`, or `paseo`. It selects the execution host and its required placement data. It is independent of model provider selection.
 
 Validate the relationship between `agent.profile`, `admission`, and `execution` at the request-envelope boundary. Do not infer placement from a model name, URL, feature flag, or legacy server graph.
+
+A chat owns its intent; each device owns its placement. A turn's execution names the host the sending device placed it on, but a chat's persisted `activeExecution` keeps only a portable host (a paired device id): `origin`, `desktop` and `loopback:` ids are dropped on write and read as local placement on every device, and a device's non-default choice lives in its composer record. An external-agent execution keeps its host; a device that cannot reach it refuses the turn with a typed reason instead of moving the chat.
 
 ### 7. Use the browser placement transport for CAD
 

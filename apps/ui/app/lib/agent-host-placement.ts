@@ -12,6 +12,7 @@ import { desktopBridge, isDesktopTarget, nodeHomeRoot, onDesktopHostHandOff } fr
 import type { DesktopBridge, DesktopHostHandOff } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
+import { loopbackHostIdPrefix } from '#utils/chat-execution.js';
 
 /**
  * The transport ladder for a daemon-placed Tau turn (`agent-host-transports-and-offline.md`, F4).
@@ -45,35 +46,31 @@ export type AgentHostPlacementRung = 'in-process' | 1 | 2 | 5;
 export const localAgentHostId = (): TauAgentHostId | undefined => (isDesktopTarget ? 'desktop' : undefined);
 
 /**
- * Why one placement cannot be reached from this build, or `undefined` when it can.
- *
- * A chat's placement is persisted with it, so a chat placed on Tau Desktop and
- * then opened on the web still names `hostId: 'desktop'` — a launcher this
- * build does not have. It is refused with this reason, never dialled, and never
- * quietly downgraded to this page's worker.
- *
- * @param hostId - The placement's host id, or `undefined` for this page's worker.
- * @returns The refusal's user-facing reason, or `undefined` when the placement is reachable.
- * @public
- */
-export const unreachablePlacementReason = (hostId: TauAgentHostId | undefined): string | undefined =>
-  hostId === 'desktop' && !isDesktopTarget
-    ? 'This chat runs in the Tau desktop app. Open the project there to continue it, or pick another agent.'
-    : undefined;
-
-/**
  * The daemon one execution is placed on, or `undefined` for this page's own
  * worker.
  *
+ * The chat owns intent; the device owns placement. A Tau execution with no
+ * host, or one that names `desktop` on a build without that launcher, takes
+ * this build's local placement: Tau Desktop's in-process launcher there, this
+ * page's worker on the web. A chat record never carries a device-relative host
+ * (`portableExecutionOf`), so a host here is a paired device, or a daemon this
+ * device chose for the chat (`withChatPlacement`, `chatPlacementOf`).
+ *
  * An external agent is *always* daemon-placed (`acpAgentExecutionSchema`
- * requires a `hostId`); a Tau turn falls back to this build's local launcher.
+ * requires a `hostId`) and keeps the host it names; see
+ * {@link unplaceableExecutionReason} for the build that cannot reach it.
  *
  * @param execution - The turn's execution.
  * @returns The host id, or `undefined` for the browser worker.
  * @public
  */
-export const daemonPlacementOf = (execution: CadAgentExecution): TauAgentHostId | undefined =>
-  execution.kind === 'tau' ? (execution.hostId ?? localAgentHostId()) : execution.hostId;
+export const daemonPlacementOf = (execution: CadAgentExecution): TauAgentHostId | undefined => {
+  if (execution.kind !== 'tau') {
+    return execution.hostId;
+  }
+  const { hostId } = execution;
+  return hostId === undefined || (hostId === 'desktop' && !isDesktopTarget) ? localAgentHostId() : hostId;
+};
 
 /** Descriptors by agent id, as of the last discovery pass. */
 const discoveredAgents = new Map<string, ExternalAgentDescriptor>();
@@ -115,8 +112,22 @@ export const agentPlacementOf = (execution: CadAgentExecution): 'browser' | 'des
 export const externalAgentDisplayName = (agentId: string): string =>
   discoveredAgents.get(agentId)?.displayName ?? agentId;
 
-/** Host ids of a loopback daemon reached by URL (rung 5) start with this, followed by its origin. @public */
-export const loopbackHostIdPrefix = 'loopback:';
+/**
+ * Why one execution cannot be placed on this device, or `undefined` when it can.
+ *
+ * A Tau execution always can: every device-relative host it carries means
+ * local placement here. An external agent cannot when it is pinned to Tau
+ * Desktop and this build is the web: its CLI is a process on that computer,
+ * so the chat keeps its pin and the turn is refused, never moved to Tau.
+ *
+ * @param execution - The turn's execution.
+ * @returns The refusal's user-facing reason, or `undefined` when the execution is placeable.
+ * @public
+ */
+export const unplaceableExecutionReason = (execution: CadAgentExecution): string | undefined =>
+  execution.kind === 'acp' && execution.hostId === 'desktop' && !isDesktopTarget
+    ? `${externalAgentDisplayName(execution.agentId)} runs in the Tau desktop app on the computer this chat was started on. Open the project there to continue it, or pick another agent.`
+    : undefined;
 
 /**
  * The rung one host id is placed on.
@@ -147,7 +158,9 @@ export type AgentHostPlacementErrorCode =
   /** Launcher 2: main never posted a port, which is how it refuses an ungranted root. */
   | 'DESKTOP_ROOT_NOT_GRANTED'
   /** The desktop build has no browser agent worker to construct; nothing to grant or retry. */
-  | 'BROWSER_HOST_UNAVAILABLE';
+  | 'BROWSER_HOST_UNAVAILABLE'
+  /** An external agent pinned to a launcher on another device; see {@link unplaceableExecutionReason}. */
+  | 'HOST_NOT_ON_THIS_DEVICE';
 
 /** A placement that could not be established, carrying which rung gave up. @public */
 export class AgentHostPlacementError extends Error {

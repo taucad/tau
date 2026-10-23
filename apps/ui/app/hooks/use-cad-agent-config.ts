@@ -20,10 +20,9 @@ import {
   hostDirectoryOutage,
   hostPlacementsIncomplete,
   listAgentHostPlacements,
-  loopbackHostIdPrefix,
   onLoopbackAgentHostsChanged,
-  unreachablePlacementReason,
 } from '#lib/agent-host-placement.js';
+import { loopbackHostIdPrefix } from '#utils/chat-execution.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 
@@ -126,11 +125,6 @@ export const awaitAgentHostAvailability = async (
   const outage = isPairedHost(input.hostId) ? hostDirectoryOutage() : undefined;
   if (outage !== undefined) {
     return { status: 'unavailable', reason: outage };
-  }
-  // A placement this build cannot reach is never discovered, so refuse now rather than after the timeout.
-  const unreachable = unreachablePlacementReason(input.hostId);
-  if (unreachable !== undefined) {
-    return { status: 'unavailable', reason: unreachable };
   }
   return new Promise<BrowserAgentHostProjectAvailability>((resolve) => {
     const waiters = availabilityWaiters.get(key) ?? new Set<AvailabilityWaiter>();

@@ -1179,3 +1179,96 @@ describe('chat file store — log ownership boundary', () => {
     expect(listed.map((chat) => chat.id)).toEqual([chatId]);
   });
 });
+
+/*
+ * XD2: `chat.json` syncs to every device, so it keeps the chat's intent and no
+ * device's placement. `desktop`, `origin` and a loopback id each name a host on
+ * the device that wrote them; read anywhere, they mean "local placement".
+ */
+describe('chat file store — device-relative placement never reaches chat.json', () => {
+  const projectId = 'proj_handoff';
+  const model = 'anthropic-claude-opus-4.8';
+  const recordOf = (chatId: string): string => `/projects/${projectId}/.tau/chats/${chatId}/chat.json`;
+
+  it.each([
+    ['desktop', 'desktop'],
+    ['origin', 'origin'],
+    ['loopback', 'loopback:http://127.0.0.1:4100'],
+  ])('should read a %s placement another device wrote as local placement', async (_label, hostId) => {
+    const files = createStoreWithFiles();
+    const chatId = `chat_${_label}`;
+    await files.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'From the desktop',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId, effort: 'high' },
+      })}\n`,
+    );
+
+    const chat = await files.reopen().getChat(chatId, projectId);
+
+    expect(chat?.activeExecution).toEqual({ kind: 'tau', model, effort: 'high' });
+  });
+
+  it('should write a local placement row as no hostId at all', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, {
+      name: 'Desktop chat',
+      messages: [],
+      activeExecution: { kind: 'tau', model, hostId: 'desktop' },
+    });
+    await files.store.patchChat(chat.id, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'origin' });
+
+    const written = JSON.parse(await files.read(recordOf(chat.id))) as Record<string, unknown>;
+    expect(written['activeExecution']).toEqual({ kind: 'tau', model: 'openai-gpt-5.5' });
+  });
+
+  it('should treat a device-relative placement over an absent one as no change', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, {
+      name: 'Web chat',
+      messages: [],
+      activeExecution: { kind: 'tau', model },
+    });
+
+    await expect(
+      files.store.patchChat(chat.id, 'activeExecution', { kind: 'tau', model, hostId: 'desktop' }),
+    ).resolves.toBeUndefined();
+    const reread = await files.store.getChat(chat.id);
+    expect(reread?.updatedAt).toBe(chat.updatedAt);
+  });
+
+  it('should keep a paired device id and an external agent’s host, which name real machines', async () => {
+    const files = createStoreWithFiles();
+    const paired = await files.store.createChat(projectId, {
+      name: 'On the studio',
+      messages: [],
+      activeExecution: { kind: 'tau', model, hostId: 'dev_studio_mini' },
+    });
+    const external = await files.store.createChat(projectId, {
+      name: 'Codex on the desktop',
+      messages: [],
+      activeExecution: { kind: 'acp', hostId: 'desktop', agentId: 'codex' },
+    });
+
+    const reader = files.reopen();
+    const [pairedChat, externalChat] = await Promise.all([
+      reader.getChat(paired.id, projectId),
+      reader.getChat(external.id, projectId),
+    ]);
+    expect(pairedChat?.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'dev_studio_mini',
+    });
+    expect(externalChat?.activeExecution).toEqual({
+      kind: 'acp',
+      hostId: 'desktop',
+      agentId: 'codex',
+    });
+  });
+});

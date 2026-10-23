@@ -38,7 +38,7 @@ import type { ObservationRead, ObservationWatch } from '@taucad/fs-client/observ
 import type { WatchEvent } from '@taucad/filesystem';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
 import type { Actor, ActorOptions, AnyActorLogic } from 'xstate';
-import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { chatRecordsPath } from '@taucad/revisions';
@@ -65,7 +65,8 @@ import {
 } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import type { ComposerRecord, ComposerRecordClient } from '#db/composer-record-store.js';
+import type { ComposerRecord, ComposerRecordClient, ComposerRecordStore } from '#db/composer-record-store.js';
+import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
 import { attachmentReferenceOf } from '#utils/attachment.utils.js';
 import type { StoredAttachmentRef } from '#utils/attachment.utils.js';
@@ -191,14 +192,34 @@ export type ChatSessionDeps = {
   ) => ObservationWatch;
 };
 
+/**
+ * This device's placement for one chat, from the chat's composer record. An absent, unreadable or failing record
+ * reads as none, so the chat takes this device's default placement.
+ */
+const readChatPlacement = async (store: ComposerRecordStore): Promise<TauAgentHostId | undefined> => {
+  try {
+    const result = await store.read();
+    return result.status === 'valid' ? result.record.placement : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/** A chat row with this device's placement put back on its execution. */
+const placeChat = (chat: ChatEntity, placement: TauAgentHostId | undefined): ChatEntity => {
+  const activeExecution = withChatPlacement(chat.activeExecution, placement);
+  return activeExecution === chat.activeExecution ? chat : { ...chat, activeExecution };
+};
+
 export type ChatSession = {
   readonly chatId: string;
   readonly chat: Chat<MyUIMessage>;
   readonly persistenceActorRef: Actor<typeof chatPersistenceMachine>;
   readonly draftActorRef: Actor<typeof draftMachine>;
   /**
-   * This chat's composer record on this device (D2): draft, edits, tool choice
-   * and mode. A surface mounts `useComposerRecordToasts` on it.
+   * This chat's composer record on this device (D2): draft, edits, tool choice,
+   * mode and this device's placement for the chat (XD2). A surface mounts
+   * `useComposerRecordToasts` on it.
    */
   readonly composerRecordRef: ComposerRecordRef;
   readonly messageQueueRef: ChatMessageQueueActor;
@@ -914,20 +935,36 @@ export class ChatSessionStore {
     };
   }
 
-  /** Resolve a listed chat's persisted placement without acquiring its SDK session. @public */
+  /**
+   * Resolve a listed chat's execution as this device places it, without acquiring its SDK session.
+   *
+   * @public
+   */
   public async getChatExecution(chatId: string): Promise<CadAgentExecution | undefined> {
-    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
-    const chat = await this.#deps.getChat(chatId, projectId);
-    return chat?.activeExecution;
+    const settings = await this.getChatHostSettings(chatId);
+    return settings?.activeExecution;
   }
 
-  /** Read a listed chat's host bootstrap choices without acquiring an SDK session. @public */
+  /**
+   * Read a listed chat's host bootstrap choices without acquiring an SDK session.
+   *
+   * The execution is the chat record's, with this device's own placement for the chat (its composer record) put
+   * back on it, so the read connector observes the host this device runs the chat on.
+   *
+   * @public
+   */
   public async getChatHostSettings(
     chatId: string,
   ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
     const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
     const chat = await this.#deps.getChat(chatId, projectId);
-    return chat === undefined ? undefined : { activeExecution: chat.activeExecution, activeKernel: chat.activeKernel };
+    if (chat === undefined) {
+      return undefined;
+    }
+    const placement = await readChatPlacement(
+      createComposerRecordStore(this.#deps.client, composerRecordPaths.chat(chat.resourceId, chatId)),
+    );
+    return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
   }
 
   /** Cancel the log's current run, including an unopened listed chat; no SDK session is acquired. @public */
@@ -3551,14 +3588,21 @@ export class ChatSessionStore {
     );
 
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id, projectId);
+    /* This device's placement for the chat as last read or written: the chat record never holds it (XD2). */
+    let devicePlacement: TauAgentHostId | undefined;
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
           loadChatActor: createAsyncLogic({
             run: async ({ input, signal }) => {
-              const loadedChat = await readChatRow(input.chatId);
+              const storedChat = await readChatRow(input.chatId);
+              if (storedChat !== undefined) {
+                devicePlacement = await readChatPlacement(recordStore);
+              }
               signal.throwIfAborted();
+              /* The persistence context holds the execution this device runs the chat on (XD2). */
+              const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, devicePlacement);
               if (this.#sessions.get(input.chatId) !== session) {
                 return { chat: undefined };
               }
@@ -3647,9 +3691,16 @@ export class ChatSessionStore {
               await depsRef().patchChat(input.chatId, 'error', undefined);
             },
           }),
+          /* The chat owns intent; the device owns placement (XD2). `chat.json` takes the portable execution, and a
+           * placement that names a host only on this device is this chat's composer record on this device. */
           persistActiveExecutionActor: createAsyncLogic({
             run: async ({ input }) => {
-              await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
+              const placement = chatPlacementOf(input.activeExecution);
+              if (placement !== devicePlacement) {
+                devicePlacement = placement;
+                composerRecordRef.send({ type: 'patch', fields: { placement: placement ?? false } });
+              }
+              await depsRef().patchChat(input.chatId, 'activeExecution', portableExecutionOf(input.activeExecution));
             },
           }),
           persistActiveKernelActor: createAsyncLogic({

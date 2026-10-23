@@ -17,23 +17,44 @@ export const toolChoiceSchema = z.union([z.enum(toolModes), z.array(z.enum(toolN
 /**
  * Which host runs a Tau turn.
  *
- * Absent means the page's own dedicated worker — the browser host, and the
- * wire-compatible default every pre-W4 execution parses as. Two literals are
- * reserved: `origin` is the daemon that *served this page* (rung 1, discovered
- * same-origin at `/.well-known/tau-host`), and `desktop` is the Electron
- * services utility's in-process launcher. Anything else is a paired device id
- * from `GET /v1/agents` (rung 2).
+ * Two literals are reserved: `origin` is the daemon that *served this page*
+ * (rung 1, discovered same-origin at `/.well-known/tau-host`), and `desktop`
+ * is the Electron services utility's in-process launcher. A host id prefixed
+ * `loopback:` is a daemon on this computer handed to one tab (rung 5).
+ * Anything else is a paired device id from `GET /v1/agents` (rung 2).
+ *
+ * Absent, `origin`, `desktop` and `loopback:` ids are **device-relative**: each
+ * names a host only on the device that chose it. A turn's execution carries
+ * whichever one the sending device placed it on. A persisted chat record
+ * (`chat.json`), which syncs to every device, is different: it keeps only a
+ * paired device id, and absent there means "local placement on whichever
+ * device reads it" — the in-process launcher on Tau Desktop, the page's own
+ * worker on the web. A device keeps its own non-default placement for a chat
+ * outside the chat record. Records written before this rule may still carry
+ * a device-relative id; they parse unchanged and read as absent.
  *
  * @public
  */
 export type TauAgentHostId = 'origin' | 'desktop' | (string & {});
 
-/** Tau-owned LangGraph/model execution for one CAD turn. @public */
+/**
+ * Tau-owned LangGraph/model execution for one CAD turn.
+ *
+ * The same shape is a chat's persisted `activeExecution`, where it records the
+ * chat's intent (model, effort and any paired-device placement) and never a
+ * device-relative host; see {@link TauAgentHostId}.
+ *
+ * @public
+ */
 export const tauAgentExecutionSchema = z
   .object({
     kind: z.literal('tau'),
     model: z.string().min(1),
-    /** See {@link TauAgentHostId}; absent = this browser's own worker. */
+    /**
+     * See {@link TauAgentHostId}. On a turn, absent is the sending page's own
+     * worker; in a persisted chat record, absent is local placement on the
+     * reading device, and only a paired device id is kept.
+     */
     hostId: z.string().min(1).optional(),
     /**
      * The chat's chosen reasoning level. Absent means the model's catalog
@@ -63,7 +84,12 @@ export const tauAgentExecutionSchema = z
 export const acpAgentExecutionSchema = z
   .object({
     kind: z.literal('acp'),
-    /** See {@link TauAgentHostId}; `origin`, `desktop`, or a paired device id. */
+    /**
+     * See {@link TauAgentHostId}; `origin`, `desktop`, or a paired device id.
+     * Kept as written in a persisted chat record, device-relative or not: the
+     * adapter is a process on that machine, so a device that cannot reach it
+     * refuses the turn rather than moving the chat.
+     */
     hostId: z.string().min(1),
     /** Registry agent id the daemon advertised, e.g. `claude` or `codex`. */
     agentId: z.string().min(1).max(64),

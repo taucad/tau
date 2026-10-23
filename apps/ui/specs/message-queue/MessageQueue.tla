@@ -20,6 +20,9 @@
 \* it reads the projection only and leaves admission, delivery and the queue alone.
 \* Chat message-change wakes are throttled for React readers only; status wakes
 \* stay immediate, and admission, delivery and the queue never read either.
+\* A queued item's execution is the chat's intent with this device's own placement
+\* put back on it, and admission refuses an external agent this device cannot place
+\* before any host wait; queue delivery, persistence and cancellation are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

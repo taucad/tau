@@ -153,6 +153,7 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   hostDirectoryOutage: () => undefined,
   desktopWorkspaceRoot: async () => '/workspace',
   openAgentHostChannel: async () => ({}),
+  unplaceableExecutionReason: () => undefined,
 }));
 // The assembler stays real; only its asynchronous capability probe, which
 // needs a mounted project filesystem, is answered directly.

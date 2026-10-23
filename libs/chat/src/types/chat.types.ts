@@ -32,7 +32,11 @@ export type Chat = {
   messages: MyUIMessage[];
   error?: ChatError; // Persisted error for display after page reload
   startupRequest?: ChatStartupRequest;
-  /** Chat-scoped execution target; opaque ids only, never credentials. */
+  /**
+   * Chat-scoped execution target; opaque ids only, never credentials. The chat
+   * owns its intent and each device its placement: a persisted Tau execution
+   * holds no device-relative host (see `TauAgentHostId`).
+   */
   activeExecution?: CadAgentExecution;
   /**
    * Chat-scoped active CAD kernel. Same semantics as {@link Chat.activeExecution}

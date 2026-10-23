@@ -15,6 +15,7 @@ import { composerRecordPaths, createComposerRecordStore } from '#db/composer-rec
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { portableExecutionOf } from '#utils/chat-execution.js';
 
 /**
  * The chat store, on the filesystem.
@@ -49,6 +50,12 @@ import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
  * The composer — draft, message edits, unread — is not the chat's at all: it is
  * this device's composer records (blueprint D3, W8), and this module only
  * removes a deleted chat's record.
+ *
+ * Neither is a device's placement. `activeExecution` is the chat's intent, so a
+ * Tau execution's device-relative host (`desktop`, `origin`, a loopback daemon)
+ * is dropped on every read and every write (`portableExecutionOf`): absent is
+ * what "local placement" reads as on every device, and a record another device
+ * wrote before this rule reads the same way (cross-device chat handoff, XD2).
  */
 
 const defaultNavigationChatName = 'New chat';
@@ -80,6 +87,12 @@ const placeholderRecord = (projectId: string, chatId: string): Chat => ({
   createdAt: 0,
   updatedAt: 0,
 });
+
+/** A chat record without a device's placement: see the module header. */
+const withPortableExecution = <Row extends Pick<Chat, 'activeExecution'>>(record: Row): Row => {
+  const activeExecution = portableExecutionOf(record.activeExecution);
+  return activeExecution === record.activeExecution ? record : { ...record, activeExecution };
+};
 
 /**
  * The slice of the worker filesystem client the chat store needs. @internal
@@ -180,11 +193,11 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       return undefined;
     }
     located.set(record.id, projectId);
-    return record;
+    return withPortableExecution(record);
   };
 
   const writeRecord = async (projectId: string, chat: Chat): Promise<void> => {
-    await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(chat));
+    await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(withPortableExecution(chat)));
     located.set(chat.id, projectId);
   };
 
@@ -473,10 +486,12 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
         if (key === 'messages') {
           throw new Error('Chat transcript messages are host-log-owned and cannot be patched in chat.json.');
         }
-        if (valuesEqual(chat[key], value)) {
+        const next =
+          key === 'activeExecution' ? (portableExecutionOf(value as Chat['activeExecution']) as typeof value) : value;
+        if (valuesEqual(chat[key], next)) {
           return false;
         }
-        chat[key] = value;
+        chat[key] = next;
         return true;
       }),
 

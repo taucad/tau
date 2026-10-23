@@ -139,11 +139,19 @@ describe('ChatExecutionSelector', () => {
   });
 
   it('should offer browser Tau when the saved Tau host is absent from discovery', () => {
+    activeExecution = { kind: 'tau', hostId: 'dev_retired', model: 'gpt-test' };
+    render(<OfferedProbe />);
+
+    expect(screen.getByText('offered:Tau Host · dev_retired')).toBeInTheDocument();
+    expect(setActiveExecution).not.toHaveBeenCalled();
+  });
+
+  it('should show a Tau chat placed on Tau Desktop as this browser’s own row on the web', () => {
+    // XD2: the desktop launcher's id is device-relative, so a chat synced from the desktop runs here locally.
     activeExecution = { kind: 'tau', hostId: 'desktop', model: 'gpt-test' };
     render(<OfferedProbe />);
 
-    expect(screen.getByText('offered:Tau')).toBeInTheDocument();
-    expect(setActiveExecution).not.toHaveBeenCalled();
+    expect(screen.getByText('hidden:Tau')).toBeInTheDocument();
   });
 
   it('should not offer agent switching when execution cannot be selected', () => {
@@ -290,6 +298,45 @@ describe('ChatExecutionSelector', () => {
     expect(await screen.findByRole('option', { name: 'Select agent: Tau' })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: 'Tau' })).toBeNull();
     vi.unstubAllEnvs();
+  });
+
+  it('should show a chat with no stored host on this computer’s row on the desktop build', () => {
+    // XD2: absent is local placement, so a chat synced from the web sits on launcher 2 here — no switch to offer.
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    try {
+      hostPlacements = [
+        { hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true },
+      ];
+      render(<OfferedProbe />);
+
+      expect(screen.getByText('hidden:Tau')).toBeInTheDocument();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('should write this computer’s row as no host on the desktop build', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    try {
+      activeExecution = { kind: 'tau', model: 'gpt-test', hostId: 'dev_studio_mini' };
+      hostPlacements = [
+        { hostId: 'desktop', rung: 'in-process', label: 'This computer', workspaceRoot: '', online: true },
+        { hostId: 'dev_studio_mini', rung: 2, label: 'studio-mini', workspaceRoot: '/Users/x/tau', online: true },
+      ];
+      const user = userEvent.setup();
+      render(
+        <ChatExecutionSelector>
+          {({ label }) => <button type='button'>Select agent: {label}</button>}
+        </ChatExecutionSelector>,
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Select agent: Tau Host · studio-mini' }));
+      await user.click(await screen.findByRole('option', { name: 'Select agent: Tau' }));
+
+      expect(setActiveExecution).toHaveBeenCalledWith({ kind: 'tau', model: 'gpt-test' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('returns a daemon-placed chat to this browser by dropping hostId', async () => {

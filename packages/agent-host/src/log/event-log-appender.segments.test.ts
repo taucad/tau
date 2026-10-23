@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { pendingToolCalls } from '#host/run-history.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
-import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
+import { foreignRunStaleMilliseconds, foreignRunStanding } from '#log/foreign-runs.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import type { ChatLogSegment } from '#log/segments.js';
 import { serializeLogEvent } from '#log/serialization.js';
@@ -242,6 +242,22 @@ describe('an event log with other devices’ segments (XD1)', () => {
       expect(ids(history)).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0', 'desktop-2-user']);
       expect(pendingToolCalls(history)).toEqual([]);
       expect(await log.historyIntact()).toBe(true);
+      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+    });
+
+    /* A run dated past the bound in this device's future is out of the history and the fence alike, and both take it
+     * up together once this clock comes within the bound: the history refolds then, with no new row. */
+    it('should take a future-dated run into the fence and the history at the same moment', async () => {
+      const future = Date.parse(at(3));
+      clock.now = future - foreignRunStaleMilliseconds - 60_000;
+      const log = await openLog(phoneTurn, { current: [segment('device-desktop', [...desktopTurn, ...inFlight])] });
+      expect(ids(await log.messages())).toContain('desktop-2-user');
+
+      clock.now = future - foreignRunStaleMilliseconds + 1;
+      await log.refresh?.();
+
+      expect(ids(await log.messages())).not.toContain('desktop-2-user');
+      expect(foreignRunStanding({ lastRecordedAt: future }, clock.now).abandoned).toBe(false);
       clock.now = Date.parse('2026-10-23T10:05:00.000Z');
     });
 

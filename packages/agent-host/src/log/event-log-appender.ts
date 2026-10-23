@@ -2,7 +2,7 @@ import { EventLogError } from '#log/event-log-error.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
-import { foreignRunStaleMilliseconds, isAbandonedForeignRun, unsettledParsedRuns } from '#log/foreign-runs.js';
+import { foreignRunStanding, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
 import { mergeSegmentRows } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
@@ -388,7 +388,7 @@ export const createEventLogAppender = async (
   let merged: ReturnType<typeof createEventLogReducer> | undefined;
   let mergedAnomalies: EventLogAnomaly[] = [];
   let segmentFailure: EventLogAnomaly | undefined;
-  /** When the earliest foreign run this fold held goes stale, so its user turn joins the history (XD3). */
+  /** When the fence would next answer differently about a foreign run this fold read, so the history follows it (XD3). */
   let refoldAt: number | undefined;
   const fold = (): void => {
     refoldAt = undefined;
@@ -416,14 +416,14 @@ export const createEventLogAppender = async (
       if (ownRunIds.has(run.runId)) {
         continue;
       }
-      const stale = isAbandonedForeignRun(run, at);
-      const into = stale ? abandoned : held;
+      /* The fence's own rule (`foreignRunStanding`): the history refolds whenever the fence's answer would change. */
+      const standing = foreignRunStanding(run, at);
+      const into = standing.abandoned ? abandoned : held;
       const ids = into.get(run.deviceId) ?? new Set<string>();
       ids.add(run.runId);
       into.set(run.deviceId, ids);
-      if (!stale) {
-        const staleAt = run.lastRecordedAt + foreignRunStaleMilliseconds;
-        refoldAt = refoldAt === undefined ? staleAt : Math.min(refoldAt, staleAt);
+      if (standing.changesAt !== undefined) {
+        refoldAt = refoldAt === undefined ? standing.changesAt : Math.min(refoldAt, standing.changesAt);
       }
     }
     const parsedSegments: ParsedLogSegment[] = [
@@ -486,7 +486,7 @@ export const createEventLogAppender = async (
       };
       return;
     }
-    if (!sameSegments(segments, next) || (refoldAt !== undefined && now() > refoldAt)) {
+    if (!sameSegments(segments, next) || (refoldAt !== undefined && now() >= refoldAt)) {
       segments = next;
       fold();
     }

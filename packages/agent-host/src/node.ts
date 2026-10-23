@@ -21,6 +21,7 @@ import {
   chatSegmentsDirectoryName,
   createChatSegmentsReader,
   createChatStore,
+  readOrAbsent,
   isPurgedChatRecord,
   purgedChatError,
   requireChatPathSegment,
@@ -335,45 +336,16 @@ const syncDirectory = async (directory: string): Promise<void> => {
  * @param directory - The chat's `events/` directory.
  * @returns A read of the segments; none while the directory does not exist.
  */
-const nodeSegmentsReader = (directory: string): (() => Promise<readonly ChatLogSegment[]>) => {
-  const absent = (error: unknown): boolean => {
-    const { code } = error as NodeJS.ErrnoException;
-    return code === 'ENOENT' || code === 'ENOTDIR';
-  };
-  return createChatSegmentsReader({
-    list: async () => {
-      try {
-        return await readdir(directory);
-      } catch (error) {
-        if (absent(error)) {
-          return [];
-        }
-        throw error;
-      }
-    },
-    version: async (name) => {
-      try {
+const nodeSegmentsReader = (directory: string): (() => Promise<readonly ChatLogSegment[]>) =>
+  createChatSegmentsReader({
+    list: async () => readOrAbsent(async () => readdir(directory), []),
+    version: async (name) =>
+      readOrAbsent(async () => {
         const { size, mtimeMs } = await stat(join(directory, name));
         return `${String(size)}:${String(mtimeMs)}`;
-      } catch (error) {
-        if (absent(error)) {
-          return undefined;
-        }
-        throw error;
-      }
-    },
-    read: async (name) => {
-      try {
-        return new Uint8Array(await readFile(join(directory, name)));
-      } catch (error) {
-        if (absent(error)) {
-          return undefined;
-        }
-        throw error;
-      }
-    },
+      }, undefined),
+    read: async (name) => readOrAbsent(async () => new Uint8Array(await readFile(join(directory, name))), undefined),
   });
-};
 
 /**
  * Open a chat log's writer.

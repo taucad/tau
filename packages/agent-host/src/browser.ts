@@ -14,6 +14,7 @@ import {
   chatSegmentsDirectoryName,
   createChatSegmentsReader,
   createChatStore,
+  readOrAbsent,
   isPurgedChatRecord,
   requireChatPathSegment,
 } from '#launchers/chat-store.js';
@@ -449,7 +450,6 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
   const recordPath = (chatId: string): string => `.tau/chats/${requireChatPathSegment(chatId)}/${chatRecordFileName}`;
   const decoder = new TextDecoder();
 
-  /** A file under the OPFS project directory, by its root-relative path; `undefined` when it is not there. */
   /**
    * A directory under the OPFS project directory, by its root-relative segments, each opened inside the one before.
    *
@@ -471,6 +471,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
     return parent;
   };
 
+  /** A file under the OPFS project directory, by its root-relative path; `undefined` when it is not there. */
   const opfsFile = async (
     directory: FileSystemDirectoryHandle,
     path: string,
@@ -617,17 +618,7 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
         readdir === undefined
           ? undefined
           : createChatSegmentsReader({
-              list: async () => {
-                try {
-                  return await readdir.call(fileSystem, directory);
-                } catch (error) {
-                  const { code } = error as { readonly code?: unknown };
-                  if (code === 'ENOENT' || code === 'ENOTDIR') {
-                    return [];
-                  }
-                  throw error;
-                }
-              },
+              list: async () => readOrAbsent(async () => readdir.call(fileSystem, directory), []),
               ...(stat === undefined
                 ? {}
                 : {

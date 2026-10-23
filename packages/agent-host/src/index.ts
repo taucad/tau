@@ -16,6 +16,7 @@ export { mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segme
 export type { ChatLogSegment, MergeLogSegmentsOptions, ParsedLogSegment } from '#log/segments.js';
 export {
   foreignRunStaleMilliseconds,
+  foreignRunStanding,
   isAbandonedForeignRun,
   liveForeignRun,
   unsettledForeignRuns,

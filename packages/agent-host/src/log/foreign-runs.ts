@@ -131,7 +131,33 @@ export const isAbandonedForeignRun = (
   run: Pick<ForeignRun, 'lastRecordedAt'>,
   now: number,
   bound: number = foreignRunStaleMilliseconds,
-): boolean => Math.abs(now - run.lastRecordedAt) > bound;
+): boolean => foreignRunStanding(run, now, bound).abandoned;
+
+/**
+ * Where a foreign run stands at `now` under {@link isAbandonedForeignRun}'s rule, and when that answer next changes:
+ * the one decision the fence and the history both read, so they never disagree about a run. A run more than the bound
+ * in this device's future is abandoned until its clock comes within the bound (`changesAt`), then live; a live run is
+ * abandoned once it is the bound old; one that old stays abandoned until a newer row arrives.
+ *
+ * @param run - The foreign run.
+ * @param now - This device's time, in epoch milliseconds.
+ * @param bound - The staleness bound.
+ * @returns Whether it is abandoned now, and when that changes with no new row (`undefined`: never).
+ * @public
+ */
+export const foreignRunStanding = (
+  run: Pick<ForeignRun, 'lastRecordedAt'>,
+  now: number,
+  bound: number = foreignRunStaleMilliseconds,
+): Readonly<{ abandoned: boolean; changesAt: number | undefined }> => {
+  if (now < run.lastRecordedAt - bound) {
+    return { abandoned: true, changesAt: run.lastRecordedAt - bound };
+  }
+  if (now - run.lastRecordedAt <= bound) {
+    return { abandoned: false, changesAt: run.lastRecordedAt + bound + 1 };
+  }
+  return { abandoned: true, changesAt: undefined };
+};
 
 /**
  * The foreign run that holds the chat now, if any: the newest unsettled run that is not abandoned.

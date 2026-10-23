@@ -128,6 +128,27 @@ export const chatSegmentsDirectoryName = 'events';
 export const segmentDeviceIdOf = (name: string): string | undefined =>
   /^[^/\\]+\.jsonl$/u.test(name) ? name.slice(0, -'.jsonl'.length) : undefined;
 
+/**
+ * Run a filesystem read that answers `absent` when its path is not there (`ENOENT`, `ENOTDIR`), and rethrows anything
+ * else: every platform's segment source reads its directory and files this way.
+ *
+ * @param read - The read.
+ * @param absent - What a missing path answers.
+ * @returns The read's answer, or `absent`.
+ * @internal
+ */
+export const readOrAbsent = async <Answer>(read: () => Promise<Answer>, absent: Answer): Promise<Answer> => {
+  try {
+    return await read();
+  } catch (error) {
+    const { code } = error as { readonly code?: unknown };
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return absent;
+    }
+    throw error;
+  }
+};
+
 const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
 

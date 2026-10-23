@@ -19,23 +19,22 @@
 # canary is synthetic. A missing receipt fails the upload.
 name: Spike W2 (macOS descendant reaping)
 
+# Dispatch only. A pull_request `paths` filter matches the whole PR diff, so while this spike's files
+# sit in a shared feature branch every push by any session (mostly Windows work) re-fired this
+# workflow; with the per-commit group below that piled ~25 runs onto the scarce macOS runners and
+# starved the run that mattered. Dispatch it explicitly when the reaping probe changes.
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'packages/core/native-process/spikes/shell/reaping/**'
-      - '.github/workflows/spike-w2-macos-reaping.yml'
 
 permissions:
   contents: read
   actions: read
   pull-requests: read
 
-# Per-commit group, non-cancelling: the macOS runners take minutes to start, and this spike's files
-# live in the PR diff, so every push to a shared feature branch (by any session) re-fires the
-# pull_request event. With a branch-wide group + cancel-in-progress those slow jobs are cancelled
-# before they can run (observed: three runs cancelled < 2 min in). Keying the group to the commit SHA
-# and never cancelling lets each commit's run complete; the live-host proof still never cache-hits.
+# Per-commit group, non-cancelling: the macOS runners take minutes to start, and a branch-wide group
+# + cancel-in-progress cancelled slow jobs before they could run (observed: three runs cancelled
+# < 2 min in). Keying the group to the commit SHA and never cancelling lets each dispatched run
+# complete; the live-host proof still never cache-hits.
 concurrency:
   group: spike-w2-macos-reaping-${{ github.sha }}
   cancel-in-progress: false

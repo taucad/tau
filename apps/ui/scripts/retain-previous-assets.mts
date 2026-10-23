@@ -108,13 +108,22 @@ type Transport = {
 const integrityOf = (bytes: Uint8Array<ArrayBuffer>): string =>
   `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
 
-const assertServedAsset = (asset: ServedAsset): void => {
-  if (!isServableAssetPath(asset.path)) {
-    throw refusePath(asset.path, 'live asset index');
+/** Check one live index entry, which arrives as untrusted JSON. */
+const assertServedAsset = (entry: unknown): ServedAsset => {
+  if (typeof entry !== 'object' || entry === null) {
+    throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
-  if (!sha384Integrity.test(asset.integrity) || !Number.isInteger(asset.generation) || asset.generation < 0) {
-    throw new Error(`The live asset index has a malformed entry for ${asset.path}.`);
+  const { path, integrity, generation } = entry as Partial<Record<keyof ServedAsset, unknown>>;
+  if (typeof path !== 'string' || typeof integrity !== 'string' || typeof generation !== 'number') {
+    throw new TypeError(`The live asset index has a malformed entry: ${JSON.stringify(entry)}.`);
   }
+  if (!isServableAssetPath(path)) {
+    throw refusePath(path, 'live asset index');
+  }
+  if (!sha384Integrity.test(integrity) || !Number.isInteger(generation) || generation < 0) {
+    throw new Error(`The live asset index has a malformed entry for ${path}.`);
+  }
+  return { path, integrity, generation };
 };
 
 /**
@@ -131,10 +140,16 @@ export const planRetention = (
   ownPaths: ReadonlySet<string>,
   generations: number = retainedGenerations,
 ): readonly ServedAsset[] => {
-  for (const asset of previous.assets) {
-    assertServedAsset(asset);
+  // One entry per path, at its youngest generation: a path listed twice is downloaded once.
+  const youngest = new Map<string, ServedAsset>();
+  for (const entry of previous.assets as readonly unknown[]) {
+    const asset = assertServedAsset(entry);
+    const known = youngest.get(asset.path);
+    if (known === undefined || asset.generation < known.generation) {
+      youngest.set(asset.path, asset);
+    }
   }
-  return previous.assets
+  return [...youngest.values()]
     .filter(
       (asset) => asset.generation + 1 <= generations && !ownPaths.has(asset.path) && !isNeverLoadedByPages(asset.path),
     )

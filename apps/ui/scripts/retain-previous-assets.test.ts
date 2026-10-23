@@ -139,6 +139,27 @@ describe('planRetention', () => {
   });
 
   it.each([
+    ['null', null],
+    ['a string', 'assets/a-1.js'],
+    ['an object without a path', { integrity: integrityOf('x'), generation: 0 }],
+  ])('should call an index entry that is %s malformed', (_label, entry) => {
+    expect(() => planRetention(indexOf([entry as unknown as ServedAsset]), new Set(), 2)).toThrow(
+      'The live asset index has a malformed entry',
+    );
+  });
+
+  it('should keep a path the index lists twice once, at its youngest generation', () => {
+    const twice = indexOf([
+      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
+      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
+    ]);
+
+    expect(planRetention(twice, new Set(), 2)).toStrictEqual([
+      { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
+    ]);
+  });
+
+  it.each([
     ['escapes the asset directory', 'assets/../server/index.js'],
     ['is outside the asset directory', 'index.html'],
     ['is absolute', '/assets/a-1.js'],

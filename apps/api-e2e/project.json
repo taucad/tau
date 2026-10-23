@@ -58,7 +58,7 @@
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/api-e2e",
-        "command": "../../node_modules/.bin/vitest run --config vitest.git.config.ts src/git/project-deletion.spec.ts --maxWorkers=2",
+        "command": "../../node_modules/.bin/vitest run --config vitest.deletion.config.ts --maxWorkers=2",
         "env": {
           "TAU_E2E_EXTERNAL_SERVICES": "true",
           "TAU_E2E_COMPLETED_ARTIFACT": "true"

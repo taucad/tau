@@ -92,23 +92,35 @@
  using PicoGK.Numerics;
  
  namespace PicoGK
-@@ -61,10 +62,12 @@
+@@ -49,9 +50,9 @@
+         public Mesh(Library libSet)
+         {
+             lib     = libSet;
+-            hThis   = _hCreate(lib.hThis);
++            m_tauHandle = _hCreate(lib.hThis);
+             
+-            if (!_bIsValid(lib.hThis, hThis))
++            if (!_bIsValid(lib.hThis, m_tauHandle))
+                 throw new PicoGKAllocException();
+         }
+ 
+@@ -61,11 +62,13 @@
          /// <param name="vox">Voxels to create a mesh from</param>
          public Mesh(in Voxels vox)
          {
 -            lib = vox.lib;
 -            hThis = _hCreateFromVoxels( vox.lib.hThis, 
 -                                        vox.hThis);
--        }
 +            var source=vox;lib=source.lib;
-+            if(lib.TauComputeReuse is {} reuse){var result=reuse.EvaluateMesh(new("mesh.capture","{}"),new[]{TauComputeSourceInput.FromVoxels(source)},()=>new Mesh(source,true));hThis=result.hThis;result.TauRelinquishComputeOwnership();return;}
-+            hThis = _hCreateFromVoxels(source.lib.hThis,source.hThis);
-+        }
-+
-+        private Mesh(Voxels source,bool nativeOnly){lib=source.lib;hThis=_hCreateFromVoxels(lib.hThis,source.hThis);GC.KeepAlive(source);}
++            if(lib.TauComputeReuse is {} reuse){var result=reuse.EvaluateMesh(new("mesh.capture","{}"),new[]{TauComputeSourceInput.FromVoxels(source)},()=>new Mesh(source,true));m_tauHandle=result.hThis;result.TauRelinquishComputeOwnership();return;}
++            m_tauHandle = _hCreateFromVoxels(source.lib.hThis,source.hThis);
+         }
  
++        private Mesh(Voxels source,bool nativeOnly){lib=source.lib;m_tauHandle=_hCreateFromVoxels(lib.hThis,source.hThis);GC.KeepAlive(source);}
++
          /// <summary>
          /// Create a transformed mesh by offsetting and scaling it
+         /// </summary>
 @@ -75,26 +78,10 @@
          public Mesh mshCreateTransformed(   Vector3 vecScale,
                                              Vector3 vecOffset)
@@ -204,7 +216,7 @@
 +            lock (m_tauSnapshotGate)
 +            {
 +                ObjectDisposedException.ThrowIf(m_bDisposed, this);
-+                return _nAddVertex(lib.hThis, hThis, vec);
++                return TauPendVertex(vec);
 +            }
          }
  
@@ -216,15 +228,14 @@
 -            
 -            int n=0;
 -            foreach (Vector3 vec in avecVertices)
--            {
--                anVertexIndex[n] = nAddVertex(vec);
--                n++;
 +            ArgumentNullException.ThrowIfNull(avecVertices);
 +            Vector3[]? vertices = avecVertices as Vector3[];
 +            if (vertices is null && avecVertices.GetType() == typeof(List<Vector3>))
 +                vertices = ((List<Vector3>)avecVertices).ToArray();
 +            if (vertices is null)
-+            {
+             {
+-                anVertexIndex[n] = nAddVertex(vec);
+-                n++;
 +                // Arbitrary iterators may observe each native write before yielding the next vertex.
 +                var indices = new List<int>();
 +                foreach (Vector3 vertex in avecVertices) indices.Add(nAddVertex(vertex));
@@ -285,7 +296,7 @@
 +            lock (m_tauSnapshotGate)
 +            {
 +                ObjectDisposedException.ThrowIf(m_bDisposed, this);
-+                return _nAddTriangle(lib.hThis, hThis, t);
++                return TauPendTriangle(t);
 +            }
          }
  
@@ -1593,7 +1604,15 @@
              switch (eFieldType(nIndex))
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
-@@ -203,6 +203,8 @@
+@@ -136,6 +136,7 @@
+                                                             VoxHandle hVoxels);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(   LibHandle  hLib,
+                                                 MshHandle hThis);
+ 
+@@ -203,6 +204,8 @@
  
          protected virtual void Dispose(bool bDisposing)
          {
@@ -1602,23 +1621,42 @@
              if (m_bDisposed)
              {
                  return;
-@@ -214,12 +216,14 @@
+@@ -214,12 +217,24 @@
                  // Nothing to do in this class
              }
  
 -            _Destroy(lib.hThis, hThis);
-+            if (lib is not null) _Destroy(lib.hThis, hThis);
++            TauDiscardPendingElements();
++            if (lib is not null) _Destroy(lib.hThis, m_tauHandle);
              m_bDisposed = true;
 +            }
          }
  
          bool m_bDisposed = false;
-         internal readonly MshHandle hThis;
+-        internal readonly MshHandle hThis;
++        private readonly MshHandle m_tauHandle;
++        /// <summary>The native mesh; reading it first appends the vertices and triangles added since the last read.</summary>
++        internal MshHandle hThis
++        {
++            get
++            {
++                TauFlushPendingElements();
++                return m_tauHandle;
++            }
++        }
 +        /// <summary>Borrowed library owner; the wrapper does not transfer library ownership.</summary>
          public readonly Library lib;
  
      }
-@@ -237,20 +241,20 @@
+@@ -230,6 +245,7 @@
+         private static extern LatHandle _hCreate(LibHandle  hLib);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Lattice_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(   LibHandle   hLib,
+                                                 LatHandle   hThis);
+ 
+@@ -237,20 +253,20 @@
          private static extern void _Destroy(    LibHandle   hLib,
                                                  LatHandle   hThis);
  
@@ -1644,7 +1682,7 @@
  
          // Dispose Pattern
  
-@@ -280,12 +284,13 @@
+@@ -280,12 +296,13 @@
                  // Nothing to do in this class
              }
  
@@ -1659,7 +1697,7 @@
          public readonly Library     lib;
      }
  
-@@ -316,10 +321,6 @@
+@@ -316,16 +333,14 @@
                                                              float fRadius1,
                                                              float fRadius2);
  
@@ -1669,8 +1707,16 @@
 -                                                            float fRadius);
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
          internal static extern bool _bIsValid(   LibHandle   hLib,
-@@ -341,20 +342,11 @@
+                                                 VoxHandle   hThis);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsEmpty")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsEmpty(  LibHandle   hLib,
+                                                 VoxHandle   hThis);
+ 
+@@ -341,20 +356,11 @@
          private static extern float _fVoxelSize(    LibHandle   hLib,
                                                      VoxHandle   hThis);
  
@@ -1678,12 +1724,12 @@
 -        private static extern void _BoolAdd(    LibHandle   hLib,
 -                                                VoxHandle   hThis,
 -                                                VoxHandle   hOther);
--
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolSubtract")]
 -        private static extern void _BoolSubtract(   LibHandle   hLib,
 -                                                    VoxHandle   hThis,
 -                                                    VoxHandle   hOther);
--
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolIntersect")]
 -        private static extern void _BoolIntersect(  LibHandle   hLib,
 -                                                    VoxHandle   hThis,
@@ -1691,12 +1737,10 @@
 +
 +
 +
-+
-+
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Offset")]
          private static extern void _Offset( LibHandle   hLib,
-@@ -373,10 +365,6 @@
+@@ -373,10 +379,6 @@
                                                      float       fOffset);
  
  
@@ -1707,7 +1751,7 @@
  
          [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
          private delegate float CallbackImplicitDistance(in Vector3 vec);
-@@ -392,8 +380,8 @@
+@@ -392,8 +394,8 @@
                                                          VoxHandle   hThis,
                                                          CallbackImplicitDistance Callback);
  
@@ -1718,7 +1762,15 @@
                                                      VoxHandle   hThis,
                                                      LatHandle   hLattice);
  
-@@ -412,29 +400,9 @@
+@@ -404,6 +406,7 @@
+                                                     float fEndX);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsEqual")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bIsEqual(   LibHandle   hLib,
+                                                 VoxHandle   hThis,
+                                                 VoxHandle   hOther);
+@@ -412,29 +415,9 @@
          private extern static float _fCalculateVolume(  LibHandle   hLib,
                                                          VoxHandle   hThis);
  
@@ -1726,32 +1778,29 @@
 -        private static extern bool _bIsInside(      LibHandle   hLib,
 -                                                    VoxHandle   hThis,
 -                                                    in Vector3 vecTestPoint);
--
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_GetSurfaceNormal")]
 -        private extern static void _GetSurfaceNormal(   LibHandle   hLib,
 -                                                        VoxHandle   hThis,
 -                                                        in  Vector3 vecSurfacePoint,
 -                                                        ref Vector3 vecSurfaceNormal);
--
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bClosestPointOnSurface")]
 -        private extern static bool _bClosestPointOnSurface( LibHandle   hLib,
 -                                                            VoxHandle   hThis,
 -                                                            in  Vector3 vecSearch,
 -                                                            ref Vector3 vecSurfacePoint);
--
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bRayCastToSurface")]
 -        private extern static bool _bRayCastToSurface(  LibHandle   hLib,
 -                                                        VoxHandle   hThis,
 -                                                        in  Vector3 vecSearch,
 -                                                        in  Vector3 vecNormal,
 -                                                        ref Vector3 vecSurfacePoint);
-+
-+
-+
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_GetVoxelDimensions")]
          private extern static void _GetVoxelDimensions( LibHandle   hLib,
-@@ -501,12 +469,13 @@
+@@ -501,12 +484,13 @@
                  m_oMetadata.Dispose();
              }
  
@@ -1766,7 +1815,15 @@
          public readonly Library lib;
      }
  
-@@ -578,13 +547,14 @@
+@@ -517,6 +501,7 @@
+                                                     in ColorFloat clr);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "PolyLine_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(   LibHandle  hLib,
+                                                 PolyHandle hThis);
+ 
+@@ -578,13 +563,14 @@
                  // Nothing to do in this class
              }
  
@@ -1782,7 +1839,54 @@
          public readonly Library lib;
      }
  
-@@ -658,8 +628,8 @@
+@@ -593,7 +579,7 @@
+         // Define delegates for the callback functions
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl, CharSet = CharSet.Ansi)]
+         public delegate void InfoCallback(  string  strMessage,
+-                                            bool    bFatalError);
++                                            [MarshalAs(UnmanagedType.U1)] bool    bFatalError);
+ 
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+         public delegate void UpdateCallback(    IntPtr          hViewer,
+@@ -612,10 +598,10 @@
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+         public delegate void MouseMovedCallback(    IntPtr      poViewer,
+                                                     in Vector2  vecMousePos,
+-                                                    bool        bShift,
+-                                                    bool        bCtrl,
+-                                                    bool        bAlt,
+-                                                    bool        bCmd);
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bShift,
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bCtrl,
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bAlt,
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bCmd);
+ 
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+         public delegate void MouseButtonCallback(   IntPtr      hViewer,
+@@ -628,10 +614,10 @@
+         public delegate void ScrollWheelCallback(   IntPtr      hViewer,
+                                                     in Vector2  vecScrollWheel,
+                                                     in Vector2  vecMousePos,
+-                                                    bool        bShift,
+-                                                    bool        bCtrl,
+-                                                    bool        bAlt,
+-                                                    bool        bCmd);
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bShift,
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bCtrl,
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bAlt,
++                                                    [MarshalAs(UnmanagedType.U1)] bool        bCmd);
+ 
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+         public delegate void WindowSizelCallback(   IntPtr hViewer,
+@@ -650,6 +636,7 @@
+                                                 WindowSizelCallback fnWindowSizeCallback);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(IntPtr hThis);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_Destroy")]
+@@ -658,18 +645,21 @@
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestUpdate")]
          private static extern void _RequestUpdate(IntPtr hThis);
  
@@ -1792,8 +1896,22 @@
 +        private static extern int _PollChecked(IntPtr hThis, [MarshalAs(UnmanagedType.I1)] out bool alive);
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestScreenShot")]
++        [return: MarshalAs(UnmanagedType.U1)]
          private static extern bool _RequestScreenShot(  IntPtr hThis,
-@@ -679,11 +649,9 @@
+                                                         string strScreenShotPath);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_EnableExperimental")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _EnableExperimental( IntPtr hThis,
+-                                                        bool bEnable);                                            
++                                                        [MarshalAs(UnmanagedType.U1)] bool bEnable);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bLoadLightSetup")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bLoadLightSetup(    IntPtr  hThis,
+                                                         byte [] abyDiffuseDdsBuffer,
+                                                         int     nDiffuseSize,
+@@ -679,11 +669,9 @@
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestClose")]
          private static extern void _RequestClose(IntPtr hThis);
  
@@ -1808,7 +1926,7 @@
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveMesh")]
          private static extern void _RemoveMesh( LibHandle   hLib,
-@@ -696,12 +664,6 @@
+@@ -696,12 +684,6 @@
                                                      MshHandle       hMesh,
                                                      in Matrix4x4    mat);
  
@@ -1821,55 +1939,95 @@
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveVoxels")]
          private static extern void _RemoveVoxels(   LibHandle   hLib,
                                                      IntPtr      hThis,
-@@ -712,12 +674,6 @@
-                                                         IntPtr          hThis,
+@@ -713,12 +695,6 @@
                                                          VoxHandle       hVoxels,
                                                          in Matrix4x4    mat);
--
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_AddPolyLine")]
 -        private static extern void _AddPolyLine(    LibHandle   hLib,
 -                                                    IntPtr      hThis,
 -                                                    int         nGroupID,
 -                                                    PolyHandle  hPolyLine);
- 
+-
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemovePolyLine")]
          private static extern void _RemovePolyLine( LibHandle   hLib,
-@@ -781,20 +737,20 @@
+                                                     IntPtr      hThis,
+@@ -736,7 +712,7 @@
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetGroupVisible")]
+         private static extern void _SetGroupVisible(    IntPtr  hThis,
+                                                         int     nGroupID,
+-                                                        bool    bVisible);
++                                                        [MarshalAs(UnmanagedType.U1)] bool    bVisible);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SetGroupMaterial")]
+         private static extern void _SetGroupMaterial(   IntPtr          hThis,
+@@ -781,20 +757,20 @@
  
          protected virtual void Dispose(bool bDisposing)
          {
 -            
 -            if (m_bDisposed)
--            {
--                return;
--            }
--
--            if (bDisposing)
--            {
--                // dispose managed state (managed objects).
--                // Nothing to do in this class
--            }
--
--            _Destroy(hThis);
--            m_bDisposed = true;
 +            System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure;
 +            lock (m_oActions)
-+            {
+             {
+-                return;
 +                if (m_bDisposed) return;
 +                m_bDisposed = true;
 +                failure = ReleaseNativeActions();
-+            }
+             }
+-
+-            if (bDisposing)
 +            try
-+            {
+             {
+-                // dispose managed state (managed objects).
+-                // Nothing to do in this class
 +                if (m_xBackend is not null) m_xBackend.Dispose();
 +                else if (hThis != IntPtr.Zero) _Destroy(hThis);
-+            }
+             }
+-
+-            _Destroy(hThis);
+-            m_bDisposed = true;
 +            catch (Exception error) { failure ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
 +            if (bDisposing) failure?.Throw();
          }
  
          InfoCallback        m_fnInfoCB;
-@@ -996,10 +952,7 @@
+@@ -870,9 +846,9 @@
+                                                         ColorFloat      clrDefault,
+                                                         float           fAlpha,
+                                                         in Matrix4x4    mat,
+-                                                        bool            bFlipX,
+-                                                        bool            bFlipY,
+-                                                        bool            bDoubleSided);
++                                                        [MarshalAs(UnmanagedType.U1)] bool            bFlipX,
++                                                        [MarshalAs(UnmanagedType.U1)] bool            bFlipY,
++                                                        [MarshalAs(UnmanagedType.U1)] bool            bDoubleSided);
+ 
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_Quad_Destroy")]
+             private static extern void _Destroy(    IntPtr       hThis,
+@@ -925,7 +901,7 @@
+         {
+             [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_SideBar_hCreate")]
+             extern internal static GuiSideBarHandle _hCreate(   IntPtr hViewer,
+-                                                                bool bLeft,
++                                                                [MarshalAs(UnmanagedType.U1)] bool bLeft,
+                                                                 int nMin,
+                                                                 int nMax,
+                                                                 int nDef,
+@@ -984,6 +960,7 @@
+                                                             string strFile);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(   LibHandle  hLib, 
+                                                 VdbHandle  hThis);
+ 
+@@ -992,14 +969,12 @@
+                                                 VdbHandle  hThis);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_bSaveToFile", CharSet = CharSet.Ansi)]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bSaveToFile(    LibHandle  hLib,
                                                      VdbHandle  hThis,
                                                      string strFileName);
  
@@ -1881,7 +2039,7 @@
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVoxels", CharSet = CharSet.Ansi)]
-@@ -1008,10 +961,7 @@
+@@ -1008,10 +983,7 @@
                                                  string      strFieldName,
                                                  VoxHandle   hVoxels);
  
@@ -1893,7 +2051,7 @@
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddScalarField", CharSet = CharSet.Ansi)]
-@@ -1020,10 +970,7 @@
+@@ -1020,10 +992,7 @@
                                                      string              strFieldName,
                                                      ScalarFieldHandle   hField);
  
@@ -1905,7 +2063,7 @@
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVectorField", CharSet = CharSet.Ansi)]
-@@ -1075,12 +1022,13 @@
+@@ -1075,12 +1044,13 @@
                  // Nothing to do in this class
              }
  
@@ -1920,7 +2078,15 @@
          public readonly Library lib;
      }
  
-@@ -1111,20 +1059,20 @@
+@@ -1104,6 +1074,7 @@
+                                                         float fSdThreshold);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(   LibHandle           hLib,
+                                                 ScalarFieldHandle   hThis);
+ 
+@@ -1111,20 +1082,20 @@
          private static extern void _Destroy(    LibHandle           hLib,
                                                  ScalarFieldHandle   hThis);
  
@@ -1939,28 +2105,25 @@
                                                  ScalarFieldHandle   hThis,
                                                  in  Vector3         vecPosition,
 -                                                ref float           fValue);
--
++                                                ref float           fValue, out byte active);
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_RemoveValue")]
 -        private static extern bool _RemoveValue(    LibHandle           hLib,
-+                                                ref float           fValue, out byte active);
-+
 +        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_RemoveValueChecked")]
 +        private static extern int _RemoveValue(    LibHandle           hLib,
                                                      ScalarFieldHandle   hThis,
                                                      in  Vector3         vecPosition);
  
-@@ -1174,15 +1122,16 @@
+@@ -1174,15 +1145,16 @@
  
              if (bDisposing)
              {
 -                // dispose managed state (managed objects).
 -                // Nothing to do in this class
--            }
--
--            _Destroy(lib.hThis, hThis);
 +                m_oMetadata?.Dispose();
-+            }
-+
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
 +            if (lib is not null) _Destroy(lib.hThis, hThis);
 +            m_bDisposed = true;
          }
@@ -1971,7 +2134,15 @@
          public readonly Library lib;
      }
  
-@@ -1213,20 +1162,20 @@
+@@ -1206,6 +1178,7 @@
+                                                         float fSDThreshold);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_bIsValid")]
++        [return: MarshalAs(UnmanagedType.U1)]
+         internal static extern bool _bIsValid(   LibHandle  hLib,
+                                                 VectorFieldHandle hThis);
+ 
+@@ -1213,20 +1186,20 @@
          private static extern void _Destroy(    LibHandle  hLib,
                                                  VectorFieldHandle hThis);
  
@@ -1990,28 +2161,25 @@
                                                  VectorFieldHandle  hThis,
                                                   in  Vector3 vecPosition,
 -                                                 ref Vector3 vecValue);
--
++                                                 ref Vector3 vecValue, out byte active);
+ 
 -        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_RemoveValue")]
 -        private static extern bool _RemoveValue(    LibHandle  hLib,
-+                                                 ref Vector3 vecValue, out byte active);
-+
 +        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_RemoveValueChecked")]
 +        private static extern int _RemoveValue(    LibHandle  hLib,
                                                      VectorFieldHandle  hThis,
                                                      in  Vector3 vecPosition);
  
-@@ -1259,16 +1208,16 @@
+@@ -1259,16 +1232,16 @@
  
              if (bDisposing)
              {
 -                // dispose managed state (managed objects).
 -                // Nothing to do in this class
--            }
--
--            _Destroy(lib.hThis, hThis);
 +                m_oMetadata?.Dispose();
-+            }
-+
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
 +            if (lib is not null) _Destroy(lib.hThis, hThis);
              m_bDisposed = true;
          }
@@ -2022,7 +2190,38 @@
          public readonly Library lib;
      }
  
-@@ -1383,12 +1332,13 @@
+@@ -1300,6 +1273,7 @@
+                                                     int     nIndex);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_bGetNameAt", CharSet = CharSet.Ansi)]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bGetNameAt( LibHandle  hLib,
+                                                 VdbMetaHandle  hThis, 
+                                                 int     nIndex, 
+@@ -1317,6 +1291,7 @@
+                                                     string  strFieldName);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_bGetStringAt", CharSet = CharSet.Ansi)]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bGetStringAt(   LibHandle  hLib,
+                                                     VdbMetaHandle  hThis, 
+                                                     string  strFieldName, 
+@@ -1324,12 +1299,14 @@
+                                                     int nMaxStringLen);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_bGetFloatAt", CharSet = CharSet.Ansi)]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bGetFloatAt(    LibHandle  hLib,
+                                                     VdbMetaHandle  hThis, 
+                                                     string  strFieldName, 
+                                                     ref float fValue);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_bGetVectorAt", CharSet = CharSet.Ansi)]
++        [return: MarshalAs(UnmanagedType.U1)]
+         private static extern bool _bGetVectorAt(   LibHandle  hLib,
+                                                     VdbMetaHandle  hThis, 
+                                                     string  strFieldName, 
+@@ -1383,12 +1360,13 @@
                  // Nothing to do in this class
              }
  
@@ -2041,7 +2240,7 @@
 +}
 --- /dev/null
 +++ b/Library/CheckedCallbacks.cs
-@@ -0,0 +1,103 @@
+@@ -0,0 +1,122 @@
 +// SPDX-License-Identifier: Apache-2.0
 +using System.Numerics;
 +using System.Runtime.ExceptionServices;
@@ -2053,6 +2252,9 @@
 +{
 +    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 +    internal delegate int Sdf(in Vector3 point, out float distance);
++    // One transition per z-row: fill distances[0, count) in order and report how many were filled.
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal unsafe delegate int SdfBatch(Vector3* points, float* distances, int count, out int completed);
 +    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 +    internal delegate int Scalar(in Vector3 point, float value);
 +    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -2062,6 +2264,10 @@
 +    internal static extern int Render(LibHandle library, VoxHandle voxels, in BBox3 bounds, Sdf callback);
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_Voxels_IntersectImplicitChecked")]
 +    internal static extern int Intersect(LibHandle library, VoxHandle voxels, Sdf callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_Voxels_RenderImplicitBatchChecked")]
++    internal static extern int RenderBatch(LibHandle library, VoxHandle voxels, in BBox3 bounds, SdfBatch callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_Voxels_IntersectImplicitBatchChecked")]
++    internal static extern int IntersectBatch(LibHandle library, VoxHandle voxels, SdfBatch callback);
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_TraverseActiveChecked")]
 +    internal static extern int TraverseScalar(LibHandle library, ScalarFieldHandle field, Scalar callback);
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_TraverseActiveChecked")]
@@ -2080,29 +2286,41 @@
 +
 +public partial class Voxels
 +{
-+    private void TauRenderImplicit(IImplicit implicitFunction, in BBox3 bounds, bool intersect)
++    private unsafe void TauRenderImplicit(IImplicit implicitFunction, in BBox3 bounds, bool intersect)
 +    {
 +        ArgumentNullException.ThrowIfNull(implicitFunction);
 +        ObjectDisposedException.ThrowIf(m_bDisposed, this);
 +        ExceptionDispatchInfo? failure = null;
-+        TauCheckedCallbacks.Sdf callback = (in Vector3 point, out float distance) =>
++        // The author sees the per-voxel sequence: the same points in the same order, and no call after a
++        // throw or a nonfinite distance, which ends the row there as the per-voxel adapter ended the render.
++        TauCheckedCallbacks.SdfBatch callback = (Vector3* points, float* distances, int count, out int completed) =>
 +        {
-+            distance = 0;
++            completed = 0;
 +            if (failure is not null) return 1;
-+            try
++            for (; completed < count; completed++)
 +            {
-+                distance = implicitFunction.fSignedDistance(point);
-+                return 0;
++                float distance;
++                try
++                {
++                    distance = implicitFunction.fSignedDistance(points[completed]);
++                }
++                catch (Exception error)
++                {
++                    failure = ExceptionDispatchInfo.Capture(error);
++                    return 1;
++                }
++                distances[completed] = distance;
++                if (!float.IsFinite(distance))
++                {
++                    completed++;
++                    return 0;
++                }
 +            }
-+            catch (Exception error)
-+            {
-+                failure = ExceptionDispatchInfo.Capture(error);
-+                return 1;
-+            }
++            return 0;
 +        };
 +        var status = intersect
-+            ? TauCheckedCallbacks.Intersect(lib.hThis, hThis, callback)
-+            : TauCheckedCallbacks.Render(lib.hThis, hThis, bounds, callback);
++            ? TauCheckedCallbacks.IntersectBatch(lib.hThis, hThis, callback)
++            : TauCheckedCallbacks.RenderBatch(lib.hThis, hThis, bounds, callback);
 +        GC.KeepAlive(callback);
 +        TauCheckedCallbacks.Check(status, failure, this);
 +    }
@@ -3580,6 +3798,154 @@
 +    }
 +}
 --- /dev/null
++++ b/Library/MeshElements.cs
+@@ -0,0 +1,145 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Numerics;
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++/// <summary>
++/// Element-wise mesh building (<c>nAddVertex</c>, <c>nAddTriangle</c>, <c>AddQuad</c>) without one native call per
++/// element. Elements accumulate in managed arrays and reach the native mesh in one append the next time anything
++/// reads <c>hThis</c>, so every native use, from a count to a capture, sees exactly the per-element tables.
++/// </summary>
++public partial class Mesh
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_AppendElements")]
++    private static extern int TauAppendElementsNative(LibHandle library, MshHandle target,
++        IntPtr positions, int positionCount, IntPtr triangles, int triangleCount);
++
++    // Guarded by m_tauSnapshotGate. The bases are the native counts when accumulation started.
++    private float[]? m_tauPendingPositions;
++    private int[]? m_tauPendingTriangles;
++    private int m_tauPendingVertexCount;
++    private int m_tauPendingTriangleCount;
++    private int m_tauPendingVertexBase;
++    private int m_tauPendingTriangleBase;
++
++    private void TauBeginPending()
++    {
++        if (m_tauPendingPositions is not null) return;
++        lib.TauTrackPendingMesh(this);
++        m_tauPendingVertexBase = _nVertexCount(lib.hThis, m_tauHandle);
++        m_tauPendingTriangleBase = _nTriangleCount(lib.hThis, m_tauHandle);
++        m_tauPendingPositions = new float[96];
++        m_tauPendingTriangles = new int[96];
++        m_tauPendingVertexCount = 0;
++        m_tauPendingTriangleCount = 0;
++    }
++
++    // Caller holds m_tauSnapshotGate. Returns the index the native per-element export would have returned.
++    private int TauPendVertex(in Vector3 vertex)
++    {
++        TauBeginPending();
++        var index = checked(m_tauPendingVertexBase + m_tauPendingVertexCount);
++        var offset = m_tauPendingVertexCount * 3;
++        if (offset + 3 > m_tauPendingPositions!.Length) Array.Resize(ref m_tauPendingPositions, checked(m_tauPendingPositions.Length * 2));
++        m_tauPendingPositions[offset] = vertex.X;
++        m_tauPendingPositions[offset + 1] = vertex.Y;
++        m_tauPendingPositions[offset + 2] = vertex.Z;
++        m_tauPendingVertexCount++;
++        return index;
++    }
++
++    // Caller holds m_tauSnapshotGate. Indices are stored as given, as the per-element export stores them.
++    private int TauPendTriangle(in Triangle triangle)
++    {
++        TauBeginPending();
++        var index = checked(m_tauPendingTriangleBase + m_tauPendingTriangleCount);
++        var offset = m_tauPendingTriangleCount * 3;
++        if (offset + 3 > m_tauPendingTriangles!.Length) Array.Resize(ref m_tauPendingTriangles, checked(m_tauPendingTriangles.Length * 2));
++        m_tauPendingTriangles[offset] = triangle.A;
++        m_tauPendingTriangles[offset + 1] = triangle.B;
++        m_tauPendingTriangles[offset + 2] = triangle.C;
++        m_tauPendingTriangleCount++;
++        return index;
++    }
++
++    private void TauFlushPendingElements()
++    {
++        if (m_tauPendingPositions is null) return;
++        lock (m_tauSnapshotGate)
++        {
++            var positions = m_tauPendingPositions;
++            var triangles = m_tauPendingTriangles;
++            if (positions is null || triangles is null) return;
++            m_tauPendingPositions = null;
++            m_tauPendingTriangles = null;
++            lib.TauUntrackPendingMesh(this);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            if (m_tauPendingVertexCount == 0 && m_tauPendingTriangleCount == 0) return;
++            GCHandle pinnedPositions = default;
++            GCHandle pinnedTriangles = default;
++            try
++            {
++                pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++                pinnedTriangles = GCHandle.Alloc(triangles, GCHandleType.Pinned);
++                TauCheckMeshStatus(TauAppendElementsNative(lib.hThis, m_tauHandle,
++                    pinnedPositions.AddrOfPinnedObject(), checked(m_tauPendingVertexCount * 3),
++                    pinnedTriangles.AddrOfPinnedObject(), checked(m_tauPendingTriangleCount * 3)));
++                GC.KeepAlive(this);
++            }
++            finally
++            {
++                if (pinnedTriangles.IsAllocated) pinnedTriangles.Free();
++                if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++            }
++        }
++    }
++
++    // Caller holds m_tauSnapshotGate; disposal releases the native mesh, so nothing remains to append.
++    private void TauDiscardPendingElements()
++    {
++        if (m_tauPendingPositions is not null) lib.TauUntrackPendingMesh(this);
++        m_tauPendingPositions = null;
++        m_tauPendingTriangles = null;
++    }
++
++    internal void TauFlushPendingForLibrary()
++    {
++        try
++        {
++            TauFlushPendingElements();
++        }
++        catch (ObjectDisposedException)
++        {
++            // A mesh disposed after the snapshot holds nothing the library still owns.
++        }
++    }
++}
++
++public partial class Library
++{
++    // Meshes holding elements not yet appended natively. Library-wide reads flush them first, so owned-memory
++    // figures match per-element building.
++    private readonly HashSet<Mesh> m_tauPendingMeshes = new(ReferenceEqualityComparer.Instance);
++
++    internal void TauTrackPendingMesh(Mesh mesh)
++    {
++        lock (m_tauPendingMeshes) m_tauPendingMeshes.Add(mesh);
++    }
++
++    internal void TauUntrackPendingMesh(Mesh mesh)
++    {
++        lock (m_tauPendingMeshes) m_tauPendingMeshes.Remove(mesh);
++    }
++
++    internal void TauFlushPendingMeshes()
++    {
++        Mesh[] pending;
++        lock (m_tauPendingMeshes)
++        {
++            if (m_tauPendingMeshes.Count == 0) return;
++            pending = [.. m_tauPendingMeshes];
++        }
++        foreach (var mesh in pending) mesh.TauFlushPendingForLibrary();
++    }
++}
+--- /dev/null
 +++ b/Library/MeshIndexed.cs
 @@ -0,0 +1,122 @@
 +// SPDX-License-Identifier: Apache-2.0
@@ -3603,7 +3969,7 @@
 +    private Mesh(Library library, MshHandle mesh)
 +    {
 +        lib = library;
-+        hThis = mesh;
++        m_tauHandle = mesh;
 +    }
 +
 +    private static Mesh TauAdoptResult(Library library, int status, MshHandle result)
@@ -3872,8 +4238,33 @@
 +    }
 +}
 --- /dev/null
++++ b/Library/Meshing.cs
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Library
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauLibrary_SetMeshing")]
++    private static extern int TauSetMeshingNative(LibHandle library, float adaptivity,
++        [MarshalAs(UnmanagedType.U1)] bool relax);
++
++    /// <summary>
++    /// Host display meshing for the Voxels a capture reads (OpenVDB adaptivity in [0, 1); 0 is the uniform mesh).
++    /// Author-created meshes, properties and the native viewer keep the uniform mesh.
++    /// </summary>
++    internal void TauSetMeshing(float adaptivity, bool relax)
++    {
++        if (!float.IsFinite(adaptivity) || adaptivity < 0 || adaptivity >= 1)
++            throw new ArgumentOutOfRangeException(nameof(adaptivity), "PicoGK mesh adaptivity must be in [0, 1).");
++        var status = TauSetMeshingNative(hThis, adaptivity, relax);
++        GC.KeepAlive(this);
++        TauCheckedCallbacks.Check(status, null, this);
++    }
++}
+--- /dev/null
 +++ b/Library/OwnedMemory.cs
-@@ -0,0 +1,28 @@
+@@ -0,0 +1,29 @@
 +// SPDX-License-Identifier: Apache-2.0
 +using System.Runtime.InteropServices;
 +namespace PicoGK;
@@ -3884,6 +4275,7 @@
 +
 +    private long TauOwnedMemoryBytes(int category)
 +    {
++        TauFlushPendingMeshes();
 +        var status = TauOwnedMemoryNative(hThis, category, out long bytes);
 +        TauCheckOwnedMemoryStatus(status);
 +        return bytes;

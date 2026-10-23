@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
 import { describeSupersession, isReloadOffered, subscribeReloadOffer } from '#filesystem/build-skew.js';
 import { Button } from '@taucad/ui/components/button';
-import { useBrowserUpdateControlMounted } from '#components/nav/browser-update.js';
+import { useReloadPromptOwned } from '#components/nav/browser-update.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
 const serverSnapshot = (): boolean => false;
@@ -24,8 +24,8 @@ const reload = (): void => {
 export function BuildSkewBanner(): React.JSX.Element | undefined {
   const superseded = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverSnapshot);
   const { supersedingBuildId } = useSupersedingBuild();
-  const sidebarOwnsPrompt = useBrowserUpdateControlMounted();
-  if (!superseded || sidebarOwnsPrompt) {
+  const promptOwnedElsewhere = useReloadPromptOwned();
+  if (!superseded || promptOwnedElsewhere) {
     return undefined;
   }
   return (

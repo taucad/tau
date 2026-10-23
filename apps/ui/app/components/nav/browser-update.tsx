@@ -8,8 +8,8 @@ import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
 const serverSnapshot = (): boolean => false;
 
-let mountedControls = 0;
-const mountedTopic = new Topic<void>({ name: 'browser-update-control' });
+let reloadPromptOwners = 0;
+const reloadPromptOwnersTopic = new Topic<void>({ name: 'reload-prompt-owners' });
 
 /**
  * Claim the reload prompt while `isOwning`: an update control in an open sidebar, or the
@@ -22,11 +22,11 @@ export const useReloadPromptOwner = (isOwning: boolean): void => {
     if (!isOwning) {
       return undefined;
     }
-    mountedControls += 1;
-    mountedTopic.emit();
+    reloadPromptOwners += 1;
+    reloadPromptOwnersTopic.emit();
     return () => {
-      mountedControls -= 1;
-      mountedTopic.emit();
+      reloadPromptOwners -= 1;
+      reloadPromptOwnersTopic.emit();
     };
   }, [isOwning]);
 };
@@ -35,10 +35,10 @@ export const useReloadPromptOwner = (isOwning: boolean): void => {
  * `true` while another surface owns the reload prompt ({@link useReloadPromptOwner}), so the
  * floating fallback (`BuildSkewBanner`) covers only surfaces without one.
  */
-export const useBrowserUpdateControlMounted = (): boolean =>
+export const useReloadPromptOwned = (): boolean =>
   useSyncExternalStore(
-    (listener) => mountedTopic.subscribe(listener),
-    () => mountedControls > 0,
+    (listener) => reloadPromptOwnersTopic.subscribe(listener),
+    () => reloadPromptOwners > 0,
     serverSnapshot,
   );
 

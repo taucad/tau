@@ -58,6 +58,10 @@ function Add-Check($id, $expect, $observed, $ok, $detail) {
   $v = if ($ok) { 'pass' } else { 'fail' }
   [void]$checks.Add([ordered]@{ id = $id; expect = $expect; observed = "$observed"; verdict = $v; detail = $detail })
 }
+# Informational evidence: recorded with verdict 'info', never gated and never counted as a pass.
+function Add-Info($id, $expect, $observed, $detail) {
+  [void]$checks.Add([ordered]@{ id = $id; expect = $expect; observed = "$observed"; verdict = 'info'; detail = $detail })
+}
 
 # ---------------------------------------------------------------------------------------------------
 # P/Invoke harness: mint a WRITE_RESTRICTED token (random cap SID restricting), launch children under
@@ -80,6 +84,7 @@ public static class TauRestrict {
     public short cbReserved2; public IntPtr lpReserved2; public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError;
   }
   [StructLayout(LayoutKind.Sequential)] struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public int dwProcessId; public int dwThreadId; }
+  [StructLayout(LayoutKind.Sequential)] struct SECURITY_ATTRIBUTES { public int nLength; public IntPtr lpSecurityDescriptor; public int bInheritHandle; }
 
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr tok);
   [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
@@ -96,6 +101,16 @@ public static class TauRestrict {
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr h);
   [DllImport("kernel32.dll", SetLastError=true)] static extern uint WaitForSingleObject(IntPtr h, uint ms);
   [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr h, out uint code);
+  [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr h);
+  [DllImport("user32.dll", SetLastError=true)] static extern IntPtr GetProcessWindowStation();
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool GetUserObjectInformation(IntPtr h, int index, StringBuilder buf, int len, out int needed);
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern IntPtr OpenWindowStation(string name, bool inherit, uint access);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool CloseWindowStation(IntPtr h);
+  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern IntPtr CreateDesktop(string name, IntPtr device, IntPtr devmode, uint flags, uint access, ref SECURITY_ATTRIBUTES sa);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool CloseDesktop(IntPtr h);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool GetUserObjectSecurity(IntPtr h, ref uint si, byte[] sd, uint len, out uint needed);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool SetUserObjectSecurity(IntPtr h, ref uint si, byte[] sd);
+  [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out IntPtr sd, IntPtr size);
 
   // token.rs:42-44: DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED == 0x01 | 0x04 | 0x08.
   public const uint FLAGS = 0x1u | 0x4u | 0x8u; // 0x0D
@@ -170,13 +185,50 @@ public static class TauRestrict {
     } catch (Exception) { return -99; }
   }
 
-  static STARTUPINFO NewSi() { STARTUPINFO si = new STARTUPINFO(); si.cb = Marshal.SizeOf(typeof(STARTUPINFO)); /* Desktop left null: inherit the parent desktop. Forcing winsta0\\default from the runner service session denies the restricted child its desktop and it dies in user32 init (0xC0000142). */ return si; }
+  // lpDesktop = "<winsta>\\<private desktop>" (Codex desktop.rs LaunchDesktop::startup_info_desktop). A
+  // null desktop inherits the parent desktop, whose DACL does not admit the write-restricted token, and
+  // the child dies in user32 init with 0xC0000142 (observed on both hosted runners).
+  static STARTUPINFO NewSi(string desktop) { STARTUPINFO si = new STARTUPINFO(); si.cb = Marshal.SizeOf(typeof(STARTUPINFO)); si.Desktop = desktop; return si; }
+
+  // ---- Window station + private desktop (Codex windows-sandbox-rs/src/desktop.rs) ----
+  public static string ProcessWinstaName() {
+    IntPtr h = GetProcessWindowStation(); StringBuilder sb = new StringBuilder(256); int n;
+    if (!GetUserObjectInformation(h, 2 /* UOI_NAME */, sb, 512, out n)) return null;
+    return sb.ToString();
+  }
+  public static IntPtr OpenWinstaForDacl(string name, out int err) {
+    err = 0; IntPtr h = OpenWindowStation(name, false, 0x00020000u | 0x00040000u); // READ_CONTROL | WRITE_DAC
+    if (h == IntPtr.Zero) err = Marshal.GetLastWin32Error();
+    return h;
+  }
+  public static void CloseWinsta(IntPtr h) { if (h != IntPtr.Zero) CloseWindowStation(h); }
+  public static byte[] GetDacl(IntPtr h, out int err) {
+    err = 0; uint si = 4; uint need; // DACL_SECURITY_INFORMATION
+    GetUserObjectSecurity(h, ref si, null, 0, out need);
+    if (need == 0) { err = Marshal.GetLastWin32Error(); return null; }
+    byte[] b = new byte[need];
+    if (!GetUserObjectSecurity(h, ref si, b, need, out need)) { err = Marshal.GetLastWin32Error(); return null; }
+    return b;
+  }
+  public static int SetDacl(IntPtr h, byte[] sd) { uint si = 4; return SetUserObjectSecurity(h, ref si, sd) ? 0 : Marshal.GetLastWin32Error(); }
+  // CreateDesktopW on the caller's window station with an explicit protected DACL (desktop.rs:290-326).
+  public static IntPtr CreatePrivateDesktop(string name, string sddl, out int err) {
+    err = 0; IntPtr sd;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptor(sddl, 1, out sd, IntPtr.Zero)) { err = -Marshal.GetLastWin32Error(); return IntPtr.Zero; }
+    try {
+      SECURITY_ATTRIBUTES sa = new SECURITY_ATTRIBUTES(); sa.nLength = Marshal.SizeOf(typeof(SECURITY_ATTRIBUTES)); sa.lpSecurityDescriptor = sd; sa.bInheritHandle = 0;
+      IntPtr h = CreateDesktop(name, IntPtr.Zero, IntPtr.Zero, 0, 0x1F01FFu /* DESKTOP_ALL_ACCESS */, ref sa);
+      if (h == IntPtr.Zero) err = Marshal.GetLastWin32Error();
+      return h;
+    } finally { LocalFree(sd); }
+  }
+  public static int ClosePrivateDesktop(IntPtr h) { if (h == IntPtr.Zero) return 0; return CloseDesktop(h) ? 0 : Marshal.GetLastWin32Error(); }
 
   // Launch a write-restricted child from the caller OWN token (restricted-of-caller: no privilege
   // required, works non-elevated). The LUA_TOKEN flag filters it to a non-elevated token.
-  public static IntPtr LaunchSelf(string app, string cmdline, string capSid, string logonSid, string cwd, out int err) {
+  public static IntPtr LaunchSelf(string app, string cmdline, string capSid, string logonSid, string cwd, string desktop, out int err) {
     err = 0; IntPtr nt = Restrict(SelfToken(), capSid, logonSid);
-    STARTUPINFO si = NewSi(); PROCESS_INFORMATION pi;
+    STARTUPINFO si = NewSi(desktop); PROCESS_INFORMATION pi;
     bool ok = CreateProcessAsUser(nt, app, new StringBuilder(cmdline), IntPtr.Zero, IntPtr.Zero, false, CREATE_NO_WINDOW, IntPtr.Zero, cwd, ref si, out pi);
     if (!ok) { err = Marshal.GetLastWin32Error(); CloseHandle(nt); return IntPtr.Zero; }
     CloseHandle(pi.hThread); CloseHandle(nt); return pi.hProcess;
@@ -184,7 +236,7 @@ public static class TauRestrict {
 
   // Launch a write-restricted child AS the given non-admin user (elevated orchestrator path; needs
   // SeImpersonatePrivilege, held by the admin-phase runner). The child is the non-admin sandbox user.
-  public static IntPtr LaunchAsUser(string user, SecureString pw, string app, string cmdline, string capSid, string logonSid, string cwd, out int err) {
+  public static IntPtr LaunchAsUser(string user, SecureString pw, string app, string cmdline, string capSid, string logonSid, string cwd, string desktop, out int err) {
     err = 0; IntPtr pwPtr = Marshal.SecureStringToGlobalAllocUnicode(pw); IntPtr logonTok;
     bool lok;
     try { lok = LogonUser(user, ".", pwPtr, LOGON_INTERACTIVE, PROVIDER_DEFAULT, out logonTok); }
@@ -192,7 +244,7 @@ public static class TauRestrict {
     if (!lok) { err = -Marshal.GetLastWin32Error(); return IntPtr.Zero; }
     try {
       IntPtr nt = Restrict(logonTok, capSid, logonSid);
-      STARTUPINFO si = NewSi(); PROCESS_INFORMATION pi;
+      STARTUPINFO si = NewSi(desktop); PROCESS_INFORMATION pi;
       bool ok = CreateProcessWithTokenW(nt, 0, app, new StringBuilder(cmdline), CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, IntPtr.Zero, cwd, ref si, out pi);
       if (!ok) { err = Marshal.GetLastWin32Error(); CloseHandle(nt); return IntPtr.Zero; }
       CloseHandle(pi.hThread); CloseHandle(nt); return pi.hProcess;
@@ -326,9 +378,68 @@ Add-Check 'fallback.mode' 'orchestration mode (elevated => provision sandbox use
 $s2Verdict = 'not-run'
 $createdUsers = @()
 $childShell = $null
+$writeProven = $false
+$readProven = $false
+
+# ---- Per-session window-station + private-desktop grants (Codex windows-sandbox-rs/src/desktop.rs) ----
+# The write-restricted child needs a desktop whose DACL admits BOTH halves of the access check: the
+# normal check (the token's user SID) and the restricted check (one of its restricting SIDs: the
+# session cap SID). Codex creates a private desktop per launch (PrivateDesktop::create, desktop.rs:362)
+# with DESKTOP_ALL_ACCESS for the owner and DESKTOP_PARTICIPANT_ACCESS (= ALL minus WRITE_DAC,
+# WRITE_OWNER, DELETE; desktop.rs:83-84) for the sandbox principal (desktop.rs:290-292). We do the same
+# per session, adding the session cap SID as a participant. The window station gets one ACE per
+# session SID with WINSTA_ALL_ACCESS minus WINSTA_CREATEDESKTOP (0x377), and the original window-
+# station DACL is restored byte-for-byte at teardown; the receipt records both grant and revocation.
+$DESKTOP_ALL = 0x1F01FF
+$DESKTOP_PARTICIPANT = 0x0201FF
+$WINSTA_SESSION_MASK = 0x377
+$winstaName = $null; $winstaH = [IntPtr]::Zero; $winstaOrig = $null; $winstaOrigSddl = $null
+$winstaGranted = New-Object System.Collections.ArrayList
+$desktops = New-Object System.Collections.ArrayList
+
+function Get-SddlOf([byte[]]$b) { (New-Object System.Security.AccessControl.RawSecurityDescriptor($b, 0)).GetSddlForm('Access') }
+
+function Grant-WinstaSession([string]$session, [string[]]$sids) {
+  if ($script:winstaH -eq [IntPtr]::Zero) { return "no-winsta-handle" }
+  $e = 0
+  $b = [TauRestrict]::GetDacl($script:winstaH, [ref]$e)
+  if ($null -eq $b) { return "GetDacl err=$e" }
+  $raw = New-Object System.Security.AccessControl.RawSecurityDescriptor($b, 0)
+  foreach ($sid in $sids) {
+    $ace = New-Object System.Security.AccessControl.CommonAce([System.Security.AccessControl.AceFlags]::None, [System.Security.AccessControl.AceQualifier]::AccessAllowed, $WINSTA_SESSION_MASK, (New-Object System.Security.Principal.SecurityIdentifier($sid)), $false, $null)
+    $raw.DiscretionaryAcl.InsertAce($raw.DiscretionaryAcl.Count, $ace)
+  }
+  $nb = New-Object byte[] $raw.BinaryLength
+  $raw.GetBinaryForm($nb, 0)
+  $rc = [TauRestrict]::SetDacl($script:winstaH, $nb)
+  [void]$script:winstaGranted.Add([ordered]@{ session = $session; sids = $sids; mask = ('0x{0:X}' -f $WINSTA_SESSION_MASK); setDacl = $rc })
+  "ok rc=$rc"
+}
+
+function New-SessionDesktop([string]$session, [string[]]$participants) {
+  $name = 'TauSandboxDesktop-' + [System.Guid]::NewGuid().ToString('N')
+  $sddl = 'D:P(A;;0x{0:X};;;{1})' -f $DESKTOP_ALL, $script:acctSidForDesk
+  foreach ($p in $participants) { $sddl += '(A;;0x{0:X};;;{1})' -f $DESKTOP_PARTICIPANT, $p }
+  $e = 0
+  $h = [TauRestrict]::CreatePrivateDesktop($name, $sddl, [ref]$e)
+  $startup = if ($h -ne [IntPtr]::Zero) { "$($script:winstaName)\$name" } else { $null }
+  [void]$script:desktops.Add([ordered]@{ session = $session; name = $name; handle = $h; startup = $startup; sddl = $sddl; createErr = $e; closeErr = $null })
+  $startup
+}
 
 if ($apiOk -and $null -ne $shellPath) {
   try {
+    $acctSid = $wi.User.Value
+    $script:acctSidForDesk = $acctSid
+    $script:winstaName = [TauRestrict]::ProcessWinstaName()
+    $we = 0
+    $script:winstaH = [TauRestrict]::OpenWinstaForDacl($script:winstaName, [ref]$we)
+    if ($script:winstaH -ne [IntPtr]::Zero) {
+      $script:winstaOrig = [TauRestrict]::GetDacl($script:winstaH, [ref]$we)
+      if ($script:winstaOrig) { $script:winstaOrigSddl = Get-SddlOf $script:winstaOrig }
+    }
+    Add-Check 'fallback.winsta.opened' 'the process window station is opened for READ_CONTROL|WRITE_DAC and its original DACL is snapshotted for restore' "winsta=$($script:winstaName) handle=$($script:winstaH -ne [IntPtr]::Zero) err=$we" (($script:winstaH -ne [IntPtr]::Zero) -and ($null -ne $script:winstaOrig)) @{ winsta = $script:winstaName; originalSddl = $script:winstaOrigSddl }
+
     # ================= (A) WRITE ISOLATION purely by the random cap SID =================
     # Two concurrent sessions run as the SAME account, differing ONLY by the write-restricting cap SID.
     # wiRoot1 grants the account + cap1 write; wiRoot2 grants the account + cap2 write; NO Everyone.
@@ -337,8 +448,8 @@ if ($apiOk -and $null -ne $shellPath) {
     $tmp1 = New-SessionTemp 'sess-temp-1'
     $tmp2 = New-SessionTemp 'sess-temp-2'
 
-    # Provision the non-admin sandbox accounts up-front (elevated mode): used for the cross-session
-    # READ-denial impersonation checks and as the S2 PTY workload identity.
+    # Provision the non-admin sandbox accounts up-front (elevated mode): used for the in-child
+    # cross-session READ-denial sessions and as the S2 PTY workload identity.
     if ($mode -eq 'elevated') {
       . (Join-Path $PSScriptRoot 'provision-sandbox-users.ps1')
       $sandboxA = New-TauSandboxUser -Name 'tausbxa'
@@ -347,103 +458,131 @@ if ($apiOk -and $null -ne $shellPath) {
       Add-Check 'fallback.sandbox.provisioned' 'two non-admin sandbox users provisioned with elevation (admin phase); workload runs as them, never elevated' "A=$($sandboxA.Name)/$($sandboxA.Sid) B=$($sandboxB.Name)/$($sandboxB.Sid)" (($sandboxA.IsAdministrator -eq $false) -and ($sandboxB.IsAdministrator -eq $false)) @{ a = $sandboxA.Sid; b = $sandboxB.Sid }
     }
     # WRITE ISOLATION: both concurrent children run under the orchestrator OWN token restricted-of-
-    # caller (CreateProcessAsUser needs no privilege and there is no cross-user window-station launch
-    # to be refused). The LUA_TOKEN filter makes the child NON-elevated. The two children differ ONLY
-    # by their random S-1-5-21 write-restricting cap SID, so any write isolation observed is
-    # attributable to the cap SID alone. Each root grants the SAME account (normal check passes on
-    # both roots) plus only its OWN cap SID write (the restricting-check discriminator); NO
-    # Everyone/Users write, so the WRITE_RESTRICTED restricting-SID check is what denies the cross write.
-    $acctSid = $wi.User.Value
+    # caller (LUA-filtered, NON-elevated). They differ ONLY by their random S-1-5-21 write-restricting
+    # cap SID, so write isolation is attributable to the cap SID alone. Each root grants the SAME
+    # account plus only its OWN cap SID write; NO Everyone/Users write.
     Set-ExplicitAcl $wi1 @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $acctSid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap1; Rights = 'Modify'; Type = 'Allow' })
     Set-ExplicitAcl $wi2 @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $acctSid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap2; Rights = 'Modify'; Type = 'Allow' })
 
+    # Per-session grants: window-station ACE (host account + session cap SID) and a private desktop.
+    $gA = Grant-WinstaSession 'write-A' @($acctSid, $cap1)
+    $gB = Grant-WinstaSession 'write-B' @($cap2)
+    $deskA = New-SessionDesktop 'write-A' @($cap1)
+    $deskB = New-SessionDesktop 'write-B' @($cap2)
+    Add-Check 'fallback.desktop.write' 'per-session private desktops created and window-station ACEs granted for the write sessions (desktop.rs:290-326)' "deskA=$deskA deskB=$deskB winstaA=$gA winstaB=$gB" (($null -ne $deskA) -and ($null -ne $deskB) -and ($gA -like 'ok rc=0') -and ($gB -like 'ok rc=0')) $null
+
     $payloadA = "`$env:TEMP='$tmp1'; `$env:TMP='$tmp1'; & '$canaryChild' -SessionId A -OwnRoot '$wi1' -OtherRoot '$wi2'"
     $payloadB = "`$env:TEMP='$tmp2'; `$env:TMP='$tmp2'; & '$canaryChild' -SessionId B -OwnRoot '$wi2' -OtherRoot '$wi1'"
-    $cmdA = Build-ChildCmd $shellPath $payloadA
-    $cmdB = Build-ChildCmd $shellPath $payloadB
 
-    $errA = 0; $errB = 0
-    $hA = [TauRestrict]::LaunchSelf($shellPath, $cmdA, $cap1, $logonSid, $env:SystemRoot, [ref]$errA)
-    $hB = [TauRestrict]::LaunchSelf($shellPath, $cmdB, $cap2, $logonSid, $env:SystemRoot, [ref]$errB)
-    $launched = ($hA -ne [IntPtr]::Zero) -and ($hB -ne [IntPtr]::Zero)
+    function Start-WritePair([string]$shell) {
+      $script:errA = 0; $script:errB = 0
+      $script:hA = [TauRestrict]::LaunchSelf($shell, (Build-ChildCmd $shell $payloadA), $cap1, $logonSid, $env:SystemRoot, $deskA, [ref]$script:errA)
+      $script:hB = [TauRestrict]::LaunchSelf($shell, (Build-ChildCmd $shell $payloadB), $cap2, $logonSid, $env:SystemRoot, $deskB, [ref]$script:errB)
+      $script:launched = ($script:hA -ne [IntPtr]::Zero) -and ($script:hB -ne [IntPtr]::Zero)
+      $script:exitA = $null; $script:exitB = $null
+      if ($script:hA -ne [IntPtr]::Zero) { $script:exitA = [TauRestrict]::Wait($script:hA, 90000); [TauRestrict]::Close($script:hA) }
+      if ($script:hB -ne [IntPtr]::Zero) { $script:exitB = [TauRestrict]::Wait($script:hB, 90000); [TauRestrict]::Close($script:hB) }
+    }
+    Start-WritePair $shellPath
     Add-Check 'fallback.concurrency' 'two sessions launched CONCURRENTLY under write-restricted tokens before either is awaited' "launchedA=$($hA -ne [IntPtr]::Zero)(err=$errA) launchedB=$($hB -ne [IntPtr]::Zero)(err=$errB)" $launched @{ errA = $errA; errB = $errB }
-    $exitA = $null; $exitB = $null
-    if ($hA -ne [IntPtr]::Zero) { $exitA = [TauRestrict]::Wait($hA, 60000); [TauRestrict]::Close($hA) }
-    if ($hB -ne [IntPtr]::Zero) { $exitB = [TauRestrict]::Wait($hB, 60000); [TauRestrict]::Close($hB) }
     $childShell = $shellPath
-    # pwsh 7 (.NET) children under the WRITE_RESTRICTED token were observed to die in loader init with
-    # 0xC0000142 on both hosted runners. Retry ONCE under the D14 fallback branch, Windows PowerShell
-    # 5.1 (fixed path), and record which shell actually ran; the receipt never hides the first failure.
+    # If the first shell still dies in loader init (0xC0000142), retry ONCE under the D14 fallback
+    # branch, Windows PowerShell 5.1 (fixed path); the receipt never hides the first attempt.
     $firstExit = "exitA=$exitA exitB=$exitB shell=$shellKind"
     if ((($exitA -eq -1073741502) -or ($exitB -eq -1073741502)) -and ($shellPath -ne $ps51) -and (Test-Path -LiteralPath $ps51)) {
       $childShell = $ps51
-      $cmdA = Build-ChildCmd $ps51 $payloadA
-      $cmdB = Build-ChildCmd $ps51 $payloadB
-      $errA = 0; $errB = 0
-      $hA = [TauRestrict]::LaunchSelf($ps51, $cmdA, $cap1, $logonSid, $env:SystemRoot, [ref]$errA)
-      $hB = [TauRestrict]::LaunchSelf($ps51, $cmdB, $cap2, $logonSid, $env:SystemRoot, [ref]$errB)
-      $launched = ($hA -ne [IntPtr]::Zero) -and ($hB -ne [IntPtr]::Zero)
-      $exitA = $null; $exitB = $null
-      if ($hA -ne [IntPtr]::Zero) { $exitA = [TauRestrict]::Wait($hA, 60000); [TauRestrict]::Close($hA) }
-      if ($hB -ne [IntPtr]::Zero) { $exitB = [TauRestrict]::Wait($hB, 60000); [TauRestrict]::Close($hB) }
+      Start-WritePair $ps51
     }
-    Add-Check 'fallback.children.exit' 'write-isolation children ran to completion (exit codes recorded; -1073741502 = 0xC0000142 DLL init failure)' "exitA=$exitA exitB=$exitB childShell=$childShell (first attempt: $firstExit)" (($exitA -eq 0) -and ($exitB -eq 0)) @{ exitA = $exitA; exitB = $exitB; childShell = $childShell; firstAttempt = $firstExit }
+    $ranA = ($exitA -eq 0); $ranB = ($exitB -eq 0)
+    Add-Check 'fallback.children.exit' 'write-isolation children ran to completion (exit codes recorded; -1073741502 = 0xC0000142 DLL init failure)' "exitA=$exitA exitB=$exitB childShell=$childShell (first attempt: $firstExit)" ($ranA -and $ranB) @{ exitA = $exitA; exitB = $exitB; childShell = $childShell; firstAttempt = $firstExit }
 
-    if ($launched) {
-      # External observation: which canary files actually materialized decides each claim.
-      $ownA = Test-Path -LiteralPath (Join-Path $wi1 'canary-from-A.txt')
-      $crossA = Test-Path -LiteralPath (Join-Path $wi2 'canary-from-A.txt')
-      $ownB = Test-Path -LiteralPath (Join-Path $wi2 'canary-from-B.txt')
-      $crossB = Test-Path -LiteralPath (Join-Path $wi1 'canary-from-B.txt')
-      Add-Check 'fallback.write.ownAllowed.A' 'session A can write its own root' "wi1/canary-from-A.txt exists=$ownA" $ownA $null
-      Add-Check 'fallback.write.ownAllowed.B' 'session B can write its own root' "wi2/canary-from-B.txt exists=$ownB" $ownB $null
-      Add-Check 'fallback.write.crossDenied.AtoB' 'session A CANNOT write into session B root (external canary absent)' "wi2/canary-from-A.txt exists=$crossA (want False)" (-not $crossA) $null
-      Add-Check 'fallback.write.crossDenied.BtoA' 'session B CANNOT write into session A root (external canary absent)' "wi1/canary-from-B.txt exists=$crossB (want False)" (-not $crossB) $null
-    } else {
-      Add-Check 'fallback.write.isolation' 'write-restricted children launched' "launch failed errA=$errA errB=$errB" $false $null
-    }
+    # External observation decides each claim. A denial counts ONLY when the same child ran to
+    # completion AND passed its own positive control (own-root write) in this run; otherwise it is
+    # recorded as NOT EXERCISED and fails, never a vacuous pass.
+    $ownA = Test-Path -LiteralPath (Join-Path $wi1 'canary-from-A.txt')
+    $crossA = Test-Path -LiteralPath (Join-Path $wi2 'canary-from-A.txt')
+    $ownB = Test-Path -LiteralPath (Join-Path $wi2 'canary-from-B.txt')
+    $crossB = Test-Path -LiteralPath (Join-Path $wi1 'canary-from-B.txt')
+    $repA = $null; $repB = $null
+    try { $repA = Get-Content -LiteralPath (Join-Path $wi1 'child-report-A.json') -Raw | ConvertFrom-Json } catch {}
+    try { $repB = Get-Content -LiteralPath (Join-Path $wi2 'child-report-B.json') -Raw | ConvertFrom-Json } catch {}
+    $exA = $ranA -and $ownA; $exB = $ranB -and $ownB
+    Add-Check 'fallback.write.ownAllowed.A' 'session A child (running in its restricted token) writes its own root (positive control)' "ran=$ranA wi1/canary-from-A.txt exists=$ownA" $exA @{ childReport = $repA }
+    Add-Check 'fallback.write.ownAllowed.B' 'session B child (running in its restricted token) writes its own root (positive control)' "ran=$ranB wi2/canary-from-B.txt exists=$ownB" $exB @{ childReport = $repB }
+    Add-Check 'fallback.write.crossDenied.AtoB' 'the running session A child attempts to write session B root and is refused (external canary absent; exercised only with A positive control)' $(if ($exA) { "exercised; wi2/canary-from-A.txt exists=$crossA; child says $($repA.crossWrite)" } else { 'NOT EXERCISED (child did not run or failed its positive control)' }) ($exA -and -not $crossA) @{ exercised = $exA }
+    Add-Check 'fallback.write.crossDenied.BtoA' 'the running session B child attempts to write session A root and is refused (external canary absent; exercised only with B positive control)' $(if ($exB) { "exercised; wi1/canary-from-B.txt exists=$crossB; child says $($repB.crossWrite)" } else { 'NOT EXERCISED (child did not run or failed its positive control)' }) ($exB -and -not $crossB) @{ exercised = $exB }
+    $writeProven = $exA -and $exB -and -not $crossA -and -not $crossB
 
-    # ================= (B) CROSS-SESSION READ DENIAL (elevated: distinct sandbox accounts) =============
+    # ================= (B) CROSS-SESSION READ DENIAL, in-child (elevated: distinct sandbox accounts) ===
     if ($mode -eq 'elevated') {
       $rdA = New-Dir (Join-Path $drop 'rd-root-a')
       $rdB = New-Dir (Join-Path $drop 'rd-root-b')
       $never = New-Dir (Join-Path $drop 'never-grantable')
       # acl.rs model: per-session read grant on own root; DENY-READ ACEs (add_deny_read_ace) on the
-      # other session root and on the never-grantable set. Lock the DACLs FIRST so the secret files
-      # inherit the restrictive ACL at creation (the admin orchestrator still writes them via its Full
-      # grant); the sandbox principals never get an inherited broad grant.
+      # other session root and on the never-grantable set. DACLs are locked BEFORE the secrets exist.
       Set-ExplicitAcl $rdA @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'ReadAndExecute'; Type = 'Allow' }, @{ Sid = $sandboxB.Sid; Rights = 'Read'; Type = 'Deny' })
       Set-ExplicitAcl $rdB @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxB.Sid; Rights = 'ReadAndExecute'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'Read'; Type = 'Deny' })
       Set-ExplicitAcl $never @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'Read'; Type = 'Deny' }, @{ Sid = $sandboxB.Sid; Rights = 'Read'; Type = 'Deny' })
-      # External synthetic canaries, authored by the orchestrator (outside any sandbox), after lockdown.
       $secretA = 'SECRET-A-' + [System.Guid]::NewGuid().ToString('N')
       $secretB = 'SECRET-B-' + [System.Guid]::NewGuid().ToString('N')
       $secretN = 'SECRET-N-' + [System.Guid]::NewGuid().ToString('N')
-      Set-Content -LiteralPath (Join-Path $rdA 'secret.txt') -Value $secretA -NoNewline
-      Set-Content -LiteralPath (Join-Path $rdB 'secret.txt') -Value $secretB -NoNewline
-      Set-Content -LiteralPath (Join-Path $never 'secret.txt') -Value $secretN -NoNewline
-
       $fA = Join-Path $rdA 'secret.txt'; $fB = Join-Path $rdB 'secret.txt'; $fN = Join-Path $never 'secret.txt'
-      $aOwn = [TauRestrict]::TryReadAs($sandboxA.Name, $sandboxA.Secure, $fA)
-      $aCross = [TauRestrict]::TryReadAs($sandboxA.Name, $sandboxA.Secure, $fB)
-      $bOwn = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fB)
-      $bCross = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fA)
-      $aNever = [TauRestrict]::TryReadAs($sandboxA.Name, $sandboxA.Secure, $fN)
-      $bNever = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fN)
-      Add-Check 'fallback.read.ownAllowed.A' 'session A can read its own private root (impersonated open == 0)' "status=$aOwn" ($aOwn -eq 0) $null
-      Add-Check 'fallback.read.ownAllowed.B' 'session B can read its own private root (impersonated open == 0)' "status=$bOwn" ($bOwn -eq 0) $null
-      Add-Check 'fallback.read.crossDenied.AtoB' 'session A read of session B root is DENIED (ACCESS_DENIED==5)' "status=$aCross (want 5)" ($aCross -eq 5) $null
-      Add-Check 'fallback.read.crossDenied.BtoA' 'session B read of session A root is DENIED (ACCESS_DENIED==5)' "status=$bCross (want 5)" ($bCross -eq 5) $null
-      Add-Check 'fallback.read.neverGrantable' 'the never-grantable set is DENIED to both sessions (deny-read ACE; acl.rs:1014)' "A=$aNever B=$bNever (want 5/5)" (($aNever -eq 5) -and ($bNever -eq 5)) $null
+      Set-Content -LiteralPath $fA -Value $secretA -NoNewline
+      Set-Content -LiteralPath $fB -Value $secretB -NoNewline
+      Set-Content -LiteralPath $fN -Value $secretN -NoNewline
+
+      # Per-session out dirs: writable only by that session sandbox user AND its cap SID (both halves of
+      # the WRITE_RESTRICTED check), so each child can record what it read and nothing else can.
+      $outA = New-Dir (Join-Path $drop 'rd-out-a')
+      $outB = New-Dir (Join-Path $drop 'rd-out-b')
+      Set-ExplicitAcl $outA @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap1; Rights = 'Modify'; Type = 'Allow' })
+      Set-ExplicitAcl $outB @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxB.Sid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap2; Rights = 'Modify'; Type = 'Allow' })
+
+      $gRA = Grant-WinstaSession 'read-A' @($sandboxA.Sid, $cap1)
+      $gRB = Grant-WinstaSession 'read-B' @($sandboxB.Sid, $cap2)
+      $deskRA = New-SessionDesktop 'read-A' @($sandboxA.Sid, $cap1)
+      $deskRB = New-SessionDesktop 'read-B' @($sandboxB.Sid, $cap2)
+      Add-Check 'fallback.desktop.read' 'per-session private desktops + window-station ACEs for the read sessions (sandbox user SID + cap SID participants)' "deskRA=$deskRA deskRB=$deskRB winstaA=$gRA winstaB=$gRB" (($null -ne $deskRA) -and ($null -ne $deskRB) -and ($gRA -like 'ok rc=0') -and ($gRB -like 'ok rc=0')) $null
+
+      $payloadRA = "`$env:TEMP='$outA'; `$env:TMP='$outA'; & '$canaryChild' -SessionId A -OwnSecret '$fA' -OtherSecret '$fB' -NeverSecret '$fN' -OutDir '$outA'"
+      $payloadRB = "`$env:TEMP='$outB'; `$env:TMP='$outB'; & '$canaryChild' -SessionId B -OwnSecret '$fB' -OtherSecret '$fA' -NeverSecret '$fN' -OutDir '$outB'"
+      $eRA = 0; $eRB = 0
+      $hRA = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, (Build-ChildCmd $childShell $payloadRA), $cap1, $logonSid, $env:SystemRoot, $deskRA, [ref]$eRA)
+      $hRB = [TauRestrict]::LaunchAsUser($sandboxB.Name, $sandboxB.Secure, $childShell, (Build-ChildCmd $childShell $payloadRB), $cap2, $logonSid, $env:SystemRoot, $deskRB, [ref]$eRB)
+      $xRA = $null; $xRB = $null
+      if ($hRA -ne [IntPtr]::Zero) { $xRA = [TauRestrict]::Wait($hRA, 120000); [TauRestrict]::Close($hRA) }
+      if ($hRB -ne [IntPtr]::Zero) { $xRB = [TauRestrict]::Wait($hRB, 120000); [TauRestrict]::Close($hRB) }
+      $rRA = ($xRA -eq 0); $rRB = ($xRB -eq 0)
+      Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) exitB=$xRB shell=$childShell" ($rRA -and $rRB) $null
+
+      $readOf = { param($f) if (Test-Path -LiteralPath $f) { [string](Get-Content -LiteralPath $f -Raw) } else { '' } }
+      $ownRA = & $readOf (Join-Path $outA 'own-read-A.txt'); $ownRB = & $readOf (Join-Path $outB 'own-read-B.txt')
+      $exfA = & $readOf (Join-Path $outA 'exfil-A.txt'); $exfB = & $readOf (Join-Path $outB 'exfil-B.txt')
+      $nevA = & $readOf (Join-Path $outA 'exfil-never-A.txt'); $nevB = & $readOf (Join-Path $outB 'exfil-never-B.txt')
+      $crA = $null; $crB = $null
+      try { $crA = Get-Content -LiteralPath (Join-Path $outA 'child-report-A.json') -Raw | ConvertFrom-Json } catch {}
+      try { $crB = Get-Content -LiteralPath (Join-Path $outB 'child-report-B.json') -Raw | ConvertFrom-Json } catch {}
+      $pcA = $rRA -and ($ownRA -eq $secretA); $pcB = $rRB -and ($ownRB -eq $secretB)
+      Add-Check 'fallback.read.ownAllowed.A' 'session A child (running as tausbxa in its restricted token) reads its own root secret (positive control; external copy matches)' "ran=$rRA ownCopyMatches=$($ownRA -eq $secretA)" $pcA @{ childReport = $crA }
+      Add-Check 'fallback.read.ownAllowed.B' 'session B child (running as tausbxb in its restricted token) reads its own root secret (positive control; external copy matches)' "ran=$rRB ownCopyMatches=$($ownRB -eq $secretB)" $pcB @{ childReport = $crB }
+      $leakAB = $exfA.Contains($secretB); $leakBA = $exfB.Contains($secretA)
+      Add-Check 'fallback.read.crossDenied.AtoB' 'the running session A child attempts to read session B secret and is refused (B secret absent from A exfil; exercised only with A positive control)' $(if ($pcA) { "exercised; leak=$leakAB; child says $($crA.crossRead)" } else { 'NOT EXERCISED (child did not run or failed its positive control)' }) ($pcA -and -not $leakAB) @{ exercised = $pcA }
+      Add-Check 'fallback.read.crossDenied.BtoA' 'the running session B child attempts to read session A secret and is refused (A secret absent from B exfil; exercised only with B positive control)' $(if ($pcB) { "exercised; leak=$leakBA; child says $($crB.crossRead)" } else { 'NOT EXERCISED (child did not run or failed its positive control)' }) ($pcB -and -not $leakBA) @{ exercised = $pcB }
+      $leakN = $nevA.Contains($secretN) -or $nevB.Contains($secretN)
+      Add-Check 'fallback.read.neverGrantable' 'both running children attempt the never-grantable set and are refused (deny-read ACE; acl.rs:1014; exercised only with both positive controls)' $(if ($pcA -and $pcB) { "exercised; leak=$leakN; A says $($crA.neverRead) B says $($crB.neverRead)" } else { 'NOT EXERCISED' }) ($pcA -and $pcB -and -not $leakN) $null
+      $readProven = $pcA -and $pcB -and -not $leakAB -and -not $leakBA -and -not $leakN
+
+      # Orchestrator impersonation against the same ACEs: INFORMATIONAL ONLY (not a running child).
+      $iAO = [TauRestrict]::TryReadAs($sandboxA.Name, $sandboxA.Secure, $fA); $iAX = [TauRestrict]::TryReadAs($sandboxA.Name, $sandboxA.Secure, $fB)
+      $iBO = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fB); $iBX = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fA)
+      $iAN = [TauRestrict]::TryReadAs($sandboxA.Name, $sandboxA.Secure, $fN); $iBN = [TauRestrict]::TryReadAs($sandboxB.Name, $sandboxB.Secure, $fN)
+      Add-Info 'fallback.read.impersonation' 'orchestrator impersonation of each sandbox user opening the secrets (0=allowed, 5=denied); informational, not gated, not a proof' "AOwn=$iAO ACross=$iAX BOwn=$iBO BCross=$iBX ANever=$iAN BNever=$iBN" $null
     } else {
-      Add-Check 'fallback.read.requiresElevated' 'cross-session READ denial requires the elevated per-account sandbox backend (distinct sandbox logons + deny-read ACEs); not provable from a single non-admin account because WRITE_RESTRICTED gates writes only, so reads use the shared account identity' "mode=$mode (non-elevated)" $false @{ note = 'Run the elevated admin-phase step to obtain the read-denial receipt.' }
+      Add-Check 'fallback.read.requiresElevated' 'cross-session READ denial requires the elevated per-account sandbox backend (distinct sandbox logons + deny-read ACEs); WRITE_RESTRICTED gates writes only' "mode=$mode (non-elevated)" $false $null
     }
 
     # ================= (C) S2 interactive PTY IN-CONTAINER (as the non-admin sandbox user) =============
     $tmpS2 = New-SessionTemp 'sess-temp-s2'
-    # The S2 child runs as the (non-admin) sandbox user, which may not be able to write the shared
-    # drop; have it write its receipt into the Everyone-writable session temp, then the orchestrator
-    # copies it into the drop for the summarizer + artifact.
     $s2Out = Join-Path $tmpS2 's2-pty.receipt.json'
     $s2Final = Join-Path $drop 's2-pty.receipt.json'
     $payloadS2 = "`$env:TEMP='$tmpS2'; `$env:TMP='$tmpS2'; `$env:MXC_S2PTY_OUT='$s2Out'; `$env:GITHUB_SHA='$($env:GITHUB_SHA)'; `$env:GITHUB_RUN_ID='$($env:GITHUB_RUN_ID)'; & '$s2Child'"
@@ -452,24 +591,20 @@ if ($apiOk -and $null -ne $shellPath) {
     $errS2 = 0
     $s2LaunchPath = 'self'
     if ($mode -eq 'elevated') {
-      $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
-      if ($hS2 -eq [IntPtr]::Zero) {
-        # Cross-user window-station launch can be refused in the runner service session; fall back to
-        # the restricted-of-caller (LUA-filtered, non-elevated) token so the S2-in-token receipt is
-        # still collected. s2-pty.ps1 re-proves non-admin regardless of which path launched it.
-        $s2LaunchPath = "asUser-failed(err=$errS2)->self"
-        $hS2 = [TauRestrict]::LaunchSelf($childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
-      } else {
-        $s2LaunchPath = 'asSandboxUser'
-      }
+      $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
+      $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
+      Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
+      $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
+      $s2LaunchPath = if ($hS2 -eq [IntPtr]::Zero) { "asUser-failed(err=$errS2)" } else { 'asSandboxUser' }
     } else {
-      $hS2 = [TauRestrict]::LaunchSelf($childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
+      $deskS2 = New-SessionDesktop 's2' @($cap1)
+      $hS2 = [TauRestrict]::LaunchSelf($childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
     }
     if ($hS2 -ne [IntPtr]::Zero) {
       $exitS2 = [TauRestrict]::Wait($hS2, 180000); [TauRestrict]::Close($hS2)
-      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1073741502 = 0xC0000142 DLL init failure)' "exit=$exitS2 launch=$s2LaunchPath" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath }
+      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1 = wait timeout; -1073741502 = 0xC0000142)' "exit=$exitS2 launch=$s2LaunchPath shell=$childShell" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath }
     } else {
-      Add-Check 'fallback.s2Pty.launch' 'S2 PTY child launched under the write-restricted sandbox token' "launch failed err=$errS2" $false $null
+      Add-Check 'fallback.s2Pty.launch' 'S2 PTY child launched under the write-restricted sandbox token' "launch failed err=$errS2 path=$s2LaunchPath" $false $null
     }
     if (Test-Path -LiteralPath $s2Out) { try { Copy-Item -LiteralPath $s2Out -Destination $s2Final -Force } catch {} }
     if (Test-Path -LiteralPath $s2Final) {
@@ -488,6 +623,22 @@ if ($apiOk -and $null -ne $shellPath) {
   } catch {
     Add-Check 'fallback.orchestration' 'fallback orchestration completed without an unhandled error' $_.Exception.Message $false $null
   } finally {
+    # ---- Teardown: close every per-session desktop and restore the window-station DACL. ----
+    foreach ($d in $desktops) { try { $d.closeErr = [TauRestrict]::ClosePrivateDesktop($d.handle) } catch { $d.closeErr = "$($_.Exception.Message)" } }
+    $restoreRc = 'not-attempted'; $afterSddl = $null; $residual = @()
+    if (($winstaH -ne [IntPtr]::Zero) -and $winstaOrig) {
+      try {
+        $restoreRc = [TauRestrict]::SetDacl($winstaH, $winstaOrig)
+        $ae = 0; $after = [TauRestrict]::GetDacl($winstaH, [ref]$ae)
+        if ($after) { $afterSddl = Get-SddlOf $after }
+        foreach ($g in $winstaGranted) { foreach ($sid in $g.sids) { if ($afterSddl -and $afterSddl.Contains($sid) -and -not $winstaOrigSddl.Contains($sid)) { $residual += $sid } } }
+      } catch { $restoreRc = "$($_.Exception.Message)" }
+    }
+    if ($winstaGranted.Count -gt 0) {
+      $closedAll = -not ($desktops | Where-Object { $_.closeErr -ne 0 })
+      Add-Check 'fallback.grants.revoked' 'teardown revokes every per-session grant: window-station DACL restored to its snapshot (no session SID remains) and every private desktop closed' "restoreRc=$restoreRc sddlRestored=$($afterSddl -eq $winstaOrigSddl) residual=$($residual -join ',') desktopsClosed=$closedAll" (($restoreRc -eq 0) -and ($afterSddl -eq $winstaOrigSddl) -and ($residual.Count -eq 0) -and $closedAll) @{ granted = @($winstaGranted); desktops = @($desktops | ForEach-Object { [ordered]@{ session = $_.session; name = $_.name; createErr = $_.createErr; closeErr = $_.closeErr; sddl = $_.sddl } }); originalSddl = $winstaOrigSddl; afterSddl = $afterSddl }
+    }
+    [TauRestrict]::CloseWinsta($winstaH)
     foreach ($u in $createdUsers) { try { Remove-LocalUser -Name $u -ErrorAction SilentlyContinue } catch {} }
   }
 }
@@ -515,7 +666,7 @@ try { if ($shellPath) { $shellIdentity.sha256 = (Get-FileHash -LiteralPath $shel
 $orchSid = $null
 try { $orchSid = $wi.User.Value } catch {}
 
-$required = $checks | Where-Object { $_.id -ne 'fallback.mode' -and $_.id -ne 'fallback.concurrency' }
+$required = $checks | Where-Object { $_.id -ne 'fallback.mode' -and $_.id -ne 'fallback.concurrency' -and $_.verdict -ne 'info' }
 $allPass = ($required.Count -gt 0) -and -not ($required | Where-Object { $_.verdict -ne 'pass' })
 $verdict = if ($allPass) { 'pass' } else { 'fail' }
 
@@ -535,7 +686,7 @@ $receipt = [ordered]@{
     mxc = [ordered]@{ isolationSessionAvailable = $isoAvail }
     source = [ordered]@{ sha = $env:GITHUB_SHA; ref = $env:GITHUB_REF; run = $env:GITHUB_RUN_ID }
   }
-  conclusion = "mode=$mode arch=$arch; write isolation by random S-1-5-21 cap SID + cross-session read denial (elevated) + S2 in-container PTY ($s2Verdict). isolationSession.available=$isoAvail (informational, not gated)."
+  conclusion = "mode=$mode arch=$arch writeIsolationProven=$writeProven readIsolationProven=$readProven s2Pty=$s2Verdict verdict=$verdict; denials count only when a running child in its restricted token was refused AND passed its own-root positive control; impersonation results are informational. isolationSession.available=$isoAvail (informational, not gated)."
   checks = $checks
   verdict = $verdict
 }

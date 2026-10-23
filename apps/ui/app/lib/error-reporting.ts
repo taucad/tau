@@ -15,6 +15,16 @@ const loadSentry = async (): Promise<typeof SentryLibrary | undefined> => {
 let started: Promise<typeof SentryLibrary | undefined> | undefined;
 let isListening = false;
 
+/** Errors reported while the SDK is unavailable (loading, or its load failed) kept for the next start, at most. */
+export const unreportedErrorLimit = 50;
+
+/** Errors waiting for the SDK, in the order reported; each is captured once, then dropped from here. */
+const unreported: unknown[] = [];
+/** Errors already handed to the SDK, or waiting to be: a second report of one is a no-op. */
+const reported = new WeakSet();
+/** Errors reported beyond the limit while the SDK was unavailable; logged once it starts. */
+let droppedWhileUnavailable = 0;
+
 /**
  * Load and start the SDK once. A failed load (a chunk a deploy stopped serving, a network error) is
  * forgotten, so the next call tries again instead of leaving reporting off for the page.
@@ -35,6 +45,30 @@ const start = async (): Promise<{ readonly sentry?: typeof SentryLibrary; readon
 };
 
 /**
+ * Hand every waiting error to the SDK once it has started; keep them while it has not. Without a DSN
+ * there is no SDK to wait for, so they are let go.
+ */
+const drain = async (): Promise<{ readonly sentry?: typeof SentryLibrary; readonly failure?: unknown }> => {
+  const { sentry, failure } = await start();
+  if (failure !== undefined) {
+    return { failure };
+  }
+  const waiting = unreported.splice(0);
+  if (sentry !== undefined) {
+    for (const error of waiting) {
+      sentry.captureUiError(error);
+    }
+    if (droppedWhileUnavailable > 0) {
+      console.warn(
+        `[error-reporting] ${String(droppedWhileUnavailable)} errors were dropped while the SDK was unavailable`,
+      );
+      droppedWhileUnavailable = 0;
+    }
+  }
+  return { sentry };
+};
+
+/**
  * Start reporting uncaught errors and unhandled rejections. Never rejects. A failed SDK load goes to
  * `onLoadFailure`, once, as its rejection used to reach the global handler (the entry hands it to
  * the stale-build recovery, since a deploy may have replaced the SDK's own chunk); a later report
@@ -43,7 +77,7 @@ const start = async (): Promise<{ readonly sentry?: typeof SentryLibrary; readon
  * @param onLoadFailure - Called with the error when the SDK could not be loaded.
  */
 export const startErrorReporting = async (onLoadFailure?: (failure: unknown) => void): Promise<void> => {
-  const { failure } = await start();
+  const { failure } = await drain();
   if (failure !== undefined) {
     onLoadFailure?.(failure);
   }
@@ -58,13 +92,33 @@ export const startErrorReporting = async (onLoadFailure?: (failure: unknown) => 
 export const isErrorTrackerListening = (): boolean => isListening;
 
 /**
- * Report an error a React or route boundary caught, which never reaches the global handlers. One
- * reported before error reporting has started waits for it, so a failure at boot is not lost; one
- * reported after a failed start tries to start again. Never rejects.
+ * Report an error a React or route boundary caught, which never reaches the global handlers, once.
+ * While the SDK is unavailable (still loading, or its load failed) the error waits, up to
+ * {@link unreportedErrorLimit}, and is captured on the next successful start, which this report
+ * also tries again. A failure at boot is therefore not lost. Never rejects.
  *
  * @param error - The caught value.
  */
 export const reportUiError = async (error: unknown): Promise<void> => {
-  const { sentry } = await start();
-  sentry?.captureUiError(error);
+  const isKey = typeof error === 'object' && error !== null;
+  if (isKey && reported.has(error)) {
+    return;
+  }
+  if (isKey) {
+    reported.add(error);
+  }
+  const isQueued = unreported.length < unreportedErrorLimit;
+  if (isQueued) {
+    unreported.push(error);
+  }
+  const { sentry, failure } = await drain();
+  if (isQueued) {
+    return;
+  }
+  // The queue was full: captured now if the SDK is up, else counted as dropped.
+  if (sentry !== undefined) {
+    sentry.captureUiError(error);
+  } else if (failure !== undefined) {
+    droppedWhileUnavailable += 1;
+  }
 };

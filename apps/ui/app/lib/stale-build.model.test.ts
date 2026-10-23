@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as BuildIdentity from '#lib/build-identity.js';
 import type * as BuildSkew from '#filesystem/build-skew.js';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
+import type * as ErrorReporting from '#lib/error-reporting.js';
 
 const buildX = 1_792_726_000_000;
 const buildY = buildX + 4_113_029;
@@ -26,8 +27,12 @@ type Step =
   | { readonly kind: 'again'; readonly tab: 0 | 1; readonly channel: Channel }
   | { readonly kind: 'tick'; readonly ms: number }
   | { readonly kind: 'tracker'; readonly tab: 0 | 1 }
+  | { readonly kind: 'trackerFails'; readonly tab: 0 | 1 }
   | { readonly kind: 'query'; readonly tab: 0 | 1 }
   | { readonly kind: 'reload'; readonly tab: 0 | 1 };
+
+/** The model's shared state: its tabs, and whether the next SDK load fails. */
+const model = { tabs: [] as Tab[], failNextTrackerLoad: false };
 
 /** The tabs' shared BroadcastChannel, delivering only when the model says so. */
 const bus = {
@@ -79,8 +84,7 @@ type Tab = {
   /** Answers naming this tab's own build since the last one naming another. */
   consecutiveOwn: number;
   fetches: number;
-  trackerReady: boolean;
-  readonly trackerQueue: unknown[];
+  errorReporting?: typeof ErrorReporting;
   /** Failures the model error tracker holds; Sentry ignores a second capture of the same error. */
   readonly tracked: Set<unknown>;
   /** The `stale_build` tag each tracked failure's event was sent with (`beforeSend` holds it). */
@@ -128,17 +132,28 @@ const loadTab = async (tab: Tab): Promise<void> => {
       removeItem: (key: string) => storage.delete(key),
     }),
   }));
-  vi.doMock('#lib/error-reporting.js', () => ({
-    startErrorReporting: async () => undefined,
-    isErrorTrackerListening: () => tab.trackerReady,
-    reportUiError: async (error: unknown) => {
-      if (tab.trackerReady) {
-        track(tab, error);
-      } else {
-        tab.trackerQueue.push(error);
-      }
-    },
-  }));
+  // The real error reporting, over a model SDK whose load can fail.
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- The environment's own names.
+  vi.doMock('#environment.config.js', () => ({ ENV: { SENTRY_DSN: 'https://model@sentry.invalid/1' } }));
+  /* The SDK is imported lazily, after every tab has loaded, so one model SDK serves both: it hands a
+   * capture to the tab whose failure it is, and whether a tab's handlers are installed is that tab's
+   * own `isErrorTrackerListening`. */
+  vi.doMock('#lib/sentry.lib.js', () => {
+    if (model.failNextTrackerLoad) {
+      model.failNextTrackerLoad = false;
+      throw new TypeError('Importing a module script failed.');
+    }
+    return {
+      initSentry: () => undefined,
+      captureUiError: (error: unknown) => {
+        const owner = model.tabs.find((candidate) => candidate.failures.some((entry) => entry.failure === error));
+        if (owner !== undefined) {
+          track(owner, error);
+        }
+      },
+    };
+  });
+  tab.errorReporting = await import('#lib/error-reporting.js');
   tab.skew = await import('#filesystem/build-skew.js');
   tab.recovery = await import('#lib/stale-build-recovery.js');
   tab.recovery.subscribeGenuineFailures((failure) => {
@@ -152,8 +167,7 @@ const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   answerDelay,
   consecutiveOwn: 0,
   fetches: 0,
-  trackerReady: false,
-  trackerQueue: [],
+
   tracked: new Set(),
   tags: new Map(),
   sawNone: false,
@@ -181,11 +195,8 @@ function track(tab: Tab, failure: unknown): void {
   tab.tags.set(failure, page.classifyStaleBuildFailure(failure));
 }
 
-const startTracker = (tab: Tab): void => {
-  tab.trackerReady = true;
-  for (const error of tab.trackerQueue.splice(0)) {
-    track(tab, error);
-  }
+const startTracker = async (tab: Tab): Promise<void> => {
+  await tab.errorReporting?.startErrorReporting();
 };
 
 const sight = (tab: Tab, failure: unknown, channel: Channel): void => {
@@ -193,7 +204,7 @@ const sight = (tab: Tab, failure: unknown, channel: Channel): void => {
   void tab.recovery?.recoverFromStaleBuild(failure, channel);
   /* Sentry's own global handlers capture what reaches `window`, once installed, and after the
    * recovery's capture-phase listener (`installStaleBuildRecovery`), which has started the decision. */
-  if (channel === 'global' && tab.trackerReady) {
+  if (channel === 'global' && tab.errorReporting?.isErrorTrackerListening() === true) {
     track(tab, failure);
   }
 };
@@ -226,7 +237,14 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
       return 0;
     }
     case 'tracker': {
-      startTracker(tabs[step.tab]);
+      // async-iife: bootstrap -- the entry starts error reporting without waiting.
+      void startTracker(tabs[step.tab]);
+      return 0;
+    }
+    case 'trackerFails': {
+      model.failNextTrackerLoad = true;
+      // async-iife: bootstrap -- the entry starts error reporting without waiting.
+      void startTracker(tabs[step.tab]);
       return 0;
     }
     case 'query': {
@@ -329,6 +347,7 @@ const step: Arbitrary<Step> = oneof(
   { weight: 1, arbitrary: record({ kind: constant<'again'>('again'), tab: tabIndex, channel }) },
   { weight: 2, arbitrary: record({ kind: constant<'tick'>('tick'), ms: constantFrom(1000, 30_000) }) },
   { weight: 1, arbitrary: record({ kind: constant<'tracker'>('tracker'), tab: tabIndex }) },
+  { weight: 1, arbitrary: record({ kind: constant<'trackerFails'>('trackerFails'), tab: tabIndex }) },
   { weight: 1, arbitrary: record({ kind: constant<'query'>('query'), tab: tabIndex }) },
   { weight: 1, arbitrary: record({ kind: constant<'reload'>('reload'), tab: tabIndex }) },
 );
@@ -351,7 +370,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock('#lib/build-identity.js');
   vi.doUnmock('#lib/session-storage.js');
-  vi.doUnmock('#lib/error-reporting.js');
+  vi.doUnmock('#environment.config.js');
+  vi.doUnmock('#lib/sentry.lib.js');
 });
 
 describe('build-skew and stale-build-recovery, together (model)', () => {
@@ -364,6 +384,8 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
           bus.queue.length = 0;
           bus.channels.clear();
           const tabs = [newTab(buildX, answerA, answerDelayA), newTab(buildY, answerB, 0)] as const;
+          model.tabs = [...tabs];
+          model.failNextTrackerLoad = false;
           await loadTab(tabs[0]);
           await loadTab(tabs[1]);
           try {
@@ -376,13 +398,15 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
               checkStep(tabs, next, { fetchesBefore, delivered });
             }
             for (const tab of tabs) {
-              startTracker(tab);
+              // oxlint-disable-next-line no-await-in-loop -- Each tab's reporting starts in turn.
+              await startTracker(tab);
             }
             // Past the longest wait `beforeSend` holds an event for, slow edges included.
             await vi.advanceTimersByTimeAsync(tabs[0].recovery!.staleBuildTagWait + 1000);
             await flush();
             for (const tab of tabs) {
-              startTracker(tab);
+              // oxlint-disable-next-line no-await-in-loop -- Each tab's reporting starts in turn.
+              await startTracker(tab);
             }
             await checkEnd(tabs);
             // I6: no phase stops writes for good without a recheck, unless the server confirmed

@@ -75,4 +75,32 @@ describe('error reporting', () => {
     expect(sentry.captureUiError).toHaveBeenCalledExactlyOnceWith(error);
     expect(onLoadFailure).toHaveBeenCalledOnce();
   });
+
+  it('should keep errors reported while the SDK is unavailable, and capture each once when it starts', async () => {
+    const { reportUiError } = await load();
+    sentry.failNextLoad = true;
+    const first = new Error('first, while the load is pending');
+    const second = new Error('second, while the load is pending');
+
+    // Both wait on the same load, which fails.
+    await Promise.all([reportUiError(first), reportUiError(second)]);
+    expect(sentry.captureUiError).not.toHaveBeenCalled();
+
+    const third = new Error('third, once the SDK loads');
+    await reportUiError(third);
+    await reportUiError(third);
+
+    expect(sentry.captureUiError.mock.calls).toStrictEqual([[first], [second], [third]]);
+  });
+
+  it('should keep at most a bounded number of errors while the SDK is unavailable', async () => {
+    const { reportUiError, unreportedErrorLimit } = await load();
+    sentry.failNextLoad = true;
+    const errors = Array.from({ length: unreportedErrorLimit + 5 }, (_, index) => new Error(`error ${String(index)}`));
+
+    await Promise.all(errors.map(async (error) => reportUiError(error)));
+    await reportUiError(new Error('after the SDK loads'));
+
+    expect(sentry.captureUiError).toHaveBeenCalledTimes(unreportedErrorLimit + 1);
+  });
 });

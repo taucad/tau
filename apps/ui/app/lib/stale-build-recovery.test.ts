@@ -210,27 +210,55 @@ describe('createStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it('should offer the reload when the page is still here after the reload should have happened', async () => {
+  it('should report the reload as pending, then stalled once it has not left the page in time', async () => {
     vi.useFakeTimers();
-    const { recovery, reload, onSuperseded } = setup({ reloadTimeout: 5000 });
+    const { recovery, onSuperseded } = setup({ reloadTimeout: 15_000 });
+    const states: string[] = [];
+    recovery.subscribeReloadState(() => {
+      states.push(recovery.readReloadState());
+    });
 
     await expect(recovery.recover(failure())).resolves.toBe('reloading');
+    expect(recovery.readReloadState()).toBe('pending');
+    await vi.advanceTimersByTimeAsync(14_999);
     expect(onSuperseded).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(1);
 
+    expect(recovery.readReloadState()).toBe('stalled');
+    expect(states).toStrictEqual(['pending', 'stalled']);
     expect(onSuperseded).toHaveBeenCalledWith(deployedBuildId);
-    await expect(recovery.recover(failure())).resolves.toBe('superseded');
-    expect(reload).toHaveBeenCalledOnce();
   });
 
-  it('should keep the guard when a reload has not navigated yet, since it may only be slow', async () => {
+  it('should keep the guard of a stalled reload, since it may only be slow', async () => {
     vi.useFakeTimers();
-    const { recovery, storage } = setup({ reloadTimeout: 5000 });
+    const { recovery, storage } = setup({ reloadTimeout: 15_000 });
 
     await recovery.recover(failure());
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(15_000);
 
     expect(storage.entries.get(staleBuildReloadKey)).toBe(guardFor(ownBuildId, deployedBuildId));
+  });
+
+  it('should try a stalled reload once more on a later failure, since the page never left', async () => {
+    vi.useFakeTimers();
+    const { recovery, reload } = setup({ reloadTimeout: 15_000 });
+
+    await recovery.recover(failure());
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(recovery.recover(failure())).resolves.toBe('reloading');
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(recovery.recover(failure())).resolves.toBe('superseded');
+
+    expect(reload).toHaveBeenCalledTimes(2);
+  });
+
+  it('should not retry a reload another page of this tab started, which may have looped', async () => {
+    const { recovery, reload, storage } = setup();
+    storage.setItem(staleBuildReloadKey, guardFor(ownBuildId, deployedBuildId));
+
+    await expect(recovery.recover(failure())).resolves.toBe('superseded');
+
+    expect(reload).not.toHaveBeenCalled();
   });
 
   describe('classify', () => {

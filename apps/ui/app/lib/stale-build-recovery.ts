@@ -29,6 +29,7 @@
  * many channels (boundary, global handler, Sentry) report it.
  */
 
+import { Topic } from '@taucad/events';
 import { buildId, offerReload, recordLiveBuild } from '#filesystem/build-skew.js';
 import { askLiveBuild } from '#lib/build-identity.js';
 
@@ -47,8 +48,18 @@ export const staleBuildReloadKey = 'tau-stale-build-reload';
 /** Milliseconds after load within which an untouched page may reload on its own. */
 export const autoReloadWindow = 15_000;
 
-/** Milliseconds a reload may take before the page assumes it was refused and offers it instead. */
-export const reloadTimeout = 5000;
+/**
+ * Milliseconds a reload may take before the page calls it stalled and offers it instead. Generous,
+ * because the old document stays until the new one commits and a slow reload looks the same as a
+ * refused one: a short wait would flash the offer during an ordinary navigation.
+ */
+export const reloadTimeout = 15_000;
+
+/** Where this page's own automatic reload stands: none started, waiting to leave, or stalled. */
+export type ReloadState = 'idle' | 'pending' | 'stalled';
+
+/** Automatic reloads one page may attempt for one deploy: the first, and one retry of a stall. */
+const reloadAttempts = 2;
 
 const staleModuleMessages = [
   /Importing a module script failed/u,
@@ -82,7 +93,7 @@ export type StaleBuildRecoveryOptions = {
   readonly onLiveBuild: (serverBuildId: number) => void;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
-  /** Milliseconds a reload may take before it is assumed refused; defaults to {@link reloadTimeout}. */
+  /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
   readonly reloadTimeout?: number;
 };
 
@@ -97,6 +108,10 @@ export type StaleBuildRecovery = {
   readonly classify: (failure: unknown) => Promise<StaleBuildOutcome>;
   /** Clear the reload guard once the page runs the build it reloaded into. */
   readonly confirmArrival: () => void;
+  /** Where this page's own automatic reload stands. */
+  readonly readReloadState: () => ReloadState;
+  /** Subscribe to each change of {@link StaleBuildRecovery.readReloadState}. */
+  readonly subscribeReloadState: (listener: () => void) => () => void;
 };
 
 const guardFor = (from: number, to: number): string => `${String(from)}>${String(to)}`;
@@ -110,8 +125,17 @@ const guardFor = (from: number, to: number): string => `${String(from)}>${String
 export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): StaleBuildRecovery => {
   const decisions = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
   const classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
-  let reloadPending = false;
-  let reloadRefused = false;
+  let reloadState: ReloadState = 'idle';
+  /** The guard this page wrote itself, and how often it reloaded under it without leaving. */
+  let ownGuard: string | undefined;
+  let attempts = 0;
+  const reloadStateTopic = new Topic<void>({ name: 'stale-build-reload' });
+  const setReloadState = (next: ReloadState): void => {
+    if (next !== reloadState) {
+      reloadState = next;
+      reloadStateTopic.emit();
+    }
+  };
 
   const supersede = (serverBuildId: number): StaleBuildOutcome => {
     options.onSuperseded(serverBuildId);
@@ -138,16 +162,20 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     if (serverBuildId === undefined) {
       return 'current';
     }
-    if (reloadPending) {
+    if (reloadState === 'pending') {
       return 'reloading';
     }
-    if (reloadRefused || !options.canReloadSafely() || options.storage === undefined) {
+    if (!options.canReloadSafely() || options.storage === undefined) {
       return supersede(serverBuildId);
     }
     const { storage } = options;
     const guard = guardFor(options.buildId, serverBuildId);
     try {
-      if (storage.getItem(staleBuildReloadKey) === guard) {
+      const recorded = storage.getItem(staleBuildReloadKey);
+      /* The guard stops a reload that landed on a failing build from reloading again. Written by this
+       * very page, it only means the reload has not left yet: one more attempt is still loop-free. */
+      const isOwnStall = recorded === guard && ownGuard === guard && attempts < reloadAttempts;
+      if (recorded === guard && !isOwnStall) {
         return supersede(serverBuildId);
       }
       storage.setItem(staleBuildReloadKey, guard);
@@ -155,15 +183,16 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       // Without a written guard nothing would stop a reload loop.
       return supersede(serverBuildId);
     }
-    reloadPending = true;
+    ownGuard = guard;
+    attempts += 1;
+    setReloadState('pending');
     options.reload();
-    /* A page still here after the timeout may have had its reload refused, or the reload may only
-     * be slow: the old document lives until the new one commits, and no signal tells the two apart.
-     * So the guard stays, and this page offers the reload from now on instead of asking again.
-     * Tau registers no unload prompt that could refuse it (`use-flush-on-close`). */
+    /* A page still here after the timeout is stalled: the reload was refused or is only slow, and no
+     * signal tells the two apart (the old document lives until the new one commits; Tau registers no
+     * unload prompt, `use-flush-on-close`). The guard stays, the reload is offered, and a later
+     * failure may try once more. */
     setTimeout(() => {
-      reloadPending = false;
-      reloadRefused = true;
+      setReloadState('stalled');
       options.onSuperseded(serverBuildId);
     }, options.reloadTimeout ?? reloadTimeout);
     return 'reloading';
@@ -198,6 +227,8 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       return classification;
     },
+    readReloadState: () => reloadState,
+    subscribeReloadState: (listener) => reloadStateTopic.subscribe(listener),
     confirmArrival() {
       try {
         const target = options.storage?.getItem(staleBuildReloadKey)?.split('>')[1];
@@ -250,6 +281,22 @@ const getPageRecovery = (): StaleBuildRecovery => {
  */
 export const recoverFromStaleBuild = async (failure: unknown): Promise<StaleBuildOutcome> =>
   getPageRecovery().recover(failure);
+
+/**
+ * Where this page's own automatic reload stands ({@link ReloadState}).
+ *
+ * @returns `pending` while waiting to leave, `stalled` once it has not left in time.
+ */
+export const readReloadState = (): ReloadState => getPageRecovery().readReloadState();
+
+/**
+ * Subscribe to each change of {@link readReloadState}.
+ *
+ * @param listener - Called after each change.
+ * @returns Unsubscribes.
+ */
+export const subscribeReloadState = (listener: () => void): (() => void) =>
+  getPageRecovery().subscribeReloadState(listener);
 
 /**
  * What one module load failure was, for an error reporter: the decision the page already

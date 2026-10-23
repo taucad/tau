@@ -4,13 +4,15 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ReactRouter from 'react-router';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
-import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 const mocks = vi.hoisted(() => ({
   routeError: undefined as unknown,
   captureException: vi.fn(),
   reportUiError: vi.fn(async () => undefined),
   recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'current'),
+  reloadState: 'idle' as ReloadState,
+  reloadStateListeners: new Set<() => void>(),
 }));
 
 vi.mock('react-router', async (importOriginal) => ({
@@ -27,6 +29,13 @@ vi.mock('#lib/error-reporting.js', () => ({ reportUiError: mocks.reportUiError }
 vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
   ...(await importOriginal<typeof StaleBuildRecovery>()),
   recoverFromStaleBuild: mocks.recoverFromStaleBuild,
+  readReloadState: () => mocks.reloadState,
+  subscribeReloadState: (listener: () => void) => {
+    mocks.reloadStateListeners.add(listener);
+    return () => {
+      mocks.reloadStateListeners.delete(listener);
+    };
+  },
 }));
 vi.mock('#components/ui/collapsible-code-block.js', () => ({
   CollapsibleCodeBlock: ({ title }: { readonly title: string }) => <pre aria-label='Stack trace'>{title}</pre>,
@@ -67,6 +76,7 @@ const renderPage = (error: unknown): ReturnType<typeof render> => {
 
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  mocks.reloadState = 'idle';
   // `recoverFromStaleBuild` answers every report of one failure alike, so a test sets one outcome for all of them.
   mocks.recoverFromStaleBuild.mockResolvedValue('current');
 });
@@ -136,16 +146,19 @@ describe('ErrorPage', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('should enable the reload again when the automatic reload did not navigate away', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it('should enable the reload once the recovery calls its own reload stalled, with no timer of its own', async () => {
     mocks.recoverFromStaleBuild.mockResolvedValue('reloading');
+    mocks.reloadState = 'pending';
 
     renderPage(moduleImportFailure());
     const button = await screen.findByRole('button', { name: 'Reload' });
     expect(button).toBeDisabled();
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(5000);
+    act(() => {
+      mocks.reloadState = 'stalled';
+      for (const listener of mocks.reloadStateListeners) {
+        listener();
+      }
     });
 
     expect(button).toBeEnabled();

@@ -1,5 +1,5 @@
 import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
@@ -8,13 +8,20 @@ import { reportUiError } from '#lib/error-reporting.js';
 import { describeSupersession } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 import { useReloadPromptOwner } from '#components/nav/browser-update.js';
-import { isStaleModuleError, recoverFromStaleBuild, reloadTimeout } from '#lib/stale-build-recovery.js';
-import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
+import {
+  isStaleModuleError,
+  readReloadState,
+  recoverFromStaleBuild,
+  subscribeReloadState,
+} from '#lib/stale-build-recovery.js';
+import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 const CollapsibleCodeBlock = lazy(async () => {
   const m = await import('#components/ui/collapsible-code-block.js');
   return { default: m.CollapsibleCodeBlock };
 });
+
+const serverReloadState = (): ReloadState => 'idle';
 
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
@@ -24,9 +31,8 @@ export function ErrorPage(): React.JSX.Element {
   const [triaged, setTriaged] = useState<{ readonly error: unknown; readonly outcome: StaleBuildOutcome }>();
   // An outcome belongs to the error it was decided for; a new error starts its own check.
   const staleOutcome = triaged !== undefined && triaged.error === error ? triaged.outcome : undefined;
-  // The error whose automatic reload has had its time and evidently did not navigate away.
-  const [reloadRefusedFor, setReloadRefusedFor] = useState<unknown>();
-  const isReloadSettled = reloadRefusedFor === error;
+  // The recovery's own reload: the button waits while it is pending and returns once it stalls.
+  const reloadState = useSyncExternalStore(subscribeReloadState, readReloadState, serverReloadState);
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
   // This screen is the reload prompt while it shows; the floating banner would only repeat it.
   useReloadPromptOwner(staleOutcome === 'reloading' || staleOutcome === 'superseded');
@@ -81,19 +87,6 @@ export function ErrorPage(): React.JSX.Element {
     }
     return undefined;
   }, [error, analytics]);
-
-  useEffect(() => {
-    if (staleOutcome !== 'reloading') {
-      return undefined;
-    }
-    // A reload that has not navigated away by now was refused; let the reader try again.
-    const timer = setTimeout(() => {
-      setReloadRefusedFor(error);
-    }, reloadTimeout);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [staleOutcome, error]);
 
   const goBack = (): void => {
     void navigate(-1);
@@ -166,7 +159,7 @@ export function ErrorPage(): React.JSX.Element {
           variant='default'
           size='sm'
           className='gap-2'
-          disabled={staleOutcome === 'reloading' && !isReloadSettled}
+          disabled={staleOutcome === 'reloading' && reloadState === 'pending'}
           onClick={refreshPage}
         >
           <RefreshCcw className='size-4' />

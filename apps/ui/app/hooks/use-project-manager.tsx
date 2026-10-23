@@ -61,6 +61,7 @@ import type {
 } from '#filesystem/handle-store.js';
 import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
+import { isPlacementOnThisDevice } from '#lib/agent-host-placement.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { chatPlacementOf } from '#utils/chat-execution.js';
 import { createComposerRecordActor, stopWhenWritesSettle } from '#hooks/composer-record.js';
@@ -752,6 +753,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         client: fileManager.recordFiles,
         projectIds: async () =>
           (queryClient.getQueryData<ProjectListing>(['projects'])?.projects ?? []).map((entry) => entry.projectId),
+        isPlacementOnThisDevice,
       }),
     [fileManager.recordFiles, queryClient],
   );

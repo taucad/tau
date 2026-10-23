@@ -82,14 +82,22 @@ export const isDeviceRelativeHostId = (hostId: string): boolean =>
  * @returns The same execution without a device-relative Tau placement.
  * @public
  */
-export const portableExecutionOf = <Execution extends CadAgentExecution | undefined>(
-  execution: Execution,
-): Execution => {
-  if (execution?.kind !== 'tau' || execution.hostId === undefined || !isDeviceRelativeHostId(execution.hostId)) {
-    return execution;
-  }
-  const { hostId: _hostId, ...portable } = execution;
-  return portable as Execution;
+export const portableExecutionOf = <Execution extends CadAgentExecution | undefined>(execution: Execution): Execution =>
+  execution?.kind !== 'tau' || execution.hostId === undefined || !isDeviceRelativeHostId(execution.hostId)
+    ? execution
+    : (withoutHostId(execution) as Execution);
+
+/**
+ * A Tau execution on local placement: the same execution with no host at all, which is this device's local placement
+ * on every device (the page's worker on the web, the in-process launcher on Tau Desktop).
+ *
+ * @param execution - A Tau execution.
+ * @returns It without `hostId`.
+ * @public
+ */
+export const withoutHostId = (execution: TauExecution): TauExecution => {
+  const { hostId: _hostId, ...local } = execution;
+  return local;
 };
 
 /**

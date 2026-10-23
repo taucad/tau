@@ -23,6 +23,10 @@
 \* A queued item's execution is the chat's intent with this device's own placement
 \* put back on it, and admission refuses an external agent this device cannot place
 \* before any host wait; queue delivery, persistence and cancellation are unchanged.
+\* A run another device holds disables submit like the existing disabled guards, and
+\* the host's `wait` refusal of a queued admission while it holds takes the existing
+\* refused-admission path; this device's placement is written on every change and
+\* read from the open session first. Queue transitions and guards are unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

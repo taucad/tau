@@ -18,7 +18,7 @@ vi.mock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
   },
 }));
 
-const { daemonPlacementOf, resetLoopbackAgentHosts, unplaceableExecutionReason } =
+const { daemonPlacementOf, isPlacementOnThisDevice, resetLoopbackAgentHosts, unplaceableExecutionReason } =
   await import('#lib/agent-host-placement.js');
 
 const model = 'anthropic-claude-opus-4.8';
@@ -105,6 +105,13 @@ describe('unplaceableExecutionReason', () => {
     it('should leave a page a daemon may have served to discovery', () => {
       expect(unplaceableExecutionReason(originCodex)).toBeUndefined();
     });
+
+    /* XD2: a legacy chat record's `origin` placement is no host on a page no daemon serves. */
+    it('should not count an origin placement as this device’s on the web build', async () => {
+      vi.stubEnv('TAU_ORIGIN_AGENT_HOST', 'absent');
+
+      await expect(isPlacementOnThisDevice('origin')).resolves.toBe(false);
+    });
   });
 
   describe('an external agent pinned to a loopback daemon', () => {
@@ -130,6 +137,14 @@ describe('unplaceableExecutionReason', () => {
       storage.set('tau:loopback-agent-hosts', JSON.stringify([{ origin, session: 'session_1' }]));
 
       expect(unplaceableExecutionReason(loopbackCodex)).toBeUndefined();
+    });
+
+    /* XD2: a legacy chat record's loopback placement is kept on this device only where this tab can reach it. */
+    it('should count a loopback placement as this device’s only while this tab holds its session', async () => {
+      storage.set('tau:loopback-agent-hosts', JSON.stringify([{ origin, session: 'session_1' }]));
+
+      await expect(isPlacementOnThisDevice(`loopback:${origin}`)).resolves.toBe(true);
+      await expect(isPlacementOnThisDevice('loopback:http://127.0.0.1:4200')).resolves.toBe(false);
     });
   });
 });

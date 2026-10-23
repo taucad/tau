@@ -101,6 +101,7 @@ import type {
   ChatProjectionReadAnswer,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
+import { segmentDeviceIdOf } from '@taucad/agent-host';
 import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
@@ -956,14 +957,20 @@ export class ChatSessionStore {
   public async getChatHostSettings(
     chatId: string,
   ): Promise<Pick<ChatEntity, 'activeExecution' | 'activeKernel'> | undefined> {
-    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const session = this.#sessions.get(chatId);
+    const projectId = session?.projectId ?? this.#observed.get(chatId)?.projectId;
     const chat = await this.#deps.getChat(chatId, projectId);
     if (chat === undefined) {
       return undefined;
     }
-    const placement = await readChatPlacement(
-      createComposerRecordStore(this.#deps.client, composerRecordPaths.chat(chat.resourceId, chatId)),
-    );
+    /* An open session's placement is the newest: its composer record write may not have landed yet. */
+    const live = session?.persistenceActorRef.getSnapshot().context;
+    const placement =
+      live?.activeChatId === chatId && !live.isLoadingChat && live.loadError === undefined
+        ? chatPlacementOf(live.activeExecution)
+        : await readChatPlacement(
+            createComposerRecordStore(this.#deps.client, composerRecordPaths.chat(chat.resourceId, chatId)),
+          );
     return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
   }
 
@@ -3588,8 +3595,6 @@ export class ChatSessionStore {
     );
 
     const readChatRow = async (id: string): Promise<ChatEntity | undefined> => depsRef().getChat(id, projectId);
-    /* This device's placement for the chat as last read or written: the chat record never holds it (XD2). */
-    let devicePlacement: TauAgentHostId | undefined;
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
@@ -3597,9 +3602,8 @@ export class ChatSessionStore {
           loadChatActor: createAsyncLogic({
             run: async ({ input, signal }) => {
               const storedChat = await readChatRow(input.chatId);
-              if (storedChat !== undefined) {
-                devicePlacement = await readChatPlacement(recordStore);
-              }
+              /* The chat record never holds this device's placement (XD2): its composer record does. */
+              const devicePlacement = storedChat === undefined ? undefined : await readChatPlacement(recordStore);
               signal.throwIfAborted();
               /* The persistence context holds the execution this device runs the chat on (XD2). */
               const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, devicePlacement);
@@ -3695,11 +3699,9 @@ export class ChatSessionStore {
            * placement that names a host only on this device is this chat's composer record on this device. */
           persistActiveExecutionActor: createAsyncLogic({
             run: async ({ input }) => {
+              /* Written on every change, never compared with a cached copy: another tab may have changed the record. */
               const placement = chatPlacementOf(input.activeExecution);
-              if (placement !== devicePlacement) {
-                devicePlacement = placement;
-                composerRecordRef.send({ type: 'patch', fields: { placement: placement ?? false } });
-              }
+              composerRecordRef.send({ type: 'patch', fields: { placement: placement ?? false } });
               await depsRef().patchChat(input.chatId, 'activeExecution', portableExecutionOf(input.activeExecution));
             },
           }),
@@ -4064,13 +4066,16 @@ export class ChatSessionStore {
       }
       entries = [];
     }
+    /* The device a segment names, as every agent host reads it (`segmentDeviceIdOf`): the run elsewhere is that device. */
+    const named = entries.flatMap((name) => {
+      const deviceId = segmentDeviceIdOf(name);
+      return deviceId === undefined ? [] : [{ name, deviceId }];
+    });
     const segments = await Promise.all(
-      entries
-        .filter((name) => /^[^/]+\.jsonl$/.test(name))
-        .map(async (name) => ({
-          deviceId: name,
-          bytes: await this.#readForeignSegment(`${directory}/${name}`, client),
-        })),
+      named.map(async ({ name, deviceId }) => ({
+        deviceId,
+        bytes: await this.#readForeignSegment(`${directory}/${name}`, client),
+      })),
     );
     if (
       this.#remoteReadVersions.get(chatId) === version &&

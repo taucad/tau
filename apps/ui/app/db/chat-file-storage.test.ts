@@ -44,6 +44,8 @@ const createStoreWithFiles = (
     readonly provider?: () => Promise<FileSystemProvider>;
     /** Paths an open writer holds, whose removal fails as OPFS's does under a sync access handle. */
     readonly held?: ReadonlySet<string>;
+    /** Which device-relative placements name a host on this device (XD2). */
+    readonly isPlacementOnThisDevice?: (hostId: string) => Promise<boolean>;
   } = {},
 ): {
   store: ReturnType<typeof createChatFileStore>;
@@ -126,7 +128,12 @@ const createStoreWithFiles = (
   const reopen = (
     projectIds: () => Promise<string[]> = async () => [...seen],
   ): ReturnType<typeof createChatFileStore> =>
-    createChatFileStore({ client, projectIds, queueLock: mutex.run.bind(mutex) });
+    createChatFileStore({
+      client,
+      projectIds,
+      queueLock: mutex.run.bind(mutex),
+      isPlacementOnThisDevice: options.isPlacementOnThisDevice,
+    });
   const store = reopen();
   return {
     store,
@@ -1212,6 +1219,37 @@ describe('chat file store — device-relative placement never reaches chat.json'
     const chat = await files.reopen().getChat(chatId, projectId);
 
     expect(chat?.activeExecution).toEqual({ kind: 'tau', model, effort: 'high' });
+  });
+
+  /* A legacy record's daemon keeps its chat on that daemon on the device where it means something, and only there. */
+  it.each([
+    ['origin', 'origin'],
+    ['loopback', 'loopback:http://127.0.0.1:4100'],
+  ])('should keep a legacy %s placement as this device’s own where it is reachable here', async (_label, hostId) => {
+    const reachable = createStoreWithFiles({ isPlacementOnThisDevice: async (id) => id === hostId });
+    const chatId = `chat_legacy_${_label}`;
+    const composer = `/.tau/composers/chats/${projectId}/${chatId}.json`;
+    await reachable.write(
+      recordOf(chatId),
+      `${JSON.stringify({
+        id: chatId,
+        resourceId: projectId,
+        name: 'Pinned to a daemon',
+        createdAt: 1,
+        updatedAt: 1,
+        activeExecution: { kind: 'tau', model, hostId },
+      })}\n`,
+    );
+
+    const chat = await reachable.reopen().getChat(chatId, projectId);
+
+    expect(chat?.activeExecution).toEqual({ kind: 'tau', model });
+    expect((JSON.parse(await reachable.read(composer)) as { placement?: unknown }).placement).toBe(hostId);
+
+    const elsewhere = createStoreWithFiles({ isPlacementOnThisDevice: async () => false });
+    await elsewhere.write(recordOf(chatId), await reachable.read(recordOf(chatId)));
+    await elsewhere.reopen().getChat(chatId, projectId);
+    await expect(elsewhere.exists(composer)).resolves.toBe(false);
   });
 
   it('should write a local placement row as no hostId at all', async () => {

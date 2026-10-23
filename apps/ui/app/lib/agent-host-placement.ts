@@ -422,6 +422,39 @@ export const resetLoopbackAgentHosts = (): void => {
  */
 const originNeverHostsAgent = (): boolean => import.meta.env.TAU_ORIGIN_AGENT_HOST === 'absent' || isDesktopTarget;
 
+/** Whether this page's origin is a daemon, asked once per page. */
+let originHostsAgent: Promise<boolean> | undefined;
+
+/**
+ * Whether a device-relative placement names a host on this device, here and now (XD2): `origin` on a page a daemon
+ * serves, a `loopback:` daemon this tab holds a session for. A chat record written before placement moved to the
+ * device keeps such a placement only where this answers `true`; anywhere else the chat runs locally.
+ *
+ * @param hostId - The placement a legacy chat record carries.
+ * @returns Whether this device can reach it.
+ * @public
+ */
+export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<boolean> => {
+  if (hostId === 'origin') {
+    if (originNeverHostsAgent()) {
+      return false;
+    }
+    originHostsAgent ??= (async (): Promise<boolean> => {
+      try {
+        return (await discoverOriginAgentHost()) !== undefined;
+      } catch {
+        return false;
+      }
+    })();
+    return originHostsAgent;
+  }
+  if (hostId.startsWith(loopbackHostIdPrefix)) {
+    restoreLoopbackAdmissions();
+    return loopbackAdmissions.has(hostId);
+  }
+  return false;
+};
+
 /**
  * Why one execution cannot be placed on this device, or `undefined` when it can.
  *

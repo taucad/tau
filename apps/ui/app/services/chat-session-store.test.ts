@@ -5889,6 +5889,57 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     store.release(chatId);
   });
 
+  /* Another tab can change this chat's composer record; a choice made here is written, never skipped as unchanged. */
+  it('should write a placement change even when this session last saw the same placement', async () => {
+    const chatId = 'chat_cross_tab';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+    /* Another tab pins the chat to the daemon that served it. */
+    deps.client.files.set(
+      composerPath(projectId, chatId),
+      new TextEncoder().encode(JSON.stringify({ version: 1, placement: 'origin' })),
+    );
+
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
+
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+  });
+
+  /* The read connector asks for the chat's placement right after a choice; it never sees the one before it. */
+  it('should answer the host settings with the open session’s placement before its record write lands', async () => {
+    const chatId = 'chat_unwritten_pin';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+    const held = Promise.withResolvers<void>();
+    const writeFile = deps.client.writeFile.bind(deps.client);
+    vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, data) => {
+      if (path === composerPath(projectId, chatId)) {
+        await held.promise;
+      }
+      return writeFile(path, data);
+    });
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model, hostId: 'origin' },
+    });
+
+    await expect(store.getChatHostSettings(chatId)).resolves.toMatchObject({
+      activeExecution: { kind: 'tau', model, hostId: 'origin' },
+    });
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    held.resolve();
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBe('origin');
+    });
+    store.release(chatId);
+  });
+
   it('should keep a paired device id in chat.json, where every device can reach it', async () => {
     const chatId = 'chat_paired';
     const deps = createStubDeps();
@@ -5909,5 +5960,35 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       expect(placementOnDisk(deps, chatId)).toBeUndefined();
     });
     store.release(chatId);
+  });
+});
+
+/* XD3: the page names another device's run as every agent host does, by the segment's device id. */
+describe('ChatSessionStore — a run on another device (XD3)', () => {
+  it('should name the device a foreign run is on without the segment file’s extension', async () => {
+    const projectId = 'project_run_elsewhere';
+    const chatId = 'chat_run_elsewhere';
+    const client = createMemoryClient();
+    const recordedAt = new Date().toISOString();
+    const row = (sequence: number, state: string) =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt, runId: 'run-desk', type: 'run.lifecycle', state })}\n`;
+    await client.writeFile(
+      `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
+      new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
+    );
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const unobserve = store.observe(chatId, projectId);
+    store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+
+    await vi.waitFor(() => {
+      expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
+        expect.objectContaining({ deviceId: 'device-desktop', runId: 'run-desk', state: 'running' }),
+      ]);
+    });
+    store.release(chatId);
+    unobserve();
   });
 });

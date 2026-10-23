@@ -53,10 +53,26 @@ const makeSession = (base: string, id: string): Sess => {
   return { id, root, secret, secretFile, sidFile: join(root, 'agent-sid.out'), exfil: join(root, 'exfil.out') };
 };
 
-/** Build an isolation_session request by overriding the containment type on the shared builder. */
+/**
+ * Build an isolation_session request by overriding the containment type on the shared builder.
+ *
+ * isolation_session rejects the processcontainer network shape: the SDK requires "an explicit network
+ * policy with network.egress.default=allow, network.ingress.default=allow, and
+ * network.ingress.hostLoopback=allow, without rules or runtimeConfig.networkProxy" (observed as
+ * MxcError "Invalid one-shot request: IsolationSession requires an explicit network policy …"). The
+ * per-session identity isolation is provided by the distinct agent user + SID, not by the network
+ * policy, so opening the network here does not weaken the isolation this receipt proves (filesystem
+ * read/write isolation, decided by EXTERNAL canaries). We therefore replace requestFor's deny/deny
+ * network wholesale with the exact allow/allow/allow policy the backend demands, and keep
+ * inheritDefaultEnv so the agent-user process is launchable.
+ */
 const isoSessionRequest = (grant: SessionGrant, command: string, denyPaths: boolean): MxcContainerRequest => {
   const base = requestFor(grant, command, '', denyPaths);
-  return { ...base, containment: { type: 'isolation_session' } } as unknown as MxcContainerRequest;
+  return {
+    ...base,
+    containment: { type: 'isolation_session' },
+    network: { egress: { default: 'allow' }, ingress: { default: 'allow', hostLoopback: 'allow' } },
+  } as unknown as MxcContainerRequest;
 };
 
 const main = async (): Promise<void> => {

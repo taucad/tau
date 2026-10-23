@@ -9,7 +9,13 @@ import { idPrefix } from '@taucad/types/constants';
 import { createCachedSystemPromptBlocks } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
-import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
+import {
+  AgentHostPlacementError,
+  desktopWorkspaceRoot,
+  openAgentHostChannel,
+  placementRungOf,
+  unreachablePlacementReason,
+} from '#lib/agent-host-placement.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { admittedReasoning } from '#utils/model-reasoning.js';
 import type {
@@ -297,14 +303,23 @@ export const hostAdmission = (input: {
  * placement resolves this project's absolute node path first. Every other
  * placement names its own workspace on the wire, and is dialled by id alone.
  *
+ * A placement this build cannot reach — a persisted `desktop` placement opened
+ * on the web — is refused before anything is resolved or dialled.
+ *
  * @param hostId - The placement to dial.
  * @param projectId - Project whose node root launcher 2 is granted.
  * @returns An open channel client.
+ * @throws {AgentHostPlacementError} When this build cannot reach the placement.
  */
-export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): Promise<AgentChannelClient> =>
-  hostId === 'desktop'
+export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): Promise<AgentChannelClient> => {
+  const unreachable = unreachablePlacementReason(hostId);
+  if (unreachable !== undefined) {
+    throw new AgentHostPlacementError('DESKTOP_ROOT_NOT_GRANTED', placementRungOf(hostId), unreachable);
+  }
+  return hostId === 'desktop'
     ? openAgentHostChannel(hostId, {
         projectId,
         workspaceRoot: await desktopWorkspaceRoot(projectId),
       })
     : openAgentHostChannel(hostId);
+};

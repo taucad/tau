@@ -8,7 +8,10 @@ import { S3HealthIndicator } from '#api/health/s3-health.indicator.js';
 import { GitToolchainHealthIndicator } from '#api/health/git-toolchain-health.indicator.js';
 
 @Module({
-  imports: [TerminusModule, DatabaseModule],
+  // Terminus' own logger prints every failed check at error level as unstructured text. Readiness
+  // refusals are logged as structured warnings by HealthController; a liveness failure still reaches
+  // the exception filter's error log with the terminus result attached.
+  imports: [TerminusModule.forRoot({ logger: false }), DatabaseModule],
   controllers: [HealthController],
   // StorageModule is @Global() so ObjectStorageService is available without an explicit import.
   providers: [RedisHealthIndicator, DatabaseHealthIndicator, S3HealthIndicator, GitToolchainHealthIndicator],

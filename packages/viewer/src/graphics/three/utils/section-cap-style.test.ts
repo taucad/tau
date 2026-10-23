@@ -1,7 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import * as THREE from 'three';
 import {
   applySectionCapStyleToPackedBuffers,
+  colorToComponents,
+  resolveSectionCapStyle,
   sectionCapNormalRegionKind,
   sectionCapOverlapRegionKind,
 } from '#graphics/three/utils/section-cap-style.js';
@@ -41,5 +44,53 @@ describe('applySectionCapStyleToPackedBuffers', () => {
     expect(buffers.baseColors.slice(3, 6)).toEqual(firstOverlapBaseColor);
     expect(buffers.stripeColors.slice(3, 6)).toEqual(firstOverlapStripeColor);
     expect(new Set(buffers.patternStrengths)).toEqual(new Set([1]));
+  });
+});
+
+describe('resolveSectionCapStyle', () => {
+  const style = (tintHex: number, stripeAngle?: number): ReturnType<typeof resolveSectionCapStyle> =>
+    resolveSectionCapStyle({
+      tintHex,
+      stripeFrequency: 2,
+      stripeWidth: 0.1,
+      stripeAngle,
+    });
+  const lightness = ([red, green, blue]: readonly [number, number, number]): number =>
+    0.2126 * red + 0.7152 * green + 0.0722 * blue;
+
+  it('should fill a cap with its tint, in linear light', () => {
+    const tint = new THREE.Color(0x6b_7f_c0);
+    expect(style(0x6b_7f_c0).normalBaseColor).toEqual([tint.r, tint.g, tint.b]);
+    expect(colorToComponents(0xff_ff_ff)).toEqual([1, 1, 1]);
+  });
+
+  it('should draw darker stripes on light and mid-tone tints, and lighter stripes on dark ones', () => {
+    for (const tintHex of [0xdd_dd_dd, 0x6b_7f_c0, 0xf9_73_16]) {
+      const { normalBaseColor, normalStripeColor } = style(tintHex);
+      expect(lightness(normalStripeColor)).toBeLessThan(lightness(normalBaseColor) * 0.5);
+    }
+    for (const tintHex of [0x00_00_00, 0x22_22_22, 0x1e_3a_8a]) {
+      const { normalBaseColor, normalStripeColor } = style(tintHex);
+      expect(lightness(normalStripeColor)).toBeGreaterThan(lightness(normalBaseColor) + 0.5);
+    }
+  });
+
+  it('should hatch a part at its own angle, 45 degrees by default', () => {
+    expect(style(0, Math.PI / 6).normalStripeAxis).toEqual([Math.sin(Math.PI / 6), Math.cos(Math.PI / 6)]);
+    const [x, y] = style(0).normalStripeAxis;
+    expect(x).toBeCloseTo(Math.SQRT1_2);
+    expect(y).toBeCloseTo(Math.SQRT1_2);
+  });
+
+  it('should draw a part at a share of the cap spacing by lengthening its stripe axis', () => {
+    const { normalStripeAxis } = resolveSectionCapStyle({
+      tintHex: 0,
+      stripeFrequency: 2,
+      stripeWidth: 0.1,
+      stripeAngle: Math.PI / 2,
+      stripeSpacingScale: 0.5,
+    });
+    expect(normalStripeAxis[0]).toBeCloseTo(2);
+    expect(normalStripeAxis[1]).toBeCloseTo(0);
   });
 });

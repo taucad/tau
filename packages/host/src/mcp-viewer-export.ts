@@ -2,10 +2,10 @@
  * The viewer page's Export pane, server half (agent plugin viewer parity blueprint V9).
  *
  * The page has no kernel: it exports through `export_model`, which writes under `.tau/artifacts`. This module answers
- * the three things `export_model` does not: which formats the entry's kernel offers and their option schemas (the same
- * capability routes the Tau app reads from its in-browser runtime), copying finished artifacts into the project's
- * `exports/` folder so they are real deliverables, and reading an artifact's bytes in ranges for a browser download
- * on the loopback page. Every path is checked against the project folder: artifacts are read only from
+ * the three things `export_model` does not: which formats the entry's kernel offers with their option and content
+ * schemas (the same capability routes the Tau app reads from its in-browser runtime), copying finished artifacts into
+ * the project's `exports/` folder so they are real deliverables, and reading an artifact's bytes in ranges for a
+ * browser download on the loopback page. Every path is checked against the project folder: artifacts are read only from
  * `.tau/artifacts`, and deliverables are written only under `exports/`. The same routes say whether a shown source's
  * GLB can carry its topology ({@link shownModelContent}).
  */
@@ -16,8 +16,9 @@ import { dirname, isAbsolute, relative, resolve as resolvePath, sep } from 'node
 import { z } from 'zod';
 
 import type { TauMcpViewerFailure } from '@taucad/mcp';
+import type { RuntimeContentInput } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/runtime/types';
-import { tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
+import { tauViewerReadEncodings, tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
 import type { TauViewerReadResult } from '@taucad/mcp/viewer-protocol';
 
 import { readModelRange } from '#mcp-viewer-read.js';
@@ -77,6 +78,11 @@ export const viewerReadArtifactInputSchema = z
     artifactPath: z.string().min(1).describe('A file export_model wrote under .tau/artifacts/.'),
     offset: z.number().int().nonnegative(),
     length: z.number().int().positive(),
+    encodings: z
+      .array(z.enum(tauViewerReadEncodings))
+      .max(4)
+      .optional()
+      .describe('Encodings the page can undo; the server uses one only when it makes the reply smaller.'),
   })
   .strict();
 
@@ -94,6 +100,8 @@ export type ViewerExportFormat = Readonly<{
   direct: boolean;
   /** `kernel` or `kernel+transcoder`. */
   provider: string;
+  /** Framework content the route can carry, such as `includeTopology`. `export_model` passes these as `content`. */
+  content?: ViewerExportSchema;
   /** The route's own options, when it declares any. `export_model` passes these as `options`. */
   exportOptions?: ViewerExportSchema;
 }>;
@@ -120,9 +128,14 @@ export type ViewerExportRoute = Readonly<{
   content?: Readonly<{ schema: JSONSchema7 }> | undefined;
 }>;
 
-/** The part of the project runtime listing needs; the host's runtime client satisfies it. */
+/** The part of the project runtime listing needs; the project's `RuntimeClient` satisfies it. */
 export type ViewerExportRuntime = Readonly<{
   capabilities: Readonly<{ routes: readonly ViewerExportRoute[] }> | undefined;
+  /** The route the runtime takes for a format (`RuntimeClient.bestRouteFor`): BREP before mesh, direct before transcoded. */
+  bestRouteFor(
+    format: string,
+    options?: { kernelId?: string; content?: RuntimeContentInput },
+  ): ViewerExportRoute | undefined;
   connect(): Promise<void>;
   describe(input: {
     source: { path: string };
@@ -184,53 +197,50 @@ const within = (
 
 const posix = (path: string): string => path.split(sep).join('/');
 
-const routeRank = (route: ViewerExportRoute): number =>
-  (route.fidelity === 'brep' ? 0 : 2) + (route.transcoderId === undefined ? 0 : 1);
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
+const schemaOf = (capability: Readonly<{ schema: JSONSchema7; defaults?: unknown }>): ViewerExportSchema => ({
+  schema: { ...capability.schema },
+  defaults: isRecord(capability.defaults) ? { ...capability.defaults } : {},
+});
+
 /**
- * The formats one kernel offers, each reduced to its best route (BREP before mesh, direct before transcoded), sorted
- * by format: the list the Tau app derives from the same manifest in the browser.
+ * The formats one kernel offers, each on the route the runtime takes for it (`bestRouteFor`), sorted by format: the
+ * list the Tau app derives from the same manifest in the browser.
  *
- * @param routes - The runtime's export routes.
+ * @param runtime - The project's runtime.
  * @param kernelId - The entry's kernel.
  * @returns One entry per format the kernel reaches, sorted by format name.
  */
 export const listKernelExportFormats = (
-  routes: readonly ViewerExportRoute[],
+  runtime: Pick<ViewerExportRuntime, 'capabilities' | 'bestRouteFor'>,
   kernelId: string,
 ): ViewerExportFormat[] => {
-  const best = new Map<string, ViewerExportRoute>();
-  for (const route of routes) {
-    if (route.kernelId !== kernelId) {
-      continue;
-    }
-    const current = best.get(route.targetFormat);
-    if (current === undefined || routeRank(route) < routeRank(current)) {
-      best.set(route.targetFormat, route);
-    }
-  }
-  return [...best.values()]
-    .map((route): ViewerExportFormat => {
-      const { schema, defaults } = route.exportOptions;
-      return {
-        format: route.targetFormat,
-        fidelity: route.fidelity,
-        direct: route.transcoderId === undefined,
-        provider: route.transcoderId === undefined ? route.kernelId : `${route.kernelId}+${route.transcoderId}`,
-        ...(Object.keys(schema).length > 0
-          ? {
-              exportOptions: {
-                schema: { ...schema },
-                defaults: isRecord(defaults) ? { ...defaults } : {},
-              },
-            }
-          : {}),
-      };
-    })
-    .toSorted((left, right) => left.format.localeCompare(right.format));
+  const formats = new Set(
+    (runtime.capabilities?.routes ?? [])
+      .filter((route) => route.kernelId === kernelId)
+      .map(({ targetFormat }) => targetFormat),
+  );
+  return [...formats]
+    .toSorted((left, right) => left.localeCompare(right))
+    .flatMap((format): ViewerExportFormat[] => {
+      const route = runtime.bestRouteFor(format, { kernelId });
+      if (route === undefined) {
+        return [];
+      }
+      const { transcoderId, exportOptions, content } = route;
+      return [
+        {
+          format,
+          fidelity: route.fidelity,
+          direct: transcoderId === undefined,
+          provider: transcoderId === undefined ? route.kernelId : `${route.kernelId}+${transcoderId}`,
+          ...(content === undefined ? {} : { content: schemaOf(content) }),
+          ...(Object.keys(exportOptions.schema).length > 0 ? { exportOptions: schemaOf(exportOptions) } : {}),
+        },
+      ];
+    });
 };
 
 /**
@@ -278,12 +288,11 @@ export const shownModelContent = async ({
   try {
     const runtime = await runtimeFor(root);
     const kernelId = await kernelOf(runtime, targetFile, signal);
-    const glb = (runtime.capabilities?.routes ?? []).filter(
-      (route) => route.kernelId === kernelId && route.targetFormat === 'glb',
-    );
-    const direct = glb.filter((route) => route.transcoderId === undefined);
-    const taken = direct.length > 0 ? direct : glb;
-    return taken.some((route) => Object.hasOwn(route.content?.schema.properties ?? {}, 'includeTopology'))
+    if (kernelId === undefined) {
+      return undefined;
+    }
+    const glb = runtime.bestRouteFor('glb', { kernelId });
+    return Object.hasOwn(glb?.content?.schema.properties ?? {}, 'includeTopology')
       ? { includeTopology: true }
       : undefined;
   } catch {
@@ -311,7 +320,7 @@ export const createMcpViewerExport = (options: McpViewerExportOptions): McpViewe
       }
       return {
         kernelId,
-        formats: listKernelExportFormats(runtime.capabilities?.routes ?? [], kernelId),
+        formats: listKernelExportFormats(runtime, kernelId),
       };
     } catch (error) {
       return failure('FORMATS_UNAVAILABLE', error instanceof Error ? error.message : String(error));
@@ -357,7 +366,7 @@ export const createMcpViewerExport = (options: McpViewerExportOptions): McpViewe
     return { files: saved };
   },
 
-  async readArtifact(root, { artifactPath, offset, length }) {
+  async readArtifact(root, { artifactPath, offset, length, encodings }) {
     const absolutePath = within(resolvePath(root, artifactsFolder), artifactPath, { from: root });
     if (absolutePath === undefined) {
       return failure('NOT_AN_ARTIFACT', `${artifactPath} is not under ${artifactsFolder}/.`);
@@ -371,6 +380,7 @@ export const createMcpViewerExport = (options: McpViewerExportOptions): McpViewe
       identity: { size: stats.size, mtimeMs: stats.mtimeMs, ino: stats.ino },
       offset,
       length: Math.min(length, tauViewerReadLimit),
+      encodings,
     });
     return 'refused' in result ? failure('ARTIFACT_CHANGED', `${artifactPath} changed while it was read.`) : result;
   },

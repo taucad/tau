@@ -42,6 +42,7 @@
     "./component-menu/use-viewer-part-menu": "./src/component-menu/use-viewer-part-menu.tsx",
     "./component-menu/viewer-component-action-menu": "./src/component-menu/viewer-component-action-menu.tsx",
     "./component-menu/viewer-secondary-gesture": "./src/component-menu/viewer-secondary-gesture.ts",
+    "./components/format-badge": "./src/components/format-badge.tsx",
     "./components/pane-action": "./src/components/pane-action.tsx",
     "./components/pane-button": "./src/components/pane-button.tsx",
     "./components/workbench-tab": "./src/components/workbench-tab.tsx",
@@ -111,6 +112,11 @@
         "types": "./dist/component-menu/viewer-secondary-gesture.d.mts",
         "import": "./dist/component-menu/viewer-secondary-gesture.mjs",
         "default": "./dist/component-menu/viewer-secondary-gesture.mjs"
+      },
+      "./components/format-badge": {
+        "types": "./dist/components/format-badge.d.mts",
+        "import": "./dist/components/format-badge.mjs",
+        "default": "./dist/components/format-badge.mjs"
       },
       "./components/pane-action": {
         "types": "./dist/components/pane-action.d.mts",

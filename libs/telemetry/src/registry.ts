@@ -363,6 +363,21 @@ export const TauMetrics = {
     }),
   }),
 
+  /**
+   * Down readiness indicators by indicator. A down indicator is the probe working (a Machine
+   * fault drains the Machine; a shared dependency stays ready and is degraded), so it is counted
+   * here and logged as a warning rather than reported as an application error; one increment per
+   * down indicator per probe, whether or not the probe refused.
+   */
+  healthReadinessFailures: defineCounter({
+    name: 'health.readiness.failures',
+    unit: '{failure}',
+    description: 'Down readiness probe indicators by health indicator',
+    attributes: z.object({
+      'health.indicator': z.string().optional(),
+    }),
+  }),
+
   publicationViewsTotal: defineCounter({
     name: 'publication.views',
     unit: '{view}',

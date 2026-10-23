@@ -70,6 +70,9 @@ if (dsn) {
 /**
  * Report a server error. A no-op when Sentry is not configured.
  *
+ * Per-event fields go in the capture context, never on a scope: a scope set* call outlives the event when no
+ * scope was forked, which is how a readiness warning's fields once reached an unrelated exception (TAU-API-6).
+ *
  * @param error - The thrown value.
  * @param requestId - The `req_…` id, so an event joins the `[ERR]` log line and the error body's `requestId`.
  */
@@ -77,10 +80,40 @@ export const reportServerError = (error: unknown, requestId?: string): void => {
   if (!Sentry.isInitialized()) {
     return;
   }
-  Sentry.withScope((scope) => {
-    if (requestId) {
-      scope.setTag('request_id', requestId);
-    }
-    Sentry.captureException(error);
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry tag name joined by the [ERR] log line
+  Sentry.captureException(error, requestId ? { tags: { request_id: requestId } } : undefined);
+};
+
+/**
+ * One down indicator of a readiness probe.
+ */
+export type ReadinessFailure = {
+  /** The terminus indicator key: `redis`, `database`, `s3`, `git` or `memory_heap`. */
+  indicator: string;
+  /** The indicator's own reason, when it gave one. */
+  message?: string;
+  /** How long the indicator's probe took, when it measured one. */
+  responseTimeMs?: number;
+};
+
+/**
+ * Report one down readiness indicator as a warning grouped by that indicator.
+ *
+ * A down indicator is the probe working: a Machine fault drains the Machine, a shared dependency is reported as
+ * degraded without draining. Reported as the terminus `ServiceUnavailableException` it became one anonymous error
+ * group that never said which dependency failed (TAU-API-3). Each indicator now gets its own fingerprint, tag and
+ * context instead.
+ *
+ * @param failure - The down indicator.
+ */
+export const reportReadinessFailure = (failure: ReadinessFailure): void => {
+  if (!Sentry.isInitialized()) {
+    return;
+  }
+  Sentry.captureMessage(`Readiness check down: ${failure.indicator}`, {
+    level: 'warning',
+    fingerprint: ['health-readiness', failure.indicator],
+    tags: { 'health.indicator': failure.indicator },
+    contexts: { readiness: { ...failure } },
   });
 };

@@ -6,6 +6,7 @@ import { Fragment } from 'react';
 import { ComboBoxResponsive } from '#components/combobox-responsive.js';
 
 const mobileState = vi.hoisted(() => ({ current: false }));
+const drawerState = vi.hoisted(() => ({ isInside: false }));
 
 vi.mock('#hooks/use-mobile.js', () => ({
   useIsMobile: (): boolean => mobileState.current,
@@ -35,7 +36,12 @@ vi.mock('#components/drawer.js', () => ({
     </div>
   ),
   DrawerDescription: () => null,
-  DrawerTitle: () => null,
+  DrawerTitle: ({ children, className }: { readonly children: React.ReactNode; readonly className?: string }) => (
+    <h2 data-testid='drawer-title-test' className={className}>
+      {children}
+    </h2>
+  ),
+  useIsInsideDrawer: (): boolean => drawerState.isInside,
   DrawerTrigger: ({ children }: { readonly children: React.ReactNode }) => (
     <span data-testid='drawer-trigger-inner'>{children}</span>
   ),
@@ -74,9 +80,10 @@ describe('ComboBoxResponsive (controlled)', () => {
 
   beforeEach(() => {
     mobileState.current = false;
+    drawerState.isInside = false;
   });
 
-  const renderResponsive = (isNested = false): void => {
+  const renderResponsive = (isNested?: boolean): void => {
     render(
       <ComboBoxResponsive<Row>
         title='Pick'
@@ -117,6 +124,39 @@ describe('ComboBoxResponsive (controlled)', () => {
     expect(screen.getByTestId('drawer-content-test')).toBeInTheDocument();
     expect(screen.queryByTestId('drawer-root')).not.toBeInTheDocument();
     expect(screen.queryByTestId('popover-root')).not.toBeInTheDocument();
+  });
+
+  it('nests inside another drawer without being told to, with a titled Back control', async () => {
+    mobileState.current = true;
+    drawerState.isInside = true;
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    render(
+      <ComboBoxResponsive<Row>
+        isOpen
+        title='Pick'
+        description='Pick one.'
+        groupedItems={[{ name: 'G', items: [a, b] }]}
+        getValue={(item) => item.id}
+        renderLabel={(item) => <span>{item.id}</span>}
+        onOpenChange={onOpenChange}
+      >
+        <button type='button'>Trigger</button>
+      </ComboBoxResponsive>,
+    );
+
+    expect(screen.getByTestId('drawer-nested-root')).toBeInTheDocument();
+    expect(screen.getByTestId('drawer-title-test')).toHaveTextContent('Pick');
+    expect(screen.getByTestId('drawer-title-test')).not.toHaveClass('sr-only');
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('keeps a standalone drawer title for assistive technology only, and divides drawer rows', () => {
+    mobileState.current = true;
+    renderResponsive();
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull();
+    expect(screen.getByTestId('drawer-title-test')).toHaveClass('sr-only');
+    expect(screen.getByTestId('drawer-content-test')).toHaveClass('command-item-dividers');
   });
 
   it('should keep a caller width on the popover and span the screen in the drawer', () => {

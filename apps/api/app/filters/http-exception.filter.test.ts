@@ -1,10 +1,15 @@
 /* oxlint-disable eslint-plugin-promise/prefer-await-to-then, eslint-plugin-promise/valid-params -- filter.catch() is a method name, not Promise.catch() */
 /* oxlint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-confusing-void-expression -- test mock casts */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { HttpException, HttpStatus, Logger, ServiceUnavailableException } from '@nestjs/common';
 import * as otelApi from '@opentelemetry/api';
+import type { HealthCheckResult } from '@nestjs/terminus';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
+import { reportServerError } from '#telemetry/sentry.js';
+
+vi.mock('#telemetry/sentry.js', () => ({ reportServerError: vi.fn() }));
 
 function createMockArgumentsHost(url = '/test') {
   const mockResponse = {
@@ -36,6 +41,7 @@ describe('HttpExceptionFilter OTEL integration', () => {
 
   beforeEach(() => {
     filter = new HttpExceptionFilter();
+    vi.mocked(reportServerError).mockClear();
     mockSpan = {
       setStatus: vi.fn(),
       recordException: vi.fn(),
@@ -71,6 +77,36 @@ describe('HttpExceptionFilter OTEL integration', () => {
     filter.catch(exception, host as any);
 
     expect(mockSpan.setStatus).toHaveBeenCalledWith(expect.objectContaining({ code: otelApi.SpanStatusCode.ERROR }));
+  });
+
+  it('should report an anonymous 503 as a server error', () => {
+    const host = createMockArgumentsHost('/health/ready');
+
+    filter.catch(new ServiceUnavailableException({ status: 'error' }), host as any);
+
+    expect(reportServerError).toHaveBeenCalledTimes(1);
+  });
+
+  it('should answer a readiness refusal with 503 without re-reporting it as a server error', () => {
+    getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+    const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const host = createMockArgumentsHost('/health/ready');
+    const result: HealthCheckResult = {
+      status: 'error',
+      info: {},
+      error: { database: { status: 'down' } },
+      details: {},
+    };
+
+    filter.catch(new ReadinessRefusalException([{ indicator: 'database' }], result), host as any);
+
+    expect(host.response.status).toHaveBeenCalledWith(503);
+    expect(host.response.send).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'SERVICE_UNAVAILABLE', statusCode: 503, path: '/health/ready' }),
+    );
+    expect(reportServerError).not.toHaveBeenCalled();
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(mockSpan.setStatus).not.toHaveBeenCalled();
   });
 
   it('should NOT annotate OTEL span for 4xx errors', () => {

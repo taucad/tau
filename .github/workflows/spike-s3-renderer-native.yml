@@ -100,8 +100,8 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/guidepup" --no-audit --no-fund \
             "@guidepup/guidepup@$GUIDEPUP_VERSION" "@guidepup/setup@$GUIDEPUP_SETUP_VERSION"
           cd "$RUNNER_TEMP/guidepup"
-          npx --no-install guidepup install 2>&1 | tee "$DROP-guidepup-install.log"
-          npx --no-install guidepup setup --ci 2>&1 | tee "$DROP-guidepup-setup.log"
+          node node_modules/@guidepup/setup/bin/guidepup install 2>&1 | tee "$DROP-guidepup-install.log"
+          node node_modules/@guidepup/setup/bin/guidepup setup --ci 2>&1 | tee "$DROP-guidepup-setup.log"
 
       - name: R04 with VoiceOver
         timeout-minutes: 20
@@ -171,7 +171,7 @@ jobs:
           npm install --prefix out/guidepup --no-audit --no-fund \
             "@guidepup/guidepup@$GUIDEPUP_VERSION" "@guidepup/setup@$GUIDEPUP_SETUP_VERSION"
           cd out/guidepup
-          npx --no-install guidepup install nvda 2>&1 | tee "$DROP-guidepup-install.log"
+          node node_modules/@guidepup/setup/bin/guidepup install nvda 2>&1 | tee "$DROP-guidepup-install.log"
 
       - name: Suites as a non-admin user
         id: nonadmin

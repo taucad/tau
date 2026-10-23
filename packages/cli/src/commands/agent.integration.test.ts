@@ -643,9 +643,10 @@ describe('tau agent (scripted command projections)', () => {
   it('should exit refused with the typed code when an external agent turns the turn down', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-refuse-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-refuse-cfg-'));
+    /* The stopped daemon's runtime child can still be writing its tsx cache here, so removal retries. */
     disposers.push(async () => {
-      await rm(workspace, { recursive: true, force: true });
-      await rm(configDirectory, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+      await rm(configDirectory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     });
     await writeFile(
       join(configDirectory, 'host.json'),

@@ -32,18 +32,57 @@
           },
           {
             "name": "worker",
-            "integrity": "sha256-zV/fZmm47gheQJE5DSI3hpW8wF/YohtN5JLSGjz89vE=",
-            "byteLength": 24431764,
+            "integrity": "sha256-ECNIrPA0jR0hSYaI5iDJy62xHLG4BN2MX6wlr8GnON8=",
+            "byteLength": 24433608,
             "format": "tar.gz",
             "origin": {
               "kind": "url",
               "urls": [
-                "https://cdn.tau.new/blobs/sha256/cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1",
-                "https://github.com/taucad/tau/releases/download/picogk-layer-cd5fdf6669b8ee08/tau-picogk-layer-darwin-arm64.tar.gz"
+                "https://cdn.tau.new/blobs/sha256/102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df",
+                "https://github.com/taucad/tau/releases/download/picogk-layer-102348acf0348d1d/tau-picogk-layer-darwin-arm64.tar.gz"
               ]
             },
             "destination": "tau-worker",
-            "unpackedByteLength": 66910071
+            "unpackedByteLength": 66912710
+          }
+        ]
+      },
+      {
+        "target": {
+          "runtime": "native",
+          "os": "linux",
+          "arch": "x64",
+          "libc": "glibc",
+          "minimumLibcVersion": "2.28"
+        },
+        "payloads": [
+          {
+            "name": "dotnet",
+            "integrity": "sha512-ZMd6X5jW38Yzk+1dL+1HwoVcfN1DIgCLOxPh0LcQrvwfun5WYS8l9+iisbbO9c93yzqDT/NoXnI60oZwPDOW2A==",
+            "byteLength": 36639275,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-linux-x64.tar.gz"
+              ]
+            },
+            "destination": "dotnet"
+          },
+          {
+            "name": "worker",
+            "integrity": "sha256-j/MhiVWJh5BmB1imOISjjUsFbvhQRmfqSXSHhMIJTd0=",
+            "byteLength": 22692075,
+            "format": "tar.gz",
+            "origin": {
+              "kind": "url",
+              "urls": [
+                "https://cdn.tau.new/blobs/sha256/8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd",
+                "https://github.com/taucad/tau/releases/download/picogk-layer-8ff3218955898790/tau-picogk-layer-linux-x64.tar.gz"
+              ]
+            },
+            "destination": "tau-worker",
+            "unpackedByteLength": 56795546
           }
         ]
       }

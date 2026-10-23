@@ -37,6 +37,16 @@ import { loadCliRuntime } from '#runtime-options.js';
 const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../..');
 const cliBinPath = resolvePath(repoRoot, 'packages/cli/dist/bin/tau.mjs');
 const examplesRoot = resolvePath(repoRoot, 'libs/tau-examples/src/kernels');
+/** Whether PicoGK's tau-plugin.json declares this host: darwin-arm64, or linux-x64 on glibc 2.28 or later. */
+const picogkDeclaredHost =
+  (process.platform === 'darwin' && process.arch === 'arm64') ||
+  (process.platform === 'linux' &&
+    process.arch === 'x64' &&
+    Number(
+      (process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime?.split(
+        '.',
+      )[1] ?? 0,
+    ) >= 28);
 
 /** What one run of the built `tau` produced. */
 type Run = { readonly code: number | undefined; readonly stdout: string; readonly stderr: string };
@@ -480,11 +490,9 @@ describe('T6 — a native kernel that is not prepared', () => {
     expect(pythonIssue?.code).toBe('KERNEL_NOT_PREPARED');
     expect(pythonIssue?.message).toContain('tau prepare build123d');
     expect(csharp.code).toBe(3);
-    /* PicoGK runs on darwin-arm64 only (D13): elsewhere the refusal is the unsupported target, not preparation. */
+    /* PicoGK runs on darwin-arm64 and glibc linux-x64 (D13): elsewhere the refusal is the unsupported target. */
     const [csharpIssue] = recordOf(csharp)['issues'] as Array<{ code: string }>;
-    expect(csharpIssue?.code).toBe(
-      process.platform === 'darwin' && process.arch === 'arm64' ? 'KERNEL_NOT_PREPARED' : 'KERNEL_CAPABILITY_MISSING',
-    );
+    expect(csharpIssue?.code).toBe(picogkDeclaredHost ? 'KERNEL_NOT_PREPARED' : 'KERNEL_CAPABILITY_MISSING');
   });
 
   it('should answer MCP evaluate_model on main.py with the typed refusal', async () => {

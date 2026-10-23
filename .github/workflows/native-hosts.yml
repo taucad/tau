@@ -338,9 +338,9 @@ jobs:
       - name: Run the Build123d suites
         run: pnpm nx run build123d:test --outputStyle=static --testTimeout=120000
 
-      # D13: PicoGK declares darwin-arm64 alone until a Tau engine builder exists for another target,
-      # so an Intel Mac refuses on `arch`; forcing `TAU_PAYLOAD_TARGET` to a target PicoGK does not
-      # declare is refused on `os`. Both before any download.
+      # D13: PicoGK declares darwin-arm64 and linux-x64 on glibc, so an Intel Mac refuses on `arch`;
+      # forcing `TAU_PAYLOAD_TARGET` to a target PicoGK does not declare is refused on `os`. Both
+      # before any download.
       - name: Refuse PicoGK on Intel and an undeclared forced target
         run: |
           refuse() {
@@ -353,4 +353,4 @@ jobs:
             test -z "$(ls -A "$store/payloads/blobs" 2>/dev/null)"
           }
           refuse picogk-intel arch
-          TAU_PAYLOAD_TARGET=linux-x64-glibc refuse picogk-forced os
+          TAU_PAYLOAD_TARGET=win32-x64 refuse picogk-forced os

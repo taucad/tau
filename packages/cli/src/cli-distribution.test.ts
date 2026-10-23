@@ -31,8 +31,8 @@ const picogkSphere = resolve(repoRoot, 'libs/tau-examples/src/kernels/picogk/par
 // `picogk:prepare-layer` stages Microsoft's runtime archive and the locally built layer here.
 const picogkSeed = resolve(repoRoot, 'out/picogk-layer/seed');
 /*
- * The engine is built for darwin-arm64 only (D13), and `tau prepare picogk` can seal a closure only once a release run
- * has pinned a published layer in place of the empty digest.
+ * The native-engine scenarios run on darwin-arm64 with a locally staged seed, and `tau prepare picogk` can seal a
+ * closure only once a release run has pinned a published layer in place of the empty digest.
  */
 /* The native-darwin job opts in (D30): a darwin-arm64 host that may download the pinned PicoGK closure. */
 const nativeDarwin =

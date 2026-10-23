@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ownBuildId = 1_792_726_000_000;
 const deployedBuildId = 1_792_730_113_029;
 
-vi.mock('#filesystem/build-skew.js', () => ({ buildId: ownBuildId, markBuildSuperseded: vi.fn() }));
+vi.mock('#filesystem/build-skew.js', () => ({
+  buildId: ownBuildId,
+  markBuildSuperseded: vi.fn(),
+  recordLiveBuild: vi.fn(),
+}));
 
 /** Fresh module state per test: the page recovery and its interaction flag live at module scope. */
 const load = async () => {
@@ -33,13 +37,26 @@ const settle = async (): Promise<void> => {
   });
 };
 
+const rejectWithStaleModule = (): void => {
+  const event = new Event('unhandledrejection') as PromiseRejectionEvent;
+  Object.assign(event, { reason: new TypeError('Importing a module script failed.') });
+  globalThis.dispatchEvent(event);
+};
+
 let uninstall: (() => void) | undefined;
+
+beforeEach(() => {
+  // A page a second after load; tests that need it older say so.
+  vi.spyOn(performance, 'now').mockReturnValue(1000);
+});
 
 afterEach(() => {
   uninstall?.();
   uninstall = undefined;
   sessionStorage.clear();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe('installStaleBuildRecovery', () => {
@@ -54,8 +71,39 @@ describe('installStaleBuildRecovery', () => {
     globalThis.dispatchEvent(event);
     await settle();
 
-    expect(fetchMock).toHaveBeenCalledWith('/health/build', { cache: 'no-store', credentials: 'omit' });
+    expect(fetchMock).toHaveBeenCalledWith('/health/build', expect.objectContaining({ cache: 'no-store' }));
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it.each(['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'])(
+    'should offer the reload instead of forcing it after a %s',
+    async (type) => {
+      const { installStaleBuildRecovery } = await load();
+      const { markBuildSuperseded } = await import('#filesystem/build-skew.js');
+      stubServer(deployedBuildId);
+      const reload = stubReload();
+      uninstall = installStaleBuildRecovery();
+
+      globalThis.dispatchEvent(new Event(type));
+      rejectWithStaleModule();
+      await settle();
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(markBuildSuperseded).toHaveBeenCalledWith(deployedBuildId, 'server');
+    },
+  );
+
+  it('should offer the reload instead of forcing it once the page has been open a while', async () => {
+    const { installStaleBuildRecovery, autoReloadWindow } = await load();
+    stubServer(deployedBuildId);
+    const reload = stubReload();
+    vi.spyOn(performance, 'now').mockReturnValue(autoReloadWindow + 1);
+    uninstall = installStaleBuildRecovery();
+
+    rejectWithStaleModule();
+    await settle();
+
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it("should recover from a failure Vite's preloader reports", async () => {

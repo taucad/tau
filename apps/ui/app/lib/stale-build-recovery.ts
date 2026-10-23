@@ -14,8 +14,11 @@
  * a failure the page asks the server which build it runs (`/health/build`):
  *
  * - The same build, or no answer: the failure is genuine (`current`) and is reported.
- * - A different build, and reloading is provably safe (the user has not touched the
- *   page since it loaded, so there is no work to lose): reload once (`reloading`).
+ * - A different build, and reloading cannot lose work: the page loaded within the last
+ *   `autoReloadWindow` milliseconds and nobody has pointed, typed, scrolled, pasted or
+ *   dropped anything on it since. Then it reloads once (`reloading`). The app has no
+ *   cheap global signal for pending work (agent turns and edits flush on close, not
+ *   on demand), so the window and the absence of input stand in for it.
  *   The guard is the `from>to` build pair in `sessionStorage`, cleared once the page
  *   runs the target build, so a deploy that cannot serve its own chunks never loops.
  * - A different build otherwise: the build is marked superseded and the sidebar
@@ -25,7 +28,8 @@
  * many channels (boundary, global handler, Sentry) report it.
  */
 
-import { buildId, markBuildSuperseded } from '#filesystem/build-skew.js';
+import { buildId, markBuildSuperseded, recordLiveBuild } from '#filesystem/build-skew.js';
+import { fetchLiveBuildId } from '#lib/build-identity.js';
 
 /**
  * What a module load failure turned out to be.
@@ -39,8 +43,8 @@ export type StaleBuildOutcome = 'reloading' | 'superseded' | 'current';
 /** `sessionStorage` key holding the `from>to` build pair this tab last reloaded across. */
 export const staleBuildReloadKey = 'tau-stale-build-reload';
 
-/** Same-origin route that names the build the server renders pages for. */
-export const buildIdentityPath = '/health/build';
+/** Milliseconds after load within which an untouched page may reload on its own. */
+export const autoReloadWindow = 15_000;
 
 /** Milliseconds a reload may take before the page assumes it was refused and offers it instead. */
 export const reloadTimeout = 5000;
@@ -73,6 +77,8 @@ export type StaleBuildRecoveryOptions = {
   readonly reload: () => void;
   /** Hand the reload over to the update control, with the build id the server reported. */
   readonly onSuperseded: (serverBuildId: number) => void;
+  /** Record the build the server reported as soon as it differs, before anything is decided. */
+  readonly onLiveBuild: (serverBuildId: number) => void;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is assumed refused; defaults to {@link reloadTimeout}. */
@@ -83,6 +89,11 @@ export type StaleBuildRecoveryOptions = {
 export type StaleBuildRecovery = {
   /** Decide, and act on, one module load failure. The same failure always gets the same answer. */
   readonly recover: (failure: unknown) => Promise<StaleBuildOutcome>;
+  /**
+   * What a failure was, without acting on it: the decision already made for it, or else
+   * whether a deploy explains it (`superseded`) or not (`current`). Never reloads.
+   */
+  readonly classify: (failure: unknown) => Promise<StaleBuildOutcome>;
   /** Clear the reload guard once the page runs the build it reloaded into. */
   readonly confirmArrival: () => void;
 };
@@ -131,6 +142,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     if (serverBuildId === undefined || serverBuildId === options.buildId) {
       return 'current';
     }
+    options.onLiveBuild(serverBuildId);
     if (reloadPending) {
       return 'reloading';
     }
@@ -169,6 +181,17 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       return decision;
     },
+    async classify(failure) {
+      const decided = typeof failure === 'object' && failure !== null ? decisions.get(failure) : undefined;
+      if (decided !== undefined) {
+        return decided;
+      }
+      if (options.buildId === 0) {
+        return 'current';
+      }
+      const serverBuildId = await readServerBuildId();
+      return serverBuildId === undefined || serverBuildId === options.buildId ? 'current' : 'superseded';
+    },
     confirmArrival() {
       try {
         const target = options.storage?.getItem(staleBuildReloadKey)?.split('>')[1];
@@ -180,16 +203,6 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
     },
   };
-};
-
-const fetchServerBuildId = async (): Promise<number | undefined> => {
-  const response = await fetch(buildIdentityPath, { cache: 'no-store', credentials: 'omit' });
-  if (!response.ok) {
-    return undefined;
-  }
-  const { buildId: published } = (await response.json()) as { readonly buildId?: unknown };
-  const serverBuildId = Number(published);
-  return Number.isFinite(serverBuildId) && serverBuildId > 0 ? serverBuildId : undefined;
 };
 
 const readSessionStorage = (): Storage | undefined => {
@@ -206,13 +219,16 @@ let pageRecovery: StaleBuildRecovery | undefined;
 const getPageRecovery = (): StaleBuildRecovery => {
   pageRecovery ??= createStaleBuildRecovery({
     buildId,
-    fetchServerBuildId,
+    fetchServerBuildId: fetchLiveBuildId,
     storage: readSessionStorage(),
     reload: () => {
       globalThis.location.reload();
     },
-    onSuperseded: markBuildSuperseded,
-    canReloadSafely: () => !hasUserInteracted,
+    onSuperseded: (serverBuildId) => {
+      markBuildSuperseded(serverBuildId, 'server');
+    },
+    onLiveBuild: recordLiveBuild,
+    canReloadSafely: () => !hasUserInteracted && performance.now() <= autoReloadWindow,
   });
   return pageRecovery;
 };
@@ -227,9 +243,19 @@ export const recoverFromStaleBuild = async (failure: unknown): Promise<StaleBuil
   getPageRecovery().recover(failure);
 
 /**
+ * What one module load failure was, for an error reporter: the decision the page already
+ * made, or a classification that never reloads or supersedes anything.
+ *
+ * @param failure - The caught value.
+ * @returns `current` when the failure is worth reporting.
+ */
+export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildOutcome> =>
+  getPageRecovery().classify(failure);
+
+/**
  * Own recovery for the whole page, independently of error reporting: clear the
- * guard of a completed reload, note the first user input (after which a reload
- * is offered, never forced), and recover from module load failures that reach
+ * guard of a completed reload, note the first user input of any kind (after which
+ * a reload is offered, never forced), and recover from module load failures that reach
  * Vite's preloader (`vite:preloadError`) or no handler at all. Failures a
  * boundary catches are handed over by the boundary itself.
  *
@@ -237,10 +263,9 @@ export const recoverFromStaleBuild = async (failure: unknown): Promise<StaleBuil
  */
 export const installStaleBuildRecovery = (): (() => void) => {
   getPageRecovery().confirmArrival();
-  const onInput = (event: Event): void => {
-    if (event.isTrusted) {
-      hasUserInteracted = true;
-    }
+  // Any of these may be the start of work a reload would lose; count them all, whoever dispatched them.
+  const onInput = (): void => {
+    hasUserInteracted = true;
   };
   const recoverFrom = (failure: unknown): void => {
     if (isStaleModuleError(failure)) {
@@ -258,8 +283,9 @@ export const installStaleBuildRecovery = (): (() => void) => {
     recoverFrom(event.error);
   };
   const listeners = [
-    ['pointerdown', onInput],
-    ['keydown', onInput],
+    ...(['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'] as const).map(
+      (type) => [type, onInput] as const,
+    ),
     ['vite:preloadError', onPreloadError],
     ['unhandledrejection', onRejection],
     ['error', onError],

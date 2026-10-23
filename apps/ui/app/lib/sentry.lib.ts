@@ -4,7 +4,7 @@ import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
 import { buildId } from '#filesystem/build-skew.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
-import { isStaleModuleError, recoverFromStaleBuild } from '#lib/stale-build-recovery.js';
+import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
 import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 /**
@@ -66,12 +66,12 @@ export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): Erro
 /**
  * The `beforeSend` hook with version-skew filtering (TAU-UI-6).
  *
- * The stale-build recovery owns module load failures on its own (`installStaleBuildRecovery`);
- * this hook only awaits its decision for the failure, which is made once per failure however
- * many channels report it. A failure a deploy explains is dropped as expected control flow; a
- * failure the live build still has is reported like any other event.
+ * The stale-build recovery owns module load failures (`installStaleBuildRecovery` and the
+ * route error page); this hook never acts on one. It consults the decision already made for
+ * the failure, or a classification that never reloads, and drops the event when a deploy
+ * explains it. A failure the live build still has is reported like any other event.
  *
- * @param decide - The recovery's decision for one failure (`#lib/stale-build-recovery`).
+ * @param decide - Classifies one failure without acting on it (`classifyStaleBuildFailure`).
  * @returns The hook to pass to `Sentry.init`.
  * @public
  */
@@ -179,7 +179,7 @@ export const initSentry = (): void => {
     release: sentryRelease(buildId),
     sendDefaultPii: false,
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
-    beforeSend: createBeforeSend(recoverFromStaleBuild),
+    beforeSend: createBeforeSend(classifyStaleBuildFailure),
     beforeBreadcrumb: scrubSentryBreadcrumb,
   });
 };

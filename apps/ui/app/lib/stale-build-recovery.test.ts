@@ -27,6 +27,7 @@ const setup = (overrides: Partial<Parameters<typeof createStaleBuildRecovery>[0]
   const storage = createStorage();
   const reload = vi.fn();
   const onSuperseded = vi.fn();
+  const onLiveBuild = vi.fn();
   const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => deployedBuildId);
   const recovery = createStaleBuildRecovery({
     buildId: ownBuildId,
@@ -34,10 +35,11 @@ const setup = (overrides: Partial<Parameters<typeof createStaleBuildRecovery>[0]
     storage,
     reload,
     onSuperseded,
+    onLiveBuild,
     canReloadSafely: () => true,
     ...overrides,
   });
-  return { storage, reload, onSuperseded, fetchServerBuildId, recovery };
+  return { storage, reload, onSuperseded, onLiveBuild, fetchServerBuildId, recovery };
 };
 
 /** A distinct failure object, as each failed `import()` produces. */
@@ -78,6 +80,15 @@ describe('createStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
     expect(storage.entries.get(staleBuildReloadKey)).toBe(guardFor(ownBuildId, deployedBuildId));
     expect(onSuperseded).not.toHaveBeenCalled();
+  });
+
+  it('should record the live build before it reloads, so a rollback is worded right meanwhile', async () => {
+    const { recovery, reload, onLiveBuild } = setup();
+
+    await recovery.recover(failure());
+
+    expect(onLiveBuild).toHaveBeenCalledWith(deployedBuildId);
+    expect(onLiveBuild.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0] ?? 0);
   });
 
   it('should offer the reload instead of reloading once the user has interacted with the page', async () => {
@@ -208,6 +219,33 @@ describe('createStaleBuildRecovery', () => {
     expect(onSuperseded).toHaveBeenCalledWith(deployedBuildId);
     await expect(recovery.recover(failure())).resolves.toBe('superseded');
     expect(reload).toHaveBeenCalledOnce();
+  });
+
+  describe('classify', () => {
+    it('should name a deploy without reloading or superseding anything', async () => {
+      const { recovery, reload, onSuperseded } = setup();
+
+      await expect(recovery.classify(failure())).resolves.toBe('superseded');
+
+      expect(reload).not.toHaveBeenCalled();
+      expect(onSuperseded).not.toHaveBeenCalled();
+    });
+
+    it('should repeat a decision already made for the same failure', async () => {
+      const { recovery, fetchServerBuildId } = setup();
+      const error = failure();
+
+      await recovery.recover(error);
+
+      await expect(recovery.classify(error)).resolves.toBe('reloading');
+      expect(fetchServerBuildId).toHaveBeenCalledOnce();
+    });
+
+    it('should call a failure the live build still has current', async () => {
+      const { recovery } = setup({ fetchServerBuildId: async () => ownBuildId });
+
+      await expect(recovery.classify(failure())).resolves.toBe('current');
+    });
   });
 
   describe('confirmArrival', () => {

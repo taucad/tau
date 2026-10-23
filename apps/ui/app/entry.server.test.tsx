@@ -119,6 +119,21 @@ describe('entry.server handleRequest', () => {
     expect(response.headers.get('Cache-Control')).toBe('private, no-cache');
   });
 
+  it('should never let any cache keep the apex document, which a presentation cookie selects', async () => {
+    const response = await handleRequest(
+      new Request('https://taucad.dev/', { method: 'HEAD' }),
+      200,
+      new Headers(),
+      entryContext,
+      loadContext,
+    );
+    const netlifyConfig = readFileSync(resolve(import.meta.dirname, '../netlify.toml'), 'utf8');
+    const apexPolicy = /for = "\/"\n\[headers\.values\]\nCache-Control = "([^"]+)"/u.exec(netlifyConfig)?.[1];
+
+    expect(apexPolicy).toBe('private, no-store');
+    expect(response.headers.get('Cache-Control')).toBe(apexPolicy);
+  });
+
   it("should keep a route's own document cache policy", async () => {
     const response = await handleRequest(
       new Request('https://taucad.dev/s/fixture', { method: 'HEAD' }),

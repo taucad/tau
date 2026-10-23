@@ -27,11 +27,16 @@ export default function handleRequest(
   responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
   /* TAU-UI-6: a document names its build's hashed chunks, and a deploy stops serving them, so no
    * cache may answer a load or refresh with a stored document without asking the server. It is
-   * also rendered from the visitor's cookies, so no shared cache may keep it at all (`private`,
-   * as the apex rule in `netlify.toml`; that file's header blocks do not reach function responses).
-   * Routes that choose their own policy (`cdnBackedSsrRouteHeaders`) keep it. */
+   * also rendered from the visitor's cookies, so no shared cache may keep it (`private`). The apex
+   * `/` is chosen by a presentation cookie, so no cache keeps it at all (`no-store`), as the `/`
+   * rule in `netlify.toml` says; that file's header blocks do not reach function responses, and the
+   * marketing edge function only covers Netlify. Routes that choose their own policy
+   * (`cdnBackedSsrRouteHeaders`) keep it. */
   if (!responseHeaders.has('Cache-Control')) {
-    responseHeaders.set('Cache-Control', 'private, no-cache');
+    responseHeaders.set(
+      'Cache-Control',
+      new URL(request.url).pathname === '/' ? 'private, no-store' : 'private, no-cache',
+    );
   }
   /* OQ-P11: `Document-Policy: js-profiling` lets a developer take a real sampling profile of this
    * document from `Profiler`. It is off the production origin, where it would offer every visitor's

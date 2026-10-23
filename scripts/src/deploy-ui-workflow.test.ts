@@ -8,7 +8,9 @@ import { describe, expect, it } from 'vitest';
 
 type Step = { id?: string; run?: string; env?: Record<string, string> };
 const root = resolve(import.meta.dirname, '../..');
+type Inputs = Record<string, { type?: string; default?: unknown; required?: boolean }>;
 const workflow = load(readFileSync(join(root, '.github/workflows/deploy-ui.yml'), 'utf8')) as {
+  on: { workflow_call: { inputs: Inputs }; workflow_dispatch: { inputs: Inputs } };
   jobs: { deploy: { steps: Step[] } };
 };
 const validation = workflow.jobs.deploy.steps.find((step) => step.id === 'posthog');
@@ -174,5 +176,30 @@ describe('UI asset retention origin', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('UI asset retention escape hatch', () => {
+  const deploy = workflow.jobs.deploy.steps.find((step) => step.env?.['TAU_RETAIN_ASSETS_FROM'] !== undefined);
+
+  it.each(['workflow_call', 'workflow_dispatch'] as const)(
+    'should let a %s deploy skip retention on purpose, off by default',
+    (trigger) => {
+      expect(workflow.on[trigger].inputs['skip_asset_retention']).toMatchObject({ type: 'boolean', default: false });
+    },
+  );
+
+  it('should hand the choice to the retention script, and only when asked', () => {
+    expect(deploy?.env?.['TAU_RETAIN_ASSETS_SKIP']).toMatch(
+      /^\$\{\{ inputs\.skip_asset_retention && '1' \|\| '' \}\}$/u,
+    );
+  });
+
+  it('should let a production redeploy pass the choice on to the UI deploy', () => {
+    const production = readFileSync(join(root, '.github/workflows/deploy-production.yml'), 'utf8');
+    expect(production).toMatch(
+      /skip_asset_retention:\n\s+description: .+\n\s+required: false\n\s+type: boolean\n\s+default: false/u,
+    );
+    expect(production).toContain('-f skip_asset_retention=true');
   });
 });

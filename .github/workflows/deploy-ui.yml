@@ -22,7 +22,9 @@
 # site IDs below are not secrets.
 #
 # Manual redeploy of staging: `gh workflow run deploy-ui.yml -f
-# environment=staging` from `main`. Production rollbacks and redeploys go
+# environment=staging` from `main`. Add `-f skip_asset_retention=true` only to
+# ship while the live Netlify origin cannot be read, which otherwise fails the
+# deploy rather than drop the assets retained for pages already open. Production rollbacks and redeploys go
 # through `deploy-production.yml` with the release tag.
 
 name: Deploy UI to Netlify
@@ -34,6 +36,11 @@ on:
         required: true
         type: string
         description: 'staging or production'
+      skip_asset_retention:
+        required: false
+        type: boolean
+        default: false
+        description: 'Ship without keeping the previous deploys assets (only while the live origin is down)'
   workflow_dispatch:
     inputs:
       environment:
@@ -43,6 +50,11 @@ on:
         options:
           - staging
           - production
+      skip_asset_retention:
+        required: false
+        type: boolean
+        default: false
+        description: 'Ship without keeping the previous deploys assets (only while the live origin is down)'
 
 permissions:
   contents: read
@@ -189,6 +201,9 @@ jobs:
           # The live deploy whose recent `/assets/*` this one keeps serving, so pages
           # loaded before it go live keep loading their chunks (`retain-previous-assets.mts`).
           TAU_RETAIN_ASSETS_FROM: ${{ steps.site.outputs.retain_from }}
+          # Emergency only: a live origin that cannot be read fails the deploy, so a fix
+          # must say on purpose that it ships without retention (logged as a warning).
+          TAU_RETAIN_ASSETS_SKIP: ${{ inputs.skip_asset_retention && '1' || '' }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of

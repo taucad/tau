@@ -267,13 +267,24 @@ const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetche
   throw lastError;
 };
 
+/** The environment variable that skips retention for one deploy, when the live origin is down and a fix must ship. */
+export const skipRetentionVariable = 'TAU_RETAIN_ASSETS_SKIP';
+
+/** Why the live index could not be read; the deploy fails rather than drop the generations it should keep. */
+const unreadableIndex = (origin: string, reason: string): Error =>
+  new Error(
+    `Retention could not read the live asset index at ${origin}/${servedAssetsIndexFileName} (${reason}). ` +
+      `Publishing now would drop every retained asset. Re-run once the live deploy answers, or set ` +
+      `${skipRetentionVariable}=1 to ship this deploy without retention.`,
+  );
+
 const readLiveIndex = async (origin: string, transport: Transport): Promise<ServedAssetsIndex | undefined> => {
   let response: Fetched;
   try {
     response = await fetchWithRetry(`${origin}/${servedAssetsIndexFileName}`, transport);
   } catch (error) {
-    console.warn(`::warning::No assets retained: ${origin} could not be reached (${String(error)}).`);
-    return undefined;
+    // After the retries: a live deploy that cannot be reached, or keeps failing, may still have assets to keep.
+    throw unreadableIndex(origin, String(error));
   }
   /* No index yet: a 404, or an OK page that is not JSON. A host from before retention answers this
    * path with its app's HTML (production on Fly answered 200 text/html on 2026-10-23). */
@@ -282,10 +293,7 @@ const readLiveIndex = async (origin: string, transport: Transport): Promise<Serv
     return undefined;
   }
   if (response.status !== 200) {
-    console.warn(
-      `::warning::No assets retained: ${origin}/${servedAssetsIndexFileName} answered ${String(response.status)}.`,
-    );
-    return undefined;
+    throw unreadableIndex(origin, `answered ${String(response.status)}`);
   }
   const index = JSON.parse(new TextDecoder().decode(response.body)) as Partial<ServedAssetsIndex>;
   if (index.schema !== servedAssetsIndexSchema || !Array.isArray(index.assets)) {
@@ -326,6 +334,8 @@ export const retainPreviousAssets = async (options: {
   readonly requestTimeout?: number;
   /** Waits out a retry's backoff; replaceable in tests. */
   readonly wait?: (milliseconds: number) => Promise<void>;
+  /** Retain nothing and ask the live deploy nothing (`TAU_RETAIN_ASSETS_SKIP`): an emergency deploy while it is down. */
+  readonly skip?: boolean;
 }): Promise<{ readonly retained: number; readonly bytes: number; readonly index: ServedAssetsIndex }> => {
   const transport: Transport = {
     requestTimeout: options.requestTimeout ?? defaultRequestTimeout,
@@ -333,7 +343,7 @@ export const retainPreviousAssets = async (options: {
   };
   const own = await listOwnAssets(options.clientDirectory);
   const origin = options.origin?.replace(/\/+$/u, '');
-  const previous = origin === undefined ? undefined : await readLiveIndex(origin, transport);
+  const previous = origin === undefined || options.skip === true ? undefined : await readLiveIndex(origin, transport);
   const kept = previous === undefined ? [] : planRetention(previous, new Set(own.map((asset) => asset.path)));
 
   const download: Download = { origin: origin ?? '', clientDirectory: options.clientDirectory, transport };
@@ -351,9 +361,17 @@ export const retainPreviousAssets = async (options: {
 const main = async (): Promise<void> => {
   const configured = process.env['TAU_RETAIN_ASSETS_FROM']?.trim();
   const origin = configured === undefined || configured === '' ? undefined : configured;
+  const skip = process.env[skipRetentionVariable]?.trim() === '1';
+  if (skip) {
+    console.warn(
+      `::warning::${skipRetentionVariable}=1: this deploy retains NO previous assets. Pages open across it ` +
+        'may fail their next lazy import until they reload. Use only to ship a fix while the live origin is down.',
+    );
+  }
   const { retained, bytes, index } = await retainPreviousAssets({
     clientDirectory: resolve(import.meta.dirname, '../build/client'),
     origin,
+    skip,
   });
   console.log(
     `✓ ${String(retained)} assets (${String(Math.round(bytes / 1024))} KiB) retained from ${origin ?? 'no live deploy'}; ${String(index.assets.length)} served.`,

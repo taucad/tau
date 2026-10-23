@@ -251,6 +251,46 @@ describe('retainPreviousAssets', () => {
     );
   });
 
+  it.each<readonly [string, 'unavailable' | { readonly status: number }]>([
+    ['keeps failing with a server error', 'unavailable'],
+    ['refuses the request', { status: 403 }],
+  ])(
+    'should fail the deploy when the live index %s, rather than drop the retained generations',
+    async (_label, fault) => {
+      const live = await startLiveDeploy({}, indexOf([]), (path) =>
+        path === servedAssetsIndexFileName ? fault : undefined,
+      );
+      const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+      await expect(
+        retainPreviousAssets({ clientDirectory: client, origin: live.origin, wait: async () => undefined }),
+      ).rejects.toThrow(/TAU_RETAIN_ASSETS_SKIP/u);
+    },
+  );
+
+  it('should fail the deploy when the live deploy cannot be reached', async () => {
+    const { origin } = await startLiveDeploy({}, undefined);
+    await Promise.all(cleanups.splice(0).map(async (cleanup) => cleanup()));
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    await expect(
+      retainPreviousAssets({ clientDirectory: client, origin, wait: async () => undefined }),
+    ).rejects.toThrow(/could not read the live asset index/u);
+  });
+
+  it('should publish an index of its own assets, asking nothing, when retention is skipped on purpose', async () => {
+    const live = await startLiveDeploy({}, indexOf([]), () => 'unavailable');
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    const result = await retainPreviousAssets({ clientDirectory: client, origin: live.origin, skip: true });
+
+    expect(result.retained).toBe(0);
+    expect(live.requests).toStrictEqual([]);
+    expect(await readIndex(client)).toStrictEqual(
+      indexOf([{ path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 }]),
+    );
+  });
+
   it('should retry an unavailable live deploy, waiting longer each time, before giving up', async () => {
     const live = await startLiveDeploy(
       { 'assets/route-OLD1.js': 'old1' },

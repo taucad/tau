@@ -128,14 +128,14 @@ describe('planRetention', () => {
   ]);
 
   it('should keep the previous builds’ assets the new build lacks, one generation older', () => {
-    expect(planRetention(previous, new Set(['assets/shared-AAAA.js']), 2)).toStrictEqual([
+    expect(planRetention(previous, new Set(['assets/shared-AAAA.js']), { generations: 2 })).toStrictEqual([
       { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
       { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
     ]);
   });
 
   it('should keep nothing when retention is off', () => {
-    expect(planRetention(previous, new Set(), 0)).toStrictEqual([]);
+    expect(planRetention(previous, new Set(), { generations: 0 })).toStrictEqual([]);
   });
 
   it.each([
@@ -143,7 +143,7 @@ describe('planRetention', () => {
     ['a string', 'assets/a-1.js'],
     ['an object without a path', { integrity: integrityOf('x'), generation: 0 }],
   ])('should call an index entry that is %s malformed', (_label, entry) => {
-    expect(() => planRetention(indexOf([entry as unknown as ServedAsset]), new Set(), 2)).toThrow(
+    expect(() => planRetention(indexOf([entry as unknown as ServedAsset]), new Set(), { generations: 2 })).toThrow(
       'The live asset index has a malformed entry',
     );
   });
@@ -154,7 +154,7 @@ describe('planRetention', () => {
       { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 },
     ]);
 
-    expect(planRetention(twice, new Set(), 2)).toStrictEqual([
+    expect(planRetention(twice, new Set(), { generations: 2 })).toStrictEqual([
       { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
     ]);
   });
@@ -166,9 +166,9 @@ describe('planRetention', () => {
     ['carries a query', 'assets/a-1.js?raw'],
     ['carries a backslash', String.raw`assets/a\b.js`],
   ])('should refuse an index whose path %s', (_label, path) => {
-    expect(() => planRetention(indexOf([{ path, integrity: integrityOf('x'), generation: 0 }]), new Set(), 2)).toThrow(
-      /refuses the path/u,
-    );
+    expect(() =>
+      planRetention(indexOf([{ path, integrity: integrityOf('x'), generation: 0 }]), new Set(), { generations: 2 }),
+    ).toThrow(/refuses the path/u);
   });
 });
 
@@ -198,6 +198,50 @@ describe('retainPreviousAssets', () => {
         { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
         { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
         { path: 'assets/shared-AAAA.js', integrity: integrityOf('shared'), generation: 0 },
+      ]),
+    );
+  });
+
+  it('should keep the generations unchanged when the same build is deployed again', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-NEW1.js': 'new1', 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
+      indexOf([
+        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+      ]),
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+
+    expect(await readIndex(client)).toStrictEqual(
+      indexOf([
+        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+      ]),
+    );
+  });
+
+  it('should age the generations when a different build is deployed', async () => {
+    const live = await startLiveDeploy(
+      { 'assets/route-NEW1.js': 'new1', 'assets/route-OLD1.js': 'old1', 'assets/route-OLD2.js': 'old2' },
+      indexOf([
+        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 0 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 1 },
+        { path: 'assets/route-OLD2.js', integrity: integrityOf('old2'), generation: 2 },
+      ]),
+    );
+    const client = await createClient({ 'assets/route-NEW2.js': 'new2' });
+
+    await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
+
+    expect(await readIndex(client)).toStrictEqual(
+      indexOf([
+        { path: 'assets/route-NEW1.js', integrity: integrityOf('new1'), generation: 1 },
+        { path: 'assets/route-NEW2.js', integrity: integrityOf('new2'), generation: 0 },
+        { path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 2 },
       ]),
     );
   });
@@ -336,6 +380,29 @@ describe('retainPreviousAssets', () => {
 
     expect(await readFile(join(client, 'assets/route-OLD1.js'), 'utf8')).toBe('old1');
     expect(waits).toStrictEqual(expectedWaits);
+  });
+
+  it.each([
+    ['zero', '0'],
+    ['a date already past', 'Thu, 01 Jan 1970 00:00:00 GMT'],
+  ])('should keep the backoff when a Retry-After asks for %s', async (_label, retryAfter) => {
+    const live = await startLiveDeploy(
+      { 'assets/route-OLD1.js': 'old1' },
+      indexOf([{ path: 'assets/route-OLD1.js', integrity: integrityOf('old1'), generation: 0 }]),
+      (path, attempt) => (path === 'assets/route-OLD1.js' && attempt < 3 ? { status: 503, retryAfter } : undefined),
+    );
+    const client = await createClient({ 'assets/route-NEW1.js': 'new1' });
+    const waits: number[] = [];
+
+    await retainPreviousAssets({
+      clientDirectory: client,
+      origin: live.origin,
+      wait: async (milliseconds) => {
+        waits.push(milliseconds);
+      },
+    });
+
+    expect(waits).toStrictEqual([1000, 2000]);
   });
 
   it('should give up on an asset the live deploy never finishes sending', async () => {

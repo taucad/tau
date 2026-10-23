@@ -12,16 +12,24 @@
  * next deploy reads in turn. Netlify stores files by content, so a retained
  * asset is not uploaded again.
  *
- * The index fails closed: a malformed index or an asset that does not match its
- * integrity fails the build. A live site without an index (the first deploy
- * that runs this) or that cannot be reached keeps nothing and says so.
+ * Generations age per distinct build: a redeploy of the build the live deploy
+ * already serves keeps every asset at the age the live index lists.
+ *
+ * It fails closed: a malformed index, an asset that does not match its integrity,
+ * a listed asset the live deploy lost, or a live index it cannot read (a network
+ * error, a 5xx or any other status but 404, after the retries) fails the build,
+ * since publishing then would drop every retained asset. Only a live site without
+ * an index yet (a 404, or a 200 page that is not JSON: the first deploy that runs
+ * this) keeps nothing and says so.
  *
  * Optional env vars:
- *   TAU_RETAIN_ASSETS_FROM   Origin of the live deploy, e.g. https://taucad.dev (`deploy-ui.yml`).
- *                            Unset: only the new deploy's index is written.
+ *   TAU_RETAIN_ASSETS_FROM   Netlify origin of the live deploy, e.g. https://taucad-prod-us.netlify.app
+ *                            (`deploy-ui.yml`), never the public host. Unset: only the new deploy's index is written.
+ *   TAU_RETAIN_ASSETS_SKIP   `1` retains nothing and asks the live deploy nothing, with a warning: the emergency
+ *                            path while the live origin is down (`skip_asset_retention` in `deploy-ui.yml`).
  *
  * Usage: node scripts/retain-previous-assets.mts   (from apps/ui, after the client build)
- * Exit codes: 0 success, 1 a malformed index or an asset that cannot be retained.
+ * Exit codes: 0 success, 1 a malformed or unreadable index, or an asset that cannot be retained.
  */
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
@@ -127,19 +135,41 @@ const assertServedAsset = (entry: unknown): ServedAsset => {
 };
 
 /**
+ * Whether the new build is the one the live deploy already serves: its own assets are exactly the
+ * live index's generation `0`. The build id cannot tell, since every build stamps a fresh one
+ * (`vite.config.ts`) while its client chunks keep their hashes.
+ *
+ * @param previous - The live deploy's index.
+ * @param own - The new build's own assets.
+ * @returns `true` for a redeploy of the same build, whose generations must not age.
+ */
+export const isSameBuild = (previous: ServedAssetsIndex, own: readonly ServedAsset[]): boolean => {
+  const live = new Set(
+    (previous.assets as readonly unknown[])
+      .map((entry) => assertServedAsset(entry))
+      .filter((asset) => asset.generation === 0)
+      .map((asset) => `${asset.path}\0${asset.integrity}`),
+  );
+  return live.size === own.length && own.every((asset) => live.has(`${asset.path}\0${asset.integrity}`));
+};
+
+/**
  * The assets a new deploy keeps from the live one.
  *
  * @param previous - The live deploy's index.
  * @param ownPaths - Asset paths the new build has itself.
- * @param generations - Deploys after its own that an asset stays served for.
- * @returns The assets to download, one generation older than the live index lists them.
+ * @param options - `generations`: deploys after its own that an asset stays served for; `shouldAge`:
+ *   `false` for a redeploy of the same build ({@link isSameBuild}), whose ages stay as listed.
+ * @returns The assets to download, one generation older than the live index lists them unless not aging.
  * @throws When the index names a path outside `assets/`.
  */
 export const planRetention = (
   previous: ServedAssetsIndex,
   ownPaths: ReadonlySet<string>,
-  generations: number = retainedGenerations,
+  options: { readonly generations?: number; readonly shouldAge?: boolean } = {},
 ): readonly ServedAsset[] => {
+  const { generations = retainedGenerations, shouldAge = true } = options;
+  const step = shouldAge ? 1 : 0;
   // One entry per path, at its youngest generation: a path listed twice is downloaded once.
   const youngest = new Map<string, ServedAsset>();
   for (const entry of previous.assets as readonly unknown[]) {
@@ -151,9 +181,10 @@ export const planRetention = (
   }
   return [...youngest.values()]
     .filter(
-      (asset) => asset.generation + 1 <= generations && !ownPaths.has(asset.path) && !isNeverLoadedByPages(asset.path),
+      (asset) =>
+        asset.generation + step <= generations && !ownPaths.has(asset.path) && !isNeverLoadedByPages(asset.path),
     )
-    .map((asset) => ({ ...asset, generation: asset.generation + 1 }));
+    .map((asset) => ({ ...asset, generation: asset.generation + step }));
 };
 
 /** Files hashed at once: the build holds about 2,000 files and 330 MiB, which must not all be read together. */
@@ -243,7 +274,8 @@ const fetchWithRetry = async (url: string, transport: Transport): Promise<Fetche
   let lastError: unknown;
   let requestedWait: number | undefined;
   for (const backoff of [0, ...retryBackoff]) {
-    const wait = requestedWait ?? backoff;
+    // A `Retry-After` may ask for longer than the backoff, never for less (zero, or a date already past).
+    const wait = Math.min(Math.max(requestedWait ?? 0, backoff), retryAfterCap);
     if (wait > 0) {
       // oxlint-disable-next-line no-await-in-loop -- Retries are sequential by definition.
       await transport.wait(wait);
@@ -344,7 +376,10 @@ export const retainPreviousAssets = async (options: {
   const own = await listOwnAssets(options.clientDirectory);
   const origin = options.origin?.replace(/\/+$/u, '');
   const previous = origin === undefined || options.skip === true ? undefined : await readLiveIndex(origin, transport);
-  const kept = previous === undefined ? [] : planRetention(previous, new Set(own.map((asset) => asset.path)));
+  const kept =
+    previous === undefined
+      ? []
+      : planRetention(previous, new Set(own.map((asset) => asset.path)), { shouldAge: !isSameBuild(previous, own) });
 
   const download: Download = { origin: origin ?? '', clientDirectory: options.clientDirectory, transport };
   const sizes = await mapWithConcurrency(kept, downloadConcurrency, async (asset) => downloadAsset(download, asset));

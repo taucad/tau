@@ -16,7 +16,13 @@ type LatencyKind = 'key' | 'paste' | 'interrupt';
 type LatencyRecord = { kind: LatencyKind; t0: number; t1: number; ms: number; found: boolean; underLoad: boolean };
 type PendingInput = { kind: LatencyKind; t0: number };
 /** `maxBytes` above the fixture size replays it until interrupted or the cap is reached. */
-type PlayOptions = { chunkBytes: number; highWater: number; maxBytes?: number };
+type PlayOptions = {
+  chunkBytes: number;
+  highWater: number;
+  maxBytes?: number;
+  /** Cap the offered stream at this many bytes per second so both candidates are measured at the same output load. */
+  rateBytesPerSecond?: number;
+};
 type PlayResult = {
   bytes: number;
   writtenBytes: number;
@@ -196,6 +202,8 @@ globalThis.addEventListener(
   { capture: true },
 );
 const pastedTexts: string[] = [];
+/** Link activations the adapter routed to the host instead of opening a window (R07). */
+const linkRequests: string[] = [];
 globalThis.addEventListener(
   'paste',
   (event) => {
@@ -251,6 +259,9 @@ const api = {
       scrollback: options.scrollback,
       webgl: options.webgl,
       screenReaderMode: options.screenReaderMode,
+      onLinkActivate(uri, event) {
+        linkRequests.push(`${uri} ctrl=${event.ctrlKey || event.metaKey}`);
+      },
     });
     const size = view.fit();
     detachData = view.onData(onTerminalData);
@@ -318,7 +329,13 @@ const api = {
         });
         drained = undefined;
       }
-      await nextTask();
+      const due = options.rateBytesPerSecond ? (writtenBytes / options.rateBytesPerSecond) * 1000 : 0;
+      const ahead = due - (performance.now() - started);
+      await (ahead > 1
+        ? new Promise<void>((resolve) => {
+            setTimeout(resolve, ahead);
+          })
+        : nextTask());
     }
     /* oxlint-enable no-loop-func, no-unmodified-loop-condition, typescript/no-unnecessary-condition, no-await-in-loop */
     await new Promise<void>((resolve) => {
@@ -444,6 +461,7 @@ const api = {
     chromeMutations: [...chromeMutations],
     images: document.querySelectorAll('img').length,
     pastedTexts: [...pastedTexts],
+    linkRequests: [...linkRequests],
     injected: (globalThis as { s3Injected?: unknown }).s3Injected !== undefined,
     // oxlint-disable-next-line unicorn/prefer-query-selector -- Keep the measured DOM-node count probe unchanged across recorded runs.
     domNodes: document.getElementsByTagName('*').length,

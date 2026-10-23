@@ -35,6 +35,8 @@ const { values } = parseArgs({
     out: { type: 'string' },
     scale: { type: 'string', default: '1' },
     'skip-build': { type: 'boolean', default: false },
+    /** Cap the R01 interactive-phase stream (MiB/s) so key latency is compared at the same output load; 0 = unbounded. */
+    rate: { type: 'string', default: '0' },
     'electron-arg': { type: 'string', multiple: true, default: [] },
   },
 });
@@ -48,6 +50,7 @@ const rounds = Number(values.rounds);
 const kinds: readonly Kind[] = ['xterm', 'ghostty'];
 const pane = { width: 960, height: 540 };
 const flow = { chunkBytes: 16_384, highWater: 262_144 };
+const interactiveRate = Number(values.rate);
 /** Milliseconds between main-process metric samples. */
 const sampleInterval = 250;
 const electronPath = createRequire(path.join(root, 'apps/desktop/package.json'))('electron') as unknown as string;
@@ -358,6 +361,7 @@ const r01Run = async (kind: Kind, round: number) => {
     const play = call<Record<string, number>>(session, 'play', 'r01-colored-log', {
       ...flow,
       maxBytes: 64 * 1024 * 1024,
+      ...(interactiveRate > 0 && { rateBytesPerSecond: interactiveRate * 2 ** 20 }),
     });
     await sleep(300);
     const letters = 'abcdefghijklmnopqrstuvwxyzabcdefghijklmn';
@@ -387,6 +391,7 @@ const r01Run = async (kind: Kind, round: number) => {
       sequence,
       afterStreamScreenshot,
       interactive: {
+        rateMiBps: interactiveRate,
         afterInterruptScreenshot: await screenshot(session, `r01-after-interrupt-${kind}-round${round}`),
         play: interactivePlay,
         ...interactive,
@@ -444,6 +449,11 @@ const r01 = async () => {
           pasteMs: summary(mine.flatMap((run) => run.interactive.paste.map((entry) => entry.ms))),
           /* oxlint-enable tau-lint/no-time-unit-suffix */
           throughputMiBps: summary(mine.map((run) => run.throughput.mibPerSecond)),
+          interactiveMiBps: summary(
+            mine.map(
+              (run) => run.interactive.play['writtenBytes']! / 2 ** 20 / (run.interactive.play['elapsedMs']! / 1000),
+            ),
+          ),
           idleCpuPercent: summary(mine.map((run) => run.idle.cpuMeanPercent)),
           idleFramesPerSecond: summary(mine.map((run) => run.idle.idleFramesPerSecond)),
           loadCpuPercent: summary(mine.map((run) => run.throughput.cpuMeanPercent)),
@@ -1014,6 +1024,7 @@ const r07Run = async (kind: Kind) => {
       outputOnly,
       userClicks: clicks,
       injectedAfterClicks: (await call<{ injected: boolean }>(session, 'probe')).injected,
+      linkRequests: (await call<{ linkRequests: string[] }>(session, 'probe')).linkRequests,
       clipboardAfterClicks: await main<string>(session, `return electron.clipboard.readText()`),
       screenshot: await screenshot(session, `r07-links-${kind}`),
     };

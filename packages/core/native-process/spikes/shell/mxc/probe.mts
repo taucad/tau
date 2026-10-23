@@ -1,5 +1,5 @@
 /**
- * W2 MXC capability probe. Records, from the pinned SDK on windows-2025:
+ * W2 MXC capability probe. Records, from the pinned SDK:
  *   - PSEC create/close: BaseContainer API present AND a real container actually launched a child
  *     (proven by a preflight sentinel the child writes to an out-of-container canary path).
  *   - PSE_SUPPORT_FS_DENY: `baseContainerSupportsDenyPaths` from the native probe facts.
@@ -11,6 +11,12 @@
  * or a container that never ran is a typed `prerequisite` state and a FAILED check — never a skip,
  * never an unsupported-platform green. If the whole SDK is unavailable, the row hands off to the
  * capability-SID fallback (fallback.mts); this probe records exactly why.
+ *
+ * Receipt-integrity rule (summarize.mts enforces it): the prose `conclusion` is GENERATED FROM the
+ * structured facts below, never hand-written, so it can never drift from them. In particular it
+ * distinguishes `baseContainerApiPresent` (the API-present fact) from `psec.createClose` (whether a
+ * real child launched+closed): a present API whose live exercise fails is a live-exercise failure
+ * (e.g. a request-config parse error), NOT an absent API, and must never be labelled E_NOTIMPL.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -75,6 +81,8 @@ const preflightSentinel = async (sdk: MxcSdk): Promise<{ check: Check; psecCreat
   };
   // A container whose PowerShell (D14) writes the nonce to the shared RW path, then exits
   // (destroy-on-exit closes PSEC). Single-quoted PS literals keep psLaunch's -Command unescaped.
+  // No proxy URL is passed: the sentinel needs no egress, so requestFor OMITS runtimeConfig.networkProxy
+  // (an empty/relative networkProxy throws "relative URL without a base" and the container never runs).
   const shell = resolveWindowsShell();
   const command = psLaunch(shell, `Set-Content -LiteralPath '${sentinel.replaceAll('\\', '/')}' -Value '${token}'`);
   let ran = false;
@@ -129,6 +137,7 @@ const main = async (): Promise<void> => {
   let platformSupport: unknown;
   let probeFacts: Record<string, unknown> = {};
   let availableBackends: unknown;
+  let tier: string | undefined;
   let psecCreateClose: Prereq = { available: false, reason: 'SDK not loaded' };
   const conpty = conptyBinding();
 
@@ -147,6 +156,7 @@ const main = async (): Promise<void> => {
     try {
       probeOutput = sdk.probe() as typeof probeOutput;
       probeFacts = probeOutput.probes ?? {};
+      tier = probeOutput.tier;
     } catch (error) {
       probeOutput = { error: String(error) };
     }
@@ -207,6 +217,9 @@ const main = async (): Promise<void> => {
       ),
     );
     checks.push(
+      check('mxc.isolationSession.available', 'isolationSessionAvailable', 'SDK unavailable', false),
+    );
+    checks.push(
       check('mxc.psec.createClose', 'a real processcontainer launched a child and closed', 'SDK unavailable', false),
     );
   }
@@ -221,19 +234,35 @@ const main = async (): Promise<void> => {
     ),
   );
 
-  const apiPresent = Boolean(probeFacts['baseContainerApiPresent']) && psecCreateClose.available;
+  const apiFact = Boolean(probeFacts['baseContainerApiPresent']);
+  const liveRan = psecCreateClose.available;
+  const denyPathsFact = Boolean(probeFacts['baseContainerSupportsDenyPaths']);
   const isolationSessionAvailable = Boolean(probeFacts['isolationSessionAvailable']);
-  // Root-caused from mxc_ffi.dll: a false baseContainerApiPresent means CreateProcessSecurityEnvironment
-  // returned E_NOTIMPL — "The process security environment feature is not enabled on this OS build
-  // (disabled feature flags: ...)". PSEC is gated behind Windows VELOCITY/experimental feature flags,
-  // not a DISM optional feature; it is OFF by default on GA builds (observed false on both hosted
-  // windows-2025/Server 2025 AND real windows-11-arm Enterprise 25H2), so stock consumer Win11
-  // Home/Pro lacks it too. Enabling needs a flighted build or an experimental-features toggle that
-  // takes effect only after a REBOOT, so it cannot be turned on inside a single CI job. MXC falls
-  // back to AppContainer (appcontainer-bfs / appcontainer-dacl) on such builds.
-  const conclusion = apiPresent
-    ? 'PSEC/processcontainer base-container API present: the two-container isolation receipt is exercisable on this row.'
-    : `PSEC/processcontainer base-container API NOT present on this Windows build (typed-unavailable, fail-closed — not a bug). Root cause: CreateProcessSecurityEnvironment returns E_NOTIMPL because the process-security-environment feature flag is disabled on this GA build; it is a flighted/experimental feature, off by default on consumer and server SKUs alike, and enabling it needs a reboot so it cannot be enabled in-CI. The PSEC two-container receipt needs a flighted/VM Windows build. PSEC-INDEPENDENT alternative on this host: isolation_session (per-session agent user + SID) isolationSessionAvailable=${String(isolationSessionAvailable)} — if true it is the stock-Windows isolation path and does not require the PSEC feature flag.`;
+  // GENERATED FROM FACTS (receipt-integrity): never hand-write PSEC prose. Distinguish API-present
+  // from live-exercise so a config/parse failure is never mislabelled E_NOTIMPL.
+  const createCloseDetail = JSON.stringify(psecCreateClose.detail ?? null).slice(0, 400);
+  const verdict4 = liveRan
+    ? 'PSEC processcontainer base-container launched AND closed a real child (external sentinel written): native Windows containment is LIVE on this build.'
+    : apiFact
+      ? `base-container API IS present but the live create/close did NOT write the external sentinel. This is a LIVE-EXERCISE failure (e.g. a request-config parse error), NOT an absent API and NOT E_NOTIMPL. createClose detail: ${createCloseDetail}`
+      : 'base-container API reports NOT present (CreateProcessSecurityEnvironment unavailable / feature-flag gated on this build); the PSEC two-container receipt needs a flighted build. isolation_session and the capability-SID fallback are the alternatives.';
+  const conclusion = [
+    `baseContainerApiPresent=${apiFact}`,
+    `psec.createClose(liveChildLaunchedAndClosed)=${liveRan}`,
+    `baseContainerSupportsDenyPaths=${denyPathsFact}`,
+    `isolationSessionAvailable=${isolationSessionAvailable}`,
+    `isolationTier=${tier ?? 'unknown'}`,
+    verdict4,
+  ].join(' | ');
+
+  // The row is green only if the SDK loaded, PSEC create/close was externally proven, and the
+  // deny-path capability is present. ConPTY absence is recorded but does not alone sink the row; the
+  // isolation_session fact is informational.
+  const verdict = checks
+    .filter((c) => c.id !== 'mxc.conpty.binding' && c.id !== 'mxc.isolationSession.available')
+    .every((c) => c.verdict === 'pass')
+    ? 'pass'
+    : 'fail';
 
   const receipt = {
     kind: 'capability-probe',
@@ -243,25 +272,18 @@ const main = async (): Promise<void> => {
     platformSupport,
     availableBackends,
     probeFacts,
+    tier,
     conpty,
     psecCreateClose,
     checks,
-    // The row is green only if the SDK loaded, PSEC create/close was externally proven, and the
-    // deny-path capability is present. ConPTY absence is recorded but does not alone sink the row
-    // (the shell can run without allocating new ttys); the isolation_session fact is informational.
-    // The summary states both explicitly.
-    verdict: checks
-      .filter((c) => c.id !== 'mxc.conpty.binding' && c.id !== 'mxc.isolationSession.available')
-      .every((c) => c.verdict === 'pass')
-      ? 'pass'
-      : 'fail',
+    verdict,
     sdkAvailable: prereq.available,
   };
   const path = join(outDir(), 'probe.receipt.json');
   writeJson(path, receipt);
   // eslint-disable-next-line no-console
   console.log(
-    `[mxc:probe] ${receipt.verdict} — PSEC=${psecCreateClose.available} denyPaths=${Boolean(probeFacts['baseContainerSupportsDenyPaths'])} conpty=${conpty.available} → ${path}`,
+    `[mxc:probe] ${receipt.verdict} — apiPresent=${apiFact} createClose=${liveRan} denyPaths=${denyPathsFact} isolationSession=${isolationSessionAvailable} conpty=${conpty.available} → ${path}`,
   );
   if (receipt.verdict !== 'pass') {
     process.exitCode = 1;

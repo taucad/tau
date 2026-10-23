@@ -73,9 +73,11 @@ describe('createMcpViewerPartThumbnails', () => {
     const render = createMcpViewerPartThumbnails(async () => ({ transcode }));
     const request = { modelId: 'm1', parts: [{ id: 'gear', primitives }] };
 
-    await expect(render({ root, source: { absolutePath: join(root, 'drawing.svg') }, request })).resolves.toMatchObject({
-      errorCode: 'UNSUPPORTED_FORMAT',
-    });
+    await expect(render({ root, source: { absolutePath: join(root, 'drawing.svg') }, request })).resolves.toMatchObject(
+      {
+        errorCode: 'UNSUPPORTED_FORMAT',
+      },
+    );
     await expect(render({ root, source: { absolutePath: join(root, 'gear.glb') }, request })).resolves.toEqual({
       errorCode: 'RENDER_FAILED',
       message: 'No adapter.',
@@ -95,9 +97,9 @@ describe('createMcpViewerPartThumbnails', () => {
     const request = { modelId: 'm1', parts: [{ id: 'gear', primitives }] };
     const bytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 
-    await expect(
-      render({ root, source: { bytes, mimeType: 'image/svg+xml' }, request }),
-    ).resolves.toMatchObject({ errorCode: 'UNSUPPORTED_FORMAT' });
+    await expect(render({ root, source: { bytes, mimeType: 'image/svg+xml' }, request })).resolves.toMatchObject({
+      errorCode: 'UNSUPPORTED_FORMAT',
+    });
     await expect(render({ root, source: { bytes, mimeType: 'model/gltf-binary' }, request })).resolves.toEqual({
       thumbnails: [{ id: 'gear', mimeType: 'image/webp', data: 'AQID' }],
     });

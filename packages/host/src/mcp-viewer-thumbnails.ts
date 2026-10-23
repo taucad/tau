@@ -53,7 +53,9 @@ export type ViewerPartThumbnailsResult = Readonly<{ thumbnails: readonly ViewerP
 export type ViewerThumbnailRuntime = Pick<RuntimeClient, 'transcode'>;
 
 /** The shown model thumbnails are drawn from: a drawn file on disk, or a watched source's render in memory. */
-export type ViewerThumbnailSource = Readonly<{ absolutePath: string } | { bytes: Uint8Array; mimeType: string }>;
+export type ViewerThumbnailSource = Readonly<
+  { absolutePath: string } | { bytes: Uint8Array<ArrayBuffer>; mimeType: string }
+>;
 
 /** Renders part thumbnails from a shown GLB, on disk or in memory. */
 export type McpViewerPartThumbnails = (

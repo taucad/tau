@@ -114,7 +114,9 @@ describe('createLocalMcpViewer', () => {
     );
     /* A watched source's render is drawn from the session's memory, never from the project. */
     const rendered = shownModel(await withThumbnails.show({ targetFile: 'src/bracket.ts' }, inline)).model;
-    await expect(tool?.call({ modelId: rendered.id, parts }, inline)).resolves.toMatchObject({ thumbnails: [{ id: 'gear' }] });
+    await expect(tool?.call({ modelId: rendered.id, parts }, inline)).resolves.toMatchObject({
+      thumbnails: [{ id: 'gear' }],
+    });
     expect(partThumbnails).toHaveBeenLastCalledWith(
       expect.objectContaining({
         root,
@@ -166,14 +168,26 @@ describe('createLocalMcpViewer', () => {
           evaluation: async ({ signal }: { signal?: AbortSignal } = {}) =>
             new Promise((_resolve, reject) => {
               signal?.addEventListener('abort', () => {
-                reject(signal.reason);
+                reject(new Error('The render was given up on.'));
               });
             }),
-          view: () => ({ on: () => () => undefined, rendering: async () => new Promise(() => undefined), close: () => undefined }),
+          view: () => ({
+            on: () => () => undefined,
+            rendering: async () =>
+              new Promise(() => {
+                /* Never renders. */
+              }),
+            close: () => undefined,
+          }),
           close: () => undefined,
         }) as unknown as EntryDocument,
     };
-    const slow = createLocalMcpViewer({ page, namedRoot: () => root, workspaceRoot: root, liveRuntime: async () => stalled });
+    const slow = createLocalMcpViewer({
+      page,
+      namedRoot: () => root,
+      workspaceRoot: root,
+      liveRuntime: async () => stalled,
+    });
 
     await expect(slow.show({ targetFile: 'src/bracket.ts' }, inline)).resolves.toMatchObject({
       errorCode: 'RENDER_TIMEOUT',

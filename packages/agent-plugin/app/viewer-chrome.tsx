@@ -2,12 +2,12 @@
  * What the page adds to the shared viewer bar (workbench parity PAR-8), as the Tau app adds its own: Capture, which
  * saves the canvas as a PNG under the project's `exports/` (`app_save_capture`), and the render timeout in Viewer
  * settings, kept where the Tau app keeps it (`app_viewer_settings` over `.tau/workbench/entries.json`), which
- * `tau mcp` applies to the entry's next render. An older `tau` serves neither tool: the bar then leaves both out.
+ * bounds how long `tau mcp` waits for the entry's render. An older `tau` serves neither tool: the bar then leaves both out.
  *
  * Kernel (view) settings and the view and instance menus stay out: `tau mcp` renders an entry's default view, so a
  * choice there could not reach the render yet.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import type { ViewerControlsProps } from '@taucad/viewer/cad/viewer-controls';
 import { CaptureViewControl } from '@taucad/workbench-panes/shell/capture-view-control';
@@ -21,16 +21,17 @@ export const viewerChromeToolName = {
   saveCapture: 'app_save_capture',
 } as const;
 
-type Settings = Readonly<{ modelId: string; renderTimeout: number | undefined; defaultRenderTimeout: number }>;
+/** The settings of one entry: `entryKey` names the project and entry, which a newer render of the source keeps. */
+type Settings = Readonly<{ entryKey: string; renderTimeout: number | undefined; defaultRenderTimeout: number }>;
 
-const settingsOf = (modelId: string, value: unknown): Settings | undefined => {
+const settingsOf = (entryKey: string, value: unknown): Settings | undefined => {
   if (typeof value !== 'object' || value === null || !('defaultRenderTimeout' in value)) {
     return undefined;
   }
   const { defaultRenderTimeout } = value;
   const renderTimeout = 'renderTimeout' in value ? value.renderTimeout : undefined;
   return typeof defaultRenderTimeout === 'number'
-    ? { modelId, defaultRenderTimeout, renderTimeout: typeof renderTimeout === 'number' ? renderTimeout : undefined }
+    ? { entryKey, defaultRenderTimeout, renderTimeout: typeof renderTimeout === 'number' ? renderTimeout : undefined }
     : undefined;
 };
 
@@ -59,17 +60,25 @@ export function usePageViewerControls({
   onNotice,
 }: PageViewerControlsInput): Pick<ViewerControlsProps, 'capture' | 'operationTimeout'> {
   const modelId = model?.id;
+  /* A watched source renders again on every edit; its entry, and so its settings, stay the same, so they are read
+   * once per entry and every call names the newest render. */
+  const entryKey = model === undefined ? undefined : `${model.projectKey ?? ''}:${model.sourceFile ?? model.path}`;
+  const modelIdRef = useRef(modelId);
+  useEffect(() => {
+    modelIdRef.current = modelId;
+  }, [modelId]);
   const [settings, setSettings] = useState<Settings | undefined>(undefined);
   const [canSave, setCanSave] = useState(true);
 
   useEffect(() => {
-    if (modelId === undefined) {
+    const shownId = modelIdRef.current;
+    if (entryKey === undefined || shownId === undefined) {
       return;
     }
     let isCurrent = true;
     const read = async (): Promise<void> => {
       try {
-        const next = settingsOf(modelId, await bridge.callTool(viewerChromeToolName.settings, { modelId }));
+        const next = settingsOf(entryKey, await bridge.callTool(viewerChromeToolName.settings, { modelId: shownId }));
         if (isCurrent) {
           setSettings(next);
         }
@@ -80,26 +89,26 @@ export function usePageViewerControls({
         }
       }
     };
-    // async-iife: bootstrap — the shown model's settings arrive once; a newer model supersedes them.
+    // async-iife: bootstrap — the shown entry's settings arrive once; another entry supersedes them.
     void read();
     return () => {
       isCurrent = false;
     };
-  }, [bridge, modelId]);
+  }, [bridge, entryKey]);
 
   const changeTimeout = useCallback(
     (renderTimeout: number) => {
-      if (modelId === undefined) {
+      if (modelId === undefined || entryKey === undefined) {
         return;
       }
       const write = async (): Promise<void> => {
         try {
           const next = settingsOf(
-            modelId,
+            entryKey,
             await bridge.callTool(viewerChromeToolName.settings, { modelId, renderTimeout }),
           );
-          setSettings((current) => (current?.modelId === modelId ? next : current));
-          onNotice('Render timeout saved; it applies to the next render');
+          setSettings((current) => (current?.entryKey === entryKey ? next : current));
+          onNotice('Render timeout saved');
         } catch (error) {
           onNotice(error instanceof Error ? `Render timeout not saved: ${error.message}` : 'Render timeout not saved');
         }
@@ -107,7 +116,7 @@ export function usePageViewerControls({
       // async-iife: bootstrap — a menu choice starts it; the notice reports its outcome.
       void write();
     },
-    [bridge, modelId, onNotice],
+    [bridge, entryKey, modelId, onNotice],
   );
 
   const capture = useCallback(async (): Promise<boolean> => {
@@ -136,7 +145,7 @@ export function usePageViewerControls({
     }
   }, [bridge, captureRegion, modelId, onNotice]);
 
-  const current = settings?.modelId === modelId ? settings : undefined;
+  const current = settings?.entryKey === entryKey ? settings : undefined;
   return {
     capture:
       modelId === undefined || !canSave ? undefined : (

@@ -1,7 +1,7 @@
 ---
 cache-core: minor
 runtime: minor
-middleware: patch
+middleware: minor
 replicad: minor
 opencascade: minor
 ---

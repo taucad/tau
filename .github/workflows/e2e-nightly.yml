@@ -36,6 +36,8 @@ env:
   TAU_API_URL: http://localhost:4000
   TAU_WEBSOCKET_URL: ws://localhost:4001
   TAU_FRONTEND_URL: http://localhost:3000
+  # End-to-end suites that open no chat, so capture no chat log for the empty-capture rule to find.
+  SUITES_WITHOUT_CHAT: '["test:e2e:non-isolated", "test:e2e:deploy-skew"]'
 
 jobs:
   # Picks the commit and lists every suite. Selectors are target names, so a new e2e
@@ -163,17 +165,16 @@ jobs:
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
-      # `test:e2e:non-isolated` runs only PicoVoxel specs and `test:e2e:deploy-skew`
-      # only the TAU-UI-6 deploy check; neither opens a chat, so neither captures a log
-      # for the empty-capture rule to find.
+      # `SUITES_WITHOUT_CHAT` names the suites that open no chat: `test:e2e:non-isolated` runs
+      # only PicoVoxel specs and `test:e2e:deploy-skew` only the TAU-UI-6 deploy check.
       - name: Setup formal toolchains
-        if: always() && matrix.suite.target != 'test:e2e:non-isolated' && matrix.suite.target != 'test:e2e:deploy-skew'
+        if: always() && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
         uses: ./.github/actions/setup-formal
         with:
           tools: tlc
 
       - name: Validate captured chat logs
-        if: always() && matrix.suite.target != 'test:e2e:non-isolated' && matrix.suite.target != 'test:e2e:deploy-skew'
+        if: always() && !contains(fromJSON(env.SUITES_WITHOUT_CHAT), matrix.suite.target)
         env:
           PROJECT: ${{ matrix.suite.project }}
         run: pnpm nx run-many -t formal:logs --projects "$PROJECT"

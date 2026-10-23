@@ -2,6 +2,10 @@
 import type { IncomingMessage } from 'node:http';
 import type { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import type { NodeSDK } from '@opentelemetry/sdk-node';
+import { setTimeout as delay } from 'node:timers/promises';
+import { context, createContextKey } from '@opentelemetry/api';
+import type * as SentryNode from '@sentry/node';
+import type { ErrorEvent } from '@sentry/node';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -137,5 +141,87 @@ describe('OTEL log export configuration', () => {
       vi.unstubAllEnvs();
       vi.resetModules();
     }
+  });
+});
+
+describe('OTEL context manager and Sentry scopes', () => {
+  let stop: (() => Promise<void>) | undefined;
+
+  /**
+   * The context manager otel.ts hands the SDK, enabled as the global context manager the way `sdk.start()` would
+   * enable it, with a real Sentry client configured as the API configures it.
+   */
+  const startWithApiContextManager = async (): Promise<{ Sentry: typeof SentryNode; events: ErrorEvent[] }> => {
+    vi.resetModules();
+    await import('#telemetry/otel.js');
+    const Sentry = await import('@sentry/node');
+    const contextManager = sdkConfigs.at(-1)?.contextManager;
+    if (contextManager === undefined) {
+      throw new Error('otel.ts gave the SDK no context manager');
+    }
+    context.setGlobalContextManager(contextManager.enable());
+    const events: ErrorEvent[] = [];
+    Sentry.init({
+      dsn: 'https://public@sentry.invalid/1',
+      skipOpenTelemetrySetup: true,
+      defaultIntegrations: false,
+      beforeSend: (event) => {
+        events.push(event);
+        return null;
+      },
+    });
+    stop = async () => {
+      await Sentry.close();
+      Sentry.getCurrentScope().setClient(undefined);
+      context.disable();
+      contextManager.disable();
+    };
+    return { Sentry, events };
+  };
+
+  afterEach(async () => {
+    await stop?.();
+    stop = undefined;
+    vi.resetModules();
+  });
+
+  it('should fork a Sentry scope per concurrent flow so neither event carries the other flow tag', async () => {
+    const { Sentry, events } = await startWithApiContextManager();
+
+    const flow = async (name: string, wait: number): Promise<void> =>
+      Sentry.withScope(async (scope) => {
+        scope.setTag('flow', name);
+        await delay(wait);
+        Sentry.captureMessage(`flow ${name}`);
+      });
+    const isolatedFlow = async (name: string, wait: number): Promise<void> =>
+      Sentry.withIsolationScope(async (scope) => {
+        scope.setTag('request', name);
+        await delay(wait);
+        Sentry.captureMessage(`request ${name}`);
+      });
+    await Promise.all([flow('a', 20), flow('b', 5), isolatedFlow('c', 20), isolatedFlow('d', 5)]);
+    await Sentry.flush(2000);
+
+    const tagsOf = (message: string): Record<string, unknown> | undefined =>
+      events.find((event) => event.message === message)?.tags;
+    expect(tagsOf('flow a')).toStrictEqual({ flow: 'a' });
+    expect(tagsOf('flow b')).toStrictEqual({ flow: 'b' });
+    expect(tagsOf('request c')).toStrictEqual({ request: 'c' });
+    expect(tagsOf('request d')).toStrictEqual({ request: 'd' });
+    expect(Sentry.getCurrentScope().getScopeData().tags).toStrictEqual({});
+  });
+
+  it('should still propagate OpenTelemetry context across await', async () => {
+    await startWithApiContextManager();
+    const key = createContextKey('tau.test');
+
+    const seen = await context.with(context.active().setValue(key, 'outer'), async () => {
+      await delay(1);
+      return context.active().getValue(key);
+    });
+
+    expect(seen).toBe('outer');
+    expect(context.active().getValue(key)).toBeUndefined();
   });
 });

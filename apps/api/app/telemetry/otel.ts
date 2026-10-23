@@ -19,6 +19,7 @@
 import process from 'node:process';
 import { metrics } from '@opentelemetry/api';
 import { NodeSDK } from '@opentelemetry/sdk-node';
+import { SentryContextManager } from '@sentry/node';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
@@ -67,6 +68,13 @@ if (!hasOtlpEndpoint) {
 
 const sdk = new NodeSDK({
   resource,
+
+  // Sentry runs with `skipOpenTelemetrySetup` (sentry.ts), so this provider's context is the only async context.
+  // Sentry's manager is the default AsyncLocalStorage manager plus a fork of Sentry's scopes on every context
+  // fork; without it `Sentry.withScope` and isolation scopes share one process-wide scope and an event inherits
+  // another's tags. It needs no DSN and no `Sentry.init` first, so this module still loads without Sentry. The
+  // Sentry sampler, span processor and propagator stay out: sampling and trace export belong to Grafana.
+  contextManager: new SentryContextManager(),
 
   traceExporter: hasOtlpEndpoint ? new OTLPTraceExporter() : undefined,
 

@@ -77,6 +77,36 @@ table.
   the **measured race window** (learn→reparent deltas, `NOTE_TRACKERR` escapes, and pids recovered
   only by the backfill walk — i.e. forks `NOTE_TRACK` missed at startup).
 
+## Candidate (c) (`sandbox.mts`): sandbox-membership enumeration (targets the sandbox, not the tree)
+
+Candidates (a)/(b) still chase the process **tree** and (empirically, run 39900487555) still miss a
+descendant that reparents to `launchd` before cancel. Candidate (c) abandons the tree. `sandbox.mts`
+launches each session's shell inside a **per-session Seatbelt profile** (`session.sb`, `deny default`)
+whose only distinguishing rule is `(allow file-read* (literal <marker>))` over a per-session UUID
+marker. Every descendant **inherits** the profile and cannot leave it — daemonized, double-forked,
+setsid or not, however it reparents. Membership becomes a property of the **sandbox**, read for any pid
+with `sandbox_check` (no task port, so it is not blocked by SIP the way `task_for_pid` is):
+
+```
+inOurSession(pid) = sandbox_check(pid,"file-read-data",PATH,<marker>)  == allowed
+                 && sandbox_check(pid,"file-read-data",PATH,<control>) == denied
+```
+
+The control path (`/.tau-reaping-control-deny`, at the filesystem root, in no allow rule) is denied by
+every session's `deny default` but permitted for every **unsandboxed** pid — so the control half
+rejects the unsandboxed world (probe, `launchd`, daemons), and the unique marker half rejects **foreign
+sessions** (their profile denies our marker literal). At cancel, `tau-sbenum` returns the in-session pid
+set; the driver `SIGSTOP`s then `SIGKILL`s it and re-enumerates until empty. Fails **closed**:
+`sandbox_check` is SPI, weak-imported; absent ⇒ verdict `blocked`/`spi-unavailable`,
+never a false pass.
+
+Every combo also runs a **second concurrent session** with a different uuid/marker in its own sandbox.
+The cancel is executed exactly as the strategy dictates (it kills precisely what `tau-sbenum` returns
+for **our** marker), and the receipt records, under `secondSession`, whether that session was
+cross-killed and whether its canary kept growing — a cross-session kill is a disqualifying failure even
+if our own gap closes. Receipts: `sbmember.<adversary>.json`, `preflight-sandbox.json`,
+`matrix-sandbox.json`, rendered in the same combined table.
+
 ## Native helpers for the candidates
 
 - `tau-spawn-disclaim.c` — SET half of (a): `responsibility_spawnattrs_setdisclaim(+SETEXEC)` then
@@ -87,6 +117,10 @@ table.
   could attribute and reports `feasible=false` with evidence when it can read only itself.
 - `tau-kqtrack.c` — (b): the long-lived kqueue tracker; `--selftest` reports whether a kqueue can be
   created at all.
+- `tau-sbenum.c` — (c): `proc_listpids(PROC_ALL_PIDS)` (public libproc) then, per pid, two
+  `sandbox_check` queries (marker + control). `sandbox_check` is SPI, weak-imported;
+  `--selftest` reports whether it resolved. The driver supplies the per-session `.sb` profile via
+  `sandbox-exec -f session.sb -D MARKER=… -D WORKDIR=… -D SCRIPTDIR=…`.
 
 ## Known gap this probe characterizes empirically
 

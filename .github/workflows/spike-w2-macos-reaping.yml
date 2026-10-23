@@ -92,7 +92,13 @@ jobs:
           s4=${PIPESTATUS[0]}
           clang -O2 -Wall -Wextra -o "$bin/tau-kqtrack" "$dir/tau-kqtrack.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           s5=${PIPESTATUS[0]}
-          echo "tau-setasid exit=$s1 ; tau-asid-enum exit=$s2 ; tau-spawn-disclaim exit=$s3 ; tau-resp-enum exit=$s4 ; tau-kqtrack exit=$s5"
+          # Candidate (c) sandbox-membership enumeration. sandbox_check is SPI, weak-imported from
+          # libSystem, so no extra -l is needed and a missing symbol does not fail the link —
+          # sandbox.mts then records candidate (c) blocked (spi-unavailable). A compile failure is
+          # likewise non-fatal.
+          clang -O2 -Wall -Wextra -o "$bin/tau-sbenum" "$dir/tau-sbenum.c" 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          s6=${PIPESTATUS[0]}
+          echo "tau-setasid exit=$s1 ; tau-asid-enum exit=$s2 ; tau-spawn-disclaim exit=$s3 ; tau-resp-enum exit=$s4 ; tau-kqtrack exit=$s5 ; tau-sbenum exit=$s6"
           ls -l "$bin" || true
 
       - name: Run reaping probe (strategies × adversaries, external canary)
@@ -118,6 +124,21 @@ jobs:
           set -o pipefail
           if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
           node packages/core/native-process/spikes/shell/reaping/candidates.mts 2>&1 | tee "$RUNNER_TEMP/candidates.log"
+
+      # Candidate (c): sandbox-membership enumeration. Each session's shell runs inside a per-session
+      # Seatbelt profile (session.sb) carrying a unique marker rule; at cancel tau-sbenum asks
+      # sandbox_check which pids are in our session and the driver reaps them, re-enumerating until
+      # empty. Tested against all four adversaries plus a concurrent second session that must survive.
+      # Writes sbmember.<adversary>.json into the same evidence directory for the combined matrix.
+      - name: Run reaping candidate (c) sandbox membership
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: |
+          set -o pipefail
+          if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
+          node packages/core/native-process/spikes/shell/reaping/sandbox.mts 2>&1 | tee "$RUNNER_TEMP/sandbox.log"
 
       - name: Summarize
         if: always()

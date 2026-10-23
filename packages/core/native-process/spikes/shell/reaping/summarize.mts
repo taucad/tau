@@ -11,7 +11,7 @@ const evidenceDirectory = process.env['TAU_SPIKE_OUT'] ?? join(process.cwd(), 'o
 const mark = (v: string): string => (v === 'pass' ? '✅' : v === 'blocked' ? '🚧' : '❌');
 
 // Preferred column/row order; anything else is appended in discovery order so nothing is hidden.
-const STRATEGY_ORDER = ['group', 'walk', 'asid', 'resp', 'kqtrack'];
+const STRATEGY_ORDER = ['group', 'walk', 'asid', 'resp', 'kqtrack', 'sbmember'];
 const ADVERSARY_ORDER = ['setsid', 'daemonize', 'double-fork', 'sigterm-ignore'];
 const ordered = (seen: Set<string>, pref: string[]): string[] => [
   ...pref.filter((x) => seen.has(x)),
@@ -41,7 +41,7 @@ for (const rowDir of readdirSync(evidenceDirectory)) {
   const files = readdirSync(dir).filter((f) => f.endsWith('.json'));
   lines.push(`## Reaping spike — ${rowDir}`, '');
 
-  for (const name of ['preflight.json', 'preflight-candidates.json']) {
+  for (const name of ['preflight.json', 'preflight-candidates.json', 'preflight-sandbox.json']) {
     if (!files.includes(name)) {
       continue;
     }

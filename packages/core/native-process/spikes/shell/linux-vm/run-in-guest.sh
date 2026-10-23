@@ -157,7 +157,7 @@ except Exception: print("no-receipt")
 PY
 }
 
-# ── PHASE A — confirm the finding: bundled bwrap, NO profile, stock sysctl ──────────────────────────
+# ── PHASE A — confirm the finding: bundled bwrap, NO profile, stock sysctl ─────────────────────────
 log "=== PHASE A (LNX-VM-NOPROFILE) ==="
 mkdir -p "$BUNDLE_DIR"
 cp /usr/bin/bwrap "$BUNDLE_BWRAP"; chmod 0755 "$BUNDLE_BWRAP"
@@ -204,11 +204,34 @@ b_status="$(harness_status LNX-VM-PROFILE)"
 if [[ $b_loop -eq 0 && "$b_status" == "ok" ]]; then b_verdict="launches-with-sysctl-1"; else b_verdict="unexpected"; fi
 phase_json LNX-VM-PROFILE "loopback succeeds; real S0/S1 (sysctl still $(cat "$SYSCTL_PATH" 2>/dev/null))" "$b_loop" "$b_status" "$b_verdict"
 
+# ── S2 — interactive PTY under the PROFILED bwrap (profile STILL loaded, sysctl UNTOUCHED) ──────────
+# With the tau-bwrap profile loaded (Phase B context) and the sysctl at its shipped value, launch a
+# REAL interactive bash inside the SAME profiled bwrap invocation shape the harness uses, plus
+# --new-session (blueprint A24 job control), over a guest-allocated PTY. Run AS $TAU_USER (root bypasses
+# the userns restriction, so a root shell would be a false pass). The driver writes s2.json with a
+# per-check pass/fail map next to s0/s1. Fail-closed: a missing pty / non-interactive shell is a typed
+# failure, never a false pass. This ADDS S2; it does not alter Phase A/B/C or the s0/s1 receipts.
+log "=== S2 (LNX-VM-PROFILE-S2 interactive PTY, profile loaded, sysctl=$(cat "$SYSCTL_PATH" 2>/dev/null)) ==="
+as_tau env \
+  PATH="$BUNDLE_DIR:/opt/node/bin:/usr/bin:/bin" \
+  HOME="/home/$TAU_USER" \
+  LC_ALL=C.UTF-8 LANG=C.UTF-8 \
+  python3 -I "$LANE_DIR/pty-probe.py" "$BUNDLE_BWRAP" "$DROP/s2.json" \
+  > "$DROP/s2.console.log" 2>&1
+s2_rc=$?
+s2_verdict="$(python3 -I - "$DROP/s2.json" <<'PY' 2>/dev/null || echo no-receipt
+import json, sys
+try: print(json.load(open(sys.argv[1])).get("verdict", "no-receipt"))
+except Exception: print("no-receipt")
+PY
+)"
+log "  S2 driver exit=$s2_rc  verdict=$s2_verdict"
+
 # Unload both profiles so Phase C starts from the stock (unprofiled) posture.
 apparmor_parser -R "$LANE_DIR/apparmor/tau-bwrap" 2>/dev/null || true
 apparmor_parser -R "$SPIKE_PROFILE" 2>/dev/null || true
 
-# ── PHASE C — AppImage: no .deb, no postinst, no profile ────────────────────────────────────────────
+# ── PHASE C — AppImage: no .deb, no postinst, no profile ─────────────────────────────────────
 log "=== PHASE C (LNX-VM-APPIMAGE) ==="
 mkdir -p "$APPIMAGE_DIR"
 cp /usr/bin/bwrap "$APPIMAGE_BWRAP"; chmod 0755 "$APPIMAGE_BWRAP"
@@ -220,5 +243,5 @@ c_status="$(harness_status LNX-VM-APPIMAGE)"
 if [[ $c_loop -ne 0 && "$c_status" == "sandbox-unavailable" ]]; then c_verdict="blocked-no-profile-path"; else c_verdict="unexpected"; fi
 phase_json LNX-VM-APPIMAGE "blocked (no install-time profile for the AppImage mount path)" "$c_loop" "$c_status" "$c_verdict"
 
-log "phases complete: A=$a_verdict B=$b_verdict C=$c_verdict"
-finish "DONE A=$a_verdict B=$b_verdict C=$c_verdict" 0
+log "phases complete: A=$a_verdict B=$b_verdict C=$c_verdict S2=$s2_verdict"
+finish "DONE A=$a_verdict B=$b_verdict C=$c_verdict S2=$s2_verdict" 0

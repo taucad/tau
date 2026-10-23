@@ -37,6 +37,43 @@ for tag in A-loopback-noprofile B-loopback-profile C-loopback-appimage; do
   fi
 done
 
+echo ""
+echo "### S2 — interactive PTY under the profiled bwrap (Phase B, sysctl untouched)"
+if [[ -f "$DROP/s2.json" ]]; then
+  python3 -I - "$DROP/s2.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+ctx = d.get("context", {})
+checks = d.get("checks", {})
+pty = d.get("pty", {})
+verdict = d.get("verdict", "?")
+ok = d.get("all_pass") is True
+print(f"- {'✅' if ok else '❌'} verdict=`{verdict}` · all_pass=`{d.get('all_pass')}` "
+      f"· run_as=`{ctx.get('run_as')}` · --new-session=`{ctx.get('new_session')}` "
+      f"· apparmor_restrict_unprivileged_userns=`{ctx.get('apparmor_restrict_unprivileged_userns')}` "
+      f"(left untouched=`{ctx.get('apparmor_restrict_sysctl_left_untouched')}`)")
+labels = {"tty": "real tty (test -t 0/1)",
+          "resize": "window resize (stty size)",
+          "sigint": "Ctrl-C → SIGINT(130)",
+          "jobcontrol": "Ctrl-Z/bg/fg job control",
+          "unicode": "UTF-8 round-trip"}
+for key in ("tty", "resize", "sigint", "jobcontrol", "unicode"):
+    c = checks.get(key, {})
+    mark = "✅" if c.get("pass") else "❌"
+    extra = ""
+    if key == "resize":
+        extra = f" (initial=`{c.get('initial')}` → resized=`{c.get('resized')}`, requested=`{c.get('requested')}`)"
+    elif key == "sigint":
+        extra = f" (exit=`{c.get('exit_code')}`, prompt regained in `{c.get('elapsed_ms')}ms`)"
+    elif key == "unicode":
+        extra = f" (sent=`{c.get('sent')}` received=`{c.get('received')}`)"
+    print(f"  - {mark} **{labels[key]}** → pass=`{c.get('pass')}`{extra}")
+    print(f"    - {c.get('detail','')}")
+PY
+else
+  echo "- **(no s2.json receipt)** — S2 phase did not produce a receipt (treated as not-proven)."
+fi
+
 if [[ -f "$DROP/DONE" ]]; then
   echo ""
   echo "Sentinel: \`$(cat "$DROP/DONE")\`"

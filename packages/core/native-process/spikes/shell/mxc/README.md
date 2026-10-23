@@ -147,19 +147,44 @@ impersonation results are recorded as `info` only.
 | `fallback.read.ownAllowed.*`          | each cmd.exe child, as its own sandbox user, copies its own secret out (exact match)                                 |
 | `fallback.read.crossDenied.*`         | the other session's secret never appears in that child's exfil file                                                  |
 | `fallback.read.neverGrantable`        | the never-grantable secret never appears in either child's exfil file                                                |
-| `fallback.s2Pty.inContainer` (S2 PTY) | `s2-bash-pty.mts` drives Git for Windows Bash in a ConPTY inside the token (tty, resize, Ctrl-C, job control, UTF-8) |
+| `fallback.pwsh.{write,read}.*`        | pwsh re-runs the write/read isolation proofs as the sandbox user in the token (external canaries, own-root controls) |
+| `fallback.s2Pty.inContainer` (S2 PTY) | `token-runner.exe` (PTY mode) owns the ConPTY; Git for Windows Bash runs in the token, driven through it (tty, resize, Ctrl-C, job control, UTF-8) |
 
-S2 uses Node + node-pty as the PTY master because PowerShell stalls at startup as the sandbox user
-inside the token while cmd.exe starts (native binaries also stall; see the status below). The S2 receipt is
-`fallback-s2-pty.receipt.json`, attributed to the sandbox user by both the driver and the Bash inside
-the pty; the UTF-8 bytes Bash wrote are re-read by the orchestrator. `WRITE_RESTRICTED` gates writes
-only, so read isolation rests on distinct sandbox users plus deny-read ACEs.
+S2's PTY master is the **unrestricted runner** (`token-runner.cs` PTY mode, Codex `conpty/mod.rs`
+shape), not node-pty: both node-pty and MSYS Bash fail to CREATE a pipe inside the write-restricted
+token (ConPTY `EPERM`; Bash "couldn't create signal pipe", Win32 error 5; run 40037048316). So the
+runner creates the pseudoconsole and pipes, spawns Git for Windows Bash in the token attached via
+`PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`, and drives tty/resize/Ctrl-C/job-control/UTF-8 from the
+terminal stream. The S2 receipt (`fallback-s2-pty.receipt.json`) is attributed to the sandbox user by
+both the runner and the Bash inside the pty; the UTF-8 bytes Bash wrote are re-read by the
+orchestrator. `WRITE_RESTRICTED` gates writes only, so read isolation rests on distinct sandbox users
+plus deny-read ACEs.
 
-Observed status (runs 40032794341, 40034047709; both rows): write and read isolation pass and every
-grant is revoked, but **S2 in-token is not proven**. As the sandbox user inside the token, cmd.exe
-and its built-ins run, while `node.exe` and Git for Windows `bash.exe` each stall at startup with
-stdio redirected to files: no output, no stderr, killed at 30s (`fallback.s2Pty.startProbe.*`). So
-the driver never reaches its first statement, and `fallback.s2Pty.inContainer` fails typed.
+### Codex token/spawn parity (recorded in the receipt as `fallback.codexParity`)
+
+The earlier stalls were a spawn-shape difference from Codex, not a token-rights difference. Diffed
+against `openai/codex` `codex-rs/windows-sandbox-rs` (read as reference, not vendored):
+
+| aspect             | before                                         | now (Codex-shaped)                                                                         |
+| ------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| spawn API          | `CreateProcessWithTokenW` from the admin       | unrestricted runner (`CreateProcessWithLogonW`) → `CreateProcessAsUserW` from its own logon |
+| default DACL       | same (logon SID `GA` + `OWNER RIGHTS` `RC`)    | same                                                                                       |
+| restricting SIDs   | cap, logon, Everyone; logon from `LogonUser`   | same set; logon is the runner's own `CreateProcessWithLogonW` logon                         |
+| handle inheritance | none                                           | `bInheritHandles=TRUE`, `STARTF_USESTDHANDLES`, `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`         |
+| job object         | none                                           | `PROC_THREAD_ATTRIBUTE_JOB_LIST`, `KILL_ON_JOB_CLOSE`, no `JOB_OBJECT_UILIMIT_*`            |
+| `lpDesktop`        | explicit `WinSta0\<private desktop>`           | same (unchanged)                                                                           |
+| creation flags     | `CREATE_NO_WINDOW\|CREATE_UNICODE_ENVIRONMENT` | `+ EXTENDED_STARTUPINFO_PRESENT` (STARTUPINFOEX)                                           |
+| environment        | `LoadUserProfile` + `CreateEnvironmentBlock`   | explicit runner env (seclogon, no profile) + TEMP/TMP                                       |
+| error mode         | none                                           | `SetErrorMode(SEM_FAILCRITICALERRORS\|SEM_NOGPFAULTERRORBOX)` around the launch, inherited  |
+| startup feedback   | none                                           | `STARTF_FORCEOFFFEEDBACK` on the runner launch                                             |
+
+Observed status: with the Codex-shaped runner, **PowerShell now starts** as the sandbox user inside
+the write-restricted token (`fallback.pwsh.startsInToken`, run 40037048316), and the write and read
+isolation proofs re-run with pwsh as the in-token workload (external canaries + own-root controls),
+alongside the cmd.exe read proof; every grant is revoked. `node.exe` (`os.userInfo()` → `ENOMEM`, no
+loaded profile) and MSYS `bash.exe` (signal-pipe Win32 error 5) still cannot create a PTY-master pipe
+inside the token, which is why the runner, not node-pty, owns the ConPTY for S2. The per-row S2 verdict
+comes from the latest run (see the handback / run id).
 
 ## Running
 

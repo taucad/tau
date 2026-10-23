@@ -58,6 +58,16 @@ for (const rowDir of readdirSync(evidenceDirectory)) {
     lines.push(`- ${name}: ${mark(pre.verdict)} ${pre.verdict}`, '');
   }
 
+  // S2 interactive-PTY receipt (PTY run inside the session.sb Seatbelt containment).
+  if (files.includes('s2.json')) {
+    const s2 = JSON.parse(readFileSync(join(dir, 's2.json'), 'utf8')) as Receipt;
+    lines.push(`- S2 PTY in sandbox: ${mark(s2.verdict)} ${s2.verdict}`);
+    for (const c of s2.checks ?? []) {
+      lines.push(`  - ${mark(c.verdict)} \`${c.id}\` — ${c.observed.slice(0, 180)}`);
+    }
+    lines.push('');
+  }
+
   // Discover the strategies and adversaries present from the `<strategy>.<adversary>.json` receipts.
   const cells = new Map<string, Receipt>();
   const strategiesSeen = new Set<string>();

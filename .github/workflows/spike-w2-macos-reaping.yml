@@ -140,6 +140,24 @@ jobs:
           if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
           node packages/core/native-process/spikes/shell/reaping/sandbox.mts 2>&1 | tee "$RUNNER_TEMP/sandbox.log"
 
+      # node-pty for the S2 interactive-PTY receipt (clang/python preinstalled on the macOS runners).
+      - name: Install node-pty for the S2 PTY receipt
+        shell: bash
+        run: npm install --prefix packages/core/native-process/spikes/shell --no-audit --no-fund
+
+      # S2 (orchestrator rule, macOS): a real PTY running an interactive Bash INSIDE the same
+      # session.sb deny-default Seatbelt profile — isatty, programmatic resize, Ctrl-C (status 130),
+      # Ctrl-Z/fg job control, and UTF-8 round-trip, each pass/fail with captured evidence in s2.json.
+      - name: Run S2 interactive PTY inside the Seatbelt containment
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/reaping-spike
+        run: |
+          set -o pipefail
+          if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
+          node packages/core/native-process/spikes/shell/reaping/s2-pty.mts 2>&1 | tee "$RUNNER_TEMP/s2-pty.log"
+
       - name: Summarize
         if: always()
         shell: bash

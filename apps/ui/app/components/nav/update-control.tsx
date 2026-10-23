@@ -66,8 +66,8 @@ export function UpdateControl({
             side='top'
             align='start'
             sideOffset={4}
-            collisionPadding={8}
-            className='w-64 max-w-[calc(100vw-1rem)] p-3'
+            collisionPadding={4}
+            className='w-(--radix-popover-trigger-width) max-w-[calc(100vw-1rem)] p-3'
             aria-label='Tau update'
             onOpenAutoFocus={
               shouldFocusOnOpen

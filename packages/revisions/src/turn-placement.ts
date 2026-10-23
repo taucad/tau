@@ -128,7 +128,24 @@ export type TurnPlacementPortOptions<Tools> = Readonly<{
    * completion cut (the agent's last writes). A host whose feed is not complete omits it.
    */
   settle?: (() => Promise<void>) | undefined;
+  /**
+   * How often a running attempt's chats are recorded again while it holds its tools, so another device sees its
+   * progress before it settles (XD3); {@link runProgressPublishMilliseconds} by default.
+   */
+  progressPublishMilliseconds?: number | undefined;
 }>;
+
+/**
+ * How often sync records the chats while an attempt holds its tools: once a minute (XD3, cross-device run fence).
+ *
+ * An admitted attempt's chat ref is recorded at once, so another device sees the run before it streams, and then once
+ * a minute until its tools are revoked, so the run's newest row reaches that device well inside the fence's staleness
+ * bound (ten minutes, `foreignRunStaleMilliseconds` in `@taucad/agent-host`). A record whose chat bytes did not change
+ * writes no commit, and the sync debounce coalesces it with any other push.
+ *
+ * @public
+ */
+export const runProgressPublishMilliseconds = 60_000;
 
 /** A root answer the adapter waits on, per attempt. */
 type Heard =
@@ -364,6 +381,7 @@ export const createTurnPlacementPort = <Tools>(
   const subscribers = new Set<() => void>();
   const queues = new Set<Fact[]>();
   let fenced = false;
+  let progress: ReturnType<typeof setInterval> | undefined;
   const isFenced = (): boolean => fenced;
   /* Rows are built in the order their facts arrive, and a verb's answer follows its row onto `settlements` (TS-R4). */
   let publishing: Promise<void> = Promise.resolve();
@@ -581,6 +599,26 @@ export const createTurnPlacementPort = <Tools>(
   /* An acknowledged attempt's row is durable in its chat's log: sync records the chats (the host's former relay did). */
   const recordsChanged = (): void => {
     actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
+  };
+
+  /* XD3: publish a run as it starts and while it runs. The admission row is durable before M1 places the attempt, so
+   * sync records it in the chat's ref now, not only once the run settles; another device then refuses a second run.
+   * Fire and forget: an offline remote queues the push and never holds the turn. */
+  const holdsTools = (): boolean => [...tools.values()].some((entry) => !entry.revocable.revoked());
+  const stopProgress = (): void => {
+    clearInterval(progress);
+    progress = undefined;
+  };
+  const republish = (): void => {
+    if (fenced || !holdsTools()) {
+      stopProgress();
+      return;
+    }
+    recordsChanged();
+  };
+  const publishProgress = (): void => {
+    recordsChanged();
+    progress ??= setInterval(republish, options.progressPublishMilliseconds ?? runProgressPublishMilliseconds);
   };
 
   /* The registry lists the lease records before a verb reads them; it answers even with no checkout (RM-R11). */
@@ -819,6 +857,7 @@ export const createTurnPlacementPort = <Tools>(
           ...(placement.unplaced === undefined ? {} : { details: { revisionId: placement.unplaced } }),
         });
       }
+      publishProgress();
       return { requestId, status: replay ? 'replayed' : 'applied', placement };
     },
 
@@ -1012,6 +1051,7 @@ export const createTurnPlacementPort = <Tools>(
 
     fence: async () => {
       stop();
+      stopProgress();
       watch.abort();
       for (const subscription of subscriptions) {
         subscription.unsubscribe();

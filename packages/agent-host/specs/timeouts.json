@@ -85,6 +85,14 @@
       "owner": "W5"
     },
     {
+      "id": "A10P",
+      "bound": "Run progress publication: record the chats once a minute while a turn attempt holds its tools, so another device sees the run before it settles (XD3)",
+      "site": "packages/revisions/src/turn-placement.ts",
+      "token": "runProgressPublishMilliseconds",
+      "class": "Debounce",
+      "owner": "XD3"
+    },
+    {
       "id": "A11",
       "bound": "Sync backoff",
       "site": "packages/revisions/src/sync.machine.ts",

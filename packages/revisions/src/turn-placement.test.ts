@@ -7,6 +7,7 @@
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { join } from 'node:path';
 
 import { NodeFsAuthorityHost, serveNodeFsProvider, NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -116,6 +117,36 @@ const createProject = async (withAuthority = false): Promise<Project> => {
       };
     },
   };
+};
+
+const recordsChanged = {
+  type: 'sync',
+  event: { type: 'recordsChanged' },
+} as const;
+
+/**
+ * The revisions with every `sync` event the adapter sends its root observed on the way in.
+ *
+ * @param opened - The root and its store.
+ * @returns The same revisions over a root that records each sync event in `syncs`.
+ */
+const observeSyncs = (opened: ProjectRevisions): Readonly<{ revisions: ProjectRevisions; syncs: unknown[] }> => {
+  const syncs: unknown[] = [];
+  const actor = new Proxy(opened.actor, {
+    get: (target, property): unknown => {
+      const value: unknown = Reflect.get(target, property, target);
+      if (property === 'send') {
+        return (event: Parameters<typeof target.send>[0]) => {
+          if (event.type === 'sync') {
+            syncs.push(event);
+          }
+          target.send(event);
+        };
+      }
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  return { revisions: { ...opened, actor }, syncs };
 };
 
 /**
@@ -628,24 +659,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
   it('should publish the settlement, then retire the lease on acknowledge', async () => {
     const project = await createProject();
-    const { revisions: opened } = project.open();
-    /* What the adapter sends the root, observed on the way in. */
-    const syncs: unknown[] = [];
-    const actor = new Proxy(opened.actor, {
-      get: (target, property): unknown => {
-        const value: unknown = Reflect.get(target, property, target);
-        if (property === 'send') {
-          return (event: Parameters<typeof target.send>[0]) => {
-            if (event.type === 'sync') {
-              syncs.push(event);
-            }
-            target.send(event);
-          };
-        }
-        return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
-      },
-    });
-    const revisions = { ...opened, actor };
+    const { revisions, syncs } = observeSyncs(project.open().revisions);
     const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
     const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
     if (admitted.status === 'refused') {
@@ -666,8 +680,53 @@ describe('createTurnPlacementPort (TS-S3)', () => {
       requestId: 'acknowledge:run-1:1',
       status: 'replayed',
     });
-    /* The row is durable in the chat's log, so sync records the chats once (W8.a2: the host relay's recordsChanged). */
-    expect(syncs).toEqual([{ type: 'sync', event: { type: 'recordsChanged' } }]);
+    /* The admission and the settlement are durable in the chat's log, so sync records the chats at each (W8.a2: the
+     * host relay's recordsChanged; XD3: the run is published as it starts). */
+    expect(syncs).toEqual([recordsChanged, recordsChanged]);
+  });
+
+  /* XD3: another device sees a run before it settles, and sees its progress while it runs. */
+  it('should record the chats when an attempt is admitted and again while it holds its tools', async () => {
+    const project = await createProject();
+    const { revisions, syncs } = observeSyncs(project.open().revisions);
+    const placement = createTurnPlacementPort({
+      revisions,
+      openTools: ({ filesystem: view }) => view,
+      progressPublishMilliseconds: 10,
+    });
+
+    const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(admitted).toMatchObject({ status: 'applied' });
+    expect(syncs).toEqual([recordsChanged]);
+    await vi.waitFor(() => {
+      expect(syncs.length).toBeGreaterThanOrEqual(3);
+    });
+    await placement.abandon({ requestId: 'abandon:run-1:1', key });
+    await sleep(30);
+    const settledCount = syncs.length;
+    await sleep(50);
+    /* Its tools are revoked: nothing more is recorded on its behalf. */
+    expect(syncs).toHaveLength(settledCount);
+  });
+
+  it('should record nothing for an attempt the root refused', async () => {
+    const project = await createProject();
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    const { revisions, syncs } = observeSyncs(project.open().revisions);
+    const placement = createTurnPlacementPort({
+      revisions,
+      openTools: ({ filesystem: view }) => view,
+    });
+
+    const answer = await placement.admit({
+      requestId: 'admit:run-1:1',
+      key,
+      checkoutId: 'checkout-gone',
+    });
+
+    expect(answer).toMatchObject({ status: 'refused' });
+    expect(syncs).toEqual([]);
   });
 
   /* I25, TS-A14, RM-R8 narrowed (W8.r1 H1, probe P1): a second root refuses another live root's attempt. */

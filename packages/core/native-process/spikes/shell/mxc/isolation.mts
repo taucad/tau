@@ -37,7 +37,9 @@ import {
   loadSdk,
   nonce,
   outDir,
+  psLaunch,
   requestFor,
+  resolveWindowsShell,
   sha256,
   startProxyCanary,
   writeJson,
@@ -131,11 +133,24 @@ const main = async (): Promise<void> => {
   // A denies B's roots (now known).
   (a.grant.deny as string[]).push(b.roots.project, b.roots.home, b.roots.temporary, b.roots.approved);
 
-  const q = (p: string): string => `"${p}"`;
+  // The in-MXC shell is PowerShell (D14). Scripts use single-quoted literals with forward-slash
+  // paths, so psLaunch's -Command wrapping needs no escaping.
+  const shell = resolveWindowsShell();
+  const p = (x: string): string => x.replaceAll('\\', '/');
+  const webGet = (port: number, outFile: string): string =>
+    `try { Invoke-WebRequest -UseBasicParsing -Uri ('http://127.0.0.1:${port}/secret') -Headers @{ Authorization = ('Bearer ' + $env:TAU_PROXY_TOKEN) } -OutFile '${p(outFile)}' } catch {}`;
 
   // ── Positive controls: each container does what it is allowed, concurrently (two live containers).
   const controlCmd = (self: Session): string =>
-    `cmd /c (type ${q(join(self.roots.project, 'secret.txt'))} > ${q(join(self.roots.project, 'self-read.out'))}) & (echo OWN-${self.grant.id}> ${q(join(self.roots.home, 'own-write.out'))}) & (curl.exe -s -o ${q(join(self.roots.project, 'own-proxy.out'))} -H "Authorization: Bearer %TAU_PROXY_TOKEN%" http://127.0.0.1:${self.grant.proxy.port}/secret) & exit 0`;
+    psLaunch(
+      shell,
+      [
+        `try { Get-Content -Raw -LiteralPath '${p(join(self.roots.project, 'secret.txt'))}' | Set-Content -LiteralPath '${p(join(self.roots.project, 'self-read.out'))}' } catch {}`,
+        `try { Set-Content -LiteralPath '${p(join(self.roots.home, 'own-write.out'))}' -Value 'OWN-${self.grant.id}' } catch {}`,
+        webGet(self.grant.proxy.port, join(self.roots.project, 'own-proxy.out')),
+        'exit 0',
+      ].join('; '),
+    );
   await Promise.all([runIn(sdk, a, controlCmd(a), denyPaths), runIn(sdk, b, controlCmd(b), denyPaths)]);
   for (const s of [a, b]) {
     const selfRead = readIfPresent(join(s.roots.project, 'self-read.out'));
@@ -165,13 +180,12 @@ const main = async (): Promise<void> => {
 
   // ── Cross READ + WRITE, run concurrently: A attacks B while B attacks A (two concurrent containers).
   const crossCmd = (attacker: Session, victim: Session): string => {
-    const reads = victim.secretFiles
-      .map((f, i) => `(type ${q(f)} >> ${q(attacker.outFile)}) 2>nul & echo --sep${i}-->> ${q(attacker.outFile)}`)
-      .join(' & ');
-    const writes = victim.secretFiles
-      .map((f) => `(echo TAMPER-${attacker.grant.id}> ${q(f.replace(/secret\.txt$/, 'tamper.out'))}) 2>nul`)
-      .join(' & ');
-    return `cmd /c (${reads}) & (${writes}) & exit 0`;
+    const steps = victim.secretFiles.flatMap((f, i) => [
+      `try { Add-Content -LiteralPath '${p(attacker.outFile)}' -Value (Get-Content -Raw -LiteralPath '${p(f)}') } catch {}`,
+      `Add-Content -LiteralPath '${p(attacker.outFile)}' -Value '--sep${i}--'`,
+      `try { Set-Content -LiteralPath '${p(f.replace(/secret\.txt$/, 'tamper.out'))}' -Value 'TAMPER-${attacker.grant.id}' } catch {}`,
+    ]);
+    return psLaunch(shell, [...steps, 'exit 0'].join('; '));
   };
   await Promise.all([runIn(sdk, a, crossCmd(a, b), denyPaths), runIn(sdk, b, crossCmd(b, a), denyPaths)]);
 
@@ -226,7 +240,10 @@ const main = async (): Promise<void> => {
 
   // ── Proxy cross-use: A reaches B's port with A's token, and B reaches A's port with B's token.
   const proxyAttack = (attacker: Session, victim: Session): string =>
-    `cmd /c curl.exe -s -o ${q(join(attacker.roots.project, 'cross-proxy.out'))} -H "Authorization: Bearer %TAU_PROXY_TOKEN%" http://127.0.0.1:${victim.grant.proxy.port}/secret & exit 0`;
+    psLaunch(
+      shell,
+      [webGet(victim.grant.proxy.port, join(attacker.roots.project, 'cross-proxy.out')), 'exit 0'].join('; '),
+    );
   const aSeenBefore = b.proxy.log.length;
   const bSeenBefore = a.proxy.log.length;
   await Promise.all([runIn(sdk, a, proxyAttack(a, b), denyPaths), runIn(sdk, b, proxyAttack(b, a), denyPaths)]);
@@ -255,16 +272,18 @@ const main = async (): Promise<void> => {
     ),
   );
 
-  // ── Descendant reaping: session-escaping TERM-ignoring writer; foreground exits; tree must be reaped.
+  // ── Descendant reaping (D14 PowerShell case): the foreground PowerShell spawns a detached native
+  // .exe child, a PowerShell background job, AND a Start-Process writer, then exits. The kill-on-close
+  // job must reap the whole tree; the external sentinel must stop growing after the container closes.
   const sentinel = join(a.roots.temporary, 'reaping-sentinel.txt');
   mkdirSync(a.roots.temporary, { recursive: true });
-  await runIn(sdk, a, reapingWriterCommand(sentinel), denyPaths);
-  // After the run() resolves (foreground exited, container closed), the detached writer must be dead.
-  const growth = await observeGrowth(sentinel, 2000);
+  await runIn(sdk, a, reapingWriterCommand(shell, sentinel), denyPaths);
+  // After the run() resolves (foreground exited, container closed), the detached writers must be dead.
+  const growth = await observeGrowth(sentinel, 2500);
   checks.push(
     check(
       'iso.reaping',
-      'descendants reaped when the foreground exits (external: sentinel stops growing after container close)',
+      'native .exe + PowerShell job + Start-Process descendants reaped when the foreground exits (external: sentinel stops growing)',
       growth.grew ? 'STILL GROWING' : 'stopped',
       !growth.grew,
       growth,
@@ -276,6 +295,7 @@ const main = async (): Promise<void> => {
   const receipt = {
     kind: 'isolation',
     identity: laneIdentity(sdk),
+    shell,
     denyPathsEnforced: denyPaths,
     sessions: {
       A: { roots: a.roots, proxyPort: a.grant.proxy.port, secretDigest: sha256(a.secret) },

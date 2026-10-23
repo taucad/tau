@@ -212,6 +212,93 @@ export const wxcExecDigest = (sdk?: MxcSdk): { path: string; sha256: string } | 
 export const sha256 = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
 export const nonce = (): string => randomBytes(16).toString('hex');
 
+/**
+ * D14 Windows shell resolution (blueprint D14, Brain f1b7c6df), the TypeScript mirror of
+ * shell-identity.ps1: FIXED PATHS ONLY, never PATH. pwsh 7 at %ProgramFiles%\PowerShell\7 wins when
+ * present and trusted, else Windows PowerShell 5.1 at %SystemRoot%\System32\WindowsPowerShell\v1.0.
+ * User-/store-writable copies (WindowsApps, profile paths, .cmd/.bat shims) are refused. The agent
+ * launch argv is fixed and carries NO -ExecutionPolicy override. shell-identity.ps1 produces the
+ * authoritative receipt; this resolver is used to BUILD in-container PowerShell command lines.
+ */
+export type ShellKind = 'pwsh7' | 'windows-powershell-5.1' | 'shell-missing';
+export type ShellIdentity = {
+  readonly kind: ShellKind;
+  readonly path?: string;
+  readonly launchArgv: readonly string[];
+  readonly ptyArgv: readonly string[];
+  readonly trusted: boolean;
+  readonly reason?: string;
+};
+
+export const D14_LAUNCH_ARGV: readonly string[] = ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command'];
+export const D14_PTY_ARGV: readonly string[] = ['-NoLogo', '-NoProfile'];
+
+const shellPathUntrusted = (p: string): string | undefined => {
+  const lower = p.toLowerCase();
+  if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+    return 'shim (.cmd/.bat) refused';
+  }
+  for (const bad of [
+    '\\windowsapps\\',
+    process.env['USERPROFILE'],
+    process.env['LOCALAPPDATA'],
+    process.env['APPDATA'],
+  ]) {
+    if (bad && lower.includes(bad.toLowerCase())) {
+      return `under user-/store-writable location: ${bad}`;
+    }
+  }
+  return undefined;
+};
+
+export const resolveWindowsShell = (hidePwsh7 = false): ShellIdentity => {
+  const pwsh7 = join(process.env['ProgramFiles'] ?? 'C:\\Program Files', 'PowerShell', '7', 'pwsh.exe');
+  const ps51 = join(
+    process.env['SystemRoot'] ?? 'C:\\Windows',
+    'System32',
+    'WindowsPowerShell',
+    'v1.0',
+    'powershell.exe',
+  );
+  const candidates: { kind: ShellKind; path: string }[] = [
+    { kind: 'pwsh7', path: pwsh7 },
+    { kind: 'windows-powershell-5.1', path: ps51 },
+  ];
+  for (const candidate of candidates) {
+    if (candidate.kind === 'pwsh7' && hidePwsh7) {
+      continue;
+    }
+    if (existsSync(candidate.path) && shellPathUntrusted(candidate.path) === undefined) {
+      return {
+        kind: candidate.kind,
+        path: candidate.path,
+        launchArgv: D14_LAUNCH_ARGV,
+        ptyArgv: D14_PTY_ARGV,
+        trusted: true,
+      };
+    }
+  }
+  return {
+    kind: 'shell-missing',
+    launchArgv: D14_LAUNCH_ARGV,
+    ptyArgv: D14_PTY_ARGV,
+    trusted: false,
+    reason: 'no trusted pwsh7 or 5.1 at the fixed paths',
+  };
+};
+
+/**
+ * Build one MXC command line that runs `script` under the resolved PowerShell with the D14 argv.
+ * Scripts are authored with single-quoted literals so no inner double quotes need escaping inside the
+ * outer `-Command "..."`. The in-MXC shell is PowerShell (D14), never Git Bash or cmd.
+ */
+export const psLaunch = (shell: ShellIdentity, script: string): string => {
+  if (!shell.path) {
+    throw new Error('shell-missing: no trusted PowerShell at the D14 fixed paths');
+  }
+  return `"${shell.path}" ${shell.launchArgv.join(' ')} "${script.replaceAll('"', '\\"')}"`;
+};
+
 /** A per-session grant: private roots, a read-only toolchain root, the other session's roots to deny. */
 export type SessionGrant = {
   readonly id: string;

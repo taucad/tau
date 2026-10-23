@@ -12,24 +12,33 @@
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 
-import { sha256, sleep } from './mxc-lib.mts';
+import { type ShellIdentity, psLaunch, sha256, sleep } from './mxc-lib.mts';
 
 /**
- * A command that:
- *   1. ignores SIGTERM in the current shell and in the child (`trap '' TERM`),
- *   2. starts a detached writer in a NEW session where available (`setsid`), so it escapes the
- *      foreground process group — the adversary case for reaping,
- *   3. appends to `sentinel` every ~100 ms,
- *   4. returns the foreground shell at once (exit 0).
- *
- * Only a kill-on-close job that reaps the ENTIRE descendant tree (not just the foreground group)
- * stops this writer. A POSIX process-group kill alone would miss the setsid child.
+ * The D14 PowerShell reaping adversary: one foreground PowerShell that spawns THREE escaping writers
+ * to `sentinel` and then exits at once. Only a kill-on-close job that reaps the ENTIRE descendant
+ * tree stops all three:
+ *   (a) a detached NATIVE .exe child (cmd.exe loop) — a non-PowerShell descendant,
+ *   (b) a PowerShell background job (Start-Job),
+ *   (c) a detached PowerShell via Start-Process.
+ * The verdict is external: after the container closes, the sentinel must STOP growing. A foreground-
+ * group-only kill would miss the Start-Process / native children, so this is the adversary case.
  */
-export const reapingWriterCommand = (sentinel: string): string => {
+export const reapingWriterCommand = (shell: ShellIdentity, sentinel: string): string => {
   const f = sentinel.replaceAll('\\', '/');
-  const writer = `trap '' TERM; i=0; while :; do printf '%s\\n' "$i $(date +%s%N)" >> "${f}"; i=$((i+1)); sleep 0.1; done`;
-  // Prefer setsid (true session escape); fall back to a plain disowned background job.
-  return `bash -c 'if command -v setsid >/dev/null 2>&1; then setsid bash -c "${writer}" >/dev/null 2>&1 < /dev/null & else ( ${writer} ) >/dev/null 2>&1 & fi; disown || true; exit 0'`;
+  // Single-quoted PowerShell literals only (no inner double quotes), so psLaunch's -Command wrapping
+  // needs no escaping. Each writer appends forever until reaped.
+  const script = [
+    `$f = '${f}'`,
+    // (a) native .exe child: cmd.exe infinite append loop, hidden/detached.
+    `Start-Process -FilePath 'cmd.exe' -ArgumentList '/c',('for /L %i in (1,0,2) do (echo a>> ' + [char]34 + $f + [char]34 + ' & ping -n 1 127.0.0.1 >nul)') -WindowStyle Hidden`,
+    // (b) PowerShell background job.
+    `Start-Job -ScriptBlock { param($p) while ($true) { Add-Content -LiteralPath $p -Value 'j'; Start-Sleep -Milliseconds 100 } } -ArgumentList $f | Out-Null`,
+    // (c) detached PowerShell via Start-Process.
+    `Start-Process -FilePath '${shell.path ?? 'powershell.exe'}' -ArgumentList '-NoLogo','-NoProfile','-Command',('while($true){Add-Content -LiteralPath ' + [char]39 + $f + [char]39 + ' -Value ' + [char]39 + 'p' + [char]39 + '; Start-Sleep -Milliseconds 100}') -WindowStyle Hidden`,
+    `exit 0`,
+  ].join('; ');
+  return psLaunch(shell, script);
 };
 
 /** Record file size at t0 and after `windowMs`; report whether it grew (external observation). */

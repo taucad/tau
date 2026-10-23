@@ -29,7 +29,9 @@ import {
   nonce,
   outDir,
   prereqCheck,
+  psLaunch,
   requestFor,
+  resolveWindowsShell,
   type SessionGrant,
   writeJson,
 } from './mxc-lib.mts';
@@ -71,8 +73,10 @@ const preflightSentinel = async (sdk: MxcSdk): Promise<{ check: Check; psecCreat
     deny: [],
     proxy: { host: '127.0.0.1', port: 0, token },
   };
-  // A container that writes the nonce to the shared RW path, then exits (destroy-on-exit closes PSEC).
-  const command = `cmd /c echo ${token}> "${sentinel}"`;
+  // A container whose PowerShell (D14) writes the nonce to the shared RW path, then exits
+  // (destroy-on-exit closes PSEC). Single-quoted PS literals keep psLaunch's -Command unescaped.
+  const shell = resolveWindowsShell();
+  const command = psLaunch(shell, `Set-Content -LiteralPath '${sentinel.replaceAll('\\', '/')}' -Value '${token}'`);
   let ran = false;
   let detail: unknown;
   try {
@@ -211,6 +215,7 @@ const main = async (): Promise<void> => {
   const receipt = {
     kind: 'capability-probe',
     identity: laneIdentity(sdk),
+    shell: resolveWindowsShell(),
     conclusion,
     platformSupport,
     availableBackends,

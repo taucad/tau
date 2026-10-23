@@ -20,12 +20,10 @@
 # proves the live host.
 name: Spike W2 (Windows MXC processcontainer isolation)
 
+# workflow_dispatch ONLY (no pull_request): a PR push must not cancel an in-flight run and lose the
+# hosted D14 ShellIdentity / grammar / PTY receipts. Ref-keyed concurrency, cancel-in-progress false.
 on:
   workflow_dispatch: {}
-  pull_request:
-    paths:
-      - 'packages/core/native-process/spikes/shell/mxc/**'
-      - '.github/workflows/spike-w2-win-mxc.yml'
 
 permissions:
   contents: read
@@ -33,8 +31,8 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: spike-w2-win-mxc-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: spike-w2-win-mxc-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 # TAU_SPIKE_OUT is not set here: the `runner` context is unavailable in workflow-level env, so the
 # harness defaults its output directory to $RUNNER_TEMP/mxc-spike (see mxc/mxc-lib.mts outDir),
@@ -58,52 +56,72 @@ jobs:
         with:
           node-version: '24.20.0'
 
-      # Install the pinned SDK into the spike directory (mxc/package.json pins @microsoft/mxc-sdk
-      # 1.0.1; npm verifies the registry integrity on fetch). A failed install is NOT fatal here: the
-      # provision/probe steps record the SDK-absent typed state and the row routes to the fallback.
+      # Install the pinned SDK (mxc/package.json pins @microsoft/mxc-sdk 1.0.1; npm verifies the
+      # registry integrity on fetch; it also brings node-pty, used by the PTY row). Non-fatal: the
+      # provision/probe steps record the SDK-absent typed state.
+      # Every step below is continue-on-error so that ALL receipts are produced and uploaded; the
+      # final Summarize step is the single gate (it exits nonzero if any receipt is not pass), so the
+      # row stays RED while PSEC is absent — that red is the intended evidence.
       - name: Install pinned MXC Node SDK
         id: install
         continue-on-error: true
         shell: bash
         run: npm install --prefix "$MXC_DIR" --no-audit --no-fund
 
-      # Record the pin: installed version == pinned, licence (MIT), registry integrity/shasum, and
-      # the resolved native wxc-exec on-disk digest + OS build.
-      # bash: provision does not exercise the SDK's getPlatformSupport/probe paths (the ones that run
-      # the SDK's internal `whoami /user`), so it is unaffected by the Git-bash whoami shadow and runs
-      # cleanly here. Its own user-SID record uses .NET WindowsIdentity (never whoami), so it is
-      # correct under either shell. probe/isolation below do call those SDK paths and so use pwsh.
+      # bash: provision does not exercise the SDK's getPlatformSupport/probe whoami path, so it is
+      # unaffected by the Git-bash whoami shadow. Its user-SID record uses .NET WindowsIdentity.
       - name: Provision + record (pin, licence, digest, OS build)
         id: provision
         continue-on-error: true
         shell: bash
         run: node "$MXC_DIR/provision.mts"
 
-      # Capability probe: PSEC create/close (externally proven by a preflight sentinel a container
-      # child writes), PSE_SUPPORT_FS_DENY, ConPTY, isolation tier, OS build. Its outcome gates the
-      # branch below.
+      # D14 ShellIdentity (the primary hosted-collectable receipt): resolve the Windows shell at the
+      # fixed paths for BOTH branches (pwsh 7 present, and 5.1 with pwsh 7 hidden) and record kind +
+      # version + digest + launch argv. pwsh host so System32 whoami.exe wins.
+      - name: D14 ShellIdentity (pwsh7 + forced-5.1 branches)
+        id: shellid
+        continue-on-error: true
+        shell: pwsh
+        run: node "$env:MXC_DIR/shell-identity.mts"
+
+      # T02-pwsh grammar cases against the resolved shell (containment cases stay language-neutral).
+      - name: T02-pwsh grammar
+        id: grammar
+        continue-on-error: true
+        shell: pwsh
+        run: node "$env:MXC_DIR/grammar.mts"
+
+      # PTY row: interactive PowerShell over a ConPTY terminal (the D14 Terminal-pane argv).
+      - name: PTY (ConPTY + interactive PowerShell)
+        id: pty
+        continue-on-error: true
+        shell: pwsh
+        run: node "$env:MXC_DIR/pty.mts"
+
+      # Capability probe: PSEC create/close (external preflight sentinel), PSE_SUPPORT_FS_DENY, ConPTY,
+      # isolation tier, OS build. On hosted Server 2025 PSEC is absent, so this is a typed-unavailable
+      # RED by design (recorded, fail-closed) — the capability-SID fallback is concluded exercisable-
+      # but-unreceipted here and is NOT re-run.
       - name: Capability probe (PSEC / PSE_SUPPORT_FS_DENY / ConPTY)
         id: probe
         continue-on-error: true
         shell: pwsh
         run: node "$env:MXC_DIR/probe.mts"
 
-      # Core deliverable, taken only when the MXC probe passed: two concurrent containers, external
-      # canaries for read/write/HOME/temp/approved-folder, proxy cross-use and descendant reaping.
+      # Core deliverable, taken only where the MXC probe passed (a PSEC-capable Windows build): two
+      # concurrent containers, external canaries for read/write/HOME/temp/approved-folder, proxy
+      # cross-use and the D14 PowerShell descendant-reaping case. Skipped on hosted (PSEC absent).
       - name: Two-concurrent-container isolation receipt
         id: isolation
         if: steps.probe.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: node "$env:MXC_DIR/isolation.mts"
 
-      # Fallback, taken only where the MXC probe failed on this row: the capability-SID receipt.
-      - name: Capability-SID fallback receipt
-        id: fallback
-        if: steps.probe.outcome != 'success'
-        shell: pwsh
-        run: node "$env:MXC_DIR/fallback.mts"
-
-      - name: Summarize
+      # Single gate: prints the summary AND exits nonzero if any produced receipt is not pass (so the
+      # row stays red while PSEC is absent). Collects every receipt regardless of earlier failures.
+      - name: Summarize + gate
         if: always()
         shell: bash
         run: node "$MXC_DIR/summarize.mts" >> "$GITHUB_STEP_SUMMARY"

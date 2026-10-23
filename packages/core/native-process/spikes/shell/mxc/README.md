@@ -6,8 +6,39 @@ records the typed infeasibility of) the ratified Windows `ShellProvider` target:
 (PSEC), on `windows-2025` (hosted Server 2025, build ~26100 / 24H2-equivalent).
 
 Nothing here is shipped or exported by the package. The workflow is
-`.github/workflows/spike-w2-win-mxc.yml`. The scripts are standalone so the later Win11 Eval VM lane
-can reuse them.
+`.github/workflows/spike-w2-win-mxc.yml` (workflow_dispatch only, ref-keyed concurrency with
+cancel-in-progress false). The scripts are standalone so the Win11 Eval VM lane reuses them.
+
+## D14: PowerShell on Windows (blueprint D14, Brain f1b7c6df)
+
+The Windows shell is **PowerShell, not Git Bash** (operator ruling 2026-10-23T03:09Z). The tool is
+one `shell` tool whose description names the host language + major version; grammar tests split into
+**T02-bash** (macOS/Linux) and **T02-pwsh** (Windows), while containment cases stay language-neutral.
+
+- **Shell resolution — FIXED PATHS ONLY, never PATH** (`shell-identity.ps1`, mirrored in
+  `mxc-lib.mts resolveWindowsShell`): pwsh 7 at `%ProgramFiles%\PowerShell\7\pwsh.exe` wins when
+  present, else Windows PowerShell 5.1 at `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`.
+  WindowsApps aliases, profile-path copies and `.cmd`/`.bat` shims are refused. `ShellIdentity`
+  (kind + version + digest) is recorded in **every** receipt.
+- **Launch argv** `-NoLogo -NoProfile -NonInteractive -Command`, with **no `-ExecutionPolicy`
+  override** — the machine/GPO policy applies; a blocked script is an ordinary nonzero `completed`,
+  not an error. Terminal pane uses `-NoLogo -NoProfile` over ConPTY.
+- **Git Bash is not offered on Windows**: the in-MXC shell, the preflight sentinel, the isolation
+  commands and the reaping writers are all PowerShell. Prior Git Bash receipts (spike-w1, the Win11
+  SRT row) remain as historical evidence only.
+
+### Hosted-collectable D14 receipts (windows-2025)
+
+| receipt          | file                          | what it proves                                                                    |
+| ---------------- | ----------------------------- | --------------------------------------------------------------------------------- |
+| ShellIdentity    | `shell-identity.receipt.json` | both resolution branches: pwsh 7 present, and forced 5.1 (`-HidePwsh7`)           |
+| T02-pwsh grammar | `grammar.receipt.json`        | here-string, pipeline, subexpression, exit code (gated); `&&`/`                   |     | ` + Unicode characterized |
+| PTY              | `pty.receipt.json`            | interactive PowerShell over a real ConPTY terminal (marker echoed back, external) |
+
+The isolation receipt's new **reaping** case proves a detached native `.exe` child, a PowerShell
+`Start-Job`, and a `Start-Process` writer are ALL reaped when the foreground PowerShell exits. The
+capability-SID fallback is concluded exercisable-but-unreceipted on hosted Server 2025 and is not
+re-run here.
 
 ## What is pinned (`pin.json`)
 

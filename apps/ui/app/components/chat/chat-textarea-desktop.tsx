@@ -13,6 +13,7 @@ import { ChatAgentSheet, ghostPillClass } from '#components/chat/chat-agent-shee
 import { ChatAgentModeControl } from '#components/chat/chat-mode-selector.js';
 import { useAgentConfig } from '#components/chat/use-agent-config.js';
 import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
+import { ChatKernelFallbackNotice } from '#components/chat/chat-kernel-fallback-notice.js';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -571,6 +572,8 @@ export const ChatTextareaDesktop = memo(function ({
             </Button>
           </div>
         ) : undefined}
+        {/* Only a session's chat can hold a kernel this runtime cannot run. */}
+        <ChatKernelFallbackNotice />
         {/* Attachments */}
         <ChatTextareaAttachmentRail
           attachments={attachments}

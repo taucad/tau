@@ -53,7 +53,12 @@ import {
 } from '#mcp-viewer-chrome.js';
 import { createMcpViewerWorkbench } from '#mcp-viewer-workbench.js';
 import type { McpViewerWorkbenchOptions } from '#mcp-viewer-workbench.js';
-import type { TauViewerMechanism, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
+import type {
+  TauViewerMechanism,
+  TauViewerModel,
+  TauViewerPreviewParametersInput,
+  TauViewerShowResult,
+} from '@taucad/mcp/viewer-protocol';
 import { readGlbMechanism } from '@taucad/agent-tools/runtime';
 import { slugifyTargetFile } from '@taucad/chat/rpc';
 
@@ -987,6 +992,26 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
                 });
           },
         }),
+    /* Only a watched source can render a drag's values; a drawn file has none to render. */
+    ...(entrySessions === undefined
+      ? {}
+      : {
+          async previewParameters(input: TauViewerPreviewParametersInput) {
+            const entry = shown.get(input.modelId);
+            if (entry === undefined) {
+              return failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
+            }
+            if (entry.kind !== 'render') {
+              return failure('NOT_LIVE', `${entry.model.path} is a drawn file, not a watched source.`);
+            }
+            /* The page may name an older render of the source: the preview goes to the source's open session. */
+            const session = entrySessions.get(entry.session.key);
+            if (session === undefined) {
+              return failure('NOT_LIVE', `The watch on ${entry.model.path} ended; show it again.`);
+            }
+            return session.preview(input.parameters);
+          },
+        }),
     async close() {
       entrySessions?.close();
       sessions.close();
@@ -1083,6 +1108,8 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       port.shareLink?.(tauViewerPageInputSchemas.appShareLink.parse(args), loopbackCall),
     [tauViewerToolName.appWorkbenchState]: async (args) =>
       port.workbenchState?.(tauViewerPageInputSchemas.appWorkbenchState.parse(args), loopbackCall),
+    [tauViewerToolName.appPreviewParameters]: async (args) =>
+      port.previewParameters?.(tauViewerPageInputSchemas.appPreviewParameters.parse(args), loopbackCall),
   };
 
   const handleLoopback = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {

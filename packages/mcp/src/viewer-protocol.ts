@@ -30,7 +30,31 @@ export const tauViewerToolName = {
   appListFiles: 'app_list_files',
   /** Show one project file in the calling page only. */
   appOpenFile: 'app_open_file',
+  /** Render transient parameter values on a shown source's watched document, for a drag in the Parameters pane. */
+  appPreviewParameters: 'app_preview_parameters',
 } as const;
+
+/**
+ * Arguments of `app_preview_parameters`.
+ *
+ * @public
+ */
+export type TauViewerPreviewParametersInput = Readonly<{
+  /** The shown model; it must be a render of a watched source. */
+  modelId: string;
+  /** Partial values over the committed record's active group; omitted, the preview ends and the committed render returns. */
+  parameters?: Readonly<Record<string, unknown>> | undefined;
+}>;
+
+/**
+ * What `app_preview_parameters` answers.
+ *
+ * @public
+ */
+export type TauViewerPreviewResult = Readonly<{
+  /** `false` when a newer preview or a committed change superseded this one. */
+  accepted: boolean;
+}>;
 
 /** Name of one viewer tool. @public */
 export type TauViewerToolName = (typeof tauViewerToolName)[keyof typeof tauViewerToolName];

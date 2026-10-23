@@ -255,6 +255,50 @@ describe('createLocalMcpViewer', () => {
     expect(await readdir(root)).not.toContain('.tau');
   });
 
+  it("should preview a drag's values on the shown source's document, and refuse a drawn file or an unknown model", async () => {
+    const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+    const part = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+
+    expect(await viewer.previewParameters?.({ modelId: model.id, parameters: { width: 30 } }, inline)).toEqual({
+      accepted: true,
+    });
+    expect(runtime.documents[0]?.updates).toEqual([{ parameters: { width: 30 }, transient: true }]);
+    /* The page follows its drag through the source's newest render, which no write left in the project. */
+    const card = syncedOf(
+      await viewer.sync(
+        {
+          pageId: 'card-source',
+          version: 0,
+          follow: false,
+          wait: false,
+          view: {
+            model: { id: model.id, title: model.title, path: model.path, sourceFile: model.sourceFile },
+            selected: [],
+            hidden: [],
+            isolated: [],
+            sectionActive: false,
+            measurementCount: 0,
+            composition: 'inline',
+            interactedAt: 1,
+          },
+        },
+        inline,
+      ),
+    );
+    expect(card.show?.model.sha256).toBe(sha(markedGlb(2)));
+    expect(card.status?.['src/bracket.ts']?.building).toBe(false);
+    expect(await viewer.previewParameters?.({ modelId: model.id }, inline)).toEqual({ accepted: true });
+    expect(runtime.documents[0]?.updates.at(-1)).toEqual({});
+
+    expect(
+      await viewer.previewParameters?.({ modelId: part.model.id, parameters: { width: 30 } }, inline),
+    ).toMatchObject({ errorCode: 'NOT_LIVE' });
+    expect(await viewer.previewParameters?.({ modelId: 'unknown', parameters: {} }, inline)).toMatchObject({
+      errorCode: 'UNKNOWN_MODEL',
+    });
+    expect(await readdir(root)).not.toContain('.tau');
+  });
+
   it('should hand a newer render and the build status to the pages showing the source, and only to them', async () => {
     const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
     const part = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));

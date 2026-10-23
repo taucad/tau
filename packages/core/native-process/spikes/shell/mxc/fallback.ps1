@@ -35,11 +35,13 @@
 #   (A) WRITE ISOLATION decided purely by the cap SID: two CONCURRENT sessions run as the SAME
 #       non-admin account, differing ONLY by their random S-1-5-21 write-restricting SID. External
 #       synthetic canary files show each can write its own root and is DENIED the other root.
-#   (B) CROSS-SESSION READ DENIAL: two distinct non-admin sandbox accounts + deny-read ACEs; an
-#       external observer (the orchestrator, outside the sandbox) impersonates each and shows its read
-#       of the other session private root (and of the never-grantable set) is denied by the kernel.
-#   (C) S2 interactive PTY IN-CONTAINER: s2-pty.ps1 is launched as the non-admin sandbox user under the
-#       write-restricted token; it stands up a real ConPTY and records tty/resize/ctrl-c/job/unicode.
+#   (B) CROSS-SESSION READ DENIAL: two distinct non-admin sandbox accounts + deny-read ACEs; each
+#       session's cmd.exe child, running in its own restricted token, reads its own secret (positive
+#       control) and is refused the other session's secret and the never-grantable set, decided from
+#       files the orchestrator inspects. Orchestrator impersonation is recorded as info only.
+#   (C) S2 interactive PTY IN-CONTAINER: s2-bash-pty.mts (Node + node-pty as the ConPTY master) runs
+#       Git for Windows Bash in a pseudoconsole as the non-admin sandbox user inside the write-
+#       restricted token and drives tty/resize/ctrl-c/job-control/UTF-8 from the terminal stream.
 #   (D) WORKLOAD NON-ELEVATED: the restricted token is LUA-filtered (not elevated) and the sandbox
 #       accounts are not members of Administrators.
 #
@@ -404,9 +406,6 @@ if ($apiOk) {
 # ---- Copy the child workload scripts to a readable staging dir (sandbox users get read+execute). ----
 $scriptsDir = Join-Path $drop 'scripts'
 New-Item -ItemType Directory -Force -Path $scriptsDir | Out-Null
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'cross-session-canary.ps1') -Destination $scriptsDir -Force
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 's2-pty.ps1') -Destination $scriptsDir -Force
-
 function Set-ExplicitAcl([string]$path, [object[]]$rules) {
   $acl = New-Object System.Security.AccessControl.DirectorySecurity
   $acl.SetAccessRuleProtection($true, $false) # disable inheritance, drop inherited ACEs
@@ -419,13 +418,30 @@ function Set-ExplicitAcl([string]$path, [object[]]$rules) {
   }
   Set-Acl -LiteralPath $path -AclObject $acl
 }
-# Grant every logged-on principal read+execute on the staging scripts (Authenticated Users S-1-5-11).
+# Grant every logged-on principal read+execute on the staging dir (Authenticated Users S-1-5-11).
 Set-ExplicitAcl $scriptsDir @(
   @{ Sid = 'S-1-5-32-544'; Rights = 'FullControl'; Type = 'Allow' },
   @{ Sid = 'S-1-5-11'; Rights = 'ReadAndExecute'; Type = 'Allow' }
 )
+# Copy AFTER the ACL is set, so every staged file and folder inherits the read+execute grant.
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'cross-session-canary.ps1') -Destination $scriptsDir -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 's2-bash-pty.mts') -Destination $scriptsDir -Force
+# S2 driver runtime, staged where the sandbox user can read+execute it: a copy of the runner's node.exe
+# and the node-pty package (ConPTY binding) that npm installed next to the pinned SDK.
+$stageNote = ''
+$s2Node = Join-Path $scriptsDir 'node.exe'
+$s2NodePty = Join-Path $scriptsDir 'node_modules\node-pty'
+try {
+  $nodeSrc = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+  Copy-Item -LiteralPath $nodeSrc -Destination $s2Node -Force
+  $stageNote += "node=$nodeSrc "
+} catch { $stageNote += "node-copy-failed: $($_.Exception.Message) " }
+try {
+  New-Item -ItemType Directory -Force -Path (Join-Path $scriptsDir 'node_modules') | Out-Null
+  Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'node_modules\node-pty') -Destination $s2NodePty -Recurse -Force
+} catch { $stageNote += "node-pty-copy-failed: $($_.Exception.Message)" }
 $canaryChild = Join-Path $scriptsDir 'cross-session-canary.ps1'
-$s2Child = Join-Path $scriptsDir 's2-pty.ps1'
+$s2Driver = Join-Path $scriptsDir 's2-bash-pty.mts'
 
 $ADMINS = 'S-1-5-32-544'
 $EVERYONE_RW = 'S-1-1-0'
@@ -440,16 +456,9 @@ function New-SessionTemp([string]$name) {
 }
 
 function Build-ChildCmd([string]$app, [string]$payload) { '"' + $app + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "' + $payload + '"' }
-# Sandbox-user children (run 40023733988: profile + env block loaded, yet pwsh never reached its first
-# statement). A WRITE_RESTRICTED token cannot write the sandbox user's own profile (its DACL names the
-# user SID, not a restricting SID), and pwsh init writes there (module analysis cache, telemetry id).
-# A cmd.exe prelude first drops a breadcrumb (separates "process started" from "pwsh init stalled"),
-# then points every per-user write location at the session's writable scratch dir before pwsh starts.
+# Sandbox-user children are launched through cmd.exe (fixed path): pwsh stalls at startup as the
+# sandbox user inside the write-restricted token, cmd.exe does not (runs 40023733988..40030269086).
 $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
-function Build-UserChildCmd([string]$shell, [string]$payload, [string]$scratch, [string]$crumb) {
-  $pre = "echo STARTED>`"$crumb`"&& set `"LOCALAPPDATA=$scratch`"&& set `"APPDATA=$scratch`"&& set `"USERPROFILE=$scratch`"&& set `"TEMP=$scratch`"&& set `"TMP=$scratch`"&& set `"PSModuleAnalysisCachePath=$scratch\pmac.clixml`"&& set POWERSHELL_TELEMETRY_OPTOUT=1&& set POWERSHELL_UPDATECHECK=Off&& "
-  '"' + $cmdExe + '" /d /s /c "' + $pre + (Build-ChildCmd $shell $payload) + '"'
-}
 
 # Resolve the D14 inner shell for the children (fixed paths only).
 $pwsh7 = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
@@ -686,54 +695,65 @@ if ($apiOk -and $null -ne $shellPath) {
     }
 
     # ================= (C) S2 interactive PTY IN-CONTAINER (as the non-admin sandbox user) =============
+    # Driver = Node + node-pty (ConPTY master) running Git for Windows Bash, all inside the token.
+    # pwsh stalled at startup as the sandbox user inside the token (runs 40023733988..40030269086), so
+    # the S2 child no longer depends on PowerShell or .NET. The result is published under its own
+    # name: run-nonadmin.ps1 writes s2-pty.receipt.json for a plain non-admin user (no restricted
+    # token), and that file must never be read as the in-token result.
     $tmpS2 = New-SessionTemp 'sess-temp-s2'
-    # The S2 child writes ONLY into this run's fresh session temp, and the result is published under
-    # its own name: run-nonadmin.ps1 writes s2-pty.receipt.json for a plain non-admin user (no
-    # restricted token), and that file must never be read as the in-token result.
-    $s2Out = Join-Path $tmpS2 's2-pty.receipt.json'
+    $s2Out = Join-Path $tmpS2 's2-bash-pty.receipt.json'
     $s2Final = Join-Path $drop 'fallback-s2-pty.receipt.json'
     foreach ($f in @($s2Out, $s2Final)) { if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force } }
-    $payloadS2 = "Set-Content -LiteralPath '$tmpS2\started-s2.txt' -Value STARTED; `$env:TEMP='$tmpS2'; `$env:TMP='$tmpS2'; `$env:MXC_S2PTY_OUT='$s2Out'; `$env:GITHUB_SHA='$($env:GITHUB_SHA)'; `$env:GITHUB_RUN_ID='$($env:GITHUB_RUN_ID)'; & '$s2Child'"
-    if (-not $childShell) { $childShell = $shellPath }
-    $cmdS2 = Build-ChildCmd $childShell $payloadS2
-    $errS2 = 0
+    $bashExe = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+    $prereqS2 = "node=$(Test-Path -LiteralPath $s2Node) nodePty=$(Test-Path -LiteralPath $s2NodePty) bash=$(Test-Path -LiteralPath $bashExe) driver=$(Test-Path -LiteralPath $s2Driver)"
+    Add-Check 'fallback.s2Pty.prereq' 'S2 driver staged readable for the sandbox user: node.exe, node-pty (ConPTY binding), Git for Windows bash.exe, s2-bash-pty.mts' $prereqS2 ($prereqS2 -notlike '*False*') @{ node = $s2Node; bash = $bashExe; stageNote = $stageNote }
+    $cmdS2 = '"' + $cmdExe + '" /d /s /c "echo STARTED>"' + $tmpS2 + '\cmd-started-s2.txt" && "' + $s2Node + '" "' + $s2Driver + '" "' + $s2Out + '" "' + $bashExe + '" "' + $tmpS2 + '""'
+    $errS2 = 0; $hS2 = [IntPtr]::Zero
     $s2LaunchPath = 'self'
-    if ($mode -eq 'elevated') {
-      $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
-      $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
-      Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
-      $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, (Build-UserChildCmd $childShell $payloadS2 $tmpS2 "$tmpS2\cmd-started-s2.txt"), $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
-      $noteS2 = [TauRestrict]::LastLaunchNote
-      $s2LaunchPath = if ($hS2 -eq [IntPtr]::Zero) { "asUser-failed(err=$errS2)" } else { 'asSandboxUser' }
-    } else {
-      $deskS2 = New-SessionDesktop 's2' @($cap1)
-      $hS2 = [TauRestrict]::LaunchSelf($childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
-    }
-    if ($hS2 -ne [IntPtr]::Zero) {
-      $exitS2 = [TauRestrict]::Wait($hS2, 180000); if ($exitS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2)
-      $startedS2 = Test-Path -LiteralPath (Join-Path $tmpS2 'started-s2.txt'); $cmdS2Started = Test-Path -LiteralPath (Join-Path $tmpS2 'cmd-started-s2.txt')
-      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1 = timed out and killed; -1073741502 = 0xC0000142)' "exit=$exitS2 cmdStarted=$cmdS2Started pwshStarted=$startedS2 launch=$s2LaunchPath shell=$childShell" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2 }
-    } else {
-      Add-Check 'fallback.s2Pty.launch' 'S2 PTY child launched under the write-restricted sandbox token' "launch failed err=$errS2 path=$s2LaunchPath" $false $null
+    $expectUser = if ($mode -eq 'elevated') { $sandboxA.Name } else { $env:USERNAME }
+    if ($prereqS2 -notlike '*False*') {
+      if ($mode -eq 'elevated') {
+        $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
+        $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
+        Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
+        $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
+        $noteS2 = [TauRestrict]::LastLaunchNote
+        $s2LaunchPath = if ($hS2 -eq [IntPtr]::Zero) { "asUser-failed(err=$errS2)" } else { 'asSandboxUser' }
+      } else {
+        $deskS2 = New-SessionDesktop 's2' @($cap1)
+        $hS2 = [TauRestrict]::LaunchSelf($cmdExe, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
+      }
+      if ($hS2 -ne [IntPtr]::Zero) {
+        $exitS2 = [TauRestrict]::Wait($hS2, 180000); if ($exitS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2)
+        $cmdS2Started = Test-Path -LiteralPath (Join-Path $tmpS2 'cmd-started-s2.txt'); $driverStarted = Test-Path -LiteralPath (Join-Path $tmpS2 'driver-started.txt')
+        Add-Check 'fallback.s2Pty.exit' 'S2 driver exit code recorded (0 = all checks pass; -1 = timed out and killed)' "exit=$exitS2 cmdStarted=$cmdS2Started driverStarted=$driverStarted launch=$s2LaunchPath cmdLineLen=$($cmdS2.Length)" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2 }
+      } else {
+        Add-Check 'fallback.s2Pty.launch' 'S2 driver launched under the write-restricted sandbox token' "launch failed err=$errS2 path=$s2LaunchPath" $false $null
+      }
     }
     if (Test-Path -LiteralPath $s2Out) { try { Copy-Item -LiteralPath $s2Out -Destination $s2Final -Force } catch {} }
     if (Test-Path -LiteralPath $s2Final) {
       try {
         $s2r = Get-Content -LiteralPath $s2Final -Raw | ConvertFrom-Json
         $s2Verdict = "$($s2r.verdict)"
-        $s2sub = @{}; foreach ($c in $s2r.checks) { $s2sub[$c.id] = $c.verdict }
+        $s2sub = @{}; foreach ($c in $s2r.checks) { $s2sub[$c.id] = "$($c.verdict): $($c.observed)" }
         $s2sub['launchPath'] = $s2LaunchPath
-        # Attribution: the receipt must come from THIS child, running as the expected sandbox identity.
-        $s2User = "$(($s2r.checks | Where-Object { $_.id -eq 's2.workload.nonAdmin' } | Select-Object -First 1).observed)"
-        $expectUser = if ($mode -eq 'elevated') { $sandboxA.Name } else { $env:USERNAME }
-        $attributed = $s2User -like "*\$expectUser *"
+        # Attribution: both the driver process (PTY master) and the Bash inside the pty must report the
+        # expected sandbox identity, so a foreign or stale receipt can never count.
+        $nodeUser = "$($s2r.identity.nodeUser)"; $bashUser = "$($s2r.identity.bashWhoami)"
+        $attributed = ($nodeUser -ieq $expectUser) -and ($bashUser -ieq $expectUser)
+        # External UTF-8 evidence: the bytes Bash wrote, read here by the orchestrator.
+        $u8File = Join-Path $tmpS2 'u8.txt'
+        $u8Hex = if (Test-Path -LiteralPath $u8File) { ([System.IO.File]::ReadAllBytes($u8File) | ForEach-Object { $_.ToString('x2') }) -join '' } else { '' }
+        $u8Want = ([System.Text.Encoding]::UTF8.GetBytes("caf$([char]0xE9) $([char]0x2713) $([char]0x65E5)$([char]0x672C) $([char]::ConvertFromUtf32(0x1F600))") | ForEach-Object { $_.ToString('x2') }) -join ''
+        $u8Ok = $u8Hex -eq $u8Want
         if (-not $attributed) { $s2Verdict = "unattributed($s2Verdict)" }
-        Add-Check 'fallback.s2Pty.inContainer' 'interactive ConPTY inside the non-admin write-restricted token (receipt written by this child as the sandbox user): tty+resize+ctrl-c+jobcontrol+unicode all pass' "verdict=$s2Verdict launch=$s2LaunchPath receiptUser=[$s2User] expect=$expectUser" ($attributed -and ($s2r.verdict -eq 'pass')) $s2sub
+        Add-Check 'fallback.s2Pty.inContainer' 'real Bash in a ConPTY inside the non-admin write-restricted token: tty+resize+ctrl-c+jobcontrol+utf8 all pass, receipt attributed to the sandbox user (driver and Bash), UTF-8 bytes confirmed externally' "verdict=$s2Verdict nodeUser=$nodeUser bashUser=$bashUser expect=$expectUser externalUtf8=$u8Ok bash=$($s2r.identity.bashVersion)" ($attributed -and $u8Ok -and ($s2r.verdict -eq 'pass')) $s2sub
       } catch {
-        Add-Check 'fallback.s2Pty.inContainer' 'S2 PTY receipt parseable' $_.Exception.Message $false $null
+        Add-Check 'fallback.s2Pty.inContainer' 'S2 driver receipt parseable' $_.Exception.Message $false $null
       }
     } else {
-      Add-Check 'fallback.s2Pty.inContainer' 'S2 PTY receipt produced by the in-token child' 'no receipt from the in-token S2 child' $false @{ launchErr = $errS2 }
+      Add-Check 'fallback.s2Pty.inContainer' 'S2 driver receipt produced by the in-token child' 'no receipt from the in-token S2 driver' $false @{ launchErr = $errS2 }
     }
   } catch {
     Add-Check 'fallback.orchestration' 'fallback orchestration completed without an unhandled error' $_.Exception.Message $false $null

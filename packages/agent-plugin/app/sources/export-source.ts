@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import { toolName } from '@taucad/chat/constants';
 import type { ExportModelOutput } from '@taucad/chat/schemas/tools/export-model';
-import { tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
-import type { TauViewerModel, TauViewerReadResult } from '@taucad/mcp/viewer-protocol';
+import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
+import { readTauViewerBytes } from '@taucad/mcp/viewer-read';
 import type { ExportFidelity, FileExtension } from '@taucad/types';
 import { fileExtensions } from '@taucad/types/constants';
 import { sanitizeFormDelta } from '@taucad/workbench-panes/export/export-source';
@@ -19,7 +19,6 @@ import type {
 import packageJson from '../../package.json' with { type: 'json' };
 import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge } from '#app/host-bridge.js';
-import { decodeBase64 } from '#app/model-loader.js';
 
 /**
  * The page's export tools, served by `@taucad/host`'s `mcp-viewer-export.ts` (app-only). `export_model` is the model
@@ -47,9 +46,6 @@ const isListedFormats = (value: unknown): value is Readonly<{ formats: readonly 
 
 const isExportResult = (value: unknown): value is Pick<ExportModelOutput, 'files'> =>
   typeof value === 'object' && value !== null && Array.isArray((value as { files?: unknown }).files);
-
-const isReadResult = (value: unknown): value is TauViewerReadResult =>
-  typeof value === 'object' && value !== null && typeof (value as { data?: unknown }).data === 'string';
 
 /**
  * The formats `app_export_formats` lists, narrowed to the catalog the pane can label. `export_model` has no input for
@@ -150,7 +146,10 @@ const createEntryCache = (load: (entryPath: string) => Promise<ExportFormatEntry
       states.set(entryPath, loadingState);
       const fetchFormats = async (): Promise<void> => {
         try {
-          settle(entryPath, { hasGeometry: true, formats: await load(entryPath) });
+          settle(entryPath, {
+            hasGeometry: true,
+            formats: await load(entryPath),
+          });
         } catch (error) {
           settle(entryPath, {
             hasGeometry: true,
@@ -166,38 +165,6 @@ const createEntryCache = (load: (entryPath: string) => Promise<ExportFormatEntry
       return loadingState;
     },
   };
-};
-
-/**
- * Read one finished artifact through `app_read_artifact`, a reply-sized range at a time.
- *
- * @param bridge - The page's bridge.
- * @param modelId - The shown model, which names the project on the loopback page.
- * @param file - The artifact's project path and size, as `export_model` listed it.
- * @returns The artifact's bytes, assembled from every range.
- */
-const readArtifact = async (
-  bridge: HostBridge,
-  modelId: string,
-  file: Readonly<{ artifactPath: string; byteLength: number }>,
-): Promise<Uint8Array<ArrayBuffer>> => {
-  const bytes = new Uint8Array(file.byteLength);
-  let offset = 0;
-  while (offset < file.byteLength) {
-    // oxlint-disable-next-line no-await-in-loop -- each range starts where the last one ended.
-    const result = await bridge.callTool(viewerExportTool.readArtifact, {
-      modelId,
-      artifactPath: file.artifactPath,
-      offset,
-      length: Math.min(tauViewerReadLimit, file.byteLength - offset),
-    });
-    if (!isReadResult(result) || result.offset !== offset || result.byteLength === 0) {
-      throw new Error(`${file.artifactPath} changed while it was read.`);
-    }
-    bytes.set(decodeBase64(result.data), offset);
-    offset += result.byteLength;
-  }
-  return bytes;
 };
 
 /**
@@ -285,7 +252,16 @@ export function createExportSource(bridge: HostBridge, model: TauViewerModel): E
         }
         if (request.download) {
           for (const file of result.files) {
-            const bytes = await readArtifact(bridge, model.id, file);
+            const bytes = await readTauViewerBytes({
+              read: async (range) =>
+                bridge.callTool(viewerExportTool.readArtifact, {
+                  modelId: model.id,
+                  artifactPath: file.artifactPath,
+                  ...range,
+                }),
+              byteLength: file.byteLength,
+              label: file.artifactPath,
+            });
             download(bytes, result.files.length === 1 ? `${model.title}.${format}` : file.name, file.mimeType);
           }
         }

@@ -77,7 +77,9 @@ const createBridge = (kind: HostView['kind']) => {
     throw new Error(`unexpected ${name}`);
   });
   const view: Pick<HostView, 'kind'> = { kind };
-  const partial: Pick<HostBridge, 'callTool'> & { view: () => Pick<HostView, 'kind'> } = { view: () => view, callTool };
+  const partial: Pick<HostBridge, 'callTool'> & {
+    view: () => Pick<HostView, 'kind'>;
+  } = { view: () => view, callTool };
   const bridge = partial as unknown as HostBridge;
   return { bridge, callTool };
 };
@@ -148,13 +150,21 @@ describe('createExportSource', () => {
   });
 
   it.each([
-    { failure: 'NO_KERNEL', thrown: new ToolCallError('NO_KERNEL', 'No kernel exports gear.ts.'), code: 'NO_KERNEL' },
+    {
+      failure: 'NO_KERNEL',
+      thrown: new ToolCallError('NO_KERNEL', 'No kernel exports gear.ts.'),
+      code: 'NO_KERNEL',
+    },
     {
       failure: 'FORMATS_UNAVAILABLE',
       thrown: new ToolCallError('FORMATS_UNAVAILABLE', 'The runtime is still starting.'),
       code: 'FORMATS_UNAVAILABLE',
     },
-    { failure: 'an uncoded error', thrown: new Error('Failed to fetch'), code: 'FORMATS_UNAVAILABLE' },
+    {
+      failure: 'an uncoded error',
+      thrown: new Error('Failed to fetch'),
+      code: 'FORMATS_UNAVAILABLE',
+    },
   ])('should show why the formats are missing after $failure and ask again on retry', async ({ thrown, code }) => {
     const { bridge, callTool } = createBridge('mcp-app');
     callTool.mockRejectedValueOnce(thrown);
@@ -162,14 +172,20 @@ describe('createExportSource', () => {
 
     readEntry(source, 'gear.ts');
     await vi.waitFor(() => {
-      expect(readEntry(source, 'gear.ts').unavailable).toMatchObject({ code, message: thrown.message });
+      expect(readEntry(source, 'gear.ts').unavailable).toMatchObject({
+        code,
+        message: thrown.message,
+      });
     });
     const { hasGeometry, unavailable } = readEntry(source, 'gear.ts');
     expect(hasGeometry).toBe(true);
     expect(unavailable?.retry).toBeTypeOf('function');
 
     unavailable?.retry?.();
-    expect(readEntry(source, 'gear.ts')).toEqual({ hasGeometry: true, formats: undefined });
+    expect(readEntry(source, 'gear.ts')).toEqual({
+      hasGeometry: true,
+      formats: undefined,
+    });
     await vi.waitFor(() => {
       expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl']);
     });
@@ -180,7 +196,10 @@ describe('createExportSource', () => {
     const { bridge, callTool } = createBridge('mcp-app');
     const source = createExportSource(bridge, { ...model, byteLength: 0 });
 
-    expect(readEntry(source, 'gear.ts')).toEqual({ hasGeometry: false, formats: undefined });
+    expect(readEntry(source, 'gear.ts')).toEqual({
+      hasGeometry: false,
+      formats: undefined,
+    });
     expect(callTool).not.toHaveBeenCalled();
   });
 
@@ -245,8 +264,13 @@ describe('createExportSource', () => {
       artifactPath: '.tau/artifacts/x/model.stl',
       offset: 0,
       length: 5,
+      encodings: ['gzip'],
     });
-    expect(callTool).toHaveBeenCalledWith('export_model', { modelId: 'm1', targetFile: 'gear.ts', to: 'stl' });
+    expect(callTool).toHaveBeenCalledWith('export_model', {
+      modelId: 'm1',
+      targetFile: 'gear.ts',
+      to: 'stl',
+    });
     expect(anchor.download).toBe('Gear.stl');
     expect(click).toHaveBeenCalledOnce();
   });

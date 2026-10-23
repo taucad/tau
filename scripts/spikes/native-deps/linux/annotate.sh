@@ -10,7 +10,11 @@ if [[ $# -ne 2 ]]; then
   echo "Usage: $0 <title> <file>" >&2
   exit 2
 fi
-title="$1"
+title="$(node --input-type=module - "$1" <<'NODE'
+const escapeData = (text) => text.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+process.stdout.write(escapeData(process.argv[2]).replaceAll(':', '%3A').replaceAll(',', '%2C'));
+NODE
+)"
 file="$2"
 [[ -f "$file" ]] || { echo "::warning title=${title}::no summary file ${file}"; exit 0; }
 work="$(mktemp -d)"
@@ -39,7 +43,11 @@ for part in "$work"/part-*; do
     echo "::warning title=${title}::summary truncated after 9 notices"
     break
   fi
-  body="$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' "$part" | awk 'BEGIN { ORS = "%0A" } { print }')"
+  body="$(node --input-type=module - "$part" <<'NODE'
+import { readFileSync } from 'node:fs';
+process.stdout.write(readFileSync(process.argv[2], 'utf8').replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A'));
+NODE
+)"
   echo "::notice title=${title} (${index})::${body}"
 done
 rm -rf "$work"

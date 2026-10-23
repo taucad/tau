@@ -43,7 +43,16 @@ vi.mock('#components/ui/collapsible-code-block.js', () => ({
 
 const { ErrorPage } = await import('#components/error-page.js');
 const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
-const { buildId, offerReload } = await import('#filesystem/build-skew.js');
+const { buildId, offerReload, recordLiveBuild } = await import('#filesystem/build-skew.js');
+const { useReloadPromptOwned } = await import('#components/nav/browser-update.js');
+
+/** A deploy explains the failure: the recovery offers the reload, as `recoverFromStaleBuild` does, and says so. */
+const supersededOutcome = (): void => {
+  mocks.recoverFromStaleBuild.mockImplementation(async () => {
+    offerReload(buildId + 1);
+    return 'superseded';
+  });
+};
 
 /** The error WebKit raised for TAU-UI-6; a stack is set so the code block would be eligible. */
 const moduleImportFailure = (): TypeError => new TypeError('Importing a module script failed.');
@@ -83,6 +92,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  // The server names this build again, which withdraws whatever offer a test left.
+  recordLiveBuild(buildId);
   vi.clearAllMocks();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -107,7 +118,12 @@ describe('ErrorPage', () => {
   it.each<StaleBuildOutcome>(['reloading', 'superseded'])(
     'should not report a module import failure a deploy explains (%s)',
     async (outcome) => {
-      mocks.recoverFromStaleBuild.mockResolvedValue(outcome);
+      if (outcome === 'superseded') {
+        supersededOutcome();
+      } else {
+        mocks.recoverFromStaleBuild.mockResolvedValue(outcome);
+        mocks.reloadState = 'pending';
+      }
 
       renderPage(moduleImportFailure());
 
@@ -120,7 +136,7 @@ describe('ErrorPage', () => {
   it('should offer the reload when the update control took over', async () => {
     const reload = vi.fn();
     vi.stubGlobal('location', { ...globalThis.location, reload });
-    mocks.recoverFromStaleBuild.mockResolvedValue('superseded');
+    supersededOutcome();
 
     renderPage(moduleImportFailure());
     fireEvent.click(await screen.findByRole('button', { name: 'Reload' }));
@@ -130,7 +146,7 @@ describe('ErrorPage', () => {
   });
 
   it('should own the reload prompt, so the floating banner does not repeat it', async () => {
-    mocks.recoverFromStaleBuild.mockResolvedValue('superseded');
+    supersededOutcome();
     mocks.routeError = moduleImportFailure();
     render(
       <MemoryRouter>
@@ -156,12 +172,61 @@ describe('ErrorPage', () => {
 
     act(() => {
       mocks.reloadState = 'stalled';
+      offerReload(buildId + 1);
       for (const listener of mocks.reloadStateListeners) {
         listener();
       }
     });
 
     expect(button).toBeEnabled();
+  });
+
+  it('should fall back to the error, and report it, once the server withdraws the offer', async () => {
+    supersededOutcome();
+    const error = moduleImportFailure();
+    const Owned = (): React.JSX.Element => <output aria-label='Prompt owned'>{String(useReloadPromptOwned())}</output>;
+    mocks.routeError = error;
+    render(
+      <MemoryRouter>
+        <ErrorPage />
+        <Owned />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('true');
+
+    act(() => {
+      recordLiveBuild(buildId);
+    });
+
+    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('false');
+    await waitFor(() => {
+      expect(mocks.reportUiError).toHaveBeenCalledWith(error);
+    });
+    expect(mocks.captureException).toHaveBeenCalledWith(error, { context: { component: 'ErrorPage' } });
+  });
+
+  it('should fall back to the error once the recovery takes its reload back, leaving the report to it', async () => {
+    mocks.recoverFromStaleBuild.mockResolvedValue('reloading');
+    mocks.reloadState = 'pending';
+    const error = moduleImportFailure();
+    renderPage(error);
+    expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
+
+    act(() => {
+      mocks.reloadState = 'idle';
+      for (const listener of mocks.reloadStateListeners) {
+        listener();
+      }
+    });
+
+    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mocks.captureException).toHaveBeenCalledWith(error, { context: { component: 'ErrorPage' } });
+    });
+    // `onGenuineFailure` in the recovery reports it to Sentry; a second report here would double it.
+    expect(mocks.reportUiError).not.toHaveBeenCalled();
   });
 
   it('should report a module import failure the live build still has, without loading another chunk', async () => {
@@ -190,7 +255,7 @@ describe('ErrorPage', () => {
   });
 
   it('should judge each error on its own outcome', async () => {
-    mocks.recoverFromStaleBuild.mockResolvedValue('superseded');
+    supersededOutcome();
     const view = renderPage(moduleImportFailure());
     expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
 

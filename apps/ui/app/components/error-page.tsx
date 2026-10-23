@@ -5,7 +5,7 @@ import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import { describeSupersession } from '#filesystem/build-skew.js';
+import { describeSupersession, isReloadOffered, subscribeReloadOffer } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 import { useReloadPromptOwner } from '#components/nav/browser-update.js';
 import {
@@ -22,6 +22,33 @@ const CollapsibleCodeBlock = lazy(async () => {
 });
 
 const serverReloadState = (): ReloadState => 'idle';
+const serverReloadOffer = (): boolean => false;
+
+/**
+ * Report `captured` for the route's `error`, unless that error was already reported.
+ *
+ * @param page - Which error has been reported, the route's error and the analytics client.
+ * @param captured - What to report (a route error response becomes an `Error`).
+ * @param toErrorTracker - Whether Sentry hears of it too, besides analytics.
+ */
+const reportErrorOnce = (
+  page: {
+    readonly reported: { current: unknown };
+    readonly error: unknown;
+    readonly analytics: Pick<ReturnType<typeof useAnalytics>, 'captureException'>;
+  },
+  captured: Error,
+  toErrorTracker: boolean,
+): void => {
+  if (page.reported.current === page.error) {
+    return;
+  }
+  page.reported.current = page.error;
+  page.analytics.captureException(captured, { context: { component: 'ErrorPage' } });
+  if (toErrorTracker) {
+    void reportUiError(captured);
+  }
+};
 
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
@@ -33,22 +60,31 @@ export function ErrorPage(): React.JSX.Element {
   const staleOutcome = triaged !== undefined && triaged.error === error ? triaged.outcome : undefined;
   // The recovery's own reload: the button waits while it is pending and returns once it stalls.
   const reloadState = useSyncExternalStore(subscribeReloadState, readReloadState, serverReloadState);
+  const isOffered = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverReloadOffer);
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
+  /* A deploy still explains the failure while the page's own reload is under way or the reload is
+   * offered. When the server names this build again the offer is withdrawn (or the recovery takes its
+   * reload back), and the failure is shown and reported as the genuine one it turned out to be. */
+  const isExplained =
+    staleOutcome === 'superseded'
+      ? isOffered
+      : staleOutcome === 'reloading' && (reloadState === 'pending' || isOffered);
+  const isTakenBack = (staleOutcome === 'reloading' || staleOutcome === 'superseded') && !isExplained;
   // This screen is the reload prompt while it shows; the floating banner would only repeat it.
-  useReloadPromptOwner(staleOutcome === 'reloading' || staleOutcome === 'superseded');
+  useReloadPromptOwner(isExplained);
   // Each failure is reported once, however often the effect runs again (a new `analytics`, a remount of the same error).
   const reportedError = useRef<unknown>(undefined);
 
   useEffect(() => {
+    if (isTakenBack && error instanceof Error) {
+      // A taken-back reload is reported by the recovery itself (`onGenuineFailure`); a withdrawn offer only here.
+      reportErrorOnce({ reported: reportedError, error, analytics }, error, staleOutcome === 'superseded');
+    }
+  }, [isTakenBack, error, staleOutcome, analytics]);
+
+  useEffect(() => {
     const reportOnce = (captured: Error, toErrorTracker: boolean): void => {
-      if (reportedError.current === error) {
-        return;
-      }
-      reportedError.current = error;
-      analytics.captureException(captured, { context: { component: 'ErrorPage' } });
-      if (toErrorTracker) {
-        void reportUiError(captured);
-      }
+      reportErrorOnce({ reported: reportedError, error, analytics }, captured, toErrorTracker);
     };
 
     // Don't report 404 errors to analytics - they're expected user behavior
@@ -141,7 +177,7 @@ export function ErrorPage(): React.JSX.Element {
     );
   }
 
-  if (staleOutcome === 'reloading' || staleOutcome === 'superseded') {
+  if (isExplained) {
     return (
       <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-4 py-8'>
         <div className='flex flex-col items-center gap-3 text-center'>

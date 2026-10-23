@@ -1,4 +1,5 @@
 // @vitest-environment node
+/* oxlint-disable new-cap -- OpenCascade API uses PascalCase method names */
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ExportResult, Rendering } from '@taucad/runtime';

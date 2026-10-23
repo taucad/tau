@@ -98,7 +98,7 @@ describe('browser update control', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is open in another tab');
+    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is available');
   });
 
   it('shows the newest build when a later one is announced', async () => {
@@ -125,6 +125,6 @@ describe('browser update control', () => {
 
     await announce(buildId + 1);
 
-    expect(screen.getByRole('alert')).toHaveTextContent('A newer version of Tau is open in another tab');
+    expect(screen.getByRole('alert')).toHaveTextContent('A newer version of Tau is available');
   });
 });

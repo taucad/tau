@@ -12,7 +12,8 @@ const reload = (): void => {
 
 /**
  * Persistent prompt shown in a tab whose bundle has been superseded by a newer
- * one in another tab (blueprint DF20). That tab has already stopped writing
+ * one in another tab (blueprint DF20) or replaced by a deploy
+ * (`#lib/stale-build-recovery`). That tab has already stopped writing
  * durable state, so reloading is the only way to make it useful again.
  *
  * Fallback for surfaces without the app sidebar (auth, shared pages, the
@@ -32,7 +33,7 @@ export function BuildSkewBanner(): React.JSX.Element | undefined {
     >
       <ArrowUpCircle className='size-4 shrink-0 text-muted-foreground' />
       <div className='min-w-0 flex-1 text-sm'>
-        A newer version of Tau is open in another tab. Reload to continue with the latest version.
+        A newer version of Tau is available. Reload to continue with the latest version.
       </div>
       <Button size='sm' variant='outline' onClick={reload}>
         Reload now

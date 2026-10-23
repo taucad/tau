@@ -108,6 +108,28 @@ describe('entry.server handleRequest', () => {
     expect(responseHeaders.get('Cross-Origin-Resource-Policy')).toBe('same-origin');
   });
 
+  it('should make every document revalidate, so a deploy is never answered with the replaced build (TAU-UI-6)', async () => {
+    const response = await handleRequest(
+      new Request('https://taucad.dev/w/home/fixture', { method: 'HEAD' }),
+      200,
+      new Headers(),
+      entryContext,
+      loadContext,
+    );
+    expect(response.headers.get('Cache-Control')).toBe('no-cache');
+  });
+
+  it("should keep a route's own document cache policy", async () => {
+    const response = await handleRequest(
+      new Request('https://taucad.dev/s/fixture', { method: 'HEAD' }),
+      200,
+      new Headers({ 'Cache-Control': 'public, max-age=0, must-revalidate' }),
+      entryContext,
+      loadContext,
+    );
+    expect(response.headers.get('Cache-Control')).toBe('public, max-age=0, must-revalidate');
+  });
+
   it('answers an unknown path with 404 (catch-all route)', async () => {
     const response = await handleRequest(
       new Request('https://tau.example/no-such-page', { method: 'HEAD' }),

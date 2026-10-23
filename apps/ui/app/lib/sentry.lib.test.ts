@@ -1,9 +1,12 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry event and breadcrumb fields are SDK wire names. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
+import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 import {
   beforeSendSentryEvent,
   consoleBreadcrumbTextLimit,
+  createBeforeSend,
+  sentryRelease,
   isUnhandledAbortRejection,
   scrubSentryBreadcrumb,
   scrubSentryEvent,
@@ -129,5 +132,60 @@ describe('scrubSentryBreadcrumb', () => {
     expect(values.every((value) => (value as string).length <= consoleBreadcrumbTextLimit + 1)).toBe(true);
     expect(breadcrumb.message?.length).toBeLessThanOrEqual(consoleBreadcrumbTextLimit + 1);
     expect(breadcrumb.data?.['logger']).toBe('console');
+  });
+});
+
+/** The event the browser SDK builds for TAU-UI-6: a route boundary's capture of a stackless WebKit import failure. */
+const moduleImportEvent = (): ErrorEvent => ({
+  type: undefined,
+  exception: {
+    values: [
+      { type: 'TypeError', value: 'Importing a module script failed.', mechanism: { type: 'generic', handled: true } },
+    ],
+  },
+  request: { url: 'https://taucad.dev/w/home/ak47-receiver-curves?tab=chat' },
+});
+
+const moduleImportFailure = new TypeError('Importing a module script failed.');
+
+describe('createBeforeSend', () => {
+  it.each<StaleBuildOutcome>(['reloading', 'superseded'])(
+    'should drop a module import failure a deploy explains (%s)',
+    async (outcome) => {
+      const recover = vi.fn(async () => outcome);
+      const beforeSend = createBeforeSend(recover);
+
+      await expect(beforeSend(moduleImportEvent(), { originalException: moduleImportFailure })).resolves.toBeNull();
+      expect(recover).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('should report a module import failure the live build still has, scrubbed', async () => {
+    const beforeSend = createBeforeSend(async () => 'current');
+
+    const sent = await beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
+
+    expect(sent?.exception).toStrictEqual(moduleImportEvent().exception);
+    expect(sent?.request).toStrictEqual({ url: 'https://taucad.dev/w/home/ak47-receiver-curves' });
+  });
+
+  it('should not probe the server for any other error', () => {
+    const recover = vi.fn(async (): Promise<StaleBuildOutcome> => 'reloading');
+    const beforeSend = createBeforeSend(recover);
+
+    const sent = beforeSend(rejectionEvent('generic'), { originalException: new Error('boom') });
+
+    expect(sent).not.toBeInstanceOf(Promise);
+    expect(recover).not.toHaveBeenCalled();
+  });
+});
+
+describe('sentryRelease', () => {
+  it('should name the deploy an event came from by its build id', () => {
+    expect(sentryRelease(1_792_730_113_029)).toBe('tau-ui@1792730113029');
+  });
+
+  it('should leave the release unset for a bundle without a build id', () => {
+    expect(sentryRelease(0)).toBeUndefined();
   });
 });

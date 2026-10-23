@@ -27,6 +27,24 @@ let newestBuildId = buildId;
 const supersededTopic = new Topic<void>({ name: 'build-skew' });
 const newestBuildTopic = new Topic<void>({ name: 'newest-build' });
 
+/**
+ * Mark this build superseded by another one: a newer tab announced it, or the
+ * server answered with a different build after a deploy (`#lib/stale-build-recovery`).
+ * A rollback serves an older build, which supersedes this one without being newer.
+ *
+ * @param otherBuildId - The superseding build's id.
+ */
+export function markBuildSuperseded(otherBuildId: number): void {
+  if (otherBuildId > newestBuildId) {
+    newestBuildId = otherBuildId;
+    newestBuildTopic.emit();
+  }
+  if (!superseded) {
+    superseded = true;
+    supersededTopic.emit();
+  }
+}
+
 const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName);
 
 if (channel) {
@@ -41,21 +59,14 @@ if (channel) {
       channel.postMessage(buildId);
       return;
     }
-    if (other > newestBuildId) {
-      newestBuildId = other;
-      newestBuildTopic.emit();
-    }
-    if (!superseded) {
-      superseded = true;
-      supersededTopic.emit();
-    }
+    markBuildSuperseded(other);
   });
   channel.postMessage(buildId);
 }
 
 /**
- * `true` once a newer build has been seen in another tab. Durable writes must
- * stop; reads are unaffected.
+ * `true` once a newer build has been seen in another tab, or a deploy replaced
+ * this one. Durable writes must stop; reads are unaffected.
  */
 export const isBuildSuperseded = (): boolean => superseded;
 

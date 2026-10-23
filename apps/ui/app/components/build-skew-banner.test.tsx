@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { metaConfig } from '#constants/meta.constants.js';
 
@@ -35,8 +35,30 @@ describe('build-id skew guard (DF20)', () => {
 
     announce(buildId + 1);
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is open in another tab');
+    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is available');
     expect(isBuildSuperseded()).toBe(true);
+  });
+
+  it('prompts a reload when the server reports that a deploy superseded this build', async () => {
+    const { BuildSkewBanner, buildId, isBuildSuperseded, markBuildSuperseded, readNewestBuildId } = await load();
+    render(<BuildSkewBanner />);
+
+    act(() => {
+      markBuildSuperseded(buildId + 1);
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is available');
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readNewestBuildId()).toBe(buildId + 1);
+  });
+
+  it('keeps the newest build id when a rollback serves an older build', async () => {
+    const { buildId, isBuildSuperseded, markBuildSuperseded, readNewestBuildId } = await load();
+
+    markBuildSuperseded(buildId - 1);
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readNewestBuildId()).toBe(buildId);
   });
 
   it('leaves an equal or older build untouched', async () => {

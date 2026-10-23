@@ -2,7 +2,10 @@ import * as Sentry from '@sentry/react';
 import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
+import { buildId } from '#filesystem/build-skew.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { isStaleModuleError, recoverFromStaleBuild } from '#lib/stale-build-recovery.js';
+import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 /**
  * Remove the query string and fragment, then any invitation token, from a URL.
@@ -59,6 +62,36 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
 // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
 export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
   isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
+
+/**
+ * The `beforeSend` hook with version-skew triage (TAU-UI-6).
+ *
+ * A module script that failed to load is first put to the stale-build recovery:
+ * when a deploy explains it the page reloads or offers the reload, and the
+ * event is dropped as expected control flow. A failure the live build still has
+ * is reported like any other event.
+ *
+ * @param recover - Decides what a module load failure was (`#lib/stale-build-recovery`).
+ * @returns The hook to pass to `Sentry.init`.
+ * @public
+ */
+export const createBeforeSend = (recover: () => Promise<StaleBuildOutcome>) => {
+  // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
+  const unlessDeployed = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> =>
+    (await recover()) === 'current' ? beforeSendSentryEvent(event, hint) : null;
+  // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
+  return (event: ErrorEvent, hint?: EventHint): ErrorEvent | null | Promise<ErrorEvent | null> =>
+    isStaleModuleError(hint?.originalException) ? unlessDeployed(event, hint) : beforeSendSentryEvent(event, hint);
+};
+
+/**
+ * The Sentry release for a build, so every event names the deploy it came from.
+ *
+ * @param id - The build id (`#lib/build-identity`).
+ * @returns `tau-ui@<build id>`, or `undefined` for a bundle without one.
+ * @public
+ */
+export const sentryRelease = (id: number): string | undefined => (id === 0 ? undefined : `tau-ui@${String(id)}`);
 
 /**
  * Longest text a console breadcrumb keeps, per logged argument and for its message (D-UI-31).
@@ -143,9 +176,10 @@ export const initSentry = (): void => {
   Sentry.init({
     dsn,
     environment: ENV.SENTRY_ENVIRONMENT ?? ENV.NODE_ENV,
+    release: sentryRelease(buildId),
     sendDefaultPii: false,
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
-    beforeSend: beforeSendSentryEvent,
+    beforeSend: createBeforeSend(recoverFromStaleBuild),
     beforeBreadcrumb: scrubSentryBreadcrumb,
   });
 };

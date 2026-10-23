@@ -35,7 +35,8 @@ const builtAt = (newestBuildId: number): string | undefined =>
 
 /**
  * Browser counterpart of `DesktopUpdate`: a tab whose bundle has been superseded
- * by a newer one in another tab (blueprint DF20) has already stopped writing
+ * by a newer one in another tab (blueprint DF20), or replaced by a deploy
+ * (`#lib/stale-build-recovery`), has already stopped writing
  * durable state, so it surfaces the same sidebar control and offers a reload.
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
@@ -74,7 +75,7 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
     <UpdateControl
       title='Update ready'
       version={builtAt(newestBuildId)}
-      detail='A newer version of Tau is open in another tab. Reload to continue with the latest version.'
+      detail='A newer version of Tau is available. Reload to continue with the latest version.'
       icon={ArrowUpCircle}
       isProminent
       isOpen={open}

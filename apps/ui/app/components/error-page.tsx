@@ -1,10 +1,12 @@
 import { AlertCircle, ArrowLeft, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
+import { isStaleModuleError, recoverFromStaleBuild } from '#lib/stale-build-recovery.js';
+import type { StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
 const CollapsibleCodeBlock = lazy(async () => {
   const m = await import('#components/ui/collapsible-code-block.js');
@@ -15,6 +17,7 @@ export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
   const analytics = useAnalytics();
+  const [staleOutcome, setStaleOutcome] = useState<StaleBuildOutcome>();
 
   useEffect(() => {
     // Don't report 404 errors to analytics - they're expected user behavior
@@ -29,10 +32,30 @@ export function ErrorPage(): React.JSX.Element {
       if (error.status >= 500) {
         void reportUiError(routeError);
       }
+    } else if (isStaleModuleError(error)) {
+      // TAU-UI-6: a deploy that replaced this page's chunks is not a bug. Report only a failure the live build has.
+      let isCurrent = true;
+      const triage = async (): Promise<void> => {
+        const outcome = await recoverFromStaleBuild();
+        if (!isCurrent) {
+          return;
+        }
+        setStaleOutcome(outcome);
+        if (outcome === 'current') {
+          analytics.captureException(error, { context: { component: 'ErrorPage' } });
+          void reportUiError(error);
+        }
+      };
+      // async-iife: bootstrap -- an effect cannot await; the boundary renders the outcome once it settles.
+      void triage();
+      return () => {
+        isCurrent = false;
+      };
     } else if (error instanceof Error) {
       analytics.captureException(error, { context: { component: 'ErrorPage' } });
       void reportUiError(error);
     }
+    return undefined;
   }, [error, analytics]);
 
   const goBack = (): void => {
@@ -73,6 +96,32 @@ export function ErrorPage(): React.JSX.Element {
             Reload Page
           </Button>
         </div>
+      </div>
+    );
+  }
+
+  if (staleOutcome === 'reloading' || staleOutcome === 'superseded') {
+    return (
+      <div className='flex min-h-full flex-1 flex-col items-center justify-center gap-6 px-4 py-8'>
+        <div className='flex flex-col items-center gap-3 text-center'>
+          <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
+            <RefreshCcw className='size-6 text-feature' />
+          </div>
+          <h1 className='text-lg font-semibold text-foreground'>Tau has been updated</h1>
+          <p className='max-w-xs text-sm text-pretty text-muted-foreground'>
+            This page was opened on an earlier version of Tau. Reload to continue with the latest version.
+          </p>
+        </div>
+        <Button
+          variant='default'
+          size='sm'
+          className='gap-2'
+          disabled={staleOutcome === 'reloading'}
+          onClick={refreshPage}
+        >
+          <RefreshCcw className='size-4' />
+          Reload
+        </Button>
       </div>
     );
   }

@@ -14,27 +14,47 @@
 set -euo pipefail
 
 ALLOW_TCG="${ALLOW_TCG:-true}"
+DROP="${DROP:-}"
+[[ -n "$DROP" ]] && mkdir -p "$DROP"
 
 echo "::group::KVM preflight"
 accel="tcg"
+access="n/a"
 if [[ -e /dev/kvm ]]; then
   echo "device: /dev/kvm present"
   ls -l /dev/kvm || true
+  if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+    # Hosted ubuntu-24.04 ships /dev/kvm as `crw-rw---- root kvm` but does NOT put the runner user in
+    # the kvm group, so it is not r/w. This is a HOST device permission, not any guest-security knob —
+    # grant the runner access (passwordless sudo on hosted runners). We never touch the guest's
+    # AppArmor/userns posture. If sudo is unavailable, we fall back to TCG.
+    echo "access: /dev/kvm not r/w by $(id -un) — attempting to grant access (host device perm)"
+    sudo chmod 0666 /dev/kvm 2>/dev/null || sudo usermod -aG kvm "$(id -un)" 2>/dev/null || true
+  fi
   if [[ -r /dev/kvm && -w /dev/kvm ]]; then
     echo "access: /dev/kvm is readable+writable by $(id -un) — hardware acceleration available"
-    accel="kvm"
+    accel="kvm"; access="rw"
   else
-    echo "access: /dev/kvm exists but is NOT r/w by $(id -un) — falling back to TCG"
+    echo "access: /dev/kvm still NOT r/w by $(id -un) — falling back to TCG"
+    access="no-rw"
   fi
 else
   echo "device: /dev/kvm ABSENT — no hardware virtualization on this runner — falling back to TCG"
+  access="absent"
 fi
-echo "cpu virt flags: $(grep -oE '(vmx|svm)' /proc/cpuinfo | sort -u | tr '\n' ' ' || true)"
+virt="$(grep -oE '(vmx|svm)' /proc/cpuinfo | sort -u | tr '\n' ' ' || true)"
+echo "cpu virt flags: ${virt}"
 echo "selected accelerator: ${accel}"
 echo "::endgroup::"
 
 echo "accel=${accel}" >> "${GITHUB_OUTPUT:-/dev/null}"
 echo "kvm=$([[ "$accel" == kvm ]] && echo present || echo absent)" >> "${GITHUB_OUTPUT:-/dev/null}"
+
+# Always leave a receipt so the KVM verdict survives even on the blocker path.
+if [[ -n "$DROP" ]]; then
+  printf '{"accel":"%s","dev_kvm_access":"%s","cpu_virt_flags":"%s","allow_tcg":"%s"}\n' \
+    "$accel" "$access" "$virt" "$ALLOW_TCG" > "$DROP/kvm.json"
+fi
 
 if [[ "$accel" != "kvm" && "$ALLOW_TCG" != "true" ]]; then
   echo "KVM unavailable and TCG disallowed (allow_tcg=false). Recording a kvm-unavailable BLOCKER." >&2

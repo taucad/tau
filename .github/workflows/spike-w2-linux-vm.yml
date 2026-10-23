@@ -86,7 +86,11 @@ jobs:
       - name: Preflight — KVM / accelerator
         id: kvm
         env:
-          ALLOW_TCG: ${{ inputs.allow_tcg == false && 'false' || 'true' }}
+          # Only a workflow_dispatch run with allow_tcg explicitly false disables the TCG fallback; a
+          # pull_request run (no inputs) must keep it enabled. (A bare `inputs.allow_tcg == false` is
+          # wrong: GitHub coerces an empty input and false both to 0, so it would be true on PRs.)
+          ALLOW_TCG: ${{ (github.event_name == 'workflow_dispatch' && inputs.allow_tcg == false) && 'false' || 'true' }}
+          DROP: ${{ runner.temp }}/linux-vm-drop
         run: bash packages/core/native-process/spikes/shell/linux-vm/preflight-kvm.sh
 
       # Step 2: host-side VM toolchain (pinned apt packages; no third-party actions in the boot path).
@@ -140,5 +144,7 @@ jobs:
         with:
           name: shell-spike-LNX-VM
           path: ${{ runner.temp }}/linux-vm-drop/
-          if-no-files-found: error
+          # A recorded blocker (e.g. kvm.json with allow_tcg=false) is a valid outcome whose receipt we
+          # still want uploaded, so a present-but-minimal drop must not fail the upload.
+          if-no-files-found: warn
           retention-days: 14

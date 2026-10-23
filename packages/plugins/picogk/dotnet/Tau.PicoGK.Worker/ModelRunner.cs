@@ -45,7 +45,12 @@ internal sealed record ModelExecutionResult(
     MaterialResources? Resources = null, WorkCounters? WorkCounters = null,
     IReadOnlyList<TauComputeStableRecord>? ComputeRecords = null,
     // The voxel edge length in millimetres `Library.Go` ran the model with; null without a library.
-    float? VoxelSize = null);
+    float? VoxelSize = null,
+    // The display meshing the host applied to captured Voxels; null for the uniform mesh.
+    MeshingOptions? Meshing = null);
+
+/// <summary>Display meshing for captured Voxels: OpenVDB adaptivity in (0, 1) and its relax pass.</summary>
+internal sealed record MeshingOptions(float Adaptivity, bool Relax);
 
 internal sealed record LayoutStability(float MinimumArea, float MaximumEdgeSum, float CreaseMargin, float MinimumFanArea, int MaximumFanFaces, float UvAxisMargin);
 
@@ -79,7 +84,8 @@ internal static class ModelRunner
         string artifactRoot,
         JsonElement? parameters = null,
         CancellationToken cancellation = default,
-        ComputeWorkerSession? compute = null)
+        ComputeWorkerSession? compute = null,
+        MeshingOptions? meshing = null)
     {
         var values = CompilationService.BindParameters(
             compiled,
@@ -96,7 +102,7 @@ internal static class ModelRunner
         unload.Stop();
         var assembly = Retain(compiled);
         var invoke = Stopwatch.StartNew();
-        var execution = RunAndExtract(assembly, artifactRoot, values, cancellation, compute);
+        var execution = RunAndExtract(assembly, artifactRoot, values, cancellation, compute, meshing);
         invoke.Stop();
         return execution with
         {
@@ -161,9 +167,10 @@ internal static class ModelRunner
         string artifactRoot,
         IReadOnlyDictionary<string, object?> values,
         CancellationToken cancellation,
-        ComputeWorkerSession? compute)
+        ComputeWorkerSession? compute,
+        MeshingOptions? meshing)
     {
-        using var host = new HostedLibraryHost(artifactRoot, cancellation, compute);
+        using var host = new HostedLibraryHost(artifactRoot, cancellation, compute, meshing);
         using (Library.UseHost(host))
         {
             ApplyParameters(assembly, values);

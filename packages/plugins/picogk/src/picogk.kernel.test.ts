@@ -8,7 +8,7 @@ import { createMockFileSystem, createMockKernelRuntime, expectKernelProjectionOr
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { picogkKernel } from '#picogk.kernel.js';
-import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
+import { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
 import { PicogkWorkerError } from '#picogk-session.js';
 import type { PicogkSession } from '#picogk-session.js';
 
@@ -51,6 +51,9 @@ const workerTimings = {
   artifactWrite: 7,
   unload: 8,
 };
+// The view default: today's uniform mesh, which never asks the worker for meshing.
+const uniform = picogkRenderSchema.parse({});
+
 const buildResult = (id = 'component:picogk-1') => ({
   artifactPath: '/private/model.tau-mesh',
   byteLength: triangle.byteLength,
@@ -270,7 +273,7 @@ describe('PicoGK kernel', () => {
 
     await definition.resolve({ entryPath: 'main.cs' }, render, value);
     await definition.describe({ entryPath: 'main.cs' }, render, value);
-    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, render, value);
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, render, value);
 
     // The mirror reuses its own walk per operation id.
     expect(value.mirror.sync.mock.calls.map((call): unknown => call[2])).toEqual([1, 1, 1]);
@@ -291,7 +294,11 @@ describe('PicoGK kernel', () => {
       ],
       mechanism: { schemaVersion: 2 },
     });
-    const result = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    const result = await definition.evaluate(
+      { entryPath: 'main.cs', parameters: {}, options: uniform },
+      runtime,
+      value,
+    );
     expect(result.handle.glb).toBeInstanceOf(Uint8Array);
     expect(result.issues).toEqual(
       expect.arrayContaining([
@@ -313,12 +320,76 @@ describe('PicoGK kernel', () => {
     );
   });
 
+  it('sends adaptive meshing only above 0 and reports what the worker applied', async () => {
+    const value = context();
+    value.session.request.mockResolvedValueOnce(buildResult());
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
+    expect(value.session.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ method: 'build', params: { entryPath: 'main.cs', parameters: {} } }),
+    );
+
+    const meshing = { adaptivity: 0.5, relax: true };
+    value.session.request.mockResolvedValueOnce({ ...buildResult(), meshing });
+    const built = await definition.evaluate(
+      { entryPath: 'main.cs', parameters: {}, options: { meshAdaptivity: 0.5, meshRelax: true } },
+      runtime,
+      value,
+    );
+    expect(value.session.request).toHaveBeenLastCalledWith(
+      expect.objectContaining({ method: 'build', params: { entryPath: 'main.cs', parameters: {}, meshing } }),
+    );
+    const artifact = await definition.render!({ view: 'model', handle: built.handle, options: {} }, runtime, value);
+    expect(artifact.tessellation).toMatchObject({ adaptivity: 0.5, relax: true });
+    expect(
+      definition.deserializeHandle!(
+        { serialized: structuredClone(definition.serializeHandle!({ handle: built.handle }, runtime, value)) },
+        runtime,
+        value,
+      ),
+    ).toEqual(built.handle);
+  });
+
+  it('refuses an adaptive view from a worker that does not echo the meshing it applied', async () => {
+    const value = context();
+    for (const echoed of [undefined, { adaptivity: 0.5, relax: false }, { adaptivity: 0.25, relax: true }]) {
+      value.session.request.mockResolvedValueOnce(echoed ? { ...buildResult(), meshing: echoed } : buildResult());
+      // oxlint-disable-next-line no-await-in-loop -- each refusal is checked against its own worker reply.
+      await expect(
+        definition.evaluate(
+          { entryPath: 'main.cs', parameters: {}, options: { meshAdaptivity: 0.5, meshRelax: true } },
+          runtime,
+          value,
+        ),
+      ).rejects.toMatchObject({
+        issues: [
+          {
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: { reason: 'meshing-unsupported', meshAdaptivity: 0.5, meshRelax: true },
+          },
+        ],
+      });
+    }
+  });
+
+  it('declares uniform meshing for views and pins it for every export', () => {
+    expect(picogkRenderSchema.parse({})).toEqual({ meshAdaptivity: 0, meshRelax: false });
+    expect(picogkRenderSchema.safeParse({ meshAdaptivity: 1 }).success).toBe(false);
+    expect(picogkRenderSchema.safeParse({ meshAdaptivity: -0.1 }).success).toBe(false);
+    for (const schema of [picogkExportSchemas.glb, picogkExportSchemas.gltf]) {
+      expect(schema.parse({})).toMatchObject({ meshAdaptivity: 0, meshRelax: false });
+      expect(schema.safeParse({ meshAdaptivity: 0.5 }).success).toBe(false);
+      expect(schema.safeParse({ meshRelax: true }).success).toBe(false);
+    }
+  });
+
   it('renders a protocol-8 worker build without a voxel size, and raises no issue for it', async () => {
     const value = context();
     const { voxelSize: _voxelSize, ...withoutVoxelSize } = buildResult();
     value.session.request.mockResolvedValueOnce(withoutVoxelSize);
 
-    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
     const artifact = await definition.render!({ view: 'model', handle: built.handle, options: {} }, runtime, value);
 
     expect(built.issues).toEqual([]);
@@ -340,7 +411,11 @@ describe('PicoGK kernel', () => {
       },
     });
 
-    const result = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, project, value);
+    const result = await definition.evaluate(
+      { entryPath: 'main.cs', parameters: {}, options: uniform },
+      project,
+      value,
+    );
 
     expect(project.filesystem.mocks.readFile.mock.calls).toEqual([['Plate.csproj', 'utf8']]);
     expect(result.issues).toEqual([
@@ -372,7 +447,7 @@ describe('PicoGK kernel', () => {
     });
 
     value.session.request.mockResolvedValueOnce(buildResult());
-    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    const built = await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
     /* D8: the C# stage timings are attributes on the span that measured the request, not a debug
      * log line, so the breakdown is answerable from the trace file with no log parsing. */
     expect(endedSpanAttributes('picogk.analyze')).toMatchObject(compilationTimings);
@@ -493,12 +568,12 @@ describe('PicoGK kernel', () => {
       ...buildResult(),
       recycleAfterResponse: true,
     });
-    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value);
+    await definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value);
     expect(value.session.recycle).toHaveBeenCalled();
 
     value.session.request.mockRejectedValueOnce(workerError('kernel'));
     await expect(
-      definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: {} }, runtime, value),
+      definition.evaluate({ entryPath: 'main.cs', parameters: {}, options: uniform }, runtime, value),
     ).rejects.toMatchObject({
       issues: [expect.objectContaining({ type: 'kernel' })],
     });

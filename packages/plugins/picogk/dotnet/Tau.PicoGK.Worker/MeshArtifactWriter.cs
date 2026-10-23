@@ -39,7 +39,9 @@ internal sealed record BuildResult(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WorkCounters? WorkCounters = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ComputeReuseManifest = null,
     // Build-level voxel edge length in millimetres; omitted when the model ran without a voxel library.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float? VoxelSize = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float? VoxelSize = null,
+    // The display meshing applied to captured Voxels; omitted for the uniform mesh.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MeshingOptions? Meshing = null);
 
 // Build-level operation deltas; memory metrics above remain point-in-time snapshots.
 internal sealed record WorkCounters(long CapturedSnapshots, long GeometryReadbacks, long InputVertices,
@@ -85,7 +87,8 @@ internal static class MeshArtifactWriter
             diagnostics.Timings,
             diagnostics.Metrics,
             artifact.Images, execution.Resources?.Textures, execution.Resources?.Samplers, execution.WorkCounters,
-            VoxelSize: execution.VoxelSize);
+            VoxelSize: execution.VoxelSize,
+            Meshing: execution.Meshing);
         write.Stop();
         return result with
         {

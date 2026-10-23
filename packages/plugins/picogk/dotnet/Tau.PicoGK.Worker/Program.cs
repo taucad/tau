@@ -186,7 +186,8 @@ internal static class Program
                     try{compute=new ComputeWorkerSession(computeRequest,arguments.Artifacts,cancellation);}
                     catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("preload",error);}
                 }
-                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute);
+                var meshing = ParseMeshing(request.Params);
+                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute, meshing);
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
                     execution,
@@ -223,6 +224,26 @@ internal static class Program
             default:
                 throw new WorkerException(new Issue($"Unknown PicoGK worker method '{request.Method}'.", "CS_TAU_PROTOCOL", "validation", "error"));
         }
+    }
+
+    /// <summary>
+    /// Reads the optional <c>meshing</c> build parameter: <c>{ adaptivity, relax }</c> with adaptivity in [0, 1).
+    /// The host sends it only for an adaptive mesh; adaptivity 0 is the uniform mesh, as if it were absent.
+    /// </summary>
+    internal static MeshingOptions? ParseMeshing(JsonElement parameters)
+    {
+        if (!parameters.TryGetProperty("meshing", out var meshing)) return null;
+        if (meshing.ValueKind != JsonValueKind.Object ||
+            !meshing.TryGetProperty("adaptivity", out var adaptivity) || adaptivity.ValueKind != JsonValueKind.Number ||
+            !adaptivity.TryGetSingle(out var value) || !float.IsFinite(value) || value < 0 || value >= 1 ||
+            !meshing.TryGetProperty("relax", out var relax) || relax.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+            meshing.EnumerateObject().Count() != 2)
+        {
+            throw new WorkerException(new Issue(
+                "PicoGK meshing must be { adaptivity: number in [0, 1), relax: boolean }.",
+                "CS_TAU_PROTOCOL", "validation", "error"));
+        }
+        return value > 0 ? new MeshingOptions(value, relax.GetBoolean()) : null;
     }
 
     /// <returns>The entry as the workspace-relative, forward-slash path its source is compiled under.</returns>

@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -143,6 +144,67 @@ public sealed partial class WorkerTests
         var cancel = Program.ParseFrame("""{"protocolVersion":8,"requestId":"a","method":"cancel","params":{}}""");
         Assert.Equal("cancel", cancel.Request!.Method);
         Assert.Null(cancel.Error);
+    }
+
+    [Fact]
+    public void BuildMeshingParsesOnlyTheDeclaredShape()
+    {
+        Assert.Null(Program.ParseMeshing(Json("""{"entryPath":"main.cs"}""")));
+        Assert.Null(Program.ParseMeshing(Json("""{"meshing":{"adaptivity":0,"relax":true}}""")));
+        Assert.Equal(new MeshingOptions(.5f, true), Program.ParseMeshing(Json("""{"meshing":{"adaptivity":0.5,"relax":true}}""")));
+        Assert.Equal(new MeshingOptions(.25f, false), Program.ParseMeshing(Json("""{"meshing":{"relax":false,"adaptivity":0.25}}""")));
+        foreach (var invalid in new[]
+                 {
+                     """{"meshing":null}""", """{"meshing":0.5}""", """{"meshing":{}}""",
+                     """{"meshing":{"adaptivity":"0.5","relax":false}}""", """{"meshing":{"adaptivity":1,"relax":false}}""",
+                     """{"meshing":{"adaptivity":-0.1,"relax":false}}""", """{"meshing":{"adaptivity":1e39,"relax":false}}""",
+                     """{"meshing":{"adaptivity":0.5}}""", """{"meshing":{"adaptivity":0.5,"relax":"yes"}}""",
+                     """{"meshing":{"adaptivity":0.5,"relax":false,"extra":1}}""",
+                 })
+        {
+            var error = Assert.Throws<WorkerException>(() => Program.ParseMeshing(Json(invalid)));
+            Assert.Equal("CS_TAU_PROTOCOL", error.Issues[0].Code);
+        }
+    }
+
+    [Fact]
+    public void AdaptiveMeshingReducesCapturedVoxelsAndIsEchoedInTheBuild()
+    {
+        Write("main.cs", "using PicoGK;using System.Numerics;Library.Go(.5f,()=>{using var shape=Voxels.voxSphere(Library.oLibrary(),Vector3.Zero,8f);Library.oViewer().Add(shape);});");
+        var compiled = CompilationService.Compile(root, "main.cs");
+        var uniform = ModelRunner.Execute(compiled, Path.Combine(root, "uniform"));
+        var adaptive = ModelRunner.Execute(compiled, Path.Combine(root, "adaptive"), meshing: new MeshingOptions(.5f, false));
+        var relaxed = ModelRunner.Execute(compiled, Path.Combine(root, "relaxed"), meshing: new MeshingOptions(.5f, true));
+        var again = ModelRunner.Execute(compiled, Path.Combine(root, "again"));
+        Assert.Null(uniform.Meshing);
+        Assert.Equal(new MeshingOptions(.5f, false), adaptive.Meshing);
+        Assert.True(adaptive.Components[0].Indices.Length < uniform.Components[0].Indices.Length);
+        Assert.Equal(new MeshingOptions(.5f, true), relaxed.Meshing);
+        Assert.NotEmpty(relaxed.Components[0].Indices);
+        // Meshing belongs to one build: the next uniform build is the uniform mesh again.
+        Assert.Equal(uniform.Components[0].Positions, again.Components[0].Positions);
+        Assert.Equal(uniform.Components[0].Indices, again.Components[0].Indices);
+
+        string Build(object? meshing)
+        {
+            var input = JsonSerializer.Serialize(new { protocolVersion = 8, requestId = "m", method = "build", @params = meshing is null ? (object)new { entryPath = "main.cs", parameters = new { } } : new { entryPath = "main.cs", parameters = new { }, meshing } }) + "\n";
+            var output = new StringWriter();
+            Assert.Equal(0, Program.Run(["--workspace", root, "--artifacts", root, "--parent-pid", Environment.ProcessId.ToString()], new StringReader(input), output, new StringWriter()));
+            return output.ToString().TrimEnd('\n').Split('\n')[^1];
+        }
+        var echoed = JsonDocument.Parse(Build(new { adaptivity = .5, relax = true })).RootElement.GetProperty("result").GetProperty("meshing");
+        Assert.Equal(.5f, echoed.GetProperty("adaptivity").GetSingle());
+        Assert.True(echoed.GetProperty("relax").GetBoolean());
+        Assert.False(JsonDocument.Parse(Build(null)).RootElement.GetProperty("result").TryGetProperty("meshing", out _));
+    }
+
+    [Fact]
+    public void LibraryMeshingRefusesValuesOutsideItsRange()
+    {
+        using var library = new Library(1f);
+        foreach (var value in new[] { -.1f, 1f, float.NaN, float.PositiveInfinity })
+            Assert.Throws<ArgumentOutOfRangeException>(() => library.TauSetMeshing(value, false));
+        library.TauSetMeshing(0f, true);
     }
 
     [Fact]

@@ -35,7 +35,7 @@
  * Dev-only evidence. Never shipped; never run elevated (no sudo); synthetic canary/marker only.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { arch, platform, release } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -47,8 +47,12 @@ import { check, sleep, waitFor, writeJson } from '../lib.mts';
 const here = dirname(fileURLToPath(import.meta.url));
 const evidenceDirectory = process.env['TAU_SPIKE_OUT'] ?? join(process.cwd(), 'out', 'research', 'reaping-spike');
 const row = process.env['TAU_SPIKE_ROW'] ?? `${platform()}-${arch()}`;
-const workRoot = join(process.env['RUNNER_TEMP'] ?? '/tmp', `tau-reaping-sb-${process.pid}`);
-mkdirSync(workRoot, { recursive: true });
+const workRootRaw = join(process.env['RUNNER_TEMP'] ?? '/tmp', `tau-reaping-sb-${process.pid}`);
+mkdirSync(workRootRaw, { recursive: true });
+// Seatbelt evaluates the kernel-RESOLVED path, so the profile's marker/WORKDIR literals must be the
+// symlink-canonical form (e.g. /tmp -> /private/tmp) or sandbox_check won't match them. realpath the
+// work root once; every per-session dir derives from it, and `here` (the checkout) has no symlink.
+const workRoot = realpathSync(workRootRaw);
 
 const advScript = join(here, 'adversaries.sh');
 const profile = join(here, 'session.sb');

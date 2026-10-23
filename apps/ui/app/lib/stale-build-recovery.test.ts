@@ -91,6 +91,14 @@ describe('createStaleBuildRecovery', () => {
     expect(onLiveBuild.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0] ?? 0);
   });
 
+  it("should pass on the server's word even when it names this build, so a stale offer can be withdrawn", async () => {
+    const { recovery, onLiveBuild } = setup({ fetchServerBuildId: async () => ownBuildId });
+
+    await expect(recovery.recover(failure())).resolves.toBe('current');
+
+    expect(onLiveBuild).toHaveBeenCalledWith(ownBuildId);
+  });
+
   it('should offer the reload instead of reloading once the user has interacted with the page', async () => {
     const { recovery, reload, storage, onSuperseded } = setup({ canReloadSafely: () => false });
 
@@ -215,15 +223,14 @@ describe('createStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it('should clear the guard of a refused reload, since no loop happened', async () => {
+  it('should keep the guard when a reload has not navigated yet, since it may only be slow', async () => {
     vi.useFakeTimers();
     const { recovery, storage } = setup({ reloadTimeout: 5000 });
 
     await recovery.recover(failure());
-    expect(storage.entries.get(staleBuildReloadKey)).toBe(guardFor(ownBuildId, deployedBuildId));
     await vi.advanceTimersByTimeAsync(5000);
 
-    expect(storage.entries.has(staleBuildReloadKey)).toBe(false);
+    expect(storage.entries.get(staleBuildReloadKey)).toBe(guardFor(ownBuildId, deployedBuildId));
   });
 
   describe('classify', () => {

@@ -301,6 +301,20 @@ describe('build-id skew guard (DF20)', () => {
     expect(isBuildSuperseded()).toBe(false);
   });
 
+  it("withdraws a deploy's reload offer when the server names this build through the recovery", async () => {
+    const { buildId, isReloadOffered, offerReload, readSupersedingBuildId, recordLiveBuild } = await load();
+    act(() => {
+      offerReload(buildId + 1);
+    });
+
+    act(() => {
+      recordLiveBuild(buildId);
+    });
+
+    expect(isReloadOffered()).toBe(false);
+    expect(readSupersedingBuildId()).toBe(buildId);
+  });
+
   it('records the live build for the prompt without superseding this tab yet', async () => {
     const { buildId, isBuildSuperseded, readSupersedingBuildId, recordLiveBuild } = await load();
 

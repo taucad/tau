@@ -120,6 +120,30 @@ describe('installStaleBuildRecovery', () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
+  it('should recover from a module load failure any error boundary caught', async () => {
+    const { recoverFromCaughtError } = await load();
+    const fetchMock = stubServer(deployedBuildId);
+    const reload = stubReload();
+
+    recoverFromCaughtError(new TypeError('Importing a module script failed.'));
+    await settle();
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it('should leave other errors a boundary caught alone', async () => {
+    const { recoverFromCaughtError } = await load();
+    const fetchMock = stubServer(deployedBuildId);
+
+    recoverFromCaughtError(new Error('controlled render failure'));
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('should leave other rejections alone', async () => {
     const { installStaleBuildRecovery } = await load();
     const fetchMock = stubServer(deployedBuildId);

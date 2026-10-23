@@ -96,16 +96,22 @@ const recordSupersedingBuild = (otherBuildId: number, source: BuildSource): void
 
 /**
  * Record the build the server renders pages for, as soon as it is known, so the
- * prompt names it (a rollback included) before anything is decided.
+ * prompt names it (a rollback included) before anything is decided. When it names
+ * this build, whatever an earlier answer or a peer left behind is withdrawn.
  *
  * @param liveBuildId - The server's build id (`/health/build`).
  */
 export function recordLiveBuild(liveBuildId: number): void {
-  if (liveBuildId !== buildId) {
-    transition(() => {
-      recordSupersedingBuild(liveBuildId, 'server');
-    });
+  if (liveBuildId === buildId) {
+    // The server names this build live: an offer or supersession a stale answer left is void.
+    if (isReloadOffered() || isBuildSuperseded() || supersedingBuildId !== buildId) {
+      resumeAsLive();
+    }
+    return;
   }
+  transition(() => {
+    recordSupersedingBuild(liveBuildId, 'server');
+  });
 }
 
 /**

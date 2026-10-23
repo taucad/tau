@@ -78,7 +78,7 @@ export type StaleBuildRecoveryOptions = {
   readonly reload: () => void;
   /** Hand the reload over to the update control, with the build id the server reported. */
   readonly onSuperseded: (serverBuildId: number) => void;
-  /** Record the build the server reported as soon as it differs, before anything is decided. */
+  /** Record the build the server reported as soon as it answers, before anything is decided. */
   readonly onLiveBuild: (serverBuildId: number) => void;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
@@ -118,15 +118,26 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     return 'superseded';
   };
 
+  /**
+   * The build a deploy replaced this one with, or `undefined` when the failure is this build's own:
+   * a server that names no build or cannot be reached, or one that names this build.
+   */
+  const replacingBuild = (serverBuildId: number | undefined): number | undefined =>
+    serverBuildId === undefined || serverBuildId === options.buildId ? undefined : serverBuildId;
+
   const decide = async (): Promise<StaleBuildOutcome> => {
     if (options.buildId === 0) {
       return 'current';
     }
-    const serverBuildId = await options.fetchServerBuildId();
-    if (serverBuildId === undefined || serverBuildId === options.buildId) {
+    const answer = await options.fetchServerBuildId();
+    if (answer !== undefined) {
+      // Passed on even when it names this build, which withdraws an offer a stale deploy left behind.
+      options.onLiveBuild(answer);
+    }
+    const serverBuildId = replacingBuild(answer);
+    if (serverBuildId === undefined) {
       return 'current';
     }
-    options.onLiveBuild(serverBuildId);
     if (reloadPending) {
       return 'reloading';
     }
@@ -146,19 +157,13 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
     reloadPending = true;
     options.reload();
-    /* A page still here after the timeout had its reload refused (an unload prompt, a blocked
-     * navigation). No loop happened, so the session guard goes; this page offers the reload from
-     * now on instead of asking again, and the next document starts with automatic recovery. */
+    /* A page still here after the timeout may have had its reload refused, or the reload may only
+     * be slow: the old document lives until the new one commits, and no signal tells the two apart.
+     * So the guard stays, and this page offers the reload from now on instead of asking again.
+     * Tau registers no unload prompt that could refuse it (`use-flush-on-close`). */
     setTimeout(() => {
       reloadPending = false;
       reloadRefused = true;
-      try {
-        if (storage.getItem(staleBuildReloadKey) === guard) {
-          storage.removeItem(staleBuildReloadKey);
-        }
-      } catch {
-        // No storage to tidy.
-      }
       options.onSuperseded(serverBuildId);
     }, options.reloadTimeout ?? reloadTimeout);
     return 'reloading';
@@ -186,8 +191,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         if (options.buildId === 0) {
           return 'current';
         }
-        const serverBuildId = await options.fetchServerBuildId();
-        return serverBuildId === undefined || serverBuildId === options.buildId ? 'current' : 'superseded';
+        return replacingBuild(await options.fetchServerBuildId()) === undefined ? 'current' : 'superseded';
       })();
       if (key !== undefined) {
         classifications.set(key, classification);
@@ -256,6 +260,21 @@ export const recoverFromStaleBuild = async (failure: unknown): Promise<StaleBuil
  */
 export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildOutcome> =>
   getPageRecovery().classify(failure);
+
+/**
+ * Hand a module load failure any React error boundary caught to the recovery (`hydrateRoot`'s
+ * `onCaughtError`). Boundaries other than the route's (a panel, a dialog) would otherwise keep a
+ * rejected lazy import on screen with nothing to replace it. The decision is made once per failure,
+ * so the route error page asking again is free.
+ *
+ * @param error - The value a boundary caught.
+ */
+export const recoverFromCaughtError = (error: unknown): void => {
+  if (isStaleModuleError(error)) {
+    // async-iife: bootstrap -- React's error callback cannot await; the decision acts on its own.
+    void recoverFromStaleBuild(error);
+  }
+};
 
 /**
  * Own recovery for the whole page, independently of error reporting: clear the

@@ -48,7 +48,7 @@ const startLiveDeploy = async (
 ): Promise<{ readonly origin: string; readonly requests: string[] }> => {
   const requests: string[] = [];
   const server: Server = createServer((request, response) => {
-    const path = (request.url ?? '/').slice(1);
+    const path = decodeURIComponent((request.url ?? '/').slice(1));
     requests.push(path);
     const fault = misbehave(path, requests.filter((requested) => requested === path).length);
     if (fault === 'hang') {
@@ -106,6 +106,8 @@ describe('planRetention', () => {
     ['escapes the asset directory', 'assets/../server/index.js'],
     ['is outside the asset directory', 'index.html'],
     ['is absolute', '/assets/a-1.js'],
+    ['carries a query', 'assets/a-1.js?raw'],
+    ['carries a backslash', String.raw`assets/a\b.js`],
   ])('should refuse an index whose path %s', (_label, path) => {
     expect(() => planRetention(indexOf([{ path, integrity: integrityOf('x'), generation: 0 }]), new Set(), 2)).toThrow(
       /refuses the path/u,
@@ -225,13 +227,14 @@ describe('retainPreviousAssets', () => {
     await expect(retainPreviousAssets({ clientDirectory: client, origin: undefined })).rejects.toThrow('ENOENT');
   });
 
-  it('should leave files only the local Node server uses out of the index and out of retention', async () => {
+  it('should leave files no page loads out of the index and out of retention', async () => {
     const live = await startLiveDeploy(
       { 'assets/kcl-OLD1.wasm': 'wasm' },
       indexOf([
         { path: 'assets/kcl-OLD1.wasm', integrity: integrityOf('wasm'), generation: 0 },
         { path: 'assets/kcl-OLD1.wasm.br', integrity: integrityOf('br'), generation: 0 },
         { path: 'assets/route-OLD1.js.map', integrity: integrityOf('map'), generation: 0 },
+        { path: 'assets/tau-module-graph-OLD1.json', integrity: integrityOf('graph'), generation: 0 },
       ]),
     );
     const client = await createClient({
@@ -239,6 +242,7 @@ describe('retainPreviousAssets', () => {
       'assets/kcl-NEW1.wasm.br': 'br',
       'assets/kcl-NEW1.wasm.gz': 'gz',
       'assets/route-NEW1.js.map': 'map',
+      'assets/tau-module-graph-NEW1.json': 'graph',
     });
 
     await retainPreviousAssets({ clientDirectory: client, origin: live.origin });
@@ -247,6 +251,28 @@ describe('retainPreviousAssets', () => {
     expect(index.assets.map((asset) => asset.path)).toStrictEqual(['assets/kcl-NEW1.wasm', 'assets/kcl-OLD1.wasm']);
     expect(live.requests).not.toContain('assets/kcl-OLD1.wasm.br');
     expect(live.requests).not.toContain('assets/route-OLD1.js.map');
+    expect(live.requests).not.toContain('assets/tau-module-graph-OLD1.json');
+  });
+
+  it('should publish an unusual but valid asset name and retain it in the next deploy', async () => {
+    const name = 'assets/chunk@1~(copy) é+$.js';
+    const previous = await createClient({ [name]: 'odd' });
+    const { index } = await retainPreviousAssets({ clientDirectory: previous, origin: undefined });
+    const live = await startLiveDeploy({ [name]: 'odd' }, index);
+    const next = await createClient({ 'assets/route-NEW1.js': 'new1' });
+
+    await retainPreviousAssets({ clientDirectory: next, origin: live.origin });
+
+    expect(await readFile(join(next, name), 'utf8')).toBe('odd');
+  });
+
+  it('should fail the deploy that would publish an asset name the next deploy could not read', async () => {
+    const client = await createClient({ 'assets/bad\\name.js': 'bad' });
+
+    await expect(retainPreviousAssets({ clientDirectory: client, origin: undefined })).rejects.toThrow(
+      /refuses the path/u,
+    );
+    await expect(readFile(join(client, servedAssetsIndexFileName), 'utf8')).rejects.toThrow('ENOENT');
   });
 
   it('should publish an index of its own assets when no live deploy is named', async () => {

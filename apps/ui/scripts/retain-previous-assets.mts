@@ -52,7 +52,37 @@ export type ServedAssetsIndex = {
   readonly assets: readonly ServedAsset[];
 };
 
-const assetPath = /^assets\/[\w.-]+(?:\/[\w.-]+)*$/u;
+/** Characters a published asset path may not carry: controls, a backslash, and URL syntax (`?`, `#`, `%`). */
+// oxlint-disable-next-line no-control-regex -- Control characters are exactly what this refuses.
+const forbiddenPathCharacter = /[\u0000-\u001F\u007F\\?#%]/u;
+
+/**
+ * Whether a path can be published by one deploy and read back by the next: under `assets/`,
+ * every segment a real name, nothing a URL or a file system would read differently. This is
+ * the one check both sides apply, so no build can publish a name its successor refuses.
+ *
+ * @param path - A path relative to the client root, with `/` separators.
+ * @returns `true` when the path is safe to publish and to retain.
+ */
+export const isServableAssetPath = (path: string): boolean => {
+  const segments = path.split('/');
+  return (
+    segments[0] === 'assets' &&
+    segments.length > 1 &&
+    !forbiddenPathCharacter.test(path) &&
+    segments.slice(1).every((segment) => segment !== '' && segment !== '.' && segment !== '..')
+  );
+};
+
+const refusePath = (path: string, where: string): Error =>
+  new Error(`The ${where} refuses the path ${JSON.stringify(path)}.`);
+
+/** The URL of an asset on an origin, each segment encoded. */
+const assetUrl = (origin: string, path: string): string =>
+  `${origin}/${path
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')}`;
 const sha384Integrity = /^sha384-[A-Za-z0-9+/]+={0,2}$/u;
 const downloadConcurrency = 8;
 /** Milliseconds to wait before each retry of a failed request. */
@@ -61,11 +91,12 @@ const retryBackoff = [1000, 2000, 4000] as const;
 const defaultRequestTimeout = 30_000;
 
 /**
- * Files only the local Node server uses: precompressed siblings (`compress-static-assets.mts`)
- * and source maps, which the upload deletes before a deploy. Netlify neither serves them as
- * chunks nor needs them kept.
+ * Files no page loads, so keeping them would only cost transfer: precompressed siblings only the
+ * local Node server uses (`compress-static-assets.mts`), source maps (deleted by the upload), and
+ * the build's module-graph provenance (`tau-module-graph-*.json`, about 3 MiB a build).
  */
-const isLocalOnly = (path: string): boolean => /\.(?:br|gz|map)$/u.test(path);
+const isNeverLoadedByPages = (path: string): boolean =>
+  /\.(?:br|gz|map)$/u.test(path) || /(?:^|\/)tau-module-graph-[^/]+\.json$/u.test(path);
 
 type Transport = {
   readonly requestTimeout: number;
@@ -76,8 +107,8 @@ const integrityOf = (bytes: Uint8Array<ArrayBuffer>): string =>
   `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
 
 const assertServedAsset = (asset: ServedAsset): void => {
-  if (!assetPath.test(asset.path) || asset.path.split('/').includes('..')) {
-    throw new Error(`The live asset index refuses the path ${JSON.stringify(asset.path)}.`);
+  if (!isServableAssetPath(asset.path)) {
+    throw refusePath(asset.path, 'live asset index');
   }
   if (!sha384Integrity.test(asset.integrity) || !Number.isInteger(asset.generation) || asset.generation < 0) {
     throw new Error(`The live asset index has a malformed entry for ${asset.path}.`);
@@ -102,18 +133,24 @@ export const planRetention = (
     assertServedAsset(asset);
   }
   return previous.assets
-    .filter((asset) => asset.generation + 1 <= generations && !ownPaths.has(asset.path) && !isLocalOnly(asset.path))
+    .filter(
+      (asset) => asset.generation + 1 <= generations && !ownPaths.has(asset.path) && !isNeverLoadedByPages(asset.path),
+    )
     .map((asset) => ({ ...asset, generation: asset.generation + 1 }));
 };
 
 const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAsset[]> => {
   // A build without its asset directory is broken; publishing an empty index would drop every retained asset.
   const entries = await readdir(join(clientDirectory, 'assets'), { recursive: true, withFileTypes: true });
-  const files = entries.filter((entry) => entry.isFile() && !isLocalOnly(entry.name));
+  const files = entries.filter((entry) => entry.isFile() && !isNeverLoadedByPages(entry.name));
   return Promise.all(
     files.map(async (entry) => {
       const absolute = join(entry.parentPath, entry.name);
       const path = relative(clientDirectory, absolute).split(sep).join(posix.sep);
+      if (!isServableAssetPath(path)) {
+        // Published, it would fail every later deploy that reads this index.
+        throw refusePath(path, 'new build');
+      }
       return { path, integrity: integrityOf(new Uint8Array(await readFile(absolute))), generation: 0 };
     }),
   );
@@ -175,7 +212,7 @@ const readLiveIndex = async (origin: string, transport: Transport): Promise<Serv
 type Download = { readonly origin: string; readonly clientDirectory: string; readonly transport: Transport };
 
 const downloadAsset = async ({ origin, clientDirectory, transport }: Download, asset: ServedAsset): Promise<number> => {
-  const response = await fetchWithRetry(`${origin}/${asset.path}`, transport);
+  const response = await fetchWithRetry(assetUrl(origin, asset.path), transport);
   if (response.status !== 200) {
     throw new Error(
       `${asset.path} answered ${String(response.status)} on ${origin}; the live deploy lost an asset its index lists.`,

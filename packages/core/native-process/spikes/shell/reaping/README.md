@@ -107,6 +107,38 @@ cross-killed and whether its canary kept growing — a cross-session kill is a d
 if our own gap closes. Receipts: `sbmember.<adversary>.json`, `preflight-sandbox.json`,
 `matrix-sandbox.json`, rendered in the same combined table.
 
+**Observed (run 40028379646 @a6cdbf24, MAC-A + MAC-X, non-elevated):** candidate (c) did not reap.
+Bash under the hand-rolled deny-default `session.sb` exits with `SIGABRT` at launch (no canary bytes),
+and the membership predicate does not discriminate: the control path came back denied for every listed
+pid, so 222–247 pids outside the session matched the marker half (`oracleOvermatch`). The driver now
+signals only pids that are both oracle-matched and mark-verified as ours, so an overmatch fails the
+receipt instead of stopping host processes. The **proposed** macOS blueprint (pending an upstream
+decision) is the ppid `walk` + process-group `SIGKILL` backstop, with the pre-cancel daemonize residual
+disclosed.
+
+## S2 interactive PTY inside Seatbelt (`s2-pty.mts` → `s2.json`)
+
+The orchestrator's S2 rule for macOS: the PTY runs **inside** the containment. `s2-pty.mts` uses the
+sandbox runtime's Seatbelt path that W1 proved runs Bash for S0/S1. It builds the W1 shell grant
+(`shellProfile`), calls `SandboxManager.wrapWithSandboxArgv` for an interactive Bash, and spawns that
+wrapped `sandbox-exec` argv under a real node-pty PTY. The workflow installs workspace dependencies as W1
+does and restores and verifies the exec bit on node-pty's prebuilt `spawn-helper`. Checks, each
+pass/fail with evidence:
+
+- `in-seatbelt` / `contained`: the launch is `sandbox-exec`, and a synthetic canary outside the grant
+  is unreadable from the shell while a granted temp path is writable.
+- `isatty` (`test -t 0` / `-t 1`), `resize` (programmatic TIOCSWINSZ/SIGWINCH, `stty size` old→new),
+  `ctrl-c` (0x03 interrupts `sleep 30`, status 130, prompt back promptly), `ctrl-z-fg` (0x1a stops a
+  job, `fg` resumes it to completion), `unicode` (é中😀 round-trip).
+- `detached-descendant-contained`: the sandboxed shell double-forks a grandchild that reparents to
+  launchd (`ppid 1`). The grandchild tries to copy the outside canary, which must be refused with 0
+  bytes copied and `EPERM`. A positive control has the same child copy a file inside its grant
+  byte-for-byte. The unsandboxed driver reads the result files from disk.
+
+Fail-closed throughout: a missing module, a non-executable helper, an SRT init/wrap error, no prompt, or
+an unanswered probe is a typed failure. A 4-minute watchdog writes `s2.json` with the checks completed
+so far.
+
 ## Native helpers for the candidates
 
 - `tau-spawn-disclaim.c` — SET half of (a): `responsibility_spawnattrs_setdisclaim(+SETEXEC)` then

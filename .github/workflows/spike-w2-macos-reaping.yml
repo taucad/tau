@@ -143,16 +143,40 @@ jobs:
           if [ "$(id -u)" = "0" ]; then echo "refusing to run elevated"; exit 1; fi
           node packages/core/native-process/spikes/shell/reaping/sandbox.mts 2>&1 | tee "$RUNNER_TEMP/sandbox.log"
 
+      # S2 runs under the sandbox runtime (SRT) Seatbelt path W1 proved for S0/S1, so it needs the
+      # workspace dependencies (@anthropic-ai/sandbox-runtime), installed exactly as W1 does.
+      - name: Install workspace dependencies for the S2 receipt (as W1)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
       # node-pty for the S2 interactive-PTY receipt (clang/python preinstalled on the macOS runners).
+      # npm can drop the exec bit on node-pty's prebuilt spawn-helper, which makes every spawn fail
+      # with "posix_spawnp failed." (run 40028379646): restore it and verify it, by name.
       - name: Install node-pty for the S2 PTY receipt
         if: ${{ !cancelled() }}
         timeout-minutes: 8
         shell: bash
-        run: npm install --prefix packages/core/native-process/spikes/shell --no-audit --no-fund
+        run: |
+          set -euo pipefail
+          npm install --prefix packages/core/native-process/spikes/shell --no-audit --no-fund
+          pty=packages/core/native-process/spikes/shell/node_modules/node-pty
+          found=0
+          for helper in "$pty"/prebuilds/darwin-*/spawn-helper "$pty"/build/Release/spawn-helper; do
+            [ -f "$helper" ] || continue
+            chmod +x "$helper"
+            test -x "$helper"
+            ls -l "$helper"
+            found=1
+          done
+          [ "$found" = 1 ] || { echo "node-pty spawn-helper not found"; exit 1; }
 
-      # S2 (orchestrator rule, macOS): a real PTY running an interactive Bash INSIDE the same
-      # session.sb deny-default Seatbelt profile — isatty, programmatic resize, Ctrl-C (status 130),
-      # Ctrl-Z/fg job control, and UTF-8 round-trip, each pass/fail with captured evidence in s2.json.
+      # S2 (orchestrator rule, macOS): a real PTY running an interactive Bash INSIDE the SRT Seatbelt
+      # containment (W1 shell grant) — containment live, isatty, programmatic resize, Ctrl-C (status
+      # 130), Ctrl-Z/fg job control, UTF-8 round-trip, and a double-forked descendant reparented to
+      # launchd still refused outside its grant; each pass/fail with captured evidence in s2.json.
       - name: Run S2 interactive PTY inside the Seatbelt containment
         if: ${{ !cancelled() }}
         timeout-minutes: 6

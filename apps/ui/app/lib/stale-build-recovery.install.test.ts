@@ -4,11 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const ownBuildId = 1_792_726_000_000;
 const deployedBuildId = 1_792_730_113_029;
 
+const liveConfirmed = vi.hoisted(() => new Set<() => void>());
+const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('#filesystem/build-skew.js', () => ({
   buildId: ownBuildId,
   offerReload: vi.fn(),
   recordLiveBuild: vi.fn(),
+  subscribeLiveBuildConfirmed: (listener: () => void) => {
+    liveConfirmed.add(listener);
+    return () => {
+      liveConfirmed.delete(listener);
+    };
+  },
 }));
+vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));
 
 /** Fresh module state per test: the page recovery and its interaction flag live at module scope. */
 const load = async () => {
@@ -51,6 +61,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  liveConfirmed.clear();
   uninstall?.();
   uninstall = undefined;
   sessionStorage.clear();
@@ -166,5 +177,35 @@ describe('installStaleBuildRecovery', () => {
     uninstall = installStaleBuildRecovery();
 
     expect(sessionStorage.getItem('tau-stale-build-reload')).toBeNull();
+  });
+
+  it('should report a failure only onCaughtError saw, with no error page, once the rollback ends', async () => {
+    const { recoverFromCaughtError, readStaleBuildOutcome, subscribeGenuineFailures } = await load();
+    const rolledBackTo = ownBuildId - 3_600_000;
+    stubServer(rolledBackTo);
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    const error = new TypeError('Importing a module script failed.');
+    const heard: unknown[] = [];
+
+    recoverFromCaughtError(error);
+    await settle();
+    expect(readStaleBuildOutcome(error)).toBe('superseded');
+    expect(reportUiError).not.toHaveBeenCalled();
+
+    // The server names this build again: `build-skew` withdraws the offer.
+    for (const listener of liveConfirmed) {
+      listener();
+    }
+    const unsubscribe = subscribeGenuineFailures((failure) => {
+      heard.push(failure);
+    });
+    for (const listener of liveConfirmed) {
+      listener();
+    }
+    unsubscribe();
+
+    expect(reportUiError.mock.calls).toStrictEqual([[error]]);
+    expect(heard).toStrictEqual([error]);
+    expect(readStaleBuildOutcome(error)).toBe('current');
   });
 });

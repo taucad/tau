@@ -1,5 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ErrorEvent } from '@sentry/react';
+import { createBeforeSend } from '#lib/sentry.lib.js';
 import { createStaleBuildRecovery, isStaleModuleError, staleBuildReloadKey } from '#lib/stale-build-recovery.js';
 
 /** In-memory `sessionStorage` stand-in. */
@@ -29,6 +31,13 @@ const setup = (overrides: Partial<Parameters<typeof createStaleBuildRecovery>[0]
   const onSuperseded = vi.fn();
   const onLiveBuild = vi.fn();
   const onGenuineFailure = vi.fn();
+  const liveListeners = new Set<() => void>();
+  /** `build-skew` hears the server name this build again (an offer withdrawn, a rollback ended). */
+  const confirmLive = (): void => {
+    for (const listener of liveListeners) {
+      listener();
+    }
+  };
   const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => deployedBuildId);
   const recovery = createStaleBuildRecovery({
     buildId: ownBuildId,
@@ -38,10 +47,16 @@ const setup = (overrides: Partial<Parameters<typeof createStaleBuildRecovery>[0]
     onSuperseded,
     onLiveBuild,
     onGenuineFailure,
+    subscribeLiveBuildConfirmed: (listener) => {
+      liveListeners.add(listener);
+      return () => {
+        liveListeners.delete(listener);
+      };
+    },
     canReloadSafely: () => true,
     ...overrides,
   });
-  return { storage, reload, onSuperseded, onLiveBuild, onGenuineFailure, fetchServerBuildId, recovery };
+  return { storage, reload, onSuperseded, onLiveBuild, onGenuineFailure, fetchServerBuildId, recovery, confirmLive };
 };
 
 /** A distinct failure object, as each failed `import()` produces. */
@@ -293,6 +308,85 @@ describe('createStaleBuildRecovery', () => {
 
     expect(onGenuineFailure).not.toHaveBeenCalled();
     await expect(recovery.classify(error)).resolves.toBe('reloading');
+  });
+
+  describe('when the server names this build after all', () => {
+    /** What Sentry's `beforeSend` does with an event for `error`: `true` when it is sent. */
+    const sentryKeeps = async (
+      classify: (failure: unknown) => Promise<'reloading' | 'superseded' | 'current'>,
+      error: unknown,
+    ) => (await createBeforeSend(classify)({ type: undefined } as ErrorEvent, { originalException: error })) !== null;
+
+    it.each(['boundary', 'global'] as const)(
+      'should report a %s failure whose superseded offer is withdrawn once, and let Sentry keep it',
+      async (source) => {
+        const { recovery, onGenuineFailure, confirmLive } = setup({ canReloadSafely: () => false });
+        const error = failure();
+        await expect(recovery.recover(error, source)).resolves.toBe('superseded');
+        await Promise.resolve();
+        expect(recovery.readOutcome(error)).toBe('superseded');
+        expect(await sentryKeeps(recovery.classify, error)).toBe(false);
+        expect(onGenuineFailure).not.toHaveBeenCalled();
+
+        confirmLive();
+
+        expect(onGenuineFailure.mock.calls).toStrictEqual([[error]]);
+        expect(recovery.readOutcome(error)).toBe('current');
+        await expect(recovery.recover(error, source)).resolves.toBe('current');
+        expect(await sentryKeeps(recovery.classify, error)).toBe(true);
+      },
+    );
+
+    it('should report the failures a stalled reload covered once its offer is withdrawn', async () => {
+      vi.useFakeTimers();
+      const { recovery, onGenuineFailure, onSuperseded, confirmLive } = setup({ reloadTimeout: 15_000 });
+      const first = failure();
+      const second = failure();
+      await recovery.recover(first);
+      await recovery.recover(second);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(recovery.readReloadState()).toBe('stalled');
+      expect(onSuperseded).toHaveBeenCalledWith(deployedBuildId);
+      expect(onGenuineFailure).not.toHaveBeenCalled();
+
+      confirmLive();
+
+      expect(onGenuineFailure.mock.calls).toStrictEqual([[first], [second]]);
+      expect(recovery.readOutcome(second)).toBe('current');
+    });
+
+    it('should report a genuine failure a boundary caught once, and leave a global one to error reporting', async () => {
+      const { recovery, onGenuineFailure } = setup({ fetchServerBuildId: async () => ownBuildId });
+      const caught = failure();
+      const unhandled = failure();
+
+      await recovery.recover(caught, 'boundary');
+      await recovery.recover(unhandled, 'global');
+      await recovery.recover(caught, 'boundary');
+      await Promise.resolve();
+
+      expect(onGenuineFailure.mock.calls).toStrictEqual([[caught]]);
+    });
+
+    it('should report nothing twice, however often the server names this build', async () => {
+      vi.useFakeTimers();
+      let served = deployedBuildId;
+      const { recovery, onGenuineFailure, confirmLive } = setup({
+        reloadTimeout: 15_000,
+        fetchServerBuildId: async () => served,
+      });
+      const error = failure();
+      await recovery.recover(error, 'boundary');
+      served = ownBuildId;
+
+      confirmLive();
+      await vi.advanceTimersByTimeAsync(15_000);
+      confirmLive();
+      await recovery.recover(error, 'boundary');
+      await Promise.resolve();
+
+      expect(onGenuineFailure.mock.calls).toStrictEqual([[error]]);
+    });
   });
 
   it('should not retry a reload another page of this tab started, which may have looped', async () => {

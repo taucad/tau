@@ -13,7 +13,17 @@ const mocks = vi.hoisted(() => ({
   recoverFromStaleBuild: vi.fn(async (_failure: unknown): Promise<StaleBuildOutcome> => 'current'),
   reloadState: 'idle' as ReloadState,
   reloadStateListeners: new Set<() => void>(),
+  outcomes: new Map<unknown, StaleBuildOutcome>(),
+  outcomeListeners: new Set<() => void>(),
 }));
+
+/** The recovery settles (or later changes) a failure's outcome, as `createStaleBuildRecovery` does. */
+const setOutcome = (failure: unknown, outcome: StaleBuildOutcome): void => {
+  mocks.outcomes.set(failure, outcome);
+  for (const listener of mocks.outcomeListeners) {
+    listener();
+  }
+};
 
 vi.mock('react-router', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactRouter>()),
@@ -28,7 +38,18 @@ vi.mock('#hooks/use-analytics.js', () => ({
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError: mocks.reportUiError }));
 vi.mock('#lib/stale-build-recovery.js', async (importOriginal) => ({
   ...(await importOriginal<typeof StaleBuildRecovery>()),
-  recoverFromStaleBuild: mocks.recoverFromStaleBuild,
+  recoverFromStaleBuild: async (failure: unknown) => {
+    const outcome = await mocks.recoverFromStaleBuild(failure);
+    setOutcome(failure, outcome);
+    return outcome;
+  },
+  readStaleBuildOutcome: (failure: unknown) => mocks.outcomes.get(failure),
+  subscribeStaleBuildOutcomes: (listener: () => void) => {
+    mocks.outcomeListeners.add(listener);
+    return () => {
+      mocks.outcomeListeners.delete(listener);
+    };
+  },
   readReloadState: () => mocks.reloadState,
   subscribeReloadState: (listener: () => void) => {
     mocks.reloadStateListeners.add(listener);
@@ -86,6 +107,7 @@ const renderPage = (error: unknown): ReturnType<typeof render> => {
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
   mocks.reloadState = 'idle';
+  mocks.outcomes.clear();
   // `recoverFromStaleBuild` answers every report of one failure alike, so a test sets one outcome for all of them.
   mocks.recoverFromStaleBuild.mockResolvedValue('current');
 });
@@ -181,7 +203,7 @@ describe('ErrorPage', () => {
     expect(button).toBeEnabled();
   });
 
-  it('should fall back to the error, and report it, once the server withdraws the offer', async () => {
+  it('should show the error once the recovery decides the failure genuine after all, leaving the report to it', async () => {
     supersededOutcome();
     const error = moduleImportFailure();
     const Owned = (): React.JSX.Element => <output aria-label='Prompt owned'>{String(useReloadPromptOwned())}</output>;
@@ -195,50 +217,23 @@ describe('ErrorPage', () => {
     expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('true');
 
+    // The server names this build again: the recovery moves the failure to `current` and reports it.
     act(() => {
-      recordLiveBuild(buildId);
+      setOutcome(error, 'current');
     });
 
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Prompt owned' })).toHaveTextContent('false');
-    await waitFor(() => {
-      expect(mocks.reportUiError).toHaveBeenCalledWith(error);
-    });
-    expect(mocks.captureException).toHaveBeenCalledWith(error, { context: { component: 'ErrorPage' } });
-  });
-
-  it('should fall back to the error once the recovery takes its reload back, leaving the report to it', async () => {
-    mocks.recoverFromStaleBuild.mockResolvedValue('reloading');
-    mocks.reloadState = 'pending';
-    const error = moduleImportFailure();
-    renderPage(error);
-    expect(await screen.findByRole('heading', { name: 'Tau has been updated' })).toBeInTheDocument();
-
-    act(() => {
-      mocks.reloadState = 'idle';
-      for (const listener of mocks.reloadStateListeners) {
-        listener();
-      }
-    });
-
-    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
-    await waitFor(() => {
-      expect(mocks.captureException).toHaveBeenCalledWith(error, { context: { component: 'ErrorPage' } });
-    });
-    // `onGenuineFailure` in the recovery reports it to Sentry; a second report here would double it.
     expect(mocks.reportUiError).not.toHaveBeenCalled();
+    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
-  it('should report a module import failure the live build still has, without loading another chunk', async () => {
+  it('should show a module import failure the live build still has without reporting it or loading another chunk', async () => {
     const error = moduleImportFailure();
 
     renderPage(error);
 
-    await waitFor(() => {
-      expect(mocks.reportUiError).toHaveBeenCalledWith(error);
-    });
-    expect(mocks.captureException).toHaveBeenCalledWith(error, { context: { component: 'ErrorPage' } });
-    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
     expect(screen.getByText('Importing a module script failed.')).toBeInTheDocument();
     await act(async () => {
       await new Promise((resolve) => {
@@ -246,6 +241,9 @@ describe('ErrorPage', () => {
       });
     });
     expect(screen.queryByLabelText('Stack trace')).not.toBeInTheDocument();
+    // The recovery reports a genuine failure a boundary caught (`onGenuineFailure`); a second report would double it.
+    expect(mocks.reportUiError).not.toHaveBeenCalled();
+    expect(mocks.captureException).not.toHaveBeenCalled();
   });
 
   it('should still show the stack of any other error', async () => {
@@ -273,13 +271,10 @@ describe('ErrorPage', () => {
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
   });
 
-  it.each([
-    ['a module import failure the live build still has', moduleImportFailure],
-    ['any other error', () => new Error('controlled render failure')],
-  ])('should report %s once, however often the page renders', async (_label, makeError) => {
+  it('should report any other error once, however often the page renders', async () => {
     isAnalyticsStable = false;
     try {
-      const error = makeError();
+      const error = new Error('controlled render failure');
       const view = renderPage(error);
       await waitFor(() => {
         expect(mocks.reportUiError).toHaveBeenCalledWith(error);

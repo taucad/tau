@@ -1,18 +1,20 @@
 import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCcw } from 'lucide-react';
-import { lazy, Suspense, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { lazy, Suspense, useEffect, useRef, useSyncExternalStore } from 'react';
 import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
-import { describeSupersession, isReloadOffered, subscribeReloadOffer } from '#filesystem/build-skew.js';
+import { describeSupersession } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
 import { useReloadPromptOwner } from '#components/nav/browser-update.js';
 import {
   isStaleModuleError,
   readReloadState,
+  readStaleBuildOutcome,
   recoverFromStaleBuild,
   subscribeReloadState,
+  subscribeStaleBuildOutcomes,
 } from '#lib/stale-build-recovery.js';
 import type { ReloadState, StaleBuildOutcome } from '#lib/stale-build-recovery.js';
 
@@ -22,107 +24,54 @@ const CollapsibleCodeBlock = lazy(async () => {
 });
 
 const serverReloadState = (): ReloadState => 'idle';
-const serverReloadOffer = (): boolean => false;
-
-/**
- * Report `captured` for the route's `error`, unless that error was already reported.
- *
- * @param page - Which error has been reported, the route's error and the analytics client.
- * @param captured - What to report (a route error response becomes an `Error`).
- * @param toErrorTracker - Whether Sentry hears of it too, besides analytics.
- */
-const reportErrorOnce = (
-  page: {
-    readonly reported: { current: unknown };
-    readonly error: unknown;
-    readonly analytics: Pick<ReturnType<typeof useAnalytics>, 'captureException'>;
-  },
-  captured: Error,
-  toErrorTracker: boolean,
-): void => {
-  if (page.reported.current === page.error) {
-    return;
-  }
-  page.reported.current = page.error;
-  page.analytics.captureException(captured, { context: { component: 'ErrorPage' } });
-  if (toErrorTracker) {
-    void reportUiError(captured);
-  }
-};
+const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
 
 export function ErrorPage(): React.JSX.Element {
   const error = useRouteError();
   const navigate = useNavigate();
   const analytics = useAnalytics();
   const isModuleLoadFailure = isStaleModuleError(error);
-  const [triaged, setTriaged] = useState<{ readonly error: unknown; readonly outcome: StaleBuildOutcome }>();
-  // An outcome belongs to the error it was decided for; a new error starts its own check.
-  const staleOutcome = triaged !== undefined && triaged.error === error ? triaged.outcome : undefined;
+  /* TAU-UI-6: the recovery owns a module load failure, its outcome and its report; this page only
+   * shows the outcome, which changes when the server names this build again (genuine after all). */
+  const outcome = useSyncExternalStore(subscribeStaleBuildOutcomes, () => readStaleBuildOutcome(error), serverOutcome);
+  const staleOutcome = isModuleLoadFailure ? outcome : undefined;
   // The recovery's own reload: the button waits while it is pending and returns once it stalls.
   const reloadState = useSyncExternalStore(subscribeReloadState, readReloadState, serverReloadState);
-  const isOffered = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverReloadOffer);
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
-  /* A deploy still explains the failure while the page's own reload is under way or the reload is
-   * offered. When the server names this build again the offer is withdrawn (or the recovery takes its
-   * reload back), and the failure is shown and reported as the genuine one it turned out to be. */
-  const isExplained =
-    staleOutcome === 'superseded'
-      ? isOffered
-      : staleOutcome === 'reloading' && (reloadState === 'pending' || isOffered);
-  const isTakenBack = (staleOutcome === 'reloading' || staleOutcome === 'superseded') && !isExplained;
+  const isExplained = staleOutcome === 'reloading' || staleOutcome === 'superseded';
   // This screen is the reload prompt while it shows; the floating banner would only repeat it.
   useReloadPromptOwner(isExplained);
-  // Each failure is reported once, however often the effect runs again (a new `analytics`, a remount of the same error).
+  // Each other error is reported once, however often the effect runs again (a new `analytics`, a remount).
   const reportedError = useRef<unknown>(undefined);
 
   useEffect(() => {
-    if (isTakenBack && error instanceof Error) {
-      // A taken-back reload is reported by the recovery itself (`onGenuineFailure`); a withdrawn offer only here.
-      reportErrorOnce({ reported: reportedError, error, analytics }, error, staleOutcome === 'superseded');
-    }
-  }, [isTakenBack, error, staleOutcome, analytics]);
-
-  useEffect(() => {
-    const reportOnce = (captured: Error, toErrorTracker: boolean): void => {
-      reportErrorOnce({ reported: reportedError, error, analytics }, captured, toErrorTracker);
-    };
-
-    // Don't report 404 errors to analytics - they're expected user behavior
-    if (isRouteErrorResponse(error) && error.status === 404) {
+    if (isModuleLoadFailure) {
+      // async-iife: bootstrap -- an effect cannot await; the outcome arrives through the subscription.
+      void recoverFromStaleBuild(error);
       return;
     }
-
-    if (isRouteErrorResponse(error)) {
-      const routeError = new Error(`${error.status} ${error.statusText}`);
-      routeError.name = 'route_error';
-      reportOnce(routeError, error.status >= 500);
-    } else if (error instanceof Error && isStaleModuleError(error)) {
-      // TAU-UI-6: a deploy that replaced this page's chunks is not a bug. Report only a failure the live build has.
-      let isCurrent = true;
-      const triage = async (): Promise<void> => {
-        const outcome = await recoverFromStaleBuild(error);
-        if (!isCurrent) {
-          return;
-        }
-        setTriaged((previous) =>
-          previous !== undefined && previous.error === error && previous.outcome === outcome
-            ? previous
-            : { error, outcome },
-        );
-        if (outcome === 'current') {
-          reportOnce(error, true);
-        }
-      };
-      // async-iife: bootstrap -- an effect cannot await; the boundary renders the outcome once it settles.
-      void triage();
-      return () => {
-        isCurrent = false;
-      };
-    } else if (error instanceof Error) {
-      reportOnce(error, true);
+    // Don't report 404 errors to analytics - they're expected user behavior
+    if (reportedError.current === error || (isRouteErrorResponse(error) && error.status === 404)) {
+      return;
     }
-    return undefined;
-  }, [error, analytics]);
+    let captured: Error | undefined;
+    let toErrorTracker = true;
+    if (isRouteErrorResponse(error)) {
+      captured = new Error(`${error.status} ${error.statusText}`);
+      captured.name = 'route_error';
+      toErrorTracker = error.status >= 500;
+    } else if (error instanceof Error) {
+      captured = error;
+    }
+    if (captured === undefined) {
+      return;
+    }
+    reportedError.current = error;
+    analytics.captureException(captured, { context: { component: 'ErrorPage' } });
+    if (toErrorTracker) {
+      void reportUiError(captured);
+    }
+  }, [error, analytics, isModuleLoadFailure]);
 
   const goBack = (): void => {
     void navigate(-1);

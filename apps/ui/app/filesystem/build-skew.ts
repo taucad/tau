@@ -105,6 +105,7 @@ let phaseTimer: ReturnType<typeof setTimeout> | undefined;
 const writeStopTopic = new Topic<void>({ name: 'build-skew' });
 const reloadOfferTopic = new Topic<void>({ name: 'build-reload-offer' });
 const supersedingBuildTopic = new Topic<void>({ name: 'superseding-build' });
+const liveBuildConfirmedTopic = new Topic<void>({ name: 'live-build-confirmed' });
 
 const stopsWrites = (current: SkewState): boolean => current.phase !== 'idle' && current.phase !== 'offered';
 
@@ -274,6 +275,7 @@ const dispatch = (event: SkewEvent): void => {
   }
   if (next === idle) {
     channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
+    liveBuildConfirmedTopic.emit();
   }
 };
 
@@ -371,4 +373,13 @@ export const subscribeBuildSkew = (listener: () => void): (() => void) => {
  */
 export const subscribeReloadOffer = (listener: () => void): (() => void) => {
   return reloadOfferTopic.subscribe(listener);
+};
+
+/**
+ * Subscribe to each time the server names this build live after something had said otherwise: a
+ * deploy's offer withdrawn, a rollback ended, a peer's claim refuted (`#lib/stale-build-recovery`
+ * then decides every failure a deploy explained as genuine).
+ */
+export const subscribeLiveBuildConfirmed = (listener: () => void): (() => void) => {
+  return liveBuildConfirmedTopic.subscribe(listener);
 };

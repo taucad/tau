@@ -29,7 +29,7 @@ $secure = ConvertTo-SecureString $pwPlain -AsPlainText -Force
 $pwPlain = $null
 
 # Children get these through Machine scope (Start-Process -Credential builds the env from Machine+User).
-$forwarded = @('S3_HOST_LABEL', 'S3_GPU_LABEL', 'S3_GUIDEPUP_MODULE', 'GUIDEPUP_SCREEN_READERS_PATH')
+$forwarded = @('S3_HOST_LABEL', 'S3_GPU_LABEL', 'S3_GUIDEPUP_MODULE', 'GUIDEPUP_SCREEN_READERS_PATH', 'S3_USER_HOME')
 $overallExit = 0
 try {
   New-LocalUser -Name $user -Password $secure -FullName 'Tau S3 (ephemeral)' `
@@ -61,10 +61,17 @@ try {
   }
   $probe = Join-Path $env:GITHUB_WORKSPACE 'node_modules/playwright/package.json'
   Write-Host "[run-nonadmin] probe ACL: $((cmd /c "icacls `"$probe`"" 2>&1) -join ' | ')"
-  # Write access to the drop and the harness output (packaged fixture, Electron user data stays in the profile).
-  foreach ($path in @($Drop, (Join-Path $env:GITHUB_WORKSPACE 'out/s3-renderer'))) {
-    cmd /c "icacls `"$path`" /grant `"${user}:(OI)(CI)M`"" | Out-Null
-  }
+  # Write access to the drop and the harness output. @electron/packager builds in the administrator's TEMP and moves
+  # the package out, so its files keep that protected ACL and need an explicit ACE on each (a few hundred files).
+  $output = Join-Path $env:GITHUB_WORKSPACE 'out/s3-renderer'
+  cmd /c "icacls `"$Drop`" /grant `"${user}:(OI)(CI)M`" /C /Q" | Out-Null
+  $grant = cmd /c "icacls `"$output`" /grant `"${user}:(OI)(CI)M`" /T /C /Q 2>&1"
+  Write-Host "[run-nonadmin] write grant out/s3-renderer: $(($grant | Select-Object -Last 1))"
+  # Start-Process -Credential builds the child's environment from the Machine scope and the administrator's User scope,
+  # so TEMP and the AppData folders name the administrator's profile (mkdtemp EPERM). run.mts moves them to S3_USER_HOME.
+  $env:S3_USER_HOME = Join-Path $env:RUNNER_TEMP $user
+  New-Item -ItemType Directory -Force -Path $env:S3_USER_HOME | Out-Null
+  cmd /c "icacls `"$env:S3_USER_HOME`" /grant `"${user}:(OI)(CI)M`" /C /Q" | Out-Null
   foreach ($name in $forwarded) {
     [Environment]::SetEnvironmentVariable($name, [Environment]::GetEnvironmentVariable($name), 'Machine')
   }

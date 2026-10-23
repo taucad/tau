@@ -67,6 +67,23 @@ const sampleInterval = 250;
 const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'));
 const electronPath = desktopRequire('electron') as unknown as string;
 const isWindows = process.platform === 'win32';
+// run-nonadmin.ps1 sets this: the standard user inherits the administrator's TEMP and AppData paths, which it cannot
+// write, so they move to a home it owns before Playwright or Electron reads them.
+if (process.env['S3_USER_HOME']) {
+  const home = process.env['S3_USER_HOME'];
+  const folders: Array<[name: string, relative: string]> = [
+    ['TEMP', 'AppData/Local/Temp'],
+    ['TMP', 'AppData/Local/Temp'],
+    ['LOCALAPPDATA', 'AppData/Local'],
+    ['APPDATA', 'AppData/Roaming'],
+  ];
+  for (const [name, relative] of folders) {
+    const folder = path.join(home, relative);
+    process.env[name] = folder;
+    await mkdir(folder, { recursive: true });
+  }
+  process.env['USERPROFILE'] = home;
+}
 /** Set by `--packaged`: the packaged fixture executable and the client root inside its resources. */
 let packagedApp: { executable: string; clientRoot: string } | undefined;
 const softwareGlArguments = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
@@ -164,8 +181,17 @@ const packageFixture = async (): Promise<{ executable: string; clientRoot: strin
     : path.join(appRoot, isWindows ? 'TauS3Fixture.exe' : 'TauS3Fixture');
   const packagedClient = path.join(resources, 'ui/client');
   // With --skip-build an earlier package is reused, so a run as another user needs neither network nor write access.
-  if (values['skip-build'] && (await stat(executable).catch(() => undefined))) {
-    return { executable, clientRoot: packagedClient };
+  // Only a missing package is rebuilt: an unreadable one (another user's ACL) must fail here, not be half deleted.
+  if (values['skip-build']) {
+    const existing = await stat(executable).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    });
+    if (existing) {
+      return { executable, clientRoot: packagedClient };
+    }
   }
   await rm(stage, { recursive: true, force: true });
   await rm(output, { recursive: true, force: true });

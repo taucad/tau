@@ -7,6 +7,7 @@ import type { Server } from 'node:http';
 import { dirname, join, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  mapWithConcurrency,
   planRetention,
   retainPreviousAssets,
   servedAssetsIndexFileName,
@@ -89,6 +90,29 @@ const startLiveDeploy = async (
 
 const readIndex = async (clientDirectory: string): Promise<ServedAssetsIndex> =>
   JSON.parse(await readFile(join(clientDirectory, servedAssetsIndexFileName), 'utf8')) as ServedAssetsIndex;
+
+describe('mapWithConcurrency', () => {
+  it('should keep at most the limit in flight and return results in input order', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const results = await mapWithConcurrency(
+      Array.from({ length: 20 }, (_, index) => index),
+      3,
+      async (value) => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => {
+          setTimeout(resolve, 2);
+        });
+        inFlight -= 1;
+        return value * 2;
+      },
+    );
+
+    expect(peak).toBe(3);
+    expect(results).toStrictEqual(Array.from({ length: 20 }, (_, index) => index * 2));
+  });
+});
 
 describe('planRetention', () => {
   const previous = indexOf([

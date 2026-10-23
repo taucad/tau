@@ -24,9 +24,11 @@
  * Exit codes: 0 success, 1 a malformed index or an asset that cannot be retained.
  */
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import process from 'node:process';
+import { pipeline } from 'node:stream/promises';
 import { setTimeout } from 'node:timers/promises';
 
 /** File the new deploy publishes at its root, listing every asset it serves. */
@@ -139,21 +141,59 @@ export const planRetention = (
     .map((asset) => ({ ...asset, generation: asset.generation + 1 }));
 };
 
+/** Files hashed at once: the build holds about 2,000 files and 330 MiB, which must not all be read together. */
+const hashConcurrency = 16;
+
+/**
+ * Map `items` through `task`, at most `limit` at a time, keeping the input order.
+ *
+ * @param items - The inputs.
+ * @param limit - Tasks in flight at most.
+ * @param task - The work for one input.
+ * @returns The results, in input order.
+ */
+export const mapWithConcurrency = async <T, R>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T) => Promise<R>,
+): Promise<R[]> => {
+  const results: R[] = Array.from({ length: items.length });
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let index = next++; index < items.length; index = next++) {
+      // oxlint-disable-next-line no-await-in-loop -- Each worker runs one task at a time.
+      results[index] = await task(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+};
+
+/** SRI integrity of a file, streamed so a large asset is never held whole. */
+const integrityOfFile = async (path: string): Promise<string> => {
+  const hash = createHash('sha384');
+  await pipeline(createReadStream(path), hash);
+  return `sha384-${hash.digest('base64')}`;
+};
+
 const listOwnAssets = async (clientDirectory: string): Promise<readonly ServedAsset[]> => {
   // A build without its asset directory is broken; publishing an empty index would drop every retained asset.
   const entries = await readdir(join(clientDirectory, 'assets'), { recursive: true, withFileTypes: true });
   const files = entries.filter((entry) => entry.isFile() && !isNeverLoadedByPages(entry.name));
-  return Promise.all(
-    files.map(async (entry) => {
-      const absolute = join(entry.parentPath, entry.name);
-      const path = relative(clientDirectory, absolute).split(sep).join(posix.sep);
-      if (!isServableAssetPath(path)) {
-        // Published, it would fail every later deploy that reads this index.
-        throw refusePath(path, 'new build');
-      }
-      return { path, integrity: integrityOf(new Uint8Array(await readFile(absolute))), generation: 0 };
-    }),
-  );
+  const paths = files.map((entry) => {
+    const absolute = join(entry.parentPath, entry.name);
+    const path = relative(clientDirectory, absolute).split(sep).join(posix.sep);
+    if (!isServableAssetPath(path)) {
+      // Published, it would fail every later deploy that reads this index.
+      throw refusePath(path, 'new build');
+    }
+    return { absolute, path };
+  });
+  return mapWithConcurrency(paths, hashConcurrency, async ({ absolute, path }) => ({
+    path,
+    integrity: await integrityOfFile(absolute),
+    generation: 0,
+  }));
 };
 
 /** Milliseconds a `Retry-After` may ask for before the wait is capped. */
@@ -279,17 +319,9 @@ export const retainPreviousAssets = async (options: {
   const previous = origin === undefined ? undefined : await readLiveIndex(origin, transport);
   const kept = previous === undefined ? [] : planRetention(previous, new Set(own.map((asset) => asset.path)));
 
-  let bytes = 0;
   const download: Download = { origin: origin ?? '', clientDirectory: options.clientDirectory, transport };
-  const queue = [...kept];
-  const worker = async (): Promise<void> => {
-    for (let asset = queue.shift(); asset !== undefined; asset = queue.shift()) {
-      // oxlint-disable-next-line no-await-in-loop -- Each worker downloads one asset at a time.
-      const size = await downloadAsset(download, asset);
-      bytes += size;
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(downloadConcurrency, queue.length) }, worker));
+  const sizes = await mapWithConcurrency(kept, downloadConcurrency, async (asset) => downloadAsset(download, asset));
+  const bytes = sizes.reduce((total, size) => total + size, 0);
 
   const index: ServedAssetsIndex = {
     schema: servedAssetsIndexSchema,

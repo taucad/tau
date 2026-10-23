@@ -1,7 +1,7 @@
 [
   {
-    "name": "Revisions ES module outputs \u2014 atomic LFS hydration and bounded durable close; measured 108425 bytes brotli on macOS, 2026-10-21",
+    "name": "Revisions ES module outputs — atomic LFS hydration and bounded durable close; measured 108425 bytes brotli on macOS, 2026-10-21; cross-device chat handoff (XD3/XD4: a chat's checkout resolved from its branch and opened on demand, removed checkouts remembered on the device, and the turn-placement `publish` verb for a live run's heartbeat) about 0.9 kB, 109.32 kB brotli on Linux, 2026-10-23 (limit raised from 108.6 kB to 109.6 kB with the owner's approval)",
     "path": "dist/**/*.mjs",
-    "limit": "108.6 kB"
+    "limit": "109.6 kB"
   }
 ]

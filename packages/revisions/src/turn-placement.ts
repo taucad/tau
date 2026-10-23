@@ -77,7 +77,7 @@ type AdmitCode =
   | Fenced;
 
 /**
- * One placement session over a project's revision root: the six verbs of agent-host's `TurnPlacementPort`, plus the
+ * One placement session over a project's revision root: the verbs of agent-host's `TurnPlacementPort`, plus the
  * session fence its binding calls when a newer session opens.
  *
  * @public
@@ -95,6 +95,8 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
   ) => Promise<Answer<Readonly<{ held: readonly Held[] }>, 'REVISIONS_UNAVAILABLE' | Fenced>>;
   settlements: (input: Readonly<{ signal: AbortSignal }>) => AsyncIterable<Fact>;
   acknowledge: (input: Request) => Promise<Answer<Nothing, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | Fenced>>;
+  /** Record a chat's ref now, after its host wrote a live run's heartbeat (XD3). */
+  publish: (input: Readonly<{ requestId: string; chatId: string }>) => Promise<Answer<Nothing, Fenced>>;
   /**
    * End this session (TS-R6): its later requests are refused `SESSION_FENCED`, its tools are revoked once their
    * accepted writes land, and its `settlements` listens end. The root keeps every turn actor.
@@ -128,24 +130,7 @@ export type TurnPlacementPortOptions<Tools> = Readonly<{
    * completion cut (the agent's last writes). A host whose feed is not complete omits it.
    */
   settle?: (() => Promise<void>) | undefined;
-  /**
-   * How often a running attempt's chats are recorded again while it holds its tools, so another device sees its
-   * progress before it settles (XD3); {@link runProgressPublishMilliseconds} by default.
-   */
-  progressPublishMilliseconds?: number | undefined;
 }>;
-
-/**
- * How often sync records the chats while an attempt holds its tools: once a minute (XD3, cross-device run fence).
- *
- * An admitted attempt's chat ref is recorded at once, so another device sees the run before it streams, and then once
- * a minute until its tools are revoked, so the run's newest row reaches that device well inside the fence's staleness
- * bound (ten minutes, `foreignRunStaleMilliseconds` in `@taucad/agent-host`). A record whose chat bytes did not change
- * writes no commit, and the sync debounce coalesces it with any other push.
- *
- * @public
- */
-export const runProgressPublishMilliseconds = 60_000;
 
 /** A root answer the adapter waits on, per attempt. */
 type Heard =
@@ -381,7 +366,6 @@ export const createTurnPlacementPort = <Tools>(
   const subscribers = new Set<() => void>();
   const queues = new Set<Fact[]>();
   let fenced = false;
-  let progress: ReturnType<typeof setInterval> | undefined;
   const isFenced = (): boolean => fenced;
   /* Rows are built in the order their facts arrive, and a verb's answer follows its row onto `settlements` (TS-R4). */
   let publishing: Promise<void> = Promise.resolve();
@@ -601,26 +585,6 @@ export const createTurnPlacementPort = <Tools>(
     actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
   };
 
-  /* XD3: publish a run as it starts and while it runs. The admission row is durable before M1 places the attempt, so
-   * sync records it in the chat's ref now, not only once the run settles; another device then refuses a second run.
-   * Fire and forget: an offline remote queues the push and never holds the turn. */
-  const holdsTools = (): boolean => [...tools.values()].some((entry) => !entry.revocable.revoked());
-  const stopProgress = (): void => {
-    clearInterval(progress);
-    progress = undefined;
-  };
-  const republish = (): void => {
-    if (fenced || !holdsTools()) {
-      stopProgress();
-      return;
-    }
-    recordsChanged();
-  };
-  const publishProgress = (): void => {
-    recordsChanged();
-    progress ??= setInterval(republish, options.progressPublishMilliseconds ?? runProgressPublishMilliseconds);
-  };
-
   /* The registry lists the lease records before a verb reads them; it answers even with no checkout (RM-R11). */
   const registryAnswered = async (): Promise<void> => {
     await waitFor(actor, (snapshot) => snapshot.context.registrySettled);
@@ -660,7 +624,8 @@ export const createTurnPlacementPort = <Tools>(
     if (code === 'CHECKOUT_CONFLICT' || code === 'LEASE_UNAVAILABLE') {
       /*
        * Today's `CHECKOUT_CONFLICT` also means "the id names no checkout"; that half has its own code (TS-S0 Q4). An id
-       * that reached the root unresolved names no branch on this device either (XD4), which a later sync can change.
+       * that reached the root unresolved names no branch on this device either (XD4), which a later sync can change: one
+       * this device removed never reaches the root, `placeIntent` refuses it `CHECKOUT_UNKNOWN` first.
        */
       const known = actor.getSnapshot().context.checkouts.some((checkout) => checkout.id === checkoutId);
       return checkoutId !== undefined && !known ? 'BRANCH_UNAVAILABLE' : 'CHECKOUT_CONFLICT';
@@ -710,13 +675,15 @@ export const createTurnPlacementPort = <Tools>(
   /*
    * XD4: where the placement intent is on this device. A checkout id derives from its branch, so the branch is the
    * portable fact and the checkout device state: an id this device has no checkout for runs on the checkout that holds
-   * its branch, on one opened for it, or, for an unborn default branch, on the live checkout. An id no branch here
-   * derives goes to the root unchanged, which refuses it (`BRANCH_UNAVAILABLE`, retried after a sync).
+   * its branch, or on one opened for it. Never on a checkout this device removed, or one of a branch it saw removed:
+   * that intent is refused for good (`CHECKOUT_UNKNOWN`), never opened again. An unborn branch no checkout holds has no
+   * head to open, so it waits (`BRANCH_UNAVAILABLE`), as does an id no branch here derives, which goes to the root
+   * unchanged and is refused there: a later sync can bring either.
    */
   const placeIntent = async (
     key: TurnAttemptKey,
     intent: string | undefined,
-  ): Promise<Readonly<{ checkoutId: string | undefined }> | Readonly<{ refused: string }>> => {
+  ): Promise<Readonly<{ checkoutId: string | undefined }> | Readonly<{ refused: string; code: AdmitCode }>> => {
     if (intent === undefined) {
       return { checkoutId: undefined };
     }
@@ -730,6 +697,9 @@ export const createTurnPlacementPort = <Tools>(
       return { checkoutId: intent };
     }
     const derived = await turns.branchOf(intent).catch(() => undefined);
+    if (derived === 'removed') {
+      return { refused: '', code: 'CHECKOUT_UNKNOWN' };
+    }
     if (derived === undefined) {
       return { checkoutId: intent };
     }
@@ -737,8 +707,11 @@ export const createTurnPlacementPort = <Tools>(
     if (holder !== undefined) {
       return { checkoutId: holder.id };
     }
-    /* The root's own fallback is the live checkout (TS-R12). */
-    return derived.unborn ? { checkoutId: undefined } : materialize(key, derived.branch);
+    if (derived.unborn) {
+      return { refused: '', code: 'BRANCH_UNAVAILABLE' };
+    }
+    const opened = await materialize(key, derived.branch);
+    return 'refused' in opened ? { ...opened, code: 'REVISIONS_UNAVAILABLE' } : opened;
   };
 
   /*
@@ -816,15 +789,16 @@ export const createTurnPlacementPort = <Tools>(
         });
       }
       /* TS-R12: the person's choice, else the chat record's checkout; the root falls back to the live one. */
-      const placed = await placeIntent(key, checkoutId ?? (await recordedCheckout(key.chatId)));
+      const intended = checkoutId ?? (await recordedCheckout(key.chatId));
+      const placed = await placeIntent(key, intended);
       if (isFenced()) {
         return fencedAnswer(requestId);
       }
       if ('refused' in placed) {
         return refused({
           requestId,
-          code: 'REVISIONS_UNAVAILABLE',
-          message: admitMessage('REVISIONS_UNAVAILABLE', '', placed.refused),
+          code: placed.code,
+          message: admitMessage(placed.code, intended ?? '', placed.refused),
         });
       }
       const intent = placed.checkoutId;
@@ -857,7 +831,9 @@ export const createTurnPlacementPort = <Tools>(
           ...(placement.unplaced === undefined ? {} : { details: { revisionId: placement.unplaced } }),
         });
       }
-      publishProgress();
+      /* XD3: the admission row is durable before M1 places the attempt, so sync records it in the chat's ref now and
+       * another device refuses a second run before this one streams; the host's heartbeats keep it current (`publish`). */
+      recordsChanged();
       return { requestId, status: replay ? 'replayed' : 'applied', placement };
     },
 
@@ -1049,9 +1025,18 @@ export const createTurnPlacementPort = <Tools>(
       return { requestId, status: 'applied' };
     },
 
+    /* XD3: the host wrote a live run's heartbeat; record the chat's ref so another device sees it. A record whose chat
+     * bytes did not change writes no commit, and the sync debounce coalesces it with any other push. */
+    publish: async ({ requestId }) => {
+      if (fenced) {
+        return fencedAnswer(requestId);
+      }
+      recordsChanged();
+      return { requestId, status: 'applied' };
+    },
+
     fence: async () => {
       stop();
-      stopProgress();
       watch.abort();
       for (const subscription of subscriptions) {
         subscription.unsubscribe();

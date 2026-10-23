@@ -450,10 +450,11 @@ export type TurnStore = Readonly<{
   /**
    * The branch a checkout id derives from, when this device knows that branch (XD4). A chat record synced from another
    * device can name a linked checkout this device never opened; its branch is the portable fact. `unborn` when the
-   * branch has no revision here yet, which only the live checkout's or the default branch can be. `undefined` when no
-   * branch on this device derives the id: a later sync may bring it.
+   * branch has no revision here yet, which only the live checkout's or the default branch can be. `removed` when this
+   * device removed that checkout, or saw its branch removed, and has not opened the branch since: the id is refused for
+   * good, never opened again. `undefined` when no branch on this device derives the id: a later sync may bring it.
    */
-  branchOf: (checkoutId: string) => Promise<Readonly<{ branch: string; unborn: boolean }> | undefined>;
+  branchOf: (checkoutId: string) => Promise<Readonly<{ branch: string; unborn: boolean }> | 'removed' | undefined>;
 }>;
 
 /**
@@ -1717,6 +1718,55 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* An undo's plan, by checkout, waiting for the `restore` cut that mints its tree (D15). */
   const pendingUndos = new Map<string, Readonly<{ treeId: string; undoes: string }>>();
 
+  /*
+   * XD4: the checkouts this device removed, and the checkouts of branches it saw removed, by id. A chat record synced
+   * from elsewhere can still name one; it is refused for good rather than opened again or waited on. Opening the
+   * branch here again forgets it. Device state in a control-plane file no tree records, like the record devices.
+   */
+  const removedCheckoutsPath = '.git/tau-removed-checkouts.json';
+  const readRemovedCheckouts = async (): Promise<ReadonlySet<string>> => {
+    try {
+      const records = await recordsFileSystem();
+      const stored: unknown = (await records.exists(removedCheckoutsPath))
+        ? JSON.parse(await records.readFile(removedCheckoutsPath, 'utf8'))
+        : [];
+      return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []);
+    } catch {
+      return new Set();
+    }
+  };
+  let removedWrites: Promise<void> = Promise.resolve();
+  const writeRemovedCheckout = async (id: string, removed: boolean): Promise<void> => {
+    const ids = new Set(await readRemovedCheckouts());
+    if (ids.has(id) === removed) {
+      return;
+    }
+    if (removed) {
+      ids.add(id);
+    } else {
+      ids.delete(id);
+    }
+    const records = await recordsFileSystem();
+    await records.writeFile(removedCheckoutsPath, `${JSON.stringify([...ids])}\n`);
+  };
+  const noteRemovedCheckout = async (id: string, removed: boolean): Promise<void> => {
+    const prior = removedWrites;
+    const write = (async (): Promise<void> => {
+      await prior;
+      try {
+        await writeRemovedCheckout(id, removed);
+      } catch {
+        /* Evidence, never a verb's outcome: a write that fails leaves the id unknown, which a sync can still answer. */
+      }
+    })();
+    removedWrites = write;
+    await write;
+  };
+  const noteBranchRemoved = async (branch: string, removed: boolean): Promise<void> => {
+    const { objectFormat } = await describePort();
+    await noteRemovedCheckout(checkoutIdOfBranch(objectFormat, branch), removed);
+  };
+
   /**
    * Append one head move to the log of the form that made it (D15, I5).
    *
@@ -1732,6 +1782,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const ref = name.startsWith('refs/') ? name : `refs/heads/${name}`;
     if (!ref.startsWith('refs/heads/')) {
       return;
+    }
+    if (from === undefined || to === undefined) {
+      await noteBranchRemoved(ref.slice('refs/heads/'.length), to === undefined);
     }
     const minted = to === undefined ? undefined : mintedOperations.get(to);
     if (to !== undefined) {
@@ -2833,6 +2886,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       },
       branchOf: async (checkoutId) => {
         await ensureStore();
+        const removed = await readRemovedCheckouts();
+        if (removed.has(checkoutId)) {
+          return 'removed';
+        }
         const { objectFormat } = await describePort();
         const [heads, places] = await Promise.all([port.listRefs('refs/heads'), listPlaces()]);
         const born = new Set(heads.map((reference) => reference.name.replace(/^refs\/heads\//, '')));
@@ -3330,6 +3387,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           branch: input.branch,
           ...(input.from === '' ? {} : { from: revisionId(input.from) }),
         });
+        await noteRemovedCheckout(added.id, false);
         return { checkout: await recordOf(added, await readLeases()) };
       }),
 
@@ -3350,6 +3408,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           );
         }
         await port.removeCheckout(input.id);
+        await noteRemovedCheckout(input.id, true);
         /* The bytes a closed checkout's captures could reuse describe a tree
          * this process can no longer reach (EQ7). */
         checkoutMemos.delete(input.id);

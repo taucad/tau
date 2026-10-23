@@ -512,6 +512,45 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(answer).toMatchObject({ status: 'applied', placement: { checkoutId: 'live', mode: 'direct' } });
   });
 
+  /* XD4: a checkout this device removed is never opened again for a chat that still names it; the refusal is final. */
+  it('should refuse a chat whose checkout this device removed, and not open it again', async () => {
+    const project = await createProject();
+    const base = await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
+    await commitBranch(project.port, 'feature', { files: { 'main.ts': 'export const size = 2;\n' }, parent: base });
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    const { revisions, placement } = project.open();
+    const checkoutsOf = () => revisions.actor.getSnapshot().context.checkouts;
+    await waitFor(revisions.actor, (snapshot) => snapshot.context.registrySettled);
+    revisions.actor.send({ type: 'addCheckout', requestId: 'open-feature', branch: 'feature', from: '' });
+    await waitFor(revisions.actor, () => checkoutsOf().some((checkout) => checkout.branch === 'feature'));
+    const opened = checkoutsOf().find((checkout) => checkout.branch === 'feature')!.id;
+    revisions.actor.send({ type: 'removeCheckout', requestId: 'close-feature', id: opened });
+    await waitFor(revisions.actor, () => !checkoutsOf().some((checkout) => checkout.id === opened));
+    await writeChatRecord(project.filesystem, opened);
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(checkoutsOf().map((checkout) => checkout.id)).not.toContain(opened);
+  });
+
+  /* XD4: an unborn branch runs only on a checkout that already tracks it; the live one on another branch waits. */
+  it('should refuse retryably when the chat names an unborn branch the live checkout is not on', async () => {
+    const project = await createProject();
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    await writeChatRecord(project.filesystem, 'checkout-of-trunk');
+    const { revisions: opened } = project.open();
+    const revisions = {
+      ...opened,
+      turns: { ...opened.turns, branchOf: async () => ({ branch: 'trunk', unborn: true }) },
+    };
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'BRANCH_UNAVAILABLE' });
+  });
+
   it('should answer replayed and mint no second base when an attempt is admitted twice', async () => {
     const project = await createProject();
     /* Unsaved edits the person made before sending: the dirty base the placement pre-mints. */
@@ -685,29 +724,33 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(syncs).toEqual([recordsChanged, recordsChanged]);
   });
 
-  /* XD3: another device sees a run before it settles, and sees its progress while it runs. */
-  it('should record the chats when an attempt is admitted and again while it holds its tools', async () => {
+  /* XD3: another device sees a run before it settles; the host's heartbeats keep it current through `publish`. */
+  it('should record the chats when an attempt is admitted and each time the host publishes, never on its own', async () => {
     const project = await createProject();
     const { revisions, syncs } = observeSyncs(project.open().revisions);
-    const placement = createTurnPlacementPort({
-      revisions,
-      openTools: ({ filesystem: view }) => view,
-      progressPublishMilliseconds: 10,
-    });
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
 
     const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
-
     expect(admitted).toMatchObject({ status: 'applied' });
     expect(syncs).toEqual([recordsChanged]);
-    await vi.waitFor(() => {
-      expect(syncs.length).toBeGreaterThanOrEqual(3);
-    });
-    await placement.abandon({ requestId: 'abandon:run-1:1', key });
     await sleep(30);
-    const settledCount = syncs.length;
-    await sleep(50);
-    /* Its tools are revoked: nothing more is recorded on its behalf. */
-    expect(syncs).toHaveLength(settledCount);
+    /* No timer of its own: liveness is the host's heartbeat, which also reaches a paused run with no tools. */
+    expect(syncs).toEqual([recordsChanged]);
+
+    await placement.abandon({ requestId: 'abandon:run-1:1', key });
+    const before = syncs.length;
+    expect(await placement.publish({ requestId: 'publish:1', chatId: key.chatId })).toEqual({
+      requestId: 'publish:1',
+      status: 'applied',
+    });
+    expect(syncs).toHaveLength(before + 1);
+
+    await placement.fence();
+    expect(await placement.publish({ requestId: 'publish:2', chatId: key.chatId })).toMatchObject({
+      status: 'refused',
+      code: 'SESSION_FENCED',
+    });
+    expect(syncs).toHaveLength(before + 1);
   });
 
   it('should record nothing for an attempt the root refused', async () => {

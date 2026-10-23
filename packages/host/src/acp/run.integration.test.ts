@@ -377,6 +377,33 @@ const until = async (
 };
 
 /**
+ * Answer an approval once the run has rested on it. The request row is durable before the attempt that asked has
+ * settled, and until it has the host answers `CHAT_RUN_LIVE` (`wait`, "settling"): the same command is sent again,
+ * as a client does, rather than dropped (which left the run paused for good).
+ *
+ * @param launcher - The launcher.
+ * @param command - The `resolve-interrupt` command.
+ * @returns The answer that was not a `wait` refusal.
+ */
+const resolveOnceSettled = async (
+  launcher: Pick<AgentLauncher, 'execute'>,
+  command: Parameters<AgentLauncher['execute']>[0],
+): ReturnType<AgentLauncher['execute']> => {
+  const deadline = Date.now() + 25_000;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- one command at a time, until it is not refused for a settling run.
+    const answer = await launcher.execute(command);
+    if (answer.status !== 'refused' || answer.code !== 'CHAT_RUN_LIVE' || Date.now() > deadline) {
+      return answer;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+  }
+};
+
+/**
  * One chat's log, reduced to what the ACP port reads and writes (W10 EA-S2).
  *
  * The host's semantics, not a merging stub: each turn has its own user-message
@@ -775,7 +802,7 @@ describe('the external agent run kind', () => {
         };
         await until(hasApproval, 'the approval request', { dump: async () => readLog(workspaceRoot, chatId) });
         const [pending] = await launcher.pendingInterrupts(runId);
-        await launcher.execute({
+        await resolveOnceSettled(launcher, {
           type: 'resolve-interrupt',
           commandId: 'cmd-2',
           payload: { chatId, runId, interruptId: pending?.interruptId ?? '', outcome: 'approved' },
@@ -890,7 +917,7 @@ describe('the external agent run kind', () => {
         },
       });
       expect(JSON.stringify(pending?.payload)).not.toContain('permission-metadata-canary');
-      await launcher.execute({
+      await resolveOnceSettled(launcher, {
         type: 'resolve-interrupt',
         commandId: 'cmd-2',
         payload: { chatId, runId, interruptId: pending?.interruptId ?? '', outcome: 'approved', optionId },
@@ -995,7 +1022,7 @@ describe('the external agent run kind', () => {
       return pending.length > 0;
     }, 'a fresh continuation approval');
     const [resumedPermission] = await launcher.pendingInterrupts(runId);
-    await launcher.execute({
+    await resolveOnceSettled(launcher, {
       type: 'resolve-interrupt',
       commandId: 'approve-resumed',
       payload: { chatId, runId, interruptId: resumedPermission?.interruptId ?? '', outcome: 'approved' },
@@ -3073,7 +3100,7 @@ describe('external turns through the revision port', () => {
     });
   }, 60_000);
 
-  /* XD4: an id no checkout and no branch here derives is refused retryably, so its ending offers Resume after a sync. */
+  /* XD4: an id no checkout and no branch here derives, in a project with no remote to bring it, is refused for good. */
   it.each([false, true])(
     'refuses a missing persisted checkout instead of main (previous turn: %s)',
     async (previousTurn) => {
@@ -3103,10 +3130,7 @@ describe('external turns through the revision port', () => {
           type: 'run.lifecycle',
           runId: 'run-selected',
           state: 'failed',
-          detail: expect.objectContaining({
-            code: 'RUN_ABANDONED',
-            details: expect.objectContaining({ code: 'BRANCH_UNAVAILABLE' }) as unknown,
-          }) as unknown,
+          detail: expect.objectContaining({ code: 'CHECKOUT_UNKNOWN' }) as unknown,
         }),
       );
       expect(sent(harness.frames, 'session/new')).toBe(previousTurn ? 1 : 0);

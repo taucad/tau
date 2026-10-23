@@ -110,6 +110,22 @@ const s0Runs = [
   },
 ];
 
+// Windows-only diagnostic (W1 spike 1): characterize WHY the read mask is unenforced on this row.
+// `whoami /all` from inside the sandbox reports the launched token's SIDs, integrity level and any
+// deny-only / restricting SIDs (so we can tell a restricted token from a plain srt-sandbox member);
+// `icacls` on the out-of-root file, the admitted project root and a record root reports the exact
+// ACEs that granted the read. Pure diagnostic — no pass/fail check, verdict unaffected. The paths
+// ride cmd's own %VAR% expansion so no backslash survives bash quoting. See docs blueprint D4/I4.
+if (isWindows) {
+  s0Runs.push({
+    id: 'win-characterization',
+    command: `cmd //c "whoami /all & echo ===DACL-OUTSIDE=== & icacls \\"%OUTSIDE_WIN%\\" & echo ===DACL-PROJECT=== & icacls \\"%PROJECT_WIN%\\" & echo ===DACL-RECORD=== & icacls \\"%RECORD_WIN%\\""`,
+    cwd: project,
+    timeoutMs: 15_000,
+    env: { OUTSIDE_WIN: join(outside, 'secret.txt'), PROJECT_WIN: project, RECORD_WIN: join(project, '.tau', 'runs') },
+  });
+}
+
 const s0Checks: Check[] = [];
 const s0 = await startSupervisor({ profile, bash: bash.path, runs: s0Runs });
 const { results: r0, stderr: e0 } = await s0.done;
@@ -250,6 +266,8 @@ writeJson(join(evidenceDirectory, row, 's0.json'), {
   grant: { project, home, temporary, readOnly: grant.readOnly, hidden: grant.hidden },
   checks: s0Checks,
   verdict: s0Checks.every((c) => c.verdict === 'pass') ? 'pass' : 'fail',
+  // WIN-only: the token/ACE characterization behind the read-mask verdict (see win-characterization).
+  ...(isWindows ? { characterization: out('win-characterization') } : {}),
   rawResults: r0,
 });
 

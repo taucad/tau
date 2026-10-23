@@ -338,13 +338,78 @@ describe('createLocalMcpViewer', () => {
     });
   });
 
-  it('should list renderable files with the main entry first, skipping tests and dependencies', async () => {
-    expect(await viewer.browse(inline)).toEqual({
-      files: [
-        { path: 'src/bracket.ts', title: 'bracket' },
-        { path: 'models/part.glb', title: 'part' },
+  it("should list the project's files with exports, leaving out .tau and dependencies", async () => {
+    await mkdir(join(root, 'exports'));
+    await writeFile(join(root, 'exports', 'bracket.stl'), 'solid bracket');
+    await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
+    await writeFile(join(root, '.tau', 'artifacts', 'preview.glb'), glb);
+
+    expect(await viewer.listFiles({ path: '' }, inline)).toEqual({
+      entries: [
+        { name: 'exports', path: 'exports', isFolder: true, renderable: false },
+        { name: 'models', path: 'models', isFolder: true, renderable: false },
+        { name: 'src', path: 'src', isFolder: true, renderable: false },
+        { name: 'tau.json', path: 'tau.json', isFolder: false, size: expect.any(Number) as unknown, renderable: false },
+      ],
+      truncated: false,
+      filesVersion: 1,
+    });
+    expect(await viewer.listFiles({ query: 'bracket' }, inline)).toMatchObject({
+      entries: [
+        { path: 'exports/bracket.stl', size: 13, renderable: true },
+        { path: 'src/bracket.test.ts', renderable: false },
+        { path: 'src/bracket.ts', renderable: true },
       ],
     });
+  });
+
+  it("should answer a page's sync with the new filesVersion when a file is created on disk", async () => {
+    const { model } = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+    const listed = await viewer.listFiles({ modelId: model.id, path: 'src' }, inline);
+    const view = {
+      model: { id: model.id, title: model.title, path: model.path },
+      selected: [],
+      hidden: [],
+      isolated: [],
+      sectionActive: false,
+      measurementCount: 0,
+      composition: 'tab',
+      interactedAt: 5,
+    } as const;
+    const page = { pageId: 'page-files-0', follow: false, view } as const;
+    const first = await viewer.sync({ ...page, version: 0, wait: false }, inline);
+    expect(first).toMatchObject({ filesVersion: 'filesVersion' in listed ? listed.filesVersion : -1 });
+
+    const held = viewer.sync({ ...page, version: 'version' in first ? first.version : 0, wait: true }, inline);
+    await writeFile(join(root, 'src', 'arm.ts'), 'export default () => null;');
+    const after = await held;
+
+    expect('filesVersion' in after && after.filesVersion).toBeGreaterThan(1);
+    expect(await viewer.listFiles({ modelId: model.id, path: 'src' }, inline)).toMatchObject({
+      entries: expect.arrayContaining([expect.objectContaining({ path: 'src/arm.ts', renderable: true })]) as unknown,
+    });
+  });
+
+  it("should open a file for the asking page only, leaving the agent's model and other pages as they are", async () => {
+    const shown = shownModel(await viewer.show({ targetFile: 'models/part.glb' }, inline));
+    const other = await viewer.sync({ pageId: 'page-other-0', version: 0, follow: true, wait: false }, inline);
+
+    const opened = shownModel(await viewer.openFile({ pageId: 'page-asking-0', path: 'src/bracket.ts' }, inline));
+
+    expect(opened.model).toMatchObject({ sourceFile: 'src/bracket.ts' });
+    expect(opened.viewerUrl).toBeUndefined();
+    /* The page's open watches the source as a show does, so the asking page follows its edits. */
+    expect(runtime.documents).toHaveLength(1);
+    expect(runtime.documents[0]).toMatchObject({ entryPath: 'src/bracket.ts', watch: true });
+    /* The other page hears of no show, and the agent's show without a target still names the model it showed. */
+    const version = 'version' in other ? other.version : 0;
+    expect(
+      await viewer.sync({ pageId: 'page-other-0', version, follow: true, wait: false }, inline),
+    ).not.toHaveProperty('show');
+    expect(shownModel(await viewer.show({}, inline)).model.id).toBe(shown.model.id);
+    expect(
+      await viewer.openFile({ pageId: 'page-asking-0', path: 'tau.json', modelId: shown.model.id }, inline),
+    ).toMatchObject({ errorCode: 'NOT_RENDERABLE' });
   });
 
   it('should read a shown model in ranges and refuse one that changed', async () => {
@@ -423,7 +488,7 @@ describe('createLocalMcpViewer', () => {
       const synced = await held;
       expect(synced.status).toBe(200);
       expect(await synced.json()).toEqual({
-        accepts: ['references', 'sourceRevision'],
+        accepts: ['references', 'sourceRevision', 'settings'],
         version: 2,
         show: { ...next, select: ['component:arm'] },
       });

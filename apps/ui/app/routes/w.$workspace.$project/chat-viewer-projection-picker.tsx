@@ -19,7 +19,7 @@ import { useProject } from '#hooks/use-project.js';
 import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
-import { newViewRecord } from '#workbench-records/projection.js';
+import { newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 
 type ViewOffer = Extract<Evaluation, { success: true }>['views'][number];

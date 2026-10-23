@@ -1,8 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
-import type { FileSelectorDataSource, FileSelectorEntry } from '#components/files/file-selector.js';
+import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
+import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
+import type { FilesEntry } from '@taucad/workbench-panes/files/files-source';
+import { FileSelector } from '#components/files/file-selector.js';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { classifyDirectoryListingError } from '@taucad/fs-client/directory-listing';
 import type { DirectoryListing, ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
@@ -42,17 +44,17 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-const rootEntries: FileSelectorEntry[] = [
+const rootEntries: FilesEntry[] = [
   { name: 'src', path: 'src', isFolder: true },
   { name: 'README.md', path: 'README.md', isFolder: false, size: 200 },
 ];
 
-const sourceEntries: FileSelectorEntry[] = [
+const sourceEntries: FilesEntry[] = [
   { name: 'main.ts', path: 'src/main.ts', isFolder: false, size: 100 },
   { name: 'utils', path: 'src/utils', isFolder: true },
 ];
 
-const searchResults: FileSelectorEntry[] = [{ name: 'main.ts', path: 'src/main.ts', isFolder: false, size: 100 }];
+const searchResults: FilesEntry[] = [{ name: 'main.ts', path: 'src/main.ts', isFolder: false, size: 100 }];
 
 function createMockDataSource(): {
   dataSource: FileSelectorDataSource;
@@ -120,10 +122,10 @@ describe('FileSelector (explicit dataSource)', () => {
   });
 
   it('should show loading indicator while loadDirectory resolves', async () => {
-    let resolveLoad: (value: FileSelectorEntry[]) => void;
+    let resolveLoad: (value: FilesEntry[]) => void;
     const slowLoad = vi.fn().mockImplementation(
       async () =>
-        new Promise<FileSelectorEntry[]>((resolve) => {
+        new Promise<FilesEntry[]>((resolve) => {
           resolveLoad = resolve;
         }),
     );
@@ -245,44 +247,7 @@ describe('FileSelector (explicit dataSource)', () => {
   });
 });
 
-describe('createStaticDataSource', () => {
-  it('should return root-level items for loadDirectory("")', async () => {
-    const ds = createStaticDataSource([
-      { path: 'src/main.ts', size: 100 },
-      { path: 'README.md', size: 200 },
-    ]);
-
-    const items = await ds.loadDirectory('');
-    expect(items).toEqual([
-      { name: 'src', path: 'src', isFolder: true, size: undefined },
-      { name: 'README.md', path: 'README.md', isFolder: false, size: 200 },
-    ]);
-  });
-
-  it('should return nested items for loadDirectory("src")', async () => {
-    const ds = createStaticDataSource([
-      { path: 'src/main.ts', size: 100 },
-      { path: 'src/utils/helpers.ts', size: 50 },
-    ]);
-
-    const items = await ds.loadDirectory('src');
-    expect(items).toEqual([
-      { name: 'utils', path: 'src/utils', isFolder: true, size: undefined },
-      { name: 'main.ts', path: 'src/main.ts', isFolder: false, size: 100 },
-    ]);
-  });
-
-  it('should filter files via searchFiles', async () => {
-    const ds = createStaticDataSource([
-      { path: 'src/main.ts', size: 100 },
-      { path: 'src/utils/helpers.ts', size: 50 },
-      { path: 'README.md', size: 200 },
-    ]);
-
-    const results = await ds.searchFiles('main');
-    expect(results).toEqual([{ name: 'main.ts', path: 'src/main.ts', isFolder: false, size: 100 }]);
-  });
-
+describe('FileSelector over createStaticDataSource', () => {
   it('should render correctly via FileSelector with createStaticDataSource', async () => {
     const ds = createStaticDataSource([
       { path: 'hello.ts', size: 42 },

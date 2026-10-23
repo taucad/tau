@@ -11,19 +11,29 @@
  */
 
 import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
+import { cameraPresetOrientations } from '@taucad/workbench';
+import type { cameraPresets } from '@taucad/workbench';
+
+type OrthographicPreset = Exclude<(typeof cameraPresets)[number], 'isometric'>;
+
+const captureView = <Id extends OrthographicPreset>(id: Id, label: string) => {
+  const { direction, up } = cameraPresetOrientations[id];
+  return { id, label, direction, up: up ?? ([0, 0, 1] as const) } as const;
+};
 
 /**
- * The six canonical orthographic views a multi-angle capture returns.
+ * The six canonical orthographic views a multi-angle capture returns, oriented by the workbench presets
+ * (`cameraPresetOrientations`), so a capture and a view record's preset look from the same side.
  *
  * @public
  */
 export const canonicalCaptureViews = [
-  { id: 'front', label: 'Front — View From −Y', direction: [0, -1, 0], up: [0, 0, 1] },
-  { id: 'back', label: 'Back — View From +Y', direction: [0, 1, 0], up: [0, 0, 1] },
-  { id: 'right', label: 'Right — View From +X', direction: [1, 0, 0], up: [0, 0, 1] },
-  { id: 'left', label: 'Left — View From −X', direction: [-1, 0, 0], up: [0, 0, 1] },
-  { id: 'top', label: 'Top — View From +Z', direction: [0, 0, 1], up: [0, 1, 0] },
-  { id: 'bottom', label: 'Bottom — View From −Z', direction: [0, 0, -1], up: [0, 1, 0] },
+  captureView('front', 'Front — View From −Y'),
+  captureView('back', 'Back — View From +Y'),
+  captureView('right', 'Right — View From +X'),
+  captureView('left', 'Left — View From −X'),
+  captureView('top', 'Top — View From +Z'),
+  captureView('bottom', 'Bottom — View From −Z'),
 ] as const;
 
 /** Inputs the agent `screenshot` tool varies. @public */

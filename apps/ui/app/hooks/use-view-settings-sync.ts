@@ -5,19 +5,21 @@ import type {
   CameraOwnedSettings,
   GraphicsViewSettings,
   PersistedCameraView,
-  PersistedSectionCut,
   PersistedSectionView,
   PinnedMeasurement,
 } from '@taucad/viewer/graphics/graphics-settings';
 import { areSectionCutsEqual } from '@taucad/viewer/graphics/section-cuts';
-import type { SectionCut } from '@taucad/viewer/graphics/section-cuts';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { useViewCameraSession } from '@taucad/viewer/hooks/use-graphics';
 import { lengthUnits, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
-import { viewCameraOrientation } from '#workbench-records/projection.js';
+import {
+  toPersistedSectionCut,
+  toViewMeasurements,
+  viewCameraOrientation,
+} from '@taucad/workbench-panes/records/view-record';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
 
 /** Milliseconds. Quiet period after the last camera emission or section-cut change before the pose is persisted. */
@@ -49,23 +51,6 @@ const activeCameraRecord = (record: WorkbenchView): WorkbenchView => {
     camera: record.kernelViews?.find((view) => view.id === selected)?.camera ?? { kind: 'preset', preset: 'isometric' },
   };
 };
-
-/** A cut's values without its id, which is made anew at every load. */
-const toPersistedSectionCut = (cut: SectionCut): PersistedSectionCut =>
-  cut.kind === 'plane'
-    ? {
-        kind: 'plane',
-        plane: cut.plane,
-        offset: cut.offset,
-        isFlipped: cut.isFlipped,
-      }
-    : {
-        kind: 'revolution',
-        axis: cut.axis,
-        origin: cut.origin,
-        start: cut.start,
-        sweep: cut.sweep,
-      };
 
 /**
  * Synchronises a view's persistable settings from its live graphics and camera owners
@@ -486,14 +471,7 @@ export function useViewSettingsSync({
             : base.grid.unit,
         },
         section: sectionAdoptionPendingRef.current ? base.section : sectionView,
-        measurements: pinnedMeasurements.map(({ id, frameId, startPoint, endPoint, distance, name }) => ({
-          id,
-          frameId,
-          startPoint,
-          endPoint,
-          distance,
-          ...(name ? { name } : {}),
-        })),
+        measurements: toViewMeasurements(pinnedMeasurements),
         camera: !selected && changedCamera ? changedCamera : base.camera,
         kernelViews:
           selected && changedCamera

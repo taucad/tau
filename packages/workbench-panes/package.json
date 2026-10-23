@@ -1,7 +1,7 @@
 {
   "name": "@taucad/workbench-panes",
   "version": "0.1.0-beta.8",
-  "description": "Tau workbench panes (parameters, model, kinematics, export, share) shared by the Tau app and the agent plugin viewer",
+  "description": "Tau workbench panes (parameters, model, kinematics, export, share, files) shared by the Tau app and the agent plugin viewer",
   "type": "module",
   "sideEffects": [
     "**/*.css"
@@ -49,6 +49,9 @@
     "./components/workbench-toggle": "./src/components/workbench-toggle.tsx",
     "./export/export-pane": "./src/export/export-pane.tsx",
     "./export/export-source": "./src/export/export-source.ts",
+    "./files/file-selector": "./src/files/file-selector.tsx",
+    "./files/files-pane": "./src/files/files-pane.tsx",
+    "./files/files-source": "./src/files/files-source.ts",
     "./host/workbench-host": "./src/host/workbench-host.tsx",
     "./kinematics/kinematics-pane": "./src/kinematics/kinematics-pane.tsx",
     "./kinematics/kinematics-source": "./src/kinematics/kinematics-source.ts",
@@ -149,6 +152,21 @@
         "types": "./dist/export/export-source.d.mts",
         "import": "./dist/export/export-source.mjs",
         "default": "./dist/export/export-source.mjs"
+      },
+      "./files/file-selector": {
+        "types": "./dist/files/file-selector.d.mts",
+        "import": "./dist/files/file-selector.mjs",
+        "default": "./dist/files/file-selector.mjs"
+      },
+      "./files/files-pane": {
+        "types": "./dist/files/files-pane.d.mts",
+        "import": "./dist/files/files-pane.mjs",
+        "default": "./dist/files/files-pane.mjs"
+      },
+      "./files/files-source": {
+        "types": "./dist/files/files-source.d.mts",
+        "import": "./dist/files/files-source.mjs",
+        "default": "./dist/files/files-source.mjs"
       },
       "./host/workbench-host": {
         "types": "./dist/host/workbench-host.d.mts",
@@ -284,7 +302,8 @@
     "class-variance-authority": "catalog:",
     "dockview-react": "^8.2.0",
     "lucide-react": "catalog:",
-    "radix-ui": "catalog:"
+    "radix-ui": "catalog:",
+    "react-virtuoso": "^4.18.7"
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",

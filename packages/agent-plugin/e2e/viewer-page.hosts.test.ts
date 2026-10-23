@@ -860,6 +860,66 @@ describe("the tab's panels (W10)", () => {
   );
 });
 
+describe('the Files pane (PAR-9)', () => {
+  it(
+    'should list the project, open another file in this page alone, and list a file created on disk',
+    async () => {
+      const client = await connect('claude-ai', mcpAppsCapabilities);
+      const first = await callTool(client, 'show_model', { targetFile: 'surface.glb' });
+      const shownId = shown(first).model.id;
+      const asking = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      const other = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      await drawn(viewerFrame(asking), 'Export');
+      await drawn(viewerFrame(other), 'Export');
+
+      /* The pane lists the project's root, folders first; `.tau` is never listed. */
+      const panel = await openPane(viewerFrame(asking), 'Files');
+      await panel.getByRole('option', { name: /^small\.glb/u }).waitFor({ timeout: 30_000 });
+      expect(await panel.getByRole('option', { name: /^main\.ts/u }).count()).toBe(1);
+      expect(await panel.getByRole('option', { name: /^\.tau/u }).count()).toBe(0);
+      expect(await panel.getByRole('option', { name: /^surface\.glb/u }).getAttribute('aria-current')).toBe('true');
+
+      /* Opening another file shows it in the asking page, without show_model. */
+      await panel.getByRole('option', { name: /^small\.glb/u }).click();
+      await expect
+        .poll(
+          async () => {
+            const calls = await recorded(asking, 'toolCalls');
+            return calls.some((call) => call.name === 'app_read' && call.arguments['modelId'] !== shownId);
+          },
+          { timeout: 60_000 },
+        )
+        .toBe(true);
+      await expect
+        .poll(async () => panel.getByRole('option', { name: /^small\.glb/u }).getAttribute('aria-current'))
+        .toBe('true');
+      const askingCalls = await recorded(asking, 'toolCalls');
+      const opens = askingCalls.filter((call) => call.name === 'app_open_file');
+      expect(opens.map((call) => call.arguments)).toEqual([
+        expect.objectContaining({ path: 'small.glb', modelId: shownId }) as unknown,
+      ]);
+      expect(askingCalls.some((call) => call.name === 'show_model')).toBe(false);
+
+      /* The second page keeps its model, and the agent's model shown last has not moved. */
+      const otherCalls = await recorded(other, 'toolCalls');
+      const otherReads = otherCalls.filter((call) => call.name === 'app_read');
+      expect(new Set(otherReads.map((call) => call.arguments['modelId']))).toEqual(new Set([shownId]));
+      const lastShown = await callTool(client, 'show_model', {});
+      expect(shown(lastShown).model.path).toBe('surface.glb');
+
+      /* A file written on disk appears through app_sync's filesVersion; one the viewer cannot show is disabled. */
+      await writeFile(join(project, 'notes.md'), '# Notes\n');
+      const notes = panel.getByRole('option', { name: /^notes\.md/u });
+      await notes.waitFor({ timeout: 60_000 });
+      expect(await notes.getAttribute('aria-disabled')).toBe('true');
+      await capture(asking, 'files-pane');
+      await rm(join(project, 'notes.md'));
+      expect(pageErrors).toEqual([]);
+    },
+    kernelCallLimit,
+  );
+});
+
 describe('the live view (W6)', () => {
   let client: Client;
 

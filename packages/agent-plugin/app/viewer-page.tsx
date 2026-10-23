@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { Box, Maximize2, MessageSquarePlus } from 'lucide-react';
+import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type {
   TauViewerCamera,
   TauViewerEntryStatus,
@@ -56,6 +57,7 @@ import { ViewerHeaderActions } from '@taucad/workbench-panes/shell/viewer-header
 import { ViewerStage } from '@taucad/workbench-panes/shell/viewer-stage';
 import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
 import { createComponentReveal, createPageComponentActions } from '#app/sources/component-menu.jsx';
+import { createFilesSource } from '#app/sources/files-source.js';
 import { WorkbenchLane } from '#app/workbench-lane.jsx';
 import { entryPathOf, liveViewSettings, readWorkbenchState, seedViewer } from '#app/workbench-state.js';
 import { PageViewerIssues } from '#app/page-issues.jsx';
@@ -508,6 +510,32 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     [],
   );
   const linkRef = useRef<LiveLink | undefined>(undefined);
+  /* The Files pane's open (PAR-9): the server renders the file for this page alone, and the page shows it as it shows
+   * a model the agent showed, so neither the agent's last shown model nor another page moves. */
+  const openFile = useCallback(
+    async (path: string): Promise<void> => {
+      const pageId = linkRef.current?.pageId;
+      if (pageId === undefined) {
+        throw new Error('The viewer is not linked to Tau yet.');
+      }
+      const modelId = latest.current.shown?.model.id;
+      const result = await bridge.callTool(tauViewerToolName.appOpenFile, {
+        pageId,
+        path,
+        ...(modelId === undefined ? {} : { modelId }),
+      });
+      if (typeof result !== 'object' || result === null || !('model' in result)) {
+        throw new Error(`Tau could not open ${path}.`);
+      }
+      showRef.current?.(result as TauViewerShowResult);
+    },
+    [bridge, showRef],
+  );
+  /* One Files source per bridge: it lists in the shown model's project, and the live link tells it the files moved. */
+  const files = useMemo(
+    () => createFilesSource(bridge, { modelId: () => latest.current.shown?.model.id, openFile }),
+    [bridge, openFile],
+  );
   useEffect(() => {
     const link = startLiveLink(bridge.callTool, {
       view() {
@@ -553,6 +581,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       status(next) {
         setLiveStatus(next);
       },
+      filesVersion(filesVersion) {
+        files.setFilesVersion(filesVersion);
+      },
       async capture() {
         if (!(await whenDrawn(isDrawn))) {
           return { error: 'The viewer has not drawn a model yet.' };
@@ -567,7 +598,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       linkRef.current = undefined;
       link.stop();
     };
-  }, [addedFrom, bridge, graphicsRef, isDrawn, showRef, shownUnit]);
+  }, [addedFrom, bridge, files, graphicsRef, isDrawn, showRef, shownUnit]);
 
   /* Report the view once a newly shown model is drawn, so `view_state` finds the page without waiting for its held
    * sync to come back: a card's first sync left before it had a model. */
@@ -886,6 +917,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                     model={shown?.model}
                     status={liveStatus}
                     graphicsRef={graphicsRef}
+                    files={files}
                     reveal={reveal}
                     componentActions={rowMenus}
                     openPaneRequest={openPaneRequest}

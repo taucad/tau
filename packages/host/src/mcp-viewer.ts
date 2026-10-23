@@ -8,7 +8,7 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -30,6 +30,8 @@ import { readBytesRange, readModelRange, snapshotModelFile } from '#mcp-viewer-r
 import type { ModelFileIdentity } from '#mcp-viewer-read.js';
 import { createMcpViewerSessions } from '#mcp-viewer-sessions.js';
 import { createDirectShare } from '#mcp-viewer-share.js';
+import { createMcpViewerFiles, drawnFormats, isOpenablePath, isSourcePath } from '#mcp-viewer-files.js';
+import type { McpViewerFilesOptions } from '#mcp-viewer-files.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import {
   viewerExportFormatsInputSchema,
@@ -41,50 +43,9 @@ import type { McpViewerExport } from '#mcp-viewer-export.js';
 import type { McpViewerSessionsOptions } from '#mcp-viewer-sessions.js';
 import { createMcpViewerWorkbench } from '#mcp-viewer-workbench.js';
 import type { McpViewerWorkbenchOptions } from '#mcp-viewer-workbench.js';
-import type {
-  TauViewerFile,
-  TauViewerMechanism,
-  TauViewerMimeType,
-  TauViewerModel,
-  TauViewerShowResult,
-} from '@taucad/mcp/viewer-protocol';
+import type { TauViewerMechanism, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
 import { readGlbMechanism } from '@taucad/agent-tools/runtime';
 import { slugifyTargetFile } from '@taucad/chat/rpc';
-
-/** The page's own formats by extension; every other file is a CAD source the runtime renders (blueprint D3). */
-const drawnFormats: Readonly<Record<string, TauViewerMimeType>> = {
-  '.glb': 'model/gltf-binary',
-  '.svg': 'image/svg+xml',
-};
-
-/**
- * Extensions `browse_models` lists as CAD sources, and the exchange formats the runtime converts to GLB like a
- * source (W7: the BRep kernel imports STEP, the mesh importer STL, 3MF and OBJ).
- */
-const sourceExtensions = new Set([
-  '.ts',
-  '.js',
-  '.mjs',
-  '.jsx',
-  '.tsx',
-  '.scad',
-  '.py',
-  '.kcl',
-  '.step',
-  '.stp',
-  '.stl',
-  '.3mf',
-  '.obj',
-]);
-
-/** Folders `browse_models` never enters. */
-const skippedFolders = new Set(['node_modules', '.git', '.tau', 'dist', 'build', 'out', '.venv', '__pycache__']);
-
-/** Files `browse_models` lists at most, so a large checkout answers quickly. */
-const browseLimit = 200;
-
-/** Folders deep `browse_models` looks. */
-const browseDepth = 6;
 
 /** Tool calls whose conversation the server remembers for the pages they open. */
 const rememberedCalls = 1024;
@@ -108,6 +69,8 @@ export type LocalMcpViewerOptions = Readonly<{
   sessions?: McpViewerSessionsOptions;
   /** How the pages' camera and component display are kept in `.tau/workbench`; tests shorten it. */
   workbench?: McpViewerWorkbenchOptions;
+  /** How long the Files pane's change notice waits for the next change; tests shorten it. */
+  files?: McpViewerFilesOptions;
   /** The runtime's source closure of an entry, for the Share pane's direct link; without it the page offers none. */
   snapshotSource?: SourceSnapshotter | undefined;
   /** The Export pane's handlers; without them the page offers no Export pane tools. */
@@ -148,6 +111,7 @@ export const loopbackHostTools: ReadonlySet<string> = new Set([
 
 /** A viewer port plus the loopback server it may have started. */
 export type LocalMcpViewer = TauMcpViewer &
+  Required<Pick<TauMcpViewer, 'listFiles' | 'openFile'>> &
   Readonly<{
     /**
      * The project folder one call works in: the folder it names, else the project of the model its conversation
@@ -219,45 +183,6 @@ const mainEntry = async (root: string): Promise<string | undefined> => {
   }
 };
 
-/**
- * List renderable files under `root`, shallowest first.
- *
- * @param root - The project folder.
- * @returns Up to {@link browseLimit} project-relative paths.
- */
-const renderableFiles = async (root: string): Promise<string[]> => {
-  const found: string[] = [];
-  let level = [root];
-  for (let depth = 0; depth < browseDepth && level.length > 0 && found.length < browseLimit; depth += 1) {
-    const next: string[] = [];
-    for (const folder of level) {
-      // ponytail: an unreadable folder lists nothing rather than failing the whole list.
-      // oxlint-disable-next-line no-await-in-loop -- breadth-first and bounded: a level is read before the next.
-      const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
-        const path = join(folder, entry.name);
-        if (entry.isDirectory()) {
-          if (!skippedFolders.has(entry.name) && !entry.name.startsWith('.')) {
-            next.push(path);
-          }
-          continue;
-        }
-        const extension = extname(entry.name).toLowerCase();
-        const isSource =
-          sourceExtensions.has(extension) && !/\.(?:test|spec|d|config|geospec)\.[a-z]+$/u.test(entry.name);
-        if (entry.isFile() && (isSource || extension in drawnFormats)) {
-          found.push(posix(relative(root, path)));
-          if (found.length >= browseLimit) {
-            return found;
-          }
-        }
-      }
-    }
-    level = next;
-  }
-  return found;
-};
-
 /** Where `export_model` writes each export: `.tau/artifacts/<toolCallId>__<slugged targetFile>-<format>/<file>`. */
 const artifactsFolder = '.tau/artifacts/';
 
@@ -279,21 +204,20 @@ const isExportFolderOf = (folder: string, source: string): boolean => {
  * `.tau/artifacts`, the one CAD source its folder was named for; otherwise, for a GLB, a source beside it with the
  * same name. A file that matches no source, or several, has none.
  *
- * @param root - The project folder.
+ * @param listed - Every project-relative path the project's listing names.
  * @param path - The shown file's project-relative path.
  * @returns The source's project-relative path.
  */
-const exportedSourceOf = async (root: string, path: string): Promise<string | undefined> => {
+const exportedSourceOf = (listed: readonly string[], path: string): string | undefined => {
   const isExport = path.startsWith(artifactsFolder);
   if (!isExport && extname(path).toLowerCase() !== '.glb') {
     return undefined;
   }
   const folder = isExport ? path.slice(artifactsFolder.length).split('/')[0]! : posix(join(path, '..'));
   const stem = basename(path, extname(path));
-  const files = await renderableFiles(root);
-  const candidates = files.filter(
+  const candidates = listed.filter(
     (source) =>
-      sourceExtensions.has(extname(source).toLowerCase()) &&
+      isSourcePath(source) &&
       source !== path &&
       (isExport
         ? isExportFolderOf(folder, source)
@@ -417,6 +341,9 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
   const token = randomBytes(24).toString('base64url');
   const sessions = createMcpViewerSessions(options.sessions);
   const workbench = createMcpViewerWorkbench(options.workbench);
+  const files = createMcpViewerFiles(options.files);
+  /** The `filesVersion` each page heard last, so a change between two syncs answers the next at once. */
+  const filesHeard = new Map<string, number>();
   let loopback: Promise<{ server: Server; origin: string }> | undefined;
 
   const describe = async (
@@ -536,11 +463,25 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     }
   };
 
-  const showPath = async (
+  /**
+   * Render or locate one project file and describe it, touching nothing a page or the agent sees: what a show and a
+   * page's own open share. A CAD source is rendered by its watched session, so every page showing it follows its edits.
+   *
+   * @param root - The project folder.
+   * @param path - Project-relative or absolute path of the file.
+   * @param callOptions - The call that asked; its signal stops the wait for the render.
+   * @returns The described model, its mechanism, the source it was exported from and the watched session's key, or a
+   *   failure.
+   */
+  const renderEntry = async (
     root: string,
-    { path, select }: Readonly<{ path: string; select?: readonly string[] | undefined }>,
-    callOptions: TauMcpViewerCallOptions,
-  ): Promise<TauViewerShowResult | TauMcpViewerFailure> => {
+    path: string,
+    callOptions: Pick<TauMcpViewerCallOptions, 'signal'>,
+  ): Promise<
+    | (Pick<TauViewerShowResult, 'model' | 'mechanism'> &
+        Readonly<{ relativePath: string; exportedFrom?: string; entry?: string }>)
+    | TauMcpViewerFailure
+  > => {
     const absolute = inside(root, path);
     if (absolute === undefined) {
       return failure('PATH_OUTSIDE_PROJECT', `${path} is outside the project ${root}.`);
@@ -548,7 +489,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     const relativePath = posix(relative(root, absolute));
     const isDrawn = extname(absolute).toLowerCase() in drawnFormats;
     /* An export names its source, so the agent hears that the page draws the file as exported (LRP-10). */
-    const exportedFrom = await exportedSourceOf(root, relativePath);
+    const exportedFrom = exportedSourceOf(await files.paths(root), relativePath);
     let described: Pick<TauViewerShowResult, 'model' | 'mechanism'> | TauMcpViewerFailure;
     let entry: string | undefined;
     if (isDrawn) {
@@ -575,7 +516,81 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     if (isFailure(described)) {
       return described;
     }
-    const { model } = described;
+    return {
+      ...described,
+      relativePath,
+      ...(exportedFrom === undefined ? {} : { exportedFrom }),
+      ...(entry === undefined ? {} : { entry }),
+    };
+  };
+
+  /** What a show result says about a rendered entry. */
+  const resultOf = (
+    rendered: Exclude<Awaited<ReturnType<typeof renderEntry>>, TauMcpViewerFailure>,
+  ): TauViewerShowResult => ({
+    model: rendered.model,
+    ...(rendered.mechanism === undefined ? {} : { mechanism: rendered.mechanism }),
+    ...(rendered.exportedFrom === undefined ? {} : { hint: exportHint(rendered.relativePath, rendered.exportedFrom) }),
+  });
+
+  /**
+   * A page's `app_sync`, answered early when the files of the page's project change once its Files pane listed them,
+   * and carrying their `filesVersion`.
+   *
+   * @param root - The project of the model the page reports, when this server showed it.
+   * @param input - The page's sync.
+   * @param context - The page's conversation and the call's cancellation.
+   * @returns The sync's answer, with `filesVersion` once the project was listed.
+   */
+  const syncWithFiles = async (
+    root: string | undefined,
+    input: Parameters<typeof sessions.sync>[0],
+    context: NonNullable<Parameters<typeof sessions.sync>[1]>,
+  ): Promise<Awaited<ReturnType<typeof sessions.sync>>> => {
+    const listed = root === undefined ? undefined : files.listed(root);
+    if (root === undefined || listed === undefined) {
+      return sessions.sync(input, context);
+    }
+    const missed = filesHeard.has(input.pageId) && filesHeard.get(input.pageId) !== listed.version;
+    const held = new AbortController();
+    const release = (): void => {
+      held.abort();
+    };
+    context.signal?.addEventListener('abort', release, { once: true });
+    const releaseOnChange = async (): Promise<void> => {
+      await listed.changed;
+      release();
+    };
+    // async-iife: bootstrap — the next change releases the held sync; the promise settles at that change or at close.
+    void releaseOnChange();
+    try {
+      const result = await sessions.sync(missed ? { ...input, wait: false } : input, {
+        ...context,
+        signal: held.signal,
+      });
+      const filesVersion = files.listed(root)?.version ?? listed.version;
+      filesHeard.delete(input.pageId);
+      filesHeard.set(input.pageId, filesVersion);
+      if (filesHeard.size > rememberedCalls) {
+        filesHeard.delete(filesHeard.keys().next().value!);
+      }
+      return { ...result, filesVersion };
+    } finally {
+      context.signal?.removeEventListener('abort', release);
+      held.abort();
+    }
+  };
+
+  const showPath = async (
+    root: string,
+    { path, select }: Readonly<{ path: string; select?: readonly string[] | undefined }>,
+    callOptions: TauMcpViewerCallOptions,
+  ): Promise<TauViewerShowResult | TauMcpViewerFailure> => {
+    const rendered = await renderEntry(root, path, callOptions);
+    if (isFailure(rendered)) {
+      return rendered;
+    }
+    const { model } = rendered;
     const scope = conversationOf(callOptions.meta);
     lastShown.set(lastShownKey(root, scope), model.sourceFile ?? model.path);
     if (scope !== undefined) {
@@ -590,22 +605,35 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     }
     const url = await viewerUrl(model, callOptions.presentation);
     const result: TauViewerShowResult = {
-      model,
-      ...(described.mechanism === undefined ? {} : { mechanism: described.mechanism }),
-      ...(exportedFrom === undefined ? {} : { hint: exportHint(relativePath, exportedFrom) }),
+      ...resultOf(rendered),
       ...(url === undefined ? {} : { viewerUrl: url }),
       ...(select === undefined || select.length === 0 ? {} : { select }),
     };
-    sessions.shown(result, scope, entry);
+    sessions.shown(result, scope, rendered.entry);
     return result;
   };
 
-  const browseIn = async (root: string): Promise<{ files: TauViewerFile[] }> => {
-    const main = await mainEntry(root);
-    const paths = await renderableFiles(root);
-    const ordered =
-      main !== undefined && paths.includes(main) ? [main, ...paths.filter((path) => path !== main)] : paths;
-    return { files: ordered.map((path) => ({ path, title: titleOf(path) })) };
+  /**
+   * A page's own open (`app_open_file`): the file is shown to that page alone, so neither the model the agent showed
+   * last nor any other page moves. A CAD source opens its watched session, which the page then follows through
+   * `app_sync` as it follows a model the agent showed.
+   *
+   * @param root - The project folder.
+   * @param input - The page and the file.
+   * @param callOptions - The page's call.
+   * @returns What the page shows, or a failure.
+   */
+  const openForPage = async (
+    root: string,
+    input: Readonly<{ pageId: string; path: string }>,
+    callOptions: Pick<TauMcpViewerCallOptions, 'signal'>,
+  ): Promise<TauViewerShowResult | TauMcpViewerFailure> => {
+    const absolute = inside(root, input.path);
+    if (absolute !== undefined && !isOpenablePath(posix(relative(root, absolute)))) {
+      return failure('NOT_RENDERABLE', `The Tau viewer cannot show ${input.path}.`);
+    }
+    const rendered = await renderEntry(root, input.path, callOptions);
+    return isFailure(rendered) ? rendered : resultOf(rendered);
   };
 
   /** The Export pane's tools, each run in the project folder its call resolves to. */
@@ -692,8 +720,12 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     async open(input, callOptions) {
       return showPath(rootOf(callOptions.meta), { path: input.path }, callOptions);
     },
-    async browse(callOptions) {
-      return browseIn(rootOf(callOptions.meta));
+    /* A page names the model it shows; that model's project is the one it lists and opens files in. */
+    async listFiles(input, callOptions) {
+      return files.list(linkedModel(input)?.root ?? rootOf(callOptions.meta), input);
+    },
+    async openFile(input, callOptions) {
+      return openForPage(linkedModel(input)?.root ?? rootOf(callOptions.meta), input, callOptions);
     },
     async read(input) {
       const entry = shown.get(input.modelId);
@@ -747,7 +779,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       if (entry?.kind === 'render' && entrySessions?.get(entry.session.key) === undefined) {
         void reopen(entry.root, entry.session.entryPath);
       }
-      return sessions.sync(input, {
+      return syncWithFiles(entry?.root, input, {
         scope,
         signal: callOptions.signal,
         entry: entry?.kind === 'render' ? entry.session.key : undefined,
@@ -787,7 +819,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     async close() {
       entrySessions?.close();
       sessions.close();
-      await workbench.close();
+      await Promise.all([workbench.close(), files.close()]);
       const running = loopback;
       loopback = undefined;
       /* A start that failed left nothing to stop. */
@@ -860,11 +892,15 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
         ? showPath(entry.root, { path: entry.session.entryPath }, { ...loopbackCall, signal })
         : describeRender(entry.session, render);
     },
-    /* Files of the project the linked model came from. */
-    [tauViewerToolName.browseModels]: async (args) => {
-      const entry = linkedModel(args);
-      return entry === undefined ? unlinked() : browseIn(entry.root);
+    /* The linked model's project, as every pane tool on this page. */
+    [tauViewerToolName.appListFiles]: async (args, _signal, link) => {
+      const input = tauViewerPageInputSchemas.appListFiles.parse(args);
+      return link === undefined ? unlinked() : files.list(link.root, input);
     },
+    [tauViewerToolName.appOpenFile]: async (args, signal, link) =>
+      link === undefined
+        ? unlinked()
+        : openForPage(link.root, tauViewerPageInputSchemas.appOpenFile.parse(args), { ...loopbackCall, signal }),
     [tauViewerToolName.appSync]: async (args, signal) =>
       port.sync(tauViewerPageInputSchemas.appSync.parse(args), {
         ...loopbackCall,

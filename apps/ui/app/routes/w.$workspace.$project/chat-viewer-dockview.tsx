@@ -22,7 +22,7 @@ import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 import { graphicsSettingsForView, newViewRecord } from '@taucad/workbench-panes/records/view-record';
 import { viewTabTitle } from '#workbench-records/view-titles.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { createStaticDataSource } from '#components/files/file-selector.js';
+import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectAvailability } from '#hooks/use-project-availability.js';

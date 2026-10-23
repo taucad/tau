@@ -66,7 +66,6 @@ const createViewer = (): TauMcpViewer => ({
     ...(options.presentation === 'text' ? { viewerUrl: 'http://127.0.0.1:4100/?model=model-1' } : {}),
   })),
   open: vi.fn<TauMcpViewer['open']>(async () => ({ model })),
-  browse: vi.fn<TauMcpViewer['browse']>(async () => ({ files: [{ path: 'src/bracket.ts', title: 'bracket' }] })),
   read: vi.fn<TauMcpViewer['read']>(async (input) => ({
     offset: input.offset,
     byteLength: 2,
@@ -79,6 +78,15 @@ const createViewer = (): TauMcpViewer => ({
     ...(input.capture === true ? ({ image: { mimeType: 'image/png', data: 'cG5n' } } as const) : {}),
   })),
   captureReply: vi.fn<TauMcpViewer['captureReply']>(async () => ({ accepted: true })),
+  listFiles: vi.fn<NonNullable<TauMcpViewer['listFiles']>>(async () => ({
+    entries: [
+      { name: 'exports', path: 'exports', isFolder: true, renderable: false },
+      { name: 'bracket.ts', path: 'bracket.ts', isFolder: false, size: 120, renderable: true },
+    ],
+    truncated: false,
+    filesVersion: 3,
+  })),
+  openFile: vi.fn<NonNullable<TauMcpViewer['openFile']>>(async () => ({ model })),
 });
 
 const connect = async (
@@ -103,11 +111,12 @@ const viewerTools = async (client: Client) => {
         [
           'show_model',
           'open_model_file',
-          'browse_models',
           'app_read',
           'view_state',
           'app_sync',
           'app_capture_reply',
+          'app_list_files',
+          'app_open_file',
         ].includes(tool.name),
       )
       .map((tool) => [tool.name, tool._meta]),
@@ -254,6 +263,8 @@ describe('Tau MCP viewer', () => {
       [tauViewerToolName.viewState]: { 'anthropic/alwaysLoad': true },
       [tauViewerToolName.appSync]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
       [tauViewerToolName.appCaptureReply]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appListFiles]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appOpenFile]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
     });
     /* The live link's tools are classified, so a host neither prompts for nor treats them as open-world calls. */
     const { tools } = await client.listTools();
@@ -279,7 +290,7 @@ describe('Tau MCP viewer', () => {
       [tauViewerToolName.showModel]: {
         'anthropic/alwaysLoad': true,
         ...openai,
-        'openai/ui': { entrypoints: [{ type: 'thread' }] },
+        'openai/ui': { entrypoints: [{ type: 'thread' }, { type: 'global' }] },
       },
       [tauViewerToolName.openModelFile]: {
         'anthropic/alwaysLoad': true,
@@ -288,15 +299,12 @@ describe('Tau MCP viewer', () => {
           entrypoints: [{ type: 'file', extensions: ['glb', 'svg', 'step', 'stp', 'stl', '3mf', 'obj'] }],
         },
       },
-      [tauViewerToolName.browseModels]: {
-        'anthropic/alwaysLoad': true,
-        ...openai,
-        'openai/ui': { entrypoints: [{ type: 'global' }] },
-      },
       [tauViewerToolName.appRead]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
       [tauViewerToolName.viewState]: { 'anthropic/alwaysLoad': true },
       [tauViewerToolName.appSync]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
       [tauViewerToolName.appCaptureReply]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appListFiles]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appOpenFile]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
     });
     await client.close();
   });
@@ -521,6 +529,42 @@ describe('Tau MCP viewer', () => {
       arguments: { requestId: 'r1', pageId: 'page-0001', image: { mimeType: 'image/png', data: 'cG5n' } },
     });
     expect(reply.structuredContent).toEqual({ accepted: true });
+    await client.close();
+  });
+
+  it("should list the project's files and open one for the asking page only", async () => {
+    const viewer = createViewer();
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const listed = await client.callTool({
+      name: 'app_list_files',
+      arguments: { modelId: 'model-1', path: '' },
+    });
+    expect(listed.structuredContent).toMatchObject({ truncated: false, filesVersion: 3 });
+    expect(listed.content).toEqual([{ type: 'text', text: '2 entries.' }]);
+    expect(viewer.listFiles).toHaveBeenCalledWith(
+      { modelId: 'model-1', path: '' },
+      expect.objectContaining({ presentation: 'inline' }),
+    );
+    /* A listing names a folder or a search, never both and never neither. */
+    const both = await client.callTool({ name: 'app_list_files', arguments: { path: '', query: 'bracket' } });
+    expect(both.isError).toBe(true);
+    const neither = await client.callTool({ name: 'app_list_files', arguments: {} });
+    expect(neither.isError).toBe(true);
+    expect(viewer.listFiles).toHaveBeenCalledTimes(1);
+
+    const opened = await client.callTool({
+      name: 'app_open_file',
+      arguments: { pageId: 'page-0001', path: 'exports/bracket.stl', modelId: 'model-1' },
+    });
+    expect(opened.structuredContent).toEqual({ model });
+    expect(viewer.openFile).toHaveBeenCalledWith(
+      { pageId: 'page-0001', path: 'exports/bracket.stl', modelId: 'model-1' },
+      expect.anything(),
+    );
+    expect(viewer.show).not.toHaveBeenCalled();
+    const unnamed = await client.callTool({ name: 'app_open_file', arguments: { path: 'src/bracket.ts' } });
+    expect(unnamed.isError).toBe(true);
     await client.close();
   });
 

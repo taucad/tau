@@ -10,12 +10,10 @@ import type { KernelIssue, SourceRevision } from '@taucad/runtime/types';
 
 /** Tools the viewer page and its host entrypoints call. @public */
 export const tauViewerToolName = {
-  /** Show a project model in the viewer (the thread entrypoint). */
+  /** Show a project model in the viewer (the thread and global entrypoints). */
   showModel: 'show_model',
   /** Open one model file the host hands over (the file entrypoint). */
   openModelFile: 'open_model_file',
-  /** List the project's renderable files (the global entrypoint). */
-  browseModels: 'browse_models',
   /** Read a byte range of a shown model; only the page calls it. */
   appRead: 'app_read',
   /** What the person sees in the viewer, and optionally a capture of it (the model calls it). */
@@ -28,6 +26,10 @@ export const tauViewerToolName = {
   appShareLink: 'app_share_link',
   /** The view the project's `.tau/workbench` records keep for a shown model, which the page restores. */
   appWorkbenchState: 'app_workbench_state',
+  /** One folder of the project, or the files a search finds, for the page's Files pane. */
+  appListFiles: 'app_list_files',
+  /** Show one project file in the calling page only. */
+  appOpenFile: 'app_open_file',
 } as const;
 
 /** Name of one viewer tool. @public */
@@ -124,15 +126,46 @@ export type TauViewerShowResult = Readonly<{
   select?: readonly string[] | undefined;
 }>;
 
-/** One renderable file `browse_models` lists. @public */
-export type TauViewerFile = Readonly<{
+/** One file or folder `app_list_files` lists. @public */
+export type TauViewerFileEntry = Readonly<{
+  name: string;
+  /** Project-relative POSIX path. */
   path: string;
-  title: string;
+  isFolder: boolean;
+  /** Bytes, for a file. */
+  size?: number | undefined;
+  /** The viewer can show it (a source, an exchange format, GLB or SVG). */
+  renderable: boolean;
 }>;
 
-/** Structured result of `browse_models`. @public */
-export type TauViewerBrowseResult = Readonly<{
-  files: readonly TauViewerFile[];
+/** Arguments of `app_list_files`: a folder to list, or a search, never both. @public */
+export type TauViewerListFilesInput = Readonly<{
+  /** A model the page shows; its project is the one listed. Without it, the project of the call. */
+  modelId?: string | undefined;
+  /** The folder to list; `''` is the project root. */
+  path?: string | undefined;
+  /** Find the files whose path contains this text, ignoring case. */
+  query?: string | undefined;
+}>;
+
+/** Structured result of `app_list_files`; `.tau` and dependency folders are never listed. @public */
+export type TauViewerListFilesResult = Readonly<{
+  /** Folders first, then by name; search results by path. */
+  entries: readonly TauViewerFileEntry[];
+  /** Whether more entries matched than the answer carries. */
+  truncated: boolean;
+  /** Moves whenever a listed file is created, changed or removed, as `app_sync`'s `filesVersion` does. */
+  filesVersion: number;
+}>;
+
+/** Arguments of `app_open_file`; it answers a {@link TauViewerShowResult} for the calling page alone. @public */
+export type TauViewerOpenFileInput = Readonly<{
+  /** The calling page, as its `app_sync` names it. */
+  pageId: string;
+  /** A model the page shows; the file is opened in that model's project. Without it, the project of the call. */
+  modelId?: string | undefined;
+  /** Project-relative path of the file to show. */
+  path: string;
 }>;
 
 /** Content encodings a page can undo on an `app_read` slice. @public */
@@ -274,6 +307,11 @@ export type TauViewerSyncResult = Readonly<{
    * them. A page may read names it does not know.
    */
   accepts?: readonly string[] | undefined;
+  /**
+   * Bumped when the file list of this page's project changes, once a Files pane listed it; the pane lists again when it
+   * moves. Absent before then, and from an older server.
+   */
+  filesVersion?: number | undefined;
 }>;
 
 /** Arguments of `app_workbench_state`. @public */

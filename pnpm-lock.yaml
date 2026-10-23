@@ -5857,6 +5857,9 @@ importers:
       radix-ui:
         specifier: 'catalog:'
         version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react-virtuoso:
+        specifier: ^4.18.7
+        version: 4.18.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
     devDependencies:
       '@taucad/nx':
         specifier: workspace:*

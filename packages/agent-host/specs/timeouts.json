@@ -918,6 +918,14 @@
       "owner": "agent-plugin-ui-blueprint W10"
     },
     {
+      "id": "D30",
+      "bound": "Viewer Files pane: a project's file changes settle 100 ms before a held app_sync answers with the new filesVersion",
+      "site": "packages/host/src/mcp-viewer-files.ts",
+      "token": "}, settle);",
+      "class": "Debounce",
+      "owner": "agent-plugin-workbench-parity-closeout-blueprint PAR-9"
+    },
+    {
       "id": "M11",
       "bound": "Desktop recovery waits for actual utility settlement before replacing its service",
       "site": "apps/desktop/src/main/services-broker.ts",

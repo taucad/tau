@@ -233,35 +233,62 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
   // empty. The second session's marker is NEVER passed, so a correct oracle never returns its pids.
   const first = sbenum(ours.marker);
   const blocked = first.spiPresent === false || first.feasible === false;
-  const rounds: Array<{ matched: number[]; stopped: number; killed: number; crossHits: number[] }> = [];
+  const rounds: Array<{
+    matched: number[];
+    signalled: number[];
+    overmatch: number[];
+    stopped: number;
+    killed: number;
+    crossHits: number[];
+  }> = [];
   const killedAll = new Set<number>();
   const otherPidsAtCancel = new Set(strays(other.mark).map((s) => s.pid));
+  const overmatchAll = new Set<number>();
 
+  // SAFETY GUARD (fail-closed): the oracle's answer is MEASURED, but only pids that are ALSO
+  // independently verified as ours — their command line carries this run's unique mark — are ever
+  // signalled. Any oracle match outside that ground truth (unsandboxed or foreign pids) is recorded as
+  // an `oracle-overmatch` typed failure and is NEVER signalled, so a wrong predicate can only fail the
+  // receipt, never stop or kill unrelated host processes.
   if (!blocked) {
     for (let r = 0; r < 6; r++) {
       const report = r === 0 ? first : sbenum(ours.marker);
       const matched = (report.match ?? []).filter((pid) => pid !== process.pid);
+      const oursTruth = new Set(strays(ours.mark).map((s) => s.pid));
       const crossHits = matched.filter((pid) => otherPidsAtCancel.has(pid));
+      const overmatch = matched.filter((pid) => !oursTruth.has(pid));
+      for (const pid of overmatch) {
+        overmatchAll.add(pid);
+      }
+      const signalled = matched.filter((pid) => oursTruth.has(pid));
       let stopped = 0;
       let killed = 0;
-      for (const pid of matched) {
+      for (const pid of signalled) {
         if (signal(pid, 'SIGSTOP')) {
           stopped++;
         }
       }
-      for (const pid of matched) {
+      for (const pid of signalled) {
         if (signal(pid, 'SIGKILL')) {
           killed++;
           killedAll.add(pid);
         }
       }
-      rounds.push({ matched, stopped, killed, crossHits });
-      if (matched.length === 0) {
+      rounds.push({
+        matched: matched.slice(0, 50),
+        signalled,
+        overmatch: overmatch.slice(0, 50),
+        stopped,
+        killed,
+        crossHits,
+      });
+      if (signalled.length === 0) {
         break;
       }
       await sleep(250);
     }
   }
+  const oracleOvermatch = overmatchAll.size > 0;
 
   await sleep(1500);
   const afterCancel = sizeOf(ours.sentinel);
@@ -272,7 +299,12 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
   // Second-session judgement — measured BEFORE any safety-net cleanup touches it.
   const crossKilled = rounds.some((r) => r.crossHits.length > 0);
   const otherGrew = otherStarted && otherBeforeCancel > 0 && otherAfterSettle > otherBeforeCancel;
-  const otherSbAfter = sbenum(other.marker); // second session still enumerable under its OWN marker
+  const otherSbRaw = sbenum(other.marker); // second session still enumerable under its OWN marker
+  const otherSbAfter = {
+    ...otherSbRaw,
+    matchCount: (otherSbRaw.match ?? []).length,
+    match: (otherSbRaw.match ?? []).slice(0, 20),
+  };
   const otherStraysAfter = strays(other.mark);
   const secondSurvived = otherGrew && !crossKilled && otherStraysAfter.length > 0;
 
@@ -292,7 +324,8 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
 
   const grewLive = startedBytes > 0 && beforeCancel >= startedBytes;
   const stopped = afterSettle === afterCancel;
-  const reaped = grewLive && stopped && !blocked;
+  // Reaped only if the canary stopped AND the oracle returned nothing outside our verified session.
+  const reaped = grewLive && stopped && !blocked && !oracleOvermatch;
   // A genuine host limitation (sandbox_check SPI absent) legitimately blocks; a launch that produced
   // no canary while the SPI IS present is a sandbox/profile failure, surfaced here with the exit and
   // stderr of the sandboxed launch rather than hidden behind "blocked".
@@ -313,9 +346,9 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
     check(
       `${strategy}.${kind}.reaped`,
       'no descendant keeps writing after cancel (external canary stops growing)',
-      `startedBytes=${startedBytes} beforeCancel=${beforeCancel} afterCancel=${afterCancel} afterSettle=${afterSettle} blocked=${blocked}`,
+      `startedBytes=${startedBytes} beforeCancel=${beforeCancel} afterCancel=${afterCancel} afterSettle=${afterSettle} blocked=${blocked} oracleOvermatch=${overmatchAll.size}`,
       reaped,
-      { leftover, firstEnum: first, rounds },
+      { leftover, firstMatchCount: (first.match ?? []).length, rounds },
     ),
     check(
       `${strategy}.${kind}.second-session-survived`,
@@ -345,7 +378,14 @@ const runCombo = async (kind: Adversary): Promise<Record<string, unknown>> => {
       straysAfter: otherStraysAfter,
       sbAfter: otherSbAfter,
     },
-    cancelDetail: { strategy, blocked, firstEnum: first, rounds, killed: [...killedAll] },
+    oracleOvermatch: { count: overmatchAll.size, sample: [...overmatchAll].slice(0, 20) },
+    cancelDetail: {
+      strategy,
+      blocked,
+      firstEnum: { ...first, match: (first.match ?? []).slice(0, 50) },
+      rounds,
+      killed: [...killedAll],
+    },
     launchDetail,
     leftover,
     checks,
@@ -422,7 +462,12 @@ const preflight = async (): Promise<{ checks: Check[]; detail: Record<string, st
     sleeper.unref();
     await sleep(1500);
     const report = sbenum(marker);
-    found = (report.match ?? []).length > 0;
+    // In-session means EXACTLY the sandboxed sleeper: its pid must be matched, and the match set must
+    // stay tiny — a large set means the predicate is admitting unsandboxed/foreign pids (overmatch).
+    const preMatch = report.match ?? [];
+    found = sleeper.pid !== undefined && preMatch.includes(sleeper.pid) && preMatch.length <= 3;
+    report.match = preMatch.slice(0, 20);
+    (report as Record<string, unknown>)['matchCount'] = preMatch.length;
     observed = report.sandboxedObserved ?? 0;
     applied = {
       out: `spawnRc=${sleeper.pid !== undefined} exit=${JSON.stringify(exit ?? null)} err=${err.slice(0, 200)} report=${JSON.stringify(report).slice(0, 260)}`,

@@ -122,7 +122,7 @@ describe('ExportPane', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Export format' }));
     const option = await screen.findByRole('option', { name: /step/iu });
-    expect(option.querySelector('svg[aria-hidden="true"] text')).toHaveTextContent('step');
+    expect(option.querySelector('svg[role="img"] text')).toHaveTextContent('step');
   });
 
   it('should pick a less common format from More formats and export only it', async () => {

@@ -20,6 +20,13 @@ describe('FormatBadge', () => {
     expect(screen.getByText('webp')).toHaveAttribute('font-size', '10');
   });
 
+  it('names its format for assistive technology', () => {
+    const { rerender } = render(<FormatBadge extension='stl' />);
+    expect(screen.getByRole('img', { name: 'stl' })).toBeInTheDocument();
+    rerender(<FormatBadge extension='stl' aria-label='STL mesh' />);
+    expect(screen.getByRole('img', { name: 'STL mesh' })).toBeInTheDocument();
+  });
+
   it('renders when SVG text measurement is unavailable', () => {
     render(<FormatBadge extension='step' aria-label='STEP file' />);
 
@@ -33,6 +40,8 @@ describe('FormatFileIcon', () => {
     expect(screen.getByText('step')).toBeInTheDocument();
     rerender(<FormatFileIcon filename='gear.ts' />);
     expect(container.querySelector('.lucide-file')).not.toBeNull();
+    rerender(<FormatFileIcon filename='prints/part.gcode.3mf' />);
+    expect(screen.getByText('gcode')).toBeInTheDocument();
     rerender(<FormatFileIcon filename='report.csv' />);
     expect(container.querySelector('.lucide-format-3d')).toBeNull();
   });

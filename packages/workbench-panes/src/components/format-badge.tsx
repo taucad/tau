@@ -4,6 +4,9 @@ import { fileExtensionSet } from '@taucad/types/constants';
 import { cn } from '@taucad/ui/utils/cn';
 import { hashString } from '@taucad/utils/hash';
 
+/** Multi-part extensions that win over their last segment: a sliced print container is a G-code program first. */
+const compoundBadges: Readonly<Record<string, string>> = { 'gcode.3mf': 'gcode' };
+
 /** Export-only text formats in the extension catalog; they carry no format badge. */
 const textFormats: ReadonlySet<string> = new Set<FileExtension>(['csv', 'json', 'txt']);
 
@@ -39,7 +42,9 @@ export function FormatBadge({
       height='24'
       viewBox='0 0 24 24'
       fill='none'
-      aria-hidden
+      // The label can shrink below the UI policy's 12px minimum, so the badge names its format.
+      role='img'
+      aria-label={extension}
       className={cn('lucide lucide-format-3d', className)}
       {...properties}
     >
@@ -86,6 +91,10 @@ export function FormatFileIcon({
   className,
 }: Readonly<{ filename: string; className?: string }>): React.JSX.Element {
   const name = filename.slice(filename.lastIndexOf('/') + 1).toLowerCase();
+  const compound = Object.keys(compoundBadges).find((suffix) => name.endsWith(`.${suffix}`));
+  if (compound !== undefined) {
+    return <FormatBadge extension={compoundBadges[compound]!} className={className} />;
+  }
   const extension = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1) : '';
   return fileExtensionSet.has(extension as FileExtension) && !textFormats.has(extension) ? (
     <FormatBadge extension={extension} className={className} />

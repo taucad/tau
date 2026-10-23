@@ -58,9 +58,9 @@ The tab, full view and browser page add Share, Export, a workbench toggle, grid,
 
 A tab or full view follows each model the agent shows, and the agent can select parts in it. A shown source stays live: each edit to the file or its parameters redraws every open view. `view_state` reports the model, selected and hidden parts and camera, plus an image with `capture`. `show_model` also opens STEP, STL, 3MF and OBJ files.
 
-The **workbench** lists parts, parameters, the selected part's properties and display switches. A changed parameter is saved to the project and the model redraws; dragging a value previews it live and saves only when you let go; the agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved too, so Tau reopens the same view.
+The **workbench** lists parts, parameters, the selected part's properties and display switches. A changed parameter is saved and the model redraws; a drag previews live and saves on release. The agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved, so Tau reopens the view.
 
-The viewer makes no network request. Model files reach it through a tool only the page can call, in compressed chunks, so a large mesh loads without the host dropping the connection. The browser link answers only on your machine, with a session token.
+The viewer makes no network request. Model files reach it through a tool only the page can call, in compressed chunks, so a large mesh loads without dropping the connection. The browser link answers only on your machine, with a session token.
 
 ## Printing
 

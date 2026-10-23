@@ -42,6 +42,8 @@ export type SectionStencilCapSource = Readonly<{
   loops?: SectionLoopCapSource;
   /** The cap's tint, emphasis included. */
   tintHex: number;
+  /** The hatch angle in plane coordinates, in radians; every source of one part shares it. Defaults to 45°. */
+  stripeAngle?: number;
   /** The outline colour where the cut meets the source's surfaces. */
   edgeHex: number;
 }>;
@@ -674,6 +676,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
             tintHex: entry.source.tintHex,
             stripeFrequency: frame.stripes.stripeFrequency,
             stripeWidth: frame.stripes.stripeWidth,
+            stripeAngle: entry.source.stripeAngle,
           });
           for (const { face, slot } of faces) {
             takePolygon(face.plane, entry.box, face.bounds, capSlot(slot).material, capOrder, {

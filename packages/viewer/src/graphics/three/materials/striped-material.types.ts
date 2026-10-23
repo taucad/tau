@@ -9,11 +9,12 @@ export type StripedMaterialProperties = {
   readonly stripeFrequency?: number;
   /**
    * The width of each stripe in plane-local units.
-   * @default 0.25
+   * @default 0.12
    */
   readonly stripeWidth?: number;
   /**
-   * When set, derives `baseColor` and `stripeColor` from this tint (mid-tone + contrast).
+   * When set, the base colour is this tint and the stripe a contrasting shade of it: darker on a light tint, lighter
+   * on a dark one.
    */
   readonly tintColor?: number;
   /**

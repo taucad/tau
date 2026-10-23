@@ -78,7 +78,8 @@ export function useSectionStripes(): Readonly<{ stripeFrequency: number; stripeW
   const renderFrame = useRenderFrame();
   const largeGridSize = useGraphicsSelector((state) => state.context.gridSizesComputed.largeSize);
   return useMemo(() => {
-    const stripeSpacing = largeGridSize / renderFrame.metersPerRenderUnit / 10;
-    return { stripeFrequency: stripeSpacing, stripeWidth: stripeSpacing * 0.2 };
+    // Dense, thin section lining, as drafting draws it: the shader keeps a line at least a pixel wide.
+    const stripeSpacing = largeGridSize / renderFrame.metersPerRenderUnit / 16;
+    return { stripeFrequency: stripeSpacing, stripeWidth: stripeSpacing * 0.06 };
   }, [largeGridSize, renderFrame.metersPerRenderUnit]);
 }

@@ -53,10 +53,14 @@ varying vec2 vCapStripeAxis;
 void main() {
   #include <clipping_planes_fragment>
   #include <logdepthbuf_fragment>
-  float pattern = mod(dot(vSurfacePos, vCapStripeAxis), uStripeFrequency);
-  float aa = fwidth(pattern) * 1.5;
-  float stripeMask = smoothstep(uStripeWidth - aa, uStripeWidth + aa, pattern);
-  gl_FragColor = vec4(mix(vCapStripeColor, vCapBaseColor, stripeMask), 1.0);
+  // Thin lines centred on multiples of the spacing, at least a pixel wide, antialiased over one pixel.
+  float coordinate = dot(vSurfacePos, vCapStripeAxis);
+  float pixel = max(fwidth(coordinate), 1e-6);
+  float halfSpacing = 0.5 * uStripeFrequency;
+  float lineDistance = abs(mod(coordinate + halfSpacing, uStripeFrequency) - halfSpacing);
+  float halfWidth = max(0.5 * uStripeWidth, 0.5 * pixel);
+  float lineMask = 1.0 - smoothstep(halfWidth - 0.5 * pixel, halfWidth + 0.5 * pixel, lineDistance);
+  gl_FragColor = vec4(mix(vCapBaseColor, vCapStripeColor, lineMask), 1.0);
   #include <colorspace_fragment>
 }`;
 

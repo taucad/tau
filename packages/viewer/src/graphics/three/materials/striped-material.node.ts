@@ -1,7 +1,21 @@
 import { DoubleSide } from 'three';
 import type { Material } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
-import { attribute, Fn as tslFunction, fwidth, mix, mod, mul, smoothstep, uniform, vec2, vec3 } from 'three/tsl';
+import {
+  abs,
+  attribute,
+  float,
+  Fn as tslFunction,
+  fwidth,
+  max,
+  mix,
+  mod,
+  mul,
+  smoothstep,
+  uniform,
+  vec2,
+  vec3,
+} from 'three/tsl';
 import { resolveStripedAppearance } from '#graphics/three/materials/striped-material-resolve-appearance.js';
 import type { StripedMaterialProperties } from '#graphics/three/materials/striped-material.types.js';
 
@@ -28,11 +42,16 @@ export function createVertexColoredStripedNodeMaterial(properties?: StripedMater
       .add(mul(surfacePlane.y, stripeAxis.y))
       .toVar('patternCoordinate');
 
-    const pattern = mod(patternCoordinate, uStripeFrequency).toVar('pattern');
-    const aa = mul(fwidth(pattern), 1.5).toVar('aa');
-
-    const stripeMask = smoothstep(uStripeWidth.sub(aa), uStripeWidth.add(aa), pattern);
-    return vec3(mix(stripeColor, baseColor, stripeMask));
+    // Thin lines centred on multiples of the spacing, at least a pixel wide, antialiased over one pixel.
+    const pixel = max(fwidth(patternCoordinate), 1e-6).toVar('pixel');
+    const halfSpacing = mul(uStripeFrequency, 0.5).toVar('halfSpacing');
+    const lineDistance = abs(mod(patternCoordinate.add(halfSpacing), uStripeFrequency).sub(halfSpacing)).toVar(
+      'lineDistance',
+    );
+    const halfWidth = max(mul(uStripeWidth, 0.5), mul(pixel, 0.5)).toVar('halfWidth');
+    const halfPixel = mul(pixel, 0.5);
+    const lineMask = float(1).sub(smoothstep(halfWidth.sub(halfPixel), halfWidth.add(halfPixel), lineDistance));
+    return vec3(mix(baseColor, stripeColor, lineMask));
   })();
 
   stripeUniformsByMaterial.set(material, { frequency: uStripeFrequency, width: uStripeWidth });

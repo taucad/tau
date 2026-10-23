@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { resolveStripedAppearance } from '#graphics/three/materials/striped-material-resolve-appearance.js';
 import type { PackedSectionCapGeometryBuffers } from '#graphics/three/utils/section-cap-packed-geometry.js';
 
@@ -7,15 +8,16 @@ export const sectionCapOverlapStripeHex = 0xfd_e0_47;
 export const sectionCapNormalRegionKind = 0;
 export const sectionCapOverlapRegionKind = 1;
 
-const colorByteRange = 256;
-const redChannelDivisor = 65_536;
-const maxColorByte = 255;
+const scratchColor = new THREE.Color();
 
-export const colorToComponents = (hex: number): readonly [number, number, number] => [
-  (Math.floor(hex / redChannelDivisor) % colorByteRange) / maxColorByte,
-  (Math.floor(hex / colorByteRange) % colorByteRange) / maxColorByte,
-  (hex % colorByteRange) / maxColorByte,
-];
+/**
+ * An sRGB hex colour as the linear components the cap shader mixes, so a cap shows its part's colour: the output
+ * colour-space conversion would otherwise brighten bytes written as if they were linear.
+ */
+export const colorToComponents = (hex: number): readonly [number, number, number] => {
+  scratchColor.setHex(hex);
+  return [scratchColor.r, scratchColor.g, scratchColor.b];
+};
 
 export const stripeAxisForAngle = (stripeAngle: number): readonly [number, number] => [
   Math.sin(stripeAngle),

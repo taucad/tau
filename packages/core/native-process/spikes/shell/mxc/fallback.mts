@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { check, isWindows, laneIdentity, mxcDirectory, outDir, writeJson } from './mxc-lib.mts';
+import { check, isWindows, laneIdentity, mxcDirectory, outDir, resolveWindowsShell, writeJson } from './mxc-lib.mts';
 
 const main = (): void => {
   const receiptPath = join(outDir(), 'fallback.receipt.json');
@@ -33,7 +33,19 @@ const main = (): void => {
     return;
   }
   const script = join(mxcDirectory, 'fallback.ps1');
-  const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', script], {
+  // The D14 shell at its fixed trusted path (never a PATH lookup); its absence is a typed failure.
+  const shell = resolveWindowsShell();
+  if (!shell.path) {
+    writeJson(receiptPath, {
+      kind: 'capability-sid-fallback',
+      identity: laneIdentity(),
+      checks: [check('fallback.shell', 'trusted PowerShell at a fixed path', shell.reason ?? 'missing', false)],
+      verdict: 'fail',
+    });
+    process.exitCode = 1;
+    return;
+  }
+  const result = spawnSync(shell.path, ['-NoProfile', '-NonInteractive', '-File', script], {
     encoding: 'utf8',
     windowsHide: true,
     env: { ...process.env, MXC_FALLBACK_OUT: receiptPath },

@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { DatabaseType } from '#database/database.service.js';
-import { storageTombstone, user } from '#database/schema.js';
+import { projectDeletion, projectDeletionManifest, storageTombstone, user } from '#database/schema.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { isProjectRepositoryId } from '#api/git/git.constants.js';
 import { commitTombstone } from '#api/git/store/commit.js';
@@ -10,7 +10,7 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
 
 /**
- * The purge job: the **only** caller of prefix deletion in this codebase
+ * The tenant purge job deletes exact keys while preserving permanent project fences
  * (charter D31, S5, S10).
  *
  * Everything about its shape is that containment. With no bucket versioning,
@@ -212,6 +212,28 @@ export const purgeTombstonedTenants = async function* (args: PurgeArguments): As
         continue;
       }
 
+      // Account cascades do not retire captured shared references. Project cleanup must finish first.
+      // oxlint-disable-next-line no-await-in-loop -- one bounded receipt check before planning this tenant.
+      const unfinished = await args.database
+        .select({ projectId: projectDeletion.projectId })
+        .from(projectDeletion)
+        .where(
+          and(
+            eq(projectDeletion.ownerId, ownerId),
+            or(
+              isNull(projectDeletion.purgedAt),
+              sql`exists (select 1 from ${projectDeletionManifest} where ${projectDeletionManifest.projectId} = ${projectDeletion.projectId} and ${projectDeletionManifest.releasedAt} is null)`,
+            ),
+          ),
+        )
+        .limit(1);
+      if (unfinished.length > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- report before advancing past this deferred tenant.
+        await report(`deferring ${ownerId}: captured project cleanup is unfinished`);
+        yield { ownerId, status: 'refused', deleted: 0 };
+        continue;
+      }
+
       if (!isProjectRepositoryId(ownerId)) {
         // oxlint-disable-next-line no-await-in-loop -- wait for the report sink before progressing
         await report(`refusing '${ownerId}': not a storable identifier, so it cannot name a tenant prefix`);
@@ -257,11 +279,7 @@ export const purgeTombstonedTenants = async function* (args: PurgeArguments): As
 
       for (const prefix of plan.prefixes) {
         // oxlint-disable-next-line no-await-in-loop -- sequential so a failure stops at a prefix boundary
-        await args.driver.deleteEntirePrefixForPurgeJob({
-          namespace: 'tenants',
-          keyPrefix: prefix,
-          tier: 'private',
-        });
+        await deleteTenantPrefixPreservingProjectFences(args.database, args.driver, { ownerId, prefix });
       }
 
       /*
@@ -272,6 +290,21 @@ export const purgeTombstonedTenants = async function* (args: PurgeArguments): As
        */
       // oxlint-disable-next-line no-await-in-loop -- the measurement belongs to this tenant's delete
       const remaining = await planTenantPurge(args.driver, ownerId);
+      let removable = 0;
+      for (const prefix of plan.prefixes) {
+        // oxlint-disable-next-line no-await-in-loop -- verify only known sentinels remain before acknowledging account cleanup.
+        removable += await deleteTenantPrefixPreservingProjectFences(args.database, args.driver, {
+          ownerId,
+          prefix,
+          verifyOnly: true,
+        });
+      }
+      if (removable > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- residual bytes keep the durable account work pending.
+        await report(`deferring ${ownerId}: ${String(removable)} non-sentinel objects remain`);
+        yield { ownerId, status: 'refused', deleted: 0, plan };
+        continue;
+      }
       const deleted = plan.objects - remaining.objects;
       const bytes = plan.bytes - remaining.bytes;
 
@@ -288,4 +321,49 @@ export const purgeTombstonedTenants = async function* (args: PurgeArguments): As
       yield { ownerId, status: 'purged', deleted, plan };
     }
   }
+};
+
+/** Exact-key deletion keeps permanent project fences even when their account has closed. */
+export const deleteTenantPrefixPreservingProjectFences = async (
+  database: DatabaseType,
+  driver: ObjectStorageService,
+  args: { ownerId: string; prefix: string; verifyOnly?: boolean },
+): Promise<number> => {
+  if (!isProjectRepositoryId(args.ownerId) || !tenantPrefixes(args.ownerId).includes(args.prefix)) {
+    throw new Error('Invalid tenant purge prefix');
+  }
+  const batch: string[] = [];
+  let removable = 0;
+  const flush = async (): Promise<void> => {
+    const candidates = batch.flatMap((key) => {
+      const parts = key.split('/');
+      return parts.length === 4 && parts[1] === 'repos' && parts[3] === 'manifest.json' ? [parts[2]!] : [];
+    });
+    const receipts =
+      candidates.length === 0
+        ? []
+        : await database
+            .select({ projectId: projectDeletion.projectId })
+            .from(projectDeletion)
+            .where(and(eq(projectDeletion.ownerId, args.ownerId), inArray(projectDeletion.projectId, candidates)));
+    const sentinels = new Set(receipts.map((receipt) => `${args.ownerId}/repos/${receipt.projectId}/manifest.json`));
+    const keys = batch.filter((key) => !sentinels.has(key));
+    removable += keys.length;
+    if (keys.length > 0 && !args.verifyOnly) {
+      await driver.deleteBlobs({ namespace: 'tenants', keys, tier: 'private' });
+    }
+    batch.length = 0;
+  };
+  for await (const object of driver.listObjects({ namespace: 'tenants', keyPrefix: args.prefix, tier: 'private' })) {
+    if (!object.key.startsWith(args.prefix)) {
+      throw new Error('Tenant purge listing escaped its prefix');
+    }
+    batch.push(object.key);
+    if (batch.length === 500) {
+      // oxlint-disable-next-line no-await-in-loop -- one bounded exact-key batch at a time.
+      await flush();
+    }
+  }
+  await flush();
+  return removable;
 };

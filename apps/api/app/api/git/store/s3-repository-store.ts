@@ -77,12 +77,14 @@ export class S3RepositoryStore implements RepositoryStore {
 
   public async readManifest(
     locator: RepositoryLocator,
+    signal?: AbortSignal,
   ): Promise<{ manifest: ManifestBytes; token: CommitToken } | undefined> {
     try {
       const blob = await this.driver(locator).getBlob({
         namespace: 'tenants',
         key: manifestKey(locator),
         tier: 'private',
+        ...(signal === undefined ? {} : { signal }),
       });
 
       return { manifest: await collect(blob.body), token: { token: blob.etag } };
@@ -95,16 +97,19 @@ export class S3RepositoryStore implements RepositoryStore {
     }
   }
 
+  // oxlint-disable-next-line max-params -- optional cancellation preserves the existing store port.
   public async commitManifest(
     locator: RepositoryLocator,
     next: ManifestBytes,
     expected: CommitToken | 'absent',
+    signal?: AbortSignal,
   ): Promise<CommitToken | 'lost'> {
     const result = await this.driver(locator).putBlob({
       namespace: 'tenants',
       key: manifestKey(locator),
       body: next,
       contentType: manifestContentType,
+      ...(signal === undefined ? {} : { signal }),
       tier: 'private',
       ...(expected === 'absent' ? { ifNoneMatch: '*' } : { ifMatch: expected.token }),
     });
@@ -122,6 +127,7 @@ export class S3RepositoryStore implements RepositoryStore {
     key: string,
     body: Uint8Array<ArrayBuffer>,
     options: PutObjectOptions,
+    signal?: AbortSignal,
   ): Promise<void> {
     if (options.contentLength !== body.byteLength) {
       throw new RangeError(
@@ -130,7 +136,7 @@ export class S3RepositoryStore implements RepositoryStore {
     }
 
     if (body.byteLength > this.capabilities.maxObjectBytes) {
-      await this.putMultipart(locator, key, body);
+      await this.putMultipart(locator, key, body, signal);
       return;
     }
 
@@ -141,6 +147,7 @@ export class S3RepositoryStore implements RepositoryStore {
       contentType: objectContentType,
       tier: 'private',
       checksumSha256: options.sha256,
+      ...(signal === undefined ? {} : { signal }),
     });
   }
 
@@ -206,7 +213,13 @@ export class S3RepositoryStore implements RepositoryStore {
     );
   }
 
-  private async putMultipart(locator: RepositoryLocator, key: string, body: Uint8Array<ArrayBuffer>): Promise<void> {
+  // oxlint-disable-next-line max-params -- mirrors the store port's optional cancellation.
+  private async putMultipart(
+    locator: RepositoryLocator,
+    key: string,
+    body: Uint8Array<ArrayBuffer>,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const driver = this.driver(locator);
     const resolvedKey = `${repositoryPrefix(locator)}${key}`;
     const uploadId = await driver.createMultipartUpload({
@@ -214,6 +227,7 @@ export class S3RepositoryStore implements RepositoryStore {
       key: resolvedKey,
       contentType: objectContentType,
       tier: 'private',
+      ...(signal === undefined ? {} : { signal }),
     });
 
     try {
@@ -230,6 +244,7 @@ export class S3RepositoryStore implements RepositoryStore {
           body: bytes,
           checksumSha256,
           tier: 'private',
+          ...(signal === undefined ? {} : { signal }),
         });
         parts.push({ partNumber, etag: uploaded.etag, checksumSha256: uploaded.checksumSha256 });
       }
@@ -240,9 +255,17 @@ export class S3RepositoryStore implements RepositoryStore {
         uploadId,
         parts,
         tier: 'private',
+        ...(signal === undefined ? {} : { signal }),
       });
     } catch (error) {
-      await driver.abortMultipartUpload({ namespace: 'tenants', key: resolvedKey, uploadId, tier: 'private' });
+      // The transfer signal is spent; await bounded cleanup with its own signal.
+      await driver.abortMultipartUpload({
+        namespace: 'tenants',
+        key: resolvedKey,
+        uploadId,
+        tier: 'private',
+        signal: AbortSignal.timeout(5000),
+      });
       throw error;
     }
   }

@@ -64,6 +64,7 @@ describe('singleton maintenance group', () => {
     await expect(collectZeroCountBlobs({ database, driver })).rejects.toThrow(/revisions-maintenance/u);
     await expect(
       restoreRepository({
+        database,
         source: store,
         primary: store,
         locator: repositoryLocator({ ownerId: 'owner', projectId: 'project' }),
@@ -85,7 +86,13 @@ describe('singleton maintenance group', () => {
     );
     const importers = listed
       .split('\n')
-      .filter((file) => file.endsWith('.ts') && !file.startsWith(maintenanceDirectory))
+      .filter(
+        (file) =>
+          file.endsWith('.ts') &&
+          !file.endsWith('.test.ts') &&
+          !file.endsWith('.spec.ts') &&
+          !file.startsWith(maintenanceDirectory),
+      )
       .map((file) => path.relative(applicationRoot, file))
       .sort();
 

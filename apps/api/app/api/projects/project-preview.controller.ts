@@ -21,6 +21,8 @@ import { isProjectRepositoryId } from '#api/git/git.constants.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { ProjectPreviewDto } from '#api/projects/project-preview.dto.js';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
+import { DatabaseService } from '#database/database.service.js';
+import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
 
 @Controller({ path: 'projects', version: '1' })
 @UseAuth()
@@ -29,6 +31,7 @@ export class ProjectPreviewController {
     private readonly access: ProjectAccessService,
     private readonly previews: ProjectPreviewService,
     private readonly rateLimiter: PublicationRateLimiterService,
+    private readonly databaseService: DatabaseService,
   ) {}
 
   @Get(':projectId/preview')
@@ -42,6 +45,7 @@ export class ProjectPreviewController {
     this.validateId(projectId);
     const { ownerId } = await this.access.authorize(projectId, userId, 'read');
     const bytes = await this.previews.get({ ownerId, projectId });
+    await this.access.authorize(projectId, userId, 'read');
     if (!bytes) {
       void reply.status(HttpStatus.NO_CONTENT);
       return undefined;
@@ -68,7 +72,12 @@ export class ProjectPreviewController {
     if (ifNoneMatch !== undefined && ifNoneMatch !== '*') {
       throw new BadRequestException('Expected If-None-Match: *');
     }
-    return this.previews.put({ ownerId, projectId, image: body.image, createOnly: ifNoneMatch === '*' });
+    await this.access.authorize(projectId, userId, 'write');
+    return this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, projectId, userId);
+      // Keep deletion waiting until the bounded object-store write settles. A response-time check cannot undo a PUT.
+      return this.previews.put({ ownerId, projectId, image: body.image, createOnly: ifNoneMatch === '*' });
+    });
   }
 
   private validateId(projectId: string): void {

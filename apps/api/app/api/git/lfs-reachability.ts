@@ -3,6 +3,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Database } from '#database/owner-lock.js';
 import { withOwnerLock } from '#database/owner-lock.js';
+import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { projectGitLfsObject } from '#database/schema.js';
 import { gitChildEnvironment, gitCommandTimeoutMilliseconds, gitMaxBufferBytes } from '#api/git/store/lease.js';
 
@@ -196,6 +197,7 @@ export const markLfsReachability = async (
   const referenced = [...(await referencedLfsOids(args.directory))];
 
   return withOwnerLock(dependencies.database, args.ownerId, async (transaction) => {
+    await assertActiveProjectLocked(transaction, args.projectId);
     const reachable =
       referenced.length === 0
         ? []

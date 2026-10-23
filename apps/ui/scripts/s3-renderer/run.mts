@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* oxlint-disable eslint/no-await-in-loop, unicorn/no-await-expression-member -- Measurement steps run strictly one after another in a fixed order: concurrent runs would perturb timing, and hoisting awaits out of result literals would reorder harness calls. */
 /**
  * S3 renderer comparison driver (Q3, D18): xterm.js + WebGL against ghostty-web
  * in Electron under Tau's real `app://` protocol and CSP.
@@ -11,6 +12,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import type { BinaryLike } from 'node:crypto';
 import { copyFile, mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
@@ -24,7 +26,6 @@ import type { ElectronApplication, Page } from 'playwright';
 type Kind = 'xterm' | 'ghostty';
 type Sample = { at: number; cpuPercent: number; workingSetKiB: number; byType: Record<string, number> };
 type Latency = { kind: 'key' | 'paste' | 'interrupt'; ms: number; found: boolean; underLoad: boolean };
-type S3Api = Record<string, (...arguments_: never[]) => unknown>;
 type Session = { app: ElectronApplication; page: Page; kind: Kind };
 
 const { values } = parseArgs({
@@ -47,14 +48,15 @@ const rounds = Number(values.rounds);
 const kinds: readonly Kind[] = ['xterm', 'ghostty'];
 const pane = { width: 960, height: 540 };
 const flow = { chunkBytes: 16_384, highWater: 262_144 };
-const sampleIntervalMs = 250;
+/** Milliseconds between main-process metric samples. */
+const sampleInterval = 250;
 const electronPath = createRequire(path.join(root, 'apps/desktop/package.json'))('electron') as unknown as string;
 
 const sleep = async (ms: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-const sha256 = (data: Uint8Array | string): string => createHash('sha256').update(data).digest('hex');
+const sha256 = (data: BinaryLike): string => createHash('sha256').update(data).digest('hex');
 const sh = (command: string, arguments_: string[]): string => {
   try {
     return execFileSync(command, arguments_, { encoding: 'utf8' }).trim();
@@ -131,6 +133,7 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
   const app = await electron.launch({
     executablePath: electronPath,
     args: arguments_,
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
     env: { ...process.env, S3_CLIENT_ROOT: clientRoot },
     timeout: 60_000,
   });
@@ -139,17 +142,24 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
   return { app, page, kind };
 };
 
-const call = async <T,>(session: Session, method: string, ...arguments_: unknown[]): Promise<T> =>
-  session.page.evaluate(
+async function call<T>(session: Session, method: string, ...arguments_: unknown[]): Promise<T> {
+  return session.page.evaluate(
     async ([name, parameters]) =>
       (globalThis as unknown as { s3: Record<string, (...values: unknown[]) => unknown> }).s3[name]!(...parameters),
     [method, arguments_] as const,
   ) as Promise<T>;
-const main = async <T,>(session: Session, body: string, argument?: unknown): Promise<T> =>
-  // eslint-disable-next-line no-new-func -- the body runs in the fixture's main process via Playwright, never here.
-  session.app.evaluate(new Function('electron', 'argument', body) as never, argument) as Promise<T>;
+}
+async function main<T>(session: Session, body: string, argument?: unknown): Promise<T> {
+  // oxlint-disable-next-line no-new-func -- the body runs in the fixture's main process via Playwright, never here.
+  const mainFunction = new Function('electron', 'argument', body) as unknown as (
+    electron: unknown,
+    value: unknown,
+  ) => T;
+  return session.app.evaluate(mainFunction, argument);
+}
 
 const mount = async (session: Session, overrides: Record<string, unknown> = {}) =>
+  // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Recorded S3 result JSON key (milliseconds) returned by the harness.
   call<{ cols: number; rows: number; renderer: string; mountMs: number }>(session, 'mount', {
     kind: session.kind,
     theme: 'dark',
@@ -160,7 +170,7 @@ const mount = async (session: Session, overrides: Record<string, unknown> = {}) 
     ...overrides,
   });
 const startSampling = async (session: Session): Promise<void> =>
-  main(session, `globalThis.s3Main.startSampling(${sampleIntervalMs})`);
+  main(session, `globalThis.s3Main.startSampling(${sampleInterval})`);
 const stopSampling = async (session: Session) => {
   const samples = await main<Sample[]>(session, 'return globalThis.s3Main.stopSampling()');
   const cpu = samples.slice(1).map((sample) => sample.cpuPercent);
@@ -222,8 +232,8 @@ const environment = async () => {
         const info = context?.getExtension('WEBGL_debug_renderer_info');
         return context
           ? {
-              vendor: info ? context.getParameter(info.UNMASKED_VENDOR_WEBGL) : 'unknown',
-              renderer: info ? context.getParameter(info.UNMASKED_RENDERER_WEBGL) : 'unknown',
+              vendor: info ? (context.getParameter(info.UNMASKED_VENDOR_WEBGL) as unknown) : 'unknown',
+              renderer: info ? (context.getParameter(info.UNMASKED_RENDERER_WEBGL) as unknown) : 'unknown',
             }
           : 'unavailable';
       })(),
@@ -231,7 +241,7 @@ const environment = async () => {
     const lock = await readFile(path.join(root, 'pnpm-lock.yaml'), 'utf8');
     const integrity = (name: string, version: string): string =>
       new RegExp(
-        `\\n  '?${name.replace('/', '\\/')}@${version.replaceAll('.', '\\.')}'?:\\n    resolution: \\{integrity: ([^}]+)\\}`,
+        `\\n  '?${name.replace('/', String.raw`\/`)}@${version.replaceAll('.', String.raw`\.`)}'?:\\n    resolution: \\{integrity: ([^}]+)\\}`,
       ).exec(lock)?.[1] ?? 'not found';
     const packageDigest = async (relative: string): Promise<string> =>
       sha256(await readFile(path.join(root, 'apps/ui/node_modules', relative)));
@@ -384,6 +394,7 @@ const r01Run = async (kind: Kind, round: number) => {
         keysEchoed: keys.length,
         keysFound: keys.filter((entry) => entry.found).length,
         keysUnderLoad: keys.filter((entry) => entry.underLoad).length,
+        // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Recorded S3 result JSON key (milliseconds); renaming breaks comparison with captured runs.
         keyMs: keys.map((entry) => entry.ms),
         keySummary: keys.length > 0 ? summary(keys.map((entry) => entry.ms)) : undefined,
         paste: latencies.filter((entry) => entry.kind === 'paste'),
@@ -402,7 +413,10 @@ const r01Run = async (kind: Kind, round: number) => {
 };
 
 /** One warmup + `rounds` measured paired runs, alternating which candidate goes first. */
-const paired = async <T,>(name: string, run: (kind: Kind, round: number) => Promise<T>) => {
+const paired = async <T extends Record<string, unknown>>(
+  name: string,
+  run: (kind: Kind, round: number) => Promise<T>,
+) => {
   const runs: Array<T & { warmup: boolean; order: number }> = [];
   for (let round = 0; round <= rounds; round++) {
     const order = round % 2 === 0 ? kinds : [...kinds].toReversed();
@@ -424,9 +438,11 @@ const r01 = async () => {
         kind,
         {
           perRunKeyP95: summary(mine.map((run) => run.interactive.keySummary?.p95 ?? Number.NaN)),
+          /* oxlint-disable tau-lint/no-time-unit-suffix -- Recorded S3 result JSON keys (milliseconds); renaming breaks comparison with captured runs. */
           pooledKeyMs: summary(mine.flatMap((run) => run.interactive.keyMs)),
           interruptMs: summary(mine.flatMap((run) => run.interactive.interrupt.map((entry) => entry.ms))),
           pasteMs: summary(mine.flatMap((run) => run.interactive.paste.map((entry) => entry.ms))),
+          /* oxlint-enable tau-lint/no-time-unit-suffix */
           throughputMiBps: summary(mine.map((run) => run.throughput.mibPerSecond)),
           idleCpuPercent: summary(mine.map((run) => run.idle.cpuMeanPercent)),
           idleFramesPerSecond: summary(mine.map((run) => run.idle.idleFramesPerSecond)),
@@ -729,7 +745,9 @@ const r03Run = async (kind: Kind) => {
       screenshot: await screenshot(session, `r03-restored-${kind}`),
     };
 
-    await session.page.evaluate(() => (globalThis as unknown as { gc: () => void }).gc());
+    await session.page.evaluate(() => {
+      (globalThis as unknown as { gc: () => void }).gc();
+    });
     const heapBefore = await call<number>(session, 'heap');
     const nodesBefore = (await call<{ domNodes: number }>(session, 'probe')).domNodes;
     const cycleHeapMiB: number[] = [];
@@ -743,7 +761,9 @@ const r03Run = async (kind: Kind) => {
     }
     await call(session, 'unmount');
     await call(session, 'settle', 500);
-    await session.page.evaluate(() => (globalThis as unknown as { gc: () => void }).gc());
+    await session.page.evaluate(() => {
+      (globalThis as unknown as { gc: () => void }).gc();
+    });
     await sleep(300);
     const heapAfter = await call<number>(session, 'heap');
     result['mountDispose30'] = {
@@ -820,9 +840,11 @@ const r05Run = async (kind: Kind, round: number) => {
       kind,
       round,
       proxy: 'three.js TorusKnot (600x96 segments) WebGL scene beside the pane; not the Tau CAD viewport',
+      /* oxlint-disable tau-lint/no-time-unit-suffix -- Recorded S3 result JSON keys (milliseconds); renaming breaks comparison with captured runs. */
       baselineFrameMs: summary(baseline.intervals),
       loadFrameMs: summary(underLoad.intervals),
-      framesOver50ms: underLoad.intervals.filter((interval) => interval > 50).length,
+      /* oxlint-enable tau-lint/no-time-unit-suffix */
+      framesOver50ms: underLoad.intervals.filter((frameInterval) => frameInterval > 50).length,
       streamMiBps: stream['bytes']! / 2 ** 20 / (stream['elapsedMs']! / 1000),
       stream,
       ...load,
@@ -1066,14 +1088,17 @@ const disposal = async () => {
     for (const variant of ['plain', 'gc-first', 'reuse-host', 'default-scrollback'] as const) {
       const session = await launch(kind, ['--enable-logging=stderr']);
       const stderr: string[] = [];
+      // oxlint-disable-next-line typescript/no-restricted-types -- Child stderr delivers Node Buffers; `Buffer#toString` decodes UTF-8 (Uint8Array's would not).
       session.app.process().stderr?.on('data', (chunk: Buffer) => stderr.push(chunk.toString()));
       let cycles = 0;
-      let error: string | undefined;
+      let failure: string | undefined;
       try {
         await mount(session);
         await call(session, 'loadFixture', 'r02-unicode');
         if (variant === 'gc-first') {
-          await session.page.evaluate(() => (globalThis as unknown as { gc: () => void }).gc());
+          await session.page.evaluate(() => {
+            (globalThis as unknown as { gc: () => void }).gc();
+          });
         }
         for (let cycle = 0; cycle < 30; cycle++) {
           /* 6 lines maps to ~10 KB, ghostty-web's own default limit. */
@@ -1084,8 +1109,8 @@ const disposal = async () => {
           await call(session, 'play', 'r02-unicode', flow);
           cycles = cycle + 1;
         }
-      } catch (caught) {
-        error = caught instanceof Error ? caught.message.split('\n')[0] : String(caught);
+      } catch (error) {
+        failure = error instanceof Error ? error.message.split('\n')[0] : String(error);
       }
       let mainEvents: string[] = [];
       try {
@@ -1097,14 +1122,94 @@ const disposal = async () => {
       const log = stderr
         .join('')
         .split('\n')
-        .filter((line) => /FATAL|ERROR|Check failed|OOM|out of memory|crash/i.test(line) && !line.includes('dbus'));
-      results.push({ kind, variant, cycles, error, events: mainEvents, stderr: log.slice(0, 12) });
+        .filter((line) => /fatal|error|check failed|oom|out of memory|crash/i.test(line) && !line.includes('dbus'));
+      results.push({ kind, variant, cycles, error: failure, events: mainEvents, stderr: log.slice(0, 12) });
     }
   }
   return results;
 };
 
+/**
+ * R04 with a real screen reader: Orca 46.1 under AT-SPI, driven by X11 key events (xdotool) so Orca sees the
+ * same input a user's keyboard produces. Receipts are Orca's own `SPEECH OUTPUT` debug lines, sliced per step.
+ * Run inside the Orca session wrapper, which exports `S3_ORCA_LOG`.
+ */
+const r04OrcaRun = async (kind: Kind) => {
+  const orcaLog = process.env['S3_ORCA_LOG'];
+  if (!orcaLog) {
+    throw new Error('S3_ORCA_LOG is required (run inside the Orca session wrapper).');
+  }
+  const xdotool = (...arguments_: string[]): string => sh('xdotool', arguments_);
+  const session = await launch(kind, ['--force-renderer-accessibility']);
+  const steps: Array<{ step: string; at: number }> = [];
+  const mark = (step: string): void => {
+    steps.push({ step, at: Date.now() });
+  };
+  try {
+    await mount(session, { screenReaderMode: true });
+    await call(session, 'settle', 1500);
+    xdotool('search', '--sync', '--name', 'S3 renderer comparison', 'windowactivate', '--sync');
+    await call(session, 'settle', 1500);
+    /* Start outside the terminal: focus the document body, then Tab in as a keyboard user would. */
+    await session.page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
+    mark('focus-entry (Tab)');
+    xdotool('key', 'Tab');
+    await sleep(2500);
+    const focusedAfterTab = await call<boolean>(session, 'activeElementInPane');
+    mark('output written while focused');
+    await call(session, 'write', '\r\nS3 ORCA OUTPUT LINE ALPHA\r\nS3 ORCA OUTPUT LINE BRAVO');
+    await sleep(3000);
+    mark('typing "xyz" with echo');
+    xdotool('type', '--delay', '200', 'xyz');
+    await sleep(2500);
+    mark('Orca say current line (KP_8)');
+    xdotool('key', 'KP_8');
+    await sleep(2500);
+    mark('Orca previous line (KP_7)');
+    xdotool('key', 'KP_7');
+    await sleep(2500);
+    mark('focus escape (Shift+Tab)');
+    xdotool('key', 'shift+Tab');
+    await sleep(2500);
+    const focusedAfterShiftTab = await call<boolean>(session, 'activeElementInPane');
+    mark('end');
+    const log = await readFile(orcaLog, 'utf8');
+    const day = new Date().toISOString().slice(0, 10);
+    const speech = log.split('\n').flatMap((line) => {
+      const match = /^(\d\d:\d\d:\d\d\.\d+) - SPEECH OUTPUT: (.*)$/.exec(line);
+      return match ? [{ at: Date.parse(`${day}T${match[1]!.slice(0, 12)}Z`), text: match[2]! }] : [];
+    });
+    return {
+      kind,
+      kindOfEvidence:
+        'Orca 46.1 SPEECH OUTPUT debug receipts (real AT over AT-SPI, X11 key events), cloud Linux container',
+      focusedAfterTab,
+      focusedAfterShiftTab,
+      receipts: steps.slice(0, -1).map((entry, index) => ({
+        step: entry.step,
+        speech: speech
+          .filter((line) => line.at >= entry.at && line.at < steps[index + 1]!.at)
+          .map((line) => line.text)
+          .filter((text) => text !== "''"),
+      })),
+    };
+  } finally {
+    await session.app.close();
+  }
+};
+
 const suites: Record<string, () => Promise<unknown>> = {
+  r04orca: async () => {
+    const results = [];
+    for (const kind of kinds) {
+      results.push(await r04OrcaRun(kind));
+    }
+    return results;
+  },
   disposal,
   integrity,
   calibrate,

@@ -7,9 +7,10 @@
  * The recorded-stream echo stub below stands in for the S2 admitted PTY until
  * Q2 lands it; it is not a shell and never spawns a process.
  */
+// eslint-disable-next-line @nx/enforce-module-boundaries -- The standalone harness page needs Tau's design tokens at load to theme both candidates identically.
 import '@taucad/ui/styles/tokens.css';
-import { createTerminalView } from './terminal-view.js';
-import type { RendererKind, TerminalTheme, TerminalView } from './terminal-view.js';
+import { createTerminalView } from '#s3-renderer/terminal-view.js';
+import type { RendererKind, TerminalTheme, TerminalView } from '#s3-renderer/terminal-view.js';
 
 type LatencyKind = 'key' | 'paste' | 'interrupt';
 type LatencyRecord = { kind: LatencyKind; t0: number; t1: number; ms: number; found: boolean; underLoad: boolean };
@@ -19,9 +20,13 @@ type PlayOptions = { chunkBytes: number; highWater: number; maxBytes?: number };
 type PlayResult = {
   bytes: number;
   writtenBytes: number;
+  /** Milliseconds. */
+  // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Recorded S3 result JSON key; renaming breaks comparison with captured runs.
   elapsedMs: number;
   interrupted: boolean;
   maxPendingBytes: number;
+  /** Milliseconds. */
+  // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Recorded S3 result JSON key; renaming breaks comparison with captured runs.
   longTaskMs: number;
   longTasks: number;
 };
@@ -66,15 +71,18 @@ const nextTask = async (): Promise<void> =>
 const afterPaint = async (): Promise<void> =>
   new Promise((resolve) => {
     nativeRequestAnimationFrame(() => {
+      // async-iife: bootstrap — rAF owns the synchronous callback; the chained resolve is the measured paint boundary.
+      // oxlint-disable-next-line promise/prefer-await-to-then -- An async callback would change the measured paint-boundary microtask ordering.
       void nextTask().then(resolve);
     });
   });
 
-let longTaskMs = 0;
+/** Milliseconds. */
+let longTaskTotal = 0;
 let longTasks = 0;
 new PerformanceObserver((list) => {
   for (const entry of list.getEntries()) {
-    longTaskMs += entry.duration;
+    longTaskTotal += entry.duration;
     longTasks++;
   }
 }).observe({ type: 'longtask', buffered: false });
@@ -122,7 +130,7 @@ let echoSequence = 0;
 let cancelPlay = false;
 let playing = false;
 let echoEnabled = true;
-const fixtures = new Map<string, Uint8Array>();
+const fixtures = new Map<string, Uint8Array<ArrayBuffer>>();
 
 const tailContains = (marker: string, lines = 400): boolean => {
   if (!view) {
@@ -142,6 +150,8 @@ const echo = (kind: LatencyKind, t0: number, text: string): void => {
   const underLoad = playing;
   const marker = `«${kind[0]}${(echoSequence++).toString(36)}»`;
   view?.write(`${text}${marker}`, () => {
+    // async-iife: bootstrap — the terminal write callback is synchronous; the latency record is read later through `latencies()`.
+    // oxlint-disable-next-line promise/prefer-await-to-then -- An async callback would change the measured echo-latency microtask ordering.
     void afterPaint().then(() => {
       const t1 = performance.now();
       latencies.push({ kind, t0, t1, ms: t1 - t0, found: tailContains(marker, 3000), underLoad });
@@ -217,9 +227,11 @@ const api = {
     pane.style.display = 'block';
     pane.style.background = 'var(--background)';
     if (options.webglUnavailable) {
-      const getContext = HTMLCanvasElement.prototype.getContext;
+      const { getContext } = HTMLCanvasElement.prototype;
       HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
-        return type === 'webgl' || type === 'webgl2' ? null : Reflect.apply(getContext, this, [type, ...rest]);
+        return type === 'webgl' || type === 'webgl2'
+          ? null
+          : (Reflect.apply(getContext, this, [type, ...rest]) as ReturnType<typeof getContext>);
       } as typeof getContext;
     }
     const started = performance.now();
@@ -247,6 +259,7 @@ const api = {
       view!.write(prompt, resolve);
     });
     await afterPaint();
+    // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- Recorded S3 result JSON key (milliseconds); renaming breaks comparison with captured runs.
     return { ...size, renderer: view.renderer(), mountMs: performance.now() - started };
   },
   unmount() {
@@ -279,13 +292,14 @@ const api = {
     const total = Math.max(options.maxBytes ?? bytes.byteLength, bytes.byteLength);
     cancelPlay = false;
     playing = true;
-    longTaskMs = 0;
+    longTaskTotal = 0;
     longTasks = 0;
     let pending = 0;
     let maxPendingBytes = 0;
     let writtenBytes = 0;
     let drained: (() => void) | undefined;
     const started = performance.now();
+    /* oxlint-disable no-loop-func, no-unmodified-loop-condition, typescript/no-unnecessary-condition, no-await-in-loop -- `cancelPlay` is set by the Ctrl+C data handler while this loop awaits; chunks are offered strictly one macrotask at a time because flow control is what is measured. */
     for (let offset = 0; offset < total && !cancelPlay; offset += options.chunkBytes) {
       const start = offset % bytes.byteLength;
       const chunk = bytes.subarray(start, Math.min(start + options.chunkBytes, bytes.byteLength));
@@ -306,20 +320,23 @@ const api = {
       }
       await nextTask();
     }
+    /* oxlint-enable no-loop-func, no-unmodified-loop-condition, typescript/no-unnecessary-condition, no-await-in-loop */
     await new Promise<void>((resolve) => {
       target.write('', resolve);
     });
     await afterPaint();
     playing = false;
+    /* oxlint-disable tau-lint/no-time-unit-suffix -- Recorded S3 result JSON keys (milliseconds); renaming breaks comparison with captured runs. */
     return {
       bytes: bytes.byteLength,
       writtenBytes,
       elapsedMs: performance.now() - started,
       interrupted: cancelPlay,
       maxPendingBytes,
-      longTaskMs,
+      longTaskMs: longTaskTotal,
       longTasks,
     };
+    /* oxlint-enable tau-lint/no-time-unit-suffix */
   },
   async write(text: string) {
     await new Promise<void>((resolve) => {
@@ -327,8 +344,11 @@ const api = {
     });
     await afterPaint();
   },
+  /** @param ms - Milliseconds to wait before the next paint. */
   async settle(ms: number) {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    await new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
     await afterPaint();
   },
   setEcho(enabled: boolean) {
@@ -357,7 +377,9 @@ const api = {
   /** Animation-frame requests per second while the page is otherwise idle. */
   async idleFrames(ms: number) {
     const before = animationFrameRequests;
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    await new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
     return ((animationFrameRequests - before) * 1000) / ms;
   },
   buffer: () => view?.buffer(),
@@ -377,6 +399,7 @@ const api = {
     const row = snapshot.baseY + snapshot.cursorY;
     return api.lines(Math.max(0, row - count + 1), row + 1);
   },
+  // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- R04 checks rendered (layout-aware) text; `textContent` would also return hidden accessibility text.
   paneText: () => pane.innerText,
   tail(count: number) {
     const length = view?.buffer().length ?? 0;
@@ -422,6 +445,7 @@ const api = {
     images: document.querySelectorAll('img').length,
     pastedTexts: [...pastedTexts],
     injected: (globalThis as { s3Injected?: unknown }).s3Injected !== undefined,
+    // oxlint-disable-next-line unicorn/prefer-query-selector -- Keep the measured DOM-node count probe unchanged across recorded runs.
     domNodes: document.getElementsByTagName('*').length,
   }),
   heap: () => (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize,
@@ -435,10 +459,10 @@ const api = {
     camera.position.z = 6;
     const mesh = new three.Mesh(
       new three.TorusKnotGeometry(1.4, 0.45, 600, 96),
-      new three.MeshStandardMaterial({ color: 0x8899aa, metalness: 0.3, roughness: 0.5 }),
+      new three.MeshStandardMaterial({ color: 0x88_99_aa, metalness: 0.3, roughness: 0.5 }),
     );
-    scene.add(mesh, new three.AmbientLight(0xffffff, 0.4));
-    const light = new three.DirectionalLight(0xffffff, 1.2);
+    scene.add(mesh, new three.AmbientLight(0xff_ff_ff, 0.4));
+    const light = new three.DirectionalLight(0xff_ff_ff, 1.2);
     light.position.set(3, 4, 5);
     scene.add(light);
     const intervals: number[] = [];

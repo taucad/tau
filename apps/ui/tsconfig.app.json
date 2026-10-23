@@ -13,6 +13,7 @@
     "asset-integrity.vite-plugin.ts",
     "geospec-mt-assets-cache-key.ts",
     "vite.calibration.config.ts",
+    "vite.s3-renderer.config.ts",
     "react-router.config.ts",
     "vite-environment.d.ts",
     "types/**/*.d.ts",

@@ -9,22 +9,22 @@
  */
 import process from 'node:process';
 import { app, BrowserWindow, clipboard, net, protocol, session } from 'electron';
-import { appOrigin, appSchemePrivileges, registerAppProtocol } from '../../src/main/app-protocol.js';
+import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
 import {
   contentSecurityPolicy,
   isPermissionGranted,
   navigationDecision,
   rendererOrigins,
-} from '../../src/main/navigation-policy.js';
+} from '#main/navigation-policy.js';
 
 type MetricSample = { at: number; cpuPercent: number; workingSetKiB: number; byType: Record<string, number> };
 
-const clientRoot = process.env['S3_CLIENT_ROOT'];
+const { S3_CLIENT_ROOT: clientRoot, S3_WINDOW_WIDTH: windowWidth, S3_WINDOW_HEIGHT: windowHeight } = process.env;
 if (!clientRoot) {
   throw new Error('S3_CLIENT_ROOT is required.');
 }
-const width = Number(process.env['S3_WINDOW_WIDTH'] ?? '1280');
-const height = Number(process.env['S3_WINDOW_HEIGHT'] ?? '960');
+const width = Number(windowWidth ?? '1280');
+const height = Number(windowHeight ?? '960');
 
 protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
 const origins = rendererOrigins({ appOrigin });
@@ -49,10 +49,15 @@ const sample = (): void => {
 Object.assign(globalThis, {
   s3Main: {
     events,
-    startSampling(intervalMs: number) {
+    /**
+     * Start collecting app metrics.
+     *
+     * @param sampleInterval - Milliseconds between samples.
+     */
+    startSampling(sampleInterval: number) {
       samples.length = 0;
       app.getAppMetrics();
-      sampler = setInterval(sample, intervalMs);
+      sampler = setInterval(sample, sampleInterval);
     },
     stopSampling() {
       clearInterval(sampler);
@@ -60,7 +65,9 @@ Object.assign(globalThis, {
       return [...samples];
     },
     clipboardText: () => clipboard.readText(),
-    setClipboardText: (text: string) => clipboard.writeText(text),
+    setClipboardText: (text: string) => {
+      clipboard.writeText(text);
+    },
     gpuFeatureStatus: () => app.getGPUFeatureStatus(),
     gpuInfo: async () => app.getGPUInfo('basic'),
   },
@@ -121,6 +128,7 @@ const start = async (): Promise<void> => {
 };
 
 /* Bundled as CommonJS: Playwright's Electron launcher instruments a CommonJS main, so no top-level await. */
+// oxlint-disable-next-line promise/prefer-await-to-then, unicorn/prefer-top-level-await -- The esbuild CommonJS bundle cannot use top-level await; the rejection handler exits the fixture.
 start().catch((error: unknown) => {
   process.stderr.write(`${String(error)}\n`);
   app.exit(1);

@@ -20,6 +20,7 @@ const { values } = parseArgs({
 });
 const seed = Number(values.seed);
 
+/* oxlint-disable no-bitwise -- mulberry32 and the line hash are defined by 32-bit integer operations; the fixture bytes and SHA-256 depend on them. */
 const mulberry32 = (start: number): (() => number) => {
   let state = start >>> 0;
   return () => {
@@ -36,7 +37,7 @@ const bel = '\u0007';
 const encoder = new TextEncoder();
 
 /** R01: 10 MiB colored log; each line carries `seq=<n>` so order and loss are checkable from the scrollback. */
-const coloredLog = (): { bytes: Uint8Array; lines: number } => {
+const coloredLog = (): { bytes: Uint8Array<ArrayBuffer>; lines: number } => {
   const random = mulberry32(seed);
   const target = 10 * 1024 * 1024;
   const levels = [
@@ -65,9 +66,10 @@ const coloredLog = (): { bytes: Uint8Array; lines: number } => {
   }
   return { bytes: encoder.encode(parts.join('')), lines: line };
 };
+/* oxlint-enable no-bitwise */
 
 /** R02: full-screen TUI on the alternate screen, then restore. */
-const tui = (): Uint8Array => {
+const tui = (): Uint8Array<ArrayBuffer> => {
   const rows: string[] = [`${esc}[?1049h${esc}[H${esc}[2J`, `${esc}[?25l`];
   rows.push(`${esc}[1;1H${esc}[7m TUI-HEADER tau-s3 ${esc}[0m`);
   for (let row = 2; row < 20; row++) {
@@ -79,7 +81,7 @@ const tui = (): Uint8Array => {
 const tuiExit = encoder.encode(`${esc}[?25h${esc}[?1049l`);
 
 /** R02: Unicode width cases, one per line, each followed by a `|` sentinel so cell width is observable. */
-const unicode = (): Uint8Array =>
+const unicode = (): Uint8Array<ArrayBuffer> =>
   encoder.encode(
     [
       'ascii|',
@@ -95,11 +97,11 @@ const unicode = (): Uint8Array =>
   );
 
 /** R02: 50,000 plain numbered lines for scrollback cap and scrolling. */
-const scrollback = (): Uint8Array =>
+const scrollback = (): Uint8Array<ArrayBuffer> =>
   encoder.encode(Array.from({ length: 50_000 }, (_, index) => `scroll ${String(index).padStart(6, '0')}\r\n`).join(''));
 
 /** R07: hostile and malformed output; every payload must stay inert text. */
-const hostile = (): Uint8Array => {
+const hostile = (): Uint8Array<ArrayBuffer> => {
   const clipboard = Buffer.from('rm -rf ~ # s3-osc52-payload').toString('base64');
   const textParts = [
     `${esc}]52;c;${clipboard}${bel}`,
@@ -123,7 +125,7 @@ const hostile = (): Uint8Array => {
   return Buffer.concat([encoder.encode(textParts.join('')), invalidUtf8, longLine, tail]);
 };
 
-const streams: Record<string, Uint8Array> = {};
+const streams: Record<string, Uint8Array<ArrayBuffer>> = {};
 const log = coloredLog();
 streams['r01-colored-log'] = log.bytes;
 streams['r02-tui'] = tui();
@@ -135,6 +137,7 @@ streams['r07-hostile'] = hostile();
 await mkdir(values.out, { recursive: true });
 const manifest: Record<string, { bytes: number; sha256: string }> = {};
 for (const [name, bytes] of Object.entries(streams)) {
+  // oxlint-disable-next-line eslint/no-await-in-loop -- Write the streams one at a time in a fixed order; the manifest mirrors that order.
   await writeFile(path.join(values.out, `${name}.bin`), bytes);
   manifest[name] = { bytes: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex') };
 }

@@ -71,19 +71,20 @@ export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
  *
  * The stale-build recovery owns module load failures (`installStaleBuildRecovery` and the route
  * error page); this hook never acts on one and never drops one: Sentry marks an error captured
- * before `beforeSend` runs, so a dropped event could never be sent again. It tags each with what is
- * known now (`stale_build` = `superseded` | `current` | `unknown`); one a deploy explains is grouped
- * apart (its own fingerprint) at level `info`, for operators to filter.
+ * before `beforeSend` runs, so a dropped event could never be sent again. It holds the event until
+ * the failure's decision settles (bounded by `staleBuildTagWait`), then tags it with that decision
+ * (`stale_build` = `superseded` | `current` | `unknown`); one a deploy explains is grouped apart (its
+ * own fingerprint) at level `info`, for operators to filter.
  *
- * @param describe - What is known about one failure now, without asking anything (`classifyStaleBuildFailure`).
+ * @param describe - The failure's tag once its decision settles, bounded, asking nothing (`classifyStaleBuildFailure`).
  * @returns The hook to pass to `Sentry.init`.
  * @public
  */
-export const createBeforeSend = (describe: (failure: unknown) => StaleBuildTag) => {
+export const createBeforeSend = (describe: (failure: unknown) => Promise<StaleBuildTag>) => {
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
-  const tagged = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null => {
-    // Passive: what is known now; the hook never asks the server or waits for an answer.
-    const tag = describe(hint?.originalException);
+  const tagged = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> => {
+    // Held until the failure's decision settles (bounded): the tracker hears a failure before it is decided.
+    const tag = await describe(hint?.originalException);
     const annotated: ErrorEvent = {
       ...event,
       // oxlint-disable-next-line naming-convention -- A Sentry tag name, filtered on by operators.
@@ -94,7 +95,7 @@ export const createBeforeSend = (describe: (failure: unknown) => StaleBuildTag) 
     return beforeSendSentryEvent(annotated, hint);
   };
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
-  return (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
+  return (event: ErrorEvent, hint?: EventHint): ErrorEvent | null | Promise<ErrorEvent | null> =>
     isStaleModuleError(hint?.originalException) ? tagged(event, hint) : beforeSendSentryEvent(event, hint);
 };
 

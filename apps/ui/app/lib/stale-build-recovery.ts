@@ -166,6 +166,12 @@ export type FailureSource = 'boundary' | 'global' | 'preload';
 /** Whether Sentry's own handlers capture failures from each channel (see {@link FailureSource}). */
 const capturedBySentry: Readonly<Record<FailureSource, boolean>> = { global: true, preload: false, boundary: false };
 
+/**
+ * Milliseconds the error tracker's `beforeSend` waits for a failure's decision before tagging it with
+ * what is known: one lookup and its confirmations (`build-skew`), each answer within its 4 s timeout.
+ */
+export const staleBuildTagWait = 10_000;
+
 /** Milliseconds a failure only `vite:preloadError` reported waits for the channel Vite rethrows it into. */
 export const preloadFollowUpDelay = 1000;
 
@@ -190,6 +196,11 @@ export type StaleBuildRecovery = {
    * on it: from the decision already made for it, or else from the live verdict. Never reloads.
    */
   readonly classify: (failure: unknown) => StaleBuildTag;
+  /**
+   * The tag once the failure's decision settles, waiting at most `bound` milliseconds; then what is
+   * known. Passive: it starts no question, it only waits for the decision under way.
+   */
+  readonly classifySettled: (failure: unknown, bound?: number) => Promise<StaleBuildTag>;
   /** The settled decision for a failure, or `undefined` while none is. */
   readonly readOutcome: (failure: unknown) => StaleBuildOutcome | undefined;
   /** Subscribe to each settled or changed decision ({@link StaleBuildRecovery.readOutcome}). */
@@ -404,7 +415,6 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       if (capturedBySentry[source] && (options.isErrorTrackerListening?.() ?? true)) {
         record.seenByTracker = true;
       }
-      reportToErrorTracker(failure);
       if (record.decision === undefined) {
         const decided = decide();
         record.decision = decided;
@@ -413,6 +423,8 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
           settle(failure, await decided);
         })();
       }
+      // After the decision is under way, so the tracker's `beforeSend` can wait for it (`classifySettled`).
+      reportToErrorTracker(failure);
       return record.decision;
     },
     classify(failure) {
@@ -423,6 +435,20 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       const verdict = liveBuild.readVerdict();
       return verdict === 'replaced' ? 'superseded' : tagOf('current', verdict);
+    },
+    async classifySettled(failure, bound = staleBuildTagWait) {
+      const decision = isKey(failure) ? records.get(failure)?.decision : undefined;
+      if (decision !== undefined && records.get(failure as WeakKey)?.outcome === undefined) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          decision,
+          new Promise((resolve) => {
+            timer = setTimeout(resolve, bound);
+          }),
+        ]);
+        clearTimeout(timer);
+      }
+      return this.classify(failure);
     },
     readOutcome: (failure) => (isKey(failure) ? records.get(failure)?.outcome : undefined),
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
@@ -543,12 +569,14 @@ export const subscribeReloadState = (listener: () => void): (() => void) =>
 
 /**
  * What the error tracker should be told about one module load failure ({@link StaleBuildTag}):
- * the decision the page already made, or the live verdict. Never reloads or supersedes anything.
+ * its decision once settled (waiting at most {@link staleBuildTagWait}, since the tracker hears a
+ * failure as soon as it happens), or else what is known. Never reloads, supersedes or asks anything.
  *
  * @param failure - The caught value.
  * @returns The `stale_build` tag for its event.
  */
-export const classifyStaleBuildFailure = (failure: unknown): StaleBuildTag => getPageRecovery().classify(failure);
+export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildTag> =>
+  getPageRecovery().classifySettled(failure);
 
 /**
  * Hand a module load failure any React error boundary caught to the recovery (`hydrateRoot`'s

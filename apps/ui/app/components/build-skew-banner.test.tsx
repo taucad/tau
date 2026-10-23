@@ -364,6 +364,28 @@ describe('build-id skew guard (DF20)', () => {
     expect(isReloadOffered()).toBe(false);
   });
 
+  it('keeps confirming, not settling as superseded, when one answer flips while it confirms this build', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, readServerVerdict, peerRecheckDelay, serverConfirmations } = await load();
+    answerLiveBuild(buildId);
+    announce(buildId + 1);
+    await pause();
+
+    // During a rollback, one edge still names the build it is leaving.
+    answerLiveBuild(buildId - 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    expect(readServerVerdict()).not.toBe('replaced');
+    answerLiveBuild(buildId);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (2 * serverConfirmations + 2));
+    });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(false);
+  });
+
   it('shares one question and its confirmations among every caller of queryLiveBuild', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { buildId, queryLiveBuild, lookupConfirmDelay, serverConfirmations } = await load();

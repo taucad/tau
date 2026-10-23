@@ -406,6 +406,44 @@ describe('createStaleBuildRecovery', () => {
       expect(reportToErrorTracker.mock.calls).toStrictEqual([[error]]);
     });
 
+    it('should tag a failure reported before its decision with the decision, once it settles', async () => {
+      let answer: (buildId: number) => void = () => undefined;
+      const { recovery, reportToErrorTracker } = setup({
+        canReloadSafely: () => false,
+        fetchServerBuildId: async () =>
+          new Promise<number>((resolve) => {
+            answer = resolve;
+          }),
+      });
+      const error = failure();
+      const decision = recovery.recover(error, 'boundary');
+      expect(reportToErrorTracker.mock.calls).toStrictEqual([[error]]);
+      expect(recovery.classify(error)).toBe('unknown');
+
+      const tag = recovery.classifySettled(error);
+      answer(deployedBuildId);
+      await decision;
+
+      await expect(tag).resolves.toBe('superseded');
+    });
+
+    it('should tag with what is known once the wait for a decision runs out', async () => {
+      vi.useFakeTimers();
+      const { recovery } = setup({
+        fetchServerBuildId: async () =>
+          new Promise<number>(() => {
+            // Never answers.
+          }),
+      });
+      const error = failure();
+      void recovery.recover(error, 'boundary');
+
+      const tag = recovery.classifySettled(error, 1000);
+      await vi.advanceTimersByTimeAsync(1000);
+
+      await expect(tag).resolves.toBe('unknown');
+    });
+
     it.each(['boundary', 'global', 'preload'] as const)(
       'should tell analytics once of a %s failure decided genuine, when it is decided',
       async (source) => {

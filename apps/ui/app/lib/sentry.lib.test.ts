@@ -152,10 +152,10 @@ const moduleImportFailure = new TypeError('Importing a module script failed.');
 
 describe('createBeforeSend', () => {
   it('should keep a module import failure a deploy explains, tagged and grouped apart at level info', async () => {
-    const describeFailure = vi.fn((_failure: unknown): StaleBuildTag => 'superseded');
+    const describeFailure = vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded');
     const beforeSend = createBeforeSend(describeFailure);
 
-    const sent = beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
+    const sent = await beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
 
     expect(sent?.tags).toMatchObject({ stale_build: 'superseded' });
     expect(sent?.level).toBe('info');
@@ -166,9 +166,9 @@ describe('createBeforeSend', () => {
   it.each<StaleBuildTag>(['current', 'unknown'])(
     'should keep a module import failure tagged %s in its usual group, scrubbed',
     async (tag) => {
-      const beforeSend = createBeforeSend(() => tag);
+      const beforeSend = createBeforeSend(async () => tag);
 
-      const sent = beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
+      const sent = await beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
 
       expect(sent?.tags).toMatchObject({ stale_build: tag });
       expect(sent?.fingerprint).toBeUndefined();
@@ -189,7 +189,7 @@ describe('createBeforeSend', () => {
         },
         flush: async () => true,
       }),
-      beforeSend: createBeforeSend(() => 'superseded'),
+      beforeSend: createBeforeSend(async () => 'superseded'),
     });
     try {
       const failure = new TypeError('Importing a module script failed.');
@@ -209,7 +209,7 @@ describe('createBeforeSend', () => {
   });
 
   it('should not probe the server for any other error', () => {
-    const decide = vi.fn((_failure: unknown): StaleBuildTag => 'superseded');
+    const decide = vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded');
     const beforeSend = createBeforeSend(decide);
 
     const sent = beforeSend(rejectionEvent('generic'), { originalException: new Error('boom') });

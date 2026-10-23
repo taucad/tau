@@ -274,7 +274,11 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
       }
       case 'server-confirming': {
         if (current.towards === 'live') {
-          return { ...replaced, phase: 'server-superseded' };
+          /* Turning back towards another build follows the same rule as every transition: a
+           * supersession already confirmed stands; otherwise the confirmations start again. */
+          return current.server === 'replaced'
+            ? { ...replaced, phase: 'server-superseded' }
+            : { ...named, phase: 'server-confirming', towards: 'replaced', checksLeft: serverConfirmations };
         }
         const checksLeft = current.checksLeft - 1;
         return checksLeft > 0
@@ -305,14 +309,9 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
     return current;
   }
   if (current.phase === 'server-confirming') {
-    // An unanswered check counts towards supersession (the earlier word stands), never back to live.
-    if (current.towards === 'live') {
-      return current;
-    }
-    const checksLeft = current.checksLeft - 1;
-    return checksLeft > 0
-      ? { ...common, phase: 'server-confirming', towards: 'replaced', checksLeft }
-      : { ...common, phase: 'server-superseded' };
+    /* An unanswered check settles nothing either way: the tab keeps asking, since only a confirmed
+     * `replaced` verdict may end in a phase that asks no more. */
+    return current;
   }
   if (claimedBuildId === undefined || current.phase === 'idle' || current.phase === 'offered') {
     return current;

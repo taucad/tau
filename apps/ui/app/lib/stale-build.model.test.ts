@@ -81,6 +81,10 @@ type Tab = {
   readonly trackerQueue: unknown[];
   /** Failures the model error tracker holds; Sentry ignores a second capture of the same error. */
   readonly tracked: Set<unknown>;
+  /** The `stale_build` tag each tracked failure's event was sent with (`beforeSend` holds it). */
+  readonly tags: Map<unknown, Promise<StaleBuildRecovery.StaleBuildTag>>;
+  /** The edge once answered `none` (no build endpoint): the newer build wins and nothing is asked again. */
+  sawNone: boolean;
   readonly analytics: Map<unknown, number>;
   /** Each failure with the page (module instance) that saw it; a reload starts a new page. */
   readonly failures: Array<{ readonly failure: unknown; readonly recovery: typeof StaleBuildRecovery }>;
@@ -98,6 +102,9 @@ const loadTab = async (tab: Tab): Promise<void> => {
     readBuildId: () => tab.build,
     askLiveBuild: async () => {
       tab.fetches += 1;
+      if (tab.answer === 'none') {
+        tab.sawNone = true;
+      }
       if (tab.answer === 'X' || tab.answer === 'Y') {
         const named = tab.answer === 'X' ? buildX : buildY;
         tab.consecutiveOwn = named === tab.build ? tab.consecutiveOwn + 1 : 0;
@@ -119,7 +126,7 @@ const loadTab = async (tab: Tab): Promise<void> => {
     isErrorTrackerListening: () => tab.trackerReady,
     reportUiError: async (error: unknown) => {
       if (tab.trackerReady) {
-        tab.tracked.add(error);
+        track(tab, error);
       } else {
         tab.trackerQueue.push(error);
       }
@@ -140,6 +147,8 @@ const newTab = (build: number, answer: Answer): Tab => ({
   trackerReady: false,
   trackerQueue: [],
   tracked: new Set(),
+  tags: new Map(),
+  sawNone: false,
   analytics: new Map(),
   failures: [],
   everStopped: false,
@@ -154,20 +163,31 @@ const flush = async (): Promise<void> => {
   }
 };
 
+/** The model error tracker captures a failure once, its event tagged as `beforeSend` would. */
+function track(tab: Tab, failure: unknown): void {
+  if (tab.tracked.has(failure)) {
+    return;
+  }
+  tab.tracked.add(failure);
+  const page = tab.failures.find((entry) => entry.failure === failure)?.recovery ?? tab.recovery!;
+  tab.tags.set(failure, page.classifyStaleBuildFailure(failure));
+}
+
 const startTracker = (tab: Tab): void => {
   tab.trackerReady = true;
   for (const error of tab.trackerQueue.splice(0)) {
-    tab.tracked.add(error);
+    track(tab, error);
   }
 };
 
 const sight = (tab: Tab, failure: unknown, channel: Channel): void => {
-  // Sentry's own global handlers capture what reaches `window`, once they are installed.
-  if (channel === 'global' && tab.trackerReady) {
-    tab.tracked.add(failure);
-  }
   // async-iife: bootstrap -- the decision lands on its own, as from a listener.
   void tab.recovery?.recoverFromStaleBuild(failure, channel);
+  /* Sentry's own global handlers capture what reaches `window`, once installed, and after the
+   * recovery's capture-phase listener (`installStaleBuildRecovery`), which has started the decision. */
+  if (channel === 'global' && tab.trackerReady) {
+    track(tab, failure);
+  }
 };
 
 const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
@@ -273,12 +293,17 @@ const checkStep = (
   }
 };
 
-/** I2 once the trackers are up and every wait has passed. */
-const checkEnd = (tabs: readonly [Tab, Tab]): void => {
+/** I2 (and I2b: the tag sent is the settled decision's) once the trackers are up and every wait has passed. */
+const checkEnd = async (tabs: readonly [Tab, Tab]): Promise<void> => {
   for (const [index, tab] of tabs.entries()) {
     for (const { failure, recovery } of tab.failures) {
       const outcome = recovery.readStaleBuildOutcome(failure);
       expect(tab.tracked.has(failure), `I2 tracker tab ${String(index)}`).toBe(true);
+      if (outcome !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- Each tag was settled during the wait already.
+        const [sent, settled] = await Promise.all([tab.tags.get(failure), recovery.classifyStaleBuildFailure(failure)]);
+        expect(sent, `I2b tag tab ${String(index)} (${outcome})`).toBe(settled);
+      }
       expect(tab.analytics.get(failure) ?? 0, `I2 analytics tab ${String(index)} (${String(outcome)})`).toBe(
         outcome === 'current' ? 1 : 0,
       );
@@ -347,7 +372,22 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
           for (const tab of tabs) {
             startTracker(tab);
           }
-          checkEnd(tabs);
+          await checkEnd(tabs);
+          // I6: no phase stops writes for good without a recheck, unless the server confirmed
+          // another build (or there is no build endpoint, where the newer build wins as before).
+          for (const tab of tabs) {
+            tab.answer = tab.build === buildX ? 'X' : 'Y';
+          }
+          for (let round = 0; round < 12; round += 1) {
+            deliverAll();
+            // oxlint-disable-next-line no-await-in-loop -- Time passes one recheck at a time.
+            await vi.advanceTimersByTimeAsync(30_000);
+          }
+          for (const [index, tab] of tabs.entries()) {
+            if (tab.skew!.isBuildSuperseded() && !tab.sawNone) {
+              expect(tab.skew!.readServerVerdict(), `I6 tab ${String(index)}`).toBe('replaced');
+            }
+          }
         } finally {
           for (const tab of tabs) {
             tab.skew?.closeBuildSkewChannel();

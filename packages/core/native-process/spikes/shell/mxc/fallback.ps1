@@ -221,8 +221,23 @@ public static class TauRestrict {
 }
 '@
 
+# The literal token flags, independent of whether the C# compiled: DISABLE_MAX_PRIVILEGE (0x01) |
+# LUA_TOKEN (0x04) | WRITE_RESTRICTED (0x08) = 0x0D (token.rs:500-501). The receipt is built from this
+# literal, never from [TauRestrict]::FLAGS, so the receipt is ALWAYS written even if Add-Type fails.
+$FLAGS = 0x0D
+$FLAGS_HEX = ('0x{0:X2}' -f $FLAGS)
+
 $apiOk = $true
-try { Add-Type -TypeDefinition $csharp -ErrorAction Stop } catch { $apiOk = $false; Add-Check 'fallback.api.compile' 'restricted-token P/Invoke harness compiles' $_.Exception.Message $false $null }
+$compileErr = $null
+# Capture the FULL Add-Type failure (the terminating exception message is generic — "Cannot add type.
+# There were compilation errors." — while the specific CSxxxx diagnostics are in the recent error
+# records), so a compile failure is a typed, inspectable receipt instead of an opaque crash.
+try { Add-Type -TypeDefinition $csharp -ErrorAction Stop } catch {
+  $apiOk = $false
+  $recent = ($Error | Select-Object -First 6 | ForEach-Object { $_.ToString() }) -join ' | '
+  $compileErr = ($_.Exception.Message + ' || ' + $recent)
+  Add-Check 'fallback.api.compile' 'restricted-token P/Invoke harness compiles' $compileErr $false @{ error = $compileErr }
+}
 
 # ---- Elevation + identity ----
 $elevated = $false; $whoami = $null
@@ -253,7 +268,7 @@ if ($apiOk) { try { $logonSid = [TauRestrict]::GetLogonSid() } catch {} }
 # ---- WRITE_RESTRICTED token flags + non-elevated workload facts ----
 if ($apiOk) {
   $elev = [TauRestrict]::RestrictedElevation($cap1, $logonSid)
-  Add-Check 'fallback.token.writeRestricted' 'WRITE_RESTRICTED token built with the random cap SID as a restricting SID (flags DISABLE_MAX_PRIVILEGE|LUA_TOKEN|WRITE_RESTRICTED=0x0D; token.rs:500-501)' ("flags=0x{0:X2} elevationProbe={1}" -f ([TauRestrict]::FLAGS), $elev) ($elev -ge 0) @{ flags = ('0x{0:X2}' -f ([TauRestrict]::FLAGS)); citation = 'codex-rs/windows-sandbox-rs/src/token.rs:500' }
+  Add-Check 'fallback.token.writeRestricted' 'WRITE_RESTRICTED token built with the random cap SID as a restricting SID (flags DISABLE_MAX_PRIVILEGE|LUA_TOKEN|WRITE_RESTRICTED=0x0D; token.rs:500-501)' ("flags=$FLAGS_HEX elevationProbe=$elev") ($elev -ge 0) @{ flags = $FLAGS_HEX; citation = 'codex-rs/windows-sandbox-rs/src/token.rs:500' }
   Add-Check 'fallback.workload.nonElevated' 'the write-restricted workload token is NOT elevated (LUA_TOKEN filtered)' "tokenIsElevated=$elev (0=not-elevated)" ($elev -eq 0) $null
 }
 
@@ -485,7 +500,7 @@ $verdict = if ($allPass) { 'pass' } else { 'fail' }
 $receipt = [ordered]@{
   kind = 'capability-sid-fallback'
   model = 'Ratified Codex-elevated restricted-token fallback: random S-1-5-21 capability SID per session (cap.rs:39-46) as the RESTRICTING SID of a WRITE_RESTRICTED token (token.rs:500-501, flags DISABLE_MAX_PRIVILEGE|LUA_TOKEN|WRITE_RESTRICTED=0x0D); ALLOW-write ACEs for the cap SID on the admitted roots and deny-read ACEs (acl.rs:1014) on the never-grantable set; sandbox user(s) provisioned once with elevation, workload runs non-elevated. The broken AppContainer capability-SID-as-restricting-SID model (ERROR_INVALID_SID) is documented as the rejected alternative in this file header.'
-  tokenFlags = ('0x{0:X2}' -f ([TauRestrict]::FLAGS))
+  tokenFlags = $FLAGS_HEX
   tokenFlagsCitation = 'codex-rs/windows-sandbox-rs/src/token.rs:500 (DISABLE_MAX_PRIVILEGE|LUA_TOKEN|WRITE_RESTRICTED); CreateRestrictedToken at token.rs:501'
   mode = $mode
   s2Pty = $s2Verdict

@@ -528,6 +528,7 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/surface-reuse.test.ts::should isolate simultaneous owners and release only the retiring framebuffer view',
       'packages/viewer/src/graphics/three/camera-preparation.test.ts::should cancel on input, hidden document and disposal, allowing a later eligible frame',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should prepare offscreen once and restore camera and state after failure=%s',
+      'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should preserve the saved rear planetary section through preparation and cut reset at 5K on %s with AO %s',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should isolate CAD draws and restore renderer state after failure=%s',
       'packages/viewer/src/graphics/three/webgpu-depth-sampling.browser.test.ts::should preserve sampled depth and attachment stencil through resize/recreation',
       'packages/viewer/src/graphics/three/webgpu-depth-sampling.browser.test.ts::should restore repeated stencil references across passes and framebuffer copies',

@@ -2505,9 +2505,14 @@ it.each(['webgpu', 'node-webgl2'] as const)(
   120_000,
 );
 
-it.each(['webgpu', 'node-webgl2'] as const)(
-  'should preserve the saved rear planetary section through a cut reset at 5K on %s',
-  async (execution) => {
+it.each([
+  ['webgpu', true],
+  ['node-webgl2', true],
+  ['webgpu', false],
+  ['node-webgl2', false],
+] as const)(
+  'should preserve the saved rear planetary section through preparation and cut reset at 5K on %s with AO %s',
+  async (execution, aoEnabled) => {
     referenceMode.forceNodeWebGl2 = execution === 'node-webgl2';
     referenceMode.manualPreparation = true;
     vi.stubGlobal('devicePixelRatio', 2);
@@ -2526,12 +2531,20 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       verticalSpan: 0.23668560039290423,
       perspectiveZoom: 1,
     } as const;
-    const machine = graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) } });
+    const machine = graphicsMachine.provide({
+      actors: { probeWebGpu: createAsyncLogic({ run: async () => true }) },
+    });
     const actor = createActor(machine, {
-      input: { enablePostProcessing: true, sectionView: { active: true, cuts: [...cuts] } },
+      input: {
+        enablePostProcessing: true,
+        sectionView: { active: true, cuts: [...cuts] },
+      },
     }).start();
     const sibling = createActor(machine, {
-      input: { enablePostProcessing: true, sectionView: { active: true, cuts: cuts.slice(0, 1) } },
+      input: {
+        enablePostProcessing: true,
+        sectionView: { active: true, cuts: cuts.slice(0, 1) },
+      },
     }).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
@@ -2543,9 +2556,15 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       return undefined;
     };
     const capture = async (): Promise<Uint8ClampedArray> => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
       await vi.waitFor(
         () => {
           state!.advance(performance.now(), true);
+          expect(Reflect.get(state!.camera, 'aspect')).toBe(2560 / 1440);
           expect(actor.getSnapshot().context.committedSectionCuts).toEqual(actor.getSnapshot().context.sectionCuts);
           const pending: number[] = [];
           state!.scene.traverse((object) => {
@@ -2558,14 +2577,6 @@ it.each(['webgpu', 'node-webgl2'] as const)(
         },
         { timeout: 30_000 },
       );
-      for (let frame = 0; frame < 4; frame++) {
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => {
-            resolve();
-          });
-        });
-        state!.advance(performance.now(), true);
-      }
       return captureRendererOutput(state!.gl);
     };
     try {
@@ -2580,7 +2591,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
                 enableAxes
                 enableGizmo
                 gizmoContainer={document.body}
-                postProcessingSettings={{ aoEnabled: true, toneMapping: 'neutral' }}
+                postProcessingSettings={{ aoEnabled, toneMapping: 'neutral' }}
                 onRetry={() => undefined}
               >
                 <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
@@ -2595,7 +2606,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
                 upDirection='z'
                 enableGrid
                 enableAxes
-                postProcessingSettings={{ aoEnabled: true, toneMapping: 'neutral' }}
+                postProcessingSettings={{ aoEnabled, toneMapping: 'neutral' }}
                 onRetry={() => undefined}
               >
                 <GltfMesh gltfFile={bytes} enableLines enableSurfaces enableMatcap={false} />
@@ -2630,6 +2641,36 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       });
       // Do not set the camera or inspect/compile shaders before the startup capture.
       const before = await capture();
+      const firstMatrices = [...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements];
+      for (let frame = 0; frame < 32; frame++) {
+        // oxlint-disable-next-line no-await-in-loop -- Each captured frame must complete before advancing the same renderer.
+        const repeat = await capture();
+        expect([...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements]).toEqual(
+          firstMatrices,
+        );
+        let firstRedrawChanges = 0;
+        const changedSamples: Array<{ x: number; y: number; difference: number }> = [];
+        for (let offset = 0; offset < before.length; offset += 4) {
+          let difference = 0;
+          for (const background of [0, 255]) {
+            for (let channel = 0; channel < 3; channel++) {
+              const first =
+                (before[offset + channel]! * before[offset + 3]! + background * (255 - before[offset + 3]!)) / 255;
+              const second =
+                (repeat[offset + channel]! * repeat[offset + 3]! + background * (255 - repeat[offset + 3]!)) / 255;
+              difference = Math.max(difference, Math.abs(first - second));
+            }
+          }
+          firstRedrawChanges += Number(difference > 3);
+          if (difference > 3 && changedSamples.length < 20) {
+            changedSamples.push({ x: (offset / 4) % 5120, y: Math.floor(offset / 4 / 5120), difference });
+          }
+        }
+        expect(
+          firstRedrawChanges,
+          `First complete redraw versus subsequent frame ${frame}: ${JSON.stringify(changedSamples)}`,
+        ).toBe(0);
+      }
       expect(Reflect.get(state!.camera, 'fov')).toBe(35);
 
       expect([state!.gl.domElement.width, state!.gl.domElement.height]).toEqual([5120, 2880]);
@@ -2638,9 +2679,23 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       }
       expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
       const matrices = [...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements];
-      actor.send({ type: 'adoptSectionView', section: { active: true, cuts: cuts.slice(0, 1) } });
+      // Match the packaged section picker: remove/add/update allocates new cut IDs.
+      // Direct adoption alone omits that material/owner history.
+      const resetCuts = (next: ReadonlyArray<(typeof cuts)[number]>): void => {
+        for (const { id } of actor.getSnapshot().context.sectionCuts) {
+          actor.send({ type: 'removeSectionCut', payload: id });
+        }
+        for (const cut of next) {
+          const index = actor.getSnapshot().context.sectionCuts.length;
+          actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: cut.plane } });
+          const added = actor.getSnapshot().context.sectionCuts[index]!;
+          actor.send({ type: 'updateSectionCut', payload: { id: added.id, patch: cut } });
+        }
+        actor.send({ type: 'selectSectionCut', payload: undefined });
+      };
+      resetCuts(cuts.slice(0, 1));
       await capture();
-      actor.send({ type: 'adoptSectionView', section: { active: true, cuts: [...cuts] } });
+      resetCuts(cuts);
       rig!.actorRef.send({ type: 'setView', ...cameraView });
       const after = await capture();
       expect([...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements]).toEqual(matrices);

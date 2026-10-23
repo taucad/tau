@@ -22,6 +22,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 type MockCameraSnapshot = { view: { target: [number, number, number] } };
 type MockAoNode = {
+  updateBefore: ReturnType<typeof vi.fn>;
   resolutionScale: number;
   useTemporalFiltering: boolean;
   radius: { value: number };
@@ -229,6 +230,7 @@ const mocks = vi.hoisted(() => {
 
   const ao = vi.fn((): MockAoNode => {
     const node: MockAoNode = {
+      updateBefore: vi.fn(),
       resolutionScale: 1,
       useTemporalFiltering: true,
       radius: { value: 0 },
@@ -449,6 +451,8 @@ vi.mock('three/webgpu', () => {
   }
 
   return {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Three's public node update enum.
+    NodeUpdateType: { OBJECT: 'object' },
     NodeMaterial,
     QuadMesh,
     RenderTarget,
@@ -757,7 +761,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.compileAsync).not.toHaveBeenCalled();
     expect(mocks.glRender).not.toHaveBeenCalled();
     mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.outputQuads[0]!.render).toHaveBeenCalledOnce();
+    expect(mocks.glRender.mock.calls.filter(([object]) => object === mocks.outputQuads[0])).toHaveLength(1);
     expect(isBeautyOnly(mocks.outputQuads[0]!)).toBe(true);
   });
 
@@ -904,7 +908,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
       output: { kind: 'output' },
     });
     mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.outputQuads.at(-1)!.render).toHaveBeenCalledOnce();
+    expect(mocks.glRender.mock.calls.filter(([object]) => object === mocks.outputQuads.at(-1))).toHaveLength(1);
   });
 
   it('should tone-map the scene once in linear light and leave the sRGB encode to the output pass', async () => {

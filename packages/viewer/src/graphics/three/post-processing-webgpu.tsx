@@ -222,6 +222,37 @@ const disposeLinearFrame = (frame: LinearFrame, renderer: WebGPURenderer): void 
   (frame.depth.material as NodeMaterial).dispose();
 };
 
+/** Reacquire camera-dependent inputs once per composition, including same-frame preparation and capture. */
+const updatePerComposition = (
+  quad: QuadMesh,
+  nodes: ReadonlyArray<ReturnType<typeof pass> | ReturnType<typeof ao>>,
+): void => {
+  const composition = { value: 0 };
+  for (const node of nodes) {
+    const update = node.updateBefore.bind(node);
+    let acquired = -1;
+    node.updateBeforeType = NodeUpdateType.OBJECT;
+    node.updateBefore = (frame) => {
+      if (acquired === composition.value) {
+        return;
+      }
+      const previous = acquired;
+      acquired = composition.value;
+      try {
+        return update(frame);
+      } catch (error) {
+        acquired = previous;
+        throw error;
+      }
+    };
+  }
+  const render = quad.render.bind(quad);
+  quad.render = (renderer) => {
+    composition.value++;
+    render(renderer);
+  };
+};
+
 const createPipelineResources = ({
   camera,
   gpuRenderer,
@@ -346,8 +377,9 @@ const createPipelineResources = ({
     };
     setCamera(camera);
 
-    // Qualified only for node WebGL2: retain its D24S8 attachment across the
-    // scene and composed frame. Native's float32/stencil cost has no proven saving.
+    // Retain the existing node WebGL2 D24S8 ownership. A copied-depth control
+    // also reproduces the packaged cap-rim history defect, so duplicating this
+    // attachment is not an established repair. Native keeps independent depth.
     frame.sharedDepth = gpuRenderer.coordinateSystem === WebGLCoordinateSystem;
     if (frame.sharedDepth) {
       scenePass.renderTarget.stencilBuffer = true;
@@ -396,6 +428,7 @@ const createPipelineResources = ({
         ),
         frame.sharedDepth ? undefined : depthRestoreMaterial,
       );
+      updatePerComposition(outputQuad, [scenePass]);
       return {
         get camera() {
           return scenePass.camera as ThreeCamera;
@@ -489,30 +522,7 @@ const createPipelineResources = ({
       const filtered = createOutputQuad(createViewportFxaa(texture(composedTarget.texture)));
       filtered.name = 'Tau reused surface FXAA';
       const compose = outputQuad.render.bind(outputQuad);
-      // Reuse destroys cached scene color. Three's animation frame can contain
-      // multiple compositions, so acquire scene/AO once per composition instead.
-      // Nested AO/filter draws still share that acquisition; no scene replay.
-      const composition = { value: 0 };
-      for (const node of [scenePass, aoNode]) {
-        const update = node.updateBefore.bind(node);
-        let acquired = -1;
-        node.updateBeforeType = NodeUpdateType.OBJECT;
-        node.updateBefore = (frame) => {
-          if (acquired === composition.value) {
-            return;
-          }
-          const previous = acquired;
-          acquired = composition.value;
-          try {
-            return update(frame);
-          } catch (error) {
-            acquired = previous;
-            throw error;
-          }
-        };
-      }
       outputQuad.render = (renderer) => {
-        composition.value++;
         reuse.render(
           () => {
             compose(renderer);
@@ -532,6 +542,10 @@ const createPipelineResources = ({
       };
     }
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
+    // Camera preparation can reuse this graph within Three's current animation
+    // frame. Both fused and reused output need fresh inputs for the next camera;
+    // nested AO/filter draws still share a single scene acquisition.
+    updatePerComposition(outputQuad, [scenePass, aoNode]);
 
     return {
       get camera() {

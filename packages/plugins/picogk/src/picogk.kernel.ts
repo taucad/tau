@@ -15,7 +15,8 @@ import { createExportFile } from '@taucad/runtime/types';
 
 import { picogkArtifactToGlb, picogkTessellation, picogkTessellationSchema } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
-import { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';
+import type { PicogkMeshing } from '#picogk.protocol.js';
+import { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
 import { PicogkSession, PicogkWorkerError } from '#picogk-session.js';
 import { picogkNative } from '#native.js';
 import { libraryVersionMismatches } from '#project-manifest.js';
@@ -65,12 +66,24 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
   ];
 };
 
+const sameMeshing = (requested: PicogkMeshing, applied: PicogkMeshing | undefined): boolean =>
+  applied !== undefined && applied.adaptivity === requested.adaptivity && applied.relax === requested.relax;
+
+const meshingUnsupportedIssue = (requested: PicogkMeshing): KernelIssue => ({
+  message: `This PicoGK runtime cannot mesh adaptively (meshAdaptivity ${String(requested.adaptivity)}). Set meshAdaptivity to 0 for the uniform mesh, or update the PicoGK runtime.`,
+  code: 'RUNTIME',
+  type: 'kernel',
+  severity: 'error',
+  details: { reason: 'meshing-unsupported', meshAdaptivity: requested.adaptivity, meshRelax: requested.relax },
+});
+
 const picogkKernelDefinition = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.5.2+dotnet10.roslyn5.9.host20.protocol8.material2.mechanism2.compute1',
+  version: '2.5.2+dotnet10.roslyn5.9.host21.protocol8.material2.mechanism2.compute1.meshing1',
   optionsSchema: picogkOptionsSchema,
+  evaluateOptionsSchema: picogkRenderSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
   /* A marching-cubes mesh has no B-rep edges, so the complete native answer to `includeEdges` is
@@ -198,7 +211,10 @@ const picogkKernelDefinition = defineKernel({
     }
   },
 
-  async evaluate({ entryPath, parameters }, services, context) {
+  async evaluate({ entryPath, parameters, options }, services, context) {
+    // Only an adaptive request crosses the protocol, so the uniform default sends today's request.
+    const meshing =
+      options.meshAdaptivity > 0 ? { adaptivity: options.meshAdaptivity, relax: options.meshRelax } : undefined;
     const paths = await context.mirror.sync(services.filesystem, services.fileContentCache, services.operationId);
     // D35: the project's own references must name the PicoGK this kernel runs, or it runs differently outside Tau.
     const manifestIssues: KernelIssue[] = [];
@@ -225,6 +241,7 @@ const picogkKernelDefinition = defineKernel({
           entryPath,
           parameters,
           ...(computeJob ? { computeReuse: computeJob.request } : {}),
+          ...(meshing ? { meshing } : {}),
         },
         schema: picogkBuildSchema,
         signal: computeJob?.signal ?? services.signal,
@@ -232,6 +249,10 @@ const picogkKernelDefinition = defineKernel({
         cancelMethod: 'cancel',
       });
       try {
+        if (meshing && !sameMeshing(meshing, result.meshing)) {
+          // A worker that predates adaptive meshing ignores the request; never show its uniform mesh as adaptive.
+          throw new PicogkKernelError([meshingUnsupportedIssue(meshing)]);
+        }
         const readSpan = services.tracer.startSpan('picogk.artifact-read');
         let artifact;
         try {
@@ -284,7 +305,7 @@ const picogkKernelDefinition = defineKernel({
       }
     } catch (error) {
       await computeJob?.failed();
-      throw new PicogkKernelError(issuesFrom(error, entryPath));
+      throw error instanceof PicogkKernelError ? error : new PicogkKernelError(issuesFrom(error, entryPath));
     } finally {
       span.end();
     }

@@ -69,6 +69,20 @@ internal static class CompilationService
     private static readonly object CacheLock = new();
     private static readonly ImmutableArray<MetadataReference> References = CreateReferences(
         AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string);
+    /*
+     * CH7: every compilation derives from this one, so they share its bound reference set: Roslyn reuses the
+     * template's reference manager for added syntax trees instead of re-binding ~180 assemblies per compile.
+     * The references, options and assembly name are exactly those a fresh `Create` would use.
+     */
+    private static readonly CSharpCompilation Template = CSharpCompilation.Create(
+        "TauUserModel",
+        [],
+        References,
+        new CSharpCompilationOptions(
+            OutputKind.ConsoleApplication,
+            optimizationLevel: OptimizationLevel.Release,
+            deterministic: true,
+            allowUnsafe: false));
     private static readonly byte[] PicoGkAssemblyHash = SHA256.HashData(File.ReadAllBytes(typeof(global::PicoGK.Library).Assembly.Location));
     // ponytail: one slot each. Alternating entries in one worker re-select from the cached parse but
     // recompile; keep a slot per entry if that switch cost shows up in the build timings.
@@ -122,17 +136,20 @@ internal static class CompilationService
         var trees = selected.Select(source => source.Tree).Prepend(ParseImplicitUsings()).ToArray();
         parse.Stop();
 
+        /*
+         * CH6: emit first and bind method bodies only once. A successful emit proves `GetDiagnostics` holds no
+         * error, so only a failed emit asks for them, and the refusal keeps the previous order exactly: compilation
+         * errors, then parameter analysis, then emit errors.
+         */
+        var emit = Stopwatch.StartNew();
+        var compilation = Template.AddSyntaxTrees(trees);
+        using var assembly = new MemoryStream();
+        using var pdb = new MemoryStream();
+        var emitted = compilation.Emit(assembly, pdbStream: pdb);
+        emit.Stop();
+
         var analyze = Stopwatch.StartNew();
-        var compilation = CSharpCompilation.Create(
-            "TauUserModel",
-            trees,
-            References,
-            new CSharpCompilationOptions(
-                OutputKind.ConsoleApplication,
-                optimizationLevel: OptimizationLevel.Release,
-                deterministic: true,
-                allowUnsafe: false));
-        ThrowDiagnostics(compilation.GetDiagnostics());
+        if (!emitted.Success) ThrowDiagnostics(compilation.GetDiagnostics());
         var parameters = AnalyzeParameters(compilation)
             .OrderBy(parameter => parameter.Order ?? int.MaxValue)
             .ThenBy(parameter => parameter.Name, StringComparer.Ordinal)
@@ -147,13 +164,7 @@ internal static class CompilationService
             properties.Add(parameter.Name, JsonSchemaFor(parameter));
         }
         analyze.Stop();
-
-        var emit = Stopwatch.StartNew();
-        using var assembly = new MemoryStream();
-        using var pdb = new MemoryStream();
-        var emitted = compilation.Emit(assembly, pdbStream: pdb);
         ThrowDiagnostics(emitted.Diagnostics);
-        emit.Stop();
 
         var model = new CompiledModel(
             assembly.ToArray(),
@@ -487,15 +498,37 @@ internal static class CompilationService
         digest.AppendData(value);
     }
 
-    private static void AssertSyntaxDepth(SyntaxTree tree)
+    /// <summary>
+    /// Refuses a tree with a node deeper than <see cref="MaximumSyntaxDepth"/> ancestors, counting through
+    /// structured trivia as <c>Ancestors()</c> does. CH8: one walk that carries each node's depth, instead of
+    /// counting every node's ancestors again.
+    /// </summary>
+    internal static void AssertSyntaxDepth(SyntaxTree tree)
     {
-        var maximumDepth = tree.GetRoot().DescendantNodes(descendIntoTrivia: true)
-            .Select(node => node.Ancestors().Count())
-            .DefaultIfEmpty(0)
-            .Max();
-        if (maximumDepth > MaximumSyntaxDepth)
+        var root = tree.GetRoot();
+        var pending = new Stack<(SyntaxNode Node, int Depth)>();
+        pending.Push((root, 0));
+        while (pending.TryPop(out var item))
         {
-            throw CompilationError($"C# syntax exceeds the maximum depth of {MaximumSyntaxDepth}.", tree.GetRoot());
+            if (item.Depth > MaximumSyntaxDepth)
+            {
+                throw CompilationError($"C# syntax exceeds the maximum depth of {MaximumSyntaxDepth}.", root);
+            }
+            foreach (var child in item.Node.ChildNodesAndTokens())
+            {
+                if (child.AsNode() is { } node)
+                {
+                    pending.Push((node, item.Depth + 1));
+                    continue;
+                }
+                var token = child.AsToken();
+                if (!token.HasStructuredTrivia) continue;
+                // A structured trivia node's ancestors are the token's parent and that parent's ancestors.
+                foreach (var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia))
+                {
+                    if (trivia.GetStructure() is { } structure) pending.Push((structure, item.Depth + 1));
+                }
+            }
         }
     }
 

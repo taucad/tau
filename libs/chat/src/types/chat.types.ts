@@ -44,7 +44,11 @@ export type Chat = {
    * fall back to the cookie default.
    */
   activeKernel?: KernelId;
-  /** Durable checkout for this chat's future turns. */
+  /**
+   * Durable checkout for this chat's future turns. A linked checkout's id derives from its branch, so the branch is
+   * the portable fact: a device that has no checkout with this id places the turn on the one holding that branch,
+   * opening it when the branch is present there (`@taucad/revisions/turn-placement`).
+   */
   checkoutId?: string;
   /** Product recency for chat ordering, in Unix epoch milliseconds. */
   recencyAt?: number;

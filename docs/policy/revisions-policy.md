@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-10-21'
+updated: '2026-10-23'
 related:
   - docs/research/revisions-always-on-sync-charter.md
   - docs/research/git-storage-substrate-charter.md
@@ -74,7 +74,7 @@ Issue every file-bearing pane, chat link, tool, editor, viewer, parameter surfac
 
 Keep the live checkout at the project directory. Place linked checkouts outside it: use persistent `/checkouts/<id>` routes over the same storage root in browser authorities and the host data directory on disk hosts. Never place a linked checkout inside a served project, expose it in project discovery, or exclude it by an ignore rule. Keep at most one checkout per branch.
 
-Attach chats and workbenches by checkout id. Default every chat and concurrent chat to the live checkout's current branch; that is `main` for a new project and may be another branch for an imported project. Create a branch only for an explicit user branch action, from the selected checkout's recorded tree: cut a dirty selected checkout (`switch`) first, then branch from the resulting head, and refuse a branch of a checkout that has no revision and nothing to record. Make the chat workspace authority the one writer of a chat's checkout id; a turn admitted while that id is still settling waits for it or is refused with the same reason. Make subagents inherit the parent chat's checkout.
+Attach chats and workbenches by checkout id. A linked checkout's id derives from its branch, so a chat record synced from another device can name a checkout this device never opened: place its turn on the checkout holding that branch, open a linked checkout of it when the branch is local, or use the live checkout when it is the unborn default branch, and refuse retryably (`BRANCH_UNAVAILABLE`) only when no local branch derives the id. Default every chat and concurrent chat to the live checkout's current branch; that is `main` for a new project and may be another branch for an imported project. Create a branch only for an explicit user branch action, from the selected checkout's recorded tree: cut a dirty selected checkout (`switch`) first, then branch from the resulting head, and refuse a branch of a checkout that has no revision and nothing to record. Make the chat workspace authority the one writer of a chat's checkout id; a turn admitted while that id is still settling waits for it or is refused with the same reason. Make subagents inherit the parent chat's checkout.
 
 Implement **Switch** as one verb:
 

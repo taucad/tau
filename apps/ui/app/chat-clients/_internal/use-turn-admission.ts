@@ -8,7 +8,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { parseAdmissionFailureForPersistence } from '#utils/error.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
-import { daemonPlacementOf } from '#lib/agent-host-placement.js';
+import { daemonPlacementOf, unplaceableExecutionReason } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
 import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
 import { randomUuid } from '@taucad/utils/id';
@@ -51,6 +51,12 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
   const creditPreflight = useCreditPreflight();
   const admitExecution = useCallback(
     async (turnExecution: CadAgentExecution = liveExecution): Promise<ChatExecutionTarget> => {
+      /* An external agent pinned to a launcher this device lacks is refused at once: nothing will ever publish
+       * that host here, and the chat keeps its pin rather than moving to Tau. */
+      const unplaceable = unplaceableExecutionReason(turnExecution);
+      if (unplaceable !== undefined) {
+        throw Object.assign(new Error(unplaceable), { code: 'CHAT_PLACEMENT_UNAVAILABLE' });
+      }
       const daemonHostId = daemonPlacementOf(turnExecution);
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,

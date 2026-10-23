@@ -657,6 +657,11 @@ function useConsumeDraft(
   }, [draftActorRef, owner]);
 }
 
+/**
+ * Session execution: the one this device runs the chat on — the chat record's intent with this device's placement
+ * for it — else the device default. A choice goes whole to the device default and to the session, whose persistence
+ * splits it: the portable execution to `chat.json`, a device-relative placement to this device's composer record (XD2).
+ */
 function useSessionExecution(session: ChatSession): ActiveChatExecution {
   const persisted = useSelector(session.persistenceActorRef, (state) => state.context.activeExecution);
   const { defaultExecution, rememberExecution } = useModels();

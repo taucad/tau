@@ -23,6 +23,12 @@ export type ChatPersistenceMachineContext = {
   loadError?: Error;
   /** The last refused command; host run failures are selected from the log. */
   persistedError?: ChatError;
+  /**
+   * The execution this device runs the chat on: the chat record's portable
+   * execution with this device's own placement for the chat put back on it.
+   * `persistActiveExecutionActor` splits it again on write, so `chat.json`
+   * never holds a device-relative host (cross-device chat handoff, XD2).
+   */
   activeExecution?: CadAgentExecution;
   activeKernel?: KernelId;
   fault?: string;

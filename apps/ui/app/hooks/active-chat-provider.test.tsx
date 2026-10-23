@@ -1117,7 +1117,7 @@ describe('ActiveChatProvider', () => {
 
     it('should persist the chosen reasoning level on the chat execution, keeping its model', async () => {
       harness.getChat.mockResolvedValue(
-        makeChat({ id: 'chat_effort', activeExecution: { kind: 'tau', model: 'old-model', hostId: 'origin' } }),
+        makeChat({ id: 'chat_effort', activeExecution: { kind: 'tau', model: 'old-model', hostId: 'dev_studio' } }),
       );
 
       const { result } = renderHook(() => useChatComposer(), {
@@ -1136,7 +1136,7 @@ describe('ActiveChatProvider', () => {
         expect(harness.patchChat).toHaveBeenCalledWith('chat_effort', 'activeExecution', {
           kind: 'tau',
           model: 'old-model',
-          hostId: 'origin',
+          hostId: 'dev_studio',
           effort: 'low',
         });
       });

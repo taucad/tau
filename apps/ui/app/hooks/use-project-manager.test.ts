@@ -3219,6 +3219,31 @@ describe('useProjectManager.createProject', () => {
       expect(mockCompletePending).toHaveBeenCalledWith(operationId);
     });
 
+    it.each([
+      ['an explicit daemon on this device', { kind: 'tau', model: 'gpt-test', hostId: 'origin' }, 'origin'],
+      ['this device’s default', { kind: 'tau', model: 'gpt-test' }, undefined],
+      ['a paired device the chat names itself', { kind: 'tau', model: 'gpt-test', hostId: 'dev_studio' }, undefined],
+    ] as const)('should keep the new chat’s placement on this device for %s (XD2)', async (_label, execution, kept) => {
+      mockPrepareProjectCreation.mockImplementationOnce(prepareWithChat);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+      await act(async () =>
+        result.current.createProject({
+          kernel: 'openscad',
+          activeExecution: execution,
+          initialMessage: { content: 'Build it', attachments: [] },
+          location: { kind: 'home' },
+        }),
+      );
+
+      const recordPath = `/.tau/composers/chats/${fakeProject.id}/cht_create.json`;
+      const written = mockWriteFile.mock.calls.filter(([path]) => path === recordPath);
+      expect(
+        written.map(([, bytes]) => (JSON.parse(new TextDecoder().decode(bytes)) as { placement?: string }).placement),
+      ).toEqual(kept === undefined ? [] : [kept]);
+      expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat?.activeExecution).toEqual(execution);
+    });
+
     it('completes the copy when an operation persisted before it is resumed', async () => {
       const image = await seedHomeAttachment(new Uint8Array([4, 5, 6]), 'image/png');
       const startup: MyUIMessage = {

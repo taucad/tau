@@ -10,7 +10,7 @@
  */
 
 import { z } from 'zod';
-import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import { cadAgentExecutionSchema, safeValidateUiMessages } from '@taucad/chat';
 import { chatMode } from '@taucad/chat/constants';
 import type { RowKey } from '@taucad/agent-host';
@@ -27,7 +27,7 @@ const composersRoot = '/.tau/composers';
 export const composerRecordPaths = {
   /** The sole Home pre-project composer record. */
   newProject: `${composersRoot}/new-project.json`,
-  /** One record per project chat: draft, message edits, tool choice and mode. */
+  /** One record per project chat: draft, message edits, tool choice, mode and this device's placement. */
   chat: (projectId: string, chatId: string): string => `${composersRoot}/chats/${projectId}/${chatId}.json`,
   /** One record per project holding each chat's read receipt, so the sidebar reads them in one call. */
   unread: (projectId: string): string => `${composersRoot}/chats/${projectId}/unread.json`,
@@ -56,6 +56,13 @@ export type ComposerRecord = {
   /** Each chat's read receipt: the attention row the person last saw (W9 PV-S8). */
   readonly readThrough?: Readonly<Record<string, RowKey>>;
   readonly execution?: CadAgentExecution;
+  /**
+   * This device's placement for the chat, when the person chose one that differs
+   * from the device default: `origin` on a daemon-served page, or a `loopback:`
+   * daemon. The chat record keeps intent and never a device-relative host
+   * (cross-device chat handoff, XD2).
+   */
+  readonly placement?: TauAgentHostId;
 };
 
 /**
@@ -71,6 +78,8 @@ export type ComposerRecordPatch = {
   /** A receipt per chat; `false` removes the chat's receipt. */
   readonly readThrough?: Readonly<Record<string, RowKey | false>>;
   readonly execution?: CadAgentExecution;
+  /** This device's placement for the chat; `false` removes it, so the chat takes the device default. */
+  readonly placement?: TauAgentHostId | false;
 };
 
 /** Absence and unreadable bytes are different outcomes, and neither is an exception. */
@@ -141,6 +150,7 @@ const envelopeSchema = z
     unread: z.record(z.string(), z.literal(true)).optional(),
     readThrough: z.record(z.string(), rowKeySchema).optional(),
     execution: cadAgentExecutionSchema.optional(),
+    placement: z.string().min(1).optional(),
   })
   .strict();
 
@@ -148,7 +158,16 @@ const envelopeSchema = z
 const mutex = new KeyedMutex<string>();
 
 // The write order every record is serialised in, so equal records produce equal bytes.
-const fieldOrder = ['draft', 'messageEdits', 'toolChoice', 'mode', 'unread', 'readThrough', 'execution'] as const;
+const fieldOrder = [
+  'draft',
+  'messageEdits',
+  'toolChoice',
+  'mode',
+  'unread',
+  'readThrough',
+  'execution',
+  'placement',
+] as const;
 
 const invalid = (error: unknown): ComposerRecordReadResult => ({
   status: 'invalid',
@@ -246,7 +265,7 @@ const parseRecord = async (text: string): Promise<ComposerRecordReadResult> => {
   if (!envelope.success) {
     return invalid(envelope.error);
   }
-  const { version, draft, messageEdits, toolChoice, mode, unread, readThrough, execution } = envelope.data;
+  const { version, draft, messageEdits, toolChoice, mode, unread, readThrough, execution, placement } = envelope.data;
 
   // Records written before empties were omitted still carry `parts: []` (D8); they mean "no field".
   const storedDraft = draft === undefined || isClearedMessage(draft) ? undefined : draft;
@@ -281,6 +300,7 @@ const parseRecord = async (text: string): Promise<ComposerRecordReadResult> => {
       ...withField('unread', nonEmptyMap({ ...unread })),
       ...withField('readThrough', nonEmptyMap({ ...readThrough })),
       ...withField('execution', execution),
+      ...withField('placement', placement),
     },
   };
 };
@@ -310,6 +330,7 @@ const mergeRecord = (record: ComposerRecord, fields: ComposerRecordPatch): Compo
     ...withField('unread', nonEmptyMap(unread) as Readonly<Record<string, true>> | undefined),
     ...withField('readThrough', nonEmptyMap(readThrough) as Readonly<Record<string, RowKey>> | undefined),
     ...withField('execution', fields.execution ?? record.execution),
+    ...withField('placement', fields.placement === false ? undefined : (fields.placement ?? record.placement)),
   };
 };
 

@@ -62,6 +62,8 @@ import type {
 import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import { chatPlacementOf } from '#utils/chat-execution.js';
+import { createComposerRecordActor, stopWhenWritesSettle } from '#hooks/composer-record.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
@@ -1264,6 +1266,31 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [fileManager.client],
   );
 
+  /**
+   * Keep a new chat's device-relative placement in this device's composer record for it (XD2).
+   *
+   * `chat.json` keeps the chat's intent and never a host that only this device can name, so a chat created on
+   * `origin` or a loopback daemon would otherwise open on this device's default. A failed write leaves the chat on
+   * that default, which is where it would run on any other device anyway.
+   */
+  const rememberChatPlacement = useCallback(
+    async (projectId: string, chatId: string, execution: CadAgentExecution | undefined): Promise<void> => {
+      const placement = chatPlacementOf(execution);
+      if (placement === undefined) {
+        return;
+      }
+      /* Through the record's own machine, as every composer write goes (storage policy); a write that keeps failing
+       * is abandoned and the chat opens on this device's default. */
+      const record = createComposerRecordActor(
+        createComposerRecordStore(fileManager.recordFiles, composerRecordPaths.chat(projectId, chatId)),
+      );
+      record.start();
+      record.send({ type: 'patch', fields: { placement } });
+      await stopWhenWritesSettle(record);
+    },
+    [fileManager.recordFiles],
+  );
+
   /** The attachment store a composer directory names; the Home composer's when none is named. */
   const composerAttachments = useCallback(
     (directory: string | undefined) =>
@@ -1596,7 +1623,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // Seed the chat row with chat-scoped active model + kernel so a
       // cookie change in another tab does not mutate the active selection
       // for this freshly-created chat. Defaults to the kernel chosen by
-      // the creation flow when not explicitly supplied.
+      // the creation flow when not explicitly supplied. The chat store keeps
+      // only the portable execution; a device-relative placement is kept for
+      // this device below (XD2).
       const seededActiveExecution = options.activeExecution;
       const seededActiveKernel = options.activeKernel ?? kernel;
 
@@ -1622,6 +1651,9 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         storage: pendingStorage,
       });
       await resumePendingProjectOperation(operation, worker);
+      if (operation.chat !== undefined) {
+        await rememberChatPlacement(operation.projectId, operation.chat.id, seededActiveExecution);
+      }
       /* D19: a project born with no remote backs up to Tau Cloud from its first
          revision — a template, a fork, a file or zip import. A caller that
          supplies the id is adopting an identity that has a remote of its own (a
@@ -1658,6 +1690,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       namingImageUrls,
       projectNameClient,
       queryClient,
+      rememberChatPlacement,
       resumePendingProjectOperation,
     ],
   );
@@ -2882,11 +2915,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       },
     ): Promise<Chat> => {
       const chat = await chatStore.createChat(resourceId, chatData);
+      await rememberChatPlacement(resourceId, chat.id, chatData.activeExecution);
       await touchProject(resourceId);
       invalidateProjectsList();
       return chat;
     },
-    [chatStore, invalidateProjectsList, touchProject],
+    [chatStore, invalidateProjectsList, rememberChatPlacement, touchProject],
   );
 
   const createNavigationRepairChat = useCallback(

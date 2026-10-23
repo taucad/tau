@@ -5793,3 +5793,121 @@ describe('ChatSessionStore — unread restore and live-record deletion (W8)', ()
     store.release(chatId);
   });
 });
+
+/*
+ * XD2: the chat owns intent and the device owns placement. `chat.json` syncs to
+ * every device, so a placement that names a host only on this one — `origin`,
+ * `desktop`, a loopback daemon — is this device's composer record, never the
+ * chat's.
+ */
+describe('ChatSessionStore — this device places the chat (XD2)', () => {
+  const projectId = 'proj_handoff';
+  const model = 'anthropic-claude-opus-4.8';
+
+  const openLoaded = async (deps: StubDeps, chatId: string) => {
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(deps);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+    });
+    return { store, session };
+  };
+
+  const placementOnDisk = (deps: StubDeps, chatId: string): unknown =>
+    (deps.client.json(composerPath(projectId, chatId)) as { placement?: unknown } | undefined)?.placement;
+
+  it('should write a local placement row with no device-relative hostId and keep no placement for it', async () => {
+    const chatId = 'chat_local_row';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5', hostId: 'desktop' },
+    });
+
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5' });
+    });
+    await settle();
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    store.release(chatId);
+  });
+
+  it('should keep an explicit daemon choice in this device’s composer record instead of chat.json', async () => {
+    const chatId = 'chat_origin_pin';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model, hostId: 'origin' },
+    });
+
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBe('origin');
+    });
+    expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model });
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+  });
+
+  it('should reopen a chat on the placement this device chose for it, for the composer and the read connector', async () => {
+    const chatId = 'chat_reopened_pin';
+    const deps = createStubDeps();
+    deps.client.files.set(
+      composerPath(projectId, chatId),
+      new TextEncoder().encode(JSON.stringify({ version: 1, placement: 'origin' })),
+    );
+    deps.getChat.mockResolvedValue(
+      chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model }, activeKernel: 'replicad' }),
+    );
+    const { store, session } = await openLoaded(deps, chatId);
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    await expect(store.getChatHostSettings(chatId)).resolves.toEqual({
+      activeExecution: { kind: 'tau', model, hostId: 'origin' },
+      activeKernel: 'replicad',
+    });
+    await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model, hostId: 'origin' });
+    store.release(chatId);
+  });
+
+  it('should keep a paired device id in chat.json, where every device can reach it', async () => {
+    const chatId = 'chat_paired';
+    const deps = createStubDeps();
+    deps.client.files.set(
+      composerPath(projectId, chatId),
+      new TextEncoder().encode(JSON.stringify({ version: 1, placement: 'origin' })),
+    );
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(deps, chatId);
+
+    const paired = { kind: 'tau', model, hostId: 'dev_studio_mini' } as const;
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: paired });
+
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', paired);
+    });
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
+    store.release(chatId);
+  });
+});

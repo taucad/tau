@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
+import { writeChatPlacement } from '#db/chat-placements.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { KeyedMutex } from '#db/keyed-mutex.js';
@@ -6259,6 +6260,52 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       store.release(chatId);
     },
   );
+
+  /* A pick made while discovery answers wins: the late answer adopts nothing over it. */
+  it('should not adopt a legacy placement over a choice made while its reach was being asked', async () => {
+    const chatId = 'chat_legacy_pick_during_probe';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const probe = Promise.withResolvers<boolean>();
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) =>
+          (await accept('origin')) ? 'origin' : undefined,
+        isPlacementOnThisDevice: async () => probe.promise,
+        isPlacementOnThisDeviceNow: () => undefined,
+      },
+      chatId,
+    );
+    const picked = { kind: 'tau', model: 'openai-gpt-5.5' } as const;
+    session.persistenceActorRef.send({ type: 'setActiveExecution', execution: picked });
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', picked);
+    });
+
+    probe.resolve(true);
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 50);
+    });
+
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual(picked);
+    expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    store.release(chatId);
+  });
+
+  /* Every placements write, the project manager's for a new chat included, is seen by the next read at once. */
+  it('should read a placement another writer just kept, without waiting out the read reuse', async () => {
+    const chatId = 'chat_placement_written_elsewhere';
+    const deps = createStubDeps();
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
+    await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model });
+
+    await writeChatPlacement({ client: deps.client, projectId, chatId, placement: 'origin' });
+
+    await expect(store.getChatExecution(chatId)).resolves.toEqual({ kind: 'tau', model, hostId: 'origin' });
+  });
 
   it('should not hold the load on finishing a half-done legacy adoption', async () => {
     const chatId = 'chat_adoption_slow';

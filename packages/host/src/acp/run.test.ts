@@ -322,5 +322,6 @@ describe('the chat handoff an ACP prompt carries', () => {
     expect(text.length).toBeLessThan(25_000);
     expect(text).toContain('THE END');
     expect(text).toContain('[earlier text cut]');
+    expect(text).toContain('**user**: [earlier text cut]');
   });
 });

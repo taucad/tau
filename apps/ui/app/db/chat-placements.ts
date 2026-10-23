@@ -32,6 +32,45 @@ export const readChatPlacements = async (
   }
 };
 
+/** How long one read of a project's placements serves every chat that asks, in milliseconds. */
+const placementReadReuse = 1000;
+
+/*
+ * Each project's placements as last read, by client, so one pass over a project's chats reads its record once. Every
+ * write here forgets the project's read, whichever caller wrote: this module is the one write path.
+ */
+const placementReads = new WeakMap<
+  ComposerRecordClient,
+  Map<string, Readonly<{ at: number; read: Promise<Readonly<Record<string, TauAgentHostId>>> }>>
+>();
+
+/**
+ * {@link readChatPlacements}, shared by every chat a pass asks about for `placementReadReuse`, and read again after
+ * any placement write.
+ *
+ * @param client - The worker filesystem client.
+ * @param projectId - The project.
+ * @returns Each chat id → its placement.
+ * @public
+ */
+export const readChatPlacementsShared = async (
+  client: ComposerRecordClient,
+  projectId: string,
+): Promise<Readonly<Record<string, TauAgentHostId>>> => {
+  let reads = placementReads.get(client);
+  if (reads === undefined) {
+    reads = new Map();
+    placementReads.set(client, reads);
+  }
+  const cached = reads.get(projectId);
+  if (cached !== undefined && Date.now() - cached.at < placementReadReuse) {
+    return cached.read;
+  }
+  const read = readChatPlacements(client, projectId);
+  reads.set(projectId, { at: Date.now(), read });
+  return read;
+};
+
 /**
  * One chat's placement on this device, or `undefined` for this device's default.
  *
@@ -70,6 +109,8 @@ export const writeChatPlacement = async ({
   placement: TauAgentHostId | undefined;
 }>): Promise<boolean> => {
   const store = createComposerRecordStore(client, composerRecordPaths.placements(projectId));
+  /* Whatever this write does, the next read reads the record again. */
+  placementReads.get(client)?.delete(projectId);
   try {
     const current = await store.read();
     if (current.status === 'valid' && current.record.placements?.[chatId] === placement) {
@@ -80,6 +121,7 @@ export const writeChatPlacement = async ({
       return true;
     }
     await store.patch({ placements: { [chatId]: placement ?? false } });
+    placementReads.get(client)?.delete(projectId);
     return true;
   } catch {
     return false;

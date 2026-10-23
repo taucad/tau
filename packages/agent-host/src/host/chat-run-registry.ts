@@ -242,6 +242,8 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
     const timer: unknown = clock.setTimeout(() => {
       expired.abort();
     }, bound); // Bound: chatClosingWaitMilliseconds.
+    /* A bound never keeps a daemon's process open at shutdown (Node's timers), as `AbortSignal.timeout` never did. */
+    (timer as { unref?: () => void } | undefined)?.unref?.();
     try {
       await waitFor(live, (snapshot) => snapshot.status !== 'active', { signal: expired.signal });
       return true;

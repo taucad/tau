@@ -8,11 +8,12 @@ import {
   externalAgentDisplayName,
   heldPlacementReason,
   isDeviceRelativeHostReachable,
+  isPlacementOnThisDeviceNow,
   onLoopbackAgentHostsChanged,
   unplaceableExecutionReason,
 } from '#lib/agent-host-placement.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
-import { isDeviceRelativeHostId, withoutHostId } from '#utils/chat-execution.js';
+import { withoutHostId } from '#utils/chat-execution.js';
 
 /**
  * Why this device cannot place one execution, kept current: a loopback daemon
@@ -28,7 +29,7 @@ const useUnplaceableExecutionReason = (execution: CadAgentExecution): string | u
 
 /**
  * The last Tau choice as this device's own Tau: a host is kept only where it is this device's and this tab reaches it
- * (`desktop` on Tau Desktop, the daemon that served this page, a loopback daemon this tab was handed). A paired
+ * (`desktop` on Tau Desktop, the daemon discovery found served this page, a loopback daemon this tab was handed). A paired
  * device's host is another machine and a device-relative host this tab cannot reach is out of hand, so either is
  * dropped and the chat runs on this tab's own Tau.
  *
@@ -40,7 +41,10 @@ const tauHere = (execution: CadAgentExecution): CadAgentExecution => {
     return execution;
   }
   const { hostId } = execution;
-  return isDeviceRelativeHostId(hostId) && isDeviceRelativeHostReachable(hostId) ? execution : withoutHostId(execution);
+  /* `desktop` is this build's own launcher; `origin` and a loopback daemon are this device's only once found so. */
+  const own =
+    hostId === 'desktop' ? isDeviceRelativeHostReachable(hostId) : isPlacementOnThisDeviceNow(hostId) === true;
+  return own ? execution : withoutHostId(execution);
 };
 
 /**

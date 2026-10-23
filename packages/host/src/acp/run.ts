@@ -429,7 +429,7 @@ export const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undef
   const lines = prior.slice(start).flatMap((entry) => {
     /* The person's words as theirs, never a user message Tau made for itself (the same rule an abandoned run keeps). */
     const text = isPersonsMessage(entry) || entry.role === 'assistant' ? messageText(entry) : undefined;
-    return text === undefined ? [] : [`**${entry.role}**: ${text}`];
+    return text === undefined ? [] : [{ label: `**${entry.role}**: `, text }];
   });
   if (lines.length === 0) {
     return [];
@@ -444,11 +444,13 @@ export const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undef
   const budget = handoffCharacters - header.length;
   const kept: string[] = [];
   let size = 0;
-  for (const line of lines.toReversed()) {
+  for (const { label, text } of lines.toReversed()) {
+    const line = `${label}${text}`;
     const cost = line.length + (kept.length === 0 ? 0 : separator.length);
     if (size + cost > budget) {
+      /* Who said it stays; only what they said is cut. */
       if (kept.length === 0) {
-        kept.unshift(tailOf(line, budget));
+        kept.unshift(`${label}${tailOf(text, budget - label.length)}`);
       }
       break;
     }

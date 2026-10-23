@@ -18,6 +18,7 @@ type Harness = {
   loopbackListeners: Set<() => void>;
   lastTauExecution: CadAgentExecution;
   reachable: (hostId: string) => boolean;
+  now: (hostId: string) => boolean | undefined;
 };
 
 const harness = vi.hoisted(
@@ -30,6 +31,7 @@ const harness = vi.hoisted(
     loopbackListeners: new Set<() => void>(),
     lastTauExecution: { kind: 'tau', model: 'anthropic-claude-opus-4.8', effort: 'high' },
     reachable: () => true,
+    now: () => undefined,
   }),
 );
 
@@ -53,6 +55,7 @@ vi.mock('#lib/agent-host-placement.js', () => ({
   heldPlacementReason: (hostId: string) => `held ${hostId}`,
   unplaceableExecutionReason: () => harness.unplaceable,
   isDeviceRelativeHostReachable: (hostId: string) => harness.reachable(hostId),
+  isPlacementOnThisDeviceNow: (hostId: string) => harness.now(hostId),
   onLoopbackAgentHostsChanged: (listener: () => void) => {
     harness.loopbackListeners.add(listener);
     return () => harness.loopbackListeners.delete(listener);
@@ -72,6 +75,7 @@ beforeEach(() => {
   harness.setActiveExecution.mockReset();
   harness.lastTauExecution = { kind: 'tau', model: 'anthropic-claude-opus-4.8', effort: 'high' };
   harness.reachable = () => true;
+  harness.now = () => undefined;
 });
 
 afterEach(() => {
@@ -168,6 +172,30 @@ describe('ChatPlacementNotice', () => {
       model: 'anthropic-claude-opus-4.8',
       effort: 'high',
     });
+  });
+
+  /* A page a daemon may have served reaches `origin` only once discovery says so: until then it runs here. */
+  it('should continue with Tau on this tab when the origin has not been found to host Tau', async () => {
+    harness.lastTauExecution = { kind: 'tau', model: 'anthropic-claude-opus-4.8', effort: 'high', hostId: 'origin' };
+    render(<ChatPlacementNotice />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue here with Tau' }));
+
+    expect(harness.setActiveExecution).toHaveBeenCalledExactlyOnceWith({
+      kind: 'tau',
+      model: 'anthropic-claude-opus-4.8',
+      effort: 'high',
+    });
+  });
+
+  it('should continue with Tau on the origin once discovery found it hosts Tau', async () => {
+    harness.lastTauExecution = { kind: 'tau', model: 'anthropic-claude-opus-4.8', effort: 'high', hostId: 'origin' };
+    harness.now = () => true;
+    render(<ChatPlacementNotice />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue here with Tau' }));
+
+    expect(harness.setActiveExecution).toHaveBeenCalledExactlyOnceWith(harness.lastTauExecution);
   });
 
   it('should offer no writable action on a surface that cannot change the agent', () => {

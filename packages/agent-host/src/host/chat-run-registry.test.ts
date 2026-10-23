@@ -332,6 +332,62 @@ describe('the chat-run registry (RA-S3)', () => {
     expect(opens).toBe(1);
   });
 
+  /* The bound never keeps a daemon's process open at shutdown, as `AbortSignal.timeout` never did. */
+  it('should not hold the process open while it waits out the closing bound', async () => {
+    const unref = vi.fn();
+    const clock = {
+      setTimeout: (callback: () => void, timerDelay: number) => ({ timer: setTimeout(callback, timerDelay), unref }),
+      clearTimeout: (handle: { timer: ReturnType<typeof setTimeout> } | undefined) => {
+        clearTimeout(handle?.timer);
+      },
+    };
+    const closeStarted = Promise.withResolvers<void>();
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      delays: { closingWait: 20 },
+      actorOptions: { clock },
+      services: {
+        openLog: async () => ({ ledger: emptyChatLedger, repair: [] }),
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw new Error('Unexpected admission');
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          closeStarted.resolve();
+          await new Promise<never>(() => {
+            /* A close that never finishes. */
+          });
+        },
+      },
+    });
+    await registry.claim('chat-unref-closing');
+    void registry.evict('chat-unref-closing');
+    await closeStarted.promise;
+    unref.mockClear();
+
+    await expect(
+      registry.execute({
+        type: 'start',
+        commandId: key(),
+        payload: {
+          chatId: 'chat-unref-closing',
+          runId: 'run-unref-closing',
+          trigger: 'submit',
+          message: { id: 'turn-unref-closing', role: 'user', content: 'Start.' },
+        },
+      }),
+    ).resolves.toMatchObject({ code: 'WRITER_LOCKED' });
+    expect(unref).toHaveBeenCalled();
+  });
+
   /* The bound runs on the clock the incarnations run on, never the process's: a simulated clock alone ends it. */
   it('should measure the closing bound on the injected clock', async () => {
     const clock = new SimulatedClock();

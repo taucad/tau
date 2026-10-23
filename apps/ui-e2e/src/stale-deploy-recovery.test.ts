@@ -14,7 +14,11 @@
  * chunk, which every route mounts right after hydration, is held at the server
  * until the next deploy goes live, so the import fails exactly as it did on
  * staging. WebKit words it "Importing a module script failed."; Chromium, used
- * here, "Failed to fetch dynamically imported module".
+ * here, "Failed to fetch dynamically imported module". No retention is modelled:
+ * this is the page that outlived it (`apps/ui/scripts/retain-previous-assets.mts`).
+ *
+ * An untouched page reloads into the new deploy on its own; a page the user has
+ * worked on is offered the reload and keeps its state until the user takes it.
  *
  * Needs a built UI (`nx run ui:build`). `TAU_E2E_CHROMIUM_EXECUTABLE` points at
  * a Chromium other than Playwright's pinned revision.
@@ -32,12 +36,12 @@ import type { Request, Response } from 'express';
 import { createRequestHandler } from '@react-router/express';
 import { coiMiddleware } from '@taucad/runtime/cross-origin-isolation/express';
 import { chromium } from 'playwright';
-import type { Browser } from 'playwright';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { Browser, BrowserContext, Page } from 'playwright';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 type Deploy = 'previous' | 'next';
 type ServerBuild = Parameters<typeof createRequestHandler>[0]['build'];
-type Settled = 'reloaded into the next deploy' | 'error page';
+type Settled = 'reloaded into the next deploy' | 'reload offered' | 'error page';
 
 const buildRoot = resolve(import.meta.dirname, '../../ui/build');
 const clientRoot = join(buildRoot, 'client');
@@ -166,9 +170,30 @@ const startDeployServer = async (builds: Readonly<Record<Deploy, ServerBuild>>):
   };
 };
 
+/** What the page settled on after the deploy, read in one poll so no second waiter is left pending. */
+const settledState = async (page: Page, nextBuildId: number): Promise<Settled> => {
+  const handle = await page.waitForFunction(
+    (id) => {
+      if ((globalThis as { ENV?: { TAU_BUILD_ID?: string } }).ENV?.TAU_BUILD_ID === id) {
+        return 'reloaded into the next deploy';
+      }
+      const headings = new Set([...document.querySelectorAll('h1')].map((heading) => heading.textContent));
+      if (headings.has('Something went wrong')) {
+        return 'error page';
+      }
+      return headings.has('Tau has been updated') ? 'reload offered' : false;
+    },
+    String(nextBuildId),
+    { timeout: 30_000 },
+  );
+  return (await handle.jsonValue()) as Settled;
+};
+
 describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', () => {
   let browser: Browser | undefined;
+  let builds: Readonly<Record<Deploy, ServerBuild>> | undefined;
   let server: DeployServer | undefined;
+  let context: BrowserContext | undefined;
   let previousBuildId = 0;
   let nextBuildId = 0;
 
@@ -183,54 +208,74 @@ describe('a deploy that replaces a freshly loaded page’s build (TAU-UI-6)', ()
     }
     nextBuildId = previousBuildId + deployGap;
     await createNextDeploy(previousBuildId, nextBuildId);
-    server = await startDeployServer({ previous: previousBuild, next: await importServerBuild(nextServerRoot) });
+    builds = { previous: previousBuild, next: await importServerBuild(nextServerRoot) };
     browser = await chromium.launch({ executablePath: process.env['TAU_E2E_CHROMIUM_EXECUTABLE'] });
   }, 120_000);
 
+  afterEach(async () => {
+    await context?.close();
+    await server?.close();
+    context = undefined;
+    server = undefined;
+  });
+
   afterAll(async () => {
     await browser?.close();
-    await server?.close();
     await rm(nextServerRoot, { recursive: true, force: true });
   });
 
-  it('should reload into the new deploy instead of showing the error page', async () => {
-    if (browser === undefined || server === undefined) {
-      expect.fail('the deploy server and browser did not start');
+  /** A fresh browser context on a fresh pair of deploys, with the previous one live. */
+  const open = async (): Promise<{ readonly page: Page; readonly live: DeployServer; readonly errors: string[] }> => {
+    if (browser === undefined || builds === undefined) {
+      expect.fail('the builds and browser did not start');
     }
-    const page = await browser.newPage();
-    const consoleErrors: string[] = [];
+    const live = await startDeployServer(builds);
+    server = live;
+    context = await browser.newContext();
+    const page = await context.newPage();
+    const errors: string[] = [];
     page.on('console', (message) => {
-      if (message.type() === 'error') {
-        consoleErrors.push(message.text());
+      if (message.type() === 'error' && /dynamically imported module/u.test(message.text())) {
+        errors.push(message.text());
       }
     });
+    await page.goto(`${live.origin}/`, { waitUntil: 'commit' });
+    await live.heldRequest;
+    return { page, live, errors };
+  };
 
-    await page.goto(`${server.origin}/`, { waitUntil: 'commit' });
-    await server.heldRequest;
-    server.deploy();
+  it('should reload into the new deploy instead of showing the error page', async () => {
+    const { page, live, errors } = await open();
 
-    const reloaded = async (): Promise<Settled> => {
-      await page.waitForFunction(
-        (id) => (globalThis as { ENV?: { TAU_BUILD_ID?: string } }).ENV?.TAU_BUILD_ID === id,
-        String(nextBuildId),
-        { timeout: 30_000 },
-      );
-      return 'reloaded into the next deploy';
-    };
-    const failed = async (): Promise<Settled> => {
-      await page.getByRole('heading', { name: 'Something went wrong' }).waitFor({ timeout: 30_000 });
-      return 'error page';
-    };
-    const settled = await Promise.race([reloaded(), failed()]);
-    const moduleErrors = consoleErrors.filter((text) => /dynamically imported module/u.test(text));
-    expect(settled, `module load errors: ${JSON.stringify(moduleErrors)}`).toBe('reloaded into the next deploy');
+    live.deploy();
 
+    expect(await settledState(page, nextBuildId), `module load errors: ${JSON.stringify(errors)}`).toBe(
+      'reloaded into the next deploy',
+    );
     await page.getByRole('main').waitFor({ timeout: 30_000 });
     await page.waitForLoadState('networkidle');
     expect(await page.getByRole('heading', { name: 'Something went wrong' }).count()).toBe(0);
-    expect(server.documents).toStrictEqual(['previous', 'next']);
-    expect(await page.evaluate(() => globalThis.sessionStorage.getItem('tau-stale-build-reload'))).toBe(
-      String(previousBuildId),
+    expect(live.documents).toStrictEqual(['previous', 'next']);
+    // The guard of a completed reload is cleared, so a duplicated tab inherits nothing.
+    expect(await page.evaluate(() => globalThis.sessionStorage.getItem('tau-stale-build-reload'))).toBeNull();
+  }, 120_000);
+
+  it('should offer the reload, never force it, once the user has worked on the page', async () => {
+    const { page, live, errors } = await open();
+    await page.getByRole('main').waitFor({ timeout: 30_000 });
+    await page.mouse.click(1, 1);
+
+    live.deploy();
+
+    expect(await settledState(page, nextBuildId), `module load errors: ${JSON.stringify(errors)}`).toBe(
+      'reload offered',
     );
+    await page.waitForTimeout(2000);
+    expect(live.documents).toStrictEqual(['previous']);
+
+    await page.getByRole('button', { name: 'Reload', exact: true }).click();
+
+    expect(await settledState(page, nextBuildId)).toBe('reloaded into the next deploy');
+    expect(live.documents).toStrictEqual(['previous', 'next']);
   }, 120_000);
 });

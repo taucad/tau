@@ -33,7 +33,14 @@ BUNDLE_BWRAP="$BUNDLE_DIR/bwrap"
 APPIMAGE_DIR="/tmp/.mount_TauAAAA/resources/sandbox"
 APPIMAGE_BWRAP="$APPIMAGE_DIR/bwrap"
 
-NODE_VERSION="v22.11.0"
+# Must match the repo's Node (package.json engines >=24; runner uses 24.20.0). Node 24 strips .mts
+# types natively; Node 22 cannot run `node fs-net-probe.mts` (ERR_UNKNOWN_FILE_EXTENSION).
+NODE_VERSION="v24.20.0"
+
+# The AppArmor unprivileged-userns restriction only strips caps from UNPRIVILEGED user namespaces; root
+# bypasses it entirely. cloud-init runcmd runs as root, so the sandbox + the direct bwrap repro MUST be
+# run as a non-root user or Phase A/C would spuriously succeed. `tau` is that unprivileged user.
+TAU_USER="tau"
 
 mkdir -p "$DROP"
 log() { echo "[guest] $*"; }
@@ -67,7 +74,7 @@ apt-get update -qq || blocker "apt-get update failed"
 apt-get install -y -qq bubblewrap socat ca-certificates curl xz-utils apparmor apparmor-utils >/dev/null \
   || blocker "apt install failed"
 
-if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(process.versions.node.split(".")[0]>=22?0:1)' 2>/dev/null; then
+if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(process.versions.node.split(".")[0]>=24?0:1)' 2>/dev/null; then
   log "installing pinned Node $NODE_VERSION (trust-on-publish via SHASUMS256.txt)"
   tb="node-${NODE_VERSION}-linux-x64.tar.xz"
   base="https://nodejs.org/dist/${NODE_VERSION}"
@@ -81,13 +88,21 @@ if ! command -v node >/dev/null 2>&1 || ! node -e 'process.exit(process.versions
 fi
 log "node $(node --version)  bwrap(distro) $(/usr/bin/bwrap --version)"
 
+# Create the unprivileged user and give it the paths it needs. Reads of the 9p repo/node_modules and
+# /opt/node are world-readable (git/tar perms); the 9p drop + fixture temp must be writable by it.
+id "$TAU_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$TAU_USER"
+mkdir -p /var/tmp/tau-run && chmod 1777 /var/tmp/tau-run
+chmod 0777 "$DROP" 2>/dev/null || true
+# Run a command as the unprivileged user with an explicit, clean environment.
+as_tau() { runuser -u "$TAU_USER" -- "$@"; }
+
 # Minimal, real-shape bwrap invocation whose ONLY privileged step is loopback bring-up in the new
 # netns. Under stripped userns caps it prints `bwrap: loopback: Failed RTM_NEWADDR: Operation not
 # permitted`; with the grant it exits 0. Writes <tag>.txt + echoes the exit code.
 direct_loopback_repro() {
   local bwrap="$1" tag="$2"
-  log "direct loopback repro via $bwrap"
-  "$bwrap" --unshare-user --unshare-net --ro-bind / / --proc /proc --dev /dev -- /bin/true \
+  log "direct loopback repro via $bwrap (as $TAU_USER)"
+  as_tau "$bwrap" --unshare-user --unshare-net --ro-bind / / --proc /proc --dev /dev -- /bin/true \
     > "$DROP/$tag.txt" 2>&1
   local rc=$?
   echo "exit=$rc" >> "$DROP/$tag.txt"
@@ -100,12 +115,13 @@ direct_loopback_repro() {
 run_harness() {
   local bwrap_dir="$1" row="$2"
   log "harness row=$row  bwrap_dir=$bwrap_dir"
-  # Give the harness a neutral RUNNER_TEMP (mirrors a hosted runner) so its fixture root lands outside
-  # the sandbox's denied roots (/root etc.); /var/tmp is not in posixDeniedRoots.
-  mkdir -p /var/tmp/tau-run
-  PATH="$bwrap_dir:/opt/node/bin:$PATH" \
-  RUNNER_TEMP=/var/tmp/tau-run \
-  TAU_SPIKE_ROW="$row" TAU_SPIKE_OUT="$DROP" \
+  # Run as the unprivileged user (see TAU_USER note). Neutral RUNNER_TEMP (mirrors a hosted runner) so
+  # the fixture root lands outside the sandbox's denied roots; /var/tmp is not in posixDeniedRoots.
+  as_tau env \
+    PATH="$bwrap_dir:/opt/node/bin:/usr/bin:/bin" \
+    HOME="/home/$TAU_USER" \
+    RUNNER_TEMP=/var/tmp/tau-run \
+    TAU_SPIKE_ROW="$row" TAU_SPIKE_OUT="$DROP" \
     node "$PROBE" > "$DROP/$row.console.log" 2>&1
   local rc=$?
   log "  harness row=$row exit=$rc"

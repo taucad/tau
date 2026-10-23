@@ -39,14 +39,19 @@ The in-guest orchestrator (`run-in-guest.sh`) runs the unmodified harness three 
 captures a **direct** `bwrap` loopback repro each time (the exact error string, independent of the
 harness):
 
-| Phase | Row | bwrap path | Profile | Expected |
-| --- | --- | --- | --- | --- |
-| A — confirm | `LNX-VM-NOPROFILE` | `/opt/Tau/resources/sandbox/bwrap` | none | `RTM_NEWADDR` EPERM → `sandbox-unavailable` |
-| B — profile | `LNX-VM-PROFILE` | same | `tau-bwrap` loaded via `apparmor_parser` | loopback OK → real S0/S1 |
-| C — AppImage | `LNX-VM-APPIMAGE` | AppImage mount path | none (no install step) | blocked, like A |
+| Phase        | Row                | bwrap path                         | Profile                                  | Expected                                    |
+| ------------ | ------------------ | ---------------------------------- | ---------------------------------------- | ------------------------------------------- |
+| A — confirm  | `LNX-VM-NOPROFILE` | `/opt/Tau/resources/sandbox/bwrap` | none                                     | `RTM_NEWADDR` EPERM → `sandbox-unavailable` |
+| B — profile  | `LNX-VM-PROFILE`   | same                               | `tau-bwrap` loaded via `apparmor_parser` | loopback OK → real S0/S1                    |
+| C — AppImage | `LNX-VM-APPIMAGE`  | AppImage mount path                | none (no install step)                   | blocked, like A                             |
 
 `apparmor_restrict_unprivileged_userns` stays at `1` in **all three** (recorded in `context.json`
 and `apparmor_parser.log`). The decisive proof is **A blocked + B launches, sysctl unchanged**.
+
+The repro and harness run as an **unprivileged user** (`tau`), not root: the AppArmor restriction only
+strips capabilities from _unprivileged_ user namespaces, so running as root (cloud-init's default) would
+bypass the restriction and make every phase spuriously succeed. The guest also installs the repo's Node
+(>= 24) because the harness is invoked as `node fs-net-probe.mts` and only Node 24 strips `.mts` natively.
 
 ## The Tau-scoped AppArmor profile
 
@@ -70,7 +75,7 @@ What it is and is not:
   elevated once — **not** running the sandboxed workload elevated). Google Chrome ships the identical
   shape at `/etc/apparmor.d/chrome` for `/opt/google/chrome/chrome`.
 - **One profile covers `apply-seccomp` too.** SRT's seccomp helper creates its own nested userns but
-  runs as a descendant *inside* bwrap's namespace under this profile's label; `flags=(unconfined)` +
+  runs as a descendant _inside_ bwrap's namespace under this profile's label; `flags=(unconfined)` +
   `userns,` grants the nested userns the same way Chrome's single profile covers its zygote children.
 - `flags=(unconfined)` mirrors the distro bwrap profile exactly; the safety is the narrow attachment,
   not internal confinement. A fully enumerated confined profile is possible but would have to re-derive

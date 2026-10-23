@@ -32,37 +32,37 @@
 # (90-day eval license, registration-gated dynamic URL, not digest-stable). For the profile-isolation
 # question the SKU is immaterial — per-user %USERPROFILE% NTFS ACLs are identical across Win11 SKUs.
 # Rather than embed a dynamic URL or a secret, the ISO is supplied by an operator at dispatch time via
-# the `iso_url` + `iso_sha256` inputs (digest verified before boot). With no ISO supplied (the default,
+# the `iso_url` input (iso_sha256 optional: when omitted, provenance is the Microsoft-host allowlist
+# + TLS and the digest is recorded observed-on-first-use; when supplied, boot is refused on mismatch).
+# With no ISO supplied (the default,
 # incl. every pull_request run) the job records a precise image-unavailable blocker receipt and fails —
 # it is NEVER green without a real VM run. See win11-vm/README.md for the full license/acquisition note.
-name: Spike W2 (consumer Win11 standard-user Bash)
+name: Spike W2 (consumer Win11 standard-user shell)
 
+# workflow_dispatch ONLY (no pull_request): a PR push must not enqueue or cancel this long-running VM
+# lane. The operator dispatches it with a single required input (iso_url); iso_sha256 is optional.
 on:
   workflow_dispatch:
     inputs:
       iso_url:
-        description: 'HTTPS URL of a Windows 11 ISO (operator-supplied; Enterprise eval recommended). Empty = record the image-unavailable blocker.'
-        required: false
+        description: 'HTTPS URL of a Windows 11 ISO on a Microsoft download host (Enterprise eval recommended). Required.'
+        required: true
         type: string
-        default: ''
       iso_sha256:
-        description: 'Lowercase hex SHA-256 of the ISO. REQUIRED when iso_url is set; the boot is refused on mismatch.'
+        description: 'Optional lowercase hex SHA-256. If omitted, provenance is the Microsoft-host allowlist + TLS and the digest is recorded observed-on-first-use. If supplied, the boot is refused on mismatch.'
         required: false
         type: string
         default: ''
-  pull_request:
-    paths:
-      - 'packages/core/native-process/spikes/shell/**'
-      - '.github/workflows/spike-w2-win11-vm.yml'
 
 permissions:
   contents: read
   actions: read
   pull-requests: read
 
+# Ref-keyed, and cancel-in-progress FALSE: a running VM receipt is never killed by a later dispatch.
 concurrency:
-  group: spike-w2-win11-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: spike-w2-win11-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   NX_NO_CLOUD: 'true'
@@ -70,7 +70,7 @@ env:
 
 jobs:
   win11-vm:
-    name: Consumer Win11 standard-user Bash (WIN11)
+    name: Consumer Win11 standard-user shell (WIN11)
     runs-on: ubuntu-24.04
     # A Win11 unattended install + provisioning + pnpm install inside the guest is slow; give it room
     # but never the full 6h (a hung VM must fail, not idle). boot-vm.sh enforces its own inner deadline.

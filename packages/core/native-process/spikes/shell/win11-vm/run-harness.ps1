@@ -38,6 +38,19 @@ $isAdmin = $pr.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 Log "is elevated/admin: $isAdmin (expected: False)"
 "$(whoami /all)" | Set-Content (Join-Path $Drop 'whoami.txt')
 
+# D14 ShellIdentity receipt (blueprint D14): the consumer standard-user Windows shell resolution,
+# fixed paths only, as the real standard user. Record the default selection (pwsh 7 if present, else
+# 5.1) AND the forced-5.1 branch, so both resolution paths are evidenced in-VM. This is additive to
+# the existing probe below; the full MXC+PowerShell in-VM isolation retool rides the mxc lane.
+$shellId = Join-Path $Spike 'mxc\shell-identity.ps1'
+if (Test-Path $shellId) {
+  Log 'resolving D14 ShellIdentity (default + pwsh7-hidden branches)'
+  & $shellId -OutPath (Join-Path $Drop 'WIN11\shell-identity.json') | Out-Null
+  & $shellId -HidePwsh7 -OutPath (Join-Path $Drop 'WIN11\shell-identity-51.json') | Out-Null
+} else {
+  Log "WARN: shell-identity.ps1 missing at $shellId"
+}
+
 $node = (Get-Command node.exe).Source
 $bash = 'C:\tau-git\bin\bash.exe'
 if (-not (Test-Path $bash)) { throw "pinned bash missing at $bash" }

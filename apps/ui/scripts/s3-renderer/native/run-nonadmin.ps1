@@ -29,7 +29,7 @@ $secure = ConvertTo-SecureString $pwPlain -AsPlainText -Force
 $pwPlain = $null
 
 # Children get these through Machine scope (Start-Process -Credential builds the env from Machine+User).
-$forwarded = @('S3_HOST_LABEL', 'S3_GPU_LABEL', 'S3_GUIDEPUP_MODULE', 'GUIDEPUP_SCREEN_READERS_PATH', 'S3_USER_HOME')
+$forwarded = @('S3_HOST_LABEL', 'S3_GPU_LABEL', 'S3_GUIDEPUP_MODULE', 'GUIDEPUP_SCREEN_READERS_PATH')
 $overallExit = 0
 try {
   New-LocalUser -Name $user -Password $secure -FullName 'Tau S3 (ephemeral)' `
@@ -67,11 +67,11 @@ try {
   cmd /c "icacls `"$Drop`" /grant `"${user}:(OI)(CI)M`" /C /Q" | Out-Null
   $grant = cmd /c "icacls `"$output`" /grant `"${user}:(OI)(CI)M`" /T /C /Q 2>&1"
   Write-Host "[run-nonadmin] write grant out/s3-renderer: $(($grant | Select-Object -Last 1))"
-  # Start-Process -Credential builds the child's environment from the Machine scope and the administrator's User scope,
-  # so TEMP and the AppData folders name the administrator's profile (mkdtemp EPERM). run.mts moves them to S3_USER_HOME.
-  $env:S3_USER_HOME = Join-Path $env:RUNNER_TEMP $user
-  New-Item -ItemType Directory -Force -Path $env:S3_USER_HOME | Out-Null
-  cmd /c "icacls `"$env:S3_USER_HOME`" /grant `"${user}:(OI)(CI)M`" /C /Q" | Out-Null
+  # The child's TEMP and AppData folders name the administrator's profile (mkdtemp EPERM), and an environment variable
+  # did not reach it, so run.mts gets a writable home as `--user-home` and moves them there.
+  $userHome = Join-Path $env:RUNNER_TEMP $user
+  New-Item -ItemType Directory -Force -Path $userHome | Out-Null
+  cmd /c "icacls `"$userHome`" /grant `"${user}:(OI)(CI)M`" /C /Q" | Out-Null
   foreach ($name in $forwarded) {
     [Environment]::SetEnvironmentVariable($name, [Environment]::GetEnvironmentVariable($name), 'Machine')
   }
@@ -82,7 +82,7 @@ try {
     $se = Join-Path $Drop "$label.err.log"
     $receipt = @{ label = $label; arguments = $arguments; runAs = $user }
     try {
-      $p = Start-Process -FilePath $node -ArgumentList "`"$runner`" $arguments" -Credential $cred -LoadUserProfile `
+      $p = Start-Process -FilePath $node -ArgumentList "`"$runner`" $arguments --user-home `"$userHome`"" -Credential $cred -LoadUserProfile `
         -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $so -RedirectStandardError $se -PassThru
       if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
         cmd /c "taskkill /T /F /PID $($p.Id)" | Out-Null

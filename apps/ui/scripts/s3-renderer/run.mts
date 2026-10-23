@@ -47,6 +47,8 @@ const { values } = parseArgs({
     /** WebGL through SwiftShader (ANGLE), as the cloud runs used; GPU-less hosted runners otherwise have no WebGL. */
     'software-gl': { type: 'boolean', default: false },
     'electron-arg': { type: 'string', multiple: true, default: [] },
+    /** A home the run's user can write: TEMP and the AppData folders move under it (run-nonadmin.ps1 passes it). */
+    'user-home': { type: 'string' },
   },
 });
 
@@ -67,10 +69,10 @@ const sampleInterval = 250;
 const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'));
 const electronPath = desktopRequire('electron') as unknown as string;
 const isWindows = process.platform === 'win32';
-// Set by run-nonadmin.ps1: the standard user inherits the administrator's TEMP and AppData paths, which it cannot
+// The standard user run-nonadmin.ps1 starts inherits the administrator's TEMP and AppData paths, which it cannot
 // write, so they move to a home it owns before Playwright or Electron reads them.
-if (process.env['S3_USER_HOME']) {
-  const home = process.env['S3_USER_HOME'];
+if (values['user-home']) {
+  const home = path.resolve(values['user-home']);
   const folders: Array<[name: string, relative: string]> = [
     ['TEMP', 'AppData/Local/Temp'],
     ['TMP', 'AppData/Local/Temp'],
@@ -83,6 +85,7 @@ if (process.env['S3_USER_HOME']) {
     await mkdir(folder, { recursive: true });
   }
   process.env['USERPROFILE'] = home;
+  console.log(`user home ${home}; temporary files in ${os.tmpdir()}`);
 }
 /** Set by `--packaged`: the packaged fixture executable and the client root inside its resources. */
 let packagedApp: { executable: string; clientRoot: string } | undefined;
@@ -259,13 +262,18 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
       // A fresh unsigned packaged executable on Windows on Arm is scanned on first launch and has needed over 2 minutes.
       timeout: isWindows ? (packagedApp ? 300_000 : 120_000) : 60_000,
     });
-  let app: ElectronApplication;
-  try {
-    app = await start();
-  } catch (error) {
-    // Windows on Arm sometimes never finishes Playwright's launch handshake; one recorded retry, then the error stands.
-    launchRetries.push({ kind, at: new Date().toISOString(), error: String(error).split('\n')[0]! });
-    app = await start();
+  // Windows on Arm sometimes never finishes Playwright's launch handshake; up to two recorded retries, then the error
+  // stands.
+  let app: ElectronApplication | undefined;
+  for (let attempt = 1; !app; attempt++) {
+    try {
+      app = await start();
+    } catch (error) {
+      if (attempt === 3) {
+        throw error;
+      }
+      launchRetries.push({ kind, at: new Date().toISOString(), error: String(error).split('\n')[0]! });
+    }
   }
   const page = await app.firstWindow();
   await page.waitForSelector('body[data-ready="true"]', { timeout: 30_000 });

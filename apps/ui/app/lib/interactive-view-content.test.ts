@@ -16,12 +16,13 @@ const capabilities: Pick<AppCapabilitiesManifest, 'renderCapabilities'> = {
 };
 
 describe('interactiveViewContent', () => {
-  it('requests supported GLB edges independently from their runtime default', () => {
-    expect(interactiveViewContent('model/gltf-binary', 'native', capabilities)).toEqual({ includeEdges: true });
+  it('requests supported GLB edges exactly when they are shown, independently from their runtime default', () => {
+    expect(interactiveViewContent('model/gltf-binary', 'native', capabilities, true)).toEqual({ includeEdges: true });
+    expect(interactiveViewContent('model/gltf-binary', 'native', capabilities, false)).toEqual({ includeEdges: false });
   });
   it('preserves SVG and unsupported routes without GLB-only content', () => {
-    expect(interactiveViewContent('image/svg+xml', 'native', capabilities)).toBeUndefined();
-    expect(interactiveViewContent('model/gltf-binary', 'plain', capabilities)).toBeUndefined();
-    expect(interactiveViewContent('model/gltf-binary', undefined, capabilities)).toBeUndefined();
+    expect(interactiveViewContent('image/svg+xml', 'native', capabilities, true)).toBeUndefined();
+    expect(interactiveViewContent('model/gltf-binary', 'plain', capabilities, true)).toBeUndefined();
+    expect(interactiveViewContent('model/gltf-binary', undefined, capabilities, true)).toBeUndefined();
   });
 });

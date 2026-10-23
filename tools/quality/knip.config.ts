@@ -187,6 +187,8 @@ const config: KnipConfig = {
         'src/preload/**/*.ts',
         'src/tau/*.entry.ts',
         'scripts/*.mts',
+        // S3 renderer comparison fixture main, bundled by apps/ui/scripts/s3-renderer/run.mts.
+        'scripts/s3-renderer-fixture/main.ts',
         // `apps/desktop/macos/project.json` runs both with paths from the workspace root.
         'macos/scripts/*.mts',
         // Ambient `tauCloudBuildEnabled`, defined by electron.vite.config.ts.
@@ -261,6 +263,10 @@ const config: KnipConfig = {
         'geospec-mt-assets-cache-key.ts',
         // Script of calibration-preview.html, served by vite.calibration.config.ts.
         'app/calibration-preview.tsx',
+        // S3 renderer comparison (dev-only): driver, fixtures and the harness page built by vite.s3-renderer.config.ts.
+        'scripts/s3-renderer/*.mts',
+        'vite.s3-renderer.config.ts',
+        'app/s3-renderer/harness.ts',
         // `tau-ui-source-alias` (vite.config.ts) swaps these in for their `#…` facades per build
         // target (cloud, self-host, desktop); knip only follows the facade import.
         'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',

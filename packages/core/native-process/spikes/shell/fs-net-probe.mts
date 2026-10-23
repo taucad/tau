@@ -428,7 +428,19 @@ writeJson(join(evidenceDirectory, row, 's1.json'), {
 
 const allChecks = [...s0Checks, ...s1Checks];
 process.stdout.write(
-  `${JSON.stringify({ row, s0: s0Checks, s1: s1Checks, verdict: allChecks.every((c) => c.verdict === 'pass') ? 'pass' : 'fail' }, undefined, 2)}\n`,
+  `${JSON.stringify(
+    {
+      row,
+      s0: s0Checks,
+      s1: s1Checks,
+      // WIN-only: surface the token/ACE characterization in the console log too (not just the
+      // uploaded s0.json), so the read-mask verdict is self-documenting from the job log alone.
+      ...(isWindows ? { characterization: out('win-characterization') } : {}),
+      verdict: allChecks.every((c) => c.verdict === 'pass') ? 'pass' : 'fail',
+    },
+    undefined,
+    2,
+  )}\n`,
 );
 rmSync(root, { recursive: true, force: true });
 process.exit(allChecks.every((c) => c.verdict === 'pass') ? 0 : 1);

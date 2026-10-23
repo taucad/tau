@@ -7,7 +7,7 @@ The API owns HTTP authentication, billing, persistence, publication, model catal
 - Keep `POST /v1/chat` limited to `project_name` and `commit_name`. Reject `cad` placement there; CAD requests use the browser/daemon host transport described by [Chat Request Config Policy](../../docs/policy/chat-request-config-policy.md).
 - Preserve provider payload bytes at the LLM gateway. Provider-specific prompt projection and stream normalization belong to the portable host codecs; follow [Cross-Provider Content Contract Policy](../../docs/policy/cross-provider-content-contract.md).
 - Preserve the byte-exact Stripe webhook body on the scoped `/v1/auth/stripe/webhook` parser. Do not route it through the catch-all JSON reserialization path.
-- Keep `/health/live` process-local. `/health/ready` checks Redis, PostgreSQL, memory, the public object-store probe, and the private publication bucket.
+- Keep `/health/live` process-local. `/health/ready` probes Redis, PostgreSQL, memory, the git toolchain, the public object-store probe, and the private publication bucket, but refuses only for Machine faults (git, heap); a down shared dependency is reported and counted without draining every Machine.
 - Define Drizzle schema changes in `app/database/` and generate migrations with `pnpm db:generate`; do not hand-author migration SQL.
 - Changes to `fly.*.toml`, the env schema, health, process groups, storage namespaces or operator CLIs update the private handbook and its go-live checklist through `create-handbook`.
 - Register each injectable in its owning Nest module. Keep the AppModule compile guard when changing module wiring.

@@ -85,7 +85,7 @@ export const reportServerError = (error: unknown, requestId?: string): void => {
 };
 
 /**
- * One down indicator of a refused readiness probe.
+ * One down indicator of a readiness probe.
  */
 export type ReadinessFailure = {
   /** The terminus indicator key: `redis`, `database`, `s3`, `git` or `memory_heap`. */
@@ -99,9 +99,10 @@ export type ReadinessFailure = {
 /**
  * Report one down readiness indicator as a warning grouped by that indicator.
  *
- * A readiness refusal is the probe working: Fly drains the Machine until the dependency answers again. Reported
- * as the terminus `ServiceUnavailableException` it became one anonymous error group that never said which
- * dependency failed (TAU-API-3). Each indicator now gets its own fingerprint, tag and context instead.
+ * A down indicator is the probe working: a Machine fault drains the Machine, a shared dependency is reported as
+ * degraded without draining. Reported as the terminus `ServiceUnavailableException` it became one anonymous error
+ * group that never said which dependency failed (TAU-API-3). Each indicator now gets its own fingerprint, tag and
+ * context instead.
  *
  * @param failure - The down indicator.
  */

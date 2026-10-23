@@ -18,6 +18,14 @@ import { AttributeKey } from '@taucad/telemetry';
  */
 const heapThresholdBytes = 1024 * 1024 * 1024 * 0.8;
 
+/**
+ * Indicators for dependencies every API Machine shares. When one is slow or down it is down for all of them, so
+ * refusing readiness on it drains the whole fleet at once and a dependency slowdown becomes a full API outage,
+ * including for routes that never touch it. They are still probed, reported and counted; they do not refuse.
+ * Any other indicator (the git toolchain, heap, one added later) describes this Machine and refuses.
+ */
+const sharedDependencyIndicators: ReadonlySet<string> = new Set(['redis', 'database', 's3']);
+
 @Controller('health')
 export class HealthController {
   private readonly logger = new Logger(HealthController.name);
@@ -44,13 +52,14 @@ export class HealthController {
   }
 
   /**
-   * Readiness probe: Can the service handle traffic?
-   * Checks all external dependencies. Failure removes the machine
-   * from the Fly.io load balancer.
+   * Readiness probe: Can this Machine handle traffic?
+   * Refuses (503, and Fly removes the Machine from the load balancer) only for a fault of this
+   * Machine: the git toolchain or heap. Redis, the database and object storage are probed too,
+   * but a down shared dependency leaves the probe at 200 with the indicator under `error`,
+   * because every Machine would refuse together.
    *
-   * A refusal is that removal working, not an application fault: it is logged as a
-   * warning naming each down indicator, counted per indicator, and reported to Sentry
-   * grouped by indicator rather than as one anonymous `ServiceUnavailableException`.
+   * Every down indicator, refusing or not, is logged as a warning, counted per indicator, and
+   * reported to Sentry grouped by indicator rather than as one anonymous `ServiceUnavailableException`.
    */
   @Get('ready')
   @HealthCheck()
@@ -73,10 +82,17 @@ export class HealthController {
       if (failures.length === 0) {
         throw error;
       }
-      this.logger.warn({ failures }, 'Readiness refused: dependency check down');
+      const refuses = failures.some((failure) => !sharedDependencyIndicators.has(failure.indicator));
+      this.logger.warn(
+        { failures },
+        refuses ? 'Readiness refused: Machine check down' : 'Readiness degraded: shared dependency check down',
+      );
       for (const failure of failures) {
         this.metrics.healthReadinessFailures.add(1, { [AttributeKey.HEALTH_INDICATOR]: failure.indicator });
         reportReadinessFailure(failure);
+      }
+      if (!refuses) {
+        return { ...result, status: 'ok' };
       }
       throw new ReadinessRefusalException(failures, result);
     }

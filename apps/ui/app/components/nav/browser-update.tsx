@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
 import { Topic } from '@taucad/events';
 import { useSidebar } from '@taucad/ui/components/sidebar';
@@ -18,7 +18,8 @@ const reloadPromptOwnersTopic = new Topic<void>({ name: 'reload-prompt-owners' }
  * @param isOwning - Whether the caller shows the prompt now.
  */
 export const useReloadPromptOwner = (isOwning: boolean): void => {
-  useEffect(() => {
+  // A layout effect, so the banner steps aside in the same commit and never paints a duplicate prompt.
+  useLayoutEffect(() => {
     if (!isOwning) {
       return undefined;
     }

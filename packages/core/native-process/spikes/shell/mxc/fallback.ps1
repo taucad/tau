@@ -167,7 +167,7 @@ public static class TauRestrict {
         try { int r; if (!GetTokenInformation(nt, TOKEN_ELEVATION_CLASS, b, 4, out r)) return -Marshal.GetLastWin32Error(); return Marshal.ReadInt32(b) == 0 ? 0 : 1; }
         finally { Marshal.FreeHGlobal(b); }
       } finally { CloseHandle(nt); }
-    } catch (Exception e) { return -99; }
+    } catch (Exception) { return -99; }
   }
 
   static STARTUPINFO NewSi() { STARTUPINFO si = new STARTUPINFO(); si.cb = Marshal.SizeOf(typeof(STARTUPINFO)); si.Desktop = "winsta0\\default"; return si; }

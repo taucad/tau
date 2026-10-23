@@ -1,9 +1,9 @@
 /**
  * The host half of the viewer `tau mcp` serves (agent plugin UI blueprint W4).
  *
- * `@taucad/mcp` registers the page and its tools; this module renders the
- * model a tool names into a GLB under `.tau/artifacts` (the runtime already
- * owns that path through `export_model`), hands out opaque handles the page
+ * `@taucad/mcp` registers the page and its tools; this module shows the model a tool names: a GLB or SVG as it is,
+ * and a CAD source through one watched runtime document (`mcp-entry-sessions.ts`), whose renders stay in memory and
+ * reach every page showing the source whenever its files or parameters change. It hands out opaque handles the page
  * reads in ranges, and runs the loopback server a text host links to.
  */
 
@@ -24,7 +24,9 @@ import type {
 } from '@taucad/mcp';
 import { tauViewerReadLimit, tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 
-import { readModelRange, snapshotModelFile } from '#mcp-viewer-read.js';
+import { createMcpEntrySessions } from '#mcp-entry-sessions.js';
+import type { EntryRender, EntrySession, EntrySessionRuntime } from '#mcp-entry-sessions.js';
+import { readBytesRange, readModelRange, snapshotModelFile } from '#mcp-viewer-read.js';
 import type { ModelFileIdentity } from '#mcp-viewer-read.js';
 import { createMcpViewerSessions } from '#mcp-viewer-sessions.js';
 import { createDirectShare } from '#mcp-viewer-share.js';
@@ -113,23 +115,14 @@ export type LocalMcpViewerOptions = Readonly<{
   /** The folder a call works in when it names none and its conversation has shown no model: the server's start folder. */
   workspaceRoot: string;
   /**
+   * The project runtime a shown CAD source is watched in: one document per source, rendered with its CAD topology,
+   * kept in memory. Without it, `show_model` draws GLB and SVG files only.
+   */
+  liveRuntime?: ((root: string) => Promise<EntrySessionRuntime>) | undefined;
+  /**
    * The project folder one call names, if any: Codex's thread folder on the agent's own calls, or the launcher's pin.
    */
   namedRoot(meta: Readonly<Record<string, unknown>> | undefined): string | undefined;
-  /**
-   * Render one CAD source to GLB under `.tau/artifacts` through the registry's `export_model`, with its CAD topology
-   * wherever the route carries it, so the page can show the components and the mechanism.
-   *
-   * @returns The project-relative artifact path, or a failure.
-   */
-  renderGlb(
-    input: Readonly<{
-      root: string;
-      targetFile: string;
-      toolCallId: string;
-      signal?: AbortSignal | undefined;
-    }>,
-  ): Promise<string | TauMcpViewerFailure>;
   /**
    * Run one of the host tools the loopback page may call ({@link loopbackHostTools}) in a project, answering what
    * `tools/call` would put in `structuredContent`. Without it the loopback page has no workbench panes that need one.
@@ -170,13 +163,14 @@ export type LocalMcpViewer = TauMcpViewer &
  * One model a tool showed, under the id its link and its reads name. The
  * entry is the single record of what was shown and for which project: the
  * loopback page asks for it by id and never resolves a folder of its own.
+ * A drawn file is read from the project; a watched source's render from its session's memory.
  */
-type Shown = Readonly<{
-  model: TauViewerModel;
-  absolutePath: string;
-  root: string;
-  identity: ModelFileIdentity;
-}>;
+type Shown = Readonly<
+  { model: TauViewerModel; root: string } & (
+    | { kind: 'file'; absolutePath: string; identity: ModelFileIdentity }
+    | { kind: 'render'; session: EntrySession }
+  )
+>;
 
 const failure = (errorCode: string, message: string): TauMcpViewerFailure => ({
   errorCode,
@@ -399,8 +393,6 @@ const mechanismOf = (bytes: Uint8Array<ArrayBuffer>): TauViewerMechanism => {
  */
 export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpViewer => {
   const shown = new Map<string, Shown>();
-  /** The source of each GLB this server rendered, by the GLB's absolute path. */
-  const renderedFrom = new Map<string, string>();
   /** The model shown last per project folder and conversation. */
   const lastShown = new Map<string, string>();
   const lastShownKey = (root: string, scope: string | undefined): string =>
@@ -456,14 +448,60 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       byteLength: bytes.length,
       sha256,
     };
-    shown.set(id, { model, absolutePath, root, identity });
+    shown.set(id, { kind: 'file', model, absolutePath, root, identity });
     return mimeType === 'model/gltf-binary' ? { model, mechanism: mechanismOf(bytes) } : { model };
   };
 
-  const startLoopback = async (): Promise<{
-    server: Server;
-    origin: string;
-  }> => {
+  /** A watched source's render as the page shows it: the source's path, the render's bytes, kept in memory. */
+  const describeRender = (
+    session: EntrySession,
+    render: EntryRender,
+  ): Pick<TauViewerShowResult, 'model' | 'mechanism'> => {
+    const model: TauViewerModel = {
+      id: render.id,
+      title: titleOf(session.entryPath),
+      path: session.entryPath,
+      sourceFile: session.entryPath,
+      mimeType: render.mimeType,
+      byteLength: render.bytes.length,
+      sha256: render.sha256,
+      ...(render.sourceRevision === undefined ? {} : { sourceRevision: render.sourceRevision }),
+      ...(render.issues.length === 0 ? {} : { issues: render.issues }),
+    };
+    shown.set(model.id, { kind: 'render', model, root: session.root, session });
+    return render.mimeType === 'model/gltf-binary' ? { model, mechanism: mechanismOf(render.bytes) } : { model };
+  };
+
+  /* A watched source rendered again or changed status: the pages showing it hear of it through `app_sync`. */
+  const entrySessions =
+    options.liveRuntime === undefined
+      ? undefined
+      : createMcpEntrySessions({
+          runtimeFor: options.liveRuntime,
+          onEvent: (session, event) => {
+            if (event.type === 'status') {
+              sessions.status(session.key, session.entryPath, event.status);
+              return;
+            }
+            sessions.rendered(session.key, describeRender(session, event.render));
+          },
+        });
+
+  /**
+   * Watch a source again. A source that cannot open leaves the page on its last render.
+   *
+   * @param root - The project folder.
+   * @param entryPath - The source.
+   */
+  const reopen = async (root: string, entryPath: string): Promise<void> => {
+    try {
+      await entrySessions?.acquire({ root, entryPath });
+    } catch {
+      /* The next show reports why. */
+    }
+  };
+
+  const startLoopback = async (): Promise<{ server: Server; origin: string }> => {
     const server = createServer((request, response) => {
       void handleLoopback(request, response);
     });
@@ -510,8 +548,9 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     const relativePath = posix(relative(root, absolute));
     const isDrawn = extname(absolute).toLowerCase() in drawnFormats;
     /* An export names its source, so the agent hears that the page draws the file as exported (LRP-10). */
-    const exportedFrom = renderedFrom.get(absolute) ?? (await exportedSourceOf(root, relativePath));
+    const exportedFrom = await exportedSourceOf(root, relativePath);
     let described: Pick<TauViewerShowResult, 'model' | 'mechanism'> | TauMcpViewerFailure;
+    let entry: string | undefined;
     if (isDrawn) {
       /* A GLB the agent exported still has its source's parameters, kinematics and exports (viewer parity V8). */
       const sourceFile = extname(absolute).toLowerCase() === '.glb' ? exportedFrom : undefined;
@@ -524,23 +563,14 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       if (!exists) {
         return failure('NOT_FOUND', `${relativePath} does not exist in ${root}.`);
       }
-      const artifact = await options.renderGlb({
-        root,
-        targetFile: relativePath,
-        toolCallId: callOptions.toolCallId,
-        signal: callOptions.signal,
-      });
-      if (isFailure(artifact)) {
-        return artifact;
+      if (entrySessions === undefined) {
+        return failure('RENDER_UNAVAILABLE', `This server has no runtime to render ${relativePath}.`);
       }
-      const artifactPath = inside(root, artifact);
-      if (artifactPath !== undefined) {
-        renderedFrom.set(artifactPath, relativePath);
-      }
-      described =
-        artifactPath === undefined
-          ? failure('RENDER_FAILED', `The rendered model for ${relativePath} landed outside the project.`)
-          : await describe(root, artifactPath, relativePath);
+      /* One watched document per source: a second show of an unchanged source answers its newest render. */
+      const session = await entrySessions.acquire({ root, entryPath: relativePath });
+      const render = await session.settled(callOptions.signal);
+      entry = session.key;
+      described = isFailure(render) ? render : describeRender(session, render);
     }
     if (isFailure(described)) {
       return described;
@@ -566,7 +596,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       ...(url === undefined ? {} : { viewerUrl: url }),
       ...(select === undefined || select.length === 0 ? {} : { select }),
     };
-    sessions.shown(result, scope);
+    sessions.shown(result, scope, entry);
     return result;
   };
 
@@ -670,11 +700,19 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       if (entry === undefined) {
         return failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
       }
+      const length = Math.min(input.length, tauViewerReadLimit);
+      if (entry.kind === 'render') {
+        /* The session keeps its newest renders; an older one gave way to a newer render the page is told of. */
+        const render = entry.session.bytesOf(input.modelId);
+        return render === undefined
+          ? failure('MODEL_CHANGED', `${entry.model.path} changed since it was shown; the newer model is on its way.`)
+          : readBytesRange({ bytes: render.bytes, offset: input.offset, length, encodings: input.encodings });
+      }
       const result = await readModelRange({
         absolutePath: entry.absolutePath,
         identity: entry.identity,
         offset: input.offset,
-        length: Math.min(input.length, tauViewerReadLimit),
+        length,
         encodings: input.encodings,
       });
       return 'refused' in result
@@ -704,7 +742,16 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       const scope =
         conversationOf(callOptions.meta) ??
         (input.toolCallId === undefined ? undefined : conversationByCall.get(input.toolCallId));
-      return sessions.sync(input, { scope, signal: callOptions.signal });
+      /* The runtime's idle release or the session limit ended the watch: a page still showing the source opens it
+       * again under the same key, so its next render reaches the page. */
+      if (entry?.kind === 'render' && entrySessions?.get(entry.session.key) === undefined) {
+        void reopen(entry.root, entry.session.entryPath);
+      }
+      return sessions.sync(input, {
+        scope,
+        signal: callOptions.signal,
+        entry: entry?.kind === 'render' ? entry.session.key : undefined,
+      });
     },
     async viewState(input, callOptions) {
       return sessions.viewState(input, {
@@ -732,6 +779,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
           },
         }),
     async close() {
+      entrySessions?.close();
       sessions.close();
       await workbench.close();
       const running = loopback;
@@ -755,14 +803,11 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
   /* The loopback API runs the same port functions a host would reach through
    * `tools/call`, for the page served at `/`. The token rides the URL fragment,
    * which the browser never sends, and the page returns it in a header.
-   * `show_model` here answers the model the link names, as it was shown: the
-   * page's call carries no host `_meta`, so it cannot name a project folder
-   * (the server's start folder is not the conversation's project), and the
-   * model was already rendered. */
-  const loopbackCall = {
-    toolCallId: 'loopback',
-    presentation: 'text',
-  } as const;
+   * `show_model` here answers the model the link names, as it was shown, or its
+   * source's newest render: the page's call carries no host `_meta`, so it
+   * cannot name a project folder (the server's start folder is not the
+   * conversation's project), and the model was already rendered. */
+  const loopbackCall = { toolCallId: 'loopback', presentation: 'text' } as const;
   const unlinked = (): TauMcpViewerFailure =>
     failure('UNKNOWN_MODEL', 'This link names no model this session showed; show it again.');
 
@@ -795,15 +840,19 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       ]),
     ),
     [tauViewerToolName.appRead]: async (args) => port.read(tauViewerPageInputSchemas.appRead.parse(args), loopbackCall),
-    [tauViewerToolName.showModel]: async (args, signal, link) => {
-      /* A pane that wrote a parameter asks for the linked model's source again: render it in the linked project. */
-      const targetFile =
-        typeof args === 'object' && args !== null ? (args as { targetFile?: unknown }).targetFile : undefined;
-      if (typeof targetFile === 'string' && link !== undefined) {
-        return showPath(link.root, { path: targetFile }, { ...loopbackCall, signal });
-      }
+    [tauViewerToolName.showModel]: async (args, signal) => {
       const entry = linkedModel(args);
-      return entry === undefined ? unlinked() : { model: entry.model };
+      if (entry === undefined) {
+        return unlinked();
+      }
+      if (entry.kind === 'file') {
+        return { model: entry.model };
+      }
+      /* A watch the server released has no render left: the source is watched again in the linked project. */
+      const render = entry.session.current();
+      return render === undefined
+        ? showPath(entry.root, { path: entry.session.entryPath }, { ...loopbackCall, signal })
+        : describeRender(entry.session, render);
     },
     /* Files of the project the linked model came from. */
     [tauViewerToolName.browseModels]: async (args) => {

@@ -2,8 +2,10 @@
  * The contract between `tau mcp` and the Tau viewer page.
  *
  * The page imports this module, so it holds names, shapes and pure helpers
- * only: no SDK, no zod and no Node built-ins.
+ * only: no SDK, no zod and no Node built-ins. The runtime's issue and source revision types are imported as types only.
  */
+
+import type { KernelIssue, SourceRevision } from '@taucad/runtime/types';
 
 /** Tools the viewer page and its host entrypoints call. @public */
 export const tauViewerToolName = {
@@ -60,7 +62,10 @@ export type TauViewerModel = Readonly<{
   id: string;
   /** What the person sees as the model's name. */
   title: string;
-  /** Project-relative path of the file the page draws (a source's rendered GLB lives under `.tau/artifacts`). */
+  /**
+   * Project-relative path of the file the page draws; for a rendered source, the source itself (its render lives in the
+   * server's memory, never in the project).
+   */
   path: string;
   /** Project-relative CAD source the model was rendered from, when there is one. */
   sourceFile?: string | undefined;
@@ -68,6 +73,10 @@ export type TauViewerModel = Readonly<{
   byteLength: number;
   /** Hex SHA-256 of the bytes, so the page can tell a re-render from the model it already shows. */
   sha256: string;
+  /** For a rendered source, the exact source this render read. */
+  sourceRevision?: SourceRevision | undefined;
+  /** What the runtime reported while rendering the source, such as warnings; absent when it reported nothing. */
+  issues?: readonly TauViewerIssue[] | undefined;
 }>;
 
 /** What a shown GLB carries of its source's mechanism, for the page's Kinematics pane. @public */
@@ -78,6 +87,25 @@ export type TauViewerMechanism = Readonly<{
   joints: number;
   /** Animation ids, in authored order. */
   animations: readonly string[];
+}>;
+
+/**
+ * One issue as the page receives it: the runtime's issue without its raw `stack` text, whose classified
+ * `stackFrames` it keeps. `details` stays, because pages act on it: a `KERNEL_NOT_PREPARED` issue names its `kernel`,
+ * and a rejected mechanism carries `mechanism`. Branch on `code`, never on `message`.
+ *
+ * @public
+ */
+export type TauViewerIssue = Readonly<Omit<KernelIssue, 'stack'>>;
+
+/** The live state of one source the page shows, which the server watches. @public */
+export type TauViewerEntryStatus = Readonly<{
+  /** The watched document is evaluating or rendering a newer revision; the shown bytes are the previous one. */
+  building: boolean;
+  /** What the shown bytes were rendered from; absent before the first render settles. */
+  sourceRevision?: SourceRevision | undefined;
+  /** Issues of the latest settled evaluation and render, errors first; empty when it rendered cleanly. */
+  issues: readonly TauViewerIssue[];
 }>;
 
 /** Structured result of `show_model` and `open_model_file`. @public */
@@ -180,6 +208,12 @@ export type TauViewerViewState = Readonly<{
    * whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}.
    */
   references?: readonly TauViewerComponent[] | undefined;
+  /**
+   * The exact source of the model the page draws, as {@link TauViewerModel.sourceRevision} names it. A page sends it
+   * only to a server whose `app_sync` lists it under {@link TauViewerSyncResult.accepts}. On the wire its digests are
+   * plain text.
+   */
+  sourceRevision?: Readonly<{ entry: string; files: Readonly<Record<string, string>> }> | undefined;
 }>;
 
 /**
@@ -188,7 +222,7 @@ export type TauViewerViewState = Readonly<{
  *
  * @public
  */
-export const tauViewerAcceptedViewFields = ['references'] as const;
+export const tauViewerAcceptedViewFields = ['references', 'sourceRevision'] as const;
 
 /** Arguments of `app_sync`. @public */
 export type TauViewerSyncInput = Readonly<{
@@ -211,8 +245,16 @@ export type TauViewerSyncInput = Readonly<{
 /** Structured result of `app_sync`. @public */
 export type TauViewerSyncResult = Readonly<{
   version: number;
-  /** The model `show_model` handed over last, for a page that follows and has not seen it. */
+  /**
+   * A model the page has not seen: the one `show_model` handed over last, for a page that follows, or a newer render of
+   * the source the page shows, after its file or parameters changed.
+   */
   show?: TauViewerShowResult | undefined;
+  /**
+   * The live state of each watched source this page shows (or the one `show` hands over), by its project-relative
+   * path; absent for a drawn file and from a server older than it.
+   */
+  status?: Readonly<Record<string, TauViewerEntryStatus>> | undefined;
   /** A capture of this page's view the agent is waiting for. */
   capture?: Readonly<{ requestId: string }> | undefined;
   /**

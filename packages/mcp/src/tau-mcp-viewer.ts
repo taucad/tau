@@ -148,6 +148,9 @@ const showModelInputSchema = z
 
 const vectorSchema = z.tuple([z.number(), z.number(), z.number()]);
 
+/** Files one reported source revision lists at most: a model's import closure, not a checkout. */
+const sourceRevisionFileLimit = 1024;
+
 const componentSchema = z
   .object({
     componentId: z.string().min(1).max(256),
@@ -186,6 +189,17 @@ const viewSchema = z
     composition: z.enum(['inline', 'tab']),
     interactedAt: z.number().nonnegative(),
     references: z.array(componentSchema).max(64).optional(),
+    sourceRevision: z
+      .object({
+        entry: z.string().min(1).max(1024),
+        files: z
+          .record(z.string().min(1).max(1024), z.string().min(1).max(128))
+          .refine((files) => Object.keys(files).length <= sourceRevisionFileLimit, {
+            message: `A source revision lists at most ${String(sourceRevisionFileLimit)} files.`,
+          }),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

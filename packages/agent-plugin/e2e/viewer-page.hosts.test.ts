@@ -7,7 +7,7 @@
  * Screenshots land in `TAU_E2E_EVIDENCE_DIR` when it is set.
  */
 
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,7 +20,7 @@ import type { Browser, Frame, Locator, Page } from 'playwright';
 import { build } from 'vite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 
-import type { TauViewerShowResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
+import type { TauViewerReadResult, TauViewerShowResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
 import { tauViewerReadLimit } from '@taucad/mcp/viewer-protocol';
 
 import type { HostRecord, TauHost } from '#e2e/basic-host/host.js';
@@ -190,6 +190,28 @@ const connect = async (name: string, capabilities: Record<string, unknown>): Pro
 
 const callTool = async (client: Client, name: string, args: Record<string, unknown>): Promise<CallToolResult> =>
   (await client.callTool({ name, arguments: args }, undefined, { timeout: kernelCallLimit })) as CallToolResult;
+
+/**
+ * Read a shown model's bytes through `app_read`, as the page does, in raw slices.
+ *
+ * @param client - The connected client.
+ * @param modelId - The shown model's id.
+ * @returns The model's bytes.
+ */
+const readShown = async (client: Client, modelId: string) => {
+  const slices: Array<Uint8Array<ArrayBuffer>> = [];
+  let offset = 0;
+  let totalBytes = 1;
+  while (offset < totalBytes) {
+    // oxlint-disable-next-line no-await-in-loop -- each slice starts where the last ended.
+    const result = await callTool(client, 'app_read', { modelId, offset, length: tauViewerReadLimit });
+    const slice = result.structuredContent as TauViewerReadResult;
+    slices.push(Buffer.from(slice.data, 'base64'));
+    offset += slice.byteLength;
+    ({ totalBytes } = slice);
+  }
+  return Buffer.concat(slices);
+};
 
 const shown = (result: CallToolResult): TauViewerShowResult => {
   expect(result.isError).toBeFalsy();
@@ -589,7 +611,7 @@ describe('exchange formats (W7)', () => {
         // oxlint-disable-next-line no-await-in-loop -- one kernel conversion at a time.
         const { model } = shown(await callTool(client, 'show_model', { targetFile }));
         expect(model).toMatchObject({ sourceFile: targetFile, mimeType: 'model/gltf-binary' });
-        expect(model.path).toMatch(/^\.tau\/artifacts\/.+\.glb$/u);
+        expect(model.path).toBe(targetFile);
       }
       const result = await callTool(client, 'show_model', { targetFile: 'cylinders.step' });
       const page = await mountInHarness(client, result, { displayMode: 'fullscreen' });
@@ -615,9 +637,11 @@ describe('a moving assembly (LRP-9)', () => {
    * the shown GLB carries `TAU_cad_topology` and `show_model` reports it preserved.
    *
    * @param client - The connected client.
+   * @param readsBytes - Whether the client reads the render through `app_read`, as an MCP Apps host's page does; a
+   * text host's loopback page reads it over the loopback server instead.
    * @returns The `show_model` result.
    */
-  const showPlanetary = async (client: Client): Promise<CallToolResult> => {
+  const showPlanetary = async (client: Client, readsBytes = true): Promise<CallToolResult> => {
     const evaluated = await callTool(client, 'evaluate_model', { targetFile: 'planetary.ts' });
     expect(evaluated.isError).toBeFalsy();
     expect(evaluated.structuredContent).toMatchObject({
@@ -627,15 +651,19 @@ describe('a moving assembly (LRP-9)', () => {
     const showResult = await callTool(client, 'show_model', { targetFile: 'planetary.ts' });
     const result = shown(showResult);
     expect(result.model).toMatchObject({ sourceFile: 'planetary.ts', mimeType: 'model/gltf-binary' });
-    /* The GLB's JSON chunk: its length at byte 12, its text from byte 20. */
-    const glb = await readFile(join(project, result.model.path));
+    expect(result.mechanism).toEqual({ preserved: true, joints: 3, animations: [animation.id] });
+    if (!readsBytes) {
+      return showResult;
+    }
+    /* The render lives in the server's memory (PAR-1): read it as the page does. The JSON chunk's length is at byte
+     * 12, its text from byte 20. */
+    const glb = await readShown(client, result.model.id);
     const gltf = JSON.parse(glb.subarray(20, 20 + glb.readUInt32LE(12)).toString('utf8')) as {
       extensionsUsed?: readonly string[];
       extensions?: Record<string, { topologyBufferView?: number }>;
     };
     expect(gltf.extensionsUsed ?? []).toContain('TAU_cad_topology');
     expect(gltf.extensions?.['TAU_cad_topology']?.topologyBufferView).toEqual(expect.any(Number));
-    expect(result.mechanism).toEqual({ preserved: true, joints: 3, animations: [animation.id] });
     return showResult;
   };
 
@@ -673,7 +701,7 @@ describe('a moving assembly (LRP-9)', () => {
     'should carry the mechanism to the loopback page of a text host',
     async () => {
       const client = await connect('claude-code', claudeCodeCapabilities);
-      const { viewerUrl } = shown(await showPlanetary(client));
+      const { viewerUrl } = shown(await showPlanetary(client, false));
       const page = await launched().newPage({ viewport: { width: 900, height: 640 } });
       await page.goto(viewerUrl ?? '');
       await drawn(page, 'Export');
@@ -867,6 +895,55 @@ describe('the live view (W6)', () => {
       const calls = await recorded(page, 'toolCalls');
       const reads = calls.filter((call) => call.name === 'app_read');
       expect(new Set(reads.map((call) => call.arguments['modelId']))).toEqual(new Set([shown(first).model.id]));
+      expect(pageErrors).toEqual([]);
+      await page.close();
+    },
+    kernelCallLimit,
+  );
+
+  it(
+    'should show an edit to the shown source without show_model, and keep its render out of the project (PAR-1)',
+    async () => {
+      const source = (width: number): string =>
+        `import { drawRectangle } from 'replicad';\n\nexport default function main() {\n  return drawRectangle(${String(width)}, 10).sketchOnPlane('XY').extrude(3);\n}\n`;
+      await writeFile(join(project, 'live.ts'), source(20));
+      const artifactsBefore = await readdir(join(project, '.tau/artifacts')).catch(() => []);
+      const first = await callTool(client, 'show_model', { targetFile: 'live.ts' });
+      expect(first.isError).toBeFalsy();
+      expect(await readdir(join(project, '.tau/artifacts')).catch(() => [])).toEqual(artifactsBefore);
+      const page = await mountInHarness(client, first, { displayMode: 'fullscreen' });
+      await drawn(viewerFrame(page), 'Export');
+      const viewNow = async (): Promise<TauViewerViewState | undefined> => {
+        const result = await callTool(client, 'view_state', {});
+        return result.isError ? undefined : (result.structuredContent as { view: TauViewerViewState }).view;
+      };
+      const modelIdNow = async (): Promise<string | undefined> => {
+        const view = await viewNow();
+        return view?.model.id;
+      };
+      const toolCallsNow = async () => {
+        const calls = await recorded(page, 'toolCalls');
+        return calls;
+      };
+      await expect.poll(modelIdNow, { timeout: 120_000 }).toBe(shown(first).model.id);
+      const before = await viewNow();
+      expect(before?.sourceRevision?.entry).toBe('live.ts');
+      const { length: callsBefore } = await toolCallsNow();
+
+      /* An editor, the agent or sed changes the file: the server's watched document renders it again. */
+      await writeFile(join(project, 'live.ts'), source(30));
+      await expect.poll(modelIdNow, { timeout: kernelCallLimit - 60_000 }).not.toBe(shown(first).model.id);
+      const after = await viewNow();
+      expect(after?.model).toMatchObject({ path: 'live.ts', sourceFile: 'live.ts' });
+      expect(after?.sourceRevision?.files['live.ts']).not.toBe(before?.sourceRevision?.files['live.ts']);
+      const recordedCalls = await toolCallsNow();
+      const calls = recordedCalls.slice(callsBefore);
+      expect(calls.map((call) => call.name)).not.toContain('show_model');
+      expect(calls.filter((call) => call.name === 'app_read').map((call) => call.arguments['modelId'])).toContain(
+        after?.model.id,
+      );
+      expect(await readdir(join(project, '.tau/artifacts')).catch(() => [])).toEqual(artifactsBefore);
+      await capture(page, 'live-file-edit');
       expect(pageErrors).toEqual([]);
       await page.close();
     },

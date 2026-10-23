@@ -78,7 +78,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y bubblewrap socat
+          sudo apt-get install -y bubblewrap socat ripgrep
           echo "stock apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
           aa-status 2>/dev/null | grep -i bwrap || true
 
@@ -91,9 +91,8 @@ jobs:
         env:
           GFW_TAG: v2.51.0.windows.1
           GFW_ASSET: PortableGit-2.51.0-64-bit.7z.exe
-          GFW_SHA256: '0000000000000000000000000000000000000000000000000000000000000000'
+          GFW_SHA256: 'a09b275d51ed3e829128e04cf4168fb54896cf6234bb30fecb8dc96a2bd321fa'
         run: |
-          # NOTE: pin GFW_SHA256 to the published checksum before trusting a receipt from this step.
           $dest = Join-Path $env:RUNNER_TEMP 'tau-git'
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
           $url = "https://github.com/git-for-windows/git/releases/download/$env:GFW_TAG/$env:GFW_ASSET"
@@ -116,8 +115,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $srt = Join-Path (node -e "process.stdout.write(require('path').dirname(require.resolve('@anthropic-ai/sandbox-runtime/package.json')))") "vendor\srt-win\$((node -e "process.stdout.write(process.arch)"))\srt-win.exe"
-          if (-not (Test-Path $srt)) { throw "vendored srt-win.exe missing at $srt" }
+          $srt = node packages/core/native-process/spikes/shell/srt-win-path.mts
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $srt)) { throw "vendored srt-win.exe missing at '$srt'" }
           "TAU_SPIKE_SRT_WIN=$srt" | Out-File -FilePath $env:GITHUB_ENV -Append
           & $srt install
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 10) { throw "srt-win install exited $LASTEXITCODE" }

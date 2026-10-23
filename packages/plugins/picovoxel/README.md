@@ -174,6 +174,11 @@ serial build, so exact output is identical in every host.
 - Exactly-zero-area triangles are dropped from every snapshot; area, volume and every other triangle
   are unchanged.
 
+The render options `meshAdaptivity` (0 to below 1, default 0) and `meshRelax` (default `false`) ask for
+an adaptive display mesh in the fast lane; exports always mesh at 0. An exact render that asks for
+adaptivity is refused with a typed `REPRESENTATION_UNSUPPORTED` issue, and the pinned PicoVoxel 0.1.0,
+whose `toMesh()` takes no options, refuses every adaptive request with `KERNEL_CAPABILITY_MISSING`.
+
 ### Runtime lifetime
 
 Each kernel worker compiles each build's WebAssembly module once (or instantiates the module its host

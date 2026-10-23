@@ -53,6 +53,13 @@ import {
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
 import { dropZeroAreaTriangles, picovoxelToGlb, picovoxelToGltf } from '#picovoxel.geometry.js';
+import {
+  meshPicovoxelField,
+  picovoxelMeshingReport,
+  resolvePicovoxelMeshing,
+  snapshotPicovoxelMeshingReport,
+} from '#picovoxel-meshing.js';
+import type { PicovoxelMeshing } from '#picovoxel-meshing.js';
 import type { PicovoxelNativeHandle, PicovoxelShapeSnapshot } from '#picovoxel.geometry.js';
 import {
   multiUnavailableReason,
@@ -704,9 +711,14 @@ type MeasuredShape = Readonly<{
  *
  * @param measured - Delivered shapes with their meshing cost.
  * @param voxelSize - The session's voxel edge length in millimetres.
+ * @param meshing - The adaptive meshing the Voxels fields were meshed with, when the view asked for one.
  * @returns The handle's tessellation report.
  */
-const tessellationOf = (measured: readonly MeasuredShape[], voxelSize: number): TessellationReport => {
+const tessellationOf = (
+  measured: readonly MeasuredShape[],
+  voxelSize: number,
+  meshing: PicovoxelMeshing | undefined,
+): TessellationReport => {
   let triangles = 0;
   let vertices = 0;
   let elapsed = 0;
@@ -731,6 +743,7 @@ const tessellationOf = (measured: readonly MeasuredShape[], voxelSize: number): 
     elapsed,
     voxelSize,
     ...(memoryBytes === undefined ? {} : { memoryBytes, ...(activeVoxels === undefined ? {} : { activeVoxels }) }),
+    ...picovoxelMeshingReport(meshing),
   };
 };
 
@@ -767,6 +780,7 @@ const snapshotTessellation = (value: unknown): TessellationReport | undefined =>
     ...(voxelSize === undefined ? {} : { voxelSize }),
     ...(activeVoxels === undefined ? {} : { activeVoxels }),
     ...(memoryBytes === undefined ? {} : { memoryBytes }),
+    ...snapshotPicovoxelMeshingReport(value),
   };
 };
 
@@ -782,12 +796,17 @@ const snapshotTessellation = (value: unknown): TessellationReport | undefined =>
  * @param session - The session's voxel size and the build's crop box.
  * @param session.voxelSize - The session's voxel edge length in millimetres.
  * @param session.region - The crop box, when the build asked for one.
+ * @param session.meshing - Adaptive meshing for Voxels parts, when the view asked for one.
  * @returns The durable native handle.
  */
 const normalizeResult = (
   result: unknown,
   sessionLane: PicovoxelLane,
-  { voxelSize, region }: { readonly voxelSize: number; readonly region?: PicovoxelRegion },
+  {
+    voxelSize,
+    region,
+    meshing,
+  }: { readonly voxelSize: number; readonly region?: PicovoxelRegion; readonly meshing?: PicovoxelMeshing },
 ): PicovoxelNativeHandle => {
   const model = isRecordObject(result) && 'shapes' in result ? result : undefined;
   const modelShapes = model?.['shapes'];
@@ -852,7 +871,7 @@ const normalizeResult = (
       if (field.isEmpty) {
         return undefined;
       }
-      const snapshot = { ...snapshotMesh(field.toMesh(), part, sessionLane), ...appearance };
+      const snapshot = { ...snapshotMesh(meshPicovoxelField(field, meshing), part, sessionLane), ...appearance };
       const elapsed = performance.now() - started;
       // Read after meshing so the grid query never counts toward the reported meshing time.
       const memoryBytes = field.memUsage;
@@ -870,7 +889,7 @@ const normalizeResult = (
   return {
     shapes: delivered.map(({ shape }) => shape),
     ...resources,
-    tessellation: tessellationOf(delivered, voxelSize),
+    tessellation: tessellationOf(delivered, voxelSize, meshing),
     ...(region === undefined ? {} : { region: { min: [...region.min], max: [...region.max] } }),
   };
 };
@@ -1252,6 +1271,11 @@ export const picovoxelKernel = defineKernel({
     const module = resolveModule(executeResult.value);
 
     const { lane } = options;
+    const meshingDecision = resolvePicovoxelMeshing(options, lane, picovoxelBuild.version);
+    if ('refusal' in meshingDecision) {
+      throw new PicovoxelBuildError([meshingDecision.refusal]);
+    }
+    const meshingOptions = meshingDecision;
     const artifact = artifactFor(lane, context.wasm);
     if (artifact === 'multi') {
       // An explicit multi request that cannot be honoured fails visibly; it never falls back.
@@ -1273,7 +1297,7 @@ export const picovoxelKernel = defineKernel({
           `PicoVoxel session variant=${sessionArtifact} pthreads=${pico.module.PThread?.runningWorkers.length ?? 0} lane=${pico.lane}`,
         );
         const result = await runMain(module, withAbortChecks(pico), parameters);
-        const nativeHandle = normalizeResult(result, lane, { voxelSize, region: options.region });
+        const nativeHandle = normalizeResult(result, lane, { voxelSize, region: options.region, ...meshingOptions });
         const { mechanism, issues } = await readMechanismExport({
           module,
           parameters,

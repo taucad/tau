@@ -107,18 +107,29 @@ new MutationObserver((records) => {
   }
 }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
 
-const colorProbe = document.createElement('canvas').getContext('2d')!;
+/* Calling getContext('webgl2') on a canvas without a context creates one, which left AurigaX's 2D base canvas
+ * unusable for its Canvas 2D fallback; record the WebGL contexts the renderers create instead. */
+const webglContexts = new WeakMap<HTMLCanvasElement, WebGLRenderingContext | WebGL2RenderingContext>();
+const { getContext: originalGetContext } = HTMLCanvasElement.prototype;
+HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+  const context = Reflect.apply(originalGetContext, this, [type, ...rest]) as unknown;
+  if ((type === 'webgl' || type === 'webgl2') && context) {
+    webglContexts.set(this, context as WebGLRenderingContext | WebGL2RenderingContext);
+  }
+  return context;
+} as typeof originalGetContext;
+
+const colorProbe = document.createElement('canvas').getContext('2d', { willReadFrequently: true })!;
 const tokenColor = (name: string): string => {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  const element = document.createElement('span');
-  element.style.color = value;
-  document.body.append(element);
-  const resolved = getComputedStyle(element).color;
-  element.remove();
-  /* Canvas normalizes any CSS color (oklch included) to #rrggbb or rgba(), which both candidates parse. */
+  /* Chromium keeps oklch() through both getComputedStyle and fillStyle, and AurigaX's parser takes only #rgb or
+   * rgb(), falling back to Ghostty's default colors. Painting one pixel gives every candidate the same #rrggbb. */
+  colorProbe.clearRect(0, 0, 1, 1);
   colorProbe.fillStyle = '#000';
-  colorProbe.fillStyle = resolved;
-  return colorProbe.fillStyle;
+  colorProbe.fillStyle = value;
+  colorProbe.fillRect(0, 0, 1, 1);
+  const [red, green, blue] = colorProbe.getImageData(0, 0, 1, 1).data;
+  return `#${[red, green, blue].map((channel) => channel!.toString(16).padStart(2, '0')).join('')}`;
 };
 const themeFromTokens = (): TerminalTheme => ({
   background: tokenColor('--background'),
@@ -142,8 +153,10 @@ const tailContains = (marker: string, lines = 400): boolean => {
   if (!view) {
     return false;
   }
+  /* Newest line first: the marker sits at the bottom, and reading a scrollback line costs a WASM call per cell in
+   * the AurigaX build, so a forward scan of 3000 lines held the main thread for about 850 ms per echo. */
   const { length } = view.buffer();
-  for (let index = Math.max(0, length - lines); index < length; index++) {
+  for (let index = length - 1; index >= Math.max(0, length - lines); index--) {
     if (view.lineText(index)?.includes(marker)) {
       return true;
     }
@@ -156,11 +169,14 @@ const echo = (kind: LatencyKind, t0: number, text: string): void => {
   const underLoad = playing;
   const marker = `«${kind[0]}${(echoSequence++).toString(36)}»`;
   view?.write(`${text}${marker}`, () => {
+    /* Checked at parse completion, while the marker is still on the bottom rows; after the paint, a fast stream has
+     * already pushed it thousands of lines up. */
+    const found = tailContains(marker, 3000);
     // async-iife: bootstrap — the terminal write callback is synchronous; the latency record is read later through `latencies()`.
     // oxlint-disable-next-line promise/prefer-await-to-then -- An async callback would change the measured echo-latency microtask ordering.
     void afterPaint().then(() => {
       const t1 = performance.now();
-      latencies.push({ kind, t0, t1, ms: t1 - t0, found: tailContains(marker, 3000), underLoad });
+      latencies.push({ kind, t0, t1, ms: t1 - t0, found, underLoad });
     });
   });
 };
@@ -442,7 +458,7 @@ const api = {
   loseWebglContexts() {
     let lost = 0;
     for (const canvas of pane.querySelectorAll('canvas')) {
-      const context = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+      const context = webglContexts.get(canvas);
       const extension = context?.getExtension('WEBGL_lose_context');
       if (extension) {
         extension.loseContext();

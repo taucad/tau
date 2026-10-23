@@ -5,7 +5,8 @@
  */
 import type * as GhosttyWeb from 'ghostty-web';
 
-export type RendererKind = 'xterm' | 'ghostty';
+/** `ghostty131` is ghostty-web's own code with a WASM rebuilt on Ghostty v1.3.1 (`scripts/s3-renderer/build-ghostty-wasm.sh`). */
+export type RendererKind = 'xterm' | 'ghostty' | 'ghostty131' | 'aurigax';
 
 export type TerminalTheme = {
   readonly background: string;
@@ -21,7 +22,7 @@ export type TerminalViewOptions = {
   readonly fontSize: number;
   readonly theme: TerminalTheme;
   readonly scrollback: number;
-  /** Request xterm's WebGL renderer; ghostty-web always draws with Canvas 2D. */
+  /** Request WebGL (xterm's addon, AurigaX's renderer); ghostty-web always draws with Canvas 2D. */
   readonly webgl: boolean;
   readonly screenReaderMode: boolean;
   /** Receives link activations instead of the renderer opening a window; the host applies Tau's link policy. */
@@ -249,7 +250,7 @@ const createGhosttyView = async (options: TerminalViewOptions): Promise<Terminal
    * instance's allocator corrupt, so the next terminal on it traps (R03). Disposing the instance with its terminal
    * avoids that; `Terminal.reset()` hits the same fault and is never called (write RIS instead). */
   const terminal = new ghostty.Terminal({
-    ghostty: await ghostty.Ghostty.load(),
+    ghostty: await ghostty.Ghostty.load(options.kind === 'ghostty131' ? './ghostty-vt-1.3.1.wasm' : undefined),
     fontFamily: options.fontFamily,
     fontSize: options.fontSize,
     theme: options.theme,
@@ -421,7 +422,7 @@ const createGhosttyView = async (options: TerminalViewOptions): Promise<Terminal
   const ghosttyBaseY = (): number =>
     terminal.buffer.active.type === 'alternate' ? 0 : Math.max(0, terminal.buffer.active.length - terminal.rows);
   return {
-    kind: 'ghostty',
+    kind: options.kind,
     renderer: () => 'canvas2d',
     write(data, done) {
       /* The ghostty-web package parses synchronously but defers the callback to the next animation frame, and a zero-length write
@@ -482,10 +483,181 @@ const createGhosttyView = async (options: TerminalViewOptions): Promise<Terminal
 };
 
 /**
+ * The AurigaX fork of ghostty-web (`@aurigax-ai/ghostty-web`) builds Ghostty's official libghostty-vt rather than
+ * ghostty-web's patched Ghostty, so it lacks the scrollback page leak fixed upstream in Ghostty PR #10251. It already
+ * acknowledges writes at parse completion, parks its render loop when idle, sends the Alt prefix, counts scrollback in
+ * lines and routes links through `linkHandler`; the shims below cover what it still lacks.
+ */
+const createAurigaxView = async (options: TerminalViewOptions): Promise<TerminalView> => {
+  const aurigax = await import('@aurigax-ai/ghostty-web');
+  /* Same edge auto-scroll as ghostty-web's selection manager (see createGhosttyView). */
+  Reflect.set(aurigax.SelectionManager, 'AUTO_SCROLL_EDGE_SIZE', 0);
+  const terminal = new aurigax.Terminal({
+    ghostty: await aurigax.Ghostty.load(),
+    fontFamily: options.fontFamily,
+    fontSize: options.fontSize,
+    theme: options.theme,
+    scrollback: options.scrollback,
+    renderer: options.webgl ? 'webgl' : 'canvas',
+    ...(options.onLinkActivate && {
+      linkHandler: {
+        activate(event: MouseEvent, uri: string) {
+          if (/^https?:/i.test(uri)) {
+            options.onLinkActivate?.(uri, event);
+          }
+        },
+      },
+    }),
+  });
+  const fitAddon = new aurigax.FitAddon();
+  terminal.loadAddon(fitAddon);
+
+  const mount = document.createElement('div');
+  mount.style.width = '100%';
+  mount.style.height = '100%';
+  options.host.append(mount);
+  const announcer = options.screenReaderMode ? createOutputAnnouncer(options.host) : undefined;
+
+  /* The selection manager's anonymous document `mousedown` listener is still never removed (upstream PR #206). */
+  const documentListeners: Array<Parameters<Document['addEventListener']>> = [];
+  const { addEventListener } = document;
+  document.addEventListener = function (this: Document, ...arguments_: Parameters<Document['addEventListener']>) {
+    documentListeners.push(arguments_);
+    Reflect.apply(addEventListener, this, arguments_);
+  } as Document['addEventListener'];
+  try {
+    terminal.open(mount);
+  } finally {
+    Reflect.deleteProperty(document, 'addEventListener');
+  }
+  const disposers: Array<() => void> = [];
+  const listen = <K extends keyof DocumentEventMap>(
+    target: Document | HTMLElement,
+    type: K,
+    listener: (event: DocumentEventMap[K]) => void,
+  ): void => {
+    target.addEventListener(type, listener as EventListener, { capture: true, passive: false });
+    disposers.push(() => {
+      target.removeEventListener(type, listener as EventListener, { capture: true });
+    });
+  };
+
+  /* Paste line breaks as CR, as xterm does; `paste()` still applies bracketed paste. */
+  listen(mount, 'paste', (event) => {
+    const text = event.clipboardData?.getData('text/plain');
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (text) {
+      terminal.paste(text.replaceAll(/\r?\n/g, '\r'));
+    }
+  });
+  listen(document, 'copy', (event) => {
+    if (mount.contains(document.activeElement) && terminal.hasSelection()) {
+      event.clipboardData?.setData('text/plain', terminal.getSelection());
+      event.preventDefault();
+    }
+  });
+
+  /* Both renderers read devicePixelRatio once, as ghostty-web's does. Re-measuring rebuilds the
+   * cell metrics and glyph atlas; a pause/resume pair is the public way to force a full redraw. */
+  let resolution: MediaQueryList | undefined;
+  const onResolutionChange = (): void => {
+    const { renderer } = terminal;
+    if (renderer) {
+      Reflect.set(renderer, 'devicePixelRatio', globalThis.devicePixelRatio);
+      renderer.remeasureFont();
+      renderer.resize(terminal.cols, terminal.rows);
+      terminal.setPaused(true);
+      terminal.setPaused(false);
+    }
+    watchResolution();
+  };
+  const watchResolution = (): void => {
+    resolution?.removeEventListener('change', onResolutionChange);
+    resolution = globalThis.matchMedia(`(resolution: ${globalThis.devicePixelRatio}dppx)`);
+    resolution.addEventListener('change', onResolutionChange);
+  };
+  watchResolution();
+  disposers.push(() => {
+    resolution?.removeEventListener('change', onResolutionChange);
+  });
+
+  /* After a GPU process restart the Canvas 2D fallback's context comes back blank, and only dirty rows repaint. */
+  listen(mount, 'contextrestored' as keyof DocumentEventMap, () => {
+    terminal.renderer?.resize(terminal.cols, terminal.rows);
+    terminal.setPaused(true);
+    terminal.setPaused(false);
+  });
+
+  return {
+    kind: 'aurigax',
+    renderer: () => (terminal.rendererType === 'webgl' ? 'webgl' : 'canvas2d'),
+    write(data, done) {
+      if (data.length > 0) {
+        terminal.write(data, done);
+        announcer?.push(data);
+      } else if (done) {
+        queueMicrotask(done);
+      }
+    },
+    onData(listener) {
+      const subscription = terminal.onData(listener);
+      return () => {
+        subscription.dispose();
+      };
+    },
+    fit() {
+      const proposed = fitAddon.proposeDimensions();
+      if (proposed && (proposed.cols !== terminal.cols || proposed.rows !== terminal.rows)) {
+        terminal.resize(proposed.cols, proposed.rows);
+      }
+      return { cols: terminal.cols, rows: terminal.rows };
+    },
+    resize: (cols, rows) => {
+      terminal.resize(cols, rows);
+    },
+    focus: () => {
+      terminal.focus();
+    },
+    buffer: () => snapshotOf(terminal.buffer),
+    lineText: (index) => terminal.buffer.active.getLine(index)?.translateToString(true),
+    /* Selection rows are viewport rows; the adapter takes an absolute buffer row like xterm. */
+    select: (column, row, length) => {
+      terminal.select(column, row - terminal.buffer.active.baseY, length);
+      terminal.wake();
+    },
+    selection: () => terminal.getSelection(),
+    dispose: () => {
+      for (const dispose of disposers) {
+        dispose();
+      }
+      announcer?.dispose();
+      terminal.dispose();
+      for (const [type, listener, listenerOptions] of documentListeners) {
+        document.removeEventListener(type, listener, listenerOptions);
+      }
+      mount.remove();
+    },
+  };
+};
+
+/**
  * Create one candidate terminal inside `options.host`.
  *
  * @param options - Identical font, theme, scrollback and renderer request for either candidate.
  * @returns The adapter for the chosen candidate.
  */
-export const createTerminalView = async (options: TerminalViewOptions): Promise<TerminalView> =>
-  options.kind === 'xterm' ? createXtermView(options) : createGhosttyView(options);
+export const createTerminalView = async (options: TerminalViewOptions): Promise<TerminalView> => {
+  switch (options.kind) {
+    case 'xterm': {
+      return createXtermView(options);
+    }
+    case 'ghostty':
+    case 'ghostty131': {
+      return createGhosttyView(options);
+    }
+    case 'aurigax': {
+      return createAurigaxView(options);
+    }
+  }
+};

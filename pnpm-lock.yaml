@@ -27,6 +27,9 @@ catalogs:
     '@arethetypeswrong/cli':
       specifier: ^0.18.3
       version: 0.18.5
+    '@aurigax-ai/ghostty-web':
+      specifier: 0.3.6
+      version: 0.3.6
     '@aws-sdk/client-s3':
       specifier: ^3.1073.0
       version: 3.1150.0
@@ -2881,6 +2884,9 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      '@aurigax-ai/ghostty-web':
+        specifier: 'catalog:'
+        version: 0.3.6
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../packages/core/geometry
@@ -6212,6 +6218,9 @@ packages:
 
   '@asamuzakjp/css-color@3.2.0':
     resolution: {integrity: sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw==}
+
+  '@aurigax-ai/ghostty-web@0.3.6':
+    resolution: {integrity: sha512-F2CwHx9F6hS58YKvi3uBCKEScHtQE6zDEuzV+uaggpuc0bk3oF+bxygnlbfip/LMKJZDgvDX/Eqjzh/sCo/uHg==}
 
   '@aws-crypto/sha256-browser@5.2.0':
     resolution: {integrity: sha512-AXfN/lGotSQwu6HNcEsIASo7kWXZ5HYWvfOmSNKDsEqC4OashTp8alTmaz+F7TC2L083SFv5RdB+qU3Vs1kZqw==}
@@ -26372,6 +26381,8 @@ snapshots:
       '@csstools/css-parser-algorithms': 3.0.5(@csstools/css-tokenizer@3.0.4)
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
+
+  '@aurigax-ai/ghostty-web@0.3.6': {}
 
   '@aws-crypto/sha256-browser@5.2.0':
     dependencies:

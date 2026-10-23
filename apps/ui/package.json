@@ -115,6 +115,7 @@
     "@types/json-schema": "catalog:",
     "@types/pluralize": "^0.0.33",
     "@types/web-app-manifest": "catalog:",
+    "@aurigax-ai/ghostty-web": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "@xterm/addon-fit": "catalog:",
     "@xterm/addon-webgl": "catalog:",

@@ -23,7 +23,7 @@ import { build } from 'esbuild';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
 
-type Kind = 'xterm' | 'ghostty';
+type Kind = 'xterm' | 'ghostty' | 'ghostty131' | 'aurigax';
 type Sample = { at: number; cpuPercent: number; workingSetKiB: number; byType: Record<string, number> };
 type Latency = { kind: 'key' | 'paste' | 'interrupt'; ms: number; found: boolean; underLoad: boolean };
 type Session = { app: ElectronApplication; page: Page; kind: Kind };
@@ -39,6 +39,8 @@ const { values } = parseArgs({
     rate: { type: 'string', default: '0' },
     /** Record a renderer CPU profile of each R01 throughput phase next to the results. */
     profile: { type: 'boolean', default: false },
+    /** Comma-separated candidates to run, in pairing order. */
+    kinds: { type: 'string', default: 'xterm,ghostty' },
     'electron-arg': { type: 'string', multiple: true, default: [] },
   },
 });
@@ -47,9 +49,11 @@ const root = path.resolve(import.meta.dirname, '../../../..');
 const outRoot = path.join(root, 'out/s3-renderer');
 const clientRoot = path.join(outRoot, 'app');
 const fixtureMain = path.join(outRoot, 'fixture/main.cjs');
+/** Written by `build-ghostty-wasm.sh`: ghostty-web's WASM API patch on Ghostty v1.3.1. */
+const ghostty131Wasm = path.join(outRoot, 'wasm/ghostty-vt-1.3.1.wasm');
 const resultsDirectory = path.resolve(values.out ?? path.join(outRoot, 'results'));
 const rounds = Number(values.rounds);
-const kinds: readonly Kind[] = ['xterm', 'ghostty'];
+const kinds = values.kinds.split(',') as readonly Kind[];
 const pane = { width: 960, height: 540 };
 const flow = { chunkBytes: 16_384, highWater: 262_144 };
 const interactiveRate = Number(values.rate);
@@ -109,6 +113,9 @@ const prepare = async (): Promise<void> => {
     await mkdir(path.join(clientRoot, 'fixtures'), { recursive: true });
     for (const file of await readdir(path.join(outRoot, 'fixtures'))) {
       await copyFile(path.join(outRoot, 'fixtures', file), path.join(clientRoot, 'fixtures', file));
+    }
+    if (kinds.includes('ghostty131')) {
+      await copyFile(ghostty131Wasm, path.join(clientRoot, 'ghostty-vt-1.3.1.wasm'));
     }
     await build({
       entryPoints: [path.join(root, 'apps/desktop/scripts/s3-renderer-fixture/main.ts')],
@@ -291,6 +298,19 @@ const environment = async () => {
           sha256Lib: await packageDigest('ghostty-web/dist/ghostty-web.js'),
           sha256Wasm: await packageDigest('ghostty-web/ghostty-vt.wasm'),
         },
+        '@aurigax-ai/ghostty-web': {
+          version: '0.3.6',
+          integrity: integrity('@aurigax-ai/ghostty-web', '0.3.6'),
+          sha256Lib: await packageDigest('@aurigax-ai/ghostty-web/lib/terminal.ts'),
+          sha256Wasm: await packageDigest('@aurigax-ai/ghostty-web/ghostty-vt.wasm'),
+        },
+        ...(kinds.includes('ghostty131') && {
+          'ghostty-web+ghostty-1.3.1': {
+            ghosttyCommit: '332b2aefc6e72d363aa93ab6ecfc86eeeeb5ed28',
+            sha256Patch: sha256(await readFile(path.join(import.meta.dirname, 'ghostty-1.3.1-wasm-api.patch'))),
+            sha256Wasm: sha256(await readFile(ghostty131Wasm)),
+          },
+        }),
       },
       fixtures: JSON.parse(await readFile(path.join(outRoot, 'fixtures/manifest.json'), 'utf8')) as unknown,
       harnessDigest: sha256(
@@ -1049,7 +1069,7 @@ const r07Run = async (kind: Kind) => {
 const calibrate = async () => {
   const results = [];
   for (const scrollback of [6, 571, 2286, 4571, 9143, 10_000]) {
-    const session = await launch('ghostty');
+    const session = await launch(kinds.find((kind) => kind.startsWith('ghostty')) ?? 'ghostty');
     try {
       await mount(session, { scrollback });
       await call(session, 'loadFixture', 'r01-colored-log');

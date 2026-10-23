@@ -398,9 +398,9 @@ describe('createLocalMcpViewer', () => {
 
     expect(opened.model).toMatchObject({ sourceFile: 'src/bracket.ts' });
     expect(opened.viewerUrl).toBeUndefined();
-    expect(renderGlb).toHaveBeenCalledWith(
-      expect.objectContaining({ targetFile: 'src/bracket.ts', toolCallId: 'page-asking-0-call-1' }),
-    );
+    /* The page's open watches the source as a show does, so the asking page follows its edits. */
+    expect(runtime.documents).toHaveLength(1);
+    expect(runtime.documents[0]).toMatchObject({ entryPath: 'src/bracket.ts', watch: true });
     /* The other page hears of no show, and the agent's show without a target still names the model it showed. */
     const version = 'version' in other ? other.version : 0;
     expect(

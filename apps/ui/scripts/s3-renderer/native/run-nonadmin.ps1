@@ -46,12 +46,19 @@ try {
   } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Drop 'nonadmin-context.json')
   if ($isAdmin) { throw 'created user unexpectedly in Administrators; refusing to run elevated' }
 
-  # Read access to the checkout (node_modules, the built harness; the runner's ACL admits only administrators). An
-  # inheritable grant alone left pnpm's hard-linked store files unreadable (EPERM), so every file also gets an explicit
-  # ACE (/T). The summary line and one probed file's ACL go to the log.
+  # Read access to the checkout (node_modules, the built harness; the runner's ACL admits only administrators). pnpm's
+  # store files are hard links that keep the store's ACL, so the inheritable grant does not reach them (EPERM). An
+  # explicit ACE on every file of the checkout ran past the step's 170 minutes, so only the store packages the harness
+  # loads at run time get one. The summary lines and one probed file's ACL go to the log.
   cmd /c "icacls `"$env:GITHUB_WORKSPACE`" /grant `"${user}:(OI)(CI)RX`" /C /Q" | Out-Null
-  $grant = cmd /c "icacls `"$env:GITHUB_WORKSPACE`" /grant `"${user}:RX`" /T /C /Q 2>&1"
-  Write-Host "[run-nonadmin] read grant: $(($grant | Select-Object -Last 1))"
+  $store = Join-Path $env:GITHUB_WORKSPACE 'node_modules/.pnpm'
+  $runtime = Get-ChildItem -LiteralPath $store -Directory |
+    Where-Object { $_.Name -match '^(playwright|playwright-core|electron|esbuild|@esbuild\+win32-arm64)@' }
+  foreach ($package in $runtime) {
+    $started = Get-Date
+    $grant = cmd /c "icacls `"$($package.FullName)`" /grant `"${user}:RX`" /T /C /Q 2>&1"
+    Write-Host "[run-nonadmin] read grant $($package.Name) in $([int]((Get-Date) - $started).TotalSeconds) s: $(($grant | Select-Object -Last 1))"
+  }
   $probe = Join-Path $env:GITHUB_WORKSPACE 'node_modules/playwright/package.json'
   Write-Host "[run-nonadmin] probe ACL: $((cmd /c "icacls `"$probe`"" 2>&1) -join ' | ')"
   # Write access to the drop and the harness output (packaged fixture, Electron user data stays in the profile).

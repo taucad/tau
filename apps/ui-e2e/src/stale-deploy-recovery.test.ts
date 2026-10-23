@@ -181,7 +181,11 @@ const settledState = async (page: Page, nextBuildId: number): Promise<Settled> =
       if (headings.has('Something went wrong')) {
         return 'error page';
       }
-      return headings.has('Tau has been updated') ? 'reload offered' : false;
+      // While the page's own reload is pending the same screen shows with its button disabled; that is not an offer.
+      const offered = [...document.querySelectorAll('button')].some(
+        (button) => button.textContent?.trim() === 'Reload' && !button.disabled,
+      );
+      return headings.has('Tau has been updated') && offered ? 'reload offered' : false;
     },
     String(nextBuildId),
     { timeout: 30_000 },

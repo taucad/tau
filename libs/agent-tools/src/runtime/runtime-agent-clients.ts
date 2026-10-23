@@ -206,10 +206,60 @@ export type CreateRuntimeAgentClientsInput = Readonly<{
 /** Inputs for adapting one host-owned parameter actor per source target. @public */
 export type CreateRuntimeParameterAgentClientInput = Readonly<{
   mapRuntimeError: RuntimeAgentErrorMapper;
+  /**
+   * The current digest of each project file, by rooted path: `sha256:<hex>`, or `'missing'`. With it, a read whose
+   * resolved manifest names only unchanged source files answers from the actor's snapshot, without the runtime
+   * round-trip a resolve costs while `test_model` holds the runtime (LRP-11). The sidecar is watched, so its values
+   * are current either way.
+   */
+  sourceDigests?: (paths: readonly string[]) => Promise<Readonly<Record<string, string>>>;
   parameterActorFor(
     targetFile: string,
   ): ActorRefFrom<typeof parameterSetMachine> | Promise<ActorRefFrom<typeof parameterSetMachine>>;
 }>;
+
+type ParameterSetSnapshot = SnapshotFrom<typeof parameterSetMachine>;
+
+/**
+ * The actor's resolved snapshot when nothing its manifest was compiled from has changed, or `undefined` when the
+ * read must resolve.
+ *
+ * @param actor - The target's parameter actor.
+ * @param mode - The resolution mode the read asks for.
+ * @param sourceDigests - The host's current file digests.
+ * @returns The snapshot to answer from, or `undefined`.
+ */
+const unchangedSnapshot = async (
+  actor: ActorRefFrom<typeof parameterSetMachine>,
+  mode: string | undefined,
+  sourceDigests: CreateRuntimeParameterAgentClientInput['sourceDigests'],
+): Promise<ParameterSetSnapshot | undefined> => {
+  const snapshot = actor.getSnapshot();
+  const { current } = snapshot.context;
+  if (
+    sourceDigests === undefined ||
+    !snapshot.matches({ open: 'ready' }) ||
+    current === undefined ||
+    (current.manifest.identity.resolution.mode ?? 'default') !== (mode ?? 'default')
+  ) {
+    return undefined;
+  }
+  const { sourceFiles } = current.manifest.identity;
+  const paths = Object.keys(sourceFiles);
+  if (paths.length === 0) {
+    return undefined;
+  }
+  let digests: Readonly<Record<string, string>>;
+  try {
+    digests = await sourceDigests(paths);
+  } catch {
+    return undefined;
+  }
+  // The actor may have moved on while the files were read; only the snapshot that was checked answers.
+  return paths.every((path) => digests[path] === sourceFiles[path]) && actor.getSnapshot() === snapshot
+    ? snapshot
+    : undefined;
+};
 
 const unresolvedParameters = (
   diagnostic: Readonly<{ code: string; message: string }>,
@@ -235,21 +285,26 @@ export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterA
         context?.signal?.throwIfAborted();
         const targetFile = assertRootedPath(request.targetFile);
         const actor = await input.parameterActorFor(targetFile);
-        // The actor refreshes bytes for a read in its current mode, so a plan awaiting confirmation survives it.
-        actor.send({
-          type: 'resolve',
-          resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
-        });
-        const result: SnapshotFrom<typeof parameterSetMachine> = await waitFor(
-          actor,
-          (snapshot) =>
-            snapshot.matches({ open: 'ready' }) ||
-            snapshot.matches({ open: 'confirmation' }) ||
-            snapshot.matches({ open: 'disconnected' }) ||
-            snapshot.matches({ open: 'uncertain' }) ||
-            snapshot.status === 'done',
-          { signal: context?.signal },
-        );
+        const unchanged = await unchangedSnapshot(actor, request.resolutionMode, input.sourceDigests);
+        if (unchanged === undefined) {
+          // The actor refreshes bytes for a read in its current mode, so a plan awaiting confirmation survives it.
+          actor.send({
+            type: 'resolve',
+            resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
+          });
+        }
+        const result: ParameterSetSnapshot =
+          unchanged ??
+          (await waitFor(
+            actor,
+            (snapshot) =>
+              snapshot.matches({ open: 'ready' }) ||
+              snapshot.matches({ open: 'confirmation' }) ||
+              snapshot.matches({ open: 'disconnected' }) ||
+              snapshot.matches({ open: 'uncertain' }) ||
+              snapshot.status === 'done',
+            { signal: context?.signal },
+          ));
         const { current } = result.context;
         const available = result.matches({ open: 'ready' }) || result.matches({ open: 'confirmation' });
         if (!available || current === undefined) {

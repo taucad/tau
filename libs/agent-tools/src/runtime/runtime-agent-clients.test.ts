@@ -1011,7 +1011,14 @@ describe('createRuntimeAgentClients default view options', () => {
 });
 
 describe('createRuntimeParameterAgentClient', () => {
-  const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean; unbound?: boolean }> = {}) => {
+  const fixture = async (
+    gate?: Promise<void>,
+    options: Readonly<{
+      sourceUnit?: boolean;
+      unbound?: boolean;
+      sourceDigests?: (paths: readonly string[]) => Promise<Readonly<Record<string, string>>>;
+    }> = {},
+  ) => {
     const target = { authority: 'test', root: '/project', entry: 'main.py' };
     const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
     const manifest = await compileParameterManifest({
@@ -1047,6 +1054,7 @@ describe('createRuntimeParameterAgentClient', () => {
       source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
       dependency: digest,
       middleware: digest,
+      ...(options.sourceDigests === undefined ? {} : { sourceFiles: { 'main.py': digest } }),
     });
     const current = resolveParameterSnapshot({
       target,
@@ -1080,6 +1088,7 @@ describe('createRuntimeParameterAgentClient', () => {
     const adapter = createRuntimeParameterAgentClient({
       parameterActorFor: () => actor,
       mapRuntimeError: (error) => ({ success: false, errorCode: 'VALIDATION_ERROR', message: String(error) }),
+      ...(options.sourceDigests === undefined ? {} : { sourceDigests: options.sourceDigests }),
     });
     const request = {
       action: 'propose',
@@ -1243,6 +1252,34 @@ describe('createRuntimeParameterAgentClient', () => {
       }),
     ).resolves.toMatchObject({ success: true, outcome: { status: 'committed', requestId: 'agent:unit' } });
     expect(commit).toHaveBeenCalledOnce();
+    actor.stop();
+  });
+
+  it('answers a read from the resolved manifest while its source files are unchanged, and resolves after an edit', async () => {
+    let main = `sha256:${'1'.repeat(64)}`;
+    const sourceDigests = vi.fn(async (paths: readonly string[]) =>
+      Object.fromEntries(paths.map((path) => [path, path === 'main.py' ? main : 'missing'])),
+    );
+    const { actor, adapter, loads } = await fixture(undefined, { sourceDigests });
+    const loadsBefore = loads.mock.calls.length;
+
+    const reads = [
+      await adapter.getParameters({ targetFile: 'main.py' }),
+      await adapter.getParameters({ targetFile: 'main.py', detail: 'full' }),
+    ];
+    expect(reads).toMatchObject([
+      { success: true, status: 'resolved', parameters: { '/width': { value: 1 } } },
+      { success: true, status: 'resolved', detail: 'full' },
+    ]);
+    expect(loads.mock.calls.length).toBe(loadsBefore);
+    expect(sourceDigests).toHaveBeenCalledWith(['main.py']);
+
+    main = `sha256:${'2'.repeat(64)}`;
+    await expect(adapter.getParameters({ targetFile: 'main.py' })).resolves.toMatchObject({ status: 'resolved' });
+    expect(loads.mock.calls.length).toBe(loadsBefore + 1);
+    /* Another admission mode always resolves. */
+    await adapter.getParameters({ targetFile: 'main.py', resolutionMode: 'declared-only' });
+    expect(loads.mock.calls.length).toBe(loadsBefore + 2);
     actor.stop();
   });
 

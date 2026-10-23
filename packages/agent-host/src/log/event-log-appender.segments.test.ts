@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { pendingToolCalls } from '#host/run-history.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import type { ChatLogSegment } from '#log/segments.js';
@@ -110,6 +111,117 @@ describe('an event log with other devices’ segments (XD1)', () => {
       kind: 'history',
       message:
         "The other devices' segments do not fold onto this device's log; the history is this device's rows alone.",
+    });
+  });
+
+  describe('another device’s run in flight (XD3)', () => {
+    const at = (minute: number): string => `2026-10-23T10:${String(minute).padStart(2, '0')}:00.000Z`;
+    const row = (sequence: number, body: Readonly<Record<string, unknown>>): AgentLogEvent =>
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- seeded rows over a closed body union.
+      ({
+        version: 1,
+        leaderEpoch: 'epoch-desktop-2',
+        sequence,
+        recordedAt: at(sequence),
+        runId: 'run-desktop-2',
+        ...body,
+      }) as AgentLogEvent;
+    /* The desktop's second run: admitted, its user turn and a tool call recorded, the tool still running. */
+    const inFlight = [
+      row(0, { type: 'run.lifecycle', state: 'admitted' }),
+      row(1, {
+        type: 'message.appended',
+        message: {
+          id: 'desktop-2-user',
+          role: 'user',
+          content: 'desktop asks again',
+        },
+      }),
+      row(2, { type: 'run.lifecycle', state: 'running' }),
+      row(3, {
+        type: 'message.appended',
+        message: {
+          id: 'desktop-2-assistant',
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'call-desktop',
+              name: 'edit_file',
+              arguments: {},
+            },
+          ],
+        },
+      }),
+    ];
+    const settled = [
+      ...inFlight,
+      row(4, {
+        type: 'message.appended',
+        message: {
+          id: 'desktop-2-output',
+          role: 'tool-output',
+          toolCallId: 'call-desktop',
+          toolName: 'edit_file',
+          content: 'edited',
+          isError: false,
+        },
+      }),
+      row(5, { type: 'run.lifecycle', state: 'completed' }),
+    ];
+
+    it('should leave the run out of the history until its device settles it', async () => {
+      const segments = {
+        current: [segment('device-desktop', [...desktopTurn, ...inFlight])],
+      };
+      const log = await openLog(phoneTurn, segments);
+
+      const held = await log.messages();
+      expect(ids(held)).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
+      /* Its open call is not this device's to close as disconnected. */
+      expect(pendingToolCalls(held)).toEqual([]);
+
+      segments.current = [segment('device-desktop', [...desktopTurn, ...settled])];
+      await log.refresh?.();
+      expect(ids(await log.messages())).toEqual([
+        'epoch-desktop-0',
+        'epoch-desktop-1',
+        'epoch-phone-0',
+        'desktop-2-user',
+        'desktop-2-assistant',
+        'desktop-2-output',
+      ]);
+    });
+
+    it('should report the run, with its device and its newest row, until it settles', async () => {
+      const segments = {
+        current: [segment('device-desktop', [...desktopTurn, ...inFlight])],
+      };
+      const log = await openLog(phoneTurn, segments);
+
+      expect(await log.foreignRuns?.()).toEqual([
+        {
+          deviceId: 'device-desktop',
+          runId: 'run-desktop-2',
+          state: 'running',
+          lastRecordedAt: Date.parse(at(3)),
+          tip: { leaderEpoch: 'epoch-desktop-2', sequence: 3 },
+        },
+      ]);
+
+      segments.current = [segment('device-desktop', [...desktopTurn, ...settled])];
+      await log.refresh?.();
+      expect(await log.foreignRuns?.()).toEqual([]);
+    });
+
+    it('should not take this device’s own run, read back from a segment, for another device’s', async () => {
+      const own = inFlight.slice(0, 2);
+      const log = await openLog(own, {
+        current: [segment('device-phone-former-actor', own)],
+      });
+
+      expect(await log.foreignRuns?.()).toEqual([]);
+      expect(ids(await log.messages())).toEqual(['desktop-2-user']);
     });
   });
 });

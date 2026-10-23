@@ -285,6 +285,49 @@ describe('the run actor on the daemon (W7)', () => {
     expect(lifecycleStates(await rowsOf(root, 'chat-restart')).at(-1)).toBe('cancelled');
   });
 
+  /* XD3: a run is never moved between devices in flight, so resuming this device's paused run waits too. */
+  it('should refuse to resume a run while another device runs the chat', async () => {
+    const root = await makeRoot();
+    const launcher = makeLauncher(root, gateway(true).fetch);
+    await startRun(launcher, 'chat-fenced', 'run-fenced');
+    await until(root, 'chat-fenced', (rows) => lifecycleStates(rows).includes('running'));
+    await execute(launcher, {
+      type: 'interrupt',
+      payload: { chatId: 'chat-fenced', runId: 'run-fenced', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
+    });
+    await until(root, 'chat-fenced', (rows) => rows.some((row) => row.type === 'turn.finalized'));
+    await execute(launcher, {
+      type: 'resolve-interrupt',
+      payload: { chatId: 'chat-fenced', runId: 'run-fenced', interruptId: 'int-1', outcome: 'approved' },
+    });
+    /* Sync brings another device's segment: its run is admitted and running there now. */
+    const foreign = {
+      version: 1,
+      leaderEpoch: 'desktop-term',
+      recordedAt: new Date().toISOString(),
+      runId: 'run-desk',
+    };
+    await mkdir(join(root, '.tau', 'chats', 'chat-fenced', 'events'), { recursive: true });
+    await writeFile(
+      join(root, '.tau', 'chats', 'chat-fenced', 'events', 'device-desktop.jsonl'),
+      [
+        { ...foreign, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
+        { ...foreign, sequence: 1, type: 'run.lifecycle', state: 'running' },
+      ]
+        .map((row) => `${JSON.stringify(row)}\n`)
+        .join(''),
+    );
+
+    const answer = await execute(launcher, { type: 'resume', payload: { chatId: 'chat-fenced', runId: 'run-fenced' } });
+
+    expect(answer).toMatchObject({
+      status: 'refused',
+      code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+      details: { deviceId: 'device-desktop', runId: 'run-desk' },
+    });
+    expect(lifecycleStates(await rowsOf(root, 'chat-fenced')).at(-1)).toBe('paused');
+  });
+
   it('should refuse INTERRUPT_PENDING instead of holding the slot', async () => {
     const root = await makeRoot();
     const launcher = makeLauncher(root, gateway(true).fetch);

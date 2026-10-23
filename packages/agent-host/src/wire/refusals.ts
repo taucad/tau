@@ -44,6 +44,12 @@ export const refusals = {
   // ── host: admission, run and command answers (W7 owns the producers) ─────────────────────────
   /** Another run holds the chat; `details.state` names it. Re-send the same key once it settles. */
   CHAT_RUN_LIVE: { owner: 'host', retry: 'wait' },
+  /**
+   * Another device runs this chat and has not settled the run (XD3); `details` names its `deviceId`, `runId`, `state`
+   * and `staleAt`. Re-send the same key once sync brings its settlement, or after `staleAt`, when it no longer holds
+   * the chat. A run is never moved between devices in flight, and this device cannot stop it.
+   */
+  RUN_ACTIVE_ON_ANOTHER_DEVICE: { owner: 'host', retry: 'wait' },
   /** A different command id reused this run id; mint a new run id. A re-send with the original key answers `replayed`. */
   RUN_ID_TAKEN: { owner: 'host', retry: 'never' },
   /** Nothing on this chat can be continued; the card offers "Try again" (a re-send or a rewind). */

@@ -64,6 +64,11 @@ describe('the refusal registry (D11, I17)', () => {
     expect(refusalOf('BRANCH_UNAVAILABLE')).toEqual({ owner: 'revisions', retry: 'wait' });
   });
 
+  /* XD3: another device's run holds the chat until it settles or goes stale; the same command is admitted then. */
+  it('should let a start refused for another device’s run be sent again later', () => {
+    expect(refusalOf('RUN_ACTIVE_ON_ANOTHER_DEVICE')).toEqual({ owner: 'host', retry: 'wait' });
+  });
+
   it('should end no run with a wait code: a wait code is never resumable', () => {
     const waits = Object.entries(refusals).filter(([, entry]) => entry.retry === 'wait');
     expect(waits.length).toBeGreaterThan(0);

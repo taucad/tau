@@ -51,6 +51,7 @@ import {
 } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody } from '#log/chat-ledger.js';
 import { v1Batch } from '#log/event-log-appender.js';
+import { foreignRunStaleMilliseconds, liveForeignRun } from '#log/foreign-runs.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type {
@@ -941,6 +942,36 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     },
   });
 
+  /**
+   * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
+   * not abandoned, so this host runs nothing on the chat until it settles. A run is never moved between devices while
+   * it is in flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same
+   * command is admitted once sync brings that run's settlement, or once it has gone {@link foreignRunStaleMilliseconds}
+   * without a new row.
+   *
+   * @param chatId - The chat.
+   * @param log - Its log, refreshed from sync.
+   */
+  const refuseForeignRun = async (chatId: string, log: DurableEventLog): Promise<void> => {
+    const held = liveForeignRun((await log.foreignRuns?.()) ?? [], now().getTime());
+    if (held === undefined) {
+      return;
+    }
+    throw coded(
+      'RUN_ACTIVE_ON_ANOTHER_DEVICE' satisfies RefusalCode,
+      `Chat ${chatId} is running on another device; send this again once that run finishes.`,
+      {
+        details: {
+          deviceId: held.deviceId,
+          runId: held.runId,
+          state: held.state,
+          lastRecordedAt: new Date(held.lastRecordedAt).toISOString(),
+          staleAt: new Date(held.lastRecordedAt + foreignRunStaleMilliseconds).toISOString(),
+        },
+      },
+    );
+  };
+
   const messagesOf = async (chatId: string): ReturnType<DurableEventLog['messages']> => {
     const log = await logOf(chatId);
     return log.messages();
@@ -1236,6 +1267,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const log = await logOf(chatId);
       /* Whatever sync brought since the log opened joins the history this turn is given (XD1). */
       await log.refresh?.();
+      await refuseForeignRun(chatId, log);
       const events = await log.read();
       const { agent } = config;
       if (agent !== undefined) {
@@ -1377,6 +1409,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const resume = payload as unknown as CommandPayload<'resume'>;
       const log = await logOf(chatId);
       await log.refresh?.();
+      await refuseForeignRun(chatId, log);
       const ledger = await ledgerOf(chatId);
       const entry = ledger.runs[runId];
       const events = await log.read();

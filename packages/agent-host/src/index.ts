@@ -15,6 +15,13 @@ export { reduceEventLog } from '#log/reducer.js';
 export { mergeLogSegments } from '#log/segments.js';
 export type { ChatLogSegment, MergeLogSegmentsOptions } from '#log/segments.js';
 export {
+  foreignRunStaleMilliseconds,
+  isAbandonedForeignRun,
+  liveForeignRun,
+  unsettledForeignRuns,
+} from '#log/foreign-runs.js';
+export type { ForeignRun } from '#log/foreign-runs.js';
+export {
   agentLogEventSchema,
   jsonValueSchema,
   parseLogEvent,

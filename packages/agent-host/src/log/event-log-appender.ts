@@ -2,6 +2,8 @@ import { EventLogError } from '#log/event-log-error.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
+import { unsettledParsedRuns, unsettledRunIds } from '#log/foreign-runs.js';
+import type { ForeignRun } from '#log/foreign-runs.js';
 import { mergeSegmentRows } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
@@ -111,6 +113,11 @@ export type EventLogAppender = {
    * open. Absent on a log that has no other segments to read.
    */
   refresh?(): Promise<void>;
+  /**
+   * The runs other devices' segments hold unsettled, each segment folded on its own ledger (XD3): what the cross-device
+   * run fence reads. A run this device's own rows name is this device's, never foreign. Absent where `refresh` is.
+   */
+  foreignRuns?(): Promise<readonly ForeignRun[]>;
   /** What the open kept but could not use: quarantined lines, broken term rules, conflicting copies, history. */
   anomalies(): Promise<readonly EventLogAnomaly[]>;
   /** Flush pending operations and release the underlying file handle. */
@@ -266,20 +273,39 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
   }
 
   let segments: readonly ChatLogSegment[] = [];
+  let foreign: readonly ParsedLogSegment[] = [];
   let merged: ReturnType<typeof createEventLogReducer> | undefined;
   let mergedAnomalies: EventLogAnomaly[] = [];
   let segmentFailure: EventLogAnomaly | undefined;
   const fold = (): void => {
     if (segments.length === 0) {
+      foreign = [];
       merged = undefined;
       mergedAnomalies = [];
       return;
     }
     const next = createEventLogReducer('history');
     const found: EventLogAnomaly[] = [];
+    foreign = segments.map((segment) => ({
+      deviceId: segment.deviceId,
+      events: parseEventLogBytes(segment.bytes).events,
+    }));
+    /* XD3: a run another device has not settled stays out of the history until it does, unless it is this device's
+     * own run read back from a segment. Its dangling turn would otherwise be answered here, or its open tool calls
+     * closed here as disconnected, while that device still runs it. */
+    const ownRuns = new Set(ownRows.map((row) => row.runId));
+    const unsettled = unsettledRunIds(foreign);
     const parsedSegments: ParsedLogSegment[] = [
       { deviceId: ownDeviceId, events: ownRows },
-      ...segments.map((segment) => ({ deviceId: segment.deviceId, events: parseEventLogBytes(segment.bytes).events })),
+      ...foreign.map((segment) => {
+        const held = unsettled.get(segment.deviceId);
+        return held === undefined || held.size === 0
+          ? segment
+          : {
+              deviceId: segment.deviceId,
+              events: segment.events.filter((event) => ownRuns.has(event.runId) || !held.has(event.runId)),
+            };
+      }),
     ];
     const rows = mergeSegmentRows(parsedSegments, {
       onConflict: ({ key, keptDeviceId, droppedDeviceId }) => {
@@ -496,6 +522,12 @@ export const createEventLogAppender = async (storage: EventLogStorage): Promise<
             enqueue(async () => {
               assertOpen();
               await readSegments();
+            }),
+          foreignRuns: async () =>
+            enqueue(async () => {
+              assertOpen();
+              const ownRuns = new Set(ownRows.map((row) => row.runId));
+              return unsettledParsedRuns(foreign).filter((run) => !ownRuns.has(run.runId));
             }),
         }),
     close: async () =>

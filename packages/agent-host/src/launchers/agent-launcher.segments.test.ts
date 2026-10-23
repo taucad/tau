@@ -19,6 +19,7 @@ import { createAgentLauncher } from '#launchers/agent-launcher.js';
 import type { AgentLauncher } from '#launchers/agent-launcher.js';
 import type { ChatStore } from '#launchers/chat-store.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 import { createNodeChatStore } from '#node.js';
 import type {
   HostRunSnapshot,
@@ -27,6 +28,7 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
+import { refusalOf } from '#wire/refusals.js';
 
 const model = { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000, maxTokens: 4096 } as const;
 const emptyTools: ToolRegistry = { list: () => [], invoke: async () => ({ content: 'no tools', isError: true }) };
@@ -193,6 +195,150 @@ describe('a chat continued on a second device', () => {
       );
       /* Run bookkeeping is this device's: the phone's current run is its own, not the desktop's. */
       expect(snapshot?.runId).toBe('run-phone-1');
+    });
+  });
+
+  /* XD3: a run in flight on one device holds the chat on every other device until it settles or goes stale. */
+  describe('while the other device is running it', () => {
+    const workspace = async (): Promise<string> => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-chat-fence-'));
+      roots.push(root);
+      return root;
+    };
+    const ownLog = (root: string): string => join(root, '.tau', 'chats', chatId, 'events.jsonl');
+    const project = async (root: string, deviceId: string, bytes: string): Promise<void> => {
+      const directory = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, `${deviceId}.jsonl`), bytes);
+    };
+    /** A model whose first call streams nothing until `release`, then answers like {@link recordingModel}. */
+    const heldModel = (reply: string) => {
+      const gate = Promise.withResolvers<void>();
+      const recorded = recordingModel(reply);
+      return {
+        release: gate.resolve,
+        transport: {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await gate.promise;
+            yield* recorded.transport.stream(request);
+          },
+        } satisfies ModelTransport,
+      };
+    };
+    const start = async (launcher: AgentLauncher, runId: string, text: string) =>
+      launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: {
+          chatId,
+          runId,
+          trigger: 'submit',
+          message: { id: `user-${runId}`, role: 'user', content: text },
+        },
+      });
+    /** The desktop's log once its run is admitted and running, its model not yet answered. */
+    const desktopInFlight = async (): Promise<
+      Readonly<{
+        desktop: string;
+        launcher: AgentLauncher;
+        release: () => void;
+        bytes: string;
+      }>
+    > => {
+      const desktop = await workspace();
+      const held = heldModel('desktop answer');
+      const launcher = launch(createNodeChatStore({ workspaceRoot: desktop }), held.transport);
+      const started = await start(launcher, 'run-desktop-1', 'in flight on the desktop');
+      expect(started.status).toBe('applied');
+      let bytes = '';
+      for (let attempt = 0; attempt < 300; attempt++) {
+        // oxlint-disable-next-line no-await-in-loop -- polling a durable file is sequential by nature.
+        bytes = await readFile(ownLog(desktop), 'utf8').catch(() => '');
+        if (rowsOf(bytes).some((row) => row.type === 'run.lifecycle' && row.state === 'running')) {
+          return { desktop, launcher, release: held.release, bytes };
+        }
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        await sleep(10);
+      }
+      throw new Error('The desktop run never started.');
+    };
+    const settle = async (launcher: AgentLauncher, runId: string): Promise<void> => {
+      for (let attempt = 0; attempt < 300; attempt++) {
+        // oxlint-disable-next-line no-await-in-loop -- polling a durable projection is sequential by nature.
+        const attached = await launcher.execute({
+          type: 'attach',
+          commandId: key(),
+          payload: { chatId },
+        });
+        const snapshot =
+          attached.status === 'applied' && attached.effect === 'not-applied'
+            ? (attached.details as { readonly snapshot?: HostRunSnapshot }).snapshot
+            : undefined;
+        if (snapshot?.runId === runId && snapshot.state === 'completed') {
+          return;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- see above.
+        await sleep(10);
+      }
+      throw new Error(`Run ${runId} never completed.`);
+    };
+
+    it('should refuse a second run with a retryable reason naming the other device, then admit it once that run settles', async () => {
+      const inFlight = await desktopInFlight();
+      const phone = await workspace();
+      const phoneModel = recordingModel('phone answer');
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
+      await project(phone, 'device-desktop', inFlight.bytes);
+
+      const refused = await start(onPhone, 'run-phone-1', 'second, on the phone');
+
+      expect(refused).toMatchObject({
+        status: 'refused',
+        code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+        effect: 'not-applied',
+        details: {
+          deviceId: 'device-desktop',
+          runId: 'run-desktop-1',
+          state: 'running',
+        },
+      });
+      expect(refusalOf('RUN_ACTIVE_ON_ANOTHER_DEVICE').retry).toBe('wait');
+      expect(phoneModel.requests).toEqual([]);
+      /* Nothing was written on the phone: the refusal is before admission. */
+      expect(await readFile(ownLog(phone), 'utf8').catch(() => '')).toBe('');
+
+      inFlight.release();
+      await settle(inFlight.launcher, 'run-desktop-1');
+      await project(phone, 'device-desktop', await readFile(ownLog(inFlight.desktop), 'utf8'));
+      await turn(onPhone, 'run-phone-1', 'second, on the phone');
+
+      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual([
+        'user: in flight on the desktop',
+        'assistant: desktop answer',
+        'user: second, on the phone',
+      ]);
+    });
+
+    it('should admit a run once the other device’s run has gone stale, without its dangling turn', async () => {
+      const inFlight = await desktopInFlight();
+      inFlight.release();
+      const phone = await workspace();
+      const phoneModel = recordingModel('phone answer');
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
+      /* The same in-flight rows, last written longer ago than the bound: a device that went away mid-run. */
+      const stale = new Date(Date.now() - foreignRunStaleMilliseconds - 60_000).toISOString();
+      await project(
+        phone,
+        'device-desktop',
+        rowsOf(inFlight.bytes)
+          .map((row) => `${JSON.stringify({ ...row, recordedAt: stale })}\n`)
+          .join(''),
+      );
+
+      await turn(onPhone, 'run-phone-1', 'second, on the phone');
+
+      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual(['user: second, on the phone']);
     });
   });
 

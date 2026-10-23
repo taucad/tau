@@ -575,6 +575,8 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       historyIntact: async () => log.historyIntact(),
       anomalies: async () => log.anomalies(),
       ...(log.refresh === undefined ? {} : { refresh: log.refresh.bind(log) }),
+      /* Other devices' unsettled runs, which the cross-device run fence reads (XD3). */
+      ...(log.foreignRuns === undefined ? {} : { foreignRuns: log.foreignRuns.bind(log) }),
       close: async () => {
         writers.delete(chatId);
         writerGenerations.delete(chatId);

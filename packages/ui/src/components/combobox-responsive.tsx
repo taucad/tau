@@ -199,22 +199,27 @@ export function ComboBoxResponsive<T>({
           }}
         >
           {isNested ? (
-            <div data-slot='combobox-drawer-header' className='relative flex min-h-11 items-center px-2'>
+            <div
+              data-slot='combobox-drawer-header'
+              className='grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center gap-2 px-3 py-1'
+            >
+              {/* A fixed square with a full radius and an even border stays a circle at every scale; the
+                  matching empty column keeps the title on the drawer's centre line. */}
               <Button
                 type='button'
-                variant='outline'
-                size='icon'
+                variant='ghost'
                 aria-label='Back'
-                className='absolute left-2 rounded-full'
+                className='flex size-9 shrink-0 items-center justify-center rounded-full border border-border p-0 has-[>svg]:p-0'
                 onClick={() => {
                   handleOpenChange(false);
                 }}
               >
-                <ChevronLeft />
+                <ChevronLeft className='size-5' />
               </Button>
-              <DrawerTitle className='w-full truncate px-12 text-center text-sm font-medium' id='drawer-title'>
+              <DrawerTitle className='truncate text-center text-sm font-medium' id='drawer-title'>
                 {title}
               </DrawerTitle>
+              <span aria-hidden />
             </div>
           ) : (
             <DrawerTitle className='sr-only' id='drawer-title'>

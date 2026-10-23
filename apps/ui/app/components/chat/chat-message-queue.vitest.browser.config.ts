@@ -12,6 +12,8 @@ const testEntries = [
 /** Queue reflow acceptance uses the production component and shipped styles. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
+  // Vite's optimizer hash excludes entries; keep this suite's scan separate from other browser configs.
+  cacheDir: fileURLToPath(new URL('../../../node_modules/.vite/chat-message-queue', import.meta.url)),
   plugins: [tailwindcss()],
   server: {
     host: '127.0.0.1',

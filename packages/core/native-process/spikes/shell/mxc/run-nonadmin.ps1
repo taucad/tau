@@ -59,24 +59,37 @@ try {
   } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $drop 'nonadmin-context.json')
   if ($isAdmin) { throw "created user unexpectedly in Administrators; refusing to run elevated" }
 
-  function Invoke-AsUser([string]$script, [string]$label) {
+  # Each child runs under its OWN bounded timeout so a single hang (e.g. ConPTY teardown) cannot eat
+  # the whole block and starve the later probe/isolation receipts. On timeout the child tree is
+  # force-killed (taskkill /T /F) and a typed <label>.timeout.json is dropped; the run continues.
+  function Invoke-AsUser([string]$script, [string]$label, [int]$timeoutSec = 240) {
     $so = Join-Path $drop "$label.out.log"
     $se = Join-Path $drop "$label.err.log"
     $p = Start-Process -FilePath $node -ArgumentList @("`"$script`"") -Credential $cred `
-      -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $so -RedirectStandardError $se -PassThru -Wait
+      -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $so -RedirectStandardError $se -PassThru
+    $null = $p | Wait-Process -Timeout $timeoutSec -ErrorAction SilentlyContinue
+    $p.Refresh()
+    if (-not $p.HasExited) {
+      Write-Host "[$label] TIMEOUT after ${timeoutSec}s — force-killing child tree"
+      cmd /c "taskkill /PID $($p.Id) /T /F" 2>$null | Out-Null
+      @{ kind = $label; verdict = 'fail'; arch = $arch; conclusion = "$label exceeded its ${timeoutSec}s run-as timeout and was force-terminated (typed timeout); harness timeout, not a containment finding." } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $drop "$label.timeout.json")
+    }
     Get-Content -LiteralPath $so -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "[$label] $_" }
     $err = Get-Content -LiteralPath $se -ErrorAction SilentlyContinue
     if ($err) { $err | ForEach-Object { Write-Host "[$label:err] $_" } }
-    Write-Host "[$label] exit=$($p.ExitCode)"
-    return $p.ExitCode
+    $code = if ($p.HasExited) { $p.ExitCode } else { 124 }
+    Write-Host "[$label] exit=$code"
+    return $code
   }
 
   # Order: provision, D14 ShellIdentity (both branches), grammar, pty, probe; then isolation if the
-  # MXC probe passed (PSEC present), else the capability-SID fallback.
+  # MXC probe passed (PSEC present), else the capability-SID fallback. pty gets a tighter run-as
+  # timeout (its own in-process watchdog is 60s, so 120s leaves it room to self-record first).
   [void](Invoke-AsUser (Join-Path $mxc 'provision.mts') 'provision')
   [void](Invoke-AsUser (Join-Path $mxc 'shell-identity.mts') 'shell-identity')
   [void](Invoke-AsUser (Join-Path $mxc 'grammar.mts') 'grammar')
-  [void](Invoke-AsUser (Join-Path $mxc 'pty.mts') 'pty')
+  [void](Invoke-AsUser (Join-Path $mxc 'pty.mts') 'pty' 120)
   [void](Invoke-AsUser (Join-Path $mxc 'probe.mts') 'probe')
 
   $probeReceipt = Join-Path $drop 'probe.receipt.json'

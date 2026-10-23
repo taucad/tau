@@ -116,10 +116,14 @@ jobs:
         run: node "$env:MXC_DIR/grammar.mts"
 
       # PTY row: interactive PowerShell over a ConPTY terminal (the D14 Terminal-pane argv).
+      # Step-level timeout backstop: if the ConPTY teardown ever hangs despite the in-process
+      # watchdog + hardExit, the STEP fails (gate red, artifacts still upload) instead of the whole
+      # job being cancelled at the 40-min job timeout with nothing.
       - name: PTY (ConPTY + interactive PowerShell)
         id: pty
         if: matrix.os == 'windows-2025'
         continue-on-error: true
+        timeout-minutes: 8
         shell: pwsh
         run: node "$env:MXC_DIR/pty.mts"
 
@@ -151,10 +155,14 @@ jobs:
       # present) or the capability-SID fallback when MXC is absent. arch=arm64 is in every receipt.
       # continue-on-error so Summarize remains the single gate; the launcher only surfaces its own
       # infrastructure failure (recorded as a typed non-pass receipt). ---------------------------------
+      # Step-level timeout backstop, well under the 40-min job timeout: the per-child run-as timeouts
+      # inside run-nonadmin.ps1 bound the worst case to ~22 min, so 28 leaves room for the always-run
+      # Summarize + Upload to still land the artifact even if this block is force-ended.
       - name: Full S0-S2 receipts as a non-admin user (arm64)
         id: nonadmin
         if: matrix.os == 'windows-11-arm'
         continue-on-error: true
+        timeout-minutes: 28
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:MXC_DIR/run-nonadmin.ps1"
 

@@ -222,6 +222,63 @@ describe('the chat-run registry (RA-S3)', () => {
     await registry.close();
   });
 
+  /* An idle incarnation closing on its eviction bound is not a closed host: a command that arrives while its log is
+   * still closing is served by the next incarnation, never refused HOST_CLOSED. */
+  it('should serve a command that arrives while an evicted incarnation is still closing its log', async () => {
+    const closingLog = Promise.withResolvers<void>();
+    const closeStarted = Promise.withResolvers<void>();
+    let opens = 0;
+    const registry = createChatRunRegistry({
+      createTerm: () => 'term-1',
+      services: {
+        openLog: async () => {
+          opens++;
+          return { ledger: emptyChatLedger, repair: [] };
+        },
+        append: async () => {
+          throw new Error('Unexpected append');
+        },
+        prepareAdmission: async () => {
+          throw Object.assign(new Error('No model here.'), { code: 'MODEL_UNAVAILABLE' });
+        },
+        prepareResume: async () => {
+          throw new Error('Unexpected resume');
+        },
+        startDriver: () => {
+          throw new Error('Unexpected driver');
+        },
+        closeLog: async () => {
+          if (opens === 1) {
+            closeStarted.resolve();
+            await closingLog.promise;
+          }
+        },
+      },
+    });
+    await registry.claim('chat-evict-closing');
+    const evicted = registry.evict('chat-evict-closing');
+    await closeStarted.promise;
+
+    const command = registry.execute({
+      type: 'start',
+      commandId: key(),
+      payload: {
+        chatId: 'chat-evict-closing',
+        runId: 'run-evict-closing',
+        trigger: 'submit',
+        message: { id: 'turn-evict-closing', role: 'user', content: 'Start.' },
+      },
+    });
+    closingLog.resolve();
+    await evicted;
+
+    const answer = await command;
+    expect(answer).toMatchObject({ status: 'refused' });
+    expect(answer).not.toMatchObject({ code: 'HOST_CLOSED' });
+    expect(opens).toBe(2);
+    await registry.close();
+  });
+
   it('should refuse commands with HOST_CLOSED and open no log after close', async () => {
     const file = createMemoryLogFile();
     const opened = vi.fn(file.open);

@@ -211,8 +211,27 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
     return (cause === 'fenced' || cause === 'fault') && (snapshot.status !== 'active' || snapshot.matches('closing'));
   };
 
+  /*
+   * An incarnation already closing — evicted while idle, or relinquished — serves nothing more: a command that arrives
+   * while its log closes waits for it to end and is served by the next incarnation. Without this the command joins the
+   * closing incarnation and is drained `HOST_CLOSED` by a host that is not closed.
+   */
+  const pastClosing = async (chatId: string): Promise<void> => {
+    const live = actors.get(chatId);
+    if (live?.getSnapshot().status === 'active' && live.getSnapshot().matches('closing')) {
+      await waitFor(live, (snapshot) => snapshot.status !== 'active').catch(() => undefined);
+    }
+  };
+
   const claim = async (chatId: string): Promise<ChatRunClaim> => {
     if (closing) {
+      return { refused: refusedAnswer('claim', 'HOST_CLOSED', 'The Tau agent host is closed.') };
+    }
+    if (fenced.has(chatId)) {
+      return { refused: refusedAnswer('claim', 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`) };
+    }
+    await pastClosing(chatId);
+    if (isClosing()) {
       return { refused: refusedAnswer('claim', 'HOST_CLOSED', 'The Tau agent host is closed.') };
     }
     if (fenced.has(chatId)) {
@@ -254,6 +273,14 @@ export const createChatRunRegistry = (options: ChatRunRegistryOptions): ChatRunR
   const run = async (command: ChatRunCommand): Promise<CommandAnswer> => {
     const { chatId } = command.payload;
     if (closing) {
+      return refusedAnswer(command.commandId, 'HOST_CLOSED', 'The Tau agent host is closed.');
+    }
+    if (fenced.has(chatId)) {
+      return refusedAnswer(command.commandId, 'LEADERSHIP_LOST', `This host no longer leads chat ${chatId}.`);
+    }
+    await pastClosing(chatId);
+    /* Read through a call: `close` or `relinquish` may land while the closing incarnation ends. */
+    if (isClosing()) {
       return refusedAnswer(command.commandId, 'HOST_CLOSED', 'The Tau agent host is closed.');
     }
     if (fenced.has(chatId)) {

@@ -325,6 +325,7 @@ Add-Check 'fallback.mode' 'orchestration mode (elevated => provision sandbox use
 
 $s2Verdict = 'not-run'
 $createdUsers = @()
+$childShell = $null
 
 if ($apiOk -and $null -ne $shellPath) {
   try {
@@ -369,7 +370,24 @@ if ($apiOk -and $null -ne $shellPath) {
     $exitA = $null; $exitB = $null
     if ($hA -ne [IntPtr]::Zero) { $exitA = [TauRestrict]::Wait($hA, 60000); [TauRestrict]::Close($hA) }
     if ($hB -ne [IntPtr]::Zero) { $exitB = [TauRestrict]::Wait($hB, 60000); [TauRestrict]::Close($hB) }
-    Add-Check 'fallback.children.exit' 'write-isolation children ran to completion (exit codes recorded; -1073741502 = 0xC0000142 DLL init failure)' "exitA=$exitA exitB=$exitB" (($exitA -eq 0) -and ($exitB -eq 0)) @{ exitA = $exitA; exitB = $exitB }
+    $childShell = $shellPath
+    # pwsh 7 (.NET) children under the WRITE_RESTRICTED token were observed to die in loader init with
+    # 0xC0000142 on both hosted runners. Retry ONCE under the D14 fallback branch, Windows PowerShell
+    # 5.1 (fixed path), and record which shell actually ran; the receipt never hides the first failure.
+    $firstExit = "exitA=$exitA exitB=$exitB shell=$shellKind"
+    if ((($exitA -eq -1073741502) -or ($exitB -eq -1073741502)) -and ($shellPath -ne $ps51) -and (Test-Path -LiteralPath $ps51)) {
+      $childShell = $ps51
+      $cmdA = Build-ChildCmd $ps51 $payloadA
+      $cmdB = Build-ChildCmd $ps51 $payloadB
+      $errA = 0; $errB = 0
+      $hA = [TauRestrict]::LaunchSelf($ps51, $cmdA, $cap1, $logonSid, $env:SystemRoot, [ref]$errA)
+      $hB = [TauRestrict]::LaunchSelf($ps51, $cmdB, $cap2, $logonSid, $env:SystemRoot, [ref]$errB)
+      $launched = ($hA -ne [IntPtr]::Zero) -and ($hB -ne [IntPtr]::Zero)
+      $exitA = $null; $exitB = $null
+      if ($hA -ne [IntPtr]::Zero) { $exitA = [TauRestrict]::Wait($hA, 60000); [TauRestrict]::Close($hA) }
+      if ($hB -ne [IntPtr]::Zero) { $exitB = [TauRestrict]::Wait($hB, 60000); [TauRestrict]::Close($hB) }
+    }
+    Add-Check 'fallback.children.exit' 'write-isolation children ran to completion (exit codes recorded; -1073741502 = 0xC0000142 DLL init failure)' "exitA=$exitA exitB=$exitB childShell=$childShell (first attempt: $firstExit)" (($exitA -eq 0) -and ($exitB -eq 0)) @{ exitA = $exitA; exitB = $exitB; childShell = $childShell; firstAttempt = $firstExit }
 
     if ($launched) {
       # External observation: which canary files actually materialized decides each claim.
@@ -429,22 +447,23 @@ if ($apiOk -and $null -ne $shellPath) {
     $s2Out = Join-Path $tmpS2 's2-pty.receipt.json'
     $s2Final = Join-Path $drop 's2-pty.receipt.json'
     $payloadS2 = "`$env:TEMP='$tmpS2'; `$env:TMP='$tmpS2'; `$env:MXC_S2PTY_OUT='$s2Out'; `$env:GITHUB_SHA='$($env:GITHUB_SHA)'; `$env:GITHUB_RUN_ID='$($env:GITHUB_RUN_ID)'; & '$s2Child'"
-    $cmdS2 = Build-ChildCmd $shellPath $payloadS2
+    if (-not $childShell) { $childShell = $shellPath }
+    $cmdS2 = Build-ChildCmd $childShell $payloadS2
     $errS2 = 0
     $s2LaunchPath = 'self'
     if ($mode -eq 'elevated') {
-      $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $shellPath, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
+      $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
       if ($hS2 -eq [IntPtr]::Zero) {
         # Cross-user window-station launch can be refused in the runner service session; fall back to
         # the restricted-of-caller (LUA-filtered, non-elevated) token so the S2-in-token receipt is
         # still collected. s2-pty.ps1 re-proves non-admin regardless of which path launched it.
         $s2LaunchPath = "asUser-failed(err=$errS2)->self"
-        $hS2 = [TauRestrict]::LaunchSelf($shellPath, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
+        $hS2 = [TauRestrict]::LaunchSelf($childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
       } else {
         $s2LaunchPath = 'asSandboxUser'
       }
     } else {
-      $hS2 = [TauRestrict]::LaunchSelf($shellPath, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
+      $hS2 = [TauRestrict]::LaunchSelf($childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, [ref]$errS2)
     }
     if ($hS2 -ne [IntPtr]::Zero) {
       $exitS2 = [TauRestrict]::Wait($hS2, 180000); [TauRestrict]::Close($hS2)

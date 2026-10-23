@@ -54,8 +54,11 @@ export function BrowserUpdate(): React.JSX.Element | undefined {
   }, [isReachable]);
   useEffect(
     () =>
-      // The offer is worth revealing once; a remount does not replay it.
+      // The offer is worth revealing once; a remount does not replay it, and a withdrawn offer reveals nothing.
       subscribeReloadOffer(() => {
+        if (!isReloadOffered()) {
+          return;
+        }
         showSidebar(true);
         setRevealed(true);
         setOpen(true);

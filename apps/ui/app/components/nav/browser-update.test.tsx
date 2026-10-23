@@ -15,8 +15,8 @@ const load = async () => {
   const { BrowserUpdate } = await import('#components/nav/browser-update.js');
   const { BuildSkewBanner } = await import('#components/build-skew-banner.js');
   // Same module instance as the control, so they share one sidebar context.
-  const { SidebarProvider } = await import('@taucad/ui/components/sidebar');
-  return { ...skew, BrowserUpdate, BuildSkewBanner, SidebarProvider };
+  const { SidebarProvider, useSidebar } = await import('@taucad/ui/components/sidebar');
+  return { ...skew, BrowserUpdate, BuildSkewBanner, SidebarProvider, useSidebar };
 };
 
 const announce = async (buildId: number): Promise<void> => {
@@ -151,6 +151,49 @@ describe('browser update control', () => {
     expect(dialog).toHaveTextContent(`Tau · Built ${format.format(rolledBack)}`);
     expect(dialog).toHaveTextContent('This version of Tau has been replaced.');
     expect(dialog).not.toHaveTextContent('newer version');
+  });
+
+  it('does not open the sidebar again when the offer is withdrawn', async () => {
+    const { BrowserUpdate, SidebarProvider, useSidebar, buildId, offerReload } = await load();
+    const SidebarState = (): React.JSX.Element => {
+      const { open, setOpen } = useSidebar();
+      return (
+        <button
+          type='button'
+          aria-label='Collapse sidebar'
+          data-open={String(open)}
+          onClick={() => {
+            setOpen(false);
+          }}
+        />
+      );
+    };
+    render(
+      <SidebarProvider defaultOpen={false}>
+        <SidebarState />
+        <BrowserUpdate />
+      </SidebarProvider>,
+    );
+    act(() => {
+      offerReload(buildId + 1);
+    });
+    const collapse = screen.getByRole('button', { name: 'Collapse sidebar' });
+    expect(collapse).toHaveAttribute('data-open', 'true');
+    fireEvent.click(collapse);
+    expect(collapse).toHaveAttribute('data-open', 'false');
+
+    // The server names this build live again, which withdraws the offer.
+    vi.stubGlobal('fetch', async () => Response.json({ buildId }));
+    const channel = new BroadcastChannel(channelName);
+    channel.postMessage({ buildId: buildId + 1, live: true });
+    channel.close();
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 30);
+      });
+    });
+
+    expect(collapse).toHaveAttribute('data-open', 'false');
   });
 
   it('falls back to the floating prompt where no sidebar is mounted', async () => {

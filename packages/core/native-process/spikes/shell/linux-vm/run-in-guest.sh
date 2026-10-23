@@ -99,7 +99,6 @@ log "node $(node --version)  bwrap(distro) $(/usr/bin/bwrap --version)"
 # Create the unprivileged user and give it the paths it needs. Reads of the 9p repo/node_modules and
 # /opt/node are world-readable (git/tar perms); the 9p drop + fixture temp must be writable by it.
 id "$TAU_USER" >/dev/null 2>&1 || useradd -m -s /bin/bash "$TAU_USER"
-mkdir -p /var/tmp/tau-run && chmod 1777 /var/tmp/tau-run
 chmod 0777 "$DROP" 2>/dev/null || true
 # Run a command as the unprivileged user with an explicit, clean environment.
 as_tau() { runuser -u "$TAU_USER" -- "$@"; }
@@ -123,12 +122,16 @@ direct_loopback_repro() {
 run_harness() {
   local bwrap_dir="$1" row="$2"
   log "harness row=$row  bwrap_dir=$bwrap_dir"
-  # Run as the unprivileged user (see TAU_USER note). Neutral RUNNER_TEMP (mirrors a hosted runner) so
-  # the fixture root lands outside the sandbox's denied roots; /var/tmp is not in posixDeniedRoots.
+  # Run as the unprivileged user (see TAU_USER note). RUNNER_TEMP is placed UNDER the user's home
+  # (/home/tau), exactly like a hosted runner's RUNNER_TEMP (/home/runner/work/_temp): fixtureRoot's
+  # out-of-root "outside" dir then lands under /home, which IS in the harness's posixDeniedRoots, so the
+  # read mask denies it — matching the hosted LNX-U row. (/var/tmp is NOT a denied root, which would
+  # spuriously let the out-of-root read succeed and misreport the filesystem mask.)
+  local rt="/home/$TAU_USER/rt"
   as_tau env \
     PATH="$bwrap_dir:/opt/node/bin:/usr/bin:/bin" \
     HOME="/home/$TAU_USER" \
-    RUNNER_TEMP=/var/tmp/tau-run \
+    RUNNER_TEMP="$rt" \
     TAU_SPIKE_ROW="$row" TAU_SPIKE_OUT="$DROP" \
     node "$PROBE" > "$DROP/$row.console.log" 2>&1
   local rc=$?

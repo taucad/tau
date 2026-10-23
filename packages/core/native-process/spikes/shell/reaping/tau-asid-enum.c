@@ -17,7 +17,9 @@
  * asid-based enumeration is infeasible for a non-elevated reaper, and it says so with evidence.
  *
  * Usage: tau-asid-enum <target-asid>
- * Build (macOS): clang -O2 -Wall -Wextra -o tau-asid-enum tau-asid-enum.c -lbsm -lproc
+ * Build (macOS): clang -O2 -Wall -Wextra -o tau-asid-enum tau-asid-enum.c -lbsm
+ * (proc_* live in libSystem and are auto-linked; audit_token_to_asid needs -lbsm. There is no
+ * separate -lproc on macOS.)
  *
  * Dev-only spike evidence. Never shipped; never run elevated.
  */

@@ -74,7 +74,7 @@ jobs:
           echo "## Reaping helper build (${{ matrix.row }})" >> "$GITHUB_STEP_SUMMARY"
           clang -O2 -Wall -Wextra -o "$bin/tau-setasid" "$dir/tau-setasid.c" -lbsm 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           s1=${PIPESTATUS[0]}
-          clang -O2 -Wall -Wextra -o "$bin/tau-asid-enum" "$dir/tau-asid-enum.c" -lbsm -lproc 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+          clang -O2 -Wall -Wextra -o "$bin/tau-asid-enum" "$dir/tau-asid-enum.c" -lbsm 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
           s2=${PIPESTATUS[0]}
           echo "tau-setasid exit=$s1 ; tau-asid-enum exit=$s2"
           ls -l "$bin" || true

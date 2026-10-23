@@ -116,7 +116,7 @@ describe('entry.server handleRequest', () => {
       entryContext,
       loadContext,
     );
-    expect(response.headers.get('Cache-Control')).toBe('no-cache');
+    expect(response.headers.get('Cache-Control')).toBe('private, no-cache');
   });
 
   it("should keep a route's own document cache policy", async () => {

@@ -26,11 +26,12 @@ export default function handleRequest(
   applyHandleRequestHeaders(responseHeaders);
   responseHeaders.set('Content-Security-Policy-Report-Only', reportOnlyContentSecurityPolicy);
   /* TAU-UI-6: a document names its build's hashed chunks, and a deploy stops serving them, so no
-   * cache may answer a load or refresh with a stored document without asking the server. Netlify
-   * applies this to function responses by default; stating it keeps every host to it. Routes that
-   * choose their own policy (`cdnBackedSsrRouteHeaders`) keep it. */
+   * cache may answer a load or refresh with a stored document without asking the server. It is
+   * also rendered from the visitor's cookies, so no shared cache may keep it at all (`private`,
+   * as the apex rule in `netlify.toml`; that file's header blocks do not reach function responses).
+   * Routes that choose their own policy (`cdnBackedSsrRouteHeaders`) keep it. */
   if (!responseHeaders.has('Cache-Control')) {
-    responseHeaders.set('Cache-Control', 'no-cache');
+    responseHeaders.set('Cache-Control', 'private, no-cache');
   }
   /* OQ-P11: `Document-Policy: js-profiling` lets a developer take a real sampling profile of this
    * document from `Profiler`. It is off the production origin, where it would offer every visitor's

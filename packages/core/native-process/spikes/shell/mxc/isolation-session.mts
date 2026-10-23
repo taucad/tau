@@ -154,6 +154,12 @@ const main = async (): Promise<void> => {
       'exit 0',
     ].join('; '));
 
+  // The isolation_session backend runs the command line through `cmd /c` (observed: exit 255,
+  // "'C:\Program' is not recognized"). cmd strips the first and last quote when the line holds more
+  // than two, which breaks a quoted "C:\Program Files\..." executable. Wrapping the whole line in one
+  // extra outer pair of quotes makes cmd strip exactly that pair and run the original line verbatim.
+  const cmdForCmdExe = (line: string): string => `"${line}"`;
+
   const bSecretBefore = digestOf(b.secretFile);
   const aSecretBefore = digestOf(a.secretFile);
 
@@ -162,8 +168,8 @@ const main = async (): Promise<void> => {
   let runResults: unknown;
   try {
     const results = await Promise.all([
-      sdk.run(isoSessionRequest(grantFor(a, b), cmd(a, b), denyPaths)),
-      sdk.run(isoSessionRequest(grantFor(b, a), cmd(b, a), denyPaths)),
+      sdk.run(isoSessionRequest(grantFor(a, b), cmdForCmdExe(cmd(a, b)), denyPaths)),
+      sdk.run(isoSessionRequest(grantFor(b, a), cmdForCmdExe(cmd(b, a)), denyPaths)),
     ]);
     runResults = results.map((r) => ({
       exitCode: r.exitCode,

@@ -707,7 +707,22 @@ if ($apiOk -and $null -ne $shellPath) {
     $bashExe = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
     $prereqS2 = "node=$(Test-Path -LiteralPath $s2Node) nodePty=$(Test-Path -LiteralPath $s2NodePty) bash=$(Test-Path -LiteralPath $bashExe) driver=$(Test-Path -LiteralPath $s2Driver)"
     Add-Check 'fallback.s2Pty.prereq' 'S2 driver staged readable for the sandbox user: node.exe, node-pty (ConPTY binding), Git for Windows bash.exe, s2-bash-pty.mts' $prereqS2 ($prereqS2 -notlike '*False*') @{ node = $s2Node; bash = $bashExe; stageNote = $stageNote }
-    $cmdS2 = '"' + $cmdExe + '" /d /s /c "echo STARTED>"' + $tmpS2 + '\cmd-started-s2.txt" && "' + $s2Node + '" "' + $s2Driver + '" "' + $s2Out + '" "' + $bashExe + '" "' + $tmpS2 + '""'
+    # Driver stdio is redirected to files (stdin from NUL) so a stall on an absent console handle is
+    # ruled out and anything Node prints before the receipt is kept.
+    $cmdS2 = '"' + $cmdExe + '" /d /s /c "echo STARTED>"' + $tmpS2 + '\cmd-started-s2.txt" && "' + $s2Node + '" "' + $s2Driver + '" "' + $s2Out + '" "' + $bashExe + '" "' + $tmpS2 + '" < NUL > "' + $tmpS2 + '\driver-out.txt" 2> "' + $tmpS2 + '\driver-err.txt""'
+    # Separate in-token start probes (same user, token and desktop as the driver), each bounded at 30s,
+    # so a stall is attributed to node.exe or bash.exe themselves with their own stdout/stderr.
+    function Invoke-S2StartProbe([string]$name, [string]$inner) {
+      $o = Join-Path $tmpS2 "probe-$name"
+      $line = '"' + $cmdExe + '" /d /s /c "echo STARTED>"' + $o + '-started.txt" & ' + $inner + ' < NUL > "' + $o + '-out.txt" 2> "' + $o + '-err.txt" & echo done>"' + $o + '-done.txt""'
+      $e = 0
+      $h = if ($mode -eq 'elevated') { [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, $line, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$e) } else { [TauRestrict]::LaunchSelf($cmdExe, $line, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$e) }
+      $x = $null
+      if ($h -ne [IntPtr]::Zero) { $x = [TauRestrict]::Wait($h, 30000); if ($x -eq -1) { [TauRestrict]::Kill($h) }; [TauRestrict]::Close($h) }
+      $rd = { param($f) if (Test-Path -LiteralPath $f) { "$(Get-Content -LiteralPath $f -Raw)".Trim() } else { '<absent>' } }
+      $obs = "launch=$($h -ne [IntPtr]::Zero)(err=$e) exit=$x started=$(Test-Path -LiteralPath "$o-started.txt") done=$(Test-Path -LiteralPath "$o-done.txt") out=$(& $rd "$o-out.txt") err=$(& $rd "$o-err.txt")"
+      Add-Info "fallback.s2Pty.startProbe.$name" "$name starts as the sandbox user inside the write-restricted token and prints (bounded 30s; exit -1 = timed out and killed)" $obs @{ line = $line }
+    }
     $errS2 = 0; $hS2 = [IntPtr]::Zero
     $s2LaunchPath = 'self'
     $expectUser = if ($mode -eq 'elevated') { $sandboxA.Name } else { $env:USERNAME }
@@ -716,17 +731,21 @@ if ($apiOk -and $null -ne $shellPath) {
         $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
         $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
         Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
+        Invoke-S2StartProbe 'node' ('"' + $s2Node + '" -e "console.log(process.version, require(''os'').userInfo().username)"')
+        Invoke-S2StartProbe 'bash' ('"' + $bashExe + '" --noprofile --norc -c "whoami; echo $BASH_VERSION"')
         $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $cmdExe, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
         $noteS2 = [TauRestrict]::LastLaunchNote
         $s2LaunchPath = if ($hS2 -eq [IntPtr]::Zero) { "asUser-failed(err=$errS2)" } else { 'asSandboxUser' }
       } else {
         $deskS2 = New-SessionDesktop 's2' @($cap1)
+        Invoke-S2StartProbe 'node' ('"' + $s2Node + '" -e "console.log(process.version, require(''os'').userInfo().username)"')
+        Invoke-S2StartProbe 'bash' ('"' + $bashExe + '" --noprofile --norc -c "whoami; echo $BASH_VERSION"')
         $hS2 = [TauRestrict]::LaunchSelf($cmdExe, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
       }
       if ($hS2 -ne [IntPtr]::Zero) {
         $exitS2 = [TauRestrict]::Wait($hS2, 180000); if ($exitS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2)
         $cmdS2Started = Test-Path -LiteralPath (Join-Path $tmpS2 'cmd-started-s2.txt'); $driverStarted = Test-Path -LiteralPath (Join-Path $tmpS2 'driver-started.txt')
-        Add-Check 'fallback.s2Pty.exit' 'S2 driver exit code recorded (0 = all checks pass; -1 = timed out and killed)' "exit=$exitS2 cmdStarted=$cmdS2Started driverStarted=$driverStarted launch=$s2LaunchPath cmdLineLen=$($cmdS2.Length)" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2 }
+        Add-Check 'fallback.s2Pty.exit' 'S2 driver exit code recorded (0 = all checks pass; -1 = timed out and killed)' "exit=$exitS2 cmdStarted=$cmdS2Started driverStarted=$driverStarted launch=$s2LaunchPath cmdLineLen=$($cmdS2.Length)" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2; driverStdout = $(if (Test-Path -LiteralPath "$tmpS2\driver-out.txt") { "$(Get-Content -LiteralPath "$tmpS2\driver-out.txt" -Raw)" } else { '<absent>' }); driverStderr = $(if (Test-Path -LiteralPath "$tmpS2\driver-err.txt") { "$(Get-Content -LiteralPath "$tmpS2\driver-err.txt" -Raw)" } else { '<absent>' }) }
       } else {
         Add-Check 'fallback.s2Pty.launch' 'S2 driver launched under the write-restricted sandbox token' "launch failed err=$errS2 path=$s2LaunchPath" $false $null
       }

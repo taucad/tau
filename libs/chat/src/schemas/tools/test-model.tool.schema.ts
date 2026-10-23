@@ -437,6 +437,34 @@ export const testModelRuntimeSchema = z.object({
 });
 
 /**
+ * The project's `geospec.config.*` as one `test_model` call read it: the same file the `geospec` CLI and `tau test`
+ * read, whose data fields this host applies and whose `exporters` it never runs.
+ *
+ * @public
+ */
+export const testModelConfigSchema = z
+  .discriminatedUnion('status', [
+    z.object({ status: z.literal('applied'), path: z.string().min(1) }).strict(),
+    z
+      .object({
+        status: z.literal('not-applied'),
+        path: z.string().min(1),
+        code: z.literal('GEOSPEC_CONFIG_NOT_APPLIED'),
+        reason: z.enum(['unresolved-import', 'invalid']),
+        message: z.string().min(1),
+      })
+      .strict(),
+  ])
+  .describe(
+    "The project's geospec.config.* this run read. applied: its include, exclude, testNamePattern, testTimeout and bail were defaults, each replaced by the same input field when given. not-applied: the run used none of it (reported once per session); unresolved-import means it imports a package only a native run (geospec run, tau test) provides.",
+  );
+/**
+ * Inferred project-config report of one `test_model` call.
+ * @public
+ */
+export type TestModelConfig = z.infer<typeof testModelConfigSchema>;
+
+/**
  * Output schema for test_model tool.
  * Includes both failures (with detailed feedback) and passes (for UI display).
  * @public
@@ -488,6 +516,7 @@ export const testModelOutputSchema = z.object({
     .describe('Absolute project root every targetFile and loadModel file resolved against.'),
   engine: geoSpecEngineIdentitySchema.optional(),
   runtime: testModelRuntimeSchema.optional(),
+  config: testModelConfigSchema.optional(),
   fullResult: testModelResultArtifactSchema
     .optional()
     .describe('Full result artifact when inline details were reduced'),

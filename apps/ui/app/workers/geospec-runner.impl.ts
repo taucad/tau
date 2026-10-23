@@ -16,7 +16,8 @@
  * @module
  */
 
-import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
+import { createGeoSpecConfigSession, runGeoSpecTests } from '@taucad/agent-tools/geospec';
+import type { GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
 import type { GeoSpecKernelEvidence } from '@taucad/agent-tools/geospec';
 import { tauClientExporter } from '@taucad/agent-tools/geospec/exporter';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -319,6 +320,8 @@ type WorkerSession = {
   runtimeClient: AppRuntimeClient;
   runner: GeoSpecRunner;
   closeEngine?: (() => void) | undefined;
+  /** The project's `geospec.config.*` for one run: read through the spec VM each run, reported once per session. */
+  readConfig: () => Promise<GeoSpecTestModelConfig>;
 };
 
 type QueuedRun = {
@@ -374,6 +377,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
   let runtimeClient: AppRuntimeClient | undefined;
   let runner: GeoSpecRunner | undefined;
   let closeEngine: (() => void) | undefined;
+  let readConfig: WorkerSession['readConfig'] | undefined;
   try {
     const runtimeConfigResult = uiRuntimeConfigSchema.safeParse(request.runtimeConfig);
     if (!runtimeConfigResult.success) {
@@ -391,9 +395,10 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       }),
     );
     {
-      const [native, { createNativeGeoSpecRunner }, exporter] = await Promise.all([
+      const [native, { createNativeGeoSpecRunner }, { readGeoSpecConfig }, exporter] = await Promise.all([
         import('geospec-engine'),
         import('geospec/runner/native'),
+        import('geospec/config'),
         // The session owns the client and terminates it on close; the exporter only borrows it.
         tauClientExporter({ client: runtimeClient }),
       ]);
@@ -424,9 +429,13 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
           }),
       };
       const projectFiles = fileSystem;
+      const vmFileSystem = createBridgeVmFileSystem(fileSystem);
+      const configSession = createGeoSpecConfigSession();
+      // The browser never runs the config's exporters: it applies the data fields and says once when it cannot.
+      readConfig = async () => configSession(await readGeoSpecConfig({ filesystem: vmFileSystem, projectPath: '' }));
 
       runner = createNativeGeoSpecRunner({
-        filesystem: createBridgeVmFileSystem(fileSystem),
+        filesystem: vmFileSystem,
         // PERF-OUTPUT-01: the product selects the bounded success evidence (ruling 13).
         nativeAssertions: {
           engine: candidateEngine,
@@ -450,6 +459,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
       runtimeClient,
       runner,
       closeEngine,
+      readConfig: readConfig!,
     };
     session = activeSession;
     workerScope.postMessage({ type: 'initialized', requestId: request.requestId, sessionId: request.sessionId });
@@ -516,6 +526,7 @@ const runGeoSpecInWorker = async (request: GeoSpecRunnerWorkerRunRequest): Promi
       discovery: createDiscoveryFileSystem(activeSession.fileSystem),
       runner: activeSession.runner,
       args: request.args,
+      config: await activeSession.readConfig(),
       onProgress: (event) => {
         workerScope.postMessage({ type: 'progress', requestId: request.requestId, event });
       },

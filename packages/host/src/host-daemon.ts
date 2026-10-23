@@ -1593,7 +1593,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       emit({
         type: 'warning',
         code: 'TRUSTED_PROJECTS_ONLY',
-        message: 'Remote project code executes on this machine. Connect only projects you trust.',
+        message:
+          'Remote project code, including its tau.config.* and geospec.config.*, executes on this machine. Connect only projects you trust.',
       });
     }
     // async-iife: bootstrap -- a failed mint is a warning and retries on the source's interval.

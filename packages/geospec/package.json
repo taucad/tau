@@ -53,6 +53,7 @@
     "./package.json": "./package.json",
     "./assertion-client": "./src/assertion-client/index.ts",
     "./vitest": "./src/vitest/index.ts",
+    "./vitest/node": "./src/vitest/node/index.ts",
     "./config": "./src/config/index.ts",
     "./config/node": "./src/config/node/index.ts",
     "./cli": "./src/cli/index.ts"
@@ -116,6 +117,11 @@
         "types": "./dist/vitest/index.d.mts",
         "import": "./dist/vitest/index.mjs",
         "default": "./dist/vitest/index.mjs"
+      },
+      "./vitest/node": {
+        "types": "./dist/vitest/node/index.d.mts",
+        "import": "./dist/vitest/node/index.mjs",
+        "default": "./dist/vitest/node/index.mjs"
       },
       "./config": {
         "types": "./dist/config/index.d.mts",

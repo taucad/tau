@@ -38,6 +38,8 @@ Filter examples:
 - Select a named requirement: { testNamePattern: 'intended envelope' }
 - Exclude an explicitly out-of-scope fixture: { exclude: ['**/fixtures/**'] }
 
+A project's \`geospec.config.*\` sets defaults: its include, exclude, testNamePattern, testTimeout and bail apply unless the input gives that field, and \`config\` in the result names the file or why it was not applied.
+
 Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded models. Check \`runStatus\`, \`accounting\`, discovery completion and \`lineageStatus\`; empty failures alone do not qualify a run. A skipped requirement is not a pass. ${testModelStatusRule} A run that outlives its host budget returns \`timeout\` (\`OPERATION_TIMEOUT\`) with only the requirements it completed. Filters qualify only the selected scope, never excluded requirements. Read the retained \`fullResult\` when compact details are omitted. ${sourceRevisionRule}
 
 When NOT to use:

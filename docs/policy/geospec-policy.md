@@ -3,7 +3,7 @@ title: 'GeoSpec Policy'
 description: 'Rules for GeoSpec matcher API design, evidence naming, diagnostics, failure messages, compiled native/WASM implementation, and high-assurance geometry test authoring.'
 status: active
 created: '2026-06-23'
-updated: '2026-10-19'
+updated: '2026-10-23'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/testing-policy.md
@@ -446,3 +446,32 @@ The GeoSpec runner owns recursive model and specification discovery from the roo
 **Why**: Complete discovery is a correctness requirement, and uncoordinated native workers can introduce nondeterministic contention or shared-runtime ownership failures.
 
 **Enforced by**: `packages/geospec/src/runner/discovery.ts` and the runner worker contract.
+
+## 23. Take Exporters From The Host Or An Executable `geospec.config.*`
+
+A model's exporter comes from the host (Tau's runtime on Tau projects) or from the project's executable `geospec.config.*`; specs never select an engine or exporter. The exporter id and the extensions it claims are agent-visible vocabulary, and every host reports a config's outcome in one shape: `config` in the `test_model` result names the file and, when it was not applied, `GEOSPEC_CONFIG_NOT_APPLIED` with reason `unresolved-import` or `invalid`, once per session. Tau projects configure their runtime in `tau.config.ts` and never set GeoSpec exporters.
+
+**Why**: One source of exporters keeps verdicts identical across the CLI, Vitest, the UI worker and the host, and an author-visible engine selector would let a spec pick the engine that passes it.
+
+CORRECT:
+
+```typescript
+// geospec.config.ts on a non-Tau project
+import { defineConfig } from 'geospec/config';
+import { commandExporter } from 'geospec/model/node';
+
+export default defineConfig({
+  exporters: [
+    commandExporter({ id: 'py', extensions: ['py'], command: ['python'], capabilities: { formats: ['step'] } }),
+  ],
+});
+```
+
+INCORRECT:
+
+```typescript
+// A spec choosing its engine or exporter.
+const model = await loadModel({ file: 'main.ts', exporter: 'replicad' });
+```
+
+**Enforced by**: `packages/geospec/src/config/read-geospec-config.ts`, `libs/agent-tools/src/geospec/config-session.ts` and the `test_model` output schema in `libs/chat/src/schemas/tools/test-model.tool.schema.ts`.

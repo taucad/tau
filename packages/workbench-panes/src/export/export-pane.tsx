@@ -1,6 +1,6 @@
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
-import { Check, ChevronDown, ChevronRight, Download, File as FileIcon, Info, OctagonAlert } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Download, Info, OctagonAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
@@ -31,6 +31,7 @@ import {
 } from '@taucad/viewer/parameters/rjsf-utils';
 import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
 import { useWorkbenchPanesHost } from '#host/workbench-host.jsx';
+import { FormatFileIcon } from '#components/format-badge.jsx';
 import {
   compileExportConfigurationManifest,
   defaultExportPreferences,
@@ -340,10 +341,6 @@ export function ExportSchemaForm({
 }
 
 type FileIconComponent = NonNullable<ExportSource['FileIcon']>;
-
-function PlainFileIcon({ className }: Readonly<{ filename: string; className?: string }>): ReactElement {
-  return <FileIcon className={className} />;
-}
 
 type GeometryUnitEntry = {
   entryPath: string;
@@ -866,7 +863,7 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
   const host = useWorkbenchPanesHost();
   const units = host.useUnits();
   const { claimUnits } = host;
-  const EntryIcon = source.FileIcon ?? PlainFileIcon;
+  const EntryIcon = source.FileIcon ?? FormatFileIcon;
   const mainEntryPath = units[0]?.entryPath ?? '';
 
   const cuEntries = useMemo<GeometryUnitEntry[]>(() => units.map(({ entryPath }) => ({ entryPath })), [units]);

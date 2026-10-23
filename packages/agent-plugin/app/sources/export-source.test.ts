@@ -8,6 +8,14 @@ import packageJson from '../../package.json' with { type: 'json' };
 import { ToolCallError } from '#app/host-bridge.js';
 import type { HostBridge, HostView } from '#app/host-bridge.js';
 import { createExportSource, viewerExportTool } from '#app/sources/export-source.js';
+import { createExportOptionStorage } from '#app/sources/export-preferences.js';
+
+/** Option storage over an empty storage that keeps nothing, so a test starts from the defaults. */
+const memoryStorage = () =>
+  createExportOptionStorage('test', {
+    getItem: () => null,
+    setItem: () => undefined,
+  });
 
 const model: TauViewerModel = {
   id: 'm1',
@@ -31,6 +39,19 @@ const listed = {
       exportOptions: {
         schema: { type: 'object', properties: { binary: { type: 'boolean' } } },
         defaults: { binary: true },
+      },
+    },
+    {
+      format: 'glb',
+      fidelity: 'mesh',
+      direct: true,
+      provider: 'replicad',
+      content: {
+        schema: {
+          type: 'object',
+          properties: { includeTopology: { type: 'boolean' } },
+        },
+        defaults: {},
       },
     },
     {
@@ -120,7 +141,7 @@ describe('createExportSource', () => {
       formats: undefined,
     });
     await vi.waitFor(() => {
-      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl']);
+      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl', 'glb']);
     });
     expect(callTool).toHaveBeenCalledOnce();
     expect(callTool).toHaveBeenCalledWith(viewerExportTool.formats, {
@@ -187,7 +208,7 @@ describe('createExportSource', () => {
       formats: undefined,
     });
     await vi.waitFor(() => {
-      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl']);
+      expect(readEntry(source, 'gear.ts').formats?.map(({ format }) => format)).toEqual(['step', 'stl', 'glb']);
     });
     expect(callTool).toHaveBeenCalledTimes(2);
   });
@@ -273,6 +294,32 @@ describe('createExportSource', () => {
     });
     expect(anchor.download).toBe('Gear.stl');
     expect(click).toHaveBeenCalledOnce();
+  });
+
+  it("should pass the content flags the format's route carries", async () => {
+    const { bridge, callTool } = createBridge('mcp-app');
+    const source = createExportSource(bridge, model, {
+      storage: memoryStorage(),
+    });
+    readEntry(source, 'gear.ts');
+    await vi.waitFor(() => {
+      expect(readEntry(source, 'gear.ts').formats).toBeDefined();
+    });
+
+    await source.export({
+      ...request,
+      formats: ['glb'],
+      formatContent: { glb: { includeTopology: true, includeEdges: true } },
+      formatOptions: {},
+      download: false,
+      saveToProject: true,
+    });
+
+    expect(callTool).toHaveBeenCalledWith('export_model', {
+      targetFile: 'gear.ts',
+      to: 'glb',
+      content: { includeTopology: true },
+    });
   });
 
   it('should count a format whose export fails without stopping the rest', async () => {

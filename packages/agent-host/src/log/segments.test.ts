@@ -45,6 +45,34 @@ describe('mergeLogSegments', () => {
     expect(mergeLogSegments([deviceA, deviceB])).toHaveLength(4);
   });
 
+  /*
+   * XD1 handoff: a phone turn, a desktop turn, then a second phone turn. Under one long-lived phone term the second
+   * phone turn merges ahead of the desktop's, because terms merge whole; a writer therefore opens a new term for a
+   * turn another device's turn came before, and then the merge keeps the order the turns happened in.
+   */
+  it('merges a second phone turn after the desktop turn between them only when it opens a new term', () => {
+    const desktop = segment('device-desktop', [
+      record({ leaderEpoch: 'epoch-desktop', sequence: 0, recordedAt: '2026-09-13T06:05:00.000Z', text: 'desktop' }),
+    ]);
+    const first = record({
+      leaderEpoch: 'epoch-phone',
+      sequence: 0,
+      recordedAt: '2026-09-13T06:00:00.000Z',
+      text: 'p',
+    });
+    const longLived = segment('device-phone', [
+      first,
+      record({ leaderEpoch: 'epoch-phone', sequence: 1, recordedAt: '2026-09-13T06:10:00.000Z', text: 'again' }),
+    ]);
+    const rehomed = segment('device-phone', [
+      first,
+      record({ leaderEpoch: 'epoch-phone-2', sequence: 0, recordedAt: '2026-09-13T06:10:00.000Z', text: 'again' }),
+    ]);
+
+    expect(ids(mergeLogSegments([longLived, desktop]))).toEqual(['epoch-phone-0', 'epoch-phone-1', 'epoch-desktop-0']);
+    expect(ids(mergeLogSegments([rehomed, desktop]))).toEqual(['epoch-phone-0', 'epoch-desktop-0', 'epoch-phone-2-0']);
+  });
+
   /* A term is a run one writer owned: splitting it would invent an interleave
    * that never happened, so a later term that started first still lands whole. */
   it('keeps a leadership term contiguous even when the other term overlaps it', () => {

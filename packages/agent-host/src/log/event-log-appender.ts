@@ -2,7 +2,7 @@ import { EventLogError } from '#log/event-log-error.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
-import { foreignRunStanding, unsettledParsedRuns } from '#log/foreign-runs.js';
+import { foreignRunStanding, noteGrownRows, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
 import { mergeSegmentRows } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
@@ -121,6 +121,19 @@ export type EventLogAppender = {
    * may hold a live run, so the fence never reads it as none.
    */
   foreignRuns?(): Promise<readonly ForeignRun[]>;
+  /**
+   * When another device last wrote this chat, as the last open or refresh read its segments: the newest `recordedAt`
+   * among rows that are not this device's own runs read back, in epoch milliseconds; `undefined` when none. A writer
+   * whose term began before it opens a new term for its next turn, so that turn merges after the other device's
+   * (terms merge whole, CL-R14). Absent where `refresh` is.
+   */
+  foreignWrittenAt?(): Promise<number | undefined>;
+  /**
+   * Whether the history is unknown: the other devices' segments cannot be read and this device's rows do not fold
+   * without them (XD1). {@link EventLogAppender.historyIntact} then answers `true`, since nothing proves the history
+   * invalid, but nothing may run or continue on it. Absent where `refresh` is.
+   */
+  historyUnknown?(): Promise<boolean>;
   /** What the open kept but could not use: quarantined lines, broken term rules, conflicting copies, history. */
   anomalies(): Promise<readonly EventLogAnomaly[]>;
   /** Flush pending operations and release the underlying file handle. */
@@ -413,11 +426,12 @@ export const createEventLogAppender = async (
     let next: Readonly<{ bytes: Uint8Array<ArrayBuffer>; events: readonly AgentLogEvent[]; validByteLength: number }>;
     if (prior !== undefined && grewFrom(prior.bytes, prior.validByteLength, bytes)) {
       const tail = parseEventLogBytes(bytes.slice(prior.validByteLength));
-      next = {
-        bytes,
-        events: tail.events.length === 0 ? prior.events : [...prior.events, ...tail.events],
-        validByteLength: prior.validByteLength + tail.validByteLength,
-      };
+      const events = tail.events.length === 0 ? prior.events : [...prior.events, ...tail.events];
+      if (events !== prior.events) {
+        /* Its runs fold on from the rows already folded (XD3). */
+        noteGrownRows(events, prior.events);
+      }
+      next = { bytes, events, validByteLength: prior.validByteLength + tail.validByteLength };
     } else {
       const whole = parseEventLogBytes(bytes);
       next = { bytes, events: whole.events, validByteLength: whole.validByteLength };
@@ -427,6 +441,23 @@ export const createEventLogAppender = async (
   };
   /** The rows the merged fold replayed, in order: a fold whose rows extend them replays only the rest. */
   let mergedRows: AgentLogEvent[] = [];
+  /** Where each term's rows begin in {@link mergedRows}: terms merge whole, so these places decide an extension. */
+  let mergedTermStarts: number[] = [];
+  const termStartsOf = (rows: readonly AgentLogEvent[]): number[] =>
+    rows.flatMap((row, index) => (index === 0 || rows[index - 1]!.leaderEpoch !== row.leaderEpoch ? [index] : []));
+  /*
+   * Whether `rows` are `mergedRows` with more after them, checked at each term's first row and at the last row
+   * rather than row by row: terms merge whole and rows only ever append, so an old row moved anywhere moves one of
+   * those places.
+   */
+  const extendsMerged = (rows: readonly AgentLogEvent[]): boolean => {
+    const { length } = mergedRows;
+    return (
+      rows.length >= length &&
+      (length === 0 || rows[length - 1] === mergedRows[length - 1]) &&
+      mergedTermStarts.every((index) => rows[index] === mergedRows[index])
+    );
+  };
   let mergedReplayAnomalies: EventLogAnomaly[] = [];
   let merged: ReturnType<typeof createEventLogReducer> | undefined;
   let mergedAnomalies: EventLogAnomaly[] = [];
@@ -440,6 +471,7 @@ export const createEventLogAppender = async (
       foreignUnsettled = [];
       merged = undefined;
       mergedRows = [];
+      mergedTermStarts = [];
       mergedReplayAnomalies = [];
       mergedAnomalies = [];
       return;
@@ -505,8 +537,7 @@ export const createEventLogAppender = async (
       },
     });
     /* Only what the rows add past those already replayed, when they extend them; otherwise the whole merge again. */
-    const extends_ =
-      merged !== undefined && rows.length >= mergedRows.length && mergedRows.every((row, index) => rows[index] === row);
+    const extends_ = merged !== undefined && extendsMerged(rows);
     const next = extends_ ? merged! : createEventLogReducer('history');
     const replayAnomalies = extends_ ? mergedReplayAnomalies : [];
     for (const row of rows.slice(extends_ ? mergedRows.length : 0)) {
@@ -516,8 +547,20 @@ export const createEventLogAppender = async (
         replayAnomalies.push({ ...replayed.anomaly, ...(cursor === undefined ? {} : { cursor }) });
       }
     }
+    if (extends_) {
+      for (let index = Math.max(mergedRows.length, 1); index < rows.length; index++) {
+        if (rows[index - 1]!.leaderEpoch !== rows[index]!.leaderEpoch) {
+          mergedTermStarts.push(index);
+        }
+      }
+      if (mergedRows.length === 0 && rows.length > 0) {
+        mergedTermStarts.unshift(0);
+      }
+    } else {
+      mergedTermStarts = termStartsOf(rows);
+    }
     merged = next;
-    mergedRows = [...rows];
+    mergedRows = rows as AgentLogEvent[];
     mergedReplayAnomalies = replayAnomalies;
     mergedAnomalies = [...conflicts, ...replayAnomalies];
   };
@@ -712,6 +755,9 @@ export const createEventLogAppender = async (
           merged.replay(transition.event);
         }
         if (merged !== undefined) {
+          if (mergedRows.at(-1)?.leaderEpoch !== transition.event.leaderEpoch) {
+            mergedTermStarts.push(mergedRows.length);
+          }
           mergedRows.push(transition.event);
         }
         events.push(transition.event);
@@ -767,6 +813,21 @@ export const createEventLogAppender = async (
             enqueue(async () => {
               assertOpen();
               await readSegments();
+            }),
+          historyUnknown: async () => enqueue(async () => historyUnknown()),
+          foreignWrittenAt: async () =>
+            enqueue(async () => {
+              assertOpen();
+              let newest: number | undefined;
+              for (const segment of foreign) {
+                for (const event of segment.events) {
+                  const at = Date.parse(event.recordedAt);
+                  if (!ownRunIds.has(event.runId) && !Number.isNaN(at) && (newest === undefined || at > newest)) {
+                    newest = at;
+                  }
+                }
+              }
+              return newest;
             }),
           foreignRuns: async () =>
             enqueue(async () => {

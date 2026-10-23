@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createBrowserChatStore } from '#browser.js';
 import { memoryFileSystem } from '#browser/leadership.fixture.js';
@@ -193,6 +193,63 @@ describe('a chat continued on a second device', () => {
         'user: second, on the phone',
         'assistant: phone answer',
         'user: third, back on the desktop',
+      ]);
+    });
+
+    /*
+     * A device keeps one term while its incarnation stays open, and a term's rows merge together (CL-R14). A turn the
+     * desktop takes after the phone's must not land in the desktop's older term, or every later reading puts the
+     * phone's turn after it: the desktop opens a new term for it.
+     */
+    it('should merge a turn after another device’s turn when its incarnation stayed open across that turn', async () => {
+      const desktop = await workspace();
+      const phone = await workspace();
+      const desktopModel = recordingModel('desktop answer');
+      const phoneModel = recordingModel('phone answer');
+      const onDesktop = launch(createNodeChatStore({ workspaceRoot: desktop }), desktopModel.transport);
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
+
+      await turn(onDesktop, 'run-desktop-1', 'first, on the desktop');
+      await project(phone, 'device-desktop', await readFile(ownLog(desktop), 'utf8'));
+      await turn(onPhone, 'run-phone-1', 'second, on the phone');
+      await project(desktop, 'device-phone', await readFile(ownLog(phone), 'utf8'));
+      await turn(onDesktop, 'run-desktop-2', 'third, back on the desktop');
+      /* The last turn's settlement may still be landing: the next one is sent once the chat is free. */
+      await vi.waitFor(
+        async () => {
+          const answer = await onDesktop.execute({ type: 'attach', commandId: key(), payload: { chatId } });
+          const snapshot =
+            answer.status === 'applied' && answer.effect === 'not-applied'
+              ? (answer.details as { readonly snapshot?: HostRunSnapshot }).snapshot
+              : undefined;
+          expect(snapshot?.state).toBe('completed');
+        },
+        { timeout: 3000, interval: 10 },
+      );
+      await turn(onDesktop, 'run-desktop-3', 'fourth, still on the desktop');
+
+      const inOrder = [
+        'user: first, on the desktop',
+        'assistant: desktop answer',
+        'user: second, on the phone',
+        'assistant: phone answer',
+        'user: third, back on the desktop',
+        'assistant: desktop answer',
+        'user: fourth, still on the desktop',
+      ];
+      expect(transcriptOf(desktopModel.requests.at(-1))).toEqual(inOrder);
+      const desktopRows = rowsOf(await readFile(ownLog(desktop), 'utf8'));
+      const termOf = (runId: string): string | undefined => desktopRows.find((row) => row.runId === runId)?.leaderEpoch;
+      expect(termOf('run-desktop-2')).not.toBe(termOf('run-desktop-1'));
+      /* Its next turn, with nothing new from the phone, stays in the term it opened. */
+      expect(termOf('run-desktop-3')).toBe(termOf('run-desktop-2'));
+
+      await project(phone, 'device-desktop', await readFile(ownLog(desktop), 'utf8'));
+      await turn(onPhone, 'run-phone-2', 'fifth, on the phone');
+      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual([
+        ...inOrder,
+        'assistant: desktop answer',
+        'user: fifth, on the phone',
       ]);
     });
 
@@ -549,6 +606,47 @@ describe('a chat continued on a second device', () => {
       gate.resolve();
 
       expect(heartbeatsAfter(rows, 'running')).toEqual([]);
+    });
+
+    /* Only an applied publish says the chat is shared: a fenced or failing placement leaves it unknown, and no
+     * heartbeat row is written on it; it is asked again the next interval. */
+    it('should write no heartbeat while the placement only fails or refuses the publish', async () => {
+      const root = await workspace();
+      const gate = Promise.withResolvers<void>();
+      const recorded = recordingModel('answer');
+      let asked = 0;
+      const launcher = launch(
+        createNodeChatStore({ workspaceRoot: root }),
+        {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await gate.promise;
+            yield* recorded.transport.stream(request);
+          },
+        },
+        {
+          runHeartbeat: 20,
+          publish: async ({ requestId }) => {
+            asked += 1;
+            if (asked % 2 === 0) {
+              throw new Error('The placement session went away.');
+            }
+            return { requestId, status: 'refused', code: 'SESSION_FENCED', message: 'Fenced.' };
+          },
+        },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
+      await sleep(200);
+      const rows = rowsOf(await readFile(ownLog(root), 'utf8'));
+      gate.resolve();
+
+      expect(heartbeatsAfter(rows, 'running')).toEqual([]);
+      expect(asked).toBeGreaterThan(2);
     });
 
     /* One publish per heartbeat, after its row; an unshared chat is asked once per interval at most, never per tick. */

@@ -78,6 +78,10 @@
 (* over-approximates M1's opening: moving recovery into the opening only   *)
 (* removes behaviours, so the draft's safety results carry over.           *)
 (***************************************************************************)
+\* XD1: one chat's term per incarnation (RA-R5) is also how a turn is ordered after another device's: the host
+\* closes an incarnation that already wrote under a term begun before another device's newest row, before it admits
+\* a start or a resume (`rehomeStaleTerm`), and the next incarnation's term starts after them. That close is this
+\* model's ordinary incarnation end; the cross-device order it keeps is CrossDevice.tla's AdmittedAfterSeen (Rehome).
 EXTENDS Integers, Sequences, FiniteSets
 
 CONSTANTS

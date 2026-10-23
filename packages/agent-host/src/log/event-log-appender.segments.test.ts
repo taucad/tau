@@ -102,6 +102,8 @@ describe('an event log with other devices’ segments (XD1)', () => {
 
       expect(await log.historyIntact()).toBe(true);
       await expect(log.foreignRuns?.()).rejects.toMatchObject({ code: 'SEGMENTS_UNREADABLE' });
+      /* Unknown, not intact: nothing may continue on this device's rows alone, inside a paused run's hold or not. */
+      await expect(log.historyUnknown?.()).resolves.toBe(true);
     });
 
     /* A device removed from the project takes its segment with it: what this device's rows named of it is gone. */

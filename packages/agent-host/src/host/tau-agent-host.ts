@@ -309,6 +309,8 @@ type ChatStore = {
   heartbeat?: Readonly<{ deliver: ChatStore['deliver']; cancel: () => void }> | undefined;
   /** When this host last paused the chat's run under its current term: where its hold starts (XD3). */
   pausedAt?: number | undefined;
+  /** When this host wrote the first row under its current term (`wrote.leaderEpoch`): where that term starts. */
+  termStartedAt?: number | undefined;
   /** When this host last asked the placement to publish the chat's ref for its live run (XD3). */
   publishedAt?: number | undefined;
   /**
@@ -1003,8 +1005,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const heartbeatInterval = options.delays?.runHeartbeat ?? runHeartbeatMilliseconds;
   /*
    * XD3: ask the placement to record the chat's ref; a publish that fails is the next heartbeat's to repeat. Records
-   * whether the chat reaches another device: not when the placement refuses `CHAT_NOT_SHARED`, or has no publish verb
-   * at all (nothing it records reaches another device), and that answer stands for one heartbeat interval.
+   * whether the chat reaches another device: shared only on an applied publish; not shared when the placement refuses
+   * `CHAT_NOT_SHARED` or has no publish verb at all (that answer stands for one heartbeat interval); unknown after a
+   * fence or a failure, which writes no heartbeat either and is asked again the next interval.
    */
   const publishChat = async (store: ChatStore, chatId: string, runId: string): Promise<boolean> => {
     const notShared = (): boolean => {
@@ -1015,13 +1018,21 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (publish === undefined) {
       return notShared();
     }
+    let answer: Awaited<ReturnType<typeof publish>>;
     try {
-      const answer = await publish({ requestId: `publish:${chatId}:${runId}:${String(now().getTime())}`, chatId });
-      if (answer.status === 'refused' && answer.code === 'CHAT_NOT_SHARED') {
-        return notShared();
-      }
+      answer = await publish({ requestId: `publish:${chatId}:${runId}:${String(now().getTime())}`, chatId });
     } catch {
-      /* An offline remote queues the push: the chat is still shared. */
+      /* No answer says nothing about sharing: unknown, so no heartbeat, and asked again the next interval. */
+      store.sharing = undefined;
+      return false;
+    }
+    if (answer.status === 'refused' && answer.code === 'CHAT_NOT_SHARED') {
+      return notShared();
+    }
+    if (answer.status !== 'applied' && answer.status !== 'replayed') {
+      /* A fenced session says nothing about sharing either (an offline remote still answers `applied`). */
+      store.sharing = undefined;
+      return false;
     }
     store.sharing = { shared: true };
     return true;
@@ -1200,8 +1211,59 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
-   * The cross-device fence on an approval (XD3). A paused run's driver continues on an approval without a resume, and
-   * a pause stops holding the chat after {@link pausedRunHoldMilliseconds}, so another device may be running the chat
+   * A new term for a turn another device's turn came between (XD1). An incarnation keeps one term while it stays
+   * open, and a term's rows merge together, ordered by the term's start (CL-R14): a turn written under a term that
+   * began before another device's rows would merge ahead of them in every device's history. So when the chat's open
+   * incarnation already wrote under its term and another device has written since that term began, the incarnation
+   * is closed before the turn is admitted, and the next one writes it under a new term that starts now. An incarnation
+   * holding a live run is left alone: the command is refused as it would be anyway.
+   *
+   * @param chatId - The chat.
+   */
+  /** Each chat's term check in flight: later commands for the chat wait behind it. */
+  const rehomes = new Map<string, Promise<void>>();
+  const rehomeStaleTerm = (chatId: string): Promise<void> | undefined => {
+    const store = stores.get(chatId);
+    const opened = store?.log;
+    const leaderEpoch = registry.termOf(chatId);
+    const termStartedAt = store?.termStartedAt;
+    if (
+      opened === undefined ||
+      leaderEpoch === undefined ||
+      store?.wrote?.leaderEpoch !== leaderEpoch ||
+      termStartedAt === undefined
+    ) {
+      return undefined;
+    }
+    const check = async (): Promise<void> => {
+      try {
+        const log = await opened;
+        await log.refresh?.();
+        const foreignAt = await log.foreignWrittenAt?.();
+        if (foreignAt === undefined || foreignAt < termStartedAt) {
+          return;
+        }
+        await registry.evict(chatId);
+      } catch {
+        /* A live run, a closed log or an unread segment: the command is answered as it would be without this. */
+      }
+    };
+    return check();
+  };
+
+  /** Whether the chat's open log reads its history as unknown (XD1): segments unread and own rows not folding alone. */
+  const historyUnknownOf = async (opened: Promise<DurableEventLog>): Promise<boolean> => {
+    try {
+      const log = await opened;
+      return (await log.historyUnknown?.()) === true;
+    } catch {
+      return true;
+    }
+  };
+
+  /**
+   * The cross-device fence on an approval (XD3). An approval lets the paused run's tool act on it at once, and a
+   * pause stops holding the chat after {@link pausedRunHoldMilliseconds}, so another device may be running the chat
    * by then: the approval is refused, before any row, while another device holds it. A denial or a cancellation ends
    * the paused run and is never refused. A chat whose log is not open here has no driver waiting; its run continues
    * only through a resume, which the fence already covers.
@@ -1227,8 +1289,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         return undefined;
       }
       /* Inside its own hold the paused run still holds the chat for every device: an unreadable segment cannot be
-       * another device's run on it, since that device's fence refuses while this run's heartbeats are fresh. */
-      if (code === 'SEGMENTS_UNREADABLE' && pauseHeld(store)) {
+       * another device's run on it, since that device's fence refuses while this run's heartbeats are fresh. Only
+       * while this device's own rows fold alone, though: an unknown history refuses the approval inside the hold too. */
+      if (code === 'SEGMENTS_UNREADABLE' && pauseHeld(store) && !(await historyUnknownOf(opened))) {
         return undefined;
       }
       return {
@@ -1339,6 +1402,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         rows,
         onAppended: (row, ledger) => {
           store.ledger = ledger;
+          if (store.wrote?.leaderEpoch !== leaderEpoch) {
+            store.termStartedAt = now().getTime();
+          }
           store.wrote = { leaderEpoch, at: now().getTime() };
           if (row.type === 'run.lifecycle' && row.state === 'paused') {
             store.pausedAt = now().getTime();
@@ -2128,6 +2194,26 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     if (command.type === 'start') {
       /* Known before any row, so a legacy cancel of a reserving run finds its chat. */
       runChats.set(command.payload.runId, command.payload.chatId);
+    }
+    /* A command behind a term check waits for it, so the chat's commands keep their order (a Stop after a Send). */
+    const checking = rehomes.get(command.payload.chatId);
+    if (checking !== undefined) {
+      await checking;
+    }
+    if (command.type === 'start' || command.type === 'resume') {
+      /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
+      const rehoming = rehomeStaleTerm(command.payload.chatId);
+      if (rehoming !== undefined) {
+        const { chatId } = command.payload;
+        rehomes.set(chatId, rehoming);
+        try {
+          await rehoming;
+        } finally {
+          if (rehomes.get(chatId) === rehoming) {
+            rehomes.delete(chatId);
+          }
+        }
+      }
     }
     if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
       const held = await refuseApprovalForeignRun(command.commandId, command.payload.chatId);

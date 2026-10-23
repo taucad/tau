@@ -1,4 +1,5 @@
 import { emptyChatLedger, foldChatLedger } from '#log/chat-ledger.js';
+import type { ChatLedger } from '#log/chat-ledger.js';
 import type { AgentLogEvent, RowKey, RunLifecycleState } from '#log/event-types.js';
 import { parseLogSegments } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
@@ -46,39 +47,44 @@ const timeOf = (event: AgentLogEvent): number => {
   return Number.isNaN(parsed) ? 0 : parsed;
 };
 
+/** One device's segment folded for its runs: its ledger, and each run's newest time and last row as its rows went by. */
+type RunFold = Readonly<{
+  ledger: ChatLedger;
+  seen: ReadonlyMap<string, Readonly<{ lastRecordedAt: number; tip: AgentLogEvent }>>;
+  runs: readonly ForeignRun[];
+}>;
+
 /**
- * Every run one device's segment holds that has not settled, by that device's own ledger.
- *
- * One pass over the rows: each unsettled run's newest time and its tip are kept as its rows go by.
- *
- * @param segment - One device's rows, as its segment holds them.
- * @returns Its unsettled runs, in the order their rows first appear.
- * @internal
+ * Fold rows onto a segment's runs, from where an earlier fold of its first rows left off (or from nothing): every run
+ * the rows name keeps its newest time and its last row, and the runs whose lifecycle the ledger leaves unsettled are
+ * answered, in the order their rows first appear.
  */
-const unsettledRunsOf = (segment: ParsedLogSegment): readonly ForeignRun[] => {
-  const ledger = foldChatLedger(emptyChatLedger, segment.events);
-  const runs = new Map<string, { state: ForeignRun['state']; lastRecordedAt: number; tip: AgentLogEvent }>();
-  for (const event of segment.events) {
-    const lifecycle = ledger.runs[event.runId]?.lifecycle;
-    if (lifecycle === undefined || !unsettledStates.has(lifecycle)) {
-      continue;
-    }
+const foldRuns = (deviceId: string, prior: RunFold | undefined, rows: readonly AgentLogEvent[]): RunFold => {
+  const ledger = foldChatLedger(prior?.ledger ?? emptyChatLedger, rows);
+  const seen = new Map(prior?.seen);
+  for (const event of rows) {
     const at = timeOf(event);
-    const seen = runs.get(event.runId);
-    if (seen === undefined) {
-      runs.set(event.runId, { state: lifecycle as ForeignRun['state'], lastRecordedAt: at, tip: event });
-    } else {
-      seen.lastRecordedAt = Math.max(seen.lastRecordedAt, at);
-      seen.tip = event;
-    }
+    const known = seen.get(event.runId);
+    seen.set(event.runId, {
+      lastRecordedAt: known === undefined ? at : Math.max(known.lastRecordedAt, at),
+      tip: event,
+    });
   }
-  return [...runs].map(([runId, { state, lastRecordedAt, tip }]) => ({
-    deviceId: segment.deviceId,
-    runId,
-    state,
-    lastRecordedAt,
-    tip: { leaderEpoch: tip.leaderEpoch, sequence: tip.sequence },
-  }));
+  const runs = [...seen].flatMap(([runId, { lastRecordedAt, tip }]): ForeignRun[] => {
+    const lifecycle = ledger.runs[runId]?.lifecycle;
+    return lifecycle === undefined || !unsettledStates.has(lifecycle)
+      ? []
+      : [
+          {
+            deviceId,
+            runId,
+            state: lifecycle as ForeignRun['state'],
+            lastRecordedAt,
+            tip: { leaderEpoch: tip.leaderEpoch, sequence: tip.sequence },
+          },
+        ];
+  });
+  return { ledger, seen, runs };
 };
 
 /**
@@ -89,25 +95,44 @@ const unsettledRunsOf = (segment: ParsedLogSegment): readonly ForeignRun[] => {
  * @public
  */
 export const unsettledParsedRuns = (segments: readonly ParsedLogSegment[]): readonly ForeignRun[] =>
-  segments.flatMap((segment) => cachedUnsettledRunsOf(segment));
+  segments.flatMap((segment) => runFoldOf(segment).runs);
 
 /*
- * A segment's runs, by its parsed rows and device: a refold reads every segment again, and one whose rows are the same
- * array (every reader keeps a parsed segment's rows while its bytes do not change) is not folded on its ledger again.
+ * A segment's run fold, by its parsed rows and device: a refold reads every segment again, and one whose rows are the
+ * same array (every reader keeps a parsed segment's rows while its bytes do not change) is not folded again; one whose
+ * rows grew from an array already folded (`noteGrownRows`) folds just the rows it gained.
  */
-const unsettledByRows = new WeakMap<readonly AgentLogEvent[], Map<string, readonly ForeignRun[]>>();
-const cachedUnsettledRunsOf = (segment: ParsedLogSegment): readonly ForeignRun[] => {
-  let byDevice = unsettledByRows.get(segment.events);
+const runFolds = new WeakMap<readonly AgentLogEvent[], Map<string, RunFold>>();
+const grownFrom = new WeakMap<readonly AgentLogEvent[], readonly AgentLogEvent[]>();
+
+/**
+ * Say that `grown` is `prior`'s rows with more appended after them, so a run fold of `prior` is carried on, not redone.
+ *
+ * @param grown - The longer rows.
+ * @param prior - The rows they begin with.
+ * @internal
+ */
+export const noteGrownRows = (grown: readonly AgentLogEvent[], prior: readonly AgentLogEvent[]): void => {
+  grownFrom.set(grown, prior);
+};
+
+const runFoldOf = (segment: ParsedLogSegment): RunFold => {
+  let byDevice = runFolds.get(segment.events);
   if (byDevice === undefined) {
     byDevice = new Map();
-    unsettledByRows.set(segment.events, byDevice);
+    runFolds.set(segment.events, byDevice);
   }
-  let runs = byDevice.get(segment.deviceId);
-  if (runs === undefined) {
-    runs = unsettledRunsOf(segment);
-    byDevice.set(segment.deviceId, runs);
+  let fold = byDevice.get(segment.deviceId);
+  if (fold === undefined) {
+    const prior = grownFrom.get(segment.events);
+    const carried = prior === undefined ? undefined : runFolds.get(prior)?.get(segment.deviceId);
+    fold =
+      carried === undefined || prior === undefined
+        ? foldRuns(segment.deviceId, undefined, segment.events)
+        : foldRuns(segment.deviceId, carried, segment.events.slice(prior.length));
+    byDevice.set(segment.deviceId, fold);
   }
-  return runs;
+  return fold;
 };
 
 /**

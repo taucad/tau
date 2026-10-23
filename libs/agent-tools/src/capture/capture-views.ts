@@ -14,14 +14,14 @@ import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
 import { cameraPresetOrientations } from '@taucad/workbench';
 import type { cameraPresets } from '@taucad/workbench';
 
+import type { WorkbenchCaptureCamera, WorkbenchCapturePlane } from '#capture/capture-workbench-view.js';
+
 type OrthographicPreset = Exclude<(typeof cameraPresets)[number], 'isometric'>;
 
 const captureView = <Id extends OrthographicPreset>(id: Id, label: string) => {
   const { direction, up } = cameraPresetOrientations[id];
   return { id, label, direction, up: up ?? ([0, 0, 1] as const) } as const;
 };
-
-import type { WorkbenchCaptureCamera, WorkbenchCapturePlane } from '#capture/capture-workbench-view.js';
 
 /**
  * The six canonical orthographic views a multi-angle capture returns, oriented by the workbench presets

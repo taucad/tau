@@ -63,7 +63,6 @@ import { isOrphanedProjectRoute } from '#filesystem/orphaned-project-route.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { chatPlacementOf } from '#utils/chat-execution.js';
-import { createComposerRecordActor, stopWhenWritesSettle } from '#hooks/composer-record.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
@@ -293,8 +292,12 @@ type ProjectManagerContextType = {
   getAllChatRecords: (options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChatRecordsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<ChatRecord[]>;
   getChat: (chatId: string, projectId?: string) => Promise<Chat | undefined>;
-  /** A pre-XD2 record's device-relative placement, read once by a session's open (`ChatStorage.legacyChatPlacement`). */
-  legacyChatPlacement: (chatId: string, projectId?: string) => Promise<TauAgentHostId | undefined>;
+  /** Adopt a pre-XD2 record's device-relative placement once, on a session's open (`ChatStorage.adoptLegacyChatPlacement`). */
+  adoptLegacyChatPlacement: (
+    chatId: string,
+    projectId: string | undefined,
+    accept: (hostId: TauAgentHostId) => Promise<boolean>,
+  ) => Promise<TauAgentHostId | undefined>;
   invalidateProjectedChats: (resourceId: string, chatIds: readonly string[]) => void;
   deleteChat: (chatId: string) => Promise<void>;
   purgeChat: (chatId: string) => Promise<void>;
@@ -1269,7 +1272,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   );
 
   /**
-   * Keep a new chat's device-relative placement in this device's composer record for it (XD2).
+   * Keep a new chat's device-relative placement in this device's placements record for its project (XD2).
    *
    * `chat.json` keeps the chat's intent and never a host that only this device can name, so a chat created on
    * `origin` or a loopback daemon would otherwise open on this device's default. A failed write leaves the chat on
@@ -1281,14 +1284,13 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (placement === undefined) {
         return;
       }
-      /* Through the record's own machine, as every composer write goes (storage policy); a write that keeps failing
-       * is abandoned and the chat opens on this device's default. */
-      const record = createComposerRecordActor(
-        createComposerRecordStore(fileManager.recordFiles, composerRecordPaths.chat(projectId, chatId)),
-      );
-      record.start();
-      record.send({ type: 'patch', fields: { placement } });
-      await stopWhenWritesSettle(record);
+      try {
+        await createComposerRecordStore(fileManager.recordFiles, composerRecordPaths.placements(projectId)).patch({
+          placements: { [chatId]: placement },
+        });
+      } catch {
+        /* The chat opens on this device's default placement. */
+      }
     },
     [fileManager.recordFiles],
   );
@@ -1890,6 +1892,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       recoveryAttemptsRef.current.set(operation.operationId, attempts + 1);
       try {
         await resumePendingProjectOperation(operation, worker);
+        /* XD2: a replayed creation keeps its first chat's placement on this device, as the first attempt would have. */
+        if (operation.kind === 'create' && operation.chat !== undefined) {
+          await rememberChatPlacement(operation.projectId, operation.chat.id, operation.chat.activeExecution);
+        }
         recoveriesRef.current.delete(operation.operationId);
       } catch (error) {
         const recovery = pendingOperationRecovery(operation);
@@ -1902,7 +1908,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       setRecoveries([...recoveriesRef.current.values()]);
       invalidateProjectsList();
     },
-    [invalidateProjectsList, resumePendingProjectOperation],
+    [invalidateProjectsList, rememberChatPlacement, resumePendingProjectOperation],
   );
 
   /**
@@ -3032,9 +3038,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [metadataReadOwner],
   );
 
-  const legacyChatPlacement = useCallback(
-    async (chatId: string, projectId?: string): Promise<TauAgentHostId | undefined> =>
-      chatStore.legacyChatPlacement?.(chatId, projectId),
+  const adoptLegacyChatPlacement = useCallback(
+    async (
+      chatId: string,
+      projectId: string | undefined,
+      accept: (hostId: TauAgentHostId) => Promise<boolean>,
+    ): Promise<TauAgentHostId | undefined> => chatStore.adoptLegacyChatPlacement?.(chatId, projectId, accept),
     [chatStore],
   );
 
@@ -3112,7 +3121,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       getAllChatRecords,
       getChatRecordsForResource,
       getChat,
-      legacyChatPlacement,
+      adoptLegacyChatPlacement,
       invalidateProjectedChats,
       deleteChat,
       purgeChat,
@@ -3166,7 +3175,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     getAllChatRecords,
     getChatRecordsForResource,
     getChat,
-    legacyChatPlacement,
+    adoptLegacyChatPlacement,
     invalidateProjectedChats,
     deleteChat,
     purgeChat,

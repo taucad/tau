@@ -6,6 +6,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import {
   externalAgentDisplayName,
+  heldPlacementReason,
   onLoopbackAgentHostsChanged,
   unplaceableExecutionReason,
 } from '#lib/agent-host-placement.js';
@@ -24,7 +25,8 @@ const useUnplaceableExecutionReason = (execution: CadAgentExecution): string | u
 };
 
 /**
- * An external-agent chat opened where its agent cannot run: a phone or browser
+ * A Tau chat this tab runs locally because it cannot reach this device's placement for it (XD2), or an external-agent
+ * chat opened where its agent cannot run: a phone or browser
  * reading a chat pinned to Tau Desktop, a page no daemon served, or a tab never
  * handed the loopback daemon it names (cross-device chat handoff, XD5).
  *
@@ -40,11 +42,25 @@ const useUnplaceableExecutionReason = (execution: CadAgentExecution): string | u
  */
 export function ChatPlacementNotice(): React.JSX.Element | undefined {
   const {
-    execution: { execution, setActiveExecution },
+    execution: { execution, setActiveExecution, heldPlacement },
     canSelectExecution,
   } = useChatComposer();
   const { lastTauExecution } = useModels();
   const reason = useUnplaceableExecutionReason(execution);
+  /* A Tau chat whose placement on this device this tab cannot reach runs here; the composer says so (XD2). */
+  if (execution.kind === 'tau' && heldPlacement !== undefined) {
+    return (
+      <ChatErrorCard
+        role='status'
+        aria-label='Running in this tab'
+        tone='notice'
+        icon={MonitorSmartphone}
+        className='mb-2'
+        title='Running in this tab'
+        description={heldPlacementReason(heldPlacement)}
+      />
+    );
+  }
   if (reason === undefined || execution.kind !== 'acp') {
     return undefined;
   }

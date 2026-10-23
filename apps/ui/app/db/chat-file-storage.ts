@@ -3,7 +3,7 @@ import { chatMessageQueuePath, createChatMessageQueueStore } from '#db/chat-mess
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
 import { safeValidateUiMessages } from '@taucad/chat';
-import type { Chat } from '@taucad/chat';
+import type { Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import { parseChatRecord, serializeChatRecord } from '@taucad/chat/schemas';
 import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/revisions';
@@ -15,7 +15,7 @@ import { composerRecordPaths, createComposerRecordStore } from '#db/composer-rec
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
-import { chatPlacementOf, portableExecutionOf } from '#utils/chat-execution.js';
+import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
 
 /**
  * The chat store, on the filesystem.
@@ -188,7 +188,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
 
   /**
    * A chat record as `chat.json` holds it, a placement written before placement moved to the device included. Only
-   * the write path and {@link ChatStorage.legacyChatPlacement} read it so: everything else reads {@link readRecord}.
+   * the write path and {@link ChatStorage.adoptLegacyChatPlacement} read it so: everything else reads {@link readRecord}.
    */
   const readStoredRecord = async (projectId: string, chatId: string): Promise<ChatRecord | undefined> => {
     const text = await readText(recordPath(projectId, chatId));
@@ -205,8 +205,18 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
     return record === undefined ? undefined : withPortableExecution(record);
   };
 
-  const writeRecord = async (projectId: string, chat: Chat): Promise<void> => {
-    await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(withPortableExecution(chat)));
+  /**
+   * Write a chat record. A caller's execution is stored portable; `legacy`, a device-relative host the stored record
+   * already carried from before placement moved to the device, is written back onto a Tau execution with no host of
+   * its own, so an unrelated write never loses it before the device it names adopts it (XD2).
+   */
+  const writeRecord = async (projectId: string, chat: Chat, legacy?: TauAgentHostId): Promise<void> => {
+    const portable = withPortableExecution(chat);
+    const stored =
+      legacy === undefined
+        ? portable
+        : { ...portable, activeExecution: withChatPlacement(portable.activeExecution, legacy) };
+    await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(stored));
     located.set(chat.id, projectId);
   };
 
@@ -303,14 +313,20 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
    * which is what keeps a no-op clear from bumping `updatedAt` — the same
    * contract the object store's `writeChatAtomic` had.
    */
-  const write = async (chatId: string, mutate: (chat: Chat) => Chat | undefined): Promise<Chat | undefined> =>
+  const write = async (
+    chatId: string,
+    mutate: (chat: Chat) => Chat | undefined,
+    writeOptions: Readonly<{ dropLegacyPlacement?: boolean }> = {},
+  ): Promise<Chat | undefined> =>
     mutex.run(chatId, async () => {
       const projectId = await locate(chatId);
       if (projectId === undefined) {
         return undefined;
       }
-      /* As stored, so a write compares against what `chat.json` holds: a legacy device-relative host is a change. */
-      const record = await readStoredRecord(projectId, chatId);
+      const stored = await readStoredRecord(projectId, chatId);
+      /* Mutators see the portable record; a legacy host rides along untouched unless this write adopts it. */
+      const legacy = writeOptions.dropLegacyPlacement === true ? undefined : chatPlacementOf(stored?.activeExecution);
+      const record = stored === undefined ? undefined : withPortableExecution(stored);
       const existing = record === undefined ? await readChatDirectory(projectId, chatId) : { ...record, messages: [] };
       if (existing === undefined || existing.purgedAt !== undefined) {
         return undefined;
@@ -322,7 +338,7 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
          * returned chat, so a clear that changed nothing must not repaint. */
         return undefined;
       }
-      await writeRecord(projectId, updated);
+      await writeRecord(projectId, updated, legacy);
       return hydrate(withPortableExecution(updated));
     });
 
@@ -491,11 +507,27 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
       );
     },
 
-    /* XD2: read only on a session's open, never on a list; the session adopts it once and writes the record back. */
-    legacyChatPlacement: async (chatId, projectId) => {
+    /*
+     * XD2: read only on a session's open, never on a list. The one write that drops a legacy host from the record is
+     * this one, and only once `accept` (asked outside the chat's lock) says the host is this device's to adopt.
+     */
+    adoptLegacyChatPlacement: async (chatId, projectId, accept) => {
       const owner = projectId ?? (await locate(chatId));
-      const record = owner === undefined ? undefined : await readStoredRecord(owner, chatId);
-      return chatPlacementOf(record?.activeExecution);
+      const stored = owner === undefined ? undefined : await readStoredRecord(owner, chatId);
+      const legacy = chatPlacementOf(stored?.activeExecution);
+      if (legacy === undefined || !(await accept(legacy))) {
+        return undefined;
+      }
+      let adopted: TauAgentHostId | undefined;
+      await write(
+        chatId,
+        (chat) => {
+          adopted = legacy;
+          return chat;
+        },
+        { dropLegacyPlacement: true },
+      );
+      return adopted;
     },
 
     patchChat: async (chatId, key, value) =>

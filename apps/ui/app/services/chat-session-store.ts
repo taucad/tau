@@ -65,7 +65,7 @@ import {
 } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import type { ComposerRecord, ComposerRecordClient, ComposerRecordStore } from '#db/composer-record-store.js';
+import type { ComposerRecord, ComposerRecordClient } from '#db/composer-record-store.js';
 import { chatPlacementOf, portableExecutionOf, withChatPlacement } from '#utils/chat-execution.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
 import { attachmentReferenceOf } from '#utils/attachment.utils.js';
@@ -185,11 +185,17 @@ export type ChatSessionDeps = {
    */
   client: ComposerRecordClient;
   /**
-   * The device-relative placement a chat record written before placement moved to the device still names (XD2). A
-   * session's open adopts it once where it names a host on this device (`isPlacementOnThisDevice`), as this device's
-   * composer record placement, and writes the record back without it.
+   * Adopt the device-relative placement a chat record written before placement moved to the device still names (XD2),
+   * once, on a session's open: when `accept` holds for it, the record is written without it and it is answered, to
+   * become this device's placement for the chat. Every other write keeps it in the record.
    */
-  legacyChatPlacement?: ((chatId: string, projectId?: string) => Promise<TauAgentHostId | undefined>) | undefined;
+  adoptLegacyChatPlacement?:
+    | ((
+        chatId: string,
+        projectId: string | undefined,
+        accept: (hostId: TauAgentHostId) => Promise<boolean>,
+      ) => Promise<TauAgentHostId | undefined>)
+    | undefined;
   /** Whether a device-relative placement names a host this device can reach now. Absent: none can. */
   isPlacementOnThisDevice?: ((hostId: TauAgentHostId) => Promise<boolean>) | undefined;
   queueLock?: QueueLock;
@@ -202,16 +208,56 @@ export type ChatSessionDeps = {
 };
 
 /**
- * This device's placement for one chat, from the chat's composer record. An absent, unreadable or failing record
- * reads as none, so the chat takes this device's default placement.
+ * This device's placement for one chat, from its project's placements record (XD2). An absent, unreadable or failing
+ * record reads as none, so the chat takes this device's default placement.
  */
-const readChatPlacement = async (store: ComposerRecordStore): Promise<TauAgentHostId | undefined> => {
+const readChatPlacement = async (
+  client: ComposerRecordClient,
+  projectId: string,
+  chatId: string,
+): Promise<TauAgentHostId | undefined> => {
   try {
-    const result = await store.read();
-    return result.status === 'valid' ? result.record.placement : undefined;
+    const result = await createComposerRecordStore(client, composerRecordPaths.placements(projectId)).read();
+    return result.status === 'valid' ? result.record.placements?.[chatId] : undefined;
   } catch {
     return undefined;
   }
+};
+
+/**
+ * Keep, or clear, this device's placement for one chat: one field-scoped read-modify-write of its project's
+ * placements record, as the unread record is written. A failed write leaves the chat on the placement it had.
+ */
+const writeChatPlacement = async ({
+  client,
+  projectId,
+  chatId,
+  placement,
+}: Readonly<{
+  client: ComposerRecordClient;
+  projectId: string;
+  chatId: string;
+  placement: TauAgentHostId | undefined;
+}>): Promise<void> => {
+  try {
+    await createComposerRecordStore(client, composerRecordPaths.placements(projectId)).patch({
+      placements: { [chatId]: placement ?? false },
+    });
+  } catch {
+    /* The record keeps the placement it had; the next choice writes again. */
+  }
+};
+
+/** This device's placement for a chat when this tab can reach it now, else `undefined`: local placement (XD2). */
+const reachablePlacement = async (
+  deps: Pick<ChatSessionDeps, 'isPlacementOnThisDevice'>,
+  placement: TauAgentHostId | undefined,
+): Promise<TauAgentHostId | undefined> => {
+  if (placement === undefined) {
+    return undefined;
+  }
+  const reachable = await deps.isPlacementOnThisDevice?.(placement).catch(() => false);
+  return reachable === true ? placement : undefined;
 };
 
 /** A chat row with this device's placement put back on its execution. */
@@ -976,9 +1022,7 @@ export class ChatSessionStore {
     const placement =
       live?.activeChatId === chatId && !live.isLoadingChat && live.loadError === undefined
         ? chatPlacementOf(live.activeExecution)
-        : await readChatPlacement(
-            createComposerRecordStore(this.#deps.client, composerRecordPaths.chat(chat.resourceId, chatId)),
-          );
+        : await reachablePlacement(this.#deps, await readChatPlacement(this.#deps.client, chat.resourceId, chatId));
     return { activeExecution: withChatPlacement(chat.activeExecution, placement), activeKernel: chat.activeKernel };
   }
 
@@ -3606,24 +3650,28 @@ export class ChatSessionStore {
 
     /*
      * XD2, once per chat: a record written before placement moved to the device can name a daemon on the device that
-     * wrote it. Where that daemon is reachable from here it becomes this device's placement for the chat, through the
-     * composer record's own writer, and the chat record is written back without it, so nothing adopts it again.
+     * wrote it. Where that daemon is reachable from here the chat store drops it from the chat record, in the one write
+     * that does (`adoptLegacyChatPlacement`), and it becomes this device's placement for the chat.
      */
     const adoptLegacyPlacement = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
       const deps = depsRef();
       try {
-        const legacy = await deps.legacyChatPlacement?.(storedChat.id, projectId);
-        if (legacy === undefined || (await deps.isPlacementOnThisDevice?.(legacy)) !== true) {
-          return undefined;
+        const adopted = await deps.adoptLegacyChatPlacement?.(
+          storedChat.id,
+          projectId,
+          async (hostId) => (await deps.isPlacementOnThisDevice?.(hostId)) === true,
+        );
+        if (adopted !== undefined) {
+          await writeChatPlacement({ client: deps.client, projectId, chatId: storedChat.id, placement: adopted });
         }
-        composerRecordRef.send({ type: 'patch', fields: { placement: legacy } });
-        await deps.patchChat(storedChat.id, 'activeExecution', storedChat.activeExecution);
-        return legacy;
+        return adopted;
       } catch {
         /* Local placement is always reachable: a legacy pin that cannot be adopted reads as local. */
         return undefined;
       }
     };
+    /* This device's placement the open tab cannot reach: kept in the record for the tab that can (XD2). */
+    let heldPlacement: TauAgentHostId | undefined;
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
@@ -3631,14 +3679,18 @@ export class ChatSessionStore {
           loadChatActor: createAsyncLogic({
             run: async ({ input, signal }) => {
               const storedChat = await readChatRow(input.chatId);
-              /* The chat record never holds this device's placement (XD2): its composer record does. */
+              /* The chat record never holds this device's placement (XD2): its placements record does. */
               const devicePlacement =
                 storedChat === undefined
                   ? undefined
-                  : ((await readChatPlacement(recordStore)) ?? (await adoptLegacyPlacement(storedChat)));
+                  : ((await readChatPlacement(depsRef().client, projectId, input.chatId)) ??
+                    (await adoptLegacyPlacement(storedChat)));
+              /* A placement this tab cannot reach is held, not applied: the chat runs locally and the composer says so. */
+              const reachable = await reachablePlacement(depsRef(), devicePlacement);
+              heldPlacement = reachable === undefined ? devicePlacement : undefined;
               signal.throwIfAborted();
               /* The persistence context holds the execution this device runs the chat on (XD2). */
-              const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, devicePlacement);
+              const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, reachable);
               if (this.#sessions.get(input.chatId) !== session) {
                 return { chat: undefined };
               }
@@ -3710,11 +3762,11 @@ export class ChatSessionStore {
                 session.seedMessage = lastMessage;
                 void this.#refreshRemoteSegmentsSafely(input.chatId, session.projectId);
                 this.startPendingSeed(input.chatId);
-                return { chat: { ...loadedChat, error: undefined } };
+                return { chat: { ...loadedChat, error: undefined }, heldPlacement };
               }
 
               session.draftActorRef.send({ type: 'initializeFromChat' });
-              return { chat: loadedChat };
+              return { chat: loadedChat, heldPlacement };
             },
           }),
           persistErrorActor: createAsyncLogic({
@@ -3731,9 +3783,14 @@ export class ChatSessionStore {
            * placement that names a host only on this device is this chat's composer record on this device. */
           persistActiveExecutionActor: createAsyncLogic({
             run: async ({ input }) => {
-              /* Written on every change, never compared with a cached copy: another tab may have changed the record. */
+              /*
+               * Written on every change, never compared with a cached copy: another tab may have changed the record. A
+               * local choice in a tab that could not reach this device's placement leaves it for the tab that can.
+               */
               const placement = chatPlacementOf(input.activeExecution);
-              composerRecordRef.send({ type: 'patch', fields: { placement: placement ?? false } });
+              if (placement !== undefined || heldPlacement === undefined) {
+                await writeChatPlacement({ client: depsRef().client, projectId, chatId: input.chatId, placement });
+              }
               await depsRef().patchChat(input.chatId, 'activeExecution', portableExecutionOf(input.activeExecution));
             },
           }),

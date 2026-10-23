@@ -422,38 +422,75 @@ export const resetLoopbackAgentHosts = (): void => {
  */
 const originNeverHostsAgent = (): boolean => import.meta.env.TAU_ORIGIN_AGENT_HOST === 'absent' || isDesktopTarget;
 
-/** Whether this page's origin is a daemon, asked once per page. */
-let originHostsAgent: Promise<boolean> | undefined;
-
 /**
- * Whether a device-relative placement names a host on this device, here and now (XD2): `origin` on a page a daemon
- * serves, a `loopback:` daemon this tab holds a session for. A chat record written before placement moved to the
- * device keeps such a placement only where this answers `true`; anywhere else the chat runs locally.
+ * Whether a host id names a host this tab can reach, as far as it can tell without asking the network: Tau Desktop's
+ * launcher on the desktop build, the daemon that served this page on a page a daemon may have served, a loopback
+ * daemon this tab holds a session for, and any portable (paired) host. {@link isPlacementOnThisDevice} also asks the
+ * origin.
  *
- * @param hostId - The placement a legacy chat record carries.
- * @returns Whether this device can reach it.
+ * @param hostId - The host id.
+ * @returns Whether this tab may reach it.
  * @public
  */
-export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<boolean> => {
+export const isDeviceRelativeHostReachable = (hostId: TauAgentHostId): boolean => {
+  if (hostId === 'desktop') {
+    return isDesktopTarget;
+  }
   if (hostId === 'origin') {
-    if (originNeverHostsAgent()) {
-      return false;
-    }
-    originHostsAgent ??= (async (): Promise<boolean> => {
-      try {
-        return (await discoverOriginAgentHost()) !== undefined;
-      } catch {
-        return false;
-      }
-    })();
-    return originHostsAgent;
+    return !originNeverHostsAgent();
   }
   if (hostId.startsWith(loopbackHostIdPrefix)) {
     restoreLoopbackAdmissions();
     return loopbackAdmissions.has(hostId);
   }
-  return false;
+  return true;
 };
+
+/** Whether this page's origin is a daemon, asked once per page. */
+let originHostsAgent: Promise<boolean> | undefined;
+
+/**
+ * Whether a device-relative placement names a host this tab can reach, here and now (XD2): `origin` on a page a
+ * daemon serves, a `loopback:` daemon this tab holds a session for. This device's placement for a chat is applied
+ * only where this answers `true`; anywhere else the chat runs locally and the composer says why, and a legacy chat
+ * record's placement is adopted only where it does.
+ *
+ * @param hostId - The placement.
+ * @returns Whether this tab can reach it.
+ * @public
+ */
+export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<boolean> => {
+  if (hostId !== 'origin' && !hostId.startsWith(loopbackHostIdPrefix)) {
+    return false;
+  }
+  if (!isDeviceRelativeHostReachable(hostId)) {
+    return false;
+  }
+  if (hostId !== 'origin') {
+    return true;
+  }
+  originHostsAgent ??= (async (): Promise<boolean> => {
+    try {
+      return (await discoverOriginAgentHost()) !== undefined;
+    } catch {
+      return false;
+    }
+  })();
+  return originHostsAgent;
+};
+
+/**
+ * Why this tab runs a chat locally rather than on this device's placement for it (XD2), naming the choice that
+ * reaches it.
+ *
+ * @param hostId - The held placement.
+ * @returns The reason.
+ * @public
+ */
+export const heldPlacementReason = (hostId: TauAgentHostId): string =>
+  hostId.startsWith(loopbackHostIdPrefix)
+    ? 'This chat runs on a Tau host this tab has not been handed, so Tau runs here. Run `tau open --desktop` to hand it over.'
+    : 'This chat runs on the Tau host that served its page, which this page cannot reach, so Tau runs here. Open the chat from that host to run it there.';
 
 /**
  * Why one execution cannot be placed on this device, or `undefined` when it can.
@@ -482,23 +519,15 @@ export const unplaceableExecutionReason = (execution: CadAgentExecution): string
   }
   const name = externalAgentDisplayName(execution.agentId);
   const { hostId } = execution;
+  if (isDeviceRelativeHostReachable(hostId)) {
+    return undefined;
+  }
   if (hostId === 'desktop') {
-    return isDesktopTarget
-      ? undefined
-      : `${name} runs in Tau Desktop. Open this chat there, or choose Tau to continue here.`;
+    return `${name} runs in Tau Desktop. Open this chat there, or choose Tau to continue here.`;
   }
-  if (hostId === 'origin') {
-    return originNeverHostsAgent()
-      ? `${name} runs on the Tau host that served this chat's page. Open this chat from that host, or choose Tau to continue here.`
-      : undefined;
-  }
-  if (hostId.startsWith(loopbackHostIdPrefix)) {
-    restoreLoopbackAdmissions();
-    return loopbackAdmissions.has(hostId)
-      ? undefined
-      : `${name} runs on a Tau host this tab has not been handed. Run \`tau open --desktop\` to hand it over, or choose Tau to continue here.`;
-  }
-  return undefined;
+  return hostId === 'origin'
+    ? `${name} runs on the Tau host that served this chat's page. Open this chat from that host, or choose Tau to continue here.`
+    : `${name} runs on a Tau host this tab has not been handed. Run \`tau open --desktop\` to hand it over, or choose Tau to continue here.`;
 };
 
 const loopbackTarget = (

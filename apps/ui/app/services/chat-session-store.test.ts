@@ -217,7 +217,7 @@ type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
 type StubDeps = {
   [K in Exclude<
     keyof ChatSessionDeps,
-    'client' | 'watchRecordFile' | 'queueLock' | 'legacyChatPlacement' | 'isPlacementOnThisDevice'
+    'client' | 'watchRecordFile' | 'queueLock' | 'adoptLegacyChatPlacement' | 'isPlacementOnThisDevice'
   >]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
 
@@ -5805,9 +5805,11 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
   const projectId = 'proj_handoff';
   const model = 'anthropic-claude-opus-4.8';
 
+  const placementsPath = `/.tau/composers/chats/${projectId}/placements.json`;
+  /* This tab reaches every device-relative placement unless a test says otherwise. */
   const openLoaded = async (deps: ChatSessionDeps, chatId: string) => {
     const store = new ChatSessionStore({ chatSession });
-    store.setDependencies(deps);
+    store.setDependencies({ isPlacementOnThisDevice: async () => true, ...deps });
     const session = store.acquire(chatId, projectId);
     await vi.waitFor(() => {
       expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
@@ -5816,7 +5818,13 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
   };
 
   const placementOnDisk = (deps: StubDeps, chatId: string): unknown =>
-    (deps.client.json(composerPath(projectId, chatId)) as { placement?: unknown } | undefined)?.placement;
+    (deps.client.json(placementsPath) as { placements?: Record<string, unknown> } | undefined)?.placements?.[chatId];
+  const seedPlacement = (deps: StubDeps, chatId: string, placement: string): void => {
+    deps.client.files.set(
+      placementsPath,
+      new TextEncoder().encode(JSON.stringify({ version: 1, placements: { [chatId]: placement } })),
+    );
+  };
 
   it('should write a local placement row with no device-relative hostId and keep no placement for it', async () => {
     const chatId = 'chat_local_row';
@@ -5868,10 +5876,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
   it('should reopen a chat on the placement this device chose for it, for the composer and the read connector', async () => {
     const chatId = 'chat_reopened_pin';
     const deps = createStubDeps();
-    deps.client.files.set(
-      composerPath(projectId, chatId),
-      new TextEncoder().encode(JSON.stringify({ version: 1, placement: 'origin' })),
-    );
+    seedPlacement(deps, chatId, 'origin');
     deps.getChat.mockResolvedValue(
       chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model }, activeKernel: 'replicad' }),
     );
@@ -5897,10 +5902,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
     const { store, session } = await openLoaded(deps, chatId);
     /* Another tab pins the chat to the daemon that served it. */
-    deps.client.files.set(
-      composerPath(projectId, chatId),
-      new TextEncoder().encode(JSON.stringify({ version: 1, placement: 'origin' })),
-    );
+    seedPlacement(deps, chatId, 'origin');
 
     session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
 
@@ -5919,7 +5921,7 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     const held = Promise.withResolvers<void>();
     const writeFile = deps.client.writeFile.bind(deps.client);
     vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, data) => {
-      if (path === composerPath(projectId, chatId)) {
+      if (path === placementsPath) {
         await held.promise;
       }
       return writeFile(path, data);
@@ -5942,18 +5944,24 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
   });
 
   /* A pre-XD2 record's daemon is adopted once, on open, where it is reachable, and written out of the chat record. */
-  it('should adopt a reachable legacy placement once on open and write the chat record back without it', async () => {
+  it('should adopt a reachable legacy placement once on open, through the chat store’s adopting write', async () => {
     const chatId = 'chat_legacy_pin';
     const deps = createStubDeps();
     let legacy: string | undefined = 'origin';
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
-    deps.patchChat.mockImplementation(async () => {
-      legacy = undefined;
-      return undefined;
-    });
+    const adoptLegacyChatPlacement = vi.fn<NonNullable<ChatSessionDeps['adoptLegacyChatPlacement']>>(
+      async (_chatId, _projectId, accept) => {
+        if (legacy === undefined || !(await accept(legacy))) {
+          return undefined;
+        }
+        const adopted = legacy;
+        legacy = undefined;
+        return adopted;
+      },
+    );
     const withLegacy = {
       ...deps,
-      legacyChatPlacement: vi.fn(async () => legacy),
+      adoptLegacyChatPlacement,
       isPlacementOnThisDevice: vi.fn(async (hostId: string) => hostId === 'origin'),
     };
     const { store, session } = await openLoaded(withLegacy, chatId);
@@ -5963,10 +5971,8 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
       model,
       hostId: 'origin',
     });
-    expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model });
-    await vi.waitFor(() => {
-      expect(placementOnDisk(deps, chatId)).toBe('origin');
-    });
+    expect(placementOnDisk(deps, chatId)).toBe('origin');
+    expect(deps.patchChat).not.toHaveBeenCalled();
 
     /* The person picks this device's local row: nothing adopts the old pin again on the next open. */
     session.persistenceActorRef.send({ type: 'setActiveExecution', execution: { kind: 'tau', model } });
@@ -5984,7 +5990,12 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     const deps = createStubDeps();
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
     const { store, session } = await openLoaded(
-      { ...deps, legacyChatPlacement: async () => 'origin', isPlacementOnThisDevice: async () => false },
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) =>
+          (await accept('origin')) ? 'origin' : undefined,
+        isPlacementOnThisDevice: async () => false,
+      },
       chatId,
     );
 
@@ -5994,13 +6005,35 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     store.release(chatId);
   });
 
+  /* A placement chosen in a tab that was handed a loopback daemon reaches every tab on the device; one that was not
+   * handed it runs the chat here and says so, and leaves the placement for the tab that can reach it. */
+  it('should run locally and hold this device’s placement in a tab that cannot reach it', async () => {
+    const chatId = 'chat_other_tab_pin';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'loopback:http://127.0.0.1:4100');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded({ ...deps, isPlacementOnThisDevice: async () => false }, chatId);
+
+    const { context } = session.persistenceActorRef.getSnapshot();
+    expect(context.activeExecution).toEqual({ kind: 'tau', model });
+    expect(context.heldPlacement).toBe('loopback:http://127.0.0.1:4100');
+    await expect(store.getChatHostSettings(chatId)).resolves.toMatchObject({ activeExecution: { kind: 'tau', model } });
+
+    session.persistenceActorRef.send({
+      type: 'setActiveExecution',
+      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
+    });
+    await vi.waitFor(() => {
+      expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5' });
+    });
+    expect(placementOnDisk(deps, chatId)).toBe('loopback:http://127.0.0.1:4100');
+    store.release(chatId);
+  });
+
   it('should keep a paired device id in chat.json, where every device can reach it', async () => {
     const chatId = 'chat_paired';
     const deps = createStubDeps();
-    deps.client.files.set(
-      composerPath(projectId, chatId),
-      new TextEncoder().encode(JSON.stringify({ version: 1, placement: 'origin' })),
-    );
+    seedPlacement(deps, chatId, 'origin');
     deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
     const { store, session } = await openLoaded(deps, chatId);
 

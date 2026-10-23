@@ -28,7 +28,8 @@
 \* refused-admission path; this device's placement is written on every change and
 \* read from the open session first. Queue transitions and guards are unchanged.
 \* A legacy device-relative placement is adopted once at a session's load, through
-\* the composer record writer, before any queued item is admitted.
+\* the chat store's adopting write, before any queued item is admitted. A placement this
+\* tab cannot reach is held at load and the chat runs locally; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -3236,10 +3236,15 @@ describe('useProjectManager.createProject', () => {
         }),
       );
 
-      const recordPath = `/.tau/composers/chats/${fakeProject.id}/cht_create.json`;
+      const recordPath = `/.tau/composers/chats/${fakeProject.id}/placements.json`;
       const written = mockWriteFile.mock.calls.filter(([path]) => path === recordPath);
       expect(
-        written.map(([, bytes]) => (JSON.parse(new TextDecoder().decode(bytes)) as { placement?: string }).placement),
+        written.map(
+          ([, bytes]) =>
+            (JSON.parse(new TextDecoder().decode(bytes)) as { placements?: Record<string, string> }).placements?.[
+              'cht_create'
+            ],
+        ),
       ).toEqual(kept === undefined ? [] : [kept]);
       expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat?.activeExecution).toEqual(execution);
     });
@@ -3268,6 +3273,34 @@ describe('useProjectManager.createProject', () => {
       });
       expect(attachmentFiles.has(`${chatAttachments}/${image.hash}.png`)).toBe(true);
       expect(mockPutChatRecord).toHaveBeenCalledWith(persisted.chat);
+    });
+
+    /* XD2: a creation replayed after a crash keeps its first chat's placement on this device, as the first try would. */
+    it('keeps the first chat’s placement when an interrupted creation is replayed', async () => {
+      const persisted = {
+        ...pendingCreate,
+        chat: {
+          ...pendingCreate.chat!,
+          activeExecution: { kind: 'tau', model: 'gpt-test', hostId: 'origin' } as const,
+        },
+      };
+      mockGetPendingProjectOperations.mockResolvedValue([persisted]);
+      mockResumeResources.mockResolvedValueOnce([persisted.chat]);
+      const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+      await result.current.getProjectListing();
+
+      await vi.waitFor(() => {
+        expect(mockCompletePending).toHaveBeenCalledWith(operationId);
+      });
+      const recordPath = `/.tau/composers/chats/${persisted.projectId}/placements.json`;
+      await vi.waitFor(() => {
+        const written = mockWriteFile.mock.calls.findLast(([path]) => path === recordPath);
+        expect(
+          written === undefined
+            ? undefined
+            : (JSON.parse(new TextDecoder().decode(written[1])) as { placements?: Record<string, string> }).placements,
+        ).toEqual({ [persisted.chat.id]: 'origin' });
+      });
     });
 
     // New (W6, P39): the operation names its source, and resume copies from that directory only.

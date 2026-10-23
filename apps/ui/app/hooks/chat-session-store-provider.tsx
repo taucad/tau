@@ -54,7 +54,7 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
   store.setDependencies({
     getChat: projectManager.getChat,
     patchChat: projectManager.patchChat,
-    legacyChatPlacement: projectManager.legacyChatPlacement,
+    adoptLegacyChatPlacement: projectManager.adoptLegacyChatPlacement,
     isPlacementOnThisDevice,
     touchChatRecency: projectManager.touchChatRecency,
     consumeChatStartupRequest: projectManager.consumeChatStartupRequest,

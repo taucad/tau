@@ -338,10 +338,10 @@ describe('composer record store', () => {
         expected: { execution: { ...tau, model: 'anthropic/claude-opus-5' } },
       },
       {
-        name: 'placement',
-        first: { placement: 'origin' },
-        second: { placement: 'loopback:http://127.0.0.1:4100' },
-        expected: { placement: 'loopback:http://127.0.0.1:4100' },
+        name: 'placements',
+        first: { placements: { chatTwo: 'origin' } },
+        second: { placements: { chatTwo: 'loopback:http://127.0.0.1:4100' } },
+        expected: { placements: { chatNine: 'origin', chatTwo: 'loopback:http://127.0.0.1:4100' } },
       },
     ] satisfies ReadonlyArray<{
       name: string;
@@ -359,7 +359,7 @@ describe('composer record store', () => {
         unread: { chatNine: true },
         readThrough: { chatNine: { leaderEpoch: 'g1', sequence: 1 } },
         execution: tau,
-        placement: 'origin',
+        placements: { chatNine: 'origin' },
       };
 
       await store.patch(everything);
@@ -488,35 +488,39 @@ describe('composer record store', () => {
       await expect(store.read()).resolves.toMatchObject({ status: 'invalid' });
     });
 
-    it('should clear this device’s chat placement when patched with false, and leave it alone when omitted', async () => {
+    it('should clear one chat’s placement when patched with false, and leave the others alone', async () => {
       const client = memoryClient();
-      const store = createComposerRecordStore(client, chatPath);
+      const placementsPath = composerRecordPaths.placements('proj_1');
+      const store = createComposerRecordStore(client, placementsPath);
 
-      await store.patch({ placement: 'origin', mode: 'plan' });
-      await store.patch({ mode: 'agent' });
+      await store.patch({ placements: { chatOne: 'origin', chatTwo: 'loopback:http://127.0.0.1:4100' } });
+      await store.patch({ placements: { chatOne: false } });
+
       await expect(store.read()).resolves.toEqual({
         status: 'valid',
-        record: { version: 1, mode: 'agent', placement: 'origin' },
+        record: { version: 1, placements: { chatTwo: 'loopback:http://127.0.0.1:4100' } },
       });
-
-      await store.patch({ placement: false });
-      await expect(store.read()).resolves.toEqual({ status: 'valid', record: { version: 1, mode: 'agent' } });
-      expect(client.text(chatPath)).not.toContain('placement');
+      await store.patch({ placements: { chatTwo: false } });
+      expect(client.text(placementsPath)).not.toContain('placements');
     });
 
-    it('should keep both writers’ values when a placement races a draft 100 times (storage policy rule 7)', async () => {
+    it('should keep both writers’ values when two chats’ placements race 100 times (storage policy rule 7)', async () => {
       await Promise.all(
         Array.from({ length: 100 }, async (_, index) => {
           const client = memoryClient();
-          const composer = createComposerRecordStore(client, chatPath);
-          const chatCreation = createComposerRecordStore(client, chatPath);
+          const placementsPath = composerRecordPaths.placements('proj_1');
+          const first = createComposerRecordStore(client, placementsPath);
+          const second = createComposerRecordStore(client, placementsPath);
           const placement = index % 2 === 0 ? 'origin' : `loopback:http://127.0.0.1:${String(4000 + index)}`;
 
-          await Promise.all([composer.patch({ draft: draft(`draft ${index}`) }), chatCreation.patch({ placement })]);
+          await Promise.all([
+            first.patch({ placements: { chatOne: placement } }),
+            second.patch({ placements: { chatTwo: 'origin' } }),
+          ]);
 
-          await expect(composer.read()).resolves.toEqual({
+          await expect(first.read()).resolves.toEqual({
             status: 'valid',
-            record: { version: 1, draft: draft(`draft ${index}`), placement },
+            record: { version: 1, placements: { chatOne: placement, chatTwo: 'origin' } },
           });
         }),
       );

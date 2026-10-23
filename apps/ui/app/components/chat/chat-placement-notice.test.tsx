@@ -11,6 +11,7 @@ import type { CadAgentExecution } from '@taucad/chat';
  */
 type Harness = {
   execution: CadAgentExecution;
+  heldPlacement: string | undefined;
   setActiveExecution: ReturnType<typeof vi.fn>;
   canSelectExecution: boolean;
   unplaceable: string | undefined;
@@ -20,6 +21,7 @@ type Harness = {
 const harness = vi.hoisted(
   (): Harness => ({
     execution: { kind: 'tau', model: 'anthropic-claude-opus-4.8' },
+    heldPlacement: undefined,
     setActiveExecution: vi.fn(),
     canSelectExecution: true,
     unplaceable: undefined,
@@ -29,7 +31,11 @@ const harness = vi.hoisted(
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
-    execution: { execution: harness.execution, setActiveExecution: harness.setActiveExecution },
+    execution: {
+      execution: harness.execution,
+      setActiveExecution: harness.setActiveExecution,
+      heldPlacement: harness.heldPlacement,
+    },
     canSelectExecution: harness.canSelectExecution,
   }),
 }));
@@ -40,6 +46,7 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 vi.mock('#lib/agent-host-placement.js', () => ({
   externalAgentDisplayName: (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId),
+  heldPlacementReason: (hostId: string) => `held ${hostId}`,
   unplaceableExecutionReason: () => harness.unplaceable,
   onLoopbackAgentHostsChanged: (listener: () => void) => {
     harness.loopbackListeners.add(listener);
@@ -54,6 +61,7 @@ const reason = 'Codex runs in Tau Desktop. Open this chat there, or choose Tau t
 
 beforeEach(() => {
   harness.execution = desktopCodex;
+  harness.heldPlacement = undefined;
   harness.canSelectExecution = true;
   harness.unplaceable = reason;
   harness.setActiveExecution.mockReset();
@@ -64,6 +72,28 @@ afterEach(() => {
 });
 
 describe('ChatPlacementNotice', () => {
+  /* XD2: this device's placement for a Tau chat that this tab cannot reach runs the chat here, and says so. */
+  it('should say a Tau chat runs in this tab when this device’s placement for it is out of this tab’s reach', () => {
+    harness.execution = { kind: 'tau', model: 'anthropic-claude-opus-4.8' };
+    harness.unplaceable = undefined;
+    harness.heldPlacement = 'loopback:http://127.0.0.1:4100';
+
+    render(<ChatPlacementNotice />);
+
+    expect(screen.getByRole('status', { name: 'Running in this tab' })).toHaveTextContent(
+      'held loopback:http://127.0.0.1:4100',
+    );
+  });
+
+  it('should say nothing for a Tau chat on a placement this tab reaches', () => {
+    harness.execution = { kind: 'tau', model: 'anthropic-claude-opus-4.8', hostId: 'loopback:http://127.0.0.1:4100' };
+    harness.unplaceable = undefined;
+
+    const { container } = render(<ChatPlacementNotice />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
   it('should explain where the agent runs, without changing the chat’s agent', () => {
     render(<ChatPlacementNotice />);
 

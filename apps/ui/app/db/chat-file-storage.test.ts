@@ -1215,40 +1215,54 @@ describe('chat file store — device-relative placement never reaches chat.json'
   });
 
   /*
-   * A legacy record's daemon is handed to the session that opens it (never adopted on a list read), and writing the
-   * chat's execution back removes it from the record, so it is adopted at most once.
+   * A legacy record's daemon is adopted only by the session that opens it where the daemon is reachable (never on a
+   * list read), and only that adopting write drops it from the record: every other write keeps it for the device it
+   * names.
    */
   it.each([
     ['origin', 'origin'],
     ['loopback', 'loopback:http://127.0.0.1:4100'],
-  ])('should hand over a legacy %s placement and drop it from chat.json on the next write', async (_label, hostId) => {
-    const files = createStoreWithFiles();
-    const chatId = `chat_legacy_${_label}`;
-    await files.write(
-      recordOf(chatId),
-      `${JSON.stringify({
-        id: chatId,
-        resourceId: projectId,
-        name: 'Pinned to a daemon',
-        createdAt: 1,
-        updatedAt: 1,
-        activeExecution: { kind: 'tau', model, hostId },
-      })}\n`,
-    );
-    const store = files.reopen();
+  ])(
+    'should keep a legacy %s placement through unrelated writes and drop it only when adopted',
+    async (_label, hostId) => {
+      const files = createStoreWithFiles();
+      const chatId = `chat_legacy_${_label}`;
+      await files.write(
+        recordOf(chatId),
+        `${JSON.stringify({
+          id: chatId,
+          resourceId: projectId,
+          name: 'Pinned to a daemon',
+          createdAt: 1,
+          updatedAt: 1,
+          activeExecution: { kind: 'tau', model, hostId },
+        })}\n`,
+      );
+      const store = files.reopen();
+      const storedHost = async (): Promise<unknown> =>
+        (JSON.parse(await files.read(recordOf(chatId))) as { activeExecution?: { hostId?: unknown } }).activeExecution
+          ?.hostId;
 
-    const listed = await store.getChatRecordsForResource(projectId);
-    expect(listed.map((chat) => chat.activeExecution)).toEqual([{ kind: 'tau', model }]);
-    await expect(files.exists(`/.tau/composers/chats/${projectId}/${chatId}.json`)).resolves.toBe(false);
-    await expect(store.legacyChatPlacement?.(chatId, projectId)).resolves.toBe(hostId);
+      const listed = await store.getChatRecordsForResource(projectId);
+      expect(listed.map((chat) => chat.activeExecution)).toEqual([{ kind: 'tau', model }]);
 
-    /* The session's write-back of the portable execution it read is a change: the record held the host. */
-    await store.patchChat(chatId, 'activeExecution', { kind: 'tau', model });
+      /* A recency touch, a rename and a model change on a device that cannot reach the host keep it. */
+      await store.touchChatRecency(chatId, Date.now());
+      await store.updateChat(chatId, { name: 'Renamed' });
+      await store.patchChat(chatId, 'activeExecution', { kind: 'tau', model: 'openai-gpt-5.5' });
+      expect(await storedHost()).toBe(hostId);
+      await expect(store.getChat(chatId, projectId)).resolves.toMatchObject({
+        activeExecution: { kind: 'tau', model: 'openai-gpt-5.5' },
+      });
 
-    const written = JSON.parse(await files.read(recordOf(chatId))) as Record<string, unknown>;
-    expect(written['activeExecution']).toEqual({ kind: 'tau', model });
-    await expect(store.legacyChatPlacement?.(chatId, projectId)).resolves.toBeUndefined();
-  });
+      /* A device that cannot reach it never adopts it; the one that can, does, once. */
+      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => false)).resolves.toBeUndefined();
+      expect(await storedHost()).toBe(hostId);
+      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBe(hostId);
+      expect(await storedHost()).toBeUndefined();
+      await expect(store.adoptLegacyChatPlacement?.(chatId, projectId, async () => true)).resolves.toBeUndefined();
+    },
+  );
 
   it('should write a local placement row as no hostId at all', async () => {
     const files = createStoreWithFiles();

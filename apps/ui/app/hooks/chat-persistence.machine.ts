@@ -1,7 +1,7 @@
 /** Chat metadata persistence: loading, execution, kernel and command refusals. */
 
 import { createAsyncLogic, setup, types } from 'xstate';
-import type { CadAgentExecution, Chat } from '@taucad/chat';
+import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { eventSchemas } from '#lib/xstate.lib.js';
@@ -30,12 +30,17 @@ export type ChatPersistenceMachineContext = {
    * never holds a device-relative host (cross-device chat handoff, XD2).
    */
   activeExecution?: CadAgentExecution;
+  /**
+   * This device's placement for the chat that this tab cannot reach (a loopback daemon another tab was handed, or
+   * `origin` on a page no daemon served), so `activeExecution` runs locally instead and the composer says so (XD2).
+   */
+  heldPlacement?: TauAgentHostId;
   activeKernel?: KernelId;
   fault?: string;
 };
 
 /** What loading a chat answers: its row, or `undefined` when it has none yet. @public */
-export type ChatLoadOutput = Readonly<{ chat: Chat | undefined }>;
+export type ChatLoadOutput = Readonly<{ chat: Chat | undefined; heldPlacement?: TauAgentHostId | undefined }>;
 
 type ChatPersistenceMachineEvents =
   | { type: 'setActiveChatId'; chatId: string }
@@ -144,6 +149,7 @@ export const chatPersistenceMachine = setup({
                 isLoadingChat: false,
                 persistedError: event.output.chat?.error,
                 activeExecution: event.output.chat?.activeExecution,
+                heldPlacement: event.output.heldPlacement,
                 activeKernel: event.output.chat?.activeKernel,
               }),
             },

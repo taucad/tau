@@ -47,7 +47,7 @@ import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
-import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, ContextUsageData, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
@@ -123,6 +123,11 @@ export type ActiveChatModel = {
 export type ActiveChatExecution = {
   execution: CadAgentExecution;
   setActiveExecution: (execution: CadAgentExecution) => void;
+  /**
+   * This device's placement for the chat that this tab cannot reach, so `execution` runs locally instead (XD2). The
+   * composer names it; it stays this device's placement for the tab that can reach it.
+   */
+  heldPlacement?: TauAgentHostId | undefined;
 };
 
 export type ChatAgentActivity = 'ready' | 'working' | 'approval-required' | 'stopping';
@@ -678,10 +683,12 @@ function useConsumeDraft(
 /**
  * Session execution: the one this device runs the chat on — the chat record's intent with this device's placement
  * for it — else the device default. A choice goes whole to the device default and to the session, whose persistence
- * splits it: the portable execution to `chat.json`, a device-relative placement to this device's composer record (XD2).
+ * splits it: the portable execution to `chat.json`, a device-relative placement to this device's placements record
+ * (XD2). A placement this tab cannot reach is held, and the chat runs locally.
  */
 function useSessionExecution(session: ChatSession): ActiveChatExecution {
   const persisted = useSelector(session.persistenceActorRef, (state) => state.context.activeExecution);
+  const heldPlacement = useSelector(session.persistenceActorRef, (state) => state.context.heldPlacement);
   const { defaultExecution, rememberExecution } = useModels();
   const execution = persisted ?? defaultExecution;
   const setActiveExecution = useCallback(
@@ -691,7 +698,10 @@ function useSessionExecution(session: ChatSession): ActiveChatExecution {
     },
     [session.persistenceActorRef, rememberExecution],
   );
-  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
+  return useMemo(
+    () => ({ execution, setActiveExecution, heldPlacement }),
+    [execution, setActiveExecution, heldPlacement],
+  );
 }
 
 /**

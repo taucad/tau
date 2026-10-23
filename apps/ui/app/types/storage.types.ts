@@ -93,11 +93,15 @@ export type ChatStorage = {
    */
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
   /**
-   * The device-relative Tau placement (`origin`, a `loopback:` daemon) a record written before placement moved to the
-   * device still carries, or `undefined` (XD2). Every other read drops it; a session adopts it once, on open, where it
-   * names a host on this device, and writing the chat's execution back removes it from the record.
+   * Adopt the device-relative Tau placement (`origin`, a `loopback:` daemon) a record written before placement moved
+   * to the device still carries (XD2). Asked once, by a session's open: when `accept` holds for the host, the record is
+   * written without it and the host is answered; otherwise nothing is written. Every other write keeps the host.
    */
-  legacyChatPlacement?(chatId: string, projectId?: string): Promise<TauAgentHostId | undefined>;
+  adoptLegacyChatPlacement?(
+    chatId: string,
+    projectId: string | undefined,
+    accept: (hostId: TauAgentHostId) => Promise<boolean>,
+  ): Promise<TauAgentHostId | undefined>;
   /** Advance user-action recency monotonically. */
   touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined>;
   /**

@@ -944,8 +944,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   let described: Promise<RevisionEngineDescriptor> | undefined;
+  /* A description that failed is asked again next time, never kept: every later caller would inherit the rejection. */
   const describePort = async (): Promise<RevisionEngineDescriptor> => {
-    described ??= port.describe();
+    described ??= (async () => {
+      try {
+        return await port.describe();
+      } catch (error) {
+        described = undefined;
+        throw error;
+      }
+    })();
     return described;
   };
   const formatOf = async (): Promise<ObjectFormat> => {
@@ -1765,9 +1773,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     removedWrites = write;
     await write;
   };
+  /* Never rejects: the head has already moved, and this is evidence for a later placement, not the move's outcome. */
   const noteBranchRemoved = async (branch: string, removed: boolean): Promise<void> => {
-    const { objectFormat } = await describePort();
-    await noteRemovedCheckout(checkoutIdOfBranch(objectFormat, branch), removed);
+    try {
+      const { objectFormat } = await describePort();
+      await noteRemovedCheckout(checkoutIdOfBranch(objectFormat, branch), removed);
+    } catch {
+      /* A store with no checkout to keep the record beside, or no format yet, records nothing. */
+    }
   };
 
   /**
@@ -1785,9 +1798,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const ref = name.startsWith('refs/') ? name : `refs/heads/${name}`;
     if (!ref.startsWith('refs/heads/')) {
       return;
-    }
-    if (from === undefined || to === undefined) {
-      await noteBranchRemoved(ref.slice('refs/heads/'.length), to === undefined);
     }
     const minted = to === undefined ? undefined : mintedOperations.get(to);
     if (to !== undefined) {
@@ -1810,6 +1820,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * report a landed revision as lost. Only this operation is missing from
        * *Undo*; the push is still derived from the head (`withOwedPushes`). */
       console.error('[revisions] operation log', error);
+    }
+    /* After the operation log, which *Undo* needs, and never failing the move (XD4). */
+    if (from === undefined || to === undefined) {
+      await noteBranchRemoved(ref.slice('refs/heads/'.length), to === undefined);
     }
   };
 

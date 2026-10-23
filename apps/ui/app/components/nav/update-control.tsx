@@ -35,7 +35,7 @@ export function UpdateControl({
   readonly detail: string;
   readonly icon: LucideIcon;
   readonly isFailed?: boolean;
-  /** Fills the row with the brand color when an update is ready to apply. */
+  /** Tints the row with the brand colour (a light wash, a half fill in dark mode) when an update is ready. */
   readonly isProminent?: boolean;
   readonly releasePage?: string;
   readonly action?: UpdateControlAction;
@@ -52,7 +52,7 @@ export function UpdateControl({
             <SidebarMenuButton
               className={cn(
                 isProminent
-                  ? 'bg-primary! text-primary-foreground! hover:bg-(image:--primary-action-glint) data-[state=open]:bg-(image:--primary-action-glint)'
+                  ? 'bg-primary/12! text-[oklch(0.45_var(--c-primary)_var(--hue-primary))]! dark:bg-primary/50! dark:text-primary-foreground! hover:bg-(image:--primary-action-glint) data-[state=open]:bg-(image:--primary-action-glint)'
                   : 'data-[state=open]:bg-sidebar-accent',
               )}
               aria-label={title}

@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 export const spikeDirectory = dirname(fileURLToPath(import.meta.url));
 export const packageDirectory = resolve(spikeDirectory, '..', '..');
 const require = createRequire(join(packageDirectory, 'package.json'));
+/** node-pty is a spike-local dependency (`spikes/shell/package.json`), so resolve it from here. */
+export const spikeRequire = createRequire(join(spikeDirectory, 'package.json'));
 
 export type Verdict = 'pass' | 'fail';
 
@@ -66,7 +68,7 @@ export const sandboxRuntime = (): { version: string; directory: string; srtWin?:
 export const nodePty = (): { version: string; directory: string; binary?: string; sha256?: string } | undefined => {
   let entry: string;
   try {
-    entry = require.resolve('node-pty');
+    entry = spikeRequire.resolve('node-pty');
   } catch {
     return undefined;
   }
@@ -178,9 +180,8 @@ export const identity = (row: string, fixtureRoot: string, bash: BashIdentity | 
   bash: bash ?? null,
   filesystem: { root: fixtureRoot, type: filesystemType(fixtureRoot) },
   linuxSecurity: linuxSecurity() ?? null,
-  elevated: isWindows
-    ? run('net', ['session']).includes('There are no entries') || !run('net', ['session']).includes('Access is denied')
-    : process.getuid?.() === 0,
+  // `net session` needs administrator rights, so its denial is a reliable non-elevated signal.
+  elevated: isWindows ? !run('net', ['session']).toLowerCase().includes('access is denied') : process.getuid?.() === 0,
 });
 
 /** A per-run fixture root outside the checkout and outside shared temporary storage. */

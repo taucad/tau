@@ -12,14 +12,13 @@
  *   there and carries input/resize frames over the wrapper's pipes.
  */
 import { spawn } from 'node:child_process';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { text } from 'node:stream/consumers';
 
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 
 import type { Check } from './lib.mts';
-import { check, isWindows, packageDirectory, shellPath, sleep, spikeDirectory } from './lib.mts';
+import { check, isWindows, shellPath, sleep, spikeDirectory, spikeRequire } from './lib.mts';
 
 type Terminal = {
   write: (data: string) => void;
@@ -41,7 +40,6 @@ type PtyJob = {
 };
 
 const quote = (value: string): string => `'${value.replaceAll("'", String.raw`'\''`)}'`;
-const require = createRequire(join(packageDirectory, 'package.json'));
 const prompt = 'tau-spike$ ';
 
 const job = JSON.parse(await text(process.stdin)) as PtyJob;
@@ -94,7 +92,7 @@ const interactiveBash = isWindows
   : [job.bash, '--noprofile', '--norc', '-i'];
 
 const direct = async (): Promise<Terminal> => {
-  const pty = require('node-pty') as typeof import('node-pty');
+  const pty = spikeRequire('node-pty') as typeof import('node-pty');
   const { argv, env } = await wrap(interactiveBash);
   const terminal = pty.spawn(argv[0]!, argv.slice(1), {
     name: 'xterm-256color',

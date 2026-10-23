@@ -6,14 +6,11 @@
  * output to stdout, and reads newline-delimited JSON frames from stdin: `{t:'i', d:<base64>}` is
  * input and `{t:'r', c, r}` is a resize. Its exit status is the shell's.
  */
-import { createRequire } from 'node:module';
-import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
-import { packageDirectory } from './lib.mts';
+import { spikeRequire } from './lib.mts';
 
-const require = createRequire(join(packageDirectory, 'package.json'));
-const pty = require('node-pty') as typeof import('node-pty');
+const pty = spikeRequire('node-pty') as typeof import('node-pty');
 
 const bash = process.argv[2]!;
 const terminal = pty.spawn(bash, ['--noprofile', '--norc', '-i'], {

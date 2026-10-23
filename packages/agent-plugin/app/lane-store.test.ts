@@ -64,7 +64,7 @@ describe('createLaneStore', () => {
     storage.items.set(
       'tau-viewer:lane:aaaa',
       JSON.stringify({
-        lane: { open: ['model', 'files'], active: 'files' },
+        lane: { open: ['model', 'gallery'], active: 'gallery' },
         sections: { model: { 'gear.ts': { expanded: 'yes' }, properties: { expanded: true, size: 80 } } },
       }),
     );

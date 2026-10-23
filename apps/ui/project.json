@@ -162,7 +162,7 @@
           "runtime": "node apps/ui/geospec-mt-assets-cache-key.ts"
         }
       ],
-      "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
+      "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts",
       "options": {
         "cwd": "{projectRoot}/serve",
         "env": {

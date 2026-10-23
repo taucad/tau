@@ -114,7 +114,7 @@ catalog:
   '@react-router/fs-routes': 7.18.2
   '@react-router/node': 7.18.2
   '@size-limit/file': ^12.1.0
-  '@tanstack/react-pacer': ^0.22.1
+  '@tanstack/react-pacer': ^0.24.1
   '@tanstack/react-query': ^5.101.0
   # tscircuit EDA kernel (@taucad/tscircuit): exact pins by charter D1 — every package is
   # 0.0.x with no semver guarantee. The @tscircuit/core peers are the modules its published
@@ -160,7 +160,7 @@ catalog:
   spicey: 0.0.14
   '@taucad/kcl-wasm-lib': 0.1.191
   '@testing-library/jest-dom': 6.6.3
-  '@testing-library/react': 16.3.2
+  '@testing-library/react': 16.3.3
   '@tiptap/core': ^3.30.5
   '@tiptap/extension-document': ^3.30.5
   '@tiptap/extension-hard-break': ^3.30.5
@@ -182,7 +182,7 @@ catalog:
   '@types/semver': ^7.5.8
   '@types/three': ^0.184.1
   '@typescript/native-preview': 7.0.0-dev.20260223.1
-  '@vitejs/plugin-react': 6.1.1
+  '@vitejs/plugin-react': 6.1.2
   '@vitest/coverage-v8': 4.1.11
   '@vitest/browser-playwright': 4.1.11
   '@vitest/ui': 4.1.11
@@ -251,7 +251,7 @@ catalog:
   oxfmt: ^0.36.0
   oxlint: ^1.80.0
   oxlint-tsgolint: ^0.16.0
-  oxc-transform-react: 0.148.0
+  oxc-transform-react: 0.152.0
   pdf-parse: 2.4.5
   polygon-clipping: ^0.15.7
   replicad: npm:@taulabs/replicad@1.1.0-taulabs.1
@@ -454,6 +454,7 @@ patchedDependencies:
   '@react-three/fiber@9.6.1': tools/pnpm/patches/@react-three__fiber@9.6.1.patch
   monaco-editor@0.55.1: tools/pnpm/patches/monaco-editor@0.55.1.patch
 overrides:
+  circuit-json-to-bom-csv@0.0.17>react-dom: 19.2.7
   '@ai-sdk/provider-utils@>=4.0.0 <4.0.33': 4.0.57
   '@esbuild-kit/core-utils>esbuild': 0.28.2
   '@langchain/cerebras@1.0.4>uuid': 11.1.1

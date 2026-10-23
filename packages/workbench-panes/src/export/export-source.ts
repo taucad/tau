@@ -189,7 +189,7 @@ export type ExportSource = Readonly<{
   optionStore?: ExportOptionStore | undefined;
   /** Host notices. Without them the pane reports outcomes in a status line under the export button. */
   notices?: ExportNotices | undefined;
-  /** The file icon the host draws for a file name. Without it the pane draws a plain file icon. */
+  /** The file icon the host draws for a file name. Without it the pane draws a format's badge, or a plain file icon. */
   FileIcon?: ComponentType<Readonly<{ filename: string; className?: string }>> | undefined;
   /**
    * The entry's geometry and formats. A hook: it is called during render.

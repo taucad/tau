@@ -1,29 +1,25 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const ownBuildId = 1_792_726_000_000;
-const deployedBuildId = 1_792_730_113_029;
-
-const liveConfirmed = vi.hoisted(() => new Set<() => void>());
 const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
-
-vi.mock('#filesystem/build-skew.js', () => ({
-  buildId: ownBuildId,
-  offerReload: vi.fn(),
-  recordLiveBuild: vi.fn(),
-  subscribeLiveBuildConfirmed: (listener: () => void) => {
-    liveConfirmed.add(listener);
-    return () => {
-      liveConfirmed.delete(listener);
-    };
-  },
-}));
 vi.mock('#lib/error-reporting.js', () => ({ reportUiError }));
 
-/** Fresh module state per test: the page recovery and its interaction flag live at module scope. */
+/** This bundle's build id and the deploy that replaced it, set by {@link load} from the real module. */
+let ownBuildId = 0;
+let deployedBuildId = 0;
+const loaded: Array<{ readonly closeBuildSkewChannel: () => void }> = [];
+
+/**
+ * Fresh module state per test: the page recovery, its interaction flag and `build-skew`, the one
+ * owner of server answers, all live at module scope. The real `build-skew` is wired in.
+ */
 const load = async () => {
   vi.resetModules();
-  return import('#lib/stale-build-recovery.js');
+  const skew = await import('#filesystem/build-skew.js');
+  loaded.push(skew);
+  ownBuildId = skew.buildId;
+  deployedBuildId = ownBuildId + 4_113_029;
+  return { ...(await import('#lib/stale-build-recovery.js')), skew };
 };
 
 const stubServer = (serverBuildId: number): ReturnType<typeof vi.fn> => {
@@ -43,7 +39,7 @@ const settle = async (): Promise<void> => {
     expect(globalThis.fetch).toHaveBeenCalled();
   });
   await new Promise((resolve) => {
-    setTimeout(resolve, 0);
+    setTimeout(resolve, 10);
   });
 };
 
@@ -61,7 +57,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  liveConfirmed.clear();
+  for (const skew of loaded.splice(0)) {
+    skew.closeBuildSkewChannel();
+  }
   uninstall?.();
   uninstall = undefined;
   sessionStorage.clear();
@@ -89,8 +87,7 @@ describe('installStaleBuildRecovery', () => {
   it.each(['pointerdown', 'keydown', 'input', 'paste', 'drop', 'dragenter', 'wheel', 'touchstart'])(
     'should offer the reload instead of forcing it after a %s',
     async (type) => {
-      const { installStaleBuildRecovery } = await load();
-      const { offerReload } = await import('#filesystem/build-skew.js');
+      const { installStaleBuildRecovery, skew } = await load();
       stubServer(deployedBuildId);
       const reload = stubReload();
       uninstall = installStaleBuildRecovery();
@@ -100,7 +97,8 @@ describe('installStaleBuildRecovery', () => {
       await settle();
 
       expect(reload).not.toHaveBeenCalled();
-      expect(offerReload).toHaveBeenCalledWith(deployedBuildId);
+      expect(skew.isReloadOffered()).toBe(true);
+      expect(skew.readSupersedingBuildId()).toBe(deployedBuildId);
     },
   );
 
@@ -171,8 +169,8 @@ describe('installStaleBuildRecovery', () => {
   });
 
   it('should clear the guard of a reload that reached this build', async () => {
-    sessionStorage.setItem('tau-stale-build-reload', `${String(ownBuildId - 1)}>${String(ownBuildId)}`);
     const { installStaleBuildRecovery } = await load();
+    sessionStorage.setItem('tau-stale-build-reload', `${String(ownBuildId - 1)}>${String(ownBuildId)}`);
 
     uninstall = installStaleBuildRecovery();
 
@@ -180,9 +178,8 @@ describe('installStaleBuildRecovery', () => {
   });
 
   it('should report a failure only onCaughtError saw, with no error page, once the rollback ends', async () => {
-    const { recoverFromCaughtError, readStaleBuildOutcome, subscribeGenuineFailures } = await load();
-    const rolledBackTo = ownBuildId - 3_600_000;
-    stubServer(rolledBackTo);
+    const { recoverFromCaughtError, readStaleBuildOutcome, subscribeGenuineFailures, skew } = await load();
+    stubServer(ownBuildId - 3_600_000);
     vi.spyOn(performance, 'now').mockReturnValue(60_000);
     const error = new TypeError('Importing a module script failed.');
     const heard: unknown[] = [];
@@ -192,20 +189,43 @@ describe('installStaleBuildRecovery', () => {
     expect(readStaleBuildOutcome(error)).toBe('superseded');
     expect(reportUiError).not.toHaveBeenCalled();
 
-    // The server names this build again: `build-skew` withdraws the offer.
-    for (const listener of liveConfirmed) {
-      listener();
+    // The rollback ends: once the server has named this build as often as the confirmation rule asks.
+    stubServer(ownBuildId);
+    for (let check = 0; check < skew.serverConfirmations; check += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- Each check is its own question, one after the other.
+      await skew.queryLiveBuild();
     }
+    expect(readStaleBuildOutcome(error)).toBe('superseded');
     const unsubscribe = subscribeGenuineFailures((failure) => {
       heard.push(failure);
     });
-    for (const listener of liveConfirmed) {
-      listener();
-    }
+    await skew.queryLiveBuild();
     unsubscribe();
 
     expect(reportUiError.mock.calls).toStrictEqual([[error]]);
     expect(heard).toStrictEqual([error]);
     expect(readStaleBuildOutcome(error)).toBe('current');
+    expect(skew.isReloadOffered()).toBe(false);
+  });
+
+  it('should re-report nothing when one stale answer names this build during a rollout', async () => {
+    const { recoverFromCaughtError, readStaleBuildOutcome, skew } = await load();
+    stubServer(deployedBuildId);
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    const error = new TypeError('Importing a module script failed.');
+    recoverFromCaughtError(error);
+    await settle();
+    expect(readStaleBuildOutcome(error)).toBe('superseded');
+
+    // An edge still answering for the build it is leaving names this one, once.
+    stubServer(ownBuildId);
+    await skew.queryLiveBuild();
+    stubServer(deployedBuildId);
+    await skew.queryLiveBuild();
+
+    expect(readStaleBuildOutcome(error)).toBe('superseded');
+    expect(skew.readServerVerdict()).toBe('replaced');
+    expect(skew.isReloadOffered()).toBe(true);
+    expect(reportUiError).not.toHaveBeenCalled();
   });
 });

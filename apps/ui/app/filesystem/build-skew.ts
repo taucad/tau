@@ -54,6 +54,13 @@ type BuildSource = 'tab' | 'server';
 type Superseding = { readonly buildId: number; readonly source: BuildSource };
 
 /**
+ * What the server last said about this build, after the confirmation rule: `live` once it named this
+ * build, `replaced` once it named another, `unknown` before it said either. `#lib/stale-build-recovery`
+ * derives every module load failure's outcome from it, so one answer reaches every consumer at once.
+ */
+export type ServerVerdict = 'live' | 'replaced' | 'unknown';
+
+/**
  * Where this tab stands. One phase at a time, each with its own timer:
  *
  * - `idle`: this tab writes and offers nothing.
@@ -62,9 +69,11 @@ type Superseding = { readonly buildId: number; readonly source: BuildSource };
  *   tab returns to `resumeTo` if the claim does not stand.
  * - `peer-superseded`: only a peer's word supersedes this tab (no server answer). With `recheck`
  *   (the server could not be reached) it asks again every `peerRecheckDelay`.
- * - `server-confirming`: the server named another build; it asks `checksLeft` more times in case an
- *   edge was answering for a build it is leaving.
- * - `server-superseded`: the server's word stands; nothing is asked again.
+ * - `server-confirming`: the server's word is changing `towards` another build (`replaced`) or back
+ *   to this one (`live`); it asks `checksLeft` more times, a `peerRecheckDelay` apart, because an edge
+ *   may answer for a build it is leaving. Entering and leaving supersession follow the same rule.
+ * - `server-superseded`: the server's word stands; it is asked again only when a tab on this build
+ *   announces itself (a rollback undone).
  *
  * `superseding` is the build the prompt names, kept across phases: the server's word outranks a tab's.
  * `vouches` says whether this tab announces itself live when the server names its build again. It
@@ -77,31 +86,42 @@ type SkewPhase =
   | { readonly phase: 'offered' }
   | { readonly phase: 'provisional'; readonly resumeTo: 'idle' | 'offered' }
   | { readonly phase: 'peer-superseded'; readonly claimedBuildId: number; readonly recheck: boolean }
-  | { readonly phase: 'server-confirming'; readonly checksLeft: number }
+  | { readonly phase: 'server-confirming'; readonly checksLeft: number; readonly towards: 'replaced' | 'live' }
   | { readonly phase: 'server-superseded' };
 
-type SkewState = SkewPhase & { readonly superseding: Superseding | undefined; readonly vouches: boolean };
+type SkewState = SkewPhase & {
+  readonly superseding: Superseding | undefined;
+  readonly vouches: boolean;
+  readonly server: ServerVerdict;
+  /**
+   * Answers naming this build still needed before a `replaced` verdict turns `live` in a phase that
+   * keeps writing (a lone tab's offer): the same rule as `server-confirming`, without the write stop.
+   */
+  readonly liveChecksLeft: number;
+};
 
 /** Something that moves the state: a server answer, a peer's claim or an offer. */
 type SkewEvent =
-  | { readonly type: 'server-names'; readonly buildId: number }
   | { readonly type: 'offer'; readonly buildId: number }
   | { readonly type: 'peer-claim'; readonly isLive: boolean }
-  | { readonly type: 'answer'; readonly answer: LiveBuildAnswer; readonly claimedBuildId: number };
+  | {
+      readonly type: 'answer';
+      readonly answer: LiveBuildAnswer;
+      /** The build a peer claimed, when a peer's claim prompted the question. */
+      readonly claimedBuildId: number | undefined;
+    };
 
 /** Milliseconds between server checks while this tab is superseded only on a peer's word. */
 export const peerRecheckDelay = 30_000;
 
 /**
- * Rechecks after a server answer named another build. During a deploy or rollback an edge may
- * briefly answer for the build it is leaving, so the tab asks again before the answer stands;
- * writes stay stopped meanwhile.
+ * Further answers needed before the server's word changes: during a deploy or rollback an edge may
+ * briefly answer for the build it is leaving, so the tab asks again before the answer stands, in
+ * either direction; writes stay stopped meanwhile.
  */
 export const serverConfirmations = 2;
 
-const idle: SkewState = { phase: 'idle', superseding: undefined, vouches: false };
-
-let state: SkewState = idle;
+let state: SkewState = { phase: 'idle', superseding: undefined, vouches: false, server: 'unknown', liveChecksLeft: 0 };
 /** Bumped on each phase change, so a server answer asked for an earlier phase is not applied to this one. */
 let epoch = 0;
 let phaseTimer: ReturnType<typeof setTimeout> | undefined;
@@ -109,7 +129,7 @@ let phaseTimer: ReturnType<typeof setTimeout> | undefined;
 const writeStopTopic = new Topic<void>({ name: 'build-skew' });
 const reloadOfferTopic = new Topic<void>({ name: 'build-reload-offer' });
 const supersedingBuildTopic = new Topic<void>({ name: 'superseding-build' });
-const liveBuildConfirmedTopic = new Topic<void>({ name: 'live-build-confirmed' });
+const serverVerdictTopic = new Topic<void>({ name: 'server-verdict' });
 
 const stopsWrites = (current: SkewState): boolean => current.phase !== 'idle' && current.phase !== 'offered';
 
@@ -133,6 +153,9 @@ export const isReloadOffered = (): boolean => offers(state);
 /** `true` once writes have stopped on a word that stands: not while a peer's claim awaits the server, nor for an offer alone. */
 export const haveWritesStopped = (): boolean => hasStopped(state);
 
+/** What the server last said about this build ({@link ServerVerdict}). */
+export const readServerVerdict = (): ServerVerdict => state.server;
+
 /** The superseding build after `source` names `otherBuildId`: the server outranks a tab, a newer tab an earlier one. */
 const nameSuperseding = (
   current: Superseding | undefined,
@@ -150,24 +173,21 @@ const nameSuperseding = (
 /** The single transition function: the next state for `event`, or `current` when nothing changes. */
 const reduce = (current: SkewState, event: SkewEvent): SkewState => {
   switch (event.type) {
-    case 'server-names': {
-      return { ...current, superseding: nameSuperseding(current.superseding, event.buildId, 'server') };
-    }
     case 'offer': {
       const superseding =
         event.buildId === buildId ? current.superseding : nameSuperseding(current.superseding, event.buildId, 'server');
       if (current.phase === 'idle') {
-        return { phase: 'offered', superseding, vouches: true };
+        return { ...current, phase: 'offered', superseding, vouches: true };
       }
       if (current.phase === 'provisional') {
-        return { phase: 'provisional', resumeTo: 'offered', superseding, vouches: true };
+        return { ...current, resumeTo: 'offered', superseding, vouches: true };
       }
       return { ...current, superseding, vouches: true };
     }
     case 'peer-claim': {
       const vouches = current.vouches || !event.isLive;
       if (current.phase === 'idle' || current.phase === 'offered') {
-        return { phase: 'provisional', resumeTo: current.phase, superseding: current.superseding, vouches };
+        return { ...commonOf(current), phase: 'provisional', resumeTo: current.phase, vouches };
       }
       return vouches === current.vouches ? current : { ...current, vouches };
     }
@@ -177,53 +197,120 @@ const reduce = (current: SkewState, event: SkewEvent): SkewState => {
   }
 };
 
+type Common = Pick<SkewState, 'superseding' | 'vouches' | 'server' | 'liveChecksLeft'>;
+
+const commonOf = (current: SkewState): Common => ({
+  superseding: current.superseding,
+  vouches: current.vouches,
+  server: current.server,
+  liveChecksLeft: current.liveChecksLeft,
+});
+
+/** The server named this build, and the confirmation rule (if any) is met: everything else is void. */
+const live = (): SkewState => ({
+  phase: 'idle',
+  superseding: undefined,
+  vouches: false,
+  server: 'live',
+  liveChecksLeft: 0,
+});
+
 /** Act on the server's answer about which build is live (`#lib/build-identity`). */
-const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: number): SkewState => {
+const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: number | undefined): SkewState => {
+  const common = commonOf(current);
   if (answer === buildId) {
-    // The server named this build live: whatever rested on a peer's word or an older deploy is void.
-    return idle;
-  }
-  if (current.phase === 'server-superseded') {
-    return typeof answer === 'number' ? { ...current, superseding: { buildId: answer, source: 'server' } } : current;
-  }
-  if (current.phase === 'server-confirming') {
-    // Each check counts down, answered or not: the server's earlier word stands until one names this build.
-    const superseding: Superseding | undefined =
-      typeof answer === 'number' ? { buildId: answer, source: 'server' } : current.superseding;
-    const checksLeft = current.checksLeft - 1;
-    return checksLeft > 0
-      ? { phase: 'server-confirming', checksLeft, superseding, vouches: current.vouches }
-      : { phase: 'server-superseded', superseding, vouches: current.vouches };
+    if (current.phase === 'server-superseded') {
+      // Leaving supersession takes as many answers as entering it did.
+      return { ...common, phase: 'server-confirming', towards: 'live', checksLeft: serverConfirmations };
+    }
+    if (current.phase === 'server-confirming') {
+      if (current.towards === 'replaced') {
+        return { ...common, phase: 'server-confirming', towards: 'live', checksLeft: serverConfirmations };
+      }
+      const checksLeft = current.checksLeft - 1;
+      return checksLeft > 0 ? { ...common, phase: 'server-confirming', towards: 'live', checksLeft } : live();
+    }
+    if (current.server === 'replaced') {
+      /* The server had named another build: leaving that word takes as many answers as entering
+       * supersession does, writes going on meanwhile (an edge may answer for a build it is leaving). */
+      const liveChecksLeft = current.liveChecksLeft === 0 ? serverConfirmations : current.liveChecksLeft - 1;
+      if (liveChecksLeft > 0) {
+        const phase =
+          current.phase === 'provisional'
+            ? current.resumeTo
+            : current.phase === 'peer-superseded'
+              ? 'offered'
+              : current.phase;
+        return { ...common, phase, liveChecksLeft };
+      }
+    }
+    // The server named this build live: whatever rested on a peer's word or a deploy offer is void.
+    return live();
   }
   if (typeof answer === 'number') {
-    // The first answer naming another build, however the question came about, enters the confirmations.
-    return {
-      phase: 'server-confirming',
-      checksLeft: serverConfirmations,
+    const replaced: Common = {
+      ...common,
       superseding: { buildId: answer, source: 'server' },
-      vouches: current.vouches,
+      server: 'replaced',
+      liveChecksLeft: 0,
     };
+    switch (current.phase) {
+      case 'server-superseded': {
+        return { ...replaced, phase: 'server-superseded' };
+      }
+      case 'server-confirming': {
+        if (current.towards === 'live') {
+          return { ...replaced, phase: 'server-superseded' };
+        }
+        const checksLeft = current.checksLeft - 1;
+        return checksLeft > 0
+          ? { ...replaced, phase: 'server-confirming', towards: 'replaced', checksLeft }
+          : { ...replaced, phase: 'server-superseded' };
+      }
+      case 'provisional':
+      case 'peer-superseded': {
+        // A peer shares storage: the first answer naming another build enters the confirmations.
+        return { ...replaced, phase: 'server-confirming', towards: 'replaced', checksLeft: serverConfirmations };
+      }
+      case 'idle':
+      case 'offered': {
+        // A lone tab: the server's word is recorded; the recovery decides whether to offer the reload.
+        return { ...replaced, phase: current.phase };
+      }
+    }
+  }
+  if (current.phase === 'server-superseded') {
+    return current;
+  }
+  if (current.phase === 'server-confirming') {
+    // An unanswered check counts towards supersession (the earlier word stands), never back to live.
+    if (current.towards === 'live') {
+      return { ...current };
+    }
+    const checksLeft = current.checksLeft - 1;
+    return checksLeft > 0
+      ? { ...common, phase: 'server-confirming', towards: 'replaced', checksLeft }
+      : { ...common, phase: 'server-superseded' };
+  }
+  if (claimedBuildId === undefined || current.phase === 'idle' || current.phase === 'offered') {
+    return current;
   }
   /* Without the server's word only a newer build stops this tab, as before there was a server to
    * ask: a peer claiming an older build is live never does (no endpoint on desktop or `tau serve`,
    * or a server that cannot be reached). */
   if (claimedBuildId < buildId) {
     return current.phase === 'provisional'
-      ? {
-          phase: current.resumeTo,
-          superseding: current.superseding,
-          vouches: current.vouches && current.resumeTo === 'offered',
-        }
+      ? { ...common, phase: current.resumeTo, vouches: current.vouches && current.resumeTo === 'offered' }
       : current;
   }
   const claimed =
     current.phase === 'peer-superseded' ? Math.max(current.claimedBuildId, claimedBuildId) : claimedBuildId;
   return {
+    ...common,
     phase: 'peer-superseded',
     claimedBuildId: claimed,
     recheck: answer === 'unreachable',
     superseding: nameSuperseding(current.superseding, claimedBuildId, 'tab'),
-    vouches: current.vouches,
   };
 };
 
@@ -236,7 +323,7 @@ const isLiveAnnouncement = (message: unknown): message is LiveAnnouncement =>
 const channel = typeof BroadcastChannel === 'undefined' ? undefined : new BroadcastChannel(channelName);
 
 /** Ask the server which build is live and apply the answer, unless the phase changed while it was asked. */
-const askServer = async (claimedBuildId: number): Promise<void> => {
+const askServer = async (claimedBuildId: number | undefined): Promise<void> => {
   const askedIn = epoch;
   const answer = await askLiveBuild();
   if (askedIn === epoch) {
@@ -246,15 +333,14 @@ const askServer = async (claimedBuildId: number): Promise<void> => {
 
 /** The timer a phase runs while it lasts: rechecks for a peer's unanswered word and for the confirmations. */
 const startPhaseTimer = (current: SkewState): void => {
-  const claimedBuildId =
-    current.phase === 'peer-superseded' && current.recheck
-      ? current.claimedBuildId
-      : current.phase === 'server-confirming'
-        ? supersedingOf(current)
-        : undefined;
-  if (claimedBuildId === undefined) {
+  const isRechecking =
+    (current.phase === 'peer-superseded' && current.recheck) ||
+    current.phase === 'server-confirming' ||
+    current.liveChecksLeft > 0;
+  if (!isRechecking) {
     return;
   }
+  const claimedBuildId = current.phase === 'peer-superseded' ? current.claimedBuildId : undefined;
   phaseTimer = setTimeout(() => {
     phaseTimer = undefined;
     // async-iife: bootstrap -- a timer cannot await; the check acts on its own.
@@ -287,27 +373,34 @@ const dispatch = (event: SkewEvent): void => {
   if (offers(next) !== offers(before) || hasStopped(next) !== hasStopped(before)) {
     reloadOfferTopic.emit();
   }
-  if (next === idle) {
-    if (before.vouches) {
-      channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
-    }
-    liveBuildConfirmedTopic.emit();
+  if (next.phase === 'idle' && before.phase !== 'idle' && next.server === 'live' && before.vouches) {
+    channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
+  }
+  if (next.server !== before.server) {
+    serverVerdictTopic.emit();
   }
 };
 
 /**
- * Record the build the server renders pages for, as soon as it is known, so the
- * prompt names it (a rollback included) before anything is decided. When it names
- * this build, whatever an earlier answer or a peer left behind is withdrawn.
+ * Ask the server which build is live (`/health/build`) and apply the answer: the single question
+ * every consumer shares (`askLiveBuild` coalesces concurrent callers). A bundle without a build id
+ * asks nothing.
+ *
+ * @returns Once the answer is applied; read {@link readServerVerdict} for what it changed.
+ */
+export const queryLiveBuild = async (): Promise<void> => {
+  if (buildId !== 0) {
+    await askServer(undefined);
+  }
+};
+
+/**
+ * Apply a server answer obtained elsewhere, as {@link queryLiveBuild} would.
  *
  * @param liveBuildId - The server's build id (`/health/build`).
  */
 export function recordLiveBuild(liveBuildId: number): void {
-  dispatch(
-    liveBuildId === buildId
-      ? { type: 'answer', answer: liveBuildId, claimedBuildId: liveBuildId }
-      : { type: 'server-names', buildId: liveBuildId },
-  );
+  dispatch({ type: 'answer', answer: liveBuildId, claimedBuildId: undefined });
 }
 
 /**
@@ -401,11 +494,7 @@ export const subscribeReloadOffer = (listener: () => void): (() => void) => {
   return reloadOfferTopic.subscribe(listener);
 };
 
-/**
- * Subscribe to each time the server names this build live after something had said otherwise: a
- * deploy's offer withdrawn, a rollback ended, a peer's claim refuted (`#lib/stale-build-recovery`
- * then decides every failure a deploy explained as genuine).
- */
-export const subscribeLiveBuildConfirmed = (listener: () => void): (() => void) => {
-  return liveBuildConfirmedTopic.subscribe(listener);
+/** Subscribe to each change of {@link readServerVerdict}. */
+export const subscribeServerVerdict = (listener: () => void): (() => void) => {
+  return serverVerdictTopic.subscribe(listener);
 };

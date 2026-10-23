@@ -1,7 +1,21 @@
 import { useSyncExternalStore } from 'react';
-import { buildId, readSupersedingBuildId, subscribeSupersedingBuildId } from '#filesystem/build-skew.js';
+import {
+  buildId,
+  isReloadOffered,
+  readSupersedingBuildId,
+  subscribeReloadOffer,
+  subscribeSupersedingBuildId,
+} from '#filesystem/build-skew.js';
 
 const serverSnapshot = (): number => buildId;
+const serverOffer = (): boolean => false;
+
+/**
+ * Whether the reload is offered (`#filesystem/build-skew`), for every surface that shows the prompt.
+ *
+ * @returns `true` while another bundle owns storage or a deploy replaced this build.
+ */
+export const useReloadOffered = (): boolean => useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverOffer);
 
 /**
  * The build every reload prompt names (`#filesystem/build-skew`), and whether it is a

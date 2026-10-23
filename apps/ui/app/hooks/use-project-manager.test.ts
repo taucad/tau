@@ -4090,6 +4090,24 @@ describe('useProjectManager.createProject', () => {
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
   });
 
+  it('writes no config upserts when the stop begins while orphaned resources are being deleted', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    mockDeleteProjectResources.mockImplementationOnce(async () => {
+      // A newer tab announces itself while this pass deletes an orphan's resources.
+      mockBuildSuperseded = true;
+    });
+
+    await result.current.getProjectListing();
+
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    // The deleted resources' config rows still follow them, so nothing re-attaches.
+    expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith('proj_ccccccccccccccccccccc');
+  });
+
   it('runs the reconciliation it skipped once a provisional write stop lifts', async () => {
     mockBuildSuperseded = true;
     mockListProjectManifests.mockResolvedValue(validProjectDiscovery);

@@ -9,7 +9,7 @@ import {
   subscribeReloadOffer,
 } from '#filesystem/build-skew.js';
 import { UpdateControl } from '#components/nav/update-control.js';
-import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
+import { useReloadOffered, useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
 const serverSnapshot = (): boolean => false;
 
@@ -60,7 +60,7 @@ const builtAt = (supersedingBuildId: number, isRolledBack: boolean): string | un
  * code; both surface the same sidebar control and offer a reload.
  */
 export function BrowserUpdate(): React.JSX.Element | undefined {
-  const superseded = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverSnapshot);
+  const superseded = useReloadOffered();
   const { supersedingBuildId, isRolledBack } = useSupersedingBuild();
   const [open, setOpen] = useState(false);
   const [revealed, setRevealed] = useState(false);

@@ -1819,9 +1819,16 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
         await Promise.all(configDeletes.map(async (projectId) => worker.deleteProjectResources(projectId)));
       }
-      // Once resources are deleted their config rows must follow, so no gate splits the two.
-      if (configUpserts.length > 0 || configDeletes.length > 0) {
-        await applyProjectFileSystemConfigChanges({ upserts: configUpserts, deletes: configDeletes });
+      /* Once resources are deleted their config rows must follow, so no gate splits the two. The
+       * upserts are new writes, though: DF20 once more after the awaits above, and skip them if a
+       * newer bundle took over meanwhile. */
+      const isStoppedNow = isBuildSuperseded();
+      if (isStoppedNow && configUpserts.length > 0) {
+        skippedDuringStopRef.current = true;
+      }
+      const upserts = isStoppedNow ? [] : configUpserts;
+      if (upserts.length > 0 || configDeletes.length > 0) {
+        await applyProjectFileSystemConfigChanges({ upserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();
       }
       if (epoch === discoveryEpochRef.current) {

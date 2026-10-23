@@ -1,11 +1,8 @@
-import { useSyncExternalStore } from 'react';
 import { ArrowUpCircle } from 'lucide-react';
-import { describeSupersession, isReloadOffered, subscribeReloadOffer } from '#filesystem/build-skew.js';
+import { describeSupersession } from '#filesystem/build-skew.js';
 import { Button } from '@taucad/ui/components/button';
 import { useReloadPromptOwned } from '#components/nav/browser-update.js';
-import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
-
-const serverSnapshot = (): boolean => false;
+import { useReloadOffered, useSupersedingBuild } from '#hooks/use-superseding-build.js';
 
 const reload = (): void => {
   globalThis.location.reload();
@@ -22,7 +19,7 @@ const reload = (): void => {
  * the prompt.
  */
 export function BuildSkewBanner(): React.JSX.Element | undefined {
-  const superseded = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverSnapshot);
+  const superseded = useReloadOffered();
   const { supersedingBuildId } = useSupersedingBuild();
   const promptOwnedElsewhere = useReloadPromptOwned();
   if (!superseded || promptOwnedElsewhere) {

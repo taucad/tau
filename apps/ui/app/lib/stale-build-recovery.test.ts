@@ -2,7 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
 import { createBeforeSend } from '#lib/sentry.lib.js';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { createStaleBuildRecovery, isStaleModuleError, staleBuildReloadKey } from '#lib/stale-build-recovery.js';
+import type { LiveBuildSource } from '#lib/stale-build-recovery.js';
 
 /** In-memory `sessionStorage` stand-in. */
 const createStorage = (): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & {
@@ -25,38 +27,89 @@ const ownBuildId = 1_792_726_000_000;
 const deployedBuildId = 1_792_730_113_029;
 const guardFor = (from: number, to: number): string => `${String(from)}>${String(to)}`;
 
-const setup = (overrides: Partial<Parameters<typeof createStaleBuildRecovery>[0]> = {}) => {
+type SetupOptions = Partial<Omit<Parameters<typeof createStaleBuildRecovery>[0], 'liveBuild'>> & {
+  /** What the server answers each question (`/health/build`), as `build-skew` would ask it. */
+  readonly fetchServerBuildId?: () => Promise<number | undefined>;
+};
+
+/**
+ * `build-skew`'s verdict, reduced to what the recovery reads: each question applies the server's
+ * answer (the confirmation rule is `build-skew`'s own, tested there). `confirmLive` is the server
+ * naming this build after the confirmations.
+ */
+const createLiveBuild = (fetchServerBuildId: () => Promise<number | undefined>) => {
+  let verdict: ServerVerdict = 'unknown';
+  let replacing = ownBuildId;
+  const listeners = new Set<() => void>();
+  /** Bumped when the server names this build, so an answer asked before it is dropped, as `build-skew` does. */
+  let version = 0;
+  const apply = (answer: number | undefined): void => {
+    if (answer === undefined) {
+      return;
+    }
+    const next: ServerVerdict = answer === ownBuildId ? 'live' : 'replaced';
+    if (next === 'replaced') {
+      replacing = answer;
+    }
+    if (next !== verdict) {
+      verdict = next;
+      for (const listener of listeners) {
+        listener();
+      }
+    }
+  };
+  const source: LiveBuildSource = {
+    query: async () => {
+      const askedIn = version;
+      const answer = await fetchServerBuildId();
+      if (askedIn === version) {
+        apply(answer);
+      }
+    },
+    readVerdict: () => verdict,
+    readReplacingBuild: () => replacing,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  return {
+    source,
+    confirmLive: () => {
+      version += 1;
+      apply(ownBuildId);
+    },
+  };
+};
+
+const setup = ({ fetchServerBuildId: answers, ...overrides }: SetupOptions = {}) => {
   const storage = createStorage();
   const reload = vi.fn();
   const onSuperseded = vi.fn();
-  const onLiveBuild = vi.fn();
   const onGenuineFailure = vi.fn();
-  const liveListeners = new Set<() => void>();
-  /** `build-skew` hears the server name this build again (an offer withdrawn, a rollback ended). */
-  const confirmLive = (): void => {
-    for (const listener of liveListeners) {
-      listener();
-    }
-  };
-  const fetchServerBuildId = vi.fn(async (): Promise<number | undefined> => deployedBuildId);
+  const fetchServerBuildId = vi.fn(answers ?? (async (): Promise<number | undefined> => deployedBuildId));
+  const liveBuild = createLiveBuild(fetchServerBuildId);
   const recovery = createStaleBuildRecovery({
     buildId: ownBuildId,
-    fetchServerBuildId,
+    liveBuild: liveBuild.source,
     storage,
     reload,
     onSuperseded,
-    onLiveBuild,
     onGenuineFailure,
-    subscribeLiveBuildConfirmed: (listener) => {
-      liveListeners.add(listener);
-      return () => {
-        liveListeners.delete(listener);
-      };
-    },
     canReloadSafely: () => true,
     ...overrides,
   });
-  return { storage, reload, onSuperseded, onLiveBuild, onGenuineFailure, fetchServerBuildId, recovery, confirmLive };
+  return {
+    storage,
+    reload,
+    onSuperseded,
+    onGenuineFailure,
+    fetchServerBuildId,
+    recovery,
+    confirmLive: liveBuild.confirmLive,
+  };
 };
 
 /** A distinct failure object, as each failed `import()` produces. */
@@ -99,21 +152,12 @@ describe('createStaleBuildRecovery', () => {
     expect(onSuperseded).not.toHaveBeenCalled();
   });
 
-  it('should record the live build before it reloads, so a rollback is worded right meanwhile', async () => {
-    const { recovery, reload, onLiveBuild } = setup();
+  it('should ask build-skew, the one owner of server answers, before it reloads', async () => {
+    const { recovery, reload, fetchServerBuildId } = setup();
 
     await recovery.recover(failure());
 
-    expect(onLiveBuild).toHaveBeenCalledWith(deployedBuildId);
-    expect(onLiveBuild.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0] ?? 0);
-  });
-
-  it("should pass on the server's word even when it names this build, so a stale offer can be withdrawn", async () => {
-    const { recovery, onLiveBuild } = setup({ fetchServerBuildId: async () => ownBuildId });
-
-    await expect(recovery.recover(failure())).resolves.toBe('current');
-
-    expect(onLiveBuild).toHaveBeenCalledWith(ownBuildId);
+    expect(fetchServerBuildId.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0] ?? 0);
   });
 
   it('should offer the reload instead of reloading once the user has interacted with the page', async () => {
@@ -399,7 +443,7 @@ describe('createStaleBuildRecovery', () => {
       expect(onGenuineFailure.mock.calls).toStrictEqual([[error, { sentry: true, analytics: true }]]);
     });
 
-    it('should drop what classify cached, and report a failure only Sentry saw, once the server names this build', async () => {
+    it('should report a failure only Sentry saw once the server names this build', async () => {
       let served = deployedBuildId;
       const { recovery, onGenuineFailure, confirmLive } = setup({ fetchServerBuildId: async () => served });
       const error = failure();
@@ -472,6 +516,37 @@ describe('createStaleBuildRecovery', () => {
       expect(onGenuineFailure).not.toHaveBeenCalled();
     });
 
+    it('should keep a failure it re-reported genuine for Sentry, even when a later lookup flaps', async () => {
+      let served = deployedBuildId;
+      const { recovery, confirmLive } = setup({ canReloadSafely: () => false, fetchServerBuildId: async () => served });
+      const error = failure();
+      await recovery.recover(error, 'boundary');
+      await Promise.resolve();
+
+      confirmLive();
+      // An edge answering for the build it is leaving names the deploy again.
+      served = deployedBuildId;
+      await recovery.classify(failure());
+
+      expect(await sentryKeeps(recovery.classify, error)).toBe(true);
+      expect(recovery.readOutcome(error)).toBe('current');
+    });
+
+    it("should send Sentry, exactly once, a global failure classify called a deploy's and the decision called genuine", async () => {
+      let served = deployedBuildId;
+      const { recovery, onGenuineFailure, confirmLive } = setup({ fetchServerBuildId: async () => served });
+      const error = failure();
+      expect(await sentryKeeps(recovery.classify, error)).toBe(false);
+
+      served = ownBuildId;
+      await expect(recovery.recover(error, 'global')).resolves.toBe('current');
+      await Promise.resolve();
+      confirmLive();
+      await recovery.recover(error, 'global');
+
+      expect(onGenuineFailure.mock.calls).toStrictEqual([[error, { sentry: true, analytics: true }]]);
+    });
+
     it('should report nothing twice, however often the server names this build', async () => {
       vi.useFakeTimers();
       let served = deployedBuildId;
@@ -522,14 +597,14 @@ describe('createStaleBuildRecovery', () => {
       expect(fetchServerBuildId).toHaveBeenCalledOnce();
     });
 
-    it('should classify one failure once, however often it is asked', async () => {
+    it('should keep no answer of its own: each classification reads build-skew afresh', async () => {
       const { recovery, fetchServerBuildId } = setup();
       const error = failure();
 
       await recovery.classify(error);
       await recovery.classify(error);
 
-      expect(fetchServerBuildId).toHaveBeenCalledOnce();
+      expect(fetchServerBuildId).toHaveBeenCalledTimes(2);
     });
 
     it('should call a failure the live build still has current', async () => {

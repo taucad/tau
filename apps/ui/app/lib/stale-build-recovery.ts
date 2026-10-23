@@ -25,10 +25,11 @@
  *   offers the reload (`superseded`). Writes go on: in a lone tab no other bundle shares
  *   storage, and another tab's bundle stops them through `build-skew`'s channel.
  *
- * Neither deploy outcome is a bug to report. One failure is decided once, however
- * many channels (boundary, global handler, Sentry) report it, and the recovery owns that
- * decision: when the server turns out to run this build after all (`build-skew` confirms it,
- * or the stall check hears it), every failure a deploy explained is decided genuine and
+ * The recovery asks no server itself: `build-skew` owns every `/health/build` answer and the
+ * verdict it supports (`live`, `replaced`, `unknown`, with the same confirmation rule both ways),
+ * and every outcome here derives from that one state. Neither deploy outcome is a bug to report.
+ * One failure is decided once, however many channels (boundary, global handler, Sentry) report it;
+ * when the verdict turns `live`, every failure a deploy explained becomes genuine at once and is
  * reported once (Sentry through `onGenuineFailure`, analytics through
  * {@link subscribeGenuineFailures}); `classify` then lets Sentry's own events through. A genuine
  * failure a boundary caught is reported the same way, since no global handler hears it. The
@@ -36,8 +37,15 @@
  */
 
 import { Topic } from '@taucad/events';
-import { buildId, offerReload, recordLiveBuild, subscribeLiveBuildConfirmed } from '#filesystem/build-skew.js';
-import { askLiveBuild } from '#lib/build-identity.js';
+import {
+  buildId,
+  offerReload,
+  queryLiveBuild,
+  readServerVerdict,
+  readSupersedingBuildId,
+  subscribeServerVerdict,
+} from '#filesystem/build-skew.js';
+import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { reportUiError } from '#lib/error-reporting.js';
 
 /**
@@ -85,22 +93,14 @@ export const isStaleModuleError = (error: unknown): boolean =>
 export type StaleBuildRecoveryOptions = {
   /** This bundle's build id; `0` means unknown, which never reloads. */
   readonly buildId: number;
-  /** The live server's build id, or `undefined` when it names none or cannot be reached. Never rejects. */
-  readonly fetchServerBuildId: () => Promise<number | undefined>;
+  /** The page's single owner of server answers (`build-skew`); every verdict here derives from it. */
+  readonly liveBuild: LiveBuildSource;
   /** Per-tab storage for the reload guard; `undefined` where none is available. */
   readonly storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | undefined;
   /** Hard-reload the document. */
   readonly reload: () => void;
   /** Hand the reload over to the update control, with the build id the server reported. */
   readonly onSuperseded: (serverBuildId: number) => void;
-  /** Record the build the server reported as soon as it answers, before anything is decided. */
-  readonly onLiveBuild: (serverBuildId: number) => void;
-  /**
-   * Subscribe to each time the server turns out to run this build after all (`build-skew` back to
-   * `idle`: an offer withdrawn, a rollback ended, a peer's claim refuted). Every failure a deploy
-   * explained is then decided again as genuine.
-   */
-  readonly subscribeLiveBuildConfirmed?: (listener: () => void) => () => void;
   /**
    * Report a failure decided genuine (`current`), to each destination at most once. Analytics hears
    * every genuine failure, wherever it was caught. Sentry hears it here only when nothing else
@@ -113,6 +113,21 @@ export type StaleBuildRecoveryOptions = {
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
   readonly reloadTimeout?: number;
+};
+
+/**
+ * What the recovery reads from the page's one owner of server answers (`build-skew`): it asks no
+ * server itself, so its verdicts and the skew guard's can never disagree.
+ */
+export type LiveBuildSource = {
+  /** Ask the server (once, shared with every concurrent caller) and apply the answer. Never rejects. */
+  readonly query: () => Promise<void>;
+  /** What the server last said about this build, after the confirmation rule. */
+  readonly readVerdict: () => ServerVerdict;
+  /** The build the server named instead, while the verdict is `replaced`. */
+  readonly readReplacingBuild: () => number;
+  /** Subscribe to each change of the verdict. */
+  readonly subscribe: (listener: () => void) => () => void;
 };
 
 /** Where one genuine failure's report goes this time: each destination hears a failure once. */
@@ -159,19 +174,22 @@ const isKey = (failure: unknown): failure is WeakKey => typeof failure === 'obje
  * @returns The page's recovery.
  */
 export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): StaleBuildRecovery => {
+  const { liveBuild } = options;
+  /** The decision for each failure, made (and acted on) once. */
   const decisions = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
+  /** The settled outcome of each decided failure; `current` never changes again. */
   const outcomes = new WeakMap<WeakKey, StaleBuildOutcome>();
   const sources = new WeakMap<WeakKey, FailureSource>();
-  /** Failures a deploy explains (`reloading` or `superseded`), decided again if the server takes that back. */
-  const explained = new Set<WeakKey>();
-  /** Failures only `classify` saw and called a deploy's, whose Sentry events were dropped for it. */
-  const classifiedExplained = new Set<WeakKey>();
+  /** Failures `classify` called a deploy's, so Sentry dropped their events. */
+  const droppedBySentry = new WeakSet();
   /** Failures each destination of {@link StaleBuildRecoveryOptions.onGenuineFailure} has heard. */
   const reportedToSentry = new WeakSet();
   const reportedToAnalytics = new WeakSet();
-  let classifications = new WeakMap<WeakKey, Promise<StaleBuildOutcome>>();
-  /** Bumped each time the server names this build again; a decision begun before it cannot stand. */
-  let confirmations = 0;
+  /**
+   * Failures a deploy explains (decided, or only classified), re-derived together when the server
+   * names this build. Held weakly: an error nothing else keeps is not pinned for this.
+   */
+  const explained = new Set<WeakRef<WeakKey>>();
   let stallTimer: ReturnType<typeof setTimeout> | undefined;
   const outcomeTopic = new Topic<void>({ name: 'stale-build-outcomes' });
   let reloadState: ReloadState = 'idle';
@@ -201,91 +219,77 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     options.onGenuineFailure?.(failure, { sentry, analytics });
   };
 
-  /** Record a settled decision; a genuine one is reported (to Sentry only if a boundary caught it). */
-  const settle = (failure: WeakKey, outcome: StaleBuildOutcome): void => {
+  /** Sentry has not heard a genuine failure unless its own handler saw it and `classify` let it through. */
+  const sentryMissed = (failure: WeakKey): boolean =>
+    sources.get(failure) === 'boundary' || droppedBySentry.has(failure);
+
+  /** Record a settled decision against the live verdict now; a genuine one is reported. */
+  const settle = (failure: WeakKey, decided: StaleBuildOutcome): void => {
+    const outcome = decided !== 'current' && liveBuild.readVerdict() === 'live' ? 'current' : decided;
+    if (outcome !== decided) {
+      decisions.set(failure, Promise.resolve('current'));
+    }
     outcomes.set(failure, outcome);
     if (outcome === 'current') {
-      reportGenuine(failure, sources.get(failure) === 'boundary');
+      reportGenuine(failure, sentryMissed(failure) || outcome !== decided);
     } else {
-      explained.add(failure);
+      explained.add(new WeakRef(failure));
     }
     outcomeTopic.emit();
   };
 
-  /** The server runs this build after all: every failure a deploy explained is genuine, and reported once. */
-  const confirmThisBuildLive = (): void => {
-    /* Everything a deploy explained is void at once: decisions still in flight cannot settle as a
-     * deploy (they check `confirmations`), classifications Sentry cached are dropped, and this page's
-     * own reload stops waiting to be called stalled. */
-    confirmations += 1;
-    classifications = new WeakMap();
+  /* The server names this build: no deploy explains anything. Every explained failure becomes genuine
+   * at once, and this page's own reload stops waiting to be called stalled. */
+  liveBuild.subscribe(() => {
+    if (liveBuild.readVerdict() !== 'live') {
+      return;
+    }
     clearTimeout(stallTimer);
     stallTimer = undefined;
     setReloadState('idle');
-    for (const failure of classifiedExplained) {
-      reportGenuine(failure, true);
-    }
-    classifiedExplained.clear();
     if (explained.size === 0) {
       return;
     }
-    for (const failure of explained) {
-      decisions.set(failure, Promise.resolve('current'));
-      outcomes.set(failure, 'current');
-      reportGenuine(failure, true);
+    for (const reference of explained) {
+      const failure = reference.deref();
+      if (failure !== undefined) {
+        decisions.set(failure, Promise.resolve('current'));
+        outcomes.set(failure, 'current');
+        // Sentry dropped it as a deploy's, or never heard it: this report is the one that stands.
+        reportGenuine(failure, true);
+      }
     }
     explained.clear();
     outcomeTopic.emit();
-  };
-  options.subscribeLiveBuildConfirmed?.(confirmThisBuildLive);
+  });
 
   const supersede = (serverBuildId: number): StaleBuildOutcome => {
     options.onSuperseded(serverBuildId);
     return 'superseded';
   };
 
-  /**
-   * The build a deploy replaced this one with, or `undefined` when the failure is this build's own:
-   * the server named no build, or named this one.
-   */
-  const replacingBuild = (serverBuildId: number | undefined): number | undefined =>
-    serverBuildId === undefined || serverBuildId === options.buildId ? undefined : serverBuildId;
-
-  /** Ask the server, and say which build (if any) replaced this one. A bundle without an id asks nothing. */
-  const askServer = async (): Promise<{
-    readonly answer: number | undefined;
-    readonly replacing: number | undefined;
-  }> => {
+  /** Whether a deploy replaced this build, by the live verdict after one shared question. */
+  const isReplaced = async (): Promise<boolean> => {
     if (options.buildId === 0) {
-      return { answer: undefined, replacing: undefined };
+      return false;
     }
-    const answer = await options.fetchServerBuildId();
-    return { answer, replacing: replacingBuild(answer) };
-  };
-
-  /** Pass a server answer on, even one naming this build, which withdraws an offer a stale deploy left. */
-  const passOn = (answer: number | undefined): void => {
-    if (answer !== undefined) {
-      options.onLiveBuild(answer);
-    }
+    await liveBuild.query();
+    return liveBuild.readVerdict() === 'replaced';
   };
 
   const decide = async (): Promise<StaleBuildOutcome> => {
     // A failure while this page's own reload is under way shares its explanation, whatever the server says now.
-    if (reloadState === 'pending') {
-      return 'reloading';
-    }
-    const askedIn = confirmations;
-    const { answer, replacing: serverBuildId } = await askServer();
-    passOn(answer);
-    // A reload another failure started while this one asked: it covers this failure too, answered or not.
     if (readReloadState() === 'pending') {
       return 'reloading';
     }
-    // The server named this build meanwhile (to another caller): this answer is stale, and the failure genuine.
-    if (serverBuildId === undefined || askedIn !== confirmations) {
+    const replaced = await isReplaced();
+    if (readReloadState() === 'pending') {
+      return 'reloading';
+    }
+    if (!replaced) {
       return 'current';
     }
+    const serverBuildId = liveBuild.readReplacingBuild();
     if (!options.canReloadSafely() || options.storage === undefined) {
       return supersede(serverBuildId);
     }
@@ -305,24 +309,18 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     /* A page still here after the timeout is stalled: the reload was refused or is only slow, and no
      * signal tells the two apart (the old document lives until the new one commits; Tau registers no
      * unload prompt, `use-flush-on-close`). The guard stays, and later failures are offered the reload,
-     * never another automatic one. Before offering, the server is asked again: if it names this build
-     * by now, every failure the reload covered is decided genuine instead. */
-    const reloadedIn = confirmations;
+     * never another automatic one. Before offering, the server is asked again; if it names this build,
+     * the verdict subscription has already decided everything genuine and ended the wait. */
     stallTimer = setTimeout(() => {
       stallTimer = undefined;
       const offerIfStillReplaced = async (): Promise<void> => {
-        const { answer, replacing: stillReplacing } = await askServer();
-        passOn(answer);
-        if (reloadedIn !== confirmations) {
-          return;
-        }
-        if (answer === options.buildId) {
-          confirmThisBuildLive();
+        await liveBuild.query();
+        if (readReloadState() !== 'pending') {
           return;
         }
         // No answer keeps the explanation the deploy gave: only the server naming this build takes it back.
         setReloadState('stalled');
-        options.onSuperseded(stillReplacing ?? serverBuildId);
+        options.onSuperseded(liveBuild.readReplacingBuild());
       };
       // async-iife: bootstrap -- a timer cannot await; the check acts on its own.
       void offerIfStillReplaced();
@@ -345,7 +343,6 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       }
       let decision = decisions.get(failure);
       if (decision === undefined) {
-        const startedIn = confirmations;
         decision = decide();
         decisions.set(failure, decision);
         const decided = decision;
@@ -353,43 +350,27 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         void (async () => {
           const outcome = await decided;
           // A later decision (the server took a deploy's reason back) has replaced this one meanwhile.
-          if (decisions.get(failure) !== decided) {
-            return;
+          if (decisions.get(failure) === decided) {
+            settle(failure, outcome);
           }
-          // The server named this build after the decision began: no deploy explains the failure.
-          if (outcome !== 'current' && startedIn !== confirmations) {
-            decisions.set(failure, Promise.resolve('current'));
-            // Its own report, if any, was dropped as a deploy's (`classify`); this is the one that stands.
-            reportGenuine(failure, true);
-            settle(failure, 'current');
-            return;
-          }
-          settle(failure, outcome);
         })();
       }
       return decision;
     },
     async classify(failure) {
-      const key = isKey(failure) ? failure : undefined;
-      const known = key === undefined ? undefined : (decisions.get(key) ?? classifications.get(key));
-      if (known !== undefined) {
-        return known;
+      if (!isKey(failure)) {
+        return (await isReplaced()) ? 'superseded' : 'current';
       }
-      const askedIn = confirmations;
-      const classification = (async (): Promise<StaleBuildOutcome> => {
-        const { replacing } = await askServer();
-        if (replacing === undefined || askedIn !== confirmations) {
-          return 'current';
+      const known = decisions.get(failure);
+      const outcome = known === undefined ? ((await isReplaced()) ? 'superseded' : 'current') : await known;
+      if (outcome !== 'current') {
+        droppedBySentry.add(failure);
+        if (known === undefined) {
+          // Only Sentry saw it: re-derived with the decided ones when the server names this build.
+          explained.add(new WeakRef(failure));
         }
-        if (key !== undefined && !decisions.has(key)) {
-          classifiedExplained.add(key);
-        }
-        return 'superseded';
-      })();
-      if (key !== undefined) {
-        classifications.set(key, classification);
       }
-      return classification;
+      return outcome;
     },
     readOutcome: (failure) => (isKey(failure) ? outcomes.get(failure) : undefined),
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
@@ -444,10 +425,12 @@ export const subscribeGenuineFailures = (listener: (failure: unknown) => void): 
 const getPageRecovery = (): StaleBuildRecovery => {
   pageRecovery ??= createStaleBuildRecovery({
     buildId,
-    // Failures that arrive together share one request (`askLiveBuild` coalesces callers); a later one asks again.
-    fetchServerBuildId: async () => {
-      const answer = await askLiveBuild();
-      return typeof answer === 'number' ? answer : undefined;
+    // `build-skew` asks the server for everyone; failures that arrive together share one request.
+    liveBuild: {
+      query: queryLiveBuild,
+      readVerdict: readServerVerdict,
+      readReplacingBuild: readSupersedingBuildId,
+      subscribe: subscribeServerVerdict,
     },
     storage: readSessionStorage(),
     reload: () => {
@@ -455,8 +438,6 @@ const getPageRecovery = (): StaleBuildRecovery => {
     },
     // A lone tab keeps writing until the user reloads; other bundles stop it through `build-skew`'s own channel.
     onSuperseded: offerReload,
-    onLiveBuild: recordLiveBuild,
-    subscribeLiveBuildConfirmed,
     onGenuineFailure: (failure, { sentry, analytics }) => {
       if (sentry) {
         void reportUiError(failure);

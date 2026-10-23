@@ -169,9 +169,9 @@ describe('build-id skew guard (DF20)', () => {
     expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
   });
 
-  it('resumes when a later check names this build after an edge briefly named another', async () => {
+  it('resumes only once as many later checks name this build as it takes to leave supersession', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { buildId, isBuildSuperseded, peerRecheckDelay } = await load();
+    const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
     answerLiveBuild(buildId - 1);
     announce(buildId + 1);
     await pause();
@@ -179,11 +179,45 @@ describe('build-id skew guard (DF20)', () => {
 
     answerLiveBuild(buildId);
     await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
+    await pause();
+    expect(isBuildSuperseded()).toBe(true);
+    await act(async () => {
       await vi.advanceTimersByTimeAsync(peerRecheckDelay);
     });
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);
+  });
+
+  it('stays superseded when one stale answer names this build during a rollout, and claims nothing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { buildId, isBuildSuperseded, readServerVerdict, peerRecheckDelay, serverConfirmations } = await load();
+    answerLiveBuild(buildId + 1);
+    announce(buildId + 1);
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
+    await pause();
+    const heard = listen();
+
+    // An edge still answering for the build it is leaving names this one, once.
+    answerLiveBuild(buildId);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+    });
+    answerLiveBuild(buildId + 1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * 3);
+    });
+    await pause();
+
+    expect(isBuildSuperseded()).toBe(true);
+    expect(readServerVerdict()).toBe('replaced');
+    // The newer tab hears no live claim, so its writes are not stopped.
+    expect(heard.map((event) => event.data as unknown)).not.toContainEqual({ buildId, live: true });
   });
 
   it('stops asking once the server has named another build on every confirmation', async () => {
@@ -220,9 +254,9 @@ describe('build-id skew guard (DF20)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1 + serverConfirmations);
   });
 
-  it('resumes when a confirmation that follows a recheck after no answer names this build', async () => {
+  it('resumes once confirmations that follow a recheck after no answer name this build', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { buildId, isBuildSuperseded, peerRecheckDelay } = await load();
+    const { buildId, isBuildSuperseded, peerRecheckDelay, serverConfirmations } = await load();
     answerLiveBuild('unreachable');
     announce(buildId + 1);
     await pause();
@@ -234,7 +268,7 @@ describe('build-id skew guard (DF20)', () => {
 
     answerLiveBuild(buildId);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(peerRecheckDelay);
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * (serverConfirmations + 1));
     });
     await pause();
 
@@ -271,6 +305,10 @@ describe('build-id skew guard (DF20)', () => {
     // The rollback is undone: a fresh tab loads this build again and announces it.
     answerLiveBuild(buildId);
     announce(buildId);
+    await pause();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(peerRecheckDelay * serverConfirmations);
+    });
     await pause();
 
     expect(isBuildSuperseded()).toBe(false);

@@ -64,6 +64,7 @@ function usePaneRuntimeView({
   options,
   instance,
   blocked,
+  edgesShown,
 }: Readonly<{
   document: RuntimeDocument | undefined;
   evaluation: Evaluation | undefined;
@@ -73,6 +74,8 @@ function usePaneRuntimeView({
   options: Record<string, unknown> | undefined;
   instance: string | undefined;
   blocked?: string;
+  /** Whether this pane shows lines; hidden lines are not computed. */
+  edgesShown: boolean;
 }>): Readonly<{
   rendering: Rendering | undefined;
   unavailable: string | undefined;
@@ -86,7 +89,12 @@ function usePaneRuntimeView({
       : evaluation.views[0]
     : undefined;
   const requestedId = selectedId ?? offered?.id;
-  const content = interactiveViewContent(offered?.mimeType, kernelId, capabilities);
+  const content = interactiveViewContent({
+    mimeType: offered?.mimeType,
+    kernelId,
+    capabilities,
+    edgesShown,
+  });
   const includeEdges = content?.includeEdges === true;
   const activeView = useRef<{ key: string; view: ViewSubscription; closed: boolean } | undefined>(undefined);
   const unavailable =
@@ -116,7 +124,7 @@ function usePaneRuntimeView({
       const request = {
         options: JSON.parse(optionsKey) as Record<string, unknown>,
         ...(instance ? { instance } : {}),
-        ...(includeEdges ? { content: { includeEdges: true } } : {}),
+        ...(content ? { content: { includeEdges } } : {}),
       };
       view = requestedId ? document.view(requestedId, request) : document.view();
     } catch (error) {
@@ -512,6 +520,17 @@ const ViewerContent = memo(function ({
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
   const cadRef = useCad();
+  // Lines this pane shows; the unit's default view computes edges only while some pane shows them.
+  const enableLines = useGraphicsSelector((state) => state.context.enableLines);
+  useEffect(() => {
+    cadRef?.send({ type: 'setViewerEdges', viewerId: viewId, shown: enableLines });
+  }, [cadRef, viewId, enableLines]);
+  useEffect(
+    () => () => {
+      cadRef?.send({ type: 'setViewerEdges', viewerId: viewId, shown: undefined });
+    },
+    [cadRef, viewId],
+  );
   const evaluation = useCadSelector(selectCadEvaluation, undefined);
   const defaultRendering = useCadSelector(selectCadRendering, undefined);
   const runtimeDocument = useCadSelector(selectCadDocument, undefined);
@@ -548,6 +567,7 @@ const ViewerContent = memo(function ({
     options: viewOptions,
     instance: localForView && !localExpired ? localForView.instanceId : selectedState?.authoredInstance,
     blocked: localExpired,
+    edgesShown: enableLines,
   });
   const rendering =
     evaluation?.success && evaluation.views.length === 0
@@ -626,7 +646,6 @@ const ViewerContent = memo(function ({
   // check works correctly. An object-returning selector creates a new reference
   // on every emission, causing unnecessary re-renders.
   const enableSurfaces = useGraphicsSelector((state) => state.context.enableSurfaces);
-  const enableLines = useGraphicsSelector((state) => state.context.enableLines);
   const enableGizmo = useGraphicsSelector((state) => state.context.enableGizmo);
   const enableGrid = useGraphicsSelector((state) => state.context.enableGrid);
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);

@@ -17,12 +17,22 @@ const capabilities: Pick<AppCapabilitiesManifest, 'renderCapabilities'> = {
 
 describe('interactiveViewContent', () => {
   it('requests supported GLB edges exactly when they are shown, independently from their runtime default', () => {
-    expect(interactiveViewContent('model/gltf-binary', 'native', capabilities, true)).toEqual({ includeEdges: true });
-    expect(interactiveViewContent('model/gltf-binary', 'native', capabilities, false)).toEqual({ includeEdges: false });
+    expect(
+      interactiveViewContent({ mimeType: 'model/gltf-binary', kernelId: 'native', capabilities, edgesShown: true }),
+    ).toEqual({ includeEdges: true });
+    expect(
+      interactiveViewContent({ mimeType: 'model/gltf-binary', kernelId: 'native', capabilities, edgesShown: false }),
+    ).toEqual({ includeEdges: false });
   });
   it('preserves SVG and unsupported routes without GLB-only content', () => {
-    expect(interactiveViewContent('image/svg+xml', 'native', capabilities, true)).toBeUndefined();
-    expect(interactiveViewContent('model/gltf-binary', 'plain', capabilities, true)).toBeUndefined();
-    expect(interactiveViewContent('model/gltf-binary', undefined, capabilities, true)).toBeUndefined();
+    expect(
+      interactiveViewContent({ mimeType: 'image/svg+xml', kernelId: 'native', capabilities, edgesShown: true }),
+    ).toBeUndefined();
+    expect(
+      interactiveViewContent({ mimeType: 'model/gltf-binary', kernelId: 'plain', capabilities, edgesShown: true }),
+    ).toBeUndefined();
+    expect(
+      interactiveViewContent({ mimeType: 'model/gltf-binary', kernelId: undefined, capabilities, edgesShown: true }),
+    ).toBeUndefined();
   });
 });

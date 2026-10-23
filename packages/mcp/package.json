@@ -68,10 +68,12 @@
     "@modelcontextprotocol/sdk": "catalog:"
   },
   "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@taucad/chat": "workspace:*",
+    "@taucad/runtime": "workspace:*",
     "zod": "catalog:"
   }
 }

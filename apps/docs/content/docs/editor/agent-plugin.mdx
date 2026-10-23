@@ -56,7 +56,7 @@ Troubleshooting, kernel choice and what to tell the user are in the [agent guide
 
 The tab, full view and browser page add Share, Export and a workbench toggle at the top, and grid, section, measure and fit. Add to chat gives the agent the card's model or a right-clicked part; the browser page copies it instead.
 
-A tab or full view follows each model the agent shows, and the agent can select parts in it. `view_state` reports the model, selected and hidden parts and camera, plus an image with `capture`. `show_model` also opens STEP, STL, 3MF and OBJ files.
+A tab or full view follows each model the agent shows, and the agent can select parts in it. A shown source stays live: editing the file or its parameters, in any editor or through the agent, redraws every open view. `view_state` reports the model, selected and hidden parts and camera, plus an image with `capture`. `show_model` also opens STEP, STL, 3MF and OBJ files.
 
 The **workbench** lists the parts, parameters, selected part's properties and display switches. A changed parameter is saved to the project and the model redraws; the agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved too, so Tau reopens the same view.
 
@@ -68,4 +68,4 @@ Start the agent with `TAU_HOST_MACHINES=true` to use the machines you set up in 
 
 ## Where files go
 
-Exports and viewed models land in `.tau/artifacts/`, workbench changes in `.tau/workbench/`. Screenshots stay in a temporary folder removed when the server stops.
+Exports land in `.tau/artifacts/`, workbench changes in `.tau/workbench/`; a viewed model stays in the server's memory. Screenshots stay in a temporary folder removed when the server stops.

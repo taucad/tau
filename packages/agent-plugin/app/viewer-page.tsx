@@ -11,7 +11,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { Box, Maximize2, MessageSquarePlus } from 'lucide-react';
-import type { TauViewerCamera, TauViewerModel, TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
+import type {
+  TauViewerCamera,
+  TauViewerModel,
+  TauViewerShowResult,
+  TauViewerEntryStatus,
+} from '@taucad/mcp/viewer-protocol';
 import type { Artifact } from '@taucad/runtime';
 import type { GeometryComponentReference } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
@@ -100,7 +105,7 @@ const chatNotice = (route: ChatRoute, added?: Readonly<{ count: number; isRepeat
 };
 
 /** The parts the person added to chat from one shown model, keyed `path#componentId`, in the order added. */
-type AddedParts = Readonly<{ modelSha: string; parts: ReadonlyMap<string, GeometryComponentReference> }>;
+type AddedParts = Readonly<{ modelKey: string; parts: ReadonlyMap<string, GeometryComponentReference> }>;
 
 /**
  * Follows the bridge: shows each model it hands over, keeping the last one on screen while the next loads. The
@@ -268,12 +273,14 @@ function LaneToggle({ children }: Readonly<{ children: React.ReactNode }>): Reac
 }
 
 /**
- * What the canvas shows besides the model, in the shared stage: the download's progress or the failure.
+ * What the canvas shows besides the model, in the shared stage: the download's progress, the server's build of a
+ * change to the shown source, or the failure.
  *
  * @param state - Whether the page waits, loads, shows or failed, with the download's byte count.
- * @returns The loading pill with its share, the failure, or `undefined` while waiting or showing.
+ * @param building - The title of the shown source the server is building again, if it is.
+ * @returns The loading pill with its share, the build, the failure, or `undefined` while waiting or showing.
  */
-const stageStatusOf = (state: PageState): ViewerStageStatus | undefined => {
+const stageStatusOf = (state: PageState, building: string | undefined): ViewerStageStatus | undefined => {
   if (state.kind === 'loading') {
     return {
       kind: 'loading',
@@ -281,8 +288,14 @@ const stageStatusOf = (state: PageState): ViewerStageStatus | undefined => {
       progress: state.model.byteLength === 0 ? 1 : state.loaded / state.model.byteLength,
     };
   }
-  return state.kind === 'failed' ? { kind: 'failed', message: state.message } : undefined;
+  if (state.kind === 'failed') {
+    return { kind: 'failed', message: state.message };
+  }
+  return building === undefined ? undefined : { kind: 'loading', label: `Building ${building}` };
 };
+
+/** The key the parts added to chat are kept under: the source, which a newer render keeps, else the drawn bytes. */
+const addedKeyOf = (model: TauViewerModel): string => model.sourceFile ?? model.sha256;
 
 /**
  * The page.
@@ -336,21 +349,11 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   const interactedAt = useRef(0);
   const latest = useRef({ state, view, shown });
   latest.current = { state, view, shown };
-  const showAgain = useCallback(() => {
-    const sourceFile = latest.current.shown?.model.sourceFile;
-    if (sourceFile === undefined) {
-      return;
-    }
-    // async-iife: bootstrap — a written parameter edit asks for the model rendered with it.
-    void (async () => {
-      try {
-        const result = await bridge.callTool('show_model', { targetFile: sourceFile });
-        showRef.current?.(result as TauViewerShowResult);
-      } catch {
-        /* The status line keeps the model it shows; the next edit tries again. */
-      }
-    })();
-  }, [bridge, showRef]);
+  /* The server watches a shown source and says when it builds a change (PAR-1); the status of another source is not
+   * this page's. */
+  const [liveStatus, setLiveStatus] = useState<Readonly<Record<string, TauViewerEntryStatus>> | undefined>(undefined);
+  const shownSource = shown?.model.sourceFile;
+  const status = shownSource === undefined ? undefined : liveStatus?.[shownSource];
   const isDrawn = useCallback((): boolean => {
     const { current } = latest;
     if (current.state.kind !== 'ready') {
@@ -368,11 +371,11 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       ? undefined
       : { unitId, unit: getModelInteractionUnitState(context.modelInteractionRef.getSnapshot().context, unitId) };
   }, [graphicsRef]);
-  /* What the person added to chat; a newly shown model starts an empty set (VUI-3). */
+  /* What the person added to chat; a newly shown model starts an empty set, a newer render of its source keeps it (VUI-3). */
   const added = useRef<AddedParts | undefined>(undefined);
   const addedFrom = useCallback(
-    (modelSha: string): GeometryComponentReference[] =>
-      added.current?.modelSha === modelSha ? [...added.current.parts.values()] : [],
+    (modelKey: string): GeometryComponentReference[] =>
+      added.current?.modelKey === modelKey ? [...added.current.parts.values()] : [],
     [],
   );
   const linkRef = useRef<LiveLink | undefined>(undefined);
@@ -406,7 +409,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           measurementCount: context.measurements.length,
           composition: latest.current.view.composition,
           interactedAt: interactedAt.current,
-          references: addedFrom(model.sha256),
+          references: addedFrom(addedKeyOf(model)),
         });
       },
       follows: () => latest.current.view.follows,
@@ -414,6 +417,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       toolCallId: () => latest.current.view.toolCallId,
       show(result) {
         showRef.current?.(result);
+      },
+      status(next) {
+        setLiveStatus(next);
       },
       async capture() {
         if (!(await whenDrawn(isDrawn))) {
@@ -523,11 +529,11 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       if (model === undefined) {
         return;
       }
-      const parts = new Map(addedFrom(model.sha256).map((part) => [`${part.filePath}#${part.componentId}`, part]));
+      const parts = new Map(addedFrom(addedKeyOf(model)).map((part) => [`${part.filePath}#${part.componentId}`, part]));
       const key = `${reference.filePath}#${reference.componentId}`;
       const isRepeat = parts.has(key);
       parts.set(key, parts.get(key) ?? reference);
-      added.current = { modelSha: model.sha256, parts };
+      added.current = { modelKey: addedKeyOf(model), parts };
       linkRef.current?.nudge();
       const all = chatReferenceOf(model, [...parts.values()]);
       // async-iife: bootstrap — a menu click starts it; the notice reports its outcome.
@@ -671,7 +677,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                     regionLabel='Model viewer'
                     partMenu={isInline ? undefined : partMenu}
                     isModelShown={shown !== undefined}
-                    status={stageStatusOf(state)}
+                    status={stageStatusOf(state, status?.building === true ? shown?.model.title : undefined)}
                     className='min-h-0 min-w-0 flex-1'
                     /* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */
                     controls={
@@ -738,8 +744,8 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                   <WorkbenchLane
                     bridge={bridge}
                     model={shown?.model}
+                    status={liveStatus}
                     graphicsRef={graphicsRef}
-                    onParametersWritten={showAgain}
                     reveal={reveal}
                     componentActions={rowMenus}
                     openPaneRequest={openPaneRequest}

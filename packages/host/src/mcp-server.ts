@@ -50,7 +50,8 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { saveChatAttachment } from '#acp/media.js';
 import { createLocalMcpViewer } from '#mcp-viewer.js';
-import { createMcpViewerExport, shownModelContent } from '#mcp-viewer-export.js';
+import { createMcpViewerExport } from '#mcp-viewer-export.js';
+import type { EntrySessionRuntime } from '#mcp-entry-sessions.js';
 import type { ViewerExportRuntime } from '#mcp-viewer-export.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
@@ -865,11 +866,11 @@ export type LocalHostMcpOptions = {
    */
   readonly viewerPage?: Readonly<{ html: string; sha256: string }> | undefined;
   /**
-   * The project runtime `export_model` uses, per project folder. With it, the viewer page's Export pane lists the
-   * entry's formats and their options, and a shown source's GLB carries its topology wherever the route can; without
-   * it, the page offers no Export pane tools and shows the mesh alone.
+   * The project runtime `export_model` uses, per project folder. With it, `show_model` watches a shown source in one
+   * runtime document whose renders refresh every page showing it, and the viewer page's Export pane lists the entry's
+   * formats and their options; without it, the viewer draws GLB and SVG files only and offers no Export pane tools.
    */
-  readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime>) | undefined;
+  readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime & EntrySessionRuntime>) | undefined;
   /**
    * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page offers no
    * direct link.
@@ -1024,43 +1025,8 @@ export const serveLocalHostMcp = async (
               process.stderr.write(`tau mcp: the viewer's view was not kept in .tau/workbench: ${String(error)}\n`);
             },
           },
-          renderGlb: async ({ root, targetFile, toolCallId, signal }) => {
-            /* The page's Kinematics pane and component menu read the GLB's topology; without it they have nothing. */
-            const glbContent =
-              options.runtimeClient === undefined
-                ? undefined
-                : await shownModelContent({
-                    runtimeFor: options.runtimeClient,
-                    root,
-                    targetFile,
-                    signal,
-                  });
-            const result = await invokeIn({
-              workspaceRoot: root,
-              tool: toolName.exportModel,
-              args: {
-                targetFile,
-                to: 'glb',
-                ...(glbContent === undefined ? {} : { content: glbContent }),
-              },
-              call: { toolCallId, signal },
-            });
-            const content: JsonObject = isJsonObject(result.content) ? result.content : {};
-            const { files } = content;
-            const listed: readonly JsonValue[] = Array.isArray(files) ? (files as readonly JsonValue[]) : [];
-            const [first] = listed;
-            const artifactPath = first !== undefined && isJsonObject(first) ? first['artifactPath'] : undefined;
-            if (result.isError || content['success'] === false || typeof artifactPath !== 'string') {
-              return {
-                errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'RENDER_FAILED',
-                message:
-                  typeof content['message'] === 'string'
-                    ? content['message']
-                    : `${targetFile} could not be rendered to GLB.`,
-              };
-            }
-            return artifactPath;
-          },
+          /* A shown source is watched in its project's runtime; its renders stay in memory (PAR-1). */
+          liveRuntime: options.runtimeClient,
           snapshotSource: options.snapshotSource,
           ...(options.runtimeClient === undefined
             ? {}

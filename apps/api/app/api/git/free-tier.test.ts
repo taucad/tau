@@ -64,7 +64,7 @@ const hostedRemote = ({
     }),
   } as unknown as DatabaseService['database'];
   const repositories = new GitRepositoryService(
-    mock<DatabaseService>({ database }),
+    Object.assign(mock<DatabaseService>(), { database }),
     mock<CommercialEntitlementsService>({ getEntitlements: vi.fn(async () => entitlements) }),
     mock<ObjectStorageService>(),
     access,

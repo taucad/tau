@@ -1,4 +1,5 @@
 ---
+cli: minor
 host: minor
 mcp: minor
 agent-plugin: minor

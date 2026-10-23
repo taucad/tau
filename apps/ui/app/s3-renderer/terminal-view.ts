@@ -489,7 +489,7 @@ const createGhosttyView = async (options: TerminalViewOptions): Promise<Terminal
  * lines and routes links through `linkHandler`; the shims below cover what it still lacks.
  */
 const createAurigaxView = async (options: TerminalViewOptions): Promise<TerminalView> => {
-  const aurigax = await import('@aurigax-ai/ghostty-web');
+  const aurigax = await import('#s3-renderer/aurigax-ghostty-web');
   /* Same edge auto-scroll as ghostty-web's selection manager (see createGhosttyView). */
   Reflect.set(aurigax.SelectionManager, 'AUTO_SCROLL_EDGE_SIZE', 0);
   const terminal = new aurigax.Terminal({

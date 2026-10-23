@@ -7,6 +7,10 @@
   "imports": {
     "#package.json": "./package.json",
     "#scripts/*": "./scripts/*",
+    "#s3-renderer/aurigax-ghostty-web": {
+      "types": "./app/s3-renderer/aurigax-ghostty-web.d.ts",
+      "default": "@aurigax-ai/ghostty-web"
+    },
     "#*": "./app/*"
   },
   "dependencies": {

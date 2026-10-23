@@ -150,6 +150,33 @@ const observeSyncs = (opened: ProjectRevisions): Readonly<{ revisions: ProjectRe
 };
 
 /**
+ * The revisions as a project that syncs with a remote sees them: the evidence that a missing branch may still arrive.
+ *
+ * @param opened - The root and its store.
+ * @returns The same revisions over a root whose snapshot names a remote child.
+ */
+const withRemote = (opened: ProjectRevisions): ProjectRevisions => {
+  const actor = new Proxy(opened.actor, {
+    get: (target, property): unknown => {
+      if (property === 'getSnapshot') {
+        return () => {
+          const snapshot = target.getSnapshot();
+          return new Proxy(snapshot, {
+            get: (inner, name): unknown =>
+              name === 'children'
+                ? { ...inner.children, remote: { getSnapshot: () => ({ context: { kind: 'tau' } }) } }
+                : Reflect.get(inner, name, inner),
+          });
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  return { ...opened, actor };
+};
+
+/**
  * The checkout id another device derives for a branch (`tau-checkout\0<branch>`, both git ports): what a synced
  * `chat.json` names when that chat last ran on a linked checkout there.
  */
@@ -438,7 +465,8 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
   /*
    * TS-R12 (W8.a2): with no checkout named, the chat record's is the placement intent, not the live checkout.
-   * XD4: an id no checkout and no branch on this device answers to is refused retryably; a sync may bring the branch.
+   * XD4: an id no checkout and no branch on this device answers to waits only while a remote may bring the branch;
+   * a project with no remote can never receive it, so it is refused for good.
    */
   it("should place an attempt on the chat record's checkout when the person named none", async () => {
     const project = await createProject();
@@ -447,8 +475,40 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
 
-    expect(answer).toMatchObject({ status: 'refused', code: 'BRANCH_UNAVAILABLE' });
+    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
     await expect(project.filesystem.readdir('.tau/runs').catch(() => [])).resolves.toEqual([]);
+  });
+
+  it('should refuse retryably a checkout id no local branch derives while the project syncs with a remote', async () => {
+    const project = await createProject();
+    await writeChatRecord(project.filesystem, 'missing-checkout');
+    const revisions = withRemote(project.open().revisions);
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'BRANCH_UNAVAILABLE' });
+  });
+
+  /* XD4: a device that cannot tell where an id's branch is never waits on it. */
+  it('should refuse for good when this device cannot read its branches', async () => {
+    const project = await createProject();
+    await writeChatRecord(project.filesystem, 'missing-checkout');
+    const opened = withRemote(project.open().revisions);
+    const revisions = {
+      ...opened,
+      turns: {
+        ...opened.turns,
+        branchOf: async () => {
+          throw new Error('The refs could not be listed.');
+        },
+      },
+    };
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
   });
 
   /*
@@ -534,21 +594,43 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(checkoutsOf().map((checkout) => checkout.id)).not.toContain(opened);
   });
 
-  /* XD4: an unborn branch runs only on a checkout that already tracks it; the live one on another branch waits. */
-  it('should refuse retryably when the chat names an unborn branch the live checkout is not on', async () => {
+  /* XD4: a removal record this device cannot read is never read as "nothing removed", nor written over. */
+  it('should refuse for good, and keep the record, when the removed-checkout record cannot be parsed', async () => {
+    const project = await createProject();
+    const base = await commitBranch(project.port, 'main', { files: { 'main.ts': 'export const size = 1;\n' } });
+    await commitBranch(project.port, 'feature', { files: { 'main.ts': 'export const size = 2;\n' }, parent: base });
+    await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
+    await project.filesystem.writeFile('.git/tau-removed-checkouts.json', '{ torn');
+    await writeChatRecord(project.filesystem, await checkoutIdOnAnotherDevice(project.port, 'feature'));
+    const { revisions, placement } = project.open();
+
+    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+
+    expect(answer).toMatchObject({ status: 'refused', code: 'CHECKOUT_UNKNOWN' });
+    expect(revisions.actor.getSnapshot().context.checkouts.map((checkout) => checkout.kind)).toEqual(['live']);
+    await expect(project.filesystem.readFile('.git/tau-removed-checkouts.json', 'utf8')).resolves.toBe('{ torn');
+  });
+
+  /* XD4: an unborn branch runs only on a checkout that already tracks it; otherwise it waits only for a remote. */
+  it('should refuse an unborn branch the live checkout is not on, retryably only while a remote may bring it', async () => {
     const project = await createProject();
     await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');
     await writeChatRecord(project.filesystem, 'checkout-of-trunk');
     const { revisions: opened } = project.open();
-    const revisions = {
-      ...opened,
-      turns: { ...opened.turns, branchOf: async () => ({ branch: 'trunk', unborn: true }) },
-    };
-    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+    const unborn = (revisions: ProjectRevisions): ProjectRevisions => ({
+      ...revisions,
+      turns: { ...revisions.turns, branchOf: async () => ({ branch: 'trunk', unborn: true }) },
+    });
+    const local = createTurnPlacementPort({ revisions: unborn(opened), openTools: ({ filesystem: view }) => view });
+    const synced = createTurnPlacementPort({
+      revisions: unborn(withRemote(opened)),
+      openTools: ({ filesystem: view }) => view,
+    });
 
-    const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
-
-    expect(answer).toMatchObject({ status: 'refused', code: 'BRANCH_UNAVAILABLE' });
+    expect(await local.admit({ requestId: 'admit:run-1:1', key })).toMatchObject({ code: 'CHECKOUT_UNKNOWN' });
+    expect(await synced.admit({ requestId: 'admit:run-2:1', key: { ...key, runId: 'run-2' } })).toMatchObject({
+      code: 'BRANCH_UNAVAILABLE',
+    });
   });
 
   it('should answer replayed and mint no second base when an attempt is admitted twice', async () => {
@@ -690,7 +772,7 @@ describe('createTurnPlacementPort (TS-S3)', () => {
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key, checkoutId: 'checkout-gone' });
 
-    expect(answer).toMatchObject({ requestId: 'admit:run-1:1', status: 'refused', code: 'BRANCH_UNAVAILABLE' });
+    expect(answer).toMatchObject({ requestId: 'admit:run-1:1', status: 'refused', code: 'CHECKOUT_UNKNOWN' });
     expect(await revisions.turns.leases()).toEqual([]);
     expect(await turnCuts(project.port, key)).toEqual([]);
     expect(opened).toEqual([]);

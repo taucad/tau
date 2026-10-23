@@ -623,12 +623,11 @@ export const createTurnPlacementPort = <Tools>(
     }
     if (code === 'CHECKOUT_CONFLICT' || code === 'LEASE_UNAVAILABLE') {
       /*
-       * Today's `CHECKOUT_CONFLICT` also means "the id names no checkout"; that half has its own code (TS-S0 Q4). An id
-       * that reached the root unresolved names no branch on this device either (XD4), which a later sync can change: one
-       * this device removed never reaches the root, `placeIntent` refuses it `CHECKOUT_UNKNOWN` first.
+       * Today's `CHECKOUT_CONFLICT` also means "the id names no checkout"; that half has its own code (TS-S0 Q4).
+       * `placeIntent` answers every id this device cannot place before the root; one that vanished since is gone.
        */
       const known = actor.getSnapshot().context.checkouts.some((checkout) => checkout.id === checkoutId);
-      return checkoutId !== undefined && !known ? 'BRANCH_UNAVAILABLE' : 'CHECKOUT_CONFLICT';
+      return checkoutId !== undefined && !known ? 'CHECKOUT_UNKNOWN' : 'CHECKOUT_CONFLICT';
     }
     return 'REVISIONS_UNAVAILABLE';
   };
@@ -673,12 +672,21 @@ export const createTurnPlacementPort = <Tools>(
   };
 
   /*
+   * XD4: whether a branch this device lacks may still arrive: only a project that syncs with a remote can bring one.
+   * Without that evidence a missing branch is gone for good, and waiting on it would hold the chat forever.
+   */
+  const branchMayArrive = (): boolean => {
+    const kind = actor.getSnapshot().children.remote?.getSnapshot().context.kind;
+    return kind !== undefined && kind !== 'none';
+  };
+
+  /*
    * XD4: where the placement intent is on this device. A checkout id derives from its branch, so the branch is the
    * portable fact and the checkout device state: an id this device has no checkout for runs on the checkout that holds
    * its branch, or on one opened for it. Never on a checkout this device removed, or one of a branch it saw removed:
-   * that intent is refused for good (`CHECKOUT_UNKNOWN`), never opened again. An unborn branch no checkout holds has no
-   * head to open, so it waits (`BRANCH_UNAVAILABLE`), as does an id no branch here derives, which goes to the root
-   * unchanged and is refused there: a later sync can bring either.
+   * that intent is refused for good (`CHECKOUT_UNKNOWN`), never opened again. An id no local branch derives, or one
+   * that derives an unborn branch no checkout holds, waits (`BRANCH_UNAVAILABLE`) only while a remote may still bring
+   * the branch; otherwise, and whenever this device cannot tell, it is `CHECKOUT_UNKNOWN`.
    */
   const placeIntent = async (
     key: TurnAttemptKey,
@@ -690,25 +698,30 @@ export const createTurnPlacementPort = <Tools>(
     try {
       await registryAnswered();
     } catch {
-      return { checkoutId: intent };
+      return { refused: 'The checkout registry did not answer.', code: 'REVISIONS_UNAVAILABLE' };
     }
     const { checkouts } = actor.getSnapshot().context;
     if (checkouts.some((checkout) => checkout.id === intent)) {
       return { checkoutId: intent };
     }
-    const derived = await turns.branchOf(intent).catch(() => undefined);
+    /* A device that cannot read its branches cannot tell: it answers as for a removed one. */
+    const derived: Awaited<ReturnType<typeof turns.branchOf>> = await turns.branchOf(intent).catch(() => 'removed');
+    const missing: Readonly<{ refused: string; code: AdmitCode }> = {
+      refused: '',
+      code: branchMayArrive() ? 'BRANCH_UNAVAILABLE' : 'CHECKOUT_UNKNOWN',
+    };
     if (derived === 'removed') {
       return { refused: '', code: 'CHECKOUT_UNKNOWN' };
     }
     if (derived === undefined) {
-      return { checkoutId: intent };
+      return missing;
     }
     const holder = checkouts.find((checkout) => checkout.branch === derived.branch);
     if (holder !== undefined) {
       return { checkoutId: holder.id };
     }
     if (derived.unborn) {
-      return { refused: '', code: 'BRANCH_UNAVAILABLE' };
+      return missing;
     }
     const opened = await materialize(key, derived.branch);
     return 'refused' in opened ? { ...opened, code: 'REVISIONS_UNAVAILABLE' } : opened;

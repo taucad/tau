@@ -1724,18 +1724,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * branch here again forgets it. Device state in a control-plane file no tree records, like the record devices.
    */
   const removedCheckoutsPath = '.git/tau-removed-checkouts.json';
+  /* Absent is none; a file this device cannot read or parse throws, so nothing reads it as none or writes over it. */
   const readRemovedCheckouts = async (): Promise<ReadonlySet<string>> => {
-    try {
-      const records = await recordsFileSystem();
-      const stored: unknown = (await records.exists(removedCheckoutsPath))
-        ? JSON.parse(await records.readFile(removedCheckoutsPath, 'utf8'))
-        : [];
-      return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : []);
-    } catch {
+    const records = await recordsFileSystem();
+    if (!(await records.exists(removedCheckoutsPath))) {
       return new Set();
     }
+    const stored: unknown = JSON.parse(await records.readFile(removedCheckoutsPath, 'utf8'));
+    if (!Array.isArray(stored) || stored.some((id) => typeof id !== 'string')) {
+      throw new RevisionPortError('INVALID_REPOSITORY', `${removedCheckoutsPath} is not a list of checkout ids.`);
+    }
+    return new Set(stored as string[]);
   };
   let removedWrites: Promise<void> = Promise.resolve();
+  /* Written whole beside the file, then renamed over it, as the record devices are: a torn write leaves the old list. */
   const writeRemovedCheckout = async (id: string, removed: boolean): Promise<void> => {
     const ids = new Set(await readRemovedCheckouts());
     if (ids.has(id) === removed) {
@@ -1747,7 +1749,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       ids.delete(id);
     }
     const records = await recordsFileSystem();
-    await records.writeFile(removedCheckoutsPath, `${JSON.stringify([...ids])}\n`);
+    await records.writeFile(`${removedCheckoutsPath}.writing`, `${JSON.stringify([...ids])}\n`);
+    await records.rename(`${removedCheckoutsPath}.writing`, removedCheckoutsPath);
   };
   const noteRemovedCheckout = async (id: string, removed: boolean): Promise<void> => {
     const prior = removedWrites;
@@ -1756,7 +1759,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       try {
         await writeRemovedCheckout(id, removed);
       } catch {
-        /* Evidence, never a verb's outcome: a write that fails leaves the id unknown, which a sync can still answer. */
+        /* Evidence, never a verb's outcome: a write that fails, or a list that cannot be read, is left as it was. */
       }
     })();
     removedWrites = write;

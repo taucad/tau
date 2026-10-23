@@ -648,6 +648,22 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
+  /* XD3/XD4: the chat waits on sync from another device; nothing here can hurry it. */
+  it.each([
+    ['SEGMENTS_UNREADABLE', "Another device's copy of this chat could not be read."],
+    ['BRANCH_UNAVAILABLE', 'The branch this chat ran on has not arrived on this device yet.'],
+  ])('should say a %s chat is waiting on sync from another device and offer nothing', (code, message) => {
+    persisted({ category: errorCategory.generic, title: 'Error', message, code });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Waiting on sync from another device')).toBeInTheDocument();
+    expect(
+      screen.getByText('This chat continues once sync brings what another device wrote. Send again then.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
   /* The one restart that loses nothing: admission refused before a run existed. */
   it('should keep Try again for a turn that never started', async () => {
     const user = userEvent.setup();

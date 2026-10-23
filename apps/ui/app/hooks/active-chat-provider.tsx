@@ -59,12 +59,8 @@ import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
-import {
-  selectCaughtUp,
-  selectCurrentRun,
-  selectRunElsewhere,
-  selectRunElsewhereRecheckDelay,
-} from '#machines/chat-projection.logic.js';
+import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
+import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -836,38 +832,12 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
 }
 
 /**
- * The run another device holds this chat with, kept current (XD3): it changes when sync brings that device's segment,
- * and when a foreign run's standing changes with the clock alone (`selectRunElsewhereRecheckDelay`), which no store announces. One
- * timeout is armed for the next such moment, and only while the chat has a foreign run that has not settled.
+ * The run another device holds this chat with, kept current (XD3), by `subscribeRunElsewhere`'s clock.
  */
 function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
   const store = useChatSessionStore();
   const subscribe = useCallback(
-    (listener: () => void) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const arm = (): void => {
-        clearTimeout(timer);
-        timer = undefined;
-        const projection = store.getProjection(chatId);
-        const recheckDelay =
-          projection === undefined ? undefined : selectRunElsewhereRecheckDelay(projection, Date.now());
-        if (recheckDelay !== undefined) {
-          timer = setTimeout(() => {
-            listener();
-            arm();
-          }, recheckDelay);
-        }
-      };
-      const unsubscribe = store.subscribeProjection(chatId, () => {
-        listener();
-        arm();
-      });
-      arm();
-      return () => {
-        clearTimeout(timer);
-        unsubscribe();
-      };
-    },
+    (listener: () => void) => subscribeRunElsewhere(store, chatId, listener),
     [chatId, store],
   );
   /* Stable for one held run: the selector returns the run object the projection holds. */

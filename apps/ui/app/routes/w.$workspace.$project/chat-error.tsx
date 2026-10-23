@@ -326,6 +326,20 @@ function codedErrorCard({
     );
   }
 
+  // Another device's copy of the chat, or the branch it ran on, has not reached this device yet (XD3, XD4). Both are
+  // refused `wait`: the same send is admitted once sync brings it, and nothing here can hurry it.
+  if (category === 'waitingOnSync') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={MonitorSmartphone}
+        title='Waiting on sync from another device'
+        description='This chat continues once sync brings what another device wrote. Send again then.'
+      />
+    );
+  }
+
   // The one restart that loses nothing: admission refused before a run existed.
   if (category === 'turnNotStarted') {
     return (

@@ -7,10 +7,12 @@ import { useModels } from '#hooks/use-models.js';
 import {
   externalAgentDisplayName,
   heldPlacementReason,
+  isDeviceRelativeHostReachable,
   onLoopbackAgentHostsChanged,
   unplaceableExecutionReason,
 } from '#lib/agent-host-placement.js';
 import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { isDeviceRelativeHostId } from '#utils/chat-execution.js';
 
 /**
  * Why this device cannot place one execution, kept current: a loopback daemon
@@ -22,6 +24,26 @@ import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js'
 const useUnplaceableExecutionReason = (execution: CadAgentExecution): string | undefined => {
   const read = useCallback(() => unplaceableExecutionReason(execution), [execution]);
   return useSyncExternalStore(onLoopbackAgentHostsChanged, read, read);
+};
+
+/**
+ * The last Tau choice as this tab can run it: a host only another tab or device reaches (`origin`, `desktop`, a
+ * loopback daemon) is dropped, so the chat runs on this tab's own Tau instead of on a host it cannot reach.
+ *
+ * @param execution - The last Tau execution chosen on this device.
+ * @returns The execution to continue with here.
+ */
+const tauHere = (execution: CadAgentExecution): CadAgentExecution => {
+  if (
+    execution.kind !== 'tau' ||
+    execution.hostId === undefined ||
+    !isDeviceRelativeHostId(execution.hostId) ||
+    isDeviceRelativeHostReachable(execution.hostId)
+  ) {
+    return execution;
+  }
+  const { hostId: _unreachable, ...local } = execution;
+  return local;
 };
 
 /**
@@ -80,7 +102,7 @@ export function ChatPlacementNotice(): React.JSX.Element | undefined {
             variant='outline'
             size='xs'
             onClick={() => {
-              setActiveExecution(lastTauExecution);
+              setActiveExecution(tauHere(lastTauExecution));
             }}
           >
             <Repeat className='size-3.5' />

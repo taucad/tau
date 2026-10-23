@@ -3644,6 +3644,31 @@ export class ChatSessionStore {
         return undefined;
       }
     };
+    /*
+     * An adoption is two writes: this device's placement, then the chat record's drop. A drop that did not land leaves
+     * the legacy host in the record; the next open finishes it, but only for the host this device's placement already
+     * names, so a placement chosen since is never replaced by the stale host.
+     */
+    const finishAdoption = async (storedChat: ChatEntity, placement: TauAgentHostId): Promise<void> => {
+      const deps = depsRef();
+      try {
+        await deps.adoptLegacyChatPlacement?.(
+          storedChat.id,
+          projectId,
+          async (hostId) => hostId === placement && (await deps.isPlacementOnThisDevice?.(hostId)) === true,
+        );
+      } catch {
+        /* The record keeps the host until a later open drops it. */
+      }
+    };
+    const placementOnOpen = async (storedChat: ChatEntity): Promise<TauAgentHostId | undefined> => {
+      const placement = await readChatPlacement(depsRef().client, projectId, storedChat.id);
+      if (placement === undefined) {
+        return adoptLegacyPlacement(storedChat);
+      }
+      await finishAdoption(storedChat, placement);
+      return placement;
+    };
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
@@ -3651,11 +3676,7 @@ export class ChatSessionStore {
             run: async ({ input, signal }) => {
               const storedChat = await readChatRow(input.chatId);
               /* The chat record never holds this device's placement (XD2): its placements record does. */
-              const devicePlacement =
-                storedChat === undefined
-                  ? undefined
-                  : ((await readChatPlacement(depsRef().client, projectId, input.chatId)) ??
-                    (await adoptLegacyPlacement(storedChat)));
+              const devicePlacement = storedChat === undefined ? undefined : await placementOnOpen(storedChat);
               /* A placement this tab cannot reach is held, not applied: the chat runs locally and the composer says so. */
               const reachable = await reachablePlacement(depsRef(), devicePlacement);
               /* This device's placement the open tab cannot reach: kept in the record for the tab that can (XD2). The

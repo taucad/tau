@@ -16,6 +16,8 @@ type Harness = {
   canSelectExecution: boolean;
   unplaceable: string | undefined;
   loopbackListeners: Set<() => void>;
+  lastTauExecution: CadAgentExecution;
+  reachable: (hostId: string) => boolean;
 };
 
 const harness = vi.hoisted(
@@ -26,6 +28,8 @@ const harness = vi.hoisted(
     canSelectExecution: true,
     unplaceable: undefined,
     loopbackListeners: new Set<() => void>(),
+    lastTauExecution: { kind: 'tau', model: 'anthropic-claude-opus-4.8', effort: 'high' },
+    reachable: () => true,
   }),
 );
 
@@ -41,13 +45,14 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
-    lastTauExecution: { kind: 'tau', model: 'anthropic-claude-opus-4.8', effort: 'high' },
+    lastTauExecution: harness.lastTauExecution,
   }),
 }));
 vi.mock('#lib/agent-host-placement.js', () => ({
   externalAgentDisplayName: (agentId: string) => (agentId === 'codex' ? 'Codex' : agentId),
   heldPlacementReason: (hostId: string) => `held ${hostId}`,
   unplaceableExecutionReason: () => harness.unplaceable,
+  isDeviceRelativeHostReachable: (hostId: string) => harness.reachable(hostId),
   onLoopbackAgentHostsChanged: (listener: () => void) => {
     harness.loopbackListeners.add(listener);
     return () => harness.loopbackListeners.delete(listener);
@@ -65,6 +70,8 @@ beforeEach(() => {
   harness.canSelectExecution = true;
   harness.unplaceable = reason;
   harness.setActiveExecution.mockReset();
+  harness.lastTauExecution = { kind: 'tau', model: 'anthropic-claude-opus-4.8', effort: 'high' };
+  harness.reachable = () => true;
 });
 
 afterEach(() => {
@@ -113,6 +120,26 @@ describe('ChatPlacementNotice', () => {
   });
 
   it('should continue the same chat with Tau on the last Tau model only when asked', async () => {
+    render(<ChatPlacementNotice />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Continue here with Tau' }));
+
+    expect(harness.setActiveExecution).toHaveBeenCalledExactlyOnceWith({
+      kind: 'tau',
+      model: 'anthropic-claude-opus-4.8',
+      effort: 'high',
+    });
+  });
+
+  /* The last Tau choice may name a daemon only another tab or device reaches: continuing here runs on this tab. */
+  it('should continue with Tau on this tab when the last Tau choice names a host this tab cannot reach', async () => {
+    harness.lastTauExecution = {
+      kind: 'tau',
+      model: 'anthropic-claude-opus-4.8',
+      effort: 'high',
+      hostId: 'loopback:http://127.0.0.1:4100',
+    };
+    harness.reachable = () => false;
     render(<ChatPlacementNotice />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Continue here with Tau' }));

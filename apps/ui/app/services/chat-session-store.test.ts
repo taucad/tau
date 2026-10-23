@@ -5990,6 +5990,64 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     reopened.store.release(chatId);
   });
 
+  /* An adoption whose placement write landed but whose drop from the chat record did not is finished on a later open. */
+  it('should drop a legacy placement this device already adopted when the chat record still holds it', async () => {
+    const chatId = 'chat_legacy_half_adopted';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    let legacy: string | undefined = 'origin';
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
+          if (legacy === undefined || !(await accept(legacy))) {
+            return undefined;
+          }
+          const adopted = legacy;
+          legacy = undefined;
+          return adopted;
+        },
+      },
+      chatId,
+    );
+
+    expect(legacy).toBeUndefined();
+    expect(placementOnDisk(deps, chatId)).toBe('origin');
+    expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+      kind: 'tau',
+      model,
+      hostId: 'origin',
+    });
+    store.release(chatId);
+  });
+
+  /* A legacy host that is not the placement this device chose since is not this device's to drop. */
+  it('should leave a legacy placement in the chat record that differs from this device’s own placement', async () => {
+    const chatId = 'chat_legacy_other';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'loopback:http://127.0.0.1:4100');
+    let legacy: string | undefined = 'origin';
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const { store } = await openLoaded(
+      {
+        ...deps,
+        adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
+          if (legacy === undefined || !(await accept(legacy))) {
+            return undefined;
+          }
+          legacy = undefined;
+          return 'origin';
+        },
+      },
+      chatId,
+    );
+
+    expect(legacy).toBe('origin');
+    expect(placementOnDisk(deps, chatId)).toBe('loopback:http://127.0.0.1:4100');
+    store.release(chatId);
+  });
+
   it('should leave a legacy placement that names no host here unadopted and in the chat record', async () => {
     const chatId = 'chat_legacy_elsewhere';
     const deps = createStubDeps();

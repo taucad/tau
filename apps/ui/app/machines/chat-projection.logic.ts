@@ -18,6 +18,7 @@ import {
   agentLogEventSchema,
   emptyChatLedger,
   foldReadAnswer,
+  compareSegmentDeviceIds,
   foldProjectionFacts,
   foreignRunStanding,
   liveForeignRun,
@@ -350,17 +351,16 @@ const hashSegment = (bytes: Uint8Array<ArrayBuffer>): number => {
 
 type SegmentSignature = Readonly<{ deviceId: string; byteLength: number; hash: number }>;
 
-const signaturesOf = (segments: readonly ChatLogSegment[]): readonly SegmentSignature[] =>
-  segments
-    .map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }))
-    .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0));
+/** Each segment's signature, in the order given: callers pass segments already in device-id order. */
+const signaturesOf = (sorted: readonly ChatLogSegment[]): readonly SegmentSignature[] =>
+  sorted.map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }));
 
 const signatureKey = ({ deviceId, byteLength, hash }: SegmentSignature): string =>
   `${deviceId}:${String(byteLength)}:${String(hash)}`;
 
 /** One bounded digest of the segment bytes that can change the merged transcript. @public */
 export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =>
-  JSON.stringify(signaturesOf(segments));
+  JSON.stringify(signaturesOf(segments.toSorted(compareSegmentDeviceIds)));
 
 /** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
 const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
@@ -1056,9 +1056,7 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
     return { state: { ...initialChatProjection, resetVersion: state.resetVersion + 1 } };
   }
   if (event.type === 'remote') {
-    const sorted = event.segments.toSorted((left, right) =>
-      left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0,
-    );
+    const sorted = event.segments.toSorted(compareSegmentDeviceIds);
     const signatures = signaturesOf(sorted);
     const digest = JSON.stringify(signatures);
     if (digest === state.remote?.digest) {

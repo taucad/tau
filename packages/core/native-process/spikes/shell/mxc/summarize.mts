@@ -196,7 +196,8 @@ const rows: { label: string; file: string; required: boolean }[] = [
   { label: 'Two-container isolation', file: 'isolation.receipt.json', required: false },
   { label: 'isolation_session two-session', file: 'isolation-session.receipt.json', required: false },
   { label: 'Capability-SID fallback', file: 'fallback.receipt.json', required: false },
-  { label: 'S2 PTY in-container', file: 's2-pty.receipt.json', required: false },
+  { label: 'S2 PTY (plain non-admin user, no restricted token)', file: 's2-pty.receipt.json', required: false },
+  { label: 'S2 PTY inside the fallback restricted token', file: 'fallback-s2-pty.receipt.json', required: false },
   { label: 'Sandbox-user provision', file: 'sandbox-provision.receipt.json', required: false },
 ];
 

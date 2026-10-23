@@ -86,6 +86,10 @@ public static class TauRestrict {
   [StructLayout(LayoutKind.Sequential)] struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public int dwProcessId; public int dwThreadId; }
   [StructLayout(LayoutKind.Sequential)] struct SECURITY_ATTRIBUTES { public int nLength; public IntPtr lpSecurityDescriptor; public int bInheritHandle; }
   [StructLayout(LayoutKind.Sequential, Pack=4)] struct TOKEN_PRIVILEGES1 { public int Count; public long Luid; public int Attr; }
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] struct PROFILEINFO {
+    public int dwSize; public int dwFlags; public string lpUserName; public string lpProfilePath; public string lpDefaultPath;
+    public string lpServerName; public string lpPolicyPath; public IntPtr hProfile;
+  }
 
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr tok);
   [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
@@ -116,6 +120,10 @@ public static class TauRestrict {
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool SetTokenInformation(IntPtr tok, int cls, ref IntPtr info, int len);
   [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool LookupPrivilegeValue(string sys, string name, out long luid);
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool AdjustTokenPrivileges(IntPtr tok, bool disableAll, ref TOKEN_PRIVILEGES1 np, int len, IntPtr prev, IntPtr retLen);
+  [DllImport("userenv.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool LoadUserProfile(IntPtr tok, ref PROFILEINFO pi);
+  [DllImport("userenv.dll", SetLastError=true)] static extern bool CreateEnvironmentBlock(out IntPtr env, IntPtr tok, bool inherit);
+  [DllImport("userenv.dll", SetLastError=true)] static extern bool DestroyEnvironmentBlock(IntPtr env);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr h, uint code);
 
   // token.rs:42-44: DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED == 0x01 | 0x04 | 0x08.
   public const uint FLAGS = 0x1u | 0x4u | 0x8u; // 0x0D
@@ -130,6 +138,8 @@ public static class TauRestrict {
 
   // Diagnostic of the last Restrict(): which logon SID was used and whether the default DACL was set.
   public static string LastRestrictNote = "";
+  // Diagnostic of the last LaunchAsUser(): profile load + per-user environment block.
+  public static string LastLaunchNote = "";
 
   public static string GetLogonSid() {
     IntPtr tok;
@@ -175,11 +185,28 @@ public static class TauRestrict {
   }
 
   // token.rs:519 enable_single_privilege(new_token, "SeChangeNotifyPrivilege").
-  static bool EnableChangeNotify(IntPtr tok) {
-    long luid; if (!LookupPrivilegeValue(null, "SeChangeNotifyPrivilege", out luid)) return false;
+  static bool EnableChangeNotify(IntPtr tok) { return EnablePrivilege(tok, "SeChangeNotifyPrivilege"); }
+
+  static bool EnablePrivilege(IntPtr tok, string name) {
+    long luid; if (!LookupPrivilegeValue(null, name, out luid)) return false;
     TOKEN_PRIVILEGES1 tp; tp.Count = 1; tp.Luid = luid; tp.Attr = 2; // SE_PRIVILEGE_ENABLED
-    return AdjustTokenPrivileges(tok, false, ref tp, Marshal.SizeOf(typeof(TOKEN_PRIVILEGES1)), IntPtr.Zero, IntPtr.Zero);
+    return AdjustTokenPrivileges(tok, false, ref tp, Marshal.SizeOf(typeof(TOKEN_PRIVILEGES1)), IntPtr.Zero, IntPtr.Zero) && Marshal.GetLastWin32Error() == 0;
   }
+
+  // Load the sandbox account profile (LoadUserProfile needs SeBackup + SeRestore enabled on the
+  // ADMIN orchestrator token, the provisioning phase) so the workload gets its own profile + env.
+  static string LoadProfile(IntPtr logonTok, string user) {
+    IntPtr self; string privs = "";
+    if (OpenProcessToken(GetCurrentProcess(), 0x20 | 0x8 /* ADJUST_PRIVILEGES|QUERY */, out self)) {
+      try { privs = "backup=" + EnablePrivilege(self, "SeBackupPrivilege") + " restore=" + EnablePrivilege(self, "SeRestorePrivilege"); }
+      finally { CloseHandle(self); }
+    }
+    PROFILEINFO pi = new PROFILEINFO(); pi.dwSize = Marshal.SizeOf(typeof(PROFILEINFO)); pi.dwFlags = 1 /* PI_NOUI */; pi.lpUserName = user;
+    bool ok = LoadUserProfile(logonTok, ref pi);
+    return "profile=" + ok + (ok ? "" : "(err=" + Marshal.GetLastWin32Error() + ")") + " " + privs;
+  }
+
+  public static void Kill(IntPtr h) { if (h != IntPtr.Zero) TerminateProcess(h, 0xDEAD); }
 
   static IntPtr BuildRestricting(string capSid, string logonSid, out uint count) {
     var sids = new List<string>(); sids.Add(capSid);
@@ -286,10 +313,15 @@ public static class TauRestrict {
     finally { Marshal.ZeroFreeGlobalAllocUnicode(pwPtr); }
     if (!lok) { err = -Marshal.GetLastWin32Error(); return IntPtr.Zero; }
     try {
+      string prof = LoadProfile(logonTok, user);
+      IntPtr env; bool envOk = CreateEnvironmentBlock(out env, logonTok, false);
       IntPtr nt = Restrict(logonTok, capSid, logonSid);
       STARTUPINFO si = NewSi(desktop); PROCESS_INFORMATION pi;
-      bool ok = CreateProcessWithTokenW(nt, 0, app, new StringBuilder(cmdline), CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, IntPtr.Zero, cwd, ref si, out pi);
-      if (!ok) { err = Marshal.GetLastWin32Error(); CloseHandle(nt); return IntPtr.Zero; }
+      bool ok = CreateProcessWithTokenW(nt, 0, app, new StringBuilder(cmdline), CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT, envOk ? env : IntPtr.Zero, cwd, ref si, out pi);
+      if (!ok) err = Marshal.GetLastWin32Error();
+      if (envOk) DestroyEnvironmentBlock(env);
+      LastLaunchNote = prof + " userEnv=" + envOk + " " + LastRestrictNote;
+      if (!ok) { CloseHandle(nt); return IntPtr.Zero; }
       CloseHandle(pi.hThread); CloseHandle(nt); return pi.hProcess;
     } finally { CloseHandle(logonTok); }
   }
@@ -589,16 +621,20 @@ if ($apiOk -and $null -ne $shellPath) {
       $deskRB = New-SessionDesktop 'read-B' @($sandboxB.Sid, $cap2)
       Add-Check 'fallback.desktop.read' 'per-session private desktops + window-station ACEs for the read sessions (sandbox user SID + cap SID participants)' "deskRA=$deskRA deskRB=$deskRB winstaA=$gRA winstaB=$gRB" (($null -ne $deskRA) -and ($null -ne $deskRB) -and ($gRA -like 'ok rc=0') -and ($gRB -like 'ok rc=0')) $null
 
-      $payloadRA = "`$env:TEMP='$outA'; `$env:TMP='$outA'; & '$canaryChild' -SessionId A -OwnSecret '$fA' -OtherSecret '$fB' -NeverSecret '$fN' -OutDir '$outA'"
-      $payloadRB = "`$env:TEMP='$outB'; `$env:TMP='$outB'; & '$canaryChild' -SessionId B -OwnSecret '$fB' -OtherSecret '$fA' -NeverSecret '$fN' -OutDir '$outB'"
+      # Breadcrumb first: distinguishes "child never started" from "child started and stalled".
+      $payloadRA = "Set-Content -LiteralPath '$outA\started-A.txt' -Value STARTED; `$env:TEMP='$outA'; `$env:TMP='$outA'; & '$canaryChild' -SessionId A -OwnSecret '$fA' -OtherSecret '$fB' -NeverSecret '$fN' -OutDir '$outA'"
+      $payloadRB = "Set-Content -LiteralPath '$outB\started-B.txt' -Value STARTED; `$env:TEMP='$outB'; `$env:TMP='$outB'; & '$canaryChild' -SessionId B -OwnSecret '$fB' -OtherSecret '$fA' -NeverSecret '$fN' -OutDir '$outB'"
       $eRA = 0; $eRB = 0
       $hRA = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, (Build-ChildCmd $childShell $payloadRA), $cap1, $logonSid, $env:SystemRoot, $deskRA, [ref]$eRA)
+      $noteRA = [TauRestrict]::LastLaunchNote
       $hRB = [TauRestrict]::LaunchAsUser($sandboxB.Name, $sandboxB.Secure, $childShell, (Build-ChildCmd $childShell $payloadRB), $cap2, $logonSid, $env:SystemRoot, $deskRB, [ref]$eRB)
+      $noteRB = [TauRestrict]::LastLaunchNote
       $xRA = $null; $xRB = $null
-      if ($hRA -ne [IntPtr]::Zero) { $xRA = [TauRestrict]::Wait($hRA, 120000); [TauRestrict]::Close($hRA) }
-      if ($hRB -ne [IntPtr]::Zero) { $xRB = [TauRestrict]::Wait($hRB, 120000); [TauRestrict]::Close($hRB) }
+      if ($hRA -ne [IntPtr]::Zero) { $xRA = [TauRestrict]::Wait($hRA, 120000); if ($xRA -eq -1) { [TauRestrict]::Kill($hRA) }; [TauRestrict]::Close($hRA) }
+      if ($hRB -ne [IntPtr]::Zero) { $xRB = [TauRestrict]::Wait($hRB, 120000); if ($xRB -eq -1) { [TauRestrict]::Kill($hRB) }; [TauRestrict]::Close($hRB) }
       $rRA = ($xRA -eq 0); $rRB = ($xRB -eq 0)
-      Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) exitB=$xRB shell=$childShell" ($rRA -and $rRB) $null
+      $startedRA = Test-Path -LiteralPath (Join-Path $outA 'started-A.txt'); $startedRB = Test-Path -LiteralPath (Join-Path $outB 'started-B.txt')
+      Add-Check 'fallback.read.children.exit' 'read-isolation children (each its own non-admin sandbox user, in its write-restricted token) ran to completion (-1 = timed out and killed)' "launchA=$($hRA -ne [IntPtr]::Zero)(err=$eRA) startedA=$startedRA exitA=$xRA launchB=$($hRB -ne [IntPtr]::Zero)(err=$eRB) startedB=$startedRB exitB=$xRB shell=$childShell" ($rRA -and $rRB) @{ launchA = $noteRA; launchB = $noteRB }
 
       $readOf = { param($f) if (Test-Path -LiteralPath $f) { [string](Get-Content -LiteralPath $f -Raw) } else { '' } }
       $ownRA = & $readOf (Join-Path $outA 'own-read-A.txt'); $ownRB = & $readOf (Join-Path $outB 'own-read-B.txt')
@@ -628,9 +664,13 @@ if ($apiOk -and $null -ne $shellPath) {
 
     # ================= (C) S2 interactive PTY IN-CONTAINER (as the non-admin sandbox user) =============
     $tmpS2 = New-SessionTemp 'sess-temp-s2'
+    # The S2 child writes ONLY into this run's fresh session temp, and the result is published under
+    # its own name: run-nonadmin.ps1 writes s2-pty.receipt.json for a plain non-admin user (no
+    # restricted token), and that file must never be read as the in-token result.
     $s2Out = Join-Path $tmpS2 's2-pty.receipt.json'
-    $s2Final = Join-Path $drop 's2-pty.receipt.json'
-    $payloadS2 = "`$env:TEMP='$tmpS2'; `$env:TMP='$tmpS2'; `$env:MXC_S2PTY_OUT='$s2Out'; `$env:GITHUB_SHA='$($env:GITHUB_SHA)'; `$env:GITHUB_RUN_ID='$($env:GITHUB_RUN_ID)'; & '$s2Child'"
+    $s2Final = Join-Path $drop 'fallback-s2-pty.receipt.json'
+    foreach ($f in @($s2Out, $s2Final)) { if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force } }
+    $payloadS2 = "Set-Content -LiteralPath '$tmpS2\started-s2.txt' -Value STARTED; `$env:TEMP='$tmpS2'; `$env:TMP='$tmpS2'; `$env:MXC_S2PTY_OUT='$s2Out'; `$env:GITHUB_SHA='$($env:GITHUB_SHA)'; `$env:GITHUB_RUN_ID='$($env:GITHUB_RUN_ID)'; & '$s2Child'"
     if (-not $childShell) { $childShell = $shellPath }
     $cmdS2 = Build-ChildCmd $childShell $payloadS2
     $errS2 = 0
@@ -640,14 +680,16 @@ if ($apiOk -and $null -ne $shellPath) {
       $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
       Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
       $hS2 = [TauRestrict]::LaunchAsUser($sandboxA.Name, $sandboxA.Secure, $childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
+      $noteS2 = [TauRestrict]::LastLaunchNote
       $s2LaunchPath = if ($hS2 -eq [IntPtr]::Zero) { "asUser-failed(err=$errS2)" } else { 'asSandboxUser' }
     } else {
       $deskS2 = New-SessionDesktop 's2' @($cap1)
       $hS2 = [TauRestrict]::LaunchSelf($childShell, $cmdS2, $cap1, $logonSid, $env:SystemRoot, $deskS2, [ref]$errS2)
     }
     if ($hS2 -ne [IntPtr]::Zero) {
-      $exitS2 = [TauRestrict]::Wait($hS2, 180000); [TauRestrict]::Close($hS2)
-      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1 = wait timeout; -1073741502 = 0xC0000142)' "exit=$exitS2 launch=$s2LaunchPath shell=$childShell" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath }
+      $exitS2 = [TauRestrict]::Wait($hS2, 180000); if ($exitS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2)
+      $startedS2 = Test-Path -LiteralPath (Join-Path $tmpS2 'started-s2.txt')
+      Add-Check 'fallback.s2Pty.exit' 'S2 PTY child exit code recorded (-1 = timed out and killed; -1073741502 = 0xC0000142)' "exit=$exitS2 started=$startedS2 launch=$s2LaunchPath shell=$childShell" ($exitS2 -eq 0) @{ exit = $exitS2; launchPath = $s2LaunchPath; launchNote = $noteS2 }
     } else {
       Add-Check 'fallback.s2Pty.launch' 'S2 PTY child launched under the write-restricted sandbox token' "launch failed err=$errS2 path=$s2LaunchPath" $false $null
     }
@@ -658,12 +700,17 @@ if ($apiOk -and $null -ne $shellPath) {
         $s2Verdict = "$($s2r.verdict)"
         $s2sub = @{}; foreach ($c in $s2r.checks) { $s2sub[$c.id] = $c.verdict }
         $s2sub['launchPath'] = $s2LaunchPath
-        Add-Check 'fallback.s2Pty.inContainer' 'interactive ConPTY inside the non-admin write-restricted token: tty+resize+ctrl-c+jobcontrol+unicode all pass' "verdict=$s2Verdict launch=$s2LaunchPath" ($s2Verdict -eq 'pass') $s2sub
+        # Attribution: the receipt must come from THIS child, running as the expected sandbox identity.
+        $s2User = "$(($s2r.checks | Where-Object { $_.id -eq 's2.workload.nonAdmin' } | Select-Object -First 1).observed)"
+        $expectUser = if ($mode -eq 'elevated') { $sandboxA.Name } else { $env:USERNAME }
+        $attributed = $s2User -like "*\$expectUser *"
+        if (-not $attributed) { $s2Verdict = "unattributed($s2Verdict)" }
+        Add-Check 'fallback.s2Pty.inContainer' 'interactive ConPTY inside the non-admin write-restricted token (receipt written by this child as the sandbox user): tty+resize+ctrl-c+jobcontrol+unicode all pass' "verdict=$s2Verdict launch=$s2LaunchPath receiptUser=[$s2User] expect=$expectUser" ($attributed -and ($s2r.verdict -eq 'pass')) $s2sub
       } catch {
         Add-Check 'fallback.s2Pty.inContainer' 'S2 PTY receipt parseable' $_.Exception.Message $false $null
       }
     } else {
-      Add-Check 'fallback.s2Pty.inContainer' 'S2 PTY receipt produced' 'no s2-pty.receipt.json' $false @{ launchErr = $errS2 }
+      Add-Check 'fallback.s2Pty.inContainer' 'S2 PTY receipt produced by the in-token child' 'no receipt from the in-token S2 child' $false @{ launchErr = $errS2 }
     }
   } catch {
     Add-Check 'fallback.orchestration' 'fallback orchestration completed without an unhandled error' $_.Exception.Message $false $null

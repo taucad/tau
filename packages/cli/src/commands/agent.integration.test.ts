@@ -10,7 +10,7 @@
  * timing-dependent.
  */
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
@@ -79,11 +79,19 @@ const descendantsOf = async (pid: number): Promise<number[]> => {
   return found;
 };
 
+/** Whether `pid` still runs. A zombie counts as exited: it holds no files, and a parent that never reaps it would keep it forever. */
 const isAlive = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
-    return true;
   } catch {
+    return false;
+  }
+  try {
+    return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' })
+      .trim()
+      .startsWith('Z');
+  } catch {
+    /* `ps` exits non-zero once the process is gone. */
     return false;
   }
 };
@@ -113,7 +121,8 @@ const reap = async (pids: readonly number[], grace: number): Promise<void> => {
       // Exited between the check and the signal.
     }
   }
-  while (alive.length > 0) {
+  const killDeadline = Date.now() + 5000;
+  while (alive.length > 0 && Date.now() < killDeadline) {
     // oxlint-disable-next-line no-await-in-loop -- polling: a SIGKILLed process is gone within moments.
     await new Promise((resolve) => {
       setTimeout(resolve, 20);

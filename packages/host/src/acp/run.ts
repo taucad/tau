@@ -356,16 +356,39 @@ const messageText = (message: ProviderMessage): string | undefined => {
   return text === '' ? undefined : text;
 };
 
-/** Whether a user message admitted a turn of this agent's vendor session `sessionId`. */
-const promptedSession = (message: ProviderMessage, agentId: string, sessionId: string): boolean => {
-  const marker = message.metadata?.tauInternal;
-  return (
-    message.role === 'user' &&
-    isRecord(marker) &&
-    marker['kind'] === 'external-agent' &&
-    marker['agentId'] === agentId &&
-    marker['acpSessionId'] === sessionId
-  );
+/**
+ * Where the vendor session `sessionId` ran its last turn in a transcript: the index of that turn's user message, or -1.
+ * A session's opening turn names it on its marker; a later turn's marker may carry no id, and then continues the
+ * agent's most recently named session.
+ */
+const lastTurnOfSession = (transcript: readonly ProviderMessage[], agentId: string, sessionId: string): number => {
+  let session: string | undefined;
+  let last = -1;
+  for (const [index, message] of transcript.entries()) {
+    const marker = message.metadata?.tauInternal;
+    if (
+      message.role !== 'user' ||
+      !isRecord(marker) ||
+      marker['kind'] !== 'external-agent' ||
+      marker['agentId'] !== agentId
+    ) {
+      continue;
+    }
+    const named = marker['acpSessionId'];
+    if (typeof named === 'string' && named !== '') {
+      session = named;
+    }
+    if (session === sessionId) {
+      last = index;
+    }
+  }
+  return last;
+};
+
+/** Keep a line within `budget` characters: its tail, marked as cut. */
+const tailOf = (line: string, budget: number): string => {
+  const marker = '[earlier text cut] ';
+  return line.length <= budget ? line : `${marker}${line.slice(line.length - (budget - marker.length))}`;
 };
 
 /**
@@ -379,8 +402,9 @@ const promptedSession = (message: ProviderMessage, agentId: string, sessionId: s
  * @param turn - The turn, with the chat's merged transcript.
  * @param sessionId - The vendor session the prompt goes to, or `undefined` for a fresh one.
  * @returns The block, or none when nothing is unseen or this turn sends no new message.
+ * @internal
  */
-const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undefined): readonly ContentBlock[] => {
+export const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undefined): readonly ContentBlock[] => {
   const { transcript, message } = turn;
   if (transcript === undefined || message === undefined) {
     return [];
@@ -389,7 +413,7 @@ const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undefined): 
   const prior = end === -1 ? transcript : transcript.slice(0, end);
   let start = 0;
   if (sessionId !== undefined) {
-    const own = prior.findLastIndex((entry) => promptedSession(entry, turn.agentId, sessionId));
+    const own = lastTurnOfSession(prior, turn.agentId, sessionId);
     if (own !== -1) {
       start = own + 1;
       while (start < prior.length && prior[start]!.role !== 'user') {
@@ -404,10 +428,14 @@ const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undefined): 
   if (lines.length === 0) {
     return [];
   }
+  /* Most recent first within the budget; the newest message alone is cut to it, keeping its tail. */
   const kept: string[] = [];
   let size = 0;
   for (const line of lines.toReversed()) {
-    if (size + line.length > handoffCharacters && kept.length > 0) {
+    if (size + line.length > handoffCharacters) {
+      if (kept.length === 0) {
+        kept.unshift(tailOf(line, handoffCharacters));
+      }
       break;
     }
     kept.unshift(line);

@@ -2866,6 +2866,9 @@ describe('authentication, initialize and prompt content', () => {
     await writeFile(join(segments, 'device-phone.jsonl'), phoneRows([[earlier, 'from the phone', 'phone answer']]));
 
     await runTurn(harness, { chatId, runId: 'run-handoff-1', text: 'first noask' });
+    /* The session's own later turns carry markers without its id: they are still its turns. */
+    await runTurn(harness, { chatId, runId: 'run-handoff-2', text: 'second noask' });
+    await runTurn(harness, { chatId, runId: 'run-handoff-3', text: 'third noask' });
     const later = new Date(Date.now() + 1000).toISOString();
     await writeFile(
       join(segments, 'device-phone.jsonl'),
@@ -2874,16 +2877,19 @@ describe('authentication, initialize and prompt content', () => {
         [later, 'phone again', 'second phone answer'],
       ]),
     );
-    await runTurn(harness, { chatId, runId: 'run-handoff-2', text: 'second noask' });
+    await runTurn(harness, { chatId, runId: 'run-handoff-4', text: 'fourth noask' });
 
-    const [first, second] = promptFrames(harness.frames);
+    const [first, second, third, fourth] = promptFrames(harness.frames);
     expect(first).toContain('tau://chat-handoff');
     expect(first).toContain('from the phone');
     expect(first).toContain('phone answer');
     expect(first?.indexOf('first noask')).toBeLessThan(first?.indexOf('tau://chat-handoff') ?? -1);
-    expect(second).toContain('tau://chat-handoff');
-    expect(second).toContain('phone again');
-    expect(second).not.toContain('from the phone');
+    expect(second).not.toContain('tau://chat-handoff');
+    expect(third).not.toContain('tau://chat-handoff');
+    expect(fourth).toContain('tau://chat-handoff');
+    expect(fourth).toContain('phone again');
+    expect(fourth).not.toContain('from the phone');
+    expect(fourth).not.toContain('second noask');
   }, 60_000);
 
   it('falls textual Tau context back to ordinary ACP text when embedded context is unsupported', async () => {

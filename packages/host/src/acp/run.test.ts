@@ -6,11 +6,11 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ContentBlock } from '@agentclientprotocol/sdk';
-import type { ExternalAgentTurn, UserProviderMessage } from '@taucad/agent-host';
+import type { ExternalAgentTurn, ProviderMessage, UserProviderMessage } from '@taucad/agent-host';
 
 import { createCallbackLogic } from 'xstate';
 
-import { createAcpExternalAgentPort } from '#acp/run.js';
+import { createAcpExternalAgentPort, handoffBlocks } from '#acp/run.js';
 import type { AcpConnectionCommand, AcpConnectionInput } from '#acp/acp-session.machine.js';
 import type { AcpAdapter } from '#acp/registry.js';
 
@@ -192,5 +192,63 @@ describe('ACP attachment materialisation (D23)', () => {
     });
 
     expect(blocks).toEqual([{ type: 'image', data: 'bGVnYWN5', mimeType: 'image/png' }]);
+  });
+});
+
+describe('the chat handoff an ACP prompt carries', () => {
+  const marked = (id: string, content: string, acpSessionId?: string): ProviderMessage => ({
+    id,
+    role: 'user',
+    content,
+    metadata: {
+      tauInternal: {
+        kind: 'external-agent',
+        agentId: 'codex',
+        runKind: 'acp',
+        ...(acpSessionId === undefined ? {} : { acpSessionId }),
+      },
+    },
+  });
+  const said = (id: string, role: 'user' | 'assistant', text: string): ProviderMessage =>
+    role === 'user' ? { id, role, content: text } : { id, role, content: [{ type: 'text', text }] };
+  const turnOf = (transcript: readonly ProviderMessage[], message: ProviderMessage): ExternalAgentTurn =>
+    ({ agentId: 'codex', message, transcript }) as unknown as ExternalAgentTurn;
+  const textOf = (blocks: readonly ContentBlock[]): string =>
+    blocks.map((block) => (block.type === 'resource' && 'text' in block.resource ? block.resource.text : '')).join('');
+
+  /* Only a session's opening turn has to name it: its later turns' markers continue the most recent named session. */
+  it('should carry only the foreign turn after a session ran turns 1–3 with bare markers on 2 and 3', () => {
+    const current = marked('turn-4', 'fourth');
+    const transcript = [
+      marked('turn-1', 'first', 'session-1'),
+      said('answer-1', 'assistant', 'one'),
+      marked('turn-2', 'second'),
+      said('answer-2', 'assistant', 'two'),
+      marked('turn-3', 'third'),
+      said('answer-3', 'assistant', 'three'),
+      said('phone-1', 'user', 'from the phone'),
+      said('phone-answer-1', 'assistant', 'phone answer'),
+      current,
+    ];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), 'session-1'));
+
+    expect(text).toContain('from the phone');
+    expect(text).toContain('phone answer');
+    expect(text).not.toContain('second');
+    expect(text).not.toContain('three');
+  });
+
+  /* The block is bounded whatever the newest message's size: its tail is kept, and says it was cut. */
+  it('should cut an oversized newest message to the budget, keeping its tail', () => {
+    const current = marked('turn-2', 'next');
+    const huge = `${'x'.repeat(40_000)}THE END`;
+    const transcript = [said('phone-1', 'user', huge), current];
+
+    const text = textOf(handoffBlocks(turnOf(transcript, current), undefined));
+
+    expect(text.length).toBeLessThan(25_000);
+    expect(text).toContain('THE END');
+    expect(text).toContain('[earlier text cut]');
   });
 });

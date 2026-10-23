@@ -186,7 +186,14 @@ const cancelAsid = (asidInfo: { setOk: boolean; afterAsid: number } | undefined,
       killed++;
     }
   }
-  return { strategy: 'asid', blocked: false, enumerated: report.match ?? [], killed, report, straysAtCancel: strays(mark) };
+  return {
+    strategy: 'asid',
+    blocked: false,
+    enumerated: report.match ?? [],
+    killed,
+    report,
+    straysAtCancel: strays(mark),
+  };
 };
 
 // ── one strategy × adversary run ─────────────────────────────────────────────────────────────
@@ -304,8 +311,7 @@ const runCombo = async (strategy: Strategy, kind: Adversary): Promise<Record<str
 };
 
 // ── identity ─────────────────────────────────────────────────────────────────────────────────
-const sourceSha = (): string =>
-  process.env['GITHUB_SHA'] ?? run('git', ['-C', here, 'rev-parse', 'HEAD']).out.trim();
+const sourceSha = (): string => process.env['GITHUB_SHA'] ?? run('git', ['-C', here, 'rev-parse', 'HEAD']).out.trim();
 
 const identity = () => ({
   row,
@@ -353,7 +359,14 @@ const preflight = (): Record<string, unknown> => {
       existsSync(enumBin) ? enumSelf.out.includes('"helper":"tau-asid-enum"') : false,
     ),
   ];
-  return { checks, detail: { plain: plain.out.slice(0, 200), setasid: setasid.out.slice(0, 400), enumSelf: enumSelf.out.slice(0, 500) } };
+  return {
+    checks,
+    detail: {
+      plain: plain.out.slice(0, 200),
+      setasid: setasid.out.slice(0, 400),
+      enumSelf: enumSelf.out.slice(0, 500),
+    },
+  };
 };
 
 // ── drive the matrix ───────────────────────────────────────────────────────────────────────────
@@ -392,7 +405,13 @@ for (const strategy of strategies) {
       identity: identity(),
       ...result,
     });
-    summary.push({ strategy, adversary, verdict: result['verdict'], status: result['status'], canary: result['canary'] });
+    summary.push({
+      strategy,
+      adversary,
+      verdict: result['verdict'],
+      status: result['status'],
+      canary: result['canary'],
+    });
     process.stdout.write(`[${row}] ${strategy} × ${adversary}: ${result['verdict']} (${result['status']})\n`);
   }
 }

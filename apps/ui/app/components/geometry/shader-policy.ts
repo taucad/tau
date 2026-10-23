@@ -344,6 +344,7 @@ export const shaderEvidence = {
       `${sectionStencilCapsBrowser}::should show overlap on exactly the pixels where two owners overlap`,
     ],
     'depth-clipping': [
+      'packages/viewer/src/graphics/three/webgpu-depth-sampling.browser.test.ts::should preserve rasterized cap-outline depth on a front surface at 5K on %s',
       `${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`,
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should occlude grid and hidden outlines through actual stencil caps',
       `${sectionStencilCapsUnit}::should cap with the shared surface depth bias and the cap stencil test`,

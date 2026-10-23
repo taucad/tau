@@ -1,5 +1,8 @@
 import { expect, it } from 'vitest';
 import {
+  PerspectiveCamera,
+  Color,
+  NoBlending,
   AlwaysDepth,
   AlwaysStencilFunc,
   DepthStencilFormat,
@@ -18,7 +21,14 @@ import {
   UnsignedInt248Type,
 } from 'three';
 import { NodeMaterial, QuadMesh, WebGLBackend, WebGPUBackend } from 'three/webgpu';
-import { float, texture, vec4 } from 'three/tsl';
+import { float, texture, vec4, expression, Fn } from 'three/tsl';
+import { createSectionCapOutlineNodeMaterial } from '#graphics/three/materials/section-cap-outline.node.js';
+import {
+  createSectionCapOutlineFaces,
+  writeSectionCapOutlineCamera,
+  writeSectionCapOutlineFaces,
+} from '#graphics/three/materials/section-cap-outline.material.js';
+import type { Node } from 'three/webgpu';
 import { createRenderer } from '#graphics/three/renderer.js';
 
 // oxlint-disable no-await-in-loop -- Sequential reuse and disposal are the behavior under test.
@@ -228,3 +238,61 @@ it.each(['webgpu', 'webgl'] as const)(
 );
 
 // oxlint-enable no-await-in-loop -- End sequential lifecycle checks.
+
+it.each(['webgpu', 'webgl'] as const)(
+  'should preserve rasterized cap-outline depth on a front surface at 5K on %s',
+  async (execution) => {
+    const renderer = await createRenderer('showcase', execution, document.createElement('canvas'));
+    expect(renderer.backend).toBeInstanceOf(execution === 'webgpu' ? WebGPUBackend : WebGLBackend);
+    const target = new RenderTarget(5120, 2880, { samples: 0, type: FloatType, depthBuffer: false });
+    const camera = new PerspectiveCamera(35, 5120 / 2880, 242.49394217288253, 1454.8833061776754);
+    camera.up.set(0, 0, 1);
+    camera.position.set(216.7, 216.7, 216.7);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld();
+    const geometry = new PlaneGeometry(170, 170);
+    const faces = createSectionCapOutlineFaces();
+    writeSectionCapOutlineFaces(faces, [{ plane: { normal: [1, 0, 0], constant: 0 }, bounds: [], cutId: 'raster' }], 3);
+    writeSectionCapOutlineCamera(faces, camera, 2880);
+    const material = createSectionCapOutlineNodeMaterial(faces, 0xff_ff_ff);
+    // Compare the shader's numeric depth with the rasterizer in one floating-point
+    // output. A separate EqualDepth draw confounds vertex-code and D24 rounding.
+    // oxlint-disable-next-line new-cap -- Three's Fn builds a shader graph.
+    const rasterDepth = Fn(
+      (builder) => expression(`${builder.getFragCoord().slice(0, -2)}z`, 'float') as unknown as Node<'float'>,
+    )();
+    material.fragmentNode = vec4(material.depthNode as Node<'float'>, rasterDepth, 0, 1);
+    material.blending = NoBlending;
+    material.depthTest = false;
+    material.depthWrite = false;
+    const outline = new Mesh(geometry, material);
+    outline.rotation.set(0.31, 0.47, 0.13);
+    outline.position.set(17.126, -11.547, 6.289);
+    const scene = new Scene();
+    scene.background = new Color(0);
+    scene.add(outline);
+    try {
+      renderer.setRenderTarget(target);
+      renderer.render(scene, camera);
+      const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, 5120, 2880);
+      expect(pixels).toBeInstanceOf(Float32Array);
+      let ink = 0;
+      let changed = 0;
+      for (let offset = 0; offset < pixels.length; offset += 4) {
+        if (pixels[offset + 3]! > 0 && pixels[offset]! > 0) {
+          ink++;
+          changed += Number(pixels[offset] !== pixels[offset + 1]);
+        }
+      }
+      expect(ink).toBeGreaterThan(1000);
+      expect(changed, 'Non-crossing depth must equal the rasterized depth, without world-space reprojection').toBe(0);
+    } finally {
+      renderer.setRenderTarget(null);
+      geometry.dispose();
+      material.dispose();
+      target.dispose();
+      renderer.dispose();
+    }
+  },
+  60_000,
+);

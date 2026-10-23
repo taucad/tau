@@ -1,7 +1,7 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`Loop`/`Break` are shader graph factories */
 import { squarePixelStripCoverage } from '#graphics/three/materials/line-coverage.js';
 import { namedUniformArray } from '#graphics/three/materials/named-uniform-array.js';
-import { Color, DoubleSide, WebGPUCoordinateSystem } from 'three';
+import { Color, DoubleSide, REVISION, WebGPUCoordinateSystem } from 'three';
 import type { PerspectiveCamera, Vector4 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import type { Node, NodeBuilder } from 'three/webgpu';
@@ -13,6 +13,7 @@ import {
   cameraViewMatrix,
   dFdx,
   dFdy,
+  expression,
   float,
   Fn,
   frontFacing,
@@ -22,6 +23,7 @@ import {
   max,
   min,
   positionWorld,
+  positionView,
   select,
   uniform,
   vec2,
@@ -89,16 +91,39 @@ const outlineNodes = (faces: SectionCapOutlineFaces): SectionCapOutlineNodes => 
   const coverage = outline.x;
   // The crossing's depth in the renderer's own convention; a fragment with no crossing keeps its own.
   const depth = Fn((builder: NodeBuilder) => {
-    const ray = select(forward.w.greaterThan(0.5), forward.xyz, positionWorld.sub(eye.xyz));
-    const view = cameraViewMatrix.mul(vec4(positionWorld.add(ray.mul(outline.y)), 1)).toVar();
-    if (builder.renderer.logarithmicDepthBuffer) {
-      return (builder as NodeBuilder & { camera?: Partial<PerspectiveCamera> }).camera?.isPerspectiveCamera === true
-        ? viewZToLogarithmicDepth(view.z, cameraNear, cameraFar)
-        : viewZToOrthographicDepth(view.z, cameraNear, cameraFar);
+    const perspective =
+      (builder as NodeBuilder & { camera?: Partial<PerspectiveCamera> }).camera?.isPerspectiveCamera === true;
+    // Reprojecting interpolated world position can round to a different depth
+    // than the rasterizer. Preserve geometric depth unless the rim actually
+    // moves to a cap-plane crossing; no extra coplanar bias belongs on the line.
+    const fragmentCoordinate = builder.getFragCoord();
+    // Three r184 exposes only the xy swizzle; retain the backend's builtin declaration
+    // and select z. Fail closed if a Three upgrade changes this code-generation seam.
+    if (REVISION !== '184' || !fragmentCoordinate.endsWith('.xy')) {
+      throw new Error('Requalify section-outline raster depth for this Three revision');
     }
-    const clip = cameraProjectionMatrix.mul(view).toVar();
-    const ndc = clip.z.div(clip.w);
-    return builder.renderer.coordinateSystem === WebGPUCoordinateSystem ? ndc : ndc.mul(0.5).add(0.5);
+    const original = builder.renderer.logarithmicDepthBuffer
+      ? perspective
+        ? viewZToLogarithmicDepth(positionView.z, cameraNear, cameraFar)
+        : viewZToOrthographicDepth(positionView.z, cameraNear, cameraFar)
+      : (expression(`${fragmentCoordinate.slice(0, -2)}z`, 'float') as unknown as Node<'float'>);
+    const result = original.toVar();
+    If(outline.y.lessThan(0), () => {
+      const ray = select(forward.w.greaterThan(0.5), forward.xyz, positionWorld.sub(eye.xyz));
+      const view = cameraViewMatrix.mul(vec4(positionWorld.add(ray.mul(outline.y)), 1)).toVar();
+      if (builder.renderer.logarithmicDepthBuffer) {
+        result.assign(
+          perspective
+            ? viewZToLogarithmicDepth(view.z, cameraNear, cameraFar)
+            : viewZToOrthographicDepth(view.z, cameraNear, cameraFar),
+        );
+      } else {
+        const clip = cameraProjectionMatrix.mul(view).toVar();
+        const ndc = clip.z.div(clip.w);
+        result.assign(builder.renderer.coordinateSystem === WebGPUCoordinateSystem ? ndc : ndc.mul(0.5).add(0.5));
+      }
+    });
+    return result;
   })();
   const nodes = { coverage, depth };
   nodesByFaces.set(faces, nodes);

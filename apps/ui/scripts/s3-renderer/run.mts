@@ -67,7 +67,7 @@ const sampleInterval = 250;
 const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'));
 const electronPath = desktopRequire('electron') as unknown as string;
 const isWindows = process.platform === 'win32';
-// run-nonadmin.ps1 sets this: the standard user inherits the administrator's TEMP and AppData paths, which it cannot
+// Set by run-nonadmin.ps1: the standard user inherits the administrator's TEMP and AppData paths, which it cannot
 // write, so they move to a home it owns before Playwright or Electron reads them.
 if (process.env['S3_USER_HOME']) {
   const home = process.env['S3_USER_HOME'];
@@ -183,8 +183,8 @@ const packageFixture = async (): Promise<{ executable: string; clientRoot: strin
   // With --skip-build an earlier package is reused, so a run as another user needs neither network nor write access.
   // Only a missing package is rebuilt: an unreadable one (another user's ACL) must fail here, not be half deleted.
   if (values['skip-build']) {
-    const existing = await stat(executable).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') {
+    const existing = await stat(executable).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return undefined;
       }
       throw error;

@@ -3,7 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
 const lookupConfirmDelay = 1000;
-vi.mock('#lib/error-reporting.js', () => ({ reportUiError, isErrorTrackerListening: () => true }));
+vi.mock('#lib/error-reporting.js', () => ({
+  reportUiError,
+  isErrorTrackerListening: () => true,
+  setQueuedErrorTagger: () => undefined,
+  retagQueuedErrors: () => undefined,
+}));
 
 /** This bundle's build id and the deploy that replaced it, set by {@link load} from the real module. */
 let ownBuildId = 0;
@@ -78,6 +83,91 @@ afterEach(() => {
 });
 
 describe('installStaleBuildRecovery', () => {
+  it('should decide a failure the reload covered again when the reload stalls and the server names this build', async () => {
+    const {
+      installStaleBuildRecovery,
+      readStaleBuildOutcome,
+      classifyStaleBuildFailure,
+      subscribeGenuineFailures,
+      reloadTimeout,
+    } = await load();
+    const fetchMock = stubServer(deployedBuildId);
+    const reload = stubReload();
+    uninstall = installStaleBuildRecovery();
+    const heard: unknown[] = [];
+    const unsubscribe = subscribeGenuineFailures((failure) => {
+      heard.push(failure);
+    });
+    const first = new TypeError('Importing a module script failed.');
+    const second = new TypeError('Importing a module script failed.');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: first }));
+    await settle();
+    expect(reload).toHaveBeenCalledOnce();
+    // A failure while the reload is pending shares its explanation, for now.
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: second }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readStaleBuildOutcome(first)).toBe('reloading');
+    expect(readStaleBuildOutcome(second)).toBe('reloading');
+    const tag = classifyStaleBuildFailure(second);
+
+    // The page never leaves, and by the stall check the server names this build again.
+    fetchMock.mockImplementation(async () => Response.json({ buildId: ownBuildId }));
+    await vi.advanceTimersByTimeAsync(reloadTimeout + lookupConfirmDelay * 3);
+
+    expect(readStaleBuildOutcome(first)).toBe('current');
+    expect(readStaleBuildOutcome(second)).toBe('current');
+    await expect(tag).resolves.toBe('current');
+    expect(heard).toStrictEqual([first, second]);
+    unsubscribe();
+  });
+
+  it('should settle a failure the reload covered as reloading once the page leaves, and decide it no further', async () => {
+    const {
+      installStaleBuildRecovery,
+      readStaleBuildOutcome,
+      classifyStaleBuildFailure,
+      subscribeGenuineFailures,
+      reloadTimeout,
+    } = await load();
+    const fetchMock = stubServer(deployedBuildId);
+    stubReload();
+    uninstall = installStaleBuildRecovery();
+    const heard: unknown[] = [];
+    const unsubscribe = subscribeGenuineFailures((failure) => {
+      heard.push(failure);
+    });
+    const failure = new TypeError('Importing a module script failed.');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: failure }));
+    await settle();
+    const tag = classifyStaleBuildFailure(failure);
+    globalThis.dispatchEvent(new Event('pagehide'));
+
+    // The tracker's held event is released at once, as a deploy explained it.
+    await expect(tag).resolves.toBe('superseded');
+    fetchMock.mockImplementation(async () => Response.json({ buildId: ownBuildId }));
+    await vi.advanceTimersByTimeAsync(reloadTimeout + lookupConfirmDelay * 3);
+    expect(readStaleBuildOutcome(failure)).toBe('reloading');
+    expect(heard).toStrictEqual([]);
+    unsubscribe();
+  });
+
+  it("should hand a failure only Vite's preloader reported to the error tracker when the page leaves first", async () => {
+    const { installStaleBuildRecovery } = await load();
+    stubServer(deployedBuildId);
+    stubReload();
+    uninstall = installStaleBuildRecovery();
+    const failure = new TypeError('Failed to fetch dynamically imported module: /assets/a-1.js');
+
+    globalThis.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: failure }));
+    globalThis.dispatchEvent(new Event('pagehide'));
+
+    expect(reportUiError).toHaveBeenCalledExactlyOnceWith(failure);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(reportUiError).toHaveBeenCalledOnce();
+  });
+
   it('should recover from a module load failure nothing handled, without any error reporter', async () => {
     const { installStaleBuildRecovery } = await load();
     const fetchMock = stubServer(deployedBuildId);

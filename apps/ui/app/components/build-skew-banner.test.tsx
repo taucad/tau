@@ -107,9 +107,40 @@ afterEach(() => {
   }
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  sessionStorage.clear();
 });
 
 describe('build-id skew guard (DF20)', () => {
+  it("hides the prompt while the page's own automatic reload is pending, and shows it once that reload stalls", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // A page a second after load, untouched: a deploy's failure reloads it on its own.
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...globalThis.location, reload });
+    const { BuildSkewBanner, buildId, isReloadOffered } = await load();
+    const { recoverFromStaleBuild, readReloadState, reloadTimeout } = await import('#lib/stale-build-recovery.js');
+    answerLiveBuild(buildId + 1);
+    render(<BuildSkewBanner />);
+
+    await act(async () => {
+      void recoverFromStaleBuild(new TypeError('Importing a module script failed.'));
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(readReloadState()).toBe('pending');
+    expect(isReloadOffered()).toBe(true);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(reloadTimeout + 3000);
+    });
+
+    expect(readReloadState()).toBe('stalled');
+    expect(await screen.findByRole('alert')).toHaveTextContent('A newer version of Tau is available');
+  });
+
   it('stops durable writes at once when a newer build announces itself, before the server answers', async () => {
     const { BuildSkewBanner, buildId, isBuildSuperseded, isReloadOffered } = await load();
     const server = serveLiveBuild();

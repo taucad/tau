@@ -5,6 +5,7 @@ import * as Sentry from '@sentry/react';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 import {
   beforeSendSentryEvent,
+  captureQueuedUiError,
   consoleBreadcrumbTextLimit,
   createBeforeSend,
   sentryRelease,
@@ -203,6 +204,88 @@ describe('createBeforeSend', () => {
       expect(events).toHaveLength(1);
       expect(events[0]?.[1].tags).toMatchObject({ stale_build: 'superseded' });
       expect(events[0]?.[1].level).toBe('info');
+    } finally {
+      await Sentry.close();
+    }
+  });
+
+  it('should send an error a previous page queued with the time and stale-build tag it was queued with', async () => {
+    const sent: unknown[] = [];
+    const describeFailure = vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'current');
+    Sentry.init({
+      dsn: 'https://public@o0.ingest.sentry.io/0',
+      defaultIntegrations: false,
+      transport: () => ({
+        send: async (envelope) => {
+          sent.push(envelope);
+          return {};
+        },
+        flush: async () => true,
+      }),
+      beforeSend: createBeforeSend(describeFailure),
+    });
+    try {
+      const time = Date.UTC(2026, 9, 23, 12);
+      captureQueuedUiError({
+        id: 'a',
+        name: 'TypeError',
+        message: 'Importing a module script failed.',
+        stack: 'TypeError: Importing a module script failed.',
+        time,
+        tags: { stale_build: 'superseded', route: 'w' },
+      });
+      await Sentry.flush(1000);
+
+      const events = sent.map((envelope) => (envelope as [unknown, Array<[{ type: string }, ErrorEvent]>])[1][0]);
+      expect(events).toHaveLength(1);
+      const [, event] = events[0]!;
+      expect(event.timestamp).toBe(time / 1000);
+      // The page that queued it decided; this page knows nothing of it and is not asked.
+      expect(event.tags).toMatchObject({
+        stale_build: 'superseded',
+        route: 'w',
+      });
+      expect(event.level).toBe('info');
+      expect(event.exception?.values?.[0]).toMatchObject({
+        type: 'TypeError',
+        value: 'Importing a module script failed.',
+      });
+      expect(describeFailure).not.toHaveBeenCalled();
+    } finally {
+      await Sentry.close();
+    }
+  });
+
+  it("should tag this page's own queued value from its settled decision, not the tag it was queued with", async () => {
+    const sent: unknown[] = [];
+    const original = new TypeError('Importing a module script failed.');
+    Sentry.init({
+      dsn: 'https://public@o0.ingest.sentry.io/0',
+      defaultIntegrations: false,
+      transport: () => ({
+        send: async (envelope) => {
+          sent.push(envelope);
+          return {};
+        },
+        flush: async () => true,
+      }),
+      beforeSend: createBeforeSend(async (failure) => (failure === original ? 'current' : 'unknown')),
+    });
+    try {
+      captureQueuedUiError(
+        {
+          id: 'b',
+          name: 'TypeError',
+          message: original.message,
+          time: Date.now(),
+          tags: { stale_build: 'unknown' },
+        },
+        original,
+      );
+      await Sentry.flush(1000);
+
+      const events = sent.map((envelope) => (envelope as [unknown, Array<[{ type: string }, ErrorEvent]>])[1][0]);
+      expect(events[0]?.[1].tags).toMatchObject({ stale_build: 'current' });
     } finally {
       await Sentry.close();
     }

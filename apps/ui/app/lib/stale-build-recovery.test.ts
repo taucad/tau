@@ -523,7 +523,7 @@ describe('createStaleBuildRecovery', () => {
       expect(recovery.classify(failure())).toBe(tag);
     });
 
-    it('should keep a stalled reload explained, and offered, when the stall check gets no answer', async () => {
+    it('should keep a stalled reload explained, and decide what it covered as offered, when the stall check gets no answer', async () => {
       vi.useFakeTimers();
       let served: number | undefined = deployedBuildId;
       const { recovery, onSuperseded, onGenuineFailure } = setup({
@@ -538,7 +538,9 @@ describe('createStaleBuildRecovery', () => {
 
       expect(recovery.readReloadState()).toBe('stalled');
       expect(onSuperseded).toHaveBeenCalledWith(deployedBuildId);
-      expect(recovery.readOutcome(error)).toBe('reloading');
+      // The page never left: the reload's provisional outcome is decided again, as offered.
+      expect(recovery.readOutcome(error)).toBe('superseded');
+      expect(recovery.classify(error)).toBe('superseded');
       expect(onGenuineFailure).not.toHaveBeenCalled();
     });
 

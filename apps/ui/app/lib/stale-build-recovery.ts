@@ -30,7 +30,9 @@
  * The recovery asks no server itself: `build-skew` owns every `/health/build` answer and the
  * verdict it supports (`live`, `replaced`, `unknown`, with the same confirmation rule both ways),
  * and every outcome here derives from that one state, once: a later verdict (a rollback ending)
- * never turns a failure a deploy explained into a bug report. One failure is decided once, however
+ * never turns a failure a deploy explained into a bug report. The one provisional outcome is
+ * `reloading`: it settles when the page actually leaves; a reload that stalls decides what it
+ * covered again (offered, or genuine once the server names this build). One failure is decided once, however
  * many channels report it. The error tracker hears every chunk failure, explained or not (its own
  * handlers, or `reportToErrorTracker` for channels it does not capture), and `beforeSend` tags it
  * `stale_build` = `superseded` | `current` | `unknown` instead of dropping it, since Sentry discards
@@ -50,8 +52,14 @@ import {
   serverConfirmations,
 } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import { isErrorTrackerListening, reportUiError } from '#lib/error-reporting.js';
+import {
+  isErrorTrackerListening,
+  reportUiError,
+  retagQueuedErrors,
+  setQueuedErrorTagger,
+} from '#lib/error-reporting.js';
 import { readSessionStorage } from '#lib/session-storage.js';
+import { isWeakKey } from '#lib/weak-key.js';
 
 /**
  * What a module load failure turned out to be.
@@ -170,13 +178,18 @@ export type FailureSource = 'boundary' | 'global' | 'preload';
 const capturedBySentry: Readonly<Record<FailureSource, boolean>> = { global: true, preload: false, boundary: false };
 
 /**
- * Milliseconds the error tracker's `beforeSend` waits for a failure's decision before tagging it with
- * what is known: the slowest lookup `build-skew` makes (one answer and its confirmations, each within
- * the request timeout, `lookupConfirmDelay` apart), derived from those constants so it cannot drift,
- * plus a margin for the decision's own work.
+ * Milliseconds the slowest lookup `build-skew` makes takes: one answer and its confirmations, each
+ * within the request timeout, `lookupConfirmDelay` apart, derived from those constants so it cannot drift.
  */
-export const staleBuildTagWait =
-  (1 + serverConfirmations) * liveBuildIdTimeout + serverConfirmations * lookupConfirmDelay + 2000;
+const slowestLookup = (1 + serverConfirmations) * liveBuildIdTimeout + serverConfirmations * lookupConfirmDelay;
+
+/**
+ * Milliseconds the error tracker's `beforeSend` waits for a failure's decision before tagging it with
+ * what is known: a reload's wait to stall ({@link reloadTimeout}, during which a `reloading` outcome
+ * is provisional) and the stall check's lookup, plus a margin for the decision's own work. The page
+ * leaving settles every wait at once.
+ */
+export const staleBuildTagWait = reloadTimeout + slowestLookup + 2000;
 
 /** Milliseconds a failure only `vite:preloadError` reported waits for the channel Vite rethrows it into. */
 export const preloadFollowUpDelay = 1000;
@@ -195,6 +208,9 @@ export type StaleBuildRecovery = {
   /**
    * Decide, and act on, one module load failure. The same failure always gets the same answer: a
    * later verdict (a rollback ending) never turns a failure a deploy explained into a bug report.
+   * The exception is `reloading`, which is provisional: it settles when the page leaves, and a
+   * reload that stalls decides what it covered again (`superseded`, or `current` once the server
+   * names this build).
    */
   readonly recover: (failure: unknown, source?: FailureSource) => Promise<StaleBuildOutcome>;
   /**
@@ -217,11 +233,15 @@ export type StaleBuildRecovery = {
   readonly readReloadState: () => ReloadState;
   /** Subscribe to each change of {@link StaleBuildRecovery.readReloadState}. */
   readonly subscribeReloadState: (listener: () => void) => () => void;
+  /**
+   * The page is going (`pagehide`): a pending reload happened, so what it covered settles as
+   * `reloading`; failures only Vite's preloader reported go to the tracker now; and every wait for a
+   * decision ends with what is known.
+   */
+  readonly leave: () => void;
 };
 
 const guardFor = (from: number, to: number): string => `${String(from)}>${String(to)}`;
-
-const isKey = (failure: unknown): failure is WeakKey => typeof failure === 'object' && failure !== null;
 
 /**
  * Create the recovery for one page.
@@ -235,8 +255,10 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   type FailureRecord = {
     /** The decision, made (and acted on) once. */
     decision?: Promise<StaleBuildOutcome>;
-    /** The settled outcome, which never changes. */
+    /** The outcome, which never changes once settled. */
     outcome?: StaleBuildOutcome;
+    /** `reloading` until the page leaves; a stalled reload decides it again. */
+    provisional: boolean;
     /** The verdict the outcome rested on, for the error tracker's tag. */
     verdict?: ServerVerdict;
     /** Channels it arrived through ({@link FailureSource}). */
@@ -252,7 +274,13 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   const recordOf = (failure: WeakKey): FailureRecord => {
     let record = records.get(failure);
     if (record === undefined) {
-      record = { sources: new Set(), seenByTracker: false, reportedToErrorTracker: false, reportedToAnalytics: false };
+      record = {
+        sources: new Set(),
+        provisional: false,
+        seenByTracker: false,
+        reportedToErrorTracker: false,
+        reportedToAnalytics: false,
+      };
       records.set(failure, record);
     }
     return record;
@@ -270,6 +298,11 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   };
 
   const isCapturedBySentry = (record: FailureRecord): boolean => record.seenByTracker;
+  /** Failures decided `reloading` while the reload is pending: settled by the page leaving, or decided again. */
+  const coveredByReload = new Set<WeakKey>();
+  /** Failures only Vite's preloader has reported, waiting for the channel it rethrows into. */
+  const awaitingFollowUp = new Set<WeakKey>();
+  let hasLeft = false;
 
   /** Hand a failure to the error tracker once, unless a channel the tracker captures itself saw it. */
   const reportToErrorTracker = (failure: WeakKey): void => {
@@ -279,8 +312,10 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
     if (record.sources.size === 1 && record.sources.has('preload')) {
       // Only Vite's preloader saw it so far: give the channel it rethrows into the chance first.
+      awaitingFollowUp.add(failure);
       record.preloadWait ??= setTimeout(() => {
         record.preloadWait = undefined;
+        awaitingFollowUp.delete(failure);
         if (!record.reportedToErrorTracker && !isCapturedBySentry(record)) {
           record.reportedToErrorTracker = true;
           options.reportToErrorTracker?.(failure);
@@ -290,13 +325,23 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
     clearTimeout(record.preloadWait);
     record.preloadWait = undefined;
+    awaitingFollowUp.delete(failure);
     record.reportedToErrorTracker = true;
     options.reportToErrorTracker?.(failure);
   };
 
-  /** Record a settled decision; analytics hears a genuine one now, and never later. */
-  const settle = (failure: WeakKey, outcome: StaleBuildOutcome): void => {
+  /** Record a decision; analytics hears a genuine one when it settles, and never later. */
+  const settle = (failure: WeakKey, decided: StaleBuildOutcome): void => {
     const record = recordOf(failure);
+    let outcome = decided;
+    if (decided === 'reloading' && !hasLeft && readReloadState() !== 'pending') {
+      // The reload was already found stalled (`superseded`) or taken back by a live verdict (`current`).
+      outcome = readReloadState() === 'stalled' ? 'superseded' : 'current';
+    }
+    record.provisional = outcome === 'reloading' && !hasLeft;
+    if (record.provisional) {
+      coveredByReload.add(failure);
+    }
     record.outcome = outcome;
     record.verdict = liveBuild.readVerdict();
     if (outcome === 'current' && !record.reportedToAnalytics) {
@@ -387,16 +432,25 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     setTimeout(() => {
       const offerIfStillReplaced = async (): Promise<void> => {
         const stillVerdict = await askVerdict();
-        if (readReloadState() !== 'pending') {
+        if (hasLeft || readReloadState() !== 'pending') {
           return;
         }
+        // What the reload covered was provisional; the page is still here, so it is decided normally.
+        const covered = [...coveredByReload];
+        coveredByReload.clear();
         if (stillVerdict === 'live') {
           setReloadState('idle');
+          for (const failure of covered) {
+            settle(failure, 'current');
+          }
           return;
         }
         // No answer keeps the explanation the deploy gave: only the server naming this build takes it back.
         setReloadState('stalled');
         options.onSuperseded(liveBuild.readReplacingBuild());
+        for (const failure of covered) {
+          settle(failure, 'superseded');
+        }
       };
       // async-iife: bootstrap -- a timer cannot await; the check acts on its own.
       void offerIfStillReplaced();
@@ -413,7 +467,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
 
   return {
     async recover(failure, source = 'boundary') {
-      if (!isKey(failure)) {
+      if (!isWeakKey(failure)) {
         return decide();
       }
       const record = recordOf(failure);
@@ -435,7 +489,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     },
     classify(failure) {
       // Passive: what is known now, from the settled outcome or else the live verdict; never asks.
-      const record = isKey(failure) ? records.get(failure) : undefined;
+      const record = isWeakKey(failure) ? records.get(failure) : undefined;
       if (record?.outcome !== undefined) {
         return tagOf(record.outcome, record.verdict);
       }
@@ -443,23 +497,55 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       return verdict === 'replaced' ? 'superseded' : tagOf('current', verdict);
     },
     async classifySettled(failure, bound = staleBuildTagWait) {
-      const decision = isKey(failure) ? records.get(failure)?.decision : undefined;
-      if (decision !== undefined && records.get(failure as WeakKey)?.outcome === undefined) {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          decision,
-          new Promise((resolve) => {
-            timer = setTimeout(resolve, bound);
-          }),
-        ]);
-        clearTimeout(timer);
+      const record = isWeakKey(failure) ? records.get(failure) : undefined;
+      // Settled: no decision under way, or one made and not provisional, or the page is going.
+      const isSettled = (): boolean =>
+        hasLeft || record?.decision === undefined || (record.outcome !== undefined && !record.provisional);
+      if (!isSettled()) {
+        await new Promise<void>((resolve) => {
+          const done = (): void => {
+            clearTimeout(timer);
+            unsubscribe();
+            resolve();
+          };
+          const timer = setTimeout(done, bound);
+          const unsubscribe = outcomeTopic.subscribe(() => {
+            if (isSettled()) {
+              done();
+            }
+          });
+        });
       }
       return this.classify(failure);
     },
-    readOutcome: (failure) => (isKey(failure) ? records.get(failure)?.outcome : undefined),
+    readOutcome: (failure) => (isWeakKey(failure) ? records.get(failure)?.outcome : undefined),
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
     readReloadState,
     subscribeReloadState: (listener) => reloadStateTopic.subscribe(listener),
+    leave() {
+      if (hasLeft) {
+        return;
+      }
+      hasLeft = true;
+      for (const failure of coveredByReload) {
+        const record = records.get(failure);
+        if (record !== undefined) {
+          record.provisional = false;
+        }
+      }
+      coveredByReload.clear();
+      for (const failure of awaitingFollowUp) {
+        const record = records.get(failure);
+        awaitingFollowUp.delete(failure);
+        if (record !== undefined && !record.reportedToErrorTracker && !isCapturedBySentry(record)) {
+          clearTimeout(record.preloadWait);
+          record.preloadWait = undefined;
+          record.reportedToErrorTracker = true;
+          options.reportToErrorTracker?.(failure);
+        }
+      }
+      outcomeTopic.emit();
+    },
     confirmArrival() {
       try {
         const target = options.storage?.getItem(staleBuildReloadKey)?.split('>')[1];
@@ -523,6 +609,14 @@ const getPageRecovery = (): StaleBuildRecovery => {
     },
     canReloadSafely: () => !hasUserInteracted && performance.now() <= autoReloadWindow,
   });
+  const recovery = pageRecovery;
+  // A failure queued for a later page carries this page's decision, kept current as decisions settle.
+  setQueuedErrorTagger(
+    (failure): Readonly<Record<string, string>> =>
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
+      isStaleModuleError(failure) ? { stale_build: recovery.classify(failure) } : {},
+  );
+  recovery.subscribeOutcomes(retagQueuedErrors);
   return pageRecovery;
 };
 
@@ -583,6 +677,15 @@ export const subscribeReloadState = (listener: () => void): (() => void) =>
  */
 export const classifyStaleBuildFailure = async (failure: unknown): Promise<StaleBuildTag> =>
   getPageRecovery().classifySettled(failure);
+
+/**
+ * What the error tracker would be told about one module load failure now ({@link StaleBuildTag}),
+ * without waiting for its decision.
+ *
+ * @param failure - The caught value.
+ * @returns The `stale_build` tag from what is known.
+ */
+export const readStaleBuildTag = (failure: unknown): StaleBuildTag => getPageRecovery().classify(failure);
 
 /**
  * Hand a failed load of the error tracker's own SDK (`startErrorReporting`) to the recovery when a
@@ -669,13 +772,32 @@ export const installStaleBuildRecovery = (): (() => void) => {
   for (const [type, listener] of failureListeners) {
     globalThis.addEventListener(type, listener as EventListener, { capture: true });
   }
+  // The page is going: settle what a pending reload covered, and store queued errors with their decisions.
+  const onPageHide = (): void => {
+    getPageRecovery().leave();
+    retagQueuedErrors();
+  };
+  globalThis.addEventListener('pagehide', onPageHide);
   return () => {
+    globalThis.removeEventListener('pagehide', onPageHide);
     stopWatchingInput();
     for (const [type, listener] of failureListeners) {
       globalThis.removeEventListener(type, listener as EventListener, { capture: true });
     }
   };
 };
+
+/**
+ * Whether a reload prompt (the banner, the sidebar update control) shows: while the reload is
+ * offered, and never while the page's own automatic reload is pending (a second reload would race
+ * it); it shows again once that reload stalls.
+ *
+ * @param offered - Whether `build-skew` offers the reload.
+ * @param reloadState - This page's own automatic reload ({@link readReloadState}).
+ * @returns `true` when the prompt shows.
+ */
+export const isReloadPromptShown = (offered: boolean, reloadState: ReloadState): boolean =>
+  offered && reloadState !== 'pending';
 
 /**
  * Whether the error page should show the reload prompt ("Tau has been updated") for a module load

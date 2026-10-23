@@ -6,6 +6,7 @@ import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
+import type { QueuedUiError } from '#lib/queued-ui-error.js';
 
 /**
  * Remove the query string and fragment, then any invitation token, from a URL.
@@ -63,6 +64,10 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
 export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
   isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
 
+const staleBuildTags: ReadonlySet<unknown> = new Set<StaleBuildTag>(['superseded', 'current', 'unknown']);
+
+const isStaleBuildTag = (value: unknown): value is StaleBuildTag => staleBuildTags.has(value);
+
 /** Fingerprint shared by chunk failures a deploy explains, so they group apart from genuine ones. */
 export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
 
@@ -83,8 +88,11 @@ export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
 export const createBeforeSend = (describe: (failure: unknown) => Promise<StaleBuildTag>) => {
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
   const tagged = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> => {
-    // Held until the failure's decision settles (bounded): the tracker hears a failure before it is decided.
-    const tag = await describe(hint?.originalException);
+    /* A queued error a later page delivers carries the decision its own page made; this page knows
+     * nothing of it. Otherwise held until the failure's decision settles (bounded): the tracker
+     * hears a failure before it is decided. */
+    const carried = event.tags?.['stale_build'];
+    const tag = isStaleBuildTag(carried) ? carried : await describe(hint?.originalException);
     const annotated: ErrorEvent = {
       ...event,
       // oxlint-disable-next-line naming-convention -- A Sentry tag name, filtered on by operators.
@@ -209,4 +217,47 @@ export const captureUiError = (error: unknown): void => {
   if (Sentry.isInitialized()) {
     Sentry.captureException(error);
   }
+};
+
+/**
+ * Rebuild a queued error a previous page reported, as close to the original as its stored fields allow.
+ *
+ * @param entry - The stored error.
+ * @returns An `Error` with its name, message and stack.
+ */
+const rebuild = (entry: QueuedUiError): Error => {
+  const error = new Error(entry.message);
+  error.name = entry.name;
+  if (entry.stack !== undefined) {
+    error.stack = entry.stack;
+  }
+  return error;
+};
+
+/**
+ * Capture an error that waited for the SDK (`#lib/error-reporting`), with the time it was reported
+ * and the tags it was queued with. A no-op before `initSentry` ran or without a DSN.
+ *
+ * @param entry - The stored error.
+ * @param original - The value itself, when this page queued it; else it is rebuilt from `entry`.
+ * @public
+ */
+export const captureQueuedUiError = (entry: QueuedUiError, original?: unknown): void => {
+  if (!Sentry.isInitialized()) {
+    return;
+  }
+  Sentry.withScope((scope) => {
+    /* This page's own value is tagged by `beforeSend` from its settled decision; one a previous page
+     * queued carries that page's. */
+    const { stale_build: staleBuild, ...tags } = entry.tags;
+    const carried = original === undefined && staleBuild !== undefined;
+    // oxlint-disable-next-line naming-convention -- A Sentry tag name, filtered on by operators.
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
+    scope.setTags(carried ? { ...tags, stale_build: staleBuild } : tags);
+    scope.addEventProcessor((event) => ({
+      ...event,
+      timestamp: entry.time / 1000,
+    }));
+    Sentry.captureException(original ?? rebuild(entry));
+  });
 };

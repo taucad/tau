@@ -6,16 +6,26 @@ import {
   subscribeReloadOffer,
   subscribeSupersedingBuildId,
 } from '#filesystem/build-skew.js';
+import { isReloadPromptShown, readReloadState, subscribeReloadState } from '#lib/stale-build-recovery.js';
+import type { ReloadState } from '#lib/stale-build-recovery.js';
 
 const serverSnapshot = (): number => buildId;
 const serverOffer = (): boolean => false;
 
+const serverReloadState = (): ReloadState => 'idle';
+
 /**
- * Whether the reload is offered (`#filesystem/build-skew`), for every surface that shows the prompt.
+ * Whether the reload prompt shows (`#filesystem/build-skew`, {@link isReloadPromptShown}), for every
+ * surface that shows it.
  *
- * @returns `true` while another bundle owns storage or a deploy replaced this build.
+ * @returns `true` while another bundle owns storage or a deploy replaced this build, and the page is
+ * not already reloading on its own.
  */
-export const useReloadOffered = (): boolean => useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverOffer);
+export const useReloadOffered = (): boolean => {
+  const offered = useSyncExternalStore(subscribeReloadOffer, isReloadOffered, serverOffer);
+  const reloadState = useSyncExternalStore(subscribeReloadState, readReloadState, serverReloadState);
+  return isReloadPromptShown(offered, reloadState);
+};
 
 /**
  * The build every reload prompt names (`#filesystem/build-skew`), and whether it is a

@@ -117,6 +117,10 @@ const deferredOutcome = (): { readonly settle: (outcome: StaleBuildOutcome) => P
   };
 };
 
+/** Every value the page handed the error tracker's report, in order. */
+const reportedValues = (): unknown[] =>
+  (mocks.reportUiError.mock.calls as unknown as Array<[unknown]>).map(([value]) => value);
+
 const renderPage = (error: unknown): ReturnType<typeof render> => {
   mocks.routeError = error;
   return render(
@@ -304,7 +308,7 @@ describe('ErrorPage', () => {
     expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
   });
 
-  it('should report any other error once, however often the page renders', async () => {
+  it('should report any other error as the same value, and to analytics once, however often the page renders', async () => {
     isAnalyticsStable = false;
     try {
       const error = new Error('controlled render failure');
@@ -324,14 +328,15 @@ describe('ErrorPage', () => {
         });
       });
 
-      expect(mocks.reportUiError).toHaveBeenCalledOnce();
+      // The same value each time: the error tracker's report deduplicates it (`reportUiError`).
+      expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
       expect(mocks.captureException).toHaveBeenCalledOnce();
     } finally {
       isAnalyticsStable = true;
     }
   });
 
-  it('should report an error once even when the error page mounts again for it', async () => {
+  it('should report an error as the same value, and to analytics once, when the error page mounts again for it', async () => {
     const error = new Error('controlled render failure');
     const first = renderPage(error);
     await waitFor(() => {
@@ -346,7 +351,27 @@ describe('ErrorPage', () => {
       });
     });
 
-    expect(mocks.reportUiError).toHaveBeenCalledOnce();
+    expect(new Set(reportedValues())).toStrictEqual(new Set([error]));
+    expect(mocks.captureException).toHaveBeenCalledOnce();
+  });
+
+  it('should report a server error response as the same value however often the page mounts for it', async () => {
+    const response = { status: 503, statusText: 'Service Unavailable', internal: true, data: '' };
+    const first = renderPage(response);
+    await waitFor(() => {
+      expect(mocks.reportUiError).toHaveBeenCalled();
+    });
+    first.unmount();
+    renderPage(response);
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    const reported = new Set(reportedValues());
+    expect(reported.size).toBe(1);
+    expect([...reported][0]).toMatchObject({ name: 'route_error', message: '503 Service Unavailable' });
     expect(mocks.captureException).toHaveBeenCalledOnce();
   });
 

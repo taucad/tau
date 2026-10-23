@@ -5,6 +5,7 @@ import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
 import { reportUiError } from '#lib/error-reporting.js';
+import { isWeakKey } from '#lib/weak-key.js';
 import { describeSupersession, readServerVerdict, subscribeServerVerdict } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import { useSupersedingBuild } from '#hooks/use-superseding-build.js';
@@ -29,19 +30,33 @@ const serverReloadState = (): ReloadState => 'idle';
 const serverVerdict = (): ServerVerdict => 'unknown';
 
 /**
- * Errors this page has reported, kept for the module's life rather than one mount's, so the same
+ * Errors analytics has heard of, kept for the module's life rather than one mount's, so the same
  * error reaching a remounted error page (a re-render of the route, a parent boundary resetting) is
- * reported once. A module load failure is the recovery's to report.
+ * counted once; analytics does not deduplicate. The error tracker's report deduplicates itself
+ * (`reportUiError`). A module load failure is the recovery's to report.
  */
-const reportedErrors = new WeakSet();
+const heardByAnalytics = new WeakSet();
 
-const isReported = (error: unknown): boolean =>
-  typeof error === 'object' && error !== null && reportedErrors.has(error);
+/** The `Error` reported for each route error response, so a remount reports the same value again. */
+const reportedForResponse = new WeakMap<WeakKey, Error>();
 
-const markReported = (error: unknown): void => {
-  if (typeof error === 'object' && error !== null) {
-    reportedErrors.add(error);
+/**
+ * The value to report for an error the route caught: the error itself, or one `Error` per route
+ * error response (named `route_error`).
+ */
+const toReported = (error: unknown): Error | undefined => {
+  if (isRouteErrorResponse(error)) {
+    let reported = isWeakKey(error) ? reportedForResponse.get(error) : undefined;
+    if (reported === undefined) {
+      reported = new Error(`${error.status} ${error.statusText}`);
+      reported.name = 'route_error';
+      if (isWeakKey(error)) {
+        reportedForResponse.set(error, reported);
+      }
+    }
+    return reported;
   }
+  return error instanceof Error ? error : undefined;
 };
 const serverOutcome = (): StaleBuildOutcome | undefined => undefined;
 
@@ -72,24 +87,18 @@ export function ErrorPage(): React.JSX.Element {
       return;
     }
     // Don't report 404 errors to analytics - they're expected user behavior
-    if (isReported(error) || (isRouteErrorResponse(error) && error.status === 404)) {
+    if (isRouteErrorResponse(error) && error.status === 404) {
       return;
     }
-    let captured: Error | undefined;
-    let toErrorTracker = true;
-    if (isRouteErrorResponse(error)) {
-      captured = new Error(`${error.status} ${error.statusText}`);
-      captured.name = 'route_error';
-      toErrorTracker = error.status >= 500;
-    } else if (error instanceof Error) {
-      captured = error;
-    }
+    const captured = toReported(error);
     if (captured === undefined) {
       return;
     }
-    markReported(error);
-    analytics.captureException(captured, { context: { component: 'ErrorPage' } });
-    if (toErrorTracker) {
+    if (!heardByAnalytics.has(captured)) {
+      heardByAnalytics.add(captured);
+      analytics.captureException(captured, { context: { component: 'ErrorPage' } });
+    }
+    if (!isRouteErrorResponse(error) || error.status >= 500) {
       void reportUiError(captured);
     }
   }, [error, analytics, isModuleLoadFailure]);

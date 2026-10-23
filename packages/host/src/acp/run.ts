@@ -35,6 +35,7 @@ import type {
   ExternalAgentTurn,
   JsonObject,
   JsonValue,
+  ProviderMessage,
   RunLifecycleEvent,
 } from '@taucad/agent-host';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
@@ -334,6 +335,93 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
   ];
 };
 
+/** How much of the chat's unseen turns one prompt carries, in characters: the most recent are kept. */
+const handoffCharacters = 24_000;
+
+/** A message's plain text, or `undefined` when it carries none (tool calls, media). */
+const messageText = (message: ProviderMessage): string | undefined => {
+  const { content } = message as { readonly content?: unknown };
+  if (typeof content === 'string') {
+    return content.trim() === '' ? undefined : content;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const text = content
+    .map((part: unknown) =>
+      isRecord(part) && part['type'] === 'text' && typeof part['text'] === 'string' ? part['text'] : '',
+    )
+    .join('')
+    .trim();
+  return text === '' ? undefined : text;
+};
+
+/** Whether a user message admitted a turn of this agent's vendor session `sessionId`. */
+const promptedSession = (message: ProviderMessage, agentId: string, sessionId: string): boolean => {
+  const marker = message.metadata?.tauInternal;
+  return (
+    message.role === 'user' &&
+    isRecord(marker) &&
+    marker['kind'] === 'external-agent' &&
+    marker['agentId'] === agentId &&
+    marker['acpSessionId'] === sessionId
+  );
+};
+
+/**
+ * The chat's turns this vendor session has not seen, as one context block (seamless handoff, XD1).
+ *
+ * An agent keeps its own session: a turn Tau ran, or another device ran and sync brought into the chat's segments,
+ * never reached it. A fresh session has seen none of the chat; a session it continues has seen everything up to the
+ * end of its own last turn. The person's words and the replies are carried as text, most recent kept within
+ * {@link handoffCharacters}; tool calls and media are not.
+ *
+ * @param turn - The turn, with the chat's merged transcript.
+ * @param sessionId - The vendor session the prompt goes to, or `undefined` for a fresh one.
+ * @returns The block, or none when nothing is unseen or this turn sends no new message.
+ */
+const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undefined): readonly ContentBlock[] => {
+  const { transcript, message } = turn;
+  if (transcript === undefined || message === undefined) {
+    return [];
+  }
+  const end = transcript.findIndex((entry) => entry.id === message.id);
+  const prior = end === -1 ? transcript : transcript.slice(0, end);
+  let start = 0;
+  if (sessionId !== undefined) {
+    const own = prior.findLastIndex((entry) => promptedSession(entry, turn.agentId, sessionId));
+    if (own !== -1) {
+      start = own + 1;
+      while (start < prior.length && prior[start]!.role !== 'user') {
+        start++;
+      }
+    }
+  }
+  const lines = prior.slice(start).flatMap((entry) => {
+    const text = entry.role === 'user' || entry.role === 'assistant' ? messageText(entry) : undefined;
+    return text === undefined ? [] : [`**${entry.role}**: ${text}`];
+  });
+  if (lines.length === 0) {
+    return [];
+  }
+  const kept: string[] = [];
+  let size = 0;
+  for (const line of lines.toReversed()) {
+    if (size + line.length > handoffCharacters && kept.length > 0) {
+      break;
+    }
+    kept.unshift(line);
+    size += line.length;
+  }
+  return [
+    contextBlock(
+      'tau://chat-handoff',
+      'text/markdown',
+      `Earlier turns of this chat that this session has not seen (run by Tau, or on another device), oldest first:\n\n${kept.join('\n\n')}`,
+    ),
+  ];
+};
+
 /**
  * The prompt this turn sends, as content blocks.
  *
@@ -341,7 +429,11 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
  * @param first - Whether this is the first prompt of a fresh vendor session.
  * @returns The blocks, or `undefined` when this turn only reattaches.
  */
-const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly ContentBlock[] | undefined => {
+const promptBlocksOf = (
+  turn: ExternalAgentTurn,
+  first: boolean,
+  handoff: readonly ContentBlock[] = [],
+): readonly ContentBlock[] | undefined => {
   const { content } = turn.message ?? {};
   const blocks =
     typeof content === 'string'
@@ -362,7 +454,7 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
   }
   /* The user's own blocks lead: a vendor names its mirrored thread after the
    * prompt's first text (Codex titled every Tau thread "tau://agent-guidance…"). */
-  return [...blocks, ...cadContextBlocks(turn.config, first)];
+  return [...blocks, ...handoff, ...cadContextBlocks(turn.config, first)];
 };
 
 /**
@@ -787,11 +879,15 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           prompt: {
             /* A vendor session Tau has not prompted before has never seen Tau's CAD
              * context, so its prompt carries it (V12). */
-            fresh: promptBlocksOf(materialized, true),
+            fresh: promptBlocksOf(materialized, true, handoffBlocks(turn, undefined)),
             /* Reattached to the session the agent stopped in: it still holds the
              * turn, so a resume with no message nudges it on (R9/S11). */
             reattached:
-              promptBlocksOf(materialized, false) ??
+              promptBlocksOf(
+                materialized,
+                false,
+                acpSessionId === undefined ? [] : handoffBlocks(turn, acpSessionId),
+              ) ??
               (stopRecorded(turn) ? [{ type: 'text', text: continuationPrompt } satisfies ContentBlock] : undefined),
           },
           ...(ownedState === undefined ? {} : { record: ownedState }),

@@ -2826,6 +2826,66 @@ describe('authentication, initialize and prompt content', () => {
     await expect(readdir(harness.workspaceRoot)).resolves.not.toContain('AGENTS.md');
   }, 60_000);
 
+  /*
+   * Seamless handoff: an agent keeps its own session, so turns it never saw — Tau's, or another device's synced into
+   * the chat's segments — reach it as context on its next prompt: the whole chat for a fresh session, and only what
+   * came after its own last turn for a session it continues.
+   */
+  it('gives the agent the chat turns its session has not seen, from Tau or another device', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-handoff';
+    const segments = join(harness.workspaceRoot, '.tau', 'chats', chatId, 'events');
+    await mkdir(segments, { recursive: true });
+    const phoneRows = (turns: ReadonlyArray<readonly [string, string, string]>): string =>
+      turns
+        .flatMap(([at, question, answer], turn) => [
+          {
+            sequence: turn * 2,
+            type: 'message.appended',
+            message: { id: `phone-user-${String(turn)}`, role: 'user', content: question },
+            at,
+          },
+          {
+            sequence: turn * 2 + 1,
+            type: 'message.appended',
+            message: {
+              id: `phone-answer-${String(turn)}`,
+              role: 'assistant',
+              content: [{ type: 'text', text: answer }],
+            },
+            at,
+          },
+        ])
+        .map(
+          ({ sequence, at, ...body }) =>
+            /* Each phone turn opened its own incarnation there, so each is its own term. */
+            `${JSON.stringify({ version: 1, leaderEpoch: `phone-${String(Math.floor(sequence / 2))}`, sequence: sequence % 2, recordedAt: at, runId: `phone-run-${String(Math.floor(sequence / 2))}`, ...body })}\n`,
+        )
+        .join('');
+    const earlier = new Date(Date.now() - 60_000).toISOString();
+    await writeFile(join(segments, 'device-phone.jsonl'), phoneRows([[earlier, 'from the phone', 'phone answer']]));
+
+    await runTurn(harness, { chatId, runId: 'run-handoff-1', text: 'first noask' });
+    const later = new Date(Date.now() + 1000).toISOString();
+    await writeFile(
+      join(segments, 'device-phone.jsonl'),
+      phoneRows([
+        [earlier, 'from the phone', 'phone answer'],
+        [later, 'phone again', 'second phone answer'],
+      ]),
+    );
+    await runTurn(harness, { chatId, runId: 'run-handoff-2', text: 'second noask' });
+
+    const [first, second] = promptFrames(harness.frames);
+    expect(first).toContain('tau://chat-handoff');
+    expect(first).toContain('from the phone');
+    expect(first).toContain('phone answer');
+    expect(first?.indexOf('first noask')).toBeLessThan(first?.indexOf('tau://chat-handoff') ?? -1);
+    expect(second).toContain('tau://chat-handoff');
+    expect(second).toContain('phone again');
+    expect(second).not.toContain('from the phone');
+  }, 60_000);
+
   it('falls textual Tau context back to ordinary ACP text when embedded context is unsupported', async () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names
     const textOnly: AcpAdapter = { ...fakeAgent, spawnEnv: { TAU_FAKE_AGENT_MODE: 'text-only' } };

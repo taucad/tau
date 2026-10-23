@@ -3644,9 +3644,6 @@ export class ChatSessionStore {
         return undefined;
       }
     };
-    /* This device's placement the open tab cannot reach: kept in the record for the tab that can (XD2). */
-    let heldPlacement: TauAgentHostId | undefined;
-
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
@@ -3661,7 +3658,9 @@ export class ChatSessionStore {
                     (await adoptLegacyPlacement(storedChat)));
               /* A placement this tab cannot reach is held, not applied: the chat runs locally and the composer says so. */
               const reachable = await reachablePlacement(depsRef(), devicePlacement);
-              heldPlacement = reachable === undefined ? devicePlacement : undefined;
+              /* This device's placement the open tab cannot reach: kept in the record for the tab that can (XD2). The
+               * persistence context holds it from here; it is the one copy. */
+              const heldPlacement = reachable === undefined ? devicePlacement : undefined;
               signal.throwIfAborted();
               /* The persistence context holds the execution this device runs the chat on (XD2). */
               const loadedChat = storedChat === undefined ? undefined : placeChat(storedChat, reachable);
@@ -3762,7 +3761,7 @@ export class ChatSessionStore {
                * local choice in a tab that could not reach this device's placement leaves it for the tab that can.
                */
               const placement = chatPlacementOf(input.activeExecution);
-              if (placement !== undefined || heldPlacement === undefined) {
+              if (placement !== undefined || input.heldPlacement === undefined) {
                 await writeChatPlacement({ client: depsRef().client, projectId, chatId: input.chatId, placement });
                 this.#placementReads.delete(projectId);
               }
@@ -3850,19 +3849,20 @@ export class ChatSessionStore {
     draftActorRef.start();
     composerRecordRef.start();
     /* A held placement becomes this tab's once it can reach it, as when a loopback daemon is handed to it (XD2). */
+    const heldNow = (): TauAgentHostId | undefined => persistenceActorRef.getSnapshot().context.heldPlacement;
     const applyHeldPlacement = async (held: TauAgentHostId): Promise<void> => {
-      if ((await reachablePlacement(depsRef(), held)) !== held || heldPlacement !== held) {
+      if ((await reachablePlacement(depsRef(), held)) !== held || heldNow() !== held) {
         return;
       }
-      heldPlacement = undefined;
       const placed = withChatPlacement(persistenceActorRef.getSnapshot().context.activeExecution, held);
       if (placed !== undefined) {
         persistenceActorRef.send({ type: 'placementReachable', execution: placed });
       }
     };
     const unsubscribeReachability = depsRef().onPlacementReachabilityChanged?.(() => {
-      if (heldPlacement !== undefined) {
-        void applyHeldPlacement(heldPlacement);
+      const held = heldNow();
+      if (held !== undefined) {
+        void applyHeldPlacement(held);
       }
     });
 

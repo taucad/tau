@@ -83,7 +83,12 @@ const clearErrorActor = createAsyncLogic<void, { chatId: string }>({
 
 const persistActiveExecutionActor = createAsyncLogic<
   void,
-  { chatId: string; activeExecution: CadAgentExecution | undefined }
+  {
+    chatId: string;
+    activeExecution: CadAgentExecution | undefined;
+    /** The placement this tab holds but cannot reach, which a local choice leaves in place for the tab that can. */
+    heldPlacement: TauAgentHostId | undefined;
+  }
 >({
   run: async () => {
     throw new Error('chatPersistenceMachine: the persistActiveExecutionActor actor was not provided.');
@@ -203,7 +208,11 @@ export const chatPersistenceMachine = setup({
         persisting: {
           invoke: {
             src: 'persistActiveExecutionActor',
-            input: ({ context }) => ({ chatId: context.activeChatId!, activeExecution: context.activeExecution }),
+            input: ({ context }) => ({
+              chatId: context.activeChatId!,
+              activeExecution: context.activeExecution,
+              heldPlacement: context.heldPlacement,
+            }),
             onDone: { target: 'idle' },
             onError: { target: 'idle' },
           },

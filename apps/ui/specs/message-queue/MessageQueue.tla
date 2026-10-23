@@ -32,6 +32,7 @@
 \* tab cannot reach is held at load and the chat runs locally; queue paths unchanged.
 \* A held placement is applied once this tab can reach it and dropped when the person
 \* picks an execution elsewhere; admission, delivery and the queue never read it.
+\* The persistence context is the held placement's one copy, which the placement write reads.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

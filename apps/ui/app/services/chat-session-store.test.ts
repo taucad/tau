@@ -6049,6 +6049,10 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     });
 
     expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBeUndefined();
+    /* The choice replaces this device's placement for the chat: no tab reopens it on the held daemon. */
+    await vi.waitFor(() => {
+      expect(placementOnDisk(deps, chatId)).toBeUndefined();
+    });
     store.release(chatId);
   });
 

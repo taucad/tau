@@ -30,6 +30,7 @@ import {
   selectOpenInterrupts,
   selectRunElsewhere,
   selectRunElsewhereChangesAt,
+  selectRunElsewhereRecheckDelay,
   selectRunFailure,
   selectPosition,
   selectRunPhase,
@@ -467,6 +468,34 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(withoutWatchedRun.some((message) => message.id === watched)).toBe(false);
   });
 
+  /* A heartbeat changes one device's segment every minute; the others' bytes are the same and are not parsed again. */
+  it('parses again only the segments whose bytes changed', () => {
+    const encode = (rows: readonly unknown[]) =>
+      new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+    const steady = { deviceId: 'device-a', bytes: encode([lifecycleRow(0, 'admitted', 'run_a')]) };
+    const first = reduceChatProjection(initialChatProjection, {
+      type: 'remote',
+      segments: [steady, { deviceId: 'device-b', bytes: encode([lifecycleRow(0, 'admitted', 'run_b')]) }],
+    }).state;
+    const second = reduceChatProjection(first, {
+      type: 'remote',
+      segments: [
+        { deviceId: 'device-a', bytes: Uint8Array.from(steady.bytes) },
+        {
+          deviceId: 'device-b',
+          bytes: encode([lifecycleRow(0, 'admitted', 'run_b'), lifecycleRow(1, 'running', 'run_b')]),
+        },
+      ],
+    }).state;
+    const parsedOf = (state: typeof first, deviceId: string) =>
+      Object.values(state.remote?.parsed ?? {}).find((segment) => segment.deviceId === deviceId);
+
+    expect(parsedOf(second, 'device-a')).toBeDefined();
+    expect(parsedOf(second, 'device-a')).toBe(parsedOf(first, 'device-a'));
+    expect(parsedOf(second, 'device-b')).not.toBe(parsedOf(first, 'device-b'));
+    expect(Object.keys(second.remote?.parsed ?? {})).toHaveLength(2);
+  });
+
   it('refolds another device’s run when its segment digest changes', async () => {
     const own = readLog('recorded/in-project-ping-pong-turn');
     const remote = readLog('recorded/daemon-reattach-hexnut');
@@ -552,6 +581,23 @@ describe('chatProjectionLogic (PV-S7)', () => {
       expect(selectRunElsewhereChangesAt(running, changesAt!)).toBeUndefined();
       expect(selectRunElsewhereChangesAt(settled, at)).toBeUndefined();
       expect(selectRunElsewhereChangesAt(initialChatProjection, at)).toBeUndefined();
+    });
+
+    /* A timer longer than 2^31 - 1 ms fires at once: a far-future foreign clock must not spin the reader. */
+    it('waits for the next change no longer than one timer can, and not at all when nothing can change', () => {
+      const farAhead = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        segments: remoteOf([{ ...lifecycleRow(0, 'admitted', 'run_other'), recordedAt: '2027-09-28T00:00:00.000Z' }]),
+      }).state;
+      const running = reduceChatProjection(initialChatProjection, {
+        type: 'remote',
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
+      }).state;
+
+      expect(selectRunElsewhereRecheckDelay(farAhead, at)).toBe(2_147_483_647);
+      expect(selectRunElsewhereRecheckDelay(running, at)).toBe(foreignRunStaleMilliseconds + 1);
+      expect(selectRunElsewhereRecheckDelay(running, at + foreignRunStaleMilliseconds + 5)).toBeUndefined();
+      expect(selectRunElsewhereRecheckDelay(initialChatProjection, at)).toBeUndefined();
     });
 
     it('never names this device’s own run, read back from a segment', () => {

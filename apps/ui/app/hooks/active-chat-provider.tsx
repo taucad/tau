@@ -63,7 +63,7 @@ import {
   selectCaughtUp,
   selectCurrentRun,
   selectRunElsewhere,
-  selectRunElsewhereChangesAt,
+  selectRunElsewhereRecheckDelay,
 } from '#machines/chat-projection.logic.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
@@ -837,7 +837,7 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
 
 /**
  * The run another device holds this chat with, kept current (XD3): it changes when sync brings that device's segment,
- * and when a foreign run's standing changes with the clock alone (`selectRunElsewhereChangesAt`), which no store announces. One
+ * and when a foreign run's standing changes with the clock alone (`selectRunElsewhereRecheckDelay`), which no store announces. One
  * timeout is armed for the next such moment, and only while the chat has a foreign run that has not settled.
  */
 function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
@@ -848,17 +848,14 @@ function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
       const arm = (): void => {
         clearTimeout(timer);
         timer = undefined;
-        const now = Date.now();
         const projection = store.getProjection(chatId);
-        const next = projection === undefined ? undefined : selectRunElsewhereChangesAt(projection, now);
-        if (next !== undefined) {
-          timer = setTimeout(
-            () => {
-              listener();
-              arm();
-            },
-            Math.max(0, next - now),
-          );
+        const recheckDelay =
+          projection === undefined ? undefined : selectRunElsewhereRecheckDelay(projection, Date.now());
+        if (recheckDelay !== undefined) {
+          timer = setTimeout(() => {
+            listener();
+            arm();
+          }, recheckDelay);
         }
       };
       const unsubscribe = store.subscribeProjection(chatId, () => {

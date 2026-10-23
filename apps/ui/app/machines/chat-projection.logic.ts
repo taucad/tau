@@ -34,6 +34,7 @@ import type {
   ChatLedger,
   ChatLogSegment,
   ForeignRun,
+  ParsedLogSegment,
   RowKey,
   TurnPlacement,
 } from '@taucad/agent-host';
@@ -177,6 +178,11 @@ export type ChatProjection = Readonly<{
     views: Readonly<Record<string, RunView>>;
     /** Runs another device has not settled, each segment read on its own ledger (XD3). */
     unsettled?: readonly ForeignRun[];
+    /**
+     * Each segment as last parsed, by its device, size and byte hash: a refold parses again only the segments whose
+     * bytes changed (one device's heartbeat changes its segment every minute, the others' not at all).
+     */
+    parsed?: Readonly<Record<string, ParsedLogSegment>>;
   }>;
   /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
   blocks: Readonly<Record<string, Readonly<Record<string, Block>>>>;
@@ -342,13 +348,19 @@ const hashSegment = (bytes: Uint8Array<ArrayBuffer>): number => {
   return hash >>> 0;
 };
 
+type SegmentSignature = Readonly<{ deviceId: string; byteLength: number; hash: number }>;
+
+const signaturesOf = (segments: readonly ChatLogSegment[]): readonly SegmentSignature[] =>
+  segments
+    .map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }))
+    .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0));
+
+const signatureKey = ({ deviceId, byteLength, hash }: SegmentSignature): string =>
+  `${deviceId}:${String(byteLength)}:${String(hash)}`;
+
 /** One bounded digest of the segment bytes that can change the merged transcript. @public */
 export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =>
-  JSON.stringify(
-    segments
-      .map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }))
-      .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0)),
-  );
+  JSON.stringify(signaturesOf(segments));
 
 /** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
 const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
@@ -1044,12 +1056,24 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
     return { state: { ...initialChatProjection, resetVersion: state.resetVersion + 1 } };
   }
   if (event.type === 'remote') {
-    const digest = digestLogSegments(event.segments);
+    const sorted = event.segments.toSorted((left, right) =>
+      left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0,
+    );
+    const signatures = signaturesOf(sorted);
+    const digest = JSON.stringify(signatures);
     if (digest === state.remote?.digest) {
       return { state };
     }
-    /* Each segment is parsed once, for the merged views and for the runs another device has not settled (XD3). */
-    const parsed = parseLogSegments(event.segments);
+    /* Each segment is parsed once, for the merged views and for the runs another device has not settled (XD3), and
+     * not again while its bytes stay the same. */
+    const known = state.remote?.parsed ?? {};
+    const byKey: Record<string, ParsedLogSegment> = {};
+    const parsed = sorted.map((segment, index) => {
+      const key = signatureKey(signatures[index]!);
+      const reused = known[key] ?? parseLogSegments([segment])[0]!;
+      byKey[key] = reused;
+      return reused;
+    });
     const { views } = foldRunViews(mergeSegmentRows(parsed), {}, {});
     const unsettled = unsettledParsedRuns(parsed);
     return {
@@ -1059,6 +1083,7 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
           digest,
           views,
           ...(unsettled.length === 0 ? {} : { unsettled }),
+          parsed: byKey,
         },
       },
     };
@@ -1312,6 +1337,24 @@ export const selectRunElsewhereChangesAt = (projection: ChatProjection, now: num
     }
   }
   return soonest;
+};
+
+/** The longest delay one `setTimeout` holds: a longer one fires at once. */
+const longestTimerMilliseconds = 2_147_483_647;
+
+/**
+ * How long a reader of `selectRunElsewhere` waits before it reads again (XD3): until the answer next changes with the
+ * clock (`selectRunElsewhereChangesAt`), never longer than one timer can wait, and `undefined` when only new segment
+ * bytes can change it. A foreign clock far ahead of this one then re-arms once a timer's span instead of spinning.
+ *
+ * @param projection - The chat's projection.
+ * @param now - This device's time, in epoch milliseconds.
+ * @returns The delay in milliseconds, or `undefined`.
+ * @public
+ */
+export const selectRunElsewhereRecheckDelay = (projection: ChatProjection, now: number): number | undefined => {
+  const changesAt = selectRunElsewhereChangesAt(projection, now);
+  return changesAt === undefined ? undefined : Math.min(Math.max(0, changesAt - now), longestTimerMilliseconds);
 };
 
 /** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */

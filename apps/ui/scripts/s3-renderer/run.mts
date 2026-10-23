@@ -1324,14 +1324,13 @@ const r04OrcaRun = async (kind: Kind) => {
     mark('end');
     const log = await readFile(orcaLog, 'utf8');
     const day = new Date().toISOString().slice(0, 10);
-    const speech = log.split('\n').flatMap((line) => {
+    const speech = log.split(/\r?\n/).flatMap((line) => {
       const match = /^(\d\d:\d\d:\d\d\.\d+) - SPEECH OUTPUT: (.*)$/.exec(line);
       return match ? [{ at: Date.parse(`${day}T${match[1]!.slice(0, 12)}Z`), text: match[2]! }] : [];
     });
     return {
       kind,
-      kindOfEvidence:
-        'Orca 46.1 SPEECH OUTPUT debug receipts (real AT over AT-SPI, X11 key events), cloud Linux container',
+      kindOfEvidence: 'Orca 46.1 SPEECH OUTPUT debug receipts (real AT over AT-SPI, X11 key events), Linux under Xvfb',
       focusedAfterTab,
       focusedAfterShiftTab,
       receipts: steps.slice(0, -1).map((entry, index) => ({

@@ -48,10 +48,21 @@ for (const [index, { label, suite }] of entries.entries()) {
           kind?: string;
           status?: string;
           reason?: string;
+          receipts?: Array<{ speech?: string[]; spoken?: string[] }>;
         }>
-      ).filter((entry) => entry.status)
+      ).filter((entry) => entry.status ?? entry.receipts)
     : [];
-  const notRun = readers.filter((entry) => entry.status !== 'ran');
+  // A reader that ran but left no speech in any step is a capture failure, not a result.
+  const silent = (entry: (typeof readers)[number]): boolean =>
+    entry.receipts?.every((receipt) => [...(receipt.speech ?? []), ...(receipt.spoken ?? [])].every((text) => !text)) ??
+    false;
+  const notRun = readers
+    .map((entry) =>
+      (entry.status === undefined || entry.status === 'ran') && silent(entry)
+        ? { ...entry, status: 'silent', reason: 'no speech captured in any step' }
+        : entry,
+    )
+    .filter((entry) => entry.status !== undefined && entry.status !== 'ran');
   if (notRun.length > 0) {
     failed = true;
   }

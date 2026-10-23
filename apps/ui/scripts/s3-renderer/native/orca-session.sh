@@ -14,7 +14,9 @@ gsettings set org.gnome.desktop.a11y.applications screen-reader-enabled true 2>/
 gsettings set org.gnome.desktop.interface toolkit-accessibility true 2>/dev/null
 export S3_ORCA_LOG="$OUT/orca-debug.log"
 orca --version >"$OUT/orca-version.txt" 2>&1
-orca --replace --debug-file="$S3_ORCA_LOG" >"$OUT/orca-stdout.log" 2>&1 &
+# Orca writes its debug file through a block-buffered file object, so the tail (the last candidate's receipts) was
+# missing when the suite read it. Pointed at a pty, Python line-buffers it, and `script -f` flushes each line.
+script -qfec 'orca --replace --debug-file=/dev/tty' "$S3_ORCA_LOG" </dev/null >"$OUT/orca-stdout.log" 2>&1 &
 OPID=$!
 sleep 4
 "$@"

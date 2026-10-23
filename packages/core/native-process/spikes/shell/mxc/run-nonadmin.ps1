@@ -20,20 +20,28 @@ $node = (Get-Command node.exe).Source
 $user = 'tauspike'
 $arch = $env:PROCESSOR_ARCHITECTURE
 
-# Random synthetic password (local, ephemeral, satisfies complexity; never logged/persisted).
+# Random synthetic password (local, ephemeral; never logged/persisted). Built from a switch-safe
+# alphabet (no / \ " ' ` space, and it cannot lead with - or /) so that no tool mis-parses it, then
+# wrapped as a SecureString that is reused for both New-LocalUser and the credential — the plaintext
+# never touches a command line. The 'Aa1_' prefix guarantees upper+lower+digit+symbol complexity.
+$alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_#%@!'.ToCharArray()
 $rng = New-Object byte[] 24
 [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($rng)
-$pwPlain = [Convert]::ToBase64String($rng) + 'Aa1!'
+$pwPlain = 'Aa1_' + (($rng | ForEach-Object { $alphabet[$_ % $alphabet.Length] }) -join '')
+$secure = ConvertTo-SecureString $pwPlain -AsPlainText -Force
+$pwPlain = $null
 
 $overallExit = 0
 try {
-  # Create the standard user; do NOT add it to Administrators. /y answers any prompt.
-  cmd /c "net user $user `"$pwPlain`" /add /y" | Out-Null
-  # Prove non-membership of Administrators (external, host-side).
-  $admins = (cmd /c "net localgroup Administrators") -join "`n"
-  $isAdmin = $admins -match "(?im)^\s*$user\s*$"
-  $secure = ConvertTo-SecureString $pwPlain -AsPlainText -Force
-  $cred = New-Object System.Management.Automation.PSCredential("$env:COMPUTERNAME\$user", $secure)
+  # Create the standard user via New-LocalUser (SecureString: the password never hits a command line,
+  # so no character can be mis-parsed as a switch). Do NOT add it to any admin group.
+  New-LocalUser -Name $user -Password $secure -FullName 'Tau Spike (ephemeral)' `
+    -Description 'Ephemeral non-admin spike user' -AccountNeverExpires -PasswordNeverExpires -ErrorAction Stop | Out-Null
+  # Prove non-membership of Administrators (external, host-side), by well-known SID S-1-5-32-544.
+  $adminGroup = (Get-LocalGroup -SID 'S-1-5-32-544').Name
+  $isAdmin = [bool](Get-LocalGroupMember -Group $adminGroup -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -match "[\\/]$([regex]::Escape($user))$" -or $_.Name -eq $user })
+  $cred = New-Object System.Management.Automation.PSCredential($user, $secure)
 
   # The standard user must be able to write the drop (receipts) and read node_modules/workspace.
   cmd /c "icacls `"$drop`" /grant `"${user}:(OI)(CI)M`"" | Out-Null
@@ -87,7 +95,7 @@ try {
   $overallExit = 1
 } finally {
   [Environment]::SetEnvironmentVariable('TAU_SPIKE_OUT', $null, 'Machine')
-  cmd /c "net user $user /delete" 2>$null | Out-Null
+  Remove-LocalUser -Name $user -ErrorAction SilentlyContinue
 }
 # The host Summarize step is the single gate over the receipts; this launcher only surfaces its own
 # infrastructure failure.

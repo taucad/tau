@@ -191,6 +191,8 @@ export type LiveLinkPage = Readonly<{
   status(status: Readonly<Record<string, TauViewerEntryStatus>>): void;
   /** Capture the live view once its model is drawn. */
   capture(): Promise<TauViewerImage | Readonly<{ error: string }>>;
+  /** The project's file list moved to this version (`app_sync`'s `filesVersion`); the Files pane lists again. */
+  filesVersion?(filesVersion: number): void;
 }>;
 
 /** Timing of the live link; tests shorten it. */
@@ -204,6 +206,8 @@ export type LiveLinkOptions = Readonly<{
 
 /** The running link. */
 export type LiveLink = Readonly<{
+  /** The page's id on the server, as its syncs name it; `app_open_file` names the page with it. */
+  pageId: string;
   /** Report the view now, outside the poll (after the person changed it). */
   nudge(): void;
   stop(): void;
@@ -287,6 +291,9 @@ export const startLiveLink = (
     if (result.status !== undefined) {
       page.status(result.status);
     }
+    if (result.filesVersion !== undefined) {
+      page.filesVersion?.(result.filesVersion);
+    }
     const requestId = result.capture?.requestId;
     if (requestId !== undefined && !answered.has(requestId)) {
       answered.add(requestId);
@@ -339,6 +346,7 @@ export const startLiveLink = (
   void loop();
 
   return {
+    pageId,
     nudge() {
       if (!control.stopped) {
         keepActive();

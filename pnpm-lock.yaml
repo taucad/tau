@@ -3221,6 +3221,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../../packages/workbench
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
@@ -3590,6 +3593,9 @@ importers:
       '@taucad/viewer':
         specifier: workspace:*
         version: link:../viewer
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
       '@taucad/workbench-panes':
         specifier: workspace:*
         version: link:../workbench-panes
@@ -4263,6 +4269,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
     devDependencies:
       '@taucad/chat':
         specifier: workspace:*
@@ -5833,6 +5842,9 @@ importers:
       '@taucad/units':
         specifier: workspace:*
         version: link:../units
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -5845,6 +5857,9 @@ importers:
       radix-ui:
         specifier: 'catalog:'
         version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react-virtuoso:
+        specifier: ^4.18.7
+        version: 4.18.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
     devDependencies:
       '@taucad/nx':
         specifier: workspace:*
@@ -5888,6 +5903,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.7(react@19.2.7)
+      three:
+        specifier: ^0.184.0
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59

@@ -90,7 +90,7 @@ A moving assembly exports a `mechanism` beside its geometry. After `evaluate_mod
 
 - Exports go under `.tau/artifacts/` in the project; the result lists each file's project-relative path.
 - Screenshots come back in the tool result; their image files stay in a temporary folder outside the project.
-- `arrange_workbench` writes the view and pane records under `.tau/workbench/`.
+- `arrange_workbench` writes the view and pane records under `.tau/workbench/`. The viewer page opens a model from those records too, so an arranged view stays after the person reloads the page.
 
 Leave `.tau/artifacts/` out of commits unless the user wants exports versioned.
 

@@ -1,12 +1,14 @@
 /**
- * The tab's workbench panes (viewer parity R1, R3): the Tau app's own Parameters, Model, Kinematics, Export and Share
- * panes from `@taucad/workbench-panes`, in a lane beside the canvas, each fed by a page source over the host bridge.
+ * The tab's workbench panes (viewer parity R1, R3, PAR-9): the Tau app's own Parameters, Model, Kinematics, Export,
+ * Share and Files panes from `@taucad/workbench-panes`, in a lane beside the canvas, each fed by a page source over the
+ * host bridge.
  */
 import { useEffect, useMemo } from 'react';
 import type { TauViewerEntryStatus, TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
 import { ExportPane } from '@taucad/workbench-panes/export/export-pane';
+import { FilesPane } from '@taucad/workbench-panes/files/files-pane';
 import { KinematicsPane } from '@taucad/workbench-panes/kinematics/kinematics-pane';
 import { PaneLane } from '@taucad/workbench-panes/lane/pane-lane';
 import { ModelPane } from '@taucad/workbench-panes/model/model-pane';
@@ -19,6 +21,7 @@ import { Toaster, toast } from '@taucad/ui/components/sonner';
 import type { HostBridge } from '#app/host-bridge.js';
 import type { ComponentReveal } from '#app/sources/component-menu.jsx';
 import { createExportSource } from '#app/sources/export-source.js';
+import type { PageFilesSource } from '#app/sources/files-source.js';
 import { createKinematicsSource } from '#app/sources/kinematics-source.js';
 import { createModelSource } from '#app/sources/model-source.js';
 import { createParametersSource } from '#app/sources/parameters-source.js';
@@ -34,8 +37,8 @@ const exportNotices: ExportNotices = {
   },
 };
 
-/** The panes the page offers; Details, Files and Revisions belong to the agent's host (R3). */
-const offeredPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics', 'export', 'share'];
+/** The panes the page offers; Details and Revisions belong to the agent's host (R3). */
+const offeredPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics', 'export', 'share', 'files'];
 
 /** The tabs the lane opens with, as the workbench opens a project. */
 const openingPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics'];
@@ -47,6 +50,8 @@ type WorkbenchLaneProps = Readonly<{
   /** The server's live state of the shown sources, by project-relative path: their build and issues. */
   status: Readonly<Record<string, TauViewerEntryStatus>> | undefined;
   graphicsRef: GraphicsRef;
+  /** The Files pane's source: the shown model's project, and how this page opens another of its files. */
+  files: PageFilesSource;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
   reveal: ComponentReveal;
   /** The part menu on the Model pane's rows. */
@@ -68,6 +73,7 @@ export function WorkbenchLane({
   model,
   status,
   graphicsRef,
+  files,
   reveal,
   componentActions,
   openPaneRequest,
@@ -87,6 +93,9 @@ export function WorkbenchLane({
   useEffect(() => {
     kinematics.setStatus(status);
   }, [kinematics, status]);
+  useEffect(() => {
+    files.setShownFile(entryPath);
+  }, [entryPath, files]);
   /* A model shown for another reason (the agent changed the source) may carry other parameters. */
   const modelSha = model?.sha256;
   useEffect(() => {
@@ -100,6 +109,7 @@ export function WorkbenchLane({
       parameters,
       kinematics: { useUnitStatus: kinematics.useUnitStatus, subscribeReveal: reveal.subscribeKinematics },
       model: createModelSource(bridge, { componentActions, reveal: reveal.model }),
+      files,
       ...(model === undefined
         ? {}
         : {
@@ -109,7 +119,7 @@ export function WorkbenchLane({
             share: createShareSource(bridge, model),
           }),
     }),
-    [bridge, componentActions, kinematics, model, parameters, reveal, units],
+    [bridge, componentActions, files, kinematics, model, parameters, reveal, units],
   );
 
   return (
@@ -135,6 +145,9 @@ export function WorkbenchLane({
             }
             case 'share': {
               return <SharePane />;
+            }
+            case 'files': {
+              return <FilesPane />;
             }
           }
         }}

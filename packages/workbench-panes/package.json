@@ -1,7 +1,7 @@
 {
   "name": "@taucad/workbench-panes",
   "version": "0.1.0-beta.8",
-  "description": "Tau workbench panes (parameters, model, kinematics, export, share) shared by the Tau app and the agent plugin viewer",
+  "description": "Tau workbench panes (parameters, model, kinematics, export, share, files) shared by the Tau app and the agent plugin viewer",
   "type": "module",
   "sideEffects": [
     "**/*.css"
@@ -49,6 +49,9 @@
     "./components/workbench-toggle": "./src/components/workbench-toggle.tsx",
     "./export/export-pane": "./src/export/export-pane.tsx",
     "./export/export-source": "./src/export/export-source.ts",
+    "./files/file-selector": "./src/files/file-selector.tsx",
+    "./files/files-pane": "./src/files/files-pane.tsx",
+    "./files/files-source": "./src/files/files-source.ts",
     "./host/workbench-host": "./src/host/workbench-host.tsx",
     "./kinematics/kinematics-pane": "./src/kinematics/kinematics-pane.tsx",
     "./kinematics/kinematics-source": "./src/kinematics/kinematics-source.ts",
@@ -62,10 +65,12 @@
     "./paneview/use-resize-handles": "./src/paneview/use-resize-handles.ts",
     "./parameters/parameters-pane": "./src/parameters/parameters-pane.tsx",
     "./parameters/parameters-source": "./src/parameters/parameters-source.ts",
+    "./records/view-record": "./src/records/view-record.ts",
     "./registry/pane-registry": "./src/registry/pane-registry.ts",
     "./share/share-pane": "./src/share/share-pane.tsx",
     "./share/share-source": "./src/share/share-source.ts",
     "./shell/viewer-header-actions": "./src/shell/viewer-header-actions.tsx",
+    "./shell/viewer-issues": "./src/shell/viewer-issues.tsx",
     "./shell/viewer-stage": "./src/shell/viewer-stage.tsx",
     "./shell/viewer-status": "./src/shell/viewer-status.tsx",
     "./styles/panes.css": {
@@ -148,6 +153,21 @@
         "import": "./dist/export/export-source.mjs",
         "default": "./dist/export/export-source.mjs"
       },
+      "./files/file-selector": {
+        "types": "./dist/files/file-selector.d.mts",
+        "import": "./dist/files/file-selector.mjs",
+        "default": "./dist/files/file-selector.mjs"
+      },
+      "./files/files-pane": {
+        "types": "./dist/files/files-pane.d.mts",
+        "import": "./dist/files/files-pane.mjs",
+        "default": "./dist/files/files-pane.mjs"
+      },
+      "./files/files-source": {
+        "types": "./dist/files/files-source.d.mts",
+        "import": "./dist/files/files-source.mjs",
+        "default": "./dist/files/files-source.mjs"
+      },
       "./host/workbench-host": {
         "types": "./dist/host/workbench-host.d.mts",
         "import": "./dist/host/workbench-host.mjs",
@@ -213,6 +233,11 @@
         "import": "./dist/parameters/parameters-source.mjs",
         "default": "./dist/parameters/parameters-source.mjs"
       },
+      "./records/view-record": {
+        "types": "./dist/records/view-record.d.mts",
+        "import": "./dist/records/view-record.mjs",
+        "default": "./dist/records/view-record.mjs"
+      },
       "./registry/pane-registry": {
         "types": "./dist/registry/pane-registry.d.mts",
         "import": "./dist/registry/pane-registry.mjs",
@@ -232,6 +257,11 @@
         "types": "./dist/shell/viewer-header-actions.d.mts",
         "import": "./dist/shell/viewer-header-actions.mjs",
         "default": "./dist/shell/viewer-header-actions.mjs"
+      },
+      "./shell/viewer-issues": {
+        "types": "./dist/shell/viewer-issues.d.mts",
+        "import": "./dist/shell/viewer-issues.mjs",
+        "default": "./dist/shell/viewer-issues.mjs"
       },
       "./shell/viewer-stage": {
         "types": "./dist/shell/viewer-stage.d.mts",
@@ -268,10 +298,12 @@
     "@taucad/parameters": "workspace:*",
     "@taucad/project-core": "workspace:*",
     "@taucad/units": "workspace:*",
+    "@taucad/workbench": "workspace:*",
     "class-variance-authority": "catalog:",
     "dockview-react": "^8.2.0",
     "lucide-react": "catalog:",
-    "radix-ui": "catalog:"
+    "radix-ui": "catalog:",
+    "react-virtuoso": "^4.18.7"
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",
@@ -280,6 +312,7 @@
     "@xstate/react": "^7.0.0-alpha.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "three": "^0.184.0",
     "xstate": "^6.0.0-alpha.59",
     "zod": "^4.1.0"
   },
@@ -298,6 +331,7 @@
     "@xstate/react": "7.0.0-alpha.3",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "three": "^0.184.0",
     "xstate": "catalog:",
     "zod": "catalog:"
   }

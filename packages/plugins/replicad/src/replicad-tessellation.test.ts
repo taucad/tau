@@ -102,7 +102,8 @@ describe('Replicad tessellation presets (P2)', () => {
   it('keeps the triangle count of a preset within 20 % across a hundredfold scale', async () => {
     const small = reportOf(await renderModel(sphere(5), { tessellation: 'medium' }));
     const large = reportOf(await renderModel(sphere(500), { tessellation: 'medium' }));
-    expect(large.linearTolerance! / small.linearTolerance!).toBeCloseTo(100, 6);
+    // The box grows by each shape's absolute tolerance (1e-7 mm), so the ratio is 100 to within 1e-6.
+    expect(large.linearTolerance! / small.linearTolerance! / 100).toBeCloseTo(1, 6);
     expect(Math.abs(large.triangles - small.triangles) / small.triangles).toBeLessThanOrEqual(0.2);
   });
 
@@ -227,6 +228,52 @@ describe('Replicad preview budget (P4)', () => {
     const empty = makeCompound([]);
     expect(measureShapesDiagonal([{ name: 'empty', shape: empty }])).toBeNaN();
     for (const shape of [near, far, empty]) {
+      shape.delete();
+    }
+  });
+
+  it('measures a preset from the cheap B-rep box: never finer than the tight box, at most 10 % coarser', async () => {
+    const replicad = await import('replicad');
+    const oc = replicad.getOC();
+    const plate = replicad.drawRoundedRectangle(50, 30, 5).sketchOnPlane().extrude(10).fillet(2);
+    const cylinder = replicad.makeCylinder(6, 70, [30, -20, 5], [1, 2, 3]);
+    const shapes = [
+      { name: 'plate', shape: plate },
+      { name: 'cylinder', shape: cylinder },
+    ];
+    const boxDiagonal = (
+      add: (shape: (typeof shapes)[number]['shape'], box: InstanceType<typeof oc.Bnd_Box>) => void,
+    ) => {
+      const box = new oc.Bnd_Box();
+      for (const { shape } of shapes) {
+        add(shape, box);
+      }
+      const low = box.CornerMin();
+      const high = box.CornerMax();
+      const diagonal = Math.hypot(high.X() - low.X(), high.Y() - low.Y(), high.Z() - low.Z());
+      for (const handle of [low, high, box]) {
+        handle.delete();
+      }
+      return diagonal;
+    };
+    const tight = boxDiagonal((shape, box) => {
+      oc.BRepBndLib.AddOptimal(shape.wrapped, box, false, false);
+    });
+    const cheap = boxDiagonal((shape, box) => {
+      oc.BRepBndLib.Add(shape.wrapped, box, false);
+    });
+
+    const measured = measureShapesDiagonal(shapes);
+    expect(measured).toBe(cheap);
+    expect(measured).toBeGreaterThanOrEqual(tight);
+    expect(measured / tight).toBeLessThanOrEqual(1.1);
+
+    // A triangulation left by an earlier mesh does not change the measurement.
+    for (const { shape } of shapes) {
+      shape.mesh({ tolerance: 5, angularTolerance: 0.5 });
+    }
+    expect(measureShapesDiagonal(shapes)).toBe(measured);
+    for (const { shape } of shapes) {
       shape.delete();
     }
   });

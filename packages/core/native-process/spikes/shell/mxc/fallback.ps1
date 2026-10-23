@@ -85,6 +85,7 @@ public static class TauRestrict {
   }
   [StructLayout(LayoutKind.Sequential)] struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public int dwProcessId; public int dwThreadId; }
   [StructLayout(LayoutKind.Sequential)] struct SECURITY_ATTRIBUTES { public int nLength; public IntPtr lpSecurityDescriptor; public int bInheritHandle; }
+  [StructLayout(LayoutKind.Sequential, Pack=4)] struct TOKEN_PRIVILEGES1 { public int Count; public long Luid; public int Attr; }
 
   [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr proc, uint access, out IntPtr tok);
   [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
@@ -111,6 +112,10 @@ public static class TauRestrict {
   [DllImport("user32.dll", SetLastError=true)] static extern bool GetUserObjectSecurity(IntPtr h, ref uint si, byte[] sd, uint len, out uint needed);
   [DllImport("user32.dll", SetLastError=true)] static extern bool SetUserObjectSecurity(IntPtr h, ref uint si, byte[] sd);
   [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out IntPtr sd, IntPtr size);
+  [DllImport("advapi32.dll", SetLastError=true)] static extern bool GetSecurityDescriptorDacl(IntPtr sd, out bool present, out IntPtr dacl, out bool defaulted);
+  [DllImport("advapi32.dll", SetLastError=true)] static extern bool SetTokenInformation(IntPtr tok, int cls, ref IntPtr info, int len);
+  [DllImport("advapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern bool LookupPrivilegeValue(string sys, string name, out long luid);
+  [DllImport("advapi32.dll", SetLastError=true)] static extern bool AdjustTokenPrivileges(IntPtr tok, bool disableAll, ref TOKEN_PRIVILEGES1 np, int len, IntPtr prev, IntPtr retLen);
 
   // token.rs:42-44: DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED == 0x01 | 0x04 | 0x08.
   public const uint FLAGS = 0x1u | 0x4u | 0x8u; // 0x0D
@@ -123,10 +128,18 @@ public static class TauRestrict {
   const uint GENERIC_READ = 0x80000000, FILE_SHARE_READ = 0x1, OPEN_EXISTING = 3;
   const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
 
+  // Diagnostic of the last Restrict(): which logon SID was used and whether the default DACL was set.
+  public static string LastRestrictNote = "";
+
   public static string GetLogonSid() {
     IntPtr tok;
     if (!OpenProcessToken(GetCurrentProcess(), 0x8, out tok)) return null; // TOKEN_QUERY
-    try {
+    try { return LogonSidOf(tok); } finally { CloseHandle(tok); }
+  }
+
+  // The SE_GROUP_LOGON_ID SID of an arbitrary token (needs TOKEN_QUERY on it).
+  static string LogonSidOf(IntPtr tok) {
+    {
       int len; GetTokenInformation(tok, TOKEN_GROUPS_CLASS, IntPtr.Zero, 0, out len);
       IntPtr buf = Marshal.AllocHGlobal(len);
       try {
@@ -143,7 +156,29 @@ public static class TauRestrict {
         }
         return null;
       } finally { Marshal.FreeHGlobal(buf); }
-    } finally { CloseHandle(tok); }
+    }
+  }
+
+  // token.rs:56-110 set_default_dacl: objects the restricted process creates (its own process/thread
+  // handles, sections, IPC) get a default DACL of the logon SID GENERIC_ALL + OWNER RIGHTS READ_CONTROL.
+  // The logon SID is BOTH a normal group and a restricting SID, so the WRITE_RESTRICTED child can open
+  // its own objects for write; without it the loader fails with 0xC0000142.
+  static void SetDefaultDacl(IntPtr tok, string logonSid) {
+    IntPtr sd;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptor("D:(A;;GA;;;" + logonSid + ")(A;;RC;;;S-1-3-4)", 1, out sd, IntPtr.Zero))
+      throw new Exception("default DACL SDDL failed err=" + Marshal.GetLastWin32Error());
+    try {
+      bool present; bool defaulted; IntPtr dacl;
+      if (!GetSecurityDescriptorDacl(sd, out present, out dacl, out defaulted) || !present) throw new Exception("GetSecurityDescriptorDacl failed err=" + Marshal.GetLastWin32Error());
+      if (!SetTokenInformation(tok, 6 /* TokenDefaultDacl */, ref dacl, IntPtr.Size)) throw new Exception("SetTokenInformation(TokenDefaultDacl) failed err=" + Marshal.GetLastWin32Error());
+    } finally { LocalFree(sd); }
+  }
+
+  // token.rs:519 enable_single_privilege(new_token, "SeChangeNotifyPrivilege").
+  static bool EnableChangeNotify(IntPtr tok) {
+    long luid; if (!LookupPrivilegeValue(null, "SeChangeNotifyPrivilege", out luid)) return false;
+    TOKEN_PRIVILEGES1 tp; tp.Count = 1; tp.Luid = luid; tp.Attr = 2; // SE_PRIVILEGE_ENABLED
+    return AdjustTokenPrivileges(tok, false, ref tp, Marshal.SizeOf(typeof(TOKEN_PRIVILEGES1)), IntPtr.Zero, IntPtr.Zero);
   }
 
   static IntPtr BuildRestricting(string capSid, string logonSid, out uint count) {
@@ -160,11 +195,19 @@ public static class TauRestrict {
     count = (uint)sids.Count; return arr;
   }
 
+  // The logon SID comes from the BASE token itself (token.rs psid_logon), so a LogonUser token for a
+  // sandbox account uses its own logon session SID, not the orchestrator's.
   static IntPtr Restrict(IntPtr baseTok, string capSid, string logonSid) {
-    uint c; IntPtr arr = BuildRestricting(capSid, logonSid, out c);
+    string own = LogonSidOf(baseTok);
+    string logon = string.IsNullOrEmpty(own) ? logonSid : own;
+    uint c; IntPtr arr = BuildRestricting(capSid, logon, out c);
     IntPtr nt;
     if (!CreateRestrictedToken(baseTok, FLAGS, 0, IntPtr.Zero, 0, IntPtr.Zero, c, arr, out nt))
       throw new Exception("CreateRestrictedToken failed err=" + Marshal.GetLastWin32Error());
+    if (string.IsNullOrEmpty(logon)) { CloseHandle(nt); throw new Exception("no logon SID for the default DACL"); }
+    try { SetDefaultDacl(nt, logon); } catch { CloseHandle(nt); throw; }
+    bool cn = EnableChangeNotify(nt);
+    LastRestrictNote = "logonSid=" + logon + " defaultDacl=ok changeNotify=" + cn;
     return nt;
   }
 
@@ -182,7 +225,7 @@ public static class TauRestrict {
         try { int r; if (!GetTokenInformation(nt, TOKEN_ELEVATION_CLASS, b, 4, out r)) return -Marshal.GetLastWin32Error(); return Marshal.ReadInt32(b) == 0 ? 0 : 1; }
         finally { Marshal.FreeHGlobal(b); }
       } finally { CloseHandle(nt); }
-    } catch (Exception) { return -99; }
+    } catch (Exception e) { LastRestrictNote = "error: " + e.Message; return -99; }
   }
 
   // lpDesktop = "<winsta>\\<private desktop>" (Codex desktop.rs LaunchDesktop::startup_info_desktop). A
@@ -322,6 +365,8 @@ if ($apiOk) {
   $elev = [TauRestrict]::RestrictedElevation($cap1, $logonSid)
   Add-Check 'fallback.token.writeRestricted' 'WRITE_RESTRICTED token built with the random cap SID as a restricting SID (flags DISABLE_MAX_PRIVILEGE|LUA_TOKEN|WRITE_RESTRICTED=0x0D; token.rs:500-501)' ("flags=$FLAGS_HEX elevationProbe=$elev") ($elev -ge 0) @{ flags = $FLAGS_HEX; citation = 'codex-rs/windows-sandbox-rs/src/token.rs:500' }
   Add-Check 'fallback.workload.nonElevated' 'the write-restricted workload token is NOT elevated (LUA_TOKEN filtered)' "tokenIsElevated=$elev (0=not-elevated)" ($elev -eq 0) $null
+  $rnote = [TauRestrict]::LastRestrictNote
+  Add-Check 'fallback.token.defaultDacl' 'the restricted token default DACL is the logon SID GENERIC_ALL + OWNER RIGHTS READ_CONTROL and SeChangeNotifyPrivilege is enabled (token.rs:56-110, 518-519)' $rnote ($rnote -like '*defaultDacl=ok*') $null
 }
 
 # ---- Copy the child workload scripts to a readable staging dir (sandbox users get read+execute). ----

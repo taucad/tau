@@ -36,7 +36,7 @@ Name the project folder in the launcher's arguments:
 }
 ```
 
-Start a new thread or session after installing: the tools appear only there. The plugin is not in the Anthropic or OpenAI plugin directories; install it from the `taucad/marketplace` catalog.
+Start a new thread after installing: the tools appear only there. The plugin is not in the Anthropic or OpenAI directories; install it from `taucad/marketplace`.
 
 ## Check
 
@@ -54,18 +54,18 @@ Troubleshooting, kernel choice and what to tell the user are in the [agent guide
 - Claude Desktop: an inline card with Add to chat and Open full view.
 - Claude Code and Codex CLI: a link to the viewer on `127.0.0.1`; screenshots stay inline.
 
-The tab, full view and browser page add Share, Export and a workbench toggle at the top, and grid, section, measure and fit. Add to chat gives the agent the card's model or a right-clicked part; the browser page copies it instead.
+The tab, full view and browser page add Share, Export, a workbench toggle, grid, section, measure and fit. Add to chat gives the agent the card's model or a right-clicked part; the browser page copies it instead.
 
-A tab or full view follows each model the agent shows, and the agent can select parts in it. `view_state` reports the model, selected and hidden parts and camera, plus an image with `capture`. `show_model` also opens STEP, STL, 3MF and OBJ files.
+A tab or full view follows each model the agent shows, and the agent can select parts in it. A shown source stays live: each edit to the file or its parameters redraws every open view. `view_state` reports the model, selected and hidden parts and camera, plus an image with `capture`. `show_model` also opens STEP, STL, 3MF and OBJ files.
 
-The **workbench** lists the parts, parameters, selected part's properties and display switches. A changed parameter is saved to the project and the model redraws; the agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved too, so Tau reopens the same view.
+The **workbench** lists parts, parameters, the selected part's properties and display switches. A changed parameter is saved to the project and the model redraws; the agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved too, so Tau reopens the same view.
 
-The viewer makes no network request. Model files reach it through a tool only the page can call, a few megabytes at a time and compressed where that helps, so a large mesh loads without the host dropping the connection. The browser link answers only on your machine, with a session token.
+The viewer makes no network request. Model files reach it through a tool only the page can call, in compressed chunks, so a large mesh loads without the host dropping the connection. The browser link answers only on your machine, with a session token.
 
 ## Printing
 
-Start the agent with `TAU_HOST_MACHINES=true` to use the machines you set up in Tau, from a folder holding a Tau project (`tau.json`). The agent can request a job; nothing starts until you approve it in Tau's Print pane. One Tau app uses your machines at a time, so quit the desktop app first.
+Start the agent with `TAU_HOST_MACHINES=true` to use the machines you set up in Tau, in a Tau project folder (`tau.json`). The agent can request a job; nothing starts until you approve it in Tau's Print pane. One Tau app uses your machines at a time, so quit the desktop app first.
 
 ## Where files go
 
-Exports and viewed models land in `.tau/artifacts/`, workbench changes in `.tau/workbench/`. Screenshots stay in a temporary folder removed when the server stops.
+Exports land in `.tau/artifacts/`, workbench changes in `.tau/workbench/`; a viewed model stays in the server's memory. Screenshots stay in a temporary folder the server removes.

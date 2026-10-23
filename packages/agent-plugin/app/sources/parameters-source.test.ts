@@ -44,7 +44,7 @@ const settle = async (): Promise<void> => {
 describe('createParametersSource', () => {
   it('should read the full manifest and the current record when the pane first observes an entry', async () => {
     const { bridge, callTool } = bridgeWith({ read: () => resolved({ width: 15 }) });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     const listener = vi.fn();
 
     expect(source.snapshot('main.ts')).toEqual({ manifest: undefined, entry: undefined, failure: undefined });
@@ -67,7 +67,7 @@ describe('createParametersSource', () => {
         diagnostics: [{ code: 'INVALID_SCHEMA', message: 'The schema is not an object.' }],
       }),
     });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -87,7 +87,7 @@ describe('createParametersSource', () => {
         return resolved({});
       },
     });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
     expect(source.snapshot('main.ts').failure).toEqual({ code: 'RESOLUTION_FAILED', message: 'UNKNOWN_TOOL' });
@@ -98,7 +98,7 @@ describe('createParametersSource', () => {
     expect(source.snapshot('main.ts').failure).toBeUndefined();
   });
 
-  it('should propose a committed value against the read revision, read again and then show the model', async () => {
+  it('should propose a committed value against the read revision and read again', async () => {
     const order: string[] = [];
     let width = 15;
     const { bridge, callTool } = bridgeWith({
@@ -112,8 +112,7 @@ describe('createParametersSource', () => {
         return committed(String(args['requestId']));
       },
     });
-    const onCommitted = vi.fn(() => order.push('committed'));
-    const source = createParametersSource(bridge, { onCommitted });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -133,13 +132,13 @@ describe('createParametersSource', () => {
       pressure: 'final',
       operation: { kind: 'native-value', group: 'default', pointer: '/width', value: 42 },
     });
-    expect(order).toEqual(['read', 'propose', 'read', 'committed']);
+    expect(order).toEqual(['read', 'propose', 'read']);
     expect(source.snapshot('main.ts').entry?.groups['default']?.values).toEqual({ width: 42 });
   });
 
   it('should not write transient drag values', async () => {
     const { bridge, callTool } = bridgeWith({ read: () => resolved({}) });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
 
     const outcome = await source.commitValue('main.ts', manifest, {
       group: 'default',
@@ -152,20 +151,18 @@ describe('createParametersSource', () => {
     expect(callTool).not.toHaveBeenCalled();
   });
 
-  it('should return a refusal without showing the model, and read the authority value again', async () => {
+  it('should return a refusal and read the authority value again', async () => {
     const { bridge, callTool } = bridgeWith({
       read: () => resolved({ width: 15 }),
       propose: () => ({
         outcome: { status: 'rejected', requestId: 'request', code: 'STALE_MANIFEST', message: 'Stale.' },
       }),
     });
-    const onCommitted = vi.fn();
-    const source = createParametersSource(bridge, { onCommitted });
+    const source = createParametersSource(bridge);
 
     const outcome = await source.commitValue('main.ts', manifest, { group: 'default', pointer: '/width', value: 1 });
 
     expect(outcome).toEqual({ status: 'rejected', requestId: 'request', code: 'STALE_MANIFEST', message: 'Stale.' });
-    expect(onCommitted).not.toHaveBeenCalled();
     expect(callTool.mock.calls.filter(([name]) => name === 'get_parameters')).toHaveLength(2);
   });
 
@@ -174,7 +171,7 @@ describe('createParametersSource', () => {
       read: () => resolved({ width: 15 }, 'tall'),
       propose: () => ({ outcome: { status: 'indeterminate', requestId: 'r', message: 'Unknown.' } }),
     });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -194,8 +191,7 @@ describe('createParametersSource', () => {
         return committed();
       },
     });
-    const onCommitted = vi.fn();
-    const source = createParametersSource(bridge, { onCommitted });
+    const source = createParametersSource(bridge);
     const groups = source.groups!;
 
     await Promise.all([
@@ -211,12 +207,11 @@ describe('createParametersSource', () => {
       { kind: 'rename-group', group: 'tall', nextGroup: 'taller' },
       { kind: 'delete-group', group: 'taller' },
     ]);
-    expect(onCommitted).toHaveBeenCalledTimes(4);
   });
 
   it('should read observed entries again on refresh', async () => {
     const { bridge, callTool } = bridgeWith({ read: () => resolved({}) });
-    const source = createParametersSource(bridge, { onCommitted: vi.fn() });
+    const source = createParametersSource(bridge);
     source.subscribe('main.ts', vi.fn());
     await settle();
 
@@ -232,7 +227,7 @@ describe('createParametersSource', () => {
 
   it('should hand failures to the page only when it shows them', () => {
     const onError = vi.fn();
-    expect(createParametersSource(bridgeWith({}).bridge, { onCommitted: vi.fn(), onError }).reportError).toBe(onError);
-    expect(createParametersSource(bridgeWith({}).bridge, { onCommitted: vi.fn() }).reportError).toBeUndefined();
+    expect(createParametersSource(bridgeWith({}).bridge, { onError }).reportError).toBe(onError);
+    expect(createParametersSource(bridgeWith({}).bridge).reportError).toBeUndefined();
   });
 });

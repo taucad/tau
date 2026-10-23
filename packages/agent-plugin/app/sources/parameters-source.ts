@@ -70,8 +70,6 @@ export type PageParametersSource = ParametersSource &
  * @public
  */
 export type ParametersSourceOptions = Readonly<{
-  /** An operation was written: show the model again. */
-  onCommitted: () => void;
   /** Show an operation's failure. Absent, the pane shows it above its sections. */
   onError?: (message: string) => void;
 }>;
@@ -113,7 +111,10 @@ const committedOrThrow = (outcome: ParameterSetOutcome): void => {
  * @returns The source, plus `refresh` for when the shown model changes.
  * @public
  */
-export const createParametersSource = (bridge: HostBridge, options: ParametersSourceOptions): PageParametersSource => {
+export const createParametersSource = (
+  bridge: HostBridge,
+  options: ParametersSourceOptions = {},
+): PageParametersSource => {
   const records = new Map<string, EntryRecord>();
   let sequence = 0;
 
@@ -226,11 +227,9 @@ export const createParametersSource = (bridge: HostBridge, options: ParametersSo
         }),
         requestId,
       );
-      // Committed or not, the record now holds what the server holds: a refusal shows the authority value again.
+      /* Committed or not, the record now holds what the server holds: a refusal shows the authority value again. A
+       * committed write is a sidecar change the server's watched document renders, so the page shows it unasked. */
       await read(entryPath);
-      if (outcome.status === 'committed') {
-        options.onCommitted();
-      }
       return outcome;
     };
     const previous = record.queue;

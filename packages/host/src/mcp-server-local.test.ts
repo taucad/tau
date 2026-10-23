@@ -9,7 +9,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +24,7 @@ import type { HostToolDefinition, HostToolInvocation, HostToolResult, ToolRegist
 
 import { serveLocalHostMcp } from '#mcp-server.js';
 import type { ViewerExportRoute, ViewerExportRuntime } from '#mcp-viewer-export.js';
+import { scriptedRuntime } from '#mcp-entry-sessions.fixture.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
 import { testModelTool } from '#test-model-tool.fixture.js';
 
@@ -365,7 +366,7 @@ describe('serveLocalHostMcp', () => {
     }
   });
 
-  it('should serve the viewer only with a page, rendering a shown source through export_model', async () => {
+  it('should serve the viewer only with a page, watching a shown source in its runtime without exporting it', async () => {
     const { local: withoutPage } = await serve(ready);
     expect(served.options?.viewer).toBeUndefined();
     await withoutPage.close();
@@ -377,117 +378,33 @@ describe('serveLocalHostMcp', () => {
       list: () => [testModelTool],
       invoke: async (invocation) => {
         invocations.push(invocation);
-        await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
-        await writeFile(join(root, '.tau', 'artifacts', 'main.glb'), 'glb');
-        return {
-          content: {
-            success: true,
-            files: [
-              {
-                artifactPath: '.tau/artifacts/main.glb',
-                mimeType: 'model/gltf-binary',
-              },
-            ],
-          },
-          isError: false,
-        };
+        return { content: { success: true }, isError: false };
       },
     };
-    const local = await serveLocalHostMcp({
-      workspaceRoot: root,
-      registry,
-      checkouts: new Map(),
-      viewerPage: { html: '<!doctype html>', sha256: 'd'.repeat(64) },
-    });
-    try {
-      const shown = await served.options?.viewer?.show(
-        { targetFile: 'main.ts' },
-        { toolCallId: 'show-1', presentation: 'inline' },
-      );
-      expect(invocations).toEqual([
-        expect.objectContaining({
-          toolName: 'export_model',
-          input: { targetFile: 'main.ts', to: 'glb' },
-        }),
-      ]);
-      expect(shown).toMatchObject({
-        model: { path: '.tau/artifacts/main.glb', sourceFile: 'main.ts' },
-      });
-    } finally {
-      await local.close();
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("should ask export_model for a shown source's topology only when its GLB route carries it", async () => {
-    const root = await mkdtemp(join(tmpdir(), 'tau-viewer-topology-'));
-    await writeFile(join(root, 'main.ts'), '');
-    await writeFile(join(root, 'main.scad'), '');
-    const invocations: HostToolInvocation[] = [];
-    const registry: ToolRegistry = {
-      list: () => [testModelTool],
-      invoke: async (invocation) => {
-        invocations.push(invocation);
-        await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
-        await writeFile(join(root, '.tau', 'artifacts', 'model.glb'), 'glb');
-        return {
-          content: {
-            success: true,
-            files: [
-              {
-                artifactPath: '.tau/artifacts/model.glb',
-                mimeType: 'model/gltf-binary',
-              },
-            ],
-          },
-          isError: false,
-        };
-      },
-    };
-    const glb = {
-      targetFormat: 'glb',
-      fidelity: 'mesh',
-      exportOptions: { schema: {}, defaults: {} },
-    } as const;
+    const runtime = scriptedRuntime();
     const local = await serveLocalHostMcp({
       workspaceRoot: root,
       registry,
       checkouts: new Map(),
       viewerPage: { html: '<!doctype html>', sha256: 'd'.repeat(64) },
       runtimeClient: async () => ({
-        ...withRoutes([
-          {
-            ...glb,
-            kernelId: 'replicad',
-            content: {
-              schema: {
-                type: 'object',
-                properties: { includeTopology: { type: 'boolean' } },
-              },
-            },
-          },
-          { ...glb, kernelId: 'openscad' },
-        ]),
+        ...runtime,
+        ...withRoutes([]),
+        lifecycleState: runtime.lifecycleState,
+        capabilities: { ...runtime.capabilities!, routes: [] },
         connect: async () => undefined,
-        describe: async ({ source }) => ({
-          kernelId: source.path.endsWith('.scad') ? 'openscad' : 'replicad',
-        }),
+        describe: async () => ({ kernelId: undefined }),
       }),
     });
     try {
-      await served.options?.viewer?.show({ targetFile: 'main.ts' }, { toolCallId: 'show-1', presentation: 'inline' });
-      await served.options?.viewer?.show({ targetFile: 'main.scad' }, { toolCallId: 'show-2', presentation: 'inline' });
-      expect(invocations.map(({ toolName: name, input }) => ({ name, input }))).toEqual([
-        {
-          name: 'export_model',
-          input: {
-            targetFile: 'main.ts',
-            to: 'glb',
-            content: { includeTopology: true },
-          },
-        },
-        { name: 'export_model', input: { targetFile: 'main.scad', to: 'glb' } },
-      ]);
+      const shown = await served.options?.viewer?.show(
+        { targetFile: 'main.ts' },
+        { toolCallId: 'show-1', presentation: 'inline' },
+      );
+      expect(invocations).toEqual([]);
+      expect(runtime.documents).toMatchObject([{ entryPath: 'main.ts', watch: true }]);
+      expect(shown).toMatchObject({ model: { path: 'main.ts', sourceFile: 'main.ts', mimeType: 'model/gltf-binary' } });
+      expect(await exists(join(root, '.tau'))).toBe(false);
     } finally {
       await local.close();
       await rm(root, { recursive: true, force: true });
@@ -508,7 +425,7 @@ describe('serveLocalHostMcp', () => {
           inputSchema: { type: 'object', properties: {} },
         },
       ],
-      invoke: async ({ runId, toolName: name, input }): Promise<HostToolResult> => {
+      invoke: async ({ runId, input }): Promise<HostToolResult> => {
         const root = (runId === undefined ? undefined : checkouts.get(runId)?.cwd) ?? '';
         const { targetFile } = z.object({ targetFile: z.string() }).parse(input);
         if (!(await exists(join(root, targetFile)))) {
@@ -521,27 +438,18 @@ describe('serveLocalHostMcp', () => {
             isError: true,
           };
         }
-        if (name === toolName.exportModel) {
-          await mkdir(join(root, '.tau', 'artifacts'), { recursive: true });
-          await writeFile(join(root, '.tau', 'artifacts', 'gear.glb'), 'glb');
-          return {
-            content: {
-              success: true,
-              files: [
-                {
-                  artifactPath: '.tau/artifacts/gear.glb',
-                  mimeType: 'model/gltf-binary',
-                },
-              ],
-            },
-            isError: false,
-          };
-        }
         return {
           content: { success: true, status: 'resolved', root },
           isError: false,
         };
       },
+    };
+    const watched = scriptedRuntime();
+    const stlRoute: ViewerExportRoute = {
+      targetFormat: 'stl',
+      kernelId: 'replicad',
+      fidelity: 'mesh',
+      exportOptions: { schema: {}, defaults: {} },
     };
     const local = await serveLocalHostMcp({
       workspaceRoot: start,
@@ -549,14 +457,10 @@ describe('serveLocalHostMcp', () => {
       checkouts,
       viewerPage: { html: '<!doctype html>', sha256: 'd'.repeat(64) },
       runtimeClient: async (root) => ({
-        ...withRoutes([
-          {
-            targetFormat: 'stl',
-            kernelId: 'replicad',
-            fidelity: 'mesh',
-            exportOptions: { schema: {}, defaults: {} },
-          },
-        ]),
+        ...watched,
+        ...withRoutes([stlRoute]),
+        lifecycleState: watched.lifecycleState,
+        capabilities: { ...watched.capabilities!, routes: [stlRoute] },
         connect: async () => undefined,
         describe: async ({ source }) => ({
           kernelId: (await exists(join(root, source.path))) ? 'replicad' : undefined,

@@ -371,6 +371,10 @@ const config: KnipConfig = {
       // Nx targets run every script from the workspace root.
       entry: ['scripts/*.mts'],
     },
+    'packages/plugins/esbuild': {
+      // `esbuild-core.{permission,release}.test.ts` run these under Node flags in a child process.
+      entry: ['src/vm/*.test.child.ts'],
+    },
     'packages/plugins/image': {
       // copy-files-from-to.cjson (run by the copy-files-from-to Nx plugin) copies Geist's TTF.
       ignoreDependencies: ['geist'],

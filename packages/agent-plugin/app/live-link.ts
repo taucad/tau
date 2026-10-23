@@ -1,6 +1,7 @@
 /**
  * The page's live link to `tau mcp` (agent plugin UI blueprint W6): a long poll of `app_sync` that reports what the
- * person sees and hears of models `show_model` handed over and of captures the agent waits for.
+ * person sees and hears of models `show_model` handed over, of newer renders of the source it shows (the server
+ * watches it, PAR-1) with their build status, and of captures the agent waits for.
  */
 
 import { tauViewerAcceptedViewFields, tauViewerToolName } from '@taucad/mcp/viewer-protocol';
@@ -10,6 +11,7 @@ import type {
   TauViewerImage,
   TauViewerModel,
   TauViewerShowResult,
+  TauViewerEntryStatus,
   TauViewerSyncResult,
   TauViewerViewState,
 } from '@taucad/mcp/viewer-protocol';
@@ -73,6 +75,7 @@ export const viewStateOf = (
     measurementCount: input.measurementCount,
     composition: input.composition,
     interactedAt: input.interactedAt,
+    ...(model.sourceRevision === undefined ? {} : { sourceRevision: model.sourceRevision }),
     references: input.references.slice(0, 64).map((reference) =>
       componentOf(reference.componentId, {
         name: reference.label,
@@ -182,8 +185,10 @@ export type LiveLinkPage = Readonly<{
   linked(): boolean;
   /** The `tools/call` whose result opened the page, which tells the server the page's conversation. */
   toolCallId(): string | undefined;
-  /** A model `show_model` handed over that this page has not seen. */
+  /** A model this page has not seen: one `show_model` handed over, or a newer render of the source it shows. */
   show(result: TauViewerShowResult): void;
+  /** The live state of the sources the page shows, by project-relative path, as the server last reported it. */
+  status(status: Readonly<Record<string, TauViewerEntryStatus>>): void;
   /** Capture the live view once its model is drawn. */
   capture(): Promise<TauViewerImage | Readonly<{ error: string }>>;
 }>;
@@ -275,8 +280,12 @@ export const startLiveLink = (
   const handle = (result: TauViewerSyncResult): void => {
     version = Math.max(version, result.version);
     accepts = new Set(result.accepts ?? []);
-    if (result.show !== undefined && page.follows()) {
+    /* The server hands a card only newer renders of its own source, and a following page whatever was shown last. */
+    if (result.show !== undefined) {
       page.show(result.show);
+    }
+    if (result.status !== undefined) {
+      page.status(result.status);
     }
     const requestId = result.capture?.requestId;
     if (requestId !== undefined && !answered.has(requestId)) {

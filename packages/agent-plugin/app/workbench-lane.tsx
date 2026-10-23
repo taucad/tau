@@ -2,8 +2,8 @@
  * The tab's workbench panes (viewer parity R1, R3): the Tau app's own Parameters, Model, Kinematics, Export and Share
  * panes from `@taucad/workbench-panes`, in a lane beside the canvas, each fed by a page source over the host bridge.
  */
-import { useEffect, useMemo, useRef } from 'react';
-import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
+import { useEffect, useMemo } from 'react';
+import type { TauViewerEntryStatus, TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
 import { ExportPane } from '@taucad/workbench-panes/export/export-pane';
@@ -44,9 +44,9 @@ type WorkbenchLaneProps = Readonly<{
   bridge: HostBridge;
   /** The shown model; the panes show nothing until there is one. */
   model: TauViewerModel | undefined;
+  /** The server's live state of the shown sources, by project-relative path: their build and issues. */
+  status: Readonly<Record<string, TauViewerEntryStatus>> | undefined;
   graphicsRef: GraphicsRef;
-  /** Show the model again after a parameter edit is written. */
-  onParametersWritten: () => void;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
   reveal: ComponentReveal;
   /** The part menu on the Model pane's rows. */
@@ -66,8 +66,8 @@ type WorkbenchLaneProps = Readonly<{
 export function WorkbenchLane({
   bridge,
   model,
+  status,
   graphicsRef,
-  onParametersWritten,
   reveal,
   componentActions,
   openPaneRequest,
@@ -79,18 +79,14 @@ export function WorkbenchLane({
     (): readonly WorkbenchUnit[] => (entryPath === undefined ? [] : [{ entryPath, graphicsRef }]),
     [entryPath, graphicsRef],
   );
-  /* One parameters source per bridge: it keeps each entry's last read, so a re-render does not read again. */
-  const onWritten = useRef(onParametersWritten);
-  onWritten.current = onParametersWritten;
-  const parameters = useMemo(
-    () =>
-      createParametersSource(bridge, {
-        onCommitted: () => {
-          onWritten.current();
-        },
-      }),
-    [bridge],
-  );
+  /* One parameters source per bridge: it keeps each entry's last read, so a re-render does not read again. A written
+   * edit is a sidecar change the server's watched document renders, and the newer model reaches the page unasked. */
+  const parameters = useMemo(() => createParametersSource(bridge), [bridge]);
+  /* One kinematics source per bridge, reading the newest status the page holds. */
+  const kinematics = useMemo(() => createKinematicsSource(), []);
+  useEffect(() => {
+    kinematics.setStatus(status);
+  }, [kinematics, status]);
   /* A model shown for another reason (the agent changed the source) may carry other parameters. */
   const modelSha = model?.sha256;
   useEffect(() => {
@@ -102,14 +98,8 @@ export function WorkbenchLane({
     (): WorkbenchPanesHost => ({
       useUnits: () => units,
       parameters,
-      kinematics: {
-        ...createKinematicsSource(bridge),
-        subscribeReveal: reveal.subscribeKinematics,
-      },
-      model: createModelSource(bridge, {
-        componentActions,
-        reveal: reveal.model,
-      }),
+      kinematics: { useUnitStatus: kinematics.useUnitStatus, subscribeReveal: reveal.subscribeKinematics },
+      model: createModelSource(bridge, { componentActions, reveal: reveal.model }),
       ...(model === undefined
         ? {}
         : {
@@ -119,7 +109,7 @@ export function WorkbenchLane({
             share: createShareSource(bridge, model),
           }),
     }),
-    [bridge, componentActions, model, parameters, reveal, units],
+    [bridge, componentActions, kinematics, model, parameters, reveal, units],
   );
 
   return (

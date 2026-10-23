@@ -290,9 +290,8 @@ function DrawerContent({
           'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:bottom-(--keyboard-frame-bottom)!',
           'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:max-h-(--keyboard-frame-height)!',
           'data-[keyboard=open]:data-[vaul-drawer-direction=bottom]:transform-none!',
-          /* A drawer is a touch surface: its list rows and their filter field are 44px thumb targets (Tau's
-             spacing unit is 4.4px). */
-          '[&_[data-slot=command-item]]:min-h-10 [&_[data-slot=command-input]]:h-10',
+          /* A drawer is a touch surface: its list rows and their filter field take the touch row height. */
+          '[&_[data-slot=command-item]]:min-h-touch-row [&_[data-slot=command-input]]:h-touch-row',
           'data-[vaul-drawer-direction=bottom]:pb-[env(safe-area-inset-bottom)]',
           'data-[vaul-drawer-direction=top]:inset-x-0 data-[vaul-drawer-direction=top]:top-0 data-[vaul-drawer-direction=top]:mb-24 data-[vaul-drawer-direction=top]:max-h-[80vh] data-[vaul-drawer-direction=top]:rounded-b-lg data-[vaul-drawer-direction=top]:border-b',
           'data-[vaul-drawer-direction=bottom]:inset-x-0 data-[vaul-drawer-direction=bottom]:bottom-0 data-[vaul-drawer-direction=bottom]:mt-24 data-[vaul-drawer-direction=bottom]:max-h-[80vh] data-[vaul-drawer-direction=bottom]:rounded-t-lg data-[vaul-drawer-direction=bottom]:border-t',

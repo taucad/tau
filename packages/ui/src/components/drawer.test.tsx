@@ -45,12 +45,12 @@ const renderDrawer = (field: React.ReactNode): HTMLElement => {
 };
 
 describe('DrawerContent', () => {
-  it('should give list rows and their filter field a 44px touch height and keep the caller className', () => {
+  it('should give list rows and their filter field the touch row height and keep the caller className', () => {
     const content = renderDrawer(undefined);
 
     expect(content).toHaveClass(
-      '[&_[data-slot=command-item]]:min-h-10',
-      '[&_[data-slot=command-input]]:h-10',
+      '[&_[data-slot=command-item]]:min-h-touch-row',
+      '[&_[data-slot=command-input]]:h-touch-row',
       'custom-drawer',
     );
   });

@@ -201,7 +201,7 @@ export function ComboBoxResponsive<T>({
           {isNested ? (
             <div
               data-slot='combobox-drawer-header'
-              className='grid grid-cols-[2.25rem_minmax(0,1fr)_2.25rem] items-center gap-2 px-3 py-1'
+              className='grid grid-cols-[var(--spacing-touch-row)_minmax(0,1fr)_var(--spacing-touch-row)] items-center gap-2 px-3 py-1'
             >
               {/* A fixed square with a full radius and an even border stays a circle at every scale; the
                   matching empty column keeps the title on the drawer's centre line. */}
@@ -209,7 +209,7 @@ export function ComboBoxResponsive<T>({
                 type='button'
                 variant='ghost'
                 aria-label='Back'
-                className='flex size-9 shrink-0 items-center justify-center rounded-full border border-border p-0 has-[>svg]:p-0'
+                className='flex size-touch-row shrink-0 items-center justify-center rounded-full border border-border p-0 has-[>svg]:p-0'
                 onClick={() => {
                   handleOpenChange(false);
                 }}

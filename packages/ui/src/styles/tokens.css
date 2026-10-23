@@ -598,6 +598,10 @@
   --shadow-menu: 0 0 0 1px var(--menu-ring), 0 6px 20px -4px rgba(0, 0, 0, 0.25);
   --font-sans: 'Geist Sans', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Geist Mono', ui-monospace, monospace;
+  /* The touch row: one height for every menu and picker row under a coarse pointer, a drawer list's
+     filter field and a nested drawer's Back control. Fixed at 40px whatever the spacing scale, so
+     `min-h-touch-row`, `h-touch-row` and `size-touch-row` change together from here. */
+  --spacing-touch-row: 2.5rem;
   --color-*: initial;
   --color-black: black;
   --color-white: white;

@@ -7,48 +7,24 @@ export const maxEncodedBytes = 64 * 1024 * 1024;
 export const maxEncodedEntries = 4096;
 
 /**
- * Validate the digests a codec attests for its leaves.
- * @param encoded - Codec output.
- * @param leafCount - Number of content leaves it carries.
- * @returns The validated digests index for index, or `undefined` when the codec attests none.
- */
-const attestedDigests = (
-  encoded: Uint8Array<ArrayBuffer> | EncodedContent,
-  leafCount: number,
-): readonly ContentDigest[] | undefined => {
-  const digests: readonly unknown[] | undefined = encoded instanceof Uint8Array ? undefined : encoded.digests;
-  if (digests === undefined) {
-    return undefined;
-  }
-  if (!Array.isArray(digests) || digests.length !== leafCount) {
-    throw new TypeError('Codec digests must match its content leaves index for index.');
-  }
-  return digests.map((value) => {
-    if (typeof value !== 'string') {
-      throw new TypeError('Codec digests must be content digests.');
-    }
-    return contentDigest({ value });
-  });
-};
-
-/**
  * Hash each owned leaf that has no attested digest and intern the unique ones under the budget.
- * @param input - Owned leaves with optional attested digests, the root identity and cancellation.
+ * @param owned - Owned leaves with optional attested digests.
+ * @param owner - The owned root bytes and their digest.
+ * @param signal - Cancellation context for hashing.
  * @returns Unique leaves by digest, excluding the root.
  */
-const internLeaves = async (input: {
-  readonly owned: ReadonlyArray<{ readonly leaf: Uint8Array<ArrayBuffer>; readonly digest: ContentDigest | undefined }>;
-  readonly rootDigest: ContentDigest;
-  readonly rootSize: number;
-  readonly signal: AbortSignal;
-}): Promise<Map<ContentDigest, Uint8Array<ArrayBuffer>>> => {
+const internLeaves = async (
+  owned: ReadonlyArray<{ readonly leaf: Uint8Array<ArrayBuffer>; readonly digest: ContentDigest | undefined }>,
+  owner: { readonly bytes: Uint8Array<ArrayBuffer>; readonly digest: ContentDigest },
+  signal: AbortSignal,
+): Promise<Map<ContentDigest, Uint8Array<ArrayBuffer>>> => {
   const content = new Map<ContentDigest, Uint8Array<ArrayBuffer>>();
-  let size = input.rootSize;
-  for (const { leaf, digest: attested } of input.owned) {
+  let size = owner.bytes.byteLength;
+  for (const { leaf, digest: attested } of owned) {
     // oxlint-disable-next-line no-await-in-loop -- hash one owned leaf at a time
     const digest = attested ?? (await digestContent({ bytes: leaf }));
-    input.signal.throwIfAborted();
-    if (digest !== input.rootDigest && !content.has(digest)) {
+    signal.throwIfAborted();
+    if (digest !== owner.digest && !content.has(digest)) {
       size += leaf.byteLength;
       if (size > maxEncodedBytes) {
         throw new RangeError('Codec content exceeds the publication budget.');
@@ -86,10 +62,14 @@ export const ownEncodedContent = async (
   ) {
     throw new RangeError('Codec content exceeds the publication budget.');
   }
-  const attested = attestedDigests(encoded, leaves.length);
+  // A codec may attest the digests of leaves it already owns and hashed, index for index.
+  const attested =
+    encoded instanceof Uint8Array ? undefined : encoded.digests?.map((value) => contentDigest({ value }));
+  if (attested !== undefined && attested.length !== leaves.length) {
+    throw new TypeError('Codec digests must match its leaves.');
+  }
   const ranges = new Map<ArrayBuffer, Set<string>>([[root.buffer, new Set([`${root.byteOffset}:${root.byteLength}`])]]);
-  const unique: Array<Uint8Array<ArrayBuffer>> = [];
-  const uniqueDigests: Array<ContentDigest | undefined> = [];
+  const unique: Array<{ readonly leaf: Uint8Array<ArrayBuffer>; readonly digest: ContentDigest | undefined }> = [];
   let ownershipSize = root.byteLength;
   for (const [index, leaf] of leaves.entries()) {
     if (!(leaf instanceof Uint8Array)) {
@@ -114,18 +94,16 @@ export const ownEncodedContent = async (
       ranges.set(buffer, offsets);
     }
     offsets.add(key);
-    unique.push(new Uint8Array(buffer, leaf.byteOffset, leaf.byteLength));
-    uniqueDigests.push(attested?.[index]);
+    unique.push({ leaf: new Uint8Array(buffer, leaf.byteOffset, leaf.byteLength), digest: attested?.[index] });
   }
   // Capture synchronously; hashing must not expose retained buffers to later mutation. An attested
   // leaf is already the codec's own copy with its digest, so it is neither copied nor hashed again.
   const bytes = new Uint8Array(root);
-  const owned = unique.map((leaf, index) => ({
-    leaf: uniqueDigests[index] === undefined ? new Uint8Array(leaf) : leaf,
-    digest: uniqueDigests[index],
+  const owned = unique.map(({ leaf, digest }) => ({
+    leaf: digest === undefined ? new Uint8Array(leaf) : leaf,
+    digest,
   }));
-  const rootDigest = await digestContent({ bytes });
+  const owner = { bytes, digest: await digestContent({ bytes }) };
   signal.throwIfAborted();
-  const content = await internLeaves({ owned, rootDigest, rootSize: bytes.byteLength, signal });
-  return { bytes, digest: rootDigest, content };
+  return { ...owner, content: await internLeaves(owned, owner, signal) };
 };

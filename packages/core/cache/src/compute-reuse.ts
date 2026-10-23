@@ -394,18 +394,16 @@ const runEvaluation = async <T>(input: {
   const value = await input.evaluation.compute({ signal: input.signal });
   throwIfAborted(input.signal);
   if (input.evaluation.policy === 'best-effort' && input.schedulePublication) {
-    const { evaluation, actionKey, contentStore, actionStore } = input;
+    const { evaluation, actionKey } = input;
     input.schedulePublication({
       actionDigest: actionKey,
       ...(evaluation.signal ? { signal: evaluation.signal } : {}),
       run: async ({ signal }): Promise<ComputePublicationOutcome> => {
         throwIfAborted(signal);
-        const result = await publishComputed({ evaluation, value, actionKey, contentStore, actionStore, signal });
+        const result = await publishComputed({ ...input, value, signal });
         // A best-effort publication never throws past an abort; a computed result always carries an outcome.
         return result.source === 'computed' && result.publication.status !== 'deferred'
-          ? result.publication.status === 'stored'
-            ? { status: 'stored', contentDigest: result.publication.contentDigest }
-            : result.publication
+          ? result.publication
           : { status: 'skipped', reason: 'action-store-failed' };
       },
     });

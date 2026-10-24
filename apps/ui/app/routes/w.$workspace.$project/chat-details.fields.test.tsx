@@ -43,6 +43,7 @@ describe('Details fields', () => {
     expect(tags).toHaveAttribute('id', 'project-tags');
     expect(screen.getByText('Tags', { selector: 'label' })).toHaveAttribute('for', 'project-tags');
     expect(tags).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Remove lighting' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Main file' })).toContainElement(
       screen.getByRole('button', { name: 'Select Main File' }),
     );
@@ -54,5 +55,6 @@ describe('Details fields', () => {
     expect(screen.getByRole('textbox', { name: 'Name' })).toBeDisabled();
     expect(screen.getByRole('combobox', { name: 'Tags' })).toBeDisabled();
     expect(screen.getByText('lighting')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove lighting' })).toBeNull();
   });
 });

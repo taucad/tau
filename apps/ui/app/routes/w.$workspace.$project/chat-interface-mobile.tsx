@@ -258,20 +258,56 @@ function isEditingTarget(target: EventTarget | undefined): boolean {
   return target instanceof HTMLTextAreaElement || target.isContentEditable || target.closest('.monaco-editor') !== null;
 }
 
+const clippingOverflow = new Set(['auto', 'scroll', 'hidden', 'clip']);
+
 /**
- * Never fold away a decision (I5): at the peek, a surface whose fixed rows (a title, a composer with an approval or a
- * question above it) no longer fit is raised to half height instead of being clipped under the nav.
+ * A decision or failure a surface may hold: an alert (a run's error card), or an agent question still waiting for an
+ * answer, in the transcript or the tray above the composer (`QuestionCard`'s open card; a settled one takes
+ * `tabindex=-1` and is a record, not a decision).
  */
-function useRaiseWhenClipped(section: HTMLElement | undefined, isAtPeek: boolean, raise: () => void): void {
+const decisionSelector = '[role=alert], [role=group][data-ask-id]:not([tabindex])';
+
+/** Whether a scroller or clipping box between the element and its surface cuts part of it off. */
+function isCutOff(element: HTMLElement, section: HTMLElement): boolean {
+  const box = element.getBoundingClientRect();
+  for (let parent = element.parentElement; parent && parent !== section; parent = parent.parentElement) {
+    if (!clippingOverflow.has(getComputedStyle(parent).overflowY)) {
+      continue;
+    }
+    const clip = parent.getBoundingClientRect();
+    if (box.top < clip.top - 1 || box.bottom > clip.bottom + 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Never fold away a decision (I5). At the peek, a surface whose fixed rows (a title, a composer with an approval or a
+ * question above it) no longer fit is raised to half height instead of being clipped under the nav. At the peek and at
+ * half, a surface whose decision or failure (a run's error card riding the transcript's last turn, a question in the
+ * tray or the transcript) a short scroller would cut off is raised one detent.
+ */
+function useRaiseWhenClipped(
+  section: HTMLElement | undefined,
+  detent: 'peek' | 'half' | undefined,
+  raise: () => void,
+): void {
   useEffect(() => {
-    if (!section || !isAtPeek || typeof ResizeObserver === 'undefined') {
+    if (!section || detent === undefined || typeof ResizeObserver === 'undefined') {
       return;
     }
     const check = (): void => {
       for (const panel of section.querySelectorAll<HTMLElement>('[data-slot=floating-panel-content]')) {
-        if (panel.scrollHeight > panel.clientHeight + 1) {
+        if (detent === 'peek' && panel.scrollHeight > panel.clientHeight + 1) {
           raise();
           return;
+        }
+        for (const decision of panel.querySelectorAll<HTMLElement>(decisionSelector)) {
+          if (isCutOff(decision, section)) {
+            raise();
+            return;
+          }
         }
       }
     };
@@ -297,7 +333,16 @@ function useRaiseWhenClipped(section: HTMLElement | undefined, isAtPeek: boolean
       resize.disconnect();
       mutations.disconnect();
     };
-  }, [section, isAtPeek, raise]);
+  }, [section, detent, raise]);
+}
+
+/** The detents a decision can raise the sheet from; full has nowhere higher to go. */
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+function raisableDetent(point: number | string | null): 'peek' | 'half' | undefined {
+  if (point === mobileDrawerPeekSnapPoint) {
+    return 'peek';
+  }
+  return point === mobileDrawerOpenSnapPoint ? 'half' : undefined;
 }
 
 /** A decision or unseen failure waiting in this project's chats, for the Chat destination (I5). */
@@ -347,10 +392,10 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
     }
   }, [activeTab, drawerOpen, section]);
 
-  const raiseFromPeek = useCallback(() => {
-    handleSnapChange(mobileDrawerOpenSnapPoint);
-  }, [handleSnapChange]);
-  useRaiseWhenClipped(section, drawerOpen && activeSnapPoint === mobileDrawerPeekSnapPoint, raiseFromPeek);
+  const raiseOneDetent = useCallback(() => {
+    handleSnapChange(activeSnapPoint === mobileDrawerPeekSnapPoint ? mobileDrawerOpenSnapPoint : 1);
+  }, [activeSnapPoint, handleSnapChange]);
+  useRaiseWhenClipped(section, drawerOpen ? raisableDetent(activeSnapPoint) : undefined, raiseOneDetent);
 
   const isViewerTab = activeTab === 'viewer';
   const sheetHeight = snapPointLength(activeSnapPoint);

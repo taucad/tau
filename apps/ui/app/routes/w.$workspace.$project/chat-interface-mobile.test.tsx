@@ -530,6 +530,126 @@ describe('ChatInterfaceMobile', () => {
     expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
   });
 
+  it('should raise the sheet from the peek when the transcript would cut off a failure (I5, PN-CHAT-7)', async () => {
+    const observers: Array<() => void> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public constructor(callback: () => void) {
+          observers.push(callback);
+        }
+        public observe(): void {
+          // The test drives the callback itself.
+        }
+        public disconnect(): void {
+          // Re-observing disconnects first; the callbacks stay registered for the test to drive.
+        }
+      },
+    );
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerPeekSnapPoint;
+    renderShell();
+
+    const surface = await screen.findByRole('region', { name: 'Jobs' });
+    const content = surface.querySelector<HTMLElement>('[data-slot=floating-panel-content]')!;
+    // The fixed rows fit the peek; the transcript between them is a short scroller.
+    Object.defineProperty(content, 'clientHeight', { configurable: true, value: 120 });
+    Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 120 });
+    const transcript = document.createElement('div');
+    transcript.style.overflowY = 'auto';
+    const failure = document.createElement('div');
+    failure.setAttribute('role', 'alert');
+    transcript.append(failure);
+    content.append(transcript);
+    const rect = (top: number, bottom: number): DOMRect =>
+      DOMRect.fromRect({ x: 0, y: top, width: 300, height: bottom - top });
+    vi.spyOn(transcript, 'getBoundingClientRect').mockReturnValue(rect(40, 140));
+    const failureBox = vi.spyOn(failure, 'getBoundingClientRect').mockReturnValue(rect(60, 120));
+    const drive = (): void => {
+      act(() => {
+        for (const observer of observers) {
+          observer();
+        }
+      });
+    };
+
+    // Wholly inside the scroller, the failure is on screen: the peek holds.
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+
+    // The failure runs past the peek's short scroller: the sheet rises to half, where the scroller holds it.
+    failureBox.mockImplementation(() =>
+      state.activeSnapPoint === mobileDrawerPeekSnapPoint ? rect(100, 220) : rect(60, 120),
+    );
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('should raise the sheet from half to full when the question tray would cut off an answer (I5, WB-09)', async () => {
+    const observers: Array<() => void> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public constructor(callback: () => void) {
+          observers.push(callback);
+        }
+        public observe(): void {
+          // The test drives the callback itself.
+        }
+        public disconnect(): void {
+          // Re-observing disconnects first; the callbacks stay registered for the test to drive.
+        }
+      },
+    );
+    state.drawerOpen = true;
+    state.activeTab = 'jobs';
+    state.activeSnapPoint = mobileDrawerOpenSnapPoint;
+    renderShell();
+
+    const surface = await screen.findByRole('region', { name: 'Jobs' });
+    const content = surface.querySelector<HTMLElement>('[data-slot=floating-panel-content]')!;
+    // At half a panel that scrolls its own rows is not a decision folded away: only the peek raises for that.
+    Object.defineProperty(content, 'clientHeight', { configurable: true, value: 300 });
+    Object.defineProperty(content, 'scrollHeight', { configurable: true, value: 420 });
+    const tray = document.createElement('ul');
+    tray.setAttribute('aria-label', 'Questions');
+    tray.style.overflowY = 'auto';
+    const row = document.createElement('li');
+    // A waiting question's card, as `QuestionCard` draws it; an answered one is a record and takes tabindex=-1.
+    const ask = document.createElement('div');
+    ask.setAttribute('role', 'group');
+    ask.dataset['askId'] = 'ask-1';
+    row.append(ask);
+    tray.append(row);
+    content.append(tray);
+    const rect = (top: number, bottom: number): DOMRect =>
+      DOMRect.fromRect({ x: 0, y: top, width: 300, height: bottom - top });
+    vi.spyOn(tray, 'getBoundingClientRect').mockReturnValue(rect(200, 350));
+    const askBox = vi.spyOn(ask, 'getBoundingClientRect').mockReturnValue(rect(210, 340));
+    const drive = (): void => {
+      act(() => {
+        for (const observer of observers) {
+          observer();
+        }
+      });
+    };
+
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    // An answered question past the tray's foot is a record, not a decision: the sheet stays.
+    askBox.mockReturnValue(rect(210, 420));
+    ask.tabIndex = -1;
+    drive();
+    expect(state.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    // A waiting question's answers past the tray's foot: the sheet rises to full rather than scroll them away.
+    ask.removeAttribute('tabindex');
+    drive();
+    expect(state.activeSnapPoint).toBe(1);
+  });
+
   it.each([
     [{ attention: 1, conflicted: false, settings: 0, failed: 0 }, 'A chat needs you'],
     [{ attention: 3, conflicted: true, settings: 0, failed: 0 }, '2 chats need you'],

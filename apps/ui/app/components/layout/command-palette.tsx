@@ -426,7 +426,8 @@ function CommandPaletteMobile({
             </Button>
           </DrawerTrigger>
         </TooltipTrigger>
-        <TooltipContent>
+        {/* Above the sidebar sheet (z-100) this button sits in. */}
+        <TooltipContent className='z-110'>
           Search{' '}
           <KeyShortcut className='ml-1' variant='tooltip'>
             {formattedKeyCombination}

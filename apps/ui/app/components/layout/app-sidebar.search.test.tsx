@@ -123,6 +123,15 @@ describe('sidebar search trigger', () => {
         close.focus();
       });
       expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Close sidebar/);
+      // Tooltips in the sheet must clear its z-100 (Radix copies the content's z-index to its popper wrapper).
+      expect(document.querySelector('[data-slot=tooltip-content]')).toHaveClass('z-110');
+      act(() => {
+        controls[2]!.focus();
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('tooltip')).toHaveTextContent(/^Search/);
+      });
+      expect(document.querySelector('[data-slot=tooltip-content]')).toHaveClass('z-110');
       expect(controls).toEqual([close, within(header).getByRole('link', { name: 'Home' }), search]);
       // The icon-lg size: a 40px header target, matching the 40px close and Home controls beside it.
       expect(search).toHaveClass('size-10');
@@ -161,6 +170,8 @@ describe('sidebar search trigger', () => {
         expect(screen.queryByRole('dialog', { name: 'Search' })).not.toBeInTheDocument();
       });
       expect(search).toHaveFocus();
+      // Escape closes only the top layer: the sidebar sheet stays open beneath.
+      expect(screen.getByRole('dialog', { name: 'Sidebar' })).toBeInTheDocument();
     });
 
     it('should open the palette sheet from the keyboard shortcut', async () => {

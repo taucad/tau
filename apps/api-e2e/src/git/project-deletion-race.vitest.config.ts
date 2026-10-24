@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     include: ['src/git/project-deletion-race.spec.ts'],
     environment: 'node',
+    globalSetup: [resolve(import.meta.dirname, 'storage-global-setup.ts')],
     testTimeout: 120_000,
     hookTimeout: 240_000,
     fileParallelism: false,

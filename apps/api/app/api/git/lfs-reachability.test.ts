@@ -25,7 +25,8 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryLocator } from '#api/git/store/port.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import { markLfsReachability, referencedLfsOids } from '#api/git/lfs-reachability.js';
+import { markLfsReachability } from '#api/git/lfs-reachability.js';
+import { referencedLfsOids } from '#api/git/lfs-references.js';
 import { databaseReachable } from '#testing/database-reachable.js';
 
 /**

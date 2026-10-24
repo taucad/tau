@@ -2,26 +2,12 @@ import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { writeSpilledPushLog } from '#api/git/store/commit.js';
 import { decodeManifest, encodeManifest, isTombstoned, succeedManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
+import { migrationFenceCommitter } from '#api/git/store/fence-marker.js';
 import type { CommitToken, RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 
-/**
- * The `committedBy` of a fence commit (Hosted Remote Storage DW1, W10 R3).
- * The manifest decoder already accepts any string here, so a fence adds no
- * manifest format: it is a successor with the same refs and packs that only a
- * migration or a restore writes, and it appears only while one runs.
- */
-export const migrationFenceCommitter = 'migration-fence';
-
-/**
- * Whether `manifest` is the one a fence wrote. A writer that hydrated a fence
- * is one a migration has already frozen out, unless the freeze is gone; the
- * route guard reads the route past its cache for exactly these.
- *
- * @param manifest - The manifest a lease was hydrated from.
- * @returns True when the latest commit is a fence.
- */
-export const isFenceManifest = (manifest: Manifest | undefined): boolean =>
-  manifest?.committedBy === migrationFenceCommitter;
+/* The marker (`isFenceManifest`, `migrationFenceCommitter`) lives in
+   `fence-marker.ts` (DC1), so tau-api can recognise a fence without importing
+   the committer that writes one. */
 
 /**
  * Commits a fence: one conditional manifest write with the same refs and

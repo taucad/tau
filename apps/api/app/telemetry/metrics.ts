@@ -569,6 +569,28 @@ export class MetricsService {
     advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteLookupDuration.buckets] },
   });
 
+  // --- tau-api to tau-storage (DC1) ---
+
+  public readonly gitGrantsRejected = this.apiMeter.createCounter(TauMetrics.gitGrantsRejected.name, {
+    description: TauMetrics.gitGrantsRejected.description,
+    unit: TauMetrics.gitGrantsRejected.unit,
+  });
+
+  public readonly gitForwardErrors = this.apiMeter.createCounter(TauMetrics.gitForwardErrors.name, {
+    description: TauMetrics.gitForwardErrors.description,
+    unit: TauMetrics.gitForwardErrors.unit,
+  });
+
+  public readonly gitReceipts = this.apiMeter.createCounter(TauMetrics.gitReceipts.name, {
+    description: TauMetrics.gitReceipts.description,
+    unit: TauMetrics.gitReceipts.unit,
+  });
+
+  public readonly gitSlowBodyAborts = this.apiMeter.createCounter(TauMetrics.gitSlowBodyAborts.name, {
+    description: TauMetrics.gitSlowBodyAborts.description,
+    unit: TauMetrics.gitSlowBodyAborts.unit,
+  });
+
   // Client-reported: Tau Sync
 
   public readonly syncClientAttempts = this.clientMeter.createCounter(TauMetrics.syncClientAttempts.name, {
@@ -616,6 +638,15 @@ export type GitOperation = z.infer<typeof TauMetrics.gitAdmissions.attributes>['
 
 /** Attributes of one `tau.git.admissions` increment. */
 export type GitAdmissionAttributes = z.infer<typeof TauMetrics.gitAdmissions.attributes>;
+
+/** `reason` on `tau.git.grants.rejected`. */
+export type GitGrantRejectionReason = z.infer<typeof TauMetrics.gitGrantsRejected.attributes>['reason'];
+
+/** `reason` on `tau.git.forward.errors`. */
+export type GitForwardErrorReason = z.infer<typeof TauMetrics.gitForwardErrors.attributes>['reason'];
+
+/** `outcome` on `tau.git.receipts`. */
+export type GitReceiptOutcome = z.infer<typeof TauMetrics.gitReceipts.attributes>['outcome'];
 
 /** Attributes of one `tau.git.commit.attempts` increment. */
 export type GitCommitAttemptAttributes = z.infer<typeof TauMetrics.gitCommitAttempts.attributes>;

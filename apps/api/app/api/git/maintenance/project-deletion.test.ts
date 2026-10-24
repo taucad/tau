@@ -17,6 +17,7 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import { assertProjectActive } from '#database/project-lifecycle.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { requestProjectDeletion, completeProjectDeletion } from '#api/projects/project-deletion.js';
+import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
@@ -95,7 +96,12 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
   };
   const intent = async (locator: ReturnType<typeof repositoryLocator>) => {
     await requestProjectDeletion({ database, projectId: locator.projectId, userId: locator.ownerId, enabled: true });
-    await completeProjectDeletion({ database, store, projectId: locator.projectId, at: fencedAt });
+    await completeProjectDeletion({
+      database,
+      fence: storeTombstoneFence(store),
+      projectId: locator.projectId,
+      at: fencedAt,
+    });
   };
   const receipt = async (projectId: string) =>
     database.query.projectDeletion.findFirst({ where: eq(schema.projectDeletion.projectId, projectId) });
@@ -277,7 +283,12 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
         },
       });
       expect(
-        await completeProjectDeletion({ database, store: unavailable, projectId: locator.projectId, at: fencedAt }),
+        await completeProjectDeletion({
+          database,
+          fence: storeTombstoneFence(unavailable),
+          projectId: locator.projectId,
+          at: fencedAt,
+        }),
       ).toMatchObject({ state: 'deleting' });
       expect(await quota()).toEqual({ storageBytes: 1000, lfsBytes: 300 });
       expect(await repositories.readOwnerUsage(locator.ownerId)).toEqual({
@@ -286,7 +297,12 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
         retainedBytes: 70,
       });
       expect(
-        await completeProjectDeletion({ database, store, projectId: locator.projectId, at: fencedAt }),
+        await completeProjectDeletion({
+          database,
+          fence: storeTombstoneFence(store),
+          projectId: locator.projectId,
+          at: fencedAt,
+        }),
       ).toMatchObject({ state: 'deleted' });
       expect(await quota()).toEqual({ storageBytes: 0, lfsBytes: 0 });
       expect(await repositories.readOwnerUsage(locator.ownerId)).toEqual({
@@ -295,7 +311,7 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project purg
         retainedBytes: 1370,
       });
       const completed = await receipt(locator.projectId);
-      await completeProjectDeletion({ database, store, projectId: locator.projectId, at });
+      await completeProjectDeletion({ database, fence: storeTombstoneFence(store), projectId: locator.projectId, at });
       const retried = await receipt(locator.projectId);
       expect(retried?.purgeAfter).toEqual(completed?.purgeAfter);
       expect(await repositories.readOwnerUsage(locator.ownerId)).toEqual({

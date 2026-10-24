@@ -414,6 +414,7 @@ const main = async (): Promise<void> => {
       ZOO_API_KEY: '',
       OTEL_METRICS_PORT: String(await freePort()),
       TAU_E2E_API_URL: apiUrl,
+      TAU_E2E_STORAGE_URL: `http://127.0.0.1:${String(await freePort())}`,
       TAU_E2E_API_CWD: directory,
       ...projectionInputs,
       TAU_E2E_COMPLETED_ARTIFACT: 'true',

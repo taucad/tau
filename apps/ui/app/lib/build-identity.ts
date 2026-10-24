@@ -53,7 +53,9 @@ export const liveBuildIdTimeout = 4000;
  * What the server said about its live build: the build id; `none` when the host has no
  * build endpoint or names no build (a 404, or an OK non-JSON document: the desktop and
  * `tau serve` hosts answer this path with their SPA `index.html`); `unreachable` when no
- * answer came in time or the answer was any other failure (5xx, 408, 429, …), which may pass.
+ * whole answer came in time (the request or its body timed out, was reset or cut short) or the
+ * answer was any other failure (5xx, 408, 429, …), which may pass. Only a JSON body read whole
+ * that names no build is `none`.
  */
 export type LiveBuildAnswer = number | 'none' | 'unreachable';
 
@@ -80,13 +82,16 @@ const requestLiveBuild = async (): Promise<LiveBuildAnswer> => {
   if (!(response.headers.get('content-type') ?? '').includes('application/json')) {
     return 'none';
   }
+  let body: unknown;
   try {
-    const { buildId: published } = (await response.json()) as { readonly buildId?: unknown };
-    const liveBuildId = Number(published);
-    return Number.isFinite(liveBuildId) && liveBuildId > 0 ? liveBuildId : 'none';
+    body = await response.json();
   } catch {
-    return 'none';
+    // The body timed out, was reset or arrived cut short: the endpoint exists, its answer did not come whole.
+    return 'unreachable';
   }
+  const published = typeof body === 'object' && body !== null && 'buildId' in body ? body.buildId : undefined;
+  const liveBuildId = Number(published);
+  return Number.isFinite(liveBuildId) && liveBuildId > 0 ? liveBuildId : 'none';
 };
 
 /**

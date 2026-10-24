@@ -81,8 +81,44 @@ describe('askLiveBuild', () => {
   );
 
   it.each([
+    [
+      'times out while its body is read',
+      async () =>
+        new Response(
+          new ReadableStream({
+            start: (controller) => {
+              controller.error(new DOMException('The operation timed out.', 'TimeoutError'));
+            },
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'is reset while its body is read',
+      async () =>
+        new Response(
+          new ReadableStream({
+            start: (controller) => {
+              controller.error(new TypeError('network error'));
+            },
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'arrives truncated',
+      async () => new Response('{"buildId":17927', { headers: { 'content-type': 'application/json' } }),
+    ],
+  ])('should call an OK JSON answer that %s unreachable, since it may pass', async (_label, answer) => {
+    vi.stubGlobal('fetch', answer);
+
+    await expect(askLiveBuild()).resolves.toBe('unreachable');
+  });
+
+  it.each([
     ['a 404', async () => new Response('', { status: 404 })],
     ['an answer without a build id', async () => Response.json({})],
+    ['a JSON answer that is no object', async () => Response.json(null)],
     [
       'an SPA fallback document (desktop and tau serve have no build endpoint)',
       async () => new Response('<!DOCTYPE html><html></html>', { headers: { 'content-type': 'text/html' } }),

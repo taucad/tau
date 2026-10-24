@@ -14,6 +14,23 @@ const navigation = (): Locator => selectors.getByRole('navigation', { name: 'Wor
 const navButton = (name: string): Locator => navigation().getByRole('button', { name, exact: true });
 const grabber = (): Locator => selectors.getByRole('slider', { name: 'Drawer height' });
 
+/**
+ * Waits for the sheet to finish moving to its detent. The detent's value changes at once, but the sheet slides there
+ * over a transition while the surface takes its new height in one step, so a box read mid-slide is not the detent's.
+ */
+const sheetSettled = async (): Promise<void> =>
+  target.evaluateLocator(grabber(), async (handle) => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+    const sheet = handle.closest('[data-slot=drawer-content]');
+    await Promise.all((sheet?.getAnimations() ?? []).map(async (animation) => animation.finished));
+  });
+
 type Box = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
 
 const boxOf = async (locator: Locator, what: string): Promise<Box> => {
@@ -87,6 +104,8 @@ test.each([
       // oxlint-disable-next-line no-await-in-loop -- each detent in turn.
       await expect.poll(async () => target.getAttribute(grabber(), 'aria-valuenow')).toBe(String(detent + 1));
     }
+    // oxlint-disable-next-line no-await-in-loop -- each detent in turn.
+    await sheetSettled();
     // oxlint-disable-next-line no-await-in-loop -- each detent in turn.
     const [surface, composer, send] = await Promise.all([
       boxOf(selectors.getByRole('region', { name: 'Chat', exact: true }), 'The chat surface'),

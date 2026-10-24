@@ -57,11 +57,25 @@ export type DestinationPutOptions = {
   readonly retainUntil: Date;
 };
 
+/**
+ * What a probe found. A refusal keeps the status, the S3 error code and its
+ * message, so a down copy says why (a revoked key, a B2 transaction cap, an
+ * outage) instead of only going quiet. None of them carries a credential.
+ */
+export type DestinationProbe =
+  | { readonly up: true }
+  | {
+      readonly up: false;
+      readonly status: number | undefined;
+      readonly code: string | undefined;
+      readonly message: string;
+    };
+
 export type MirrorDestination = {
   /** The label every `tau.mirror.*` series carries. */
   readonly name: 'b2';
-  /** True when the store answers with this key's authority: a canary `HEAD` that is found or not found. */
-  probe(signal?: AbortSignal): Promise<boolean>;
+  /** Up when the store answers with this key's authority; otherwise why it did not. */
+  probe(signal?: AbortSignal): Promise<DestinationProbe>;
   /** Every version and hide marker under `prefix`, paginating internally. */
   listVersions(prefix: string, signal?: AbortSignal): AsyncIterable<DestinationVersion>;
   head(key: string, versionId: string, signal?: AbortSignal): Promise<DestinationHead | undefined>;
@@ -218,8 +232,11 @@ export class S3MirrorDestination implements MirrorDestination {
    * `HEAD` of an absent key with 403 for a bucket-scoped key (DT0 2c), which a
    * probe could not tell from a revoked one. A listing answers 200 when the key
    * works, absent or not, and 403 only when it does not.
+   *
+   * A version listing is a B2 Class C transaction, which an account's daily
+   * transaction cap counts, so the worker does not probe on every poll.
    */
-  public async probe(signal?: AbortSignal): Promise<boolean> {
+  public async probe(signal?: AbortSignal): Promise<DestinationProbe> {
     try {
       await this.client.send(
         new ListObjectVersionsCommand({
@@ -229,9 +246,15 @@ export class S3MirrorDestination implements MirrorDestination {
         }),
         { abortSignal: signal },
       );
-      return true;
-    } catch {
-      return false;
+      return { up: true };
+    } catch (error) {
+      const candidate = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } } | undefined;
+      return {
+        up: false,
+        status: candidate?.$metadata?.httpStatusCode,
+        code: candidate?.Code ?? candidate?.name,
+        message: (error instanceof Error ? error.message : String(error)).slice(0, 200),
+      };
     }
   }
 

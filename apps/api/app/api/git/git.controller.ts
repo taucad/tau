@@ -219,8 +219,10 @@ export class GitController {
       });
     }
 
-    /* Only a refusal counts here: the advertisement is the first leg of a push or fetch,
-       whose POST counts the attempt. A push refused for quota is refused here first. */
+    /* A refusal here counts against the push or fetch this advertisement opens, whose POST
+       counts the attempt: a push refused for quota is refused here first. A served
+       advertisement is answered from the manifest with no lease (DB1) and counts as its own
+       `advertise` operation, whose latency is W14's SLO-7. */
     const startedAt = performance.now();
     const operation: SyncOperation = service === 'git-receive-pack' ? 'push' : 'fetch';
     const advertisement = await this.withRetryAfter(reply, async () => {
@@ -235,6 +237,7 @@ export class GitController {
       this.recordFailure(operation, error, startedAt);
       throw error;
     });
+    this.recordSync('advertise', 'ok', startedAt);
     return new StreamableFile(
       Buffer.concat([Buffer.from(serviceAdvertisementPrefix(service), 'utf8'), advertisement]),
       { type: `application/x-${service}-advertisement` },

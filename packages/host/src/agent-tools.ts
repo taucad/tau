@@ -58,7 +58,8 @@ import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
-import { runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
+import { createGeoSpecConfigSession, runGeoSpecTests, tauClientExporter } from '@taucad/agent-tools/geospec';
+import type { GeoSpecTestModelConfig } from '@taucad/agent-tools/geospec';
 import type { GeoSpecModelExporter } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { Engine as NativeGeoSpecEngine, HostEngineLimits } from 'geospec-engine/node';
@@ -930,6 +931,22 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
             ? async () => createHostGeoSpecRunner(workspaceRoot, await runtimeClient(workspaceRoot))
             : undefined));
 
+    /*
+     * The project's `geospec.config.*` through the spec VM, as every host reads it: its data fields are this call's
+     * defaults and its exporters never run here. Its code runs only where the project's does, which the daemon
+     * already gates behind `--trust-projects` for relayed projects.
+     */
+    const configSession = createGeoSpecConfigSession();
+    const readConfig = async (): Promise<GeoSpecTestModelConfig> => {
+      const [{ readGeoSpecConfig }, { createNodeVmFileSystem }] = await Promise.all([
+        import('geospec/config'),
+        import('geospec/runner/node'),
+      ]);
+      return configSession(
+        await readGeoSpecConfig({ filesystem: createNodeVmFileSystem(workspaceRoot), projectPath: '' }),
+      );
+    };
+
     /**
      * `test_model` in process: discovery walks the real directory, the runner
      * executes the selected specs, and the projection is the same one the browser
@@ -959,6 +976,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
               runner,
               projectPath: workspaceRoot,
               args,
+              config: await readConfig(),
               /* One report as the run starts and one as each test starts, counting the tests started, so a client
                * sees which requirement a long claim belongs to. */
               ...(onProgress === undefined

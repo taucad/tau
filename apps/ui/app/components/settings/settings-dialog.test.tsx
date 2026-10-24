@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { SettingsDialog } from '#components/settings/settings-dialog.js';
+import { SettingsDialog, SettingsSurface } from '#components/settings/settings-dialog.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 const renderSecuritySettings = vi.hoisted(() => vi.fn(() => <div>Mounted security settings</div>));
@@ -291,6 +291,20 @@ describe('SettingsDialog', () => {
       vi.unstubAllGlobals();
     });
 
+    it('should render the embedded section list outside a dialog', () => {
+      render(
+        <MemoryRouter initialEntries={['/settings']}>
+          <SidebarProvider>
+            <SettingsSurface isEmbedded activeSection='general' openSection={vi.fn()} close={vi.fn()} />
+          </SidebarProvider>
+        </MemoryRouter>,
+      );
+
+      expect(screen.getByRole('heading', { level: 2, name: 'Settings' })).toBeInTheDocument();
+      expect(screen.getByRole('navigation', { name: 'Settings navigation' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Close settings' })).toBeInTheDocument();
+    });
+
     it('should open on the section list and step into a section and back to its row', async () => {
       const user = userEvent.setup();
       render(<SettingsTestSurface url='/home/project' />);
@@ -401,5 +415,38 @@ describe('SettingsDialog', () => {
       expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
       expect(screen.queryByRole('navigation', { name: 'Settings navigation' })).not.toBeInTheDocument();
     });
+  });
+
+  it('should render embedded outside a dialog and keep search-clearing Escape from the host', async () => {
+    const user = userEvent.setup();
+    const onHostKeyDown = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/home/project']}>
+        <SidebarProvider>
+          {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- stands in for the embedding host's key handling. */}
+          <div
+            onKeyDown={(event) => {
+              onHostKeyDown(event.key);
+            }}
+          >
+            <SettingsSurface isEmbedded activeSection='general' openSection={vi.fn()} close={vi.fn()} />
+          </div>
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+    const searchbox = screen.getByRole('searchbox', { name: 'Search settings' });
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+
+    await user.type(searchbox, 'theme');
+    onHostKeyDown.mockClear();
+    await user.keyboard('{Escape}');
+
+    expect(searchbox).toHaveValue('');
+    expect(onHostKeyDown).not.toHaveBeenCalled();
+
+    await user.keyboard('{Escape}');
+
+    expect(onHostKeyDown).toHaveBeenCalledWith('Escape');
   });
 });

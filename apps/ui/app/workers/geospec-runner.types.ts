@@ -10,6 +10,8 @@ export type GeoSpecRunnerWorkerInitializeRequest = {
   fileSystemPort: MessagePort;
   /** Host policy: the largest work-unit budget a spec may author. */
   maxWorkUnitLimit?: number;
+  /** Host policy: the longest `testTimeout` a run may use, the input's or the project config's. Milliseconds. */
+  maxRunBudget?: number;
 };
 
 export type GeoSpecRunnerWorkerRunRequest = {
@@ -62,6 +64,8 @@ export type GeoSpecRunnerWorkerProgressResponse = {
   type: 'progress';
   requestId: string;
   event: GeoSpecRunProgressEvent;
+  /** On `run-start`: the run's effective `testTimeout`, the input's or else the project config's. */
+  testTimeout?: number;
 };
 
 export type GeoSpecRunnerWorkerErrorResponse = {

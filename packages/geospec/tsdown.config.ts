@@ -12,6 +12,7 @@ const packageConfig: UserConfig = {
     'src/config/node/index.ts',
     'src/assertion-client/index.ts',
     'src/vitest/index.ts',
+    'src/vitest/node/index.ts',
     'src/engine/index.ts',
     'src/mesh/index.ts',
     'src/model/index.ts',

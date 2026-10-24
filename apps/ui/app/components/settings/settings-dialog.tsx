@@ -211,6 +211,8 @@ export function SettingsSurface({
   readonly lastFocus?: React.RefObject<HTMLElement | undefined>;
 }): React.JSX.Element {
   const Content = isEmbedded ? EmbeddedSettingsContent : DialogContent;
+  const Title: SettingsTitle = isEmbedded ? EmbeddedTitle : DialogTitle;
+  const Description = isEmbedded ? EmbeddedDescription : DialogDescription;
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
   const [searchDestination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
@@ -412,11 +414,12 @@ export function SettingsSurface({
         }
       }}
     >
-      {showsList ? null : <DialogTitle className='sr-only'>Settings</DialogTitle>}
-      <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
+      {/* Radix titles throw outside a Dialog root, so embedded hosts get plain landmarks. */}
+      {showsList ? null : <Title className='sr-only'>Settings</Title>}
+      <Description className='sr-only'>Application settings and preferences</Description>
       <div className={cn('flex min-h-0 min-w-0 flex-col', !isMobile && 'md:flex-row')}>
         {isMobile && !showsList ? null : (
-          <SettingsNavigationPane isMobile={isMobile} close={close} search={search} listRef={listRef}>
+          <SettingsNavigationPane isMobile={isMobile} close={close} search={search} listRef={listRef} title={Title}>
             <SettingsNavigationItems
               results={results}
               isSearching={isSearching}
@@ -447,12 +450,14 @@ function SettingsNavigationPane({
   close,
   search,
   listRef,
+  title: Title,
   children,
 }: {
   readonly isMobile: boolean;
   readonly close: () => void;
   readonly search: React.ReactNode;
   readonly listRef: React.Ref<HTMLElement>;
+  readonly title: SettingsTitle;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   return (
@@ -466,7 +471,7 @@ function SettingsNavigationPane({
     >
       {isMobile ? (
         <SettingsSheetHeader close={close}>
-          <DialogTitle className={sheetTitleClassName}>Settings</DialogTitle>
+          <Title className={sheetTitleClassName}>Settings</Title>
         </SettingsSheetHeader>
       ) : (
         <Button variant='ghost' className='w-full justify-start' onClick={close}>
@@ -617,10 +622,38 @@ function SettingsSheetHeader({
   );
 }
 
-/** Embedded hosts already own their focus boundary. */
+/** Embedded hosts already own their focus boundary; Escape that clears search stays inside. */
 function EmbeddedSettingsContent({
   children,
   className,
+  onEscapeKeyDown,
 }: React.ComponentProps<typeof DialogContent>): React.JSX.Element {
-  return <div className={cn(className, 'grid h-full w-full max-w-none sm:max-w-none')}>{children}</div>;
+  return (
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- delegates Escape from the focused search field.
+    <div
+      className={cn(className, 'grid h-full w-full max-w-none sm:max-w-none')}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') {
+          return;
+        }
+
+        onEscapeKeyDown?.(event.nativeEvent);
+        if (event.nativeEvent.defaultPrevented) {
+          event.stopPropagation();
+        }
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+type SettingsTitle = React.ComponentType<{ readonly className?: string; readonly children: React.ReactNode }>;
+
+function EmbeddedTitle(props: React.ComponentProps<'h2'>): React.JSX.Element {
+  return <h2 {...props} />;
+}
+
+function EmbeddedDescription(props: React.ComponentProps<'p'>): React.JSX.Element {
+  return <p {...props} />;
 }

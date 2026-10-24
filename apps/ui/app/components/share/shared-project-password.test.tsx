@@ -33,6 +33,23 @@ describe('SharedProjectPassword', () => {
     expect(screen.getByText('Incorrect password')).toBeVisible();
   });
 
+  it('describes the password field with the error only while one is shown', () => {
+    const props = {
+      password: 'local-review-password-32-characters',
+      isOpening: false,
+      onPasswordChange: vi.fn(),
+      onSubmit: vi.fn(),
+    };
+    const { rerender } = render(<SharedProjectPassword {...props} passwordError='Incorrect password' />);
+    const input = screen.getByLabelText('Password');
+    expect(input).toHaveAccessibleDescription('Incorrect password');
+    expect(input).toHaveAccessibleErrorMessage('Incorrect password');
+
+    rerender(<SharedProjectPassword {...props} />);
+    expect(screen.getByLabelText('Password')).not.toHaveAttribute('aria-describedby');
+    expect(screen.getByLabelText('Password')).not.toHaveAttribute('aria-errormessage');
+  });
+
   it('prevents another submit while opening', () => {
     const onSubmit = vi.fn();
     render(

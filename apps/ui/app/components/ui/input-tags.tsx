@@ -75,7 +75,7 @@ export function TagsTrigger({
   inputAriaLabel,
   disabled,
 }: TagsTriggerProps): React.JSX.Element {
-  const { tags, onTagsChange, value, setValue } = useTagsContext();
+  const { tags, onTagsChange, value, setValue, onOpenChange } = useTagsContext();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleRemoveTag = (tagToRemove: string): void => {
@@ -129,6 +129,10 @@ export function TagsTrigger({
     }
 
     inputRef.current?.focus();
+    // The input's PopoverTrigger already toggles for clicks on the input itself.
+    if (event.target !== inputRef.current) {
+      onOpenChange(true);
+    }
   };
 
   return (

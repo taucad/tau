@@ -1,6 +1,6 @@
 # geospec public API index
 
-geospec 0.1.0-beta.9 · 927 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.9 · 943 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature, and each top-level symbol names the lines of that file which hold its declaration and members: read only that range.
 
@@ -52,9 +52,10 @@ createNodeGeoSpecCliHost (function) [lines 227-230] — Build the Node CLI host
 createGeoSpecVitestAdapter (function) [lines 232-235] — Create Vitest matchers over an existing runner-independent client
 installGeoSpecVitest (function) [lines 237-240] — Register GeoSpec matchers and their settlement hook in the active…
 setupGeoSpecVitest (function) [lines 242-245] — Create a native client and register it with the active…
-defineConfig (function) [lines 247-251] — Type a `geospec.config.*` default export
-readGeoSpecConfig (function) [lines 253-257] — Read a project's `geospec.config.*` data fields through the spec VM,…
-loadGeoSpecConfig (function) [lines 259-263] — Load one trusted project config using Node's native module loader
+setupGeoSpecVitestProject (function) [lines 247-260] — Configure GeoSpec for the active Vitest file from the project's…
+defineConfig (function) [lines 262-266] — Type a `geospec.config.*` default export
+readGeoSpecConfig (function) [lines 268-272] — Read a project's `geospec.config.*` data fields through the spec VM,…
+loadGeoSpecConfig (function) [lines 274-278] — Load one trusted project config using Node's native module loader
 
 ## Constants — `public-api-constants.md`
 
@@ -914,28 +915,43 @@ NodeGeoSpecCliHostOptions (type) [lines 442-457] [2 members] — Options for {@l
 GeoSpecVitestAdapter (type) [lines 459-468] [2 members] — Installed Vitest matcher map and lifecycle settlement hook
   GeoSpecVitestAdapter.matchers (property)
   GeoSpecVitestAdapter.flush (method)
-ReadGeoSpecConfigOptions (type) [lines 470-482] [2 members] — Options for {@link readGeoSpecConfig}
+GeoSpecVitestProject (type) [lines 470-492] [5 members] — The installed matchers plus the project's model loader
+  GeoSpecVitestProject.matchers (property)
+  GeoSpecVitestProject.flush (method)
+  GeoSpecVitestProject.loadModel (property) — Load a model through the config's exporters
+  GeoSpecVitestProject.configPath (property) — The config file that was read, when the project has…
+  GeoSpecVitestProject.binding (property) — The build the created engine runs on
+SetupGeoSpecVitestProjectOptions (type) [lines 494-528] [8 members] — Options for {@link setupGeoSpecVitestProject}
+  SetupGeoSpecVitestProjectOptions.claimId (property)
+  SetupGeoSpecVitestProjectOptions.evidenceProfile (property) — Success-evidence profile of every claim and query
+  SetupGeoSpecVitestProjectOptions.subjectSlot (property)
+  SetupGeoSpecVitestProjectOptions.workUnitLimit (property)
+  SetupGeoSpecVitestProjectOptions.projectPath (property) — Absolute project root
+  SetupGeoSpecVitestProjectOptions.configPath (property) — Explicit config file, resolved relative to the project unless absolute
+  SetupGeoSpecVitestProjectOptions.overrides (property) — Fields that replace the config's whole, as a CLI flag…
+  SetupGeoSpecVitestProjectOptions.engine (property) — A caller-owned engine, kept open after the file
+ReadGeoSpecConfigOptions (type) [lines 530-542] [2 members] — Options for {@link readGeoSpecConfig}
   ReadGeoSpecConfigOptions.filesystem (property) — The project filesystem
   ReadGeoSpecConfigOptions.projectPath (property) — Rooted directory holding the config, in the filesystem's spelling
-ReadGeoSpecConfigResult (type) [lines 484-502] [1 members] — Outcome of {@link readGeoSpecConfig}
+ReadGeoSpecConfigResult (type) [lines 544-562] [1 members] — Outcome of {@link readGeoSpecConfig}
   ReadGeoSpecConfigResult.status (property)
-GeoSpecConfig (type) [lines 504-533] [6 members] — Trusted project configuration using existing discovery and runner options
+GeoSpecConfig (type) [lines 564-593] [6 members] — Trusted project configuration using existing discovery and runner options
   GeoSpecConfig.include (property)
   GeoSpecConfig.exclude (property)
   GeoSpecConfig.testNamePattern (property)
   GeoSpecConfig.testTimeout (property) — Positive finite milliseconds
   GeoSpecConfig.bail (property)
   GeoSpecConfig.exporters (property) — Model exporters for `loadModel({ file })`
-GeoSpecConfigData (type) [lines 535-547] [5 members] — The config's data fields
+GeoSpecConfigData (type) [lines 595-607] [5 members] — The config's data fields
   GeoSpecConfigData.include (property)
   GeoSpecConfigData.exclude (property)
   GeoSpecConfigData.testNamePattern (property)
   GeoSpecConfigData.testTimeout (property) — Positive finite milliseconds
   GeoSpecConfigData.bail (property)
-LoadedGeoSpecConfig (type) [lines 549-557] [2 members] — Resolved file identity and validated configuration data
+LoadedGeoSpecConfig (type) [lines 609-617] [2 members] — Resolved file identity and validated configuration data
   LoadedGeoSpecConfig.configPath (property)
   LoadedGeoSpecConfig.options (property)
-LoadGeoSpecConfigOptions (type) [lines 559-574] [3 members] — Options for one trusted Node configuration load
+LoadGeoSpecConfigOptions (type) [lines 619-634] [3 members] — Options for one trusted Node configuration load
   LoadGeoSpecConfigOptions.projectPath (property)
   LoadGeoSpecConfigOptions.configPath (property) — Explicit file, resolved relative to the project unless absolute
   LoadGeoSpecConfigOptions.overrides (property) — Own defined fields override configuration without deep merging

@@ -15,6 +15,7 @@ import type { RunGeoSpecTestsRpcInput } from '@taucad/chat';
 import { discoverGeoSpecFiles } from 'geospec/runner/worker';
 import type { GeoSpecDiscoveryFileSystem, GeoSpecRunner, GeoSpecRunnerResult } from 'geospec/runner/worker';
 
+import type { GeoSpecTestModelConfig } from '#geospec/config-session.js';
 import { runnerResultToTestModelOutput } from '#geospec/result.js';
 import type { GeoSpecKernelEvidence, TestModelOutput } from '#geospec/result.js';
 import { observeGeoSpecRunProgress } from '#geospec/run-progress.js';
@@ -55,6 +56,38 @@ export type RunGeoSpecTestsOptions = {
    * evidence refusal; an error or `undefined` leaves the generic guidance.
    */
   readonly kernelEvidence?: ((sourcePath: string) => Promise<GeoSpecKernelEvidence | undefined>) | undefined;
+  /**
+   * The project's `geospec.config.*` for this call, from `createGeoSpecConfigSession`: its data fields are the
+   * defaults an input field of the same name replaces, as a `geospec run` flag replaces them.
+   */
+  readonly config?: GeoSpecTestModelConfig | undefined;
+};
+
+/**
+ * The input with the config's data fields filled in where the input leaves them out.
+ *
+ * @param args - The validated `test_model` input.
+ * @param defaults - The applied config's data fields.
+ * @returns The selection and timing this call runs with, and whether to stop at the first failure.
+ */
+const withConfigDefaults = (
+  args: RunGeoSpecTestsRpcInput,
+  defaults: GeoSpecTestModelConfig['defaults'] = {},
+): { readonly args: RunGeoSpecTestsRpcInput; readonly bail: boolean } => {
+  const include = args.include !== undefined && args.include.length > 0 ? args.include : defaults.include;
+  const exclude = args.exclude !== undefined && args.exclude.length > 0 ? args.exclude : defaults.exclude;
+  const testNamePattern = args.testNamePattern ?? defaults.testNamePattern;
+  const testTimeout = args.testTimeout ?? defaults.testTimeout;
+  return {
+    args: {
+      ...args,
+      ...(include === undefined ? {} : { include: [...include] }),
+      ...(exclude === undefined ? {} : { exclude: [...exclude] }),
+      ...(testNamePattern === undefined ? {} : { testNamePattern }),
+      ...(testTimeout === undefined ? {} : { testTimeout }),
+    },
+    bail: defaults.bail === true,
+  };
 };
 
 /**
@@ -117,7 +150,8 @@ const evidenceKernels = async (
  * ```
  */
 export const runGeoSpecTests = async (options: RunGeoSpecTestsOptions): Promise<TestModelOutput> => {
-  const { args } = options;
+  const { args, bail } = withConfigDefaults(options.args, options.config?.defaults);
+  const configReport = options.config?.report;
   const discovery = await discoverGeoSpecFiles({
     filesystem: options.discovery,
     projectPath: options.projectPath ?? '',
@@ -141,15 +175,18 @@ export const runGeoSpecTests = async (options: RunGeoSpecTestsOptions): Promise<
             ...(args.testNamePattern === undefined ? {} : { testNamePattern: args.testNamePattern }),
             ...(args.testTimeout === undefined ? {} : { testTimeout: args.testTimeout }),
             ...(args.workUnitLimit === undefined ? {} : { workUnitLimit: args.workUnitLimit }),
+            ...(bail ? { bail: true } : {}),
           });
   } finally {
     stopProgress?.();
   }
   const filtersApplied = hasGeoSpecSelectionFilters(args);
   const output = runnerResultToTestModelOutput(result, entryPaths, { filtersApplied });
-  if (options.kernelEvidence === undefined) {
-    return output;
-  }
-  const kernels = await evidenceKernels(output, options.kernelEvidence);
-  return kernels.size === 0 ? output : runnerResultToTestModelOutput(result, entryPaths, { filtersApplied, kernels });
+  const kernels =
+    options.kernelEvidence === undefined ? undefined : await evidenceKernels(output, options.kernelEvidence);
+  const projected =
+    kernels === undefined || kernels.size === 0
+      ? output
+      : runnerResultToTestModelOutput(result, entryPaths, { filtersApplied, kernels });
+  return configReport === undefined ? projected : { ...projected, config: configReport };
 };

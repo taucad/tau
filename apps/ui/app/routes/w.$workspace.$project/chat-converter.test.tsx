@@ -612,10 +612,11 @@ describe('ChatConverter', () => {
     mockParameterSnapshots.clear();
   });
 
-  it('should name its Close after the panel, as its tooltip does (I6)', () => {
+  it('should name its title and Close after the Export surface, as its tooltip does (I6)', () => {
     render(<ChatConverter isExpanded />);
 
-    expect(screen.getByRole('button', { name: 'Close Exporter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close Export' })).toBeInTheDocument();
+    expect(screen.queryByText('Exporter')).not.toBeInTheDocument();
   });
 
   it('should retain export recovery in the mounted panel after its error toast is gone', async () => {

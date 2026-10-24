@@ -88,6 +88,48 @@ function useStackedLeading(
   return stacked;
 }
 
+/** The gap a phone bar keeps from the top of the viewer frame, matching the stage's inset below it. */
+const phoneTopInsetPx = 8;
+
+/**
+ * The tallest a phone's bar may grow: from its bottom edge up to the viewer frame's top inset, less whatever sits
+ * above it in the stage's controls slot. The slot is anchored to the frame's bottom and has no height of its own, so
+ * `max-h-full` alone cannot bound the bar; the measured height lets the tool rows scroll inside the stage instead of
+ * running off its top.
+ * @param barRef - The element whose height is bounded, in the stage's controls slot.
+ * @param isEnabled - Whether the viewport is a phone's.
+ * @returns The bar's maximum height in pixels; undefined on desktop and outside a viewer frame.
+ */
+function usePhoneBarMaxHeight(
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- required by React
+  barRef: React.RefObject<HTMLElement | null>,
+  isEnabled: boolean,
+): number | undefined {
+  const [maxHeight, setMaxHeight] = useState<number>();
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    const frame = bar?.closest<HTMLElement>('[data-viewer-frame]');
+    const slot = bar?.parentElement;
+    if (!isEnabled || !bar || !frame || !slot || typeof ResizeObserver === 'undefined') {
+      setMaxHeight(undefined);
+      return;
+    }
+    const measure = (): void => {
+      const above = bar.getBoundingClientRect().top - slot.getBoundingClientRect().top;
+      const space = bar.getBoundingClientRect().bottom - frame.getBoundingClientRect().top - phoneTopInsetPx - above;
+      setMaxHeight(Math.max(0, Math.floor(space)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame);
+    observer.observe(slot);
+    return () => {
+      observer.disconnect();
+    };
+  }, [barRef, isEnabled]);
+  return maxHeight;
+}
+
 /** When a row unmounts holding focus, the keyboard returns to the toggle that started its tool. */
 const resolveToolToggle = (row: HTMLElement): HTMLElement | undefined =>
   row.closest('[data-slot="viewer-controls"]')?.querySelector<HTMLElement>(`[data-tool="${row.dataset['toolBar']}"]`) ??
@@ -202,7 +244,10 @@ function barLayout(isMobile: boolean, isTouch: boolean): { bar: string; toolRows
   return {
     bar: cn(
       'pointer-events-auto flex max-w-full flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs',
-      isMobile ? 'max-h-full min-h-0 min-w-0' : 'min-w-min',
+      // `max-h-full` is the fallback for a phone bar outside a viewer frame, in a parent of bounded height; inside a
+      // frame the measured max height replaces it. Every section may shrink, so the issues list scrolls beside the tool
+      // rows instead of squeezing them out; the controls line holds its height (`shrink-0`).
+      isMobile ? 'max-h-full min-h-0 min-w-0 *:min-h-0' : 'min-w-min',
     ),
     toolRows: cn('flex flex-col gap-1', isMobile && 'min-h-0 overflow-y-auto'),
     controls: cn(
@@ -231,6 +276,7 @@ function ViewerControlsBody({
   const leadingRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const isLeadingStacked = useStackedLeading(barRef, leadingRef, controlsRef);
+  const phoneBarMaxHeight = usePhoneBarMaxHeight(barRef, isMobile);
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
@@ -257,7 +303,12 @@ function ViewerControlsBody({
   }, []);
 
   return (
-    <div ref={barRef} data-slot='viewer-controls' className={layout.bar}>
+    <div
+      ref={barRef}
+      data-slot='viewer-controls'
+      className={layout.bar}
+      style={phoneBarMaxHeight === undefined ? undefined : { maxHeight: phoneBarMaxHeight }}
+    >
       {!is2dGeometry && (isSectionViewActive || isMeasureActive) ? (
         <div data-slot='viewer-tool-rows' className={layout.toolRows}>
           {isSectionViewActive ? (

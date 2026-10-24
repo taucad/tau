@@ -33,8 +33,15 @@ const touchTargetMisses = async (): Promise<readonly string[]> =>
   target.evaluateLocator(
     composer(),
     async (region, barSelector: string) => {
-      // Let the row's fold and padding settle before measuring.
-      await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
+      // Let the row's fold and padding settle before measuring. Scroll-driven animations (the scroll shadows) follow
+      // their scroller and never finish, so wait only on those that run in time; one cancelled as its element leaves
+      // (a loading spinner) has settled too.
+      await Promise.all(
+        document
+          .getAnimations()
+          .filter((animation) => animation.timeline === document.timeline)
+          .map(async (animation) => animation.finished.catch(() => undefined)),
+      );
       const misses: string[] = [];
       const buttons = [...region.querySelectorAll<HTMLButtonElement>(`${barSelector} button`)].filter((button) =>
         button.checkVisibility({ visibilityProperty: true, opacityProperty: true }),
@@ -83,7 +90,13 @@ const touchTargetMisses = async (): Promise<readonly string[]> =>
 /** Taps 2px inside the resting editor's edges, which must reach the editor, not a control's ring. */
 const editorEdgeHits = async (): Promise<readonly string[]> =>
   target.evaluateLocator(selectors.getByCss(composerSelector).first(), async (editor) => {
-    await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
+    // Scroll-driven animations never finish, so wait only on those that run in time; a cancelled one has settled.
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.timeline === document.timeline)
+        .map(async (animation) => animation.finished.catch(() => undefined)),
+    );
     const box = editor.getBoundingClientRect();
     const y = box.top + box.height / 2;
     return [box.left + 2, box.right - 2].map((x) => {
@@ -99,6 +112,11 @@ beforeEach(async () => {
   await target.setViewport(iosViewport);
   await target.navigate('/__e2e/chat-attachments');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+  // A project opens on the model stage (Option B); the composer lives on the Chat surface.
+  await target.click(
+    selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name: 'Chat', exact: true }),
+    { touch: true },
+  );
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   // The spec guards touch rules on its own: this context must report a coarse pointer.
   expect(await target.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
@@ -143,7 +161,9 @@ const hintsMatching = async (
   }, selector);
 
 test('shows no keyboard hints on a touch screen (I7)', async () => {
-  // Focus opens Send's tooltip, which carries the Enter chip for keyboards.
+  // Focus opens Send's tooltip, which carries the Enter chip for keyboards once there is a draft to send; an empty
+  // composer's Send names its refusal instead, with no chip.
+  await target.type(selectors.getByCss(composerSelector).first(), 'A bracket');
   await target.evaluateLocator(composer().getByRole('button', { name: 'Send', exact: true }), (send) => {
     (send as HTMLElement).focus();
   });

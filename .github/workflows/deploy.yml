@@ -217,6 +217,21 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
 
+      # A private app's Machine that crash-looped to Fly's restart limit stays
+      # stopped, and `flyctl deploy` updates a stopped Machine without starting it.
+      # Start it so the check below sees the new image run, not the old failure.
+      - name: Start a stopped ${{ inputs.app }} Machine
+        if: (inputs.app == 'mirror' || inputs.app == 'maintenance') && steps.superseded.outputs.superseded != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+          FLY_APP: ${{ steps.targets.outputs.fly_app }}
+        run: |
+          set -euo pipefail
+          for id in $(flyctl machines list --app "$FLY_APP" --json | jq -r '.[] | select(.state == "stopped") | .id'); do
+            echo "Starting stopped Machine ${id}"
+            flyctl machines start "$id" --app "$FLY_APP"
+          done
+
       # DM1 and DC4: a private app has no service, so it must have no IP address of
       # any kind, and its Machine must be started and must not have exited non-zero
       # since the deploy (a missing secret or grant stops it at boot, naming the

@@ -38,6 +38,7 @@ import { useProject } from '#hooks/use-project.js';
 import { usePaneviewPersistence } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
 import { projectWorkspaceKeyCombinations } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { subscribeWorkbenchReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 
 const keyCombinationEditor = projectWorkspaceKeyCombinations.model;
 const emptyPreviewSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map();
@@ -221,14 +222,8 @@ function ModelPanelBodyContent({ onRequestOpen }: { readonly onRequestOpen?: () 
         openPartGallery,
         componentActions,
         reveal: editorRef && {
-          subscribe(listener) {
-            const subscription = editorRef.on('modelComponentRevealRequested', (event) => {
-              listener({ entryPath: event.entryPath, unitId: event.unitId, componentId: event.componentId });
-            });
-            return () => {
-              subscription.unsubscribe();
-            };
-          },
+          // A reveal that opened the pane arrives held, before this pane subscribed.
+          subscribe: (listener) => subscribeWorkbenchReveal(editorRef, 'model', listener),
           request(target) {
             editorRef.send({ type: 'revealModelComponentInExplorer', ...target });
           },

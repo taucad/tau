@@ -3934,9 +3934,7 @@ describe('KernelRuntimeWorker projection release', () => {
     if (!event.success) {
       throw new Error(JSON.stringify(event.issues));
     }
-    return JSON.stringify(event.artifact, (_key, field: unknown) =>
-      field instanceof Uint8Array ? [...field] : field,
-    );
+    return JSON.stringify(event.artifact, (_key, field: unknown) => (field instanceof Uint8Array ? [...field] : field));
   };
 
   it.each(bindings)(

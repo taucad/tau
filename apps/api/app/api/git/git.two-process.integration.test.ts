@@ -234,9 +234,10 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
   );
   app.enableVersioning({ type: VersioningType.URI });
   await app.init();
-  /* S2 exercises cross-worker store and manifest races, not the production 2.5 GiB disk reservation.
-   * Keep a nonzero admission bound without depending on the test runner's transient free space. */
-  app.get(GitRepositoryService).leaseDiskBytesPerLease = 1024 ** 2;
+  /* S2 exercises cross-worker store and manifest races, not the lease-disk admission (DA3).
+   * A 1 TiB stand-in disk keeps admission real without depending on the test runner's free space,
+   * which a push's quarantine bound (about 1 GiB) would otherwise have to fit in. */
+  app.get(GitRepositoryService).readLeaseDiskFreeBytes = async () => 1024 ** 4;
   await app.getHttpAdapter().getInstance().ready();
   await app.listen(String(port), '127.0.0.1');
 

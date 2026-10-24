@@ -76,21 +76,28 @@ describe('All surfaces', () => {
   it.each([
     [undefined, ['Revisions', 'Agents']],
     ['desktop', ['Browser', 'Revisions', 'Agents']],
-  ] as const)('should list Browser only in the desktop app and Jobs nowhere (TAU_TARGET=%s)', (buildTarget, activity) => {
-    vi.stubEnv('TAU_TARGET', buildTarget);
-    onTestFinished(() => {
-      vi.unstubAllEnvs();
-    });
-    render(<ControlledNav />);
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
+  ] as const)(
+    'should list Browser only in the desktop app and Jobs nowhere (TAU_TARGET=%s)',
+    (buildTarget, activity) => {
+      vi.stubEnv('TAU_TARGET', buildTarget);
+      onTestFinished(() => {
+        vi.unstubAllEnvs();
+      });
+      render(<ControlledNav />);
+      fireEvent.click(
+        within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }),
+      );
 
-    const group = within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('region', { name: 'Activity' });
-    expect(
-      within(group)
-        .getAllByRole('button')
-        .map((button) => button.textContent),
-    ).toEqual(activity);
-  });
+      const group = within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('region', {
+        name: 'Activity',
+      });
+      expect(
+        within(group)
+          .getAllByRole('button')
+          .map((button) => button.textContent),
+      ).toEqual(activity);
+    },
+  );
 
   it('should hide Print without Machines and the diagnostics without debug mode, as the desktop launcher does', () => {
     flags.machines = false;

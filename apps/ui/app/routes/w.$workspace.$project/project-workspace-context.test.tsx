@@ -629,24 +629,27 @@ describe('ProjectWorkspaceProvider', () => {
     [undefined, true, 'jobs'],
     ['desktop', false, 'jobs'],
     ['desktop', true, 'jobs'],
-  ] as const)('refuses an unshipped surface on any layout (TAU_TARGET=%s, mobile=%s, %s)', (buildTarget, isMobile, panel) => {
-    vi.stubEnv('TAU_TARGET', buildTarget);
-    onTestFinished(() => {
-      vi.unstubAllEnvs();
-    });
-    state.isMobile = isMobile;
-    render(
-      <ProjectWorkspaceProvider>
-        <Probe />
-      </ProjectWorkspaceProvider>,
-    );
+  ] as const)(
+    'refuses an unshipped surface on any layout (TAU_TARGET=%s, mobile=%s, %s)',
+    (buildTarget, isMobile, panel) => {
+      vi.stubEnv('TAU_TARGET', buildTarget);
+      onTestFinished(() => {
+        vi.unstubAllEnvs();
+      });
+      state.isMobile = isMobile;
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
 
-    act(() => {
-      workspace.openPanel(panel);
-    });
+      act(() => {
+        workspace.openPanel(panel);
+      });
 
-    expect(send).not.toHaveBeenCalled();
-  });
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
 
   it('selects Workbench only for user-origin file opens on desktop', () => {
     render(

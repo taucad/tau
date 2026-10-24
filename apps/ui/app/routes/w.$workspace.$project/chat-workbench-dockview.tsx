@@ -1826,6 +1826,8 @@ export const WorkbenchDockview = memo(function ({
       const active = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
       isRestoringLayout.current = true;
       try {
+        // Pruned here, not in the record: a web session's next edit writes the pruned layout back, dropping a desktop
+        // Browser tab. That is intended, since Browser tabs are window-local.
         api.fromJSON(
           toDockview('workbench', withoutUnshippedPanes(node), {
             dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },

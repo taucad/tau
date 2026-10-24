@@ -472,3 +472,35 @@ test('deletes a view record when the person closes its tab', async () => {
     )
     .toBe(false);
 });
+
+test('drops unshipped Jobs and Browser panes from an adopted layout record', async () => {
+  await openProject();
+  const initial = JSON.parse((await readFile(layoutPath))!) as {
+    lanes: { chat: boolean; workbench: boolean };
+  };
+  // Let the workspace watcher establish its first physical snapshot before an outside editor changes bytes.
+  await new Promise((resolve) => {
+    setTimeout(resolve, 3500);
+  });
+  // A layout the desktop app saved before Jobs was withdrawn; the web build ships neither Jobs nor Browser.
+  await writeWorkbenchFile(
+    layoutPath,
+    JSON.stringify({
+      ...initial,
+      lanes: { ...initial.lanes, workbench: true },
+      workbench: {
+        kind: 'group',
+        tabs: [
+          { kind: 'pane', pane: 'parameters' },
+          { kind: 'pane', pane: 'jobs' },
+          { kind: 'pane', pane: 'browser' },
+        ],
+        active: 1,
+      },
+    }),
+    workspace,
+  );
+  await target.expectVisible(selectors.getByCss('.dv-tab[data-tab-panel-id="workbench:parameters"]'), 60_000);
+  await target.expectCount(selectors.getByCss('.dv-tab[data-tab-panel-id="workbench:jobs"]'), 0);
+  await target.expectCount(selectors.getByCss('.dv-tab[data-tab-panel-id="workbench:browser"]'), 0);
+});

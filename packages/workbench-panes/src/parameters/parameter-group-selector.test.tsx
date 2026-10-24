@@ -6,6 +6,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ParameterGroupSelector } from '#parameters/parameter-group-selector.jsx';
 
 // The selector only passes the manifest through to the host's group operations.
+// oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- nothing reads it, so a compiled manifest would be dead weight
 const manifest = {} as unknown as ParameterManifest;
 
 const renderSelector = () => {

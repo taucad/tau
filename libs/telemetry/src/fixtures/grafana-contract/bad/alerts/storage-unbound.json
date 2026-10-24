@@ -1,0 +1,57 @@
+{
+  "title": "tau-storage-seeded-bad",
+  "interval": 300,
+  "rules": [
+    {
+      "uid": "trigger-combined-matcher",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": { "expr": "max(tau_git_hot_project_commit_rate{app=~\"tau-api.*|.*storage.*\",rank=\"1\"}) > 0.5" }
+        }
+      ]
+    },
+    {
+      "uid": "storage-dashboard-variable",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": { "expr": "sum(tau_git_rpcs_inflight{app=~\"$storage_app\"}) > 10" }
+        }
+      ]
+    },
+    {
+      "uid": "storage-mirror-on-api",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": { "expr": "absent(tau_mirror_rounds_total{app=~\".*\"})" }
+        }
+      ]
+    },
+    {
+      "uid": "storage-two-app-matchers",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": { "expr": "sum(tau_git_rpcs_inflight{app=~\".*\",app=~\".*storage.*\"}) > 10" }
+        }
+      ]
+    },
+    {
+      "uid": "storage-bound-correctly",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": { "expr": "absent(tau_mirror_rounds_total{app=~\".*mirror.*\"})" }
+        },
+        { "refId": "B", "datasourceUid": "__expr__", "model": { "type": "threshold", "expression": "A" } }
+      ]
+    }
+  ]
+}

@@ -8,5 +8,18 @@
   },
   "tags": ["scope:api", "type:app", "deploy:staging"],
   "implicitDependencies": ["api"],
-  "targets": {}
+  "targets": {
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/mirror/fly.staging.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore --target mirror --ha=false --no-public-ips"
+      }
+    },
+    "deploy:prod": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/mirror/fly.prod.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore --target mirror --ha=false --no-public-ips"
+      }
+    }
+  }
 }

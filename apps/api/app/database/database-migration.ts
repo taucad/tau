@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { installBillingProtections } from '#database/billing-protections.js';
+import { installMaintenanceRole, installMirrorRole } from '#database/service-roles.js';
 
 /** Drizzle's generated journal; `when` is the millisecond stamp the migrator stores as `created_at`. */
 type MigrationJournal = { entries: Array<{ readonly tag: string; readonly when: number }> };
@@ -107,11 +108,19 @@ export async function installApiRuntimeRole(client: postgres.Sql): Promise<void>
  * Runs on its own `max: 1` connection under the migration identity, then reinstalls the
  * billing protections and refreshes the runtime role grants (`GRANT … ON ALL TABLES` is a
  * snapshot and the trigger list is explicit, so new tables need both after every migration)
- * and proves the result matches the build's journal head. This is the release command, so a
+ * and the private service apps' logins (`tau_mirror`'s column grants, W13 B4, and
+ * `tau_maintenance`, DC4; each password is optional), and proves the result matches the
+ * build's journal head. This is the release command, so a
  * fresh database is never left without its financial triggers or runtime roles.
  * Re-running it applies nothing: the migrator's own bookkeeping table is the fence.
  */
-export async function runMigrationJob(databaseUrl: string): Promise<{ applied: number; head: MigrationHead }> {
+export async function runMigrationJob(
+  databaseUrl: string,
+  options: {
+    readonly mirrorPassword?: string;
+    readonly maintenancePassword?: string;
+  } = {},
+): Promise<{ applied: number; head: MigrationHead }> {
   const client = postgres(databaseUrl, {
     max: 1,
     prepare: false,
@@ -124,6 +133,8 @@ export async function runMigrationJob(databaseUrl: string): Promise<{ applied: n
     await migrate(drizzle(client), { migrationsFolder });
     await installBillingProtections(client);
     await installApiRuntimeRole(client);
+    await installMirrorRole(client, options.mirrorPassword);
+    await installMaintenanceRole(client, options.maintenancePassword);
     await assertSchemaCompatibility(client);
     const after = await readAppliedMigrations(client);
     return { applied: after.count - before.count, head: await readMigrationHead() };

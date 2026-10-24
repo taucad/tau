@@ -64,6 +64,7 @@ import type { SweepOutcome } from '#api/git/store/sweep.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import type { FaultInjector } from '#api/git/store/fault-points.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
+import { copyPendingOnAdvance } from '#api/git/mirror/watermark.js';
 import { markLfsReachability } from '#api/git/lfs-reachability.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
@@ -1698,10 +1699,15 @@ export class GitRepositoryService {
       await assertActiveProjectLocked(transaction, projectId);
       await transaction
         .insert(projectGit)
-        .values({ projectId, generation })
+        .values({ projectId, generation, copyPendingSince: new Date() })
         .onConflictDoUpdate({
           target: projectGit.projectId,
-          set: { generation, updatedAt: new Date() },
+          // W13 B4: the B2 copy's lag clock starts in the statement that advances `generation`.
+          set: {
+            generation,
+            copyPendingSince: copyPendingOnAdvance(generation),
+            updatedAt: new Date(),
+          },
           setWhere: lt(projectGit.generation, generation),
         });
     });
@@ -1791,6 +1797,7 @@ export class GitRepositoryService {
             storageBytes,
             generation: manifest.generation,
             derivedGeneration: manifest.generation,
+            copyPendingSince: new Date(),
           })
           .onConflictDoUpdate({
             target: projectGit.projectId,
@@ -1802,6 +1809,7 @@ export class GitRepositoryService {
                (review F1). */
               generation: manifest.generation,
               derivedGeneration: manifest.generation,
+              copyPendingSince: copyPendingOnAdvance(manifest.generation),
               updatedAt: new Date(),
             },
             /* Compare-and-swap (review F4). A request repairing generation 5 and a

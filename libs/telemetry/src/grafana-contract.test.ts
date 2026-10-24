@@ -315,6 +315,25 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_git_repository_size: 'OB2',
   tau_git_hot_project_commit_rate: 'OB2',
   tau_git_hot_project_writers: 'OB2',
+  // DM1 ships the copier's instruments; OB9's storage-critical B2 row reads them (W14 OB6).
+  tau_mirror_copy_lag_seconds: 'OB9',
+  tau_mirror_copy_lag_generations: 'OB9',
+  tau_mirror_backlog_repositories: 'OB9',
+  tau_mirror_lfs_backlog_objects: 'OB9',
+  tau_mirror_copy_delay_seconds: 'OB9',
+  tau_mirror_rounds_total: 'OB9',
+  tau_mirror_objects_copied_total: 'OB9',
+  tau_mirror_bytes_copied_total: 'OB9',
+  tau_mirror_copy_failures_total: 'OB9',
+  tau_mirror_retention_extensions_total: 'OB9',
+  tau_mirror_retention_min_remaining_seconds: 'OB9',
+  tau_mirror_retention_max_ahead_seconds: 'OB9',
+  tau_mirror_destination_up: 'OB9',
+  tau_mirror_reconcile_last_success_timestamp_seconds: 'OB9',
+  tau_mirror_reconcile_missing_objects: 'OB9',
+  tau_mirror_reconcile_hidden_versions: 'OB9',
+  tau_mirror_destination_stored_bytes: 'OB9',
+  tau_mirror_destination_object_versions: 'OB9',
 };
 
 /**

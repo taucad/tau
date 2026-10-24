@@ -31,15 +31,11 @@ export const buildComputeStoreBridge = (binding: ComputeBinding | undefined): Co
   if (openPort) {
     /* The authority already serves a port: hand it to the runtime instead of relaying every call here. */
     const port = openPort();
-    let closed = false;
     return {
       memoryHandle: { computeBindingMode: 'durable', computeStorePort: port },
       transfer: [port as Transferable],
-      dispose() {
-        if (closed) {
-          return;
-        }
-        closed = true;
+      /* `close` is idempotent, and a no-op once the port has been transferred. */
+      dispose: () => {
         port.close();
       },
     };

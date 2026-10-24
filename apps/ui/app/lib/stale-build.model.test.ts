@@ -15,7 +15,9 @@
  * The SDK's own chunk can fail through the real loader as Vite's preload helper reports
  * it: `vite:preloadError` first, then the import rejecting into the loader, whose hand-over to the
  * recovery comes at once or only after the failure's verdict (a fast verdict: no build id, a quick
- * answer), so whose failure it is cannot depend on which arrives first (I9).
+ * answer), so whose failure it is cannot depend on which arrives first (I9). A third tab may boot on
+ * either build at any moment, its announcement heard at once, so a peer's claim can land while a
+ * lookup is still confirming (I10).
  */
 import process from 'node:process';
 import { array, assert, asyncProperty, constant, constantFrom, oneof, record, tuple } from 'fast-check';
@@ -33,6 +35,7 @@ type Answer = 'X' | 'Y' | 'unreachable' | 'none';
 type Channel = 'boundary' | 'global' | 'preload';
 type Step =
   | { readonly kind: 'deliver' }
+  | { readonly kind: 'announce'; readonly build: 0 | 1 }
   | { readonly kind: 'answer'; readonly tab: 0 | 1; readonly answer: Answer }
   | { readonly kind: 'failure'; readonly tab: 0 | 1; readonly channel: Channel }
   | { readonly kind: 'again'; readonly tab: 0 | 1; readonly channel: Channel }
@@ -112,6 +115,10 @@ type Tab = {
   /** Answers naming this tab's own build since the last one naming another. */
   consecutiveOwn: number;
   fetches: number;
+  /** Every build the edge named, in order (`unreachable` and `none` included), across this tab's pages. */
+  readonly answers: Answer[];
+  /** I10 violations found when a decision landed, checked after each step. */
+  readonly violations: string[];
   errorReporting?: typeof ErrorReporting;
   /** Events the model error tracker sent per failure; Sentry ignores a second capture of the same value. */
   readonly tracked: Map<unknown, number>;
@@ -186,6 +193,7 @@ const loadTab = async (tab: Tab): Promise<void> => {
       if (tab.answer === 'none') {
         tab.sawNone = true;
       }
+      tab.answers.push(tab.answer);
       if (tab.answer === 'X' || tab.answer === 'Y') {
         const named = tab.answer === 'X' ? buildX : buildY;
         tab.consecutiveOwn = named === tab.build ? tab.consecutiveOwn + 1 : 0;
@@ -385,7 +393,8 @@ const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   answerDelay,
   consecutiveOwn: 0,
   fetches: 0,
-
+  answers: [],
+  violations: [],
   tracked: new Map(),
   tagsAtLeave: new Map(),
   tagsAtHide: new Map(),
@@ -435,10 +444,39 @@ const startTracker = async (tab: Tab): Promise<void> => {
   });
 };
 
+/**
+ * I10: a failure is decided genuine (`current`) only on the server's word or its silence. A decision
+ * that landed within the lookup's budget, while every answer the edge gave named another build, must
+ * have been decided by that build, whatever peer claimed what meanwhile.
+ */
+const watchDecision = (tab: Tab, failure: unknown, decision: Promise<StaleBuildRecovery.StaleBuildOutcome>): void => {
+  const asked = tab.answers.length;
+  // The lookup's budget, on the same fake clock: a decision that waited it out may rest on silence.
+  const budget = { isOpen: true };
+  setTimeout(() => {
+    budget.isOpen = false;
+  }, tab.skew!.lookupBudget);
+  const other: Answer = tab.build === buildX ? 'Y' : 'X';
+  // async-iife: bootstrap -- the check runs when the decision lands, as the decision itself does.
+  void (async () => {
+    const outcome = await decision;
+    const given = tab.answers.slice(asked);
+    if (outcome === 'current' && budget.isOpen && given.length > 0 && given.every((named) => named === other)) {
+      tab.violations.push(
+        `I10 ${String(failure)} decided current though the edge named ${other} ${String(given.length)}×`,
+      );
+    }
+  })();
+};
+
 const sight = (tab: Tab, failure: unknown, channel: Channel): void => {
-  tab.failures.find((entry) => entry.failure === failure)?.channels.add(channel);
-  // async-iife: bootstrap -- the decision lands on its own, as from a listener.
-  void tab.recovery?.recoverFromStaleBuild(failure, channel);
+  const entry = tab.failures.find((candidate) => candidate.failure === failure);
+  const isFirstSighting = entry?.channels.size === 0;
+  entry?.channels.add(channel);
+  const decision = tab.recovery?.recoverFromStaleBuild(failure, channel);
+  if (decision !== undefined && isFirstSighting && entry.sdk === undefined) {
+    watchDecision(tab, failure, decision);
+  }
   if (isHidden(tab)) {
     // A failure on a hidden page goes at once, with what its page knows now.
     noteHiddenTags(tab);
@@ -544,6 +582,14 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
     case 'deliver': {
       return deliverAll();
     }
+    case 'announce': {
+      // A third tab boots on this tab's build and announces itself; every tab hears it at once.
+      const message = tabs[step.build].build;
+      for (const channel of bus.channels) {
+        channel.receive(message);
+      }
+      return 1;
+    }
     case 'answer': {
       tabs[step.tab].answer = step.answer;
       return 0;
@@ -618,6 +664,7 @@ const checkStep = (
 ): void => {
   const confirmations = 1 + (tabs[0].skew?.serverConfirmations ?? 2);
   for (const [index, tab] of tabs.entries()) {
+    expect(tab.violations, `I10 tab ${String(index)}`).toStrictEqual([]);
     const skew = tab.skew!;
     const isWriting = !skew.isBuildSuperseded();
     if (!isWriting) {
@@ -705,6 +752,7 @@ const answer = constantFrom<Answer>('X', 'Y', 'unreachable', 'none');
 const channel = constantFrom<Channel>('boundary', 'global', 'preload');
 const step: Arbitrary<Step> = oneof(
   { weight: 3, arbitrary: constant({ kind: 'deliver' } as const) },
+  { weight: 1, arbitrary: record({ kind: constant<'announce'>('announce'), build: tabIndex }) },
   { weight: 3, arbitrary: record({ kind: constant<'answer'>('answer'), tab: tabIndex, answer }) },
   { weight: 2, arbitrary: record({ kind: constant<'failure'>('failure'), tab: tabIndex, channel }) },
   { weight: 1, arbitrary: record({ kind: constant<'again'>('again'), tab: tabIndex, channel }) },
@@ -883,6 +931,27 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
           expect(recovery.readStaleBuildOutcome(failure)).toBe('current');
           expect(tab.analytics.get(failure)).toBe(1);
         }
+      },
+    );
+  }, 60_000);
+
+  it("decide a deploy's failure superseded though a peer's claim lands while the lookup confirms", async () => {
+    await runModel(
+      // Tab A's edge is slow and names Y throughout; the page is too old to reload on its own.
+      ['Y', 'Y', 3500, 60_000],
+      [
+        { kind: 'failure', tab: 0, channel: 'boundary' },
+        // The first answer (at 3.5 s) starts the confirmations; the first is asked at 4.5 s.
+        ...Array.from({ length: 5 }, () => ({ kind: 'tick', ms: 1000 }) as const),
+        // A tab on build Y boots while that confirmation is in flight.
+        { kind: 'announce', build: 1 },
+        { kind: 'tick', ms: 30_000 },
+      ],
+      ([tab]) => {
+        const [failure] = tab.failures;
+        expect(failure?.recovery.readStaleBuildOutcome(failure.failure)).toBe('superseded');
+        expect(tab.analytics.get(failure?.failure) ?? 0).toBe(0);
+        expect(tab.skew?.readServerVerdict()).toBe('replaced');
       },
     );
   }, 60_000);

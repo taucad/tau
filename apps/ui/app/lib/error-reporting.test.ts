@@ -385,6 +385,48 @@ describe('error reporting', () => {
     expect(posted).toHaveLength(page.directErrorLimit);
   });
 
+  it('should say it dropped errors beyond the limit only once one is dropped, not while a hidden page keeps them waiting', async () => {
+    const posted = stubIngest();
+    let release: () => void = () => undefined;
+    sentry.holdNextLoad = new Promise((resolve) => {
+      release = resolve;
+    });
+    const page = await load();
+    const started = page.startErrorReporting();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const report = (label: string): void => {
+      const error = new Error(label);
+      error.stack = 'short';
+      void page.reportUiError(error);
+    };
+
+    // Tab switches while the load stalls spend the page's limit for errors without the SDK.
+    for (let round = 0; posted.length < page.directErrorLimit && round < 50; round += 1) {
+      for (let index = 0; index < 10; index += 1) {
+        report(`round ${String(round)} error ${String(index)}`);
+      }
+      page.sendWaitingErrors('hidden');
+      // oxlint-disable-next-line no-await-in-loop -- The page is shown again before the next switch.
+      await settle();
+    }
+    // Hidden again with the limit spent: what waits stays waiting, for the SDK.
+    report('kept for the SDK');
+    page.sendWaitingErrors('hidden');
+    await settle();
+
+    expect(posted).toHaveLength(page.directErrorLimit);
+    expect(warn).not.toHaveBeenCalled();
+
+    // The load fails: what waited can no longer go, and is dropped now.
+    sentry.failNextLoad = true;
+    release();
+    await started;
+    await settle();
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(String(warn.mock.calls[0]?.[0])).toContain('the rest are dropped');
+  });
+
   it('should keep what did not fit as the document was hidden for the SDK, which captures it once it loads', async () => {
     const posted = stubIngest();
     let release: () => void = () => undefined;

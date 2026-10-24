@@ -41,15 +41,13 @@
  */
 
 import { Topic } from '@taucad/events';
-import { liveBuildIdTimeout } from '#lib/build-identity.js';
 import {
   buildId,
-  lookupConfirmDelay,
+  lookupBudget,
   offerReload,
   queryLiveBuild,
   readServerVerdict,
   readSupersedingBuildId,
-  serverConfirmations,
 } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
 import {
@@ -209,18 +207,12 @@ const capturedBySentry: Readonly<Record<FailureSource, boolean>> = {
 const isSdkLoad = (sources: ReadonlySet<FailureSource>): boolean => sources.has('sdk');
 
 /**
- * Milliseconds the slowest lookup `build-skew` makes takes: one answer and its confirmations, each
- * within the request timeout, `lookupConfirmDelay` apart, derived from those constants so it cannot drift.
- */
-const slowestLookup = (1 + serverConfirmations) * liveBuildIdTimeout + serverConfirmations * lookupConfirmDelay;
-
-/**
  * Milliseconds the error tracker's `beforeSend` waits for a failure's decision before tagging it with
  * what is known, from the whole chain a decision can take: its own lookup, a reload's wait to stall
  * ({@link reloadTimeout}, during which a `reloading` outcome is provisional), the stall check's
  * lookup, and a margin for the decision's own work. The page leaving settles every wait at once.
  */
-export const staleBuildTagWait = slowestLookup + reloadTimeout + slowestLookup + 2000;
+export const staleBuildTagWait = lookupBudget + reloadTimeout + lookupBudget + 2000;
 
 /** Milliseconds a failure only `vite:preloadError` reported waits for the channel Vite rethrows it into. */
 export const preloadFollowUpDelay = 1000;

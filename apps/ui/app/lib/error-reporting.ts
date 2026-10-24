@@ -109,20 +109,26 @@ const capture = (sentry: typeof SentryLibrary, reportedError: unknown): void => 
 
 /**
  * Take one report onto the path without the SDK, unless the page's {@link directErrorLimit} is
- * spent: the one admission point for every send without the SDK.
+ * spent: the one admission point for every send without the SDK. A refusal drops nothing by itself:
+ * a hidden page keeps what it refused waiting for the SDK; the caller that drops it says so
+ * ({@link warnDirectDropped}).
  */
 const admitDirect = (): boolean => {
   if (directReports >= directErrorLimit) {
-    if (!hasWarnedDirectLimit) {
-      hasWarnedDirectLimit = true;
-      console.warn(
-        `[error-reporting] more than ${String(directErrorLimit)} errors without the SDK; the rest are dropped`,
-      );
-    }
     return false;
   }
   directReports += 1;
   return true;
+};
+
+/** Reports beyond {@link directErrorLimit} were dropped: said once per page, when the first one is. */
+const warnDirectDropped = (dropped: number): void => {
+  if (dropped > 0 && !hasWarnedDirectLimit) {
+    hasWarnedDirectLimit = true;
+    console.warn(
+      `[error-reporting] more than ${String(directErrorLimit)} errors without the SDK; the rest are dropped`,
+    );
+  }
 };
 
 /** Give back an admission whose report did not go after all (it did not fit as the page was hidden). */
@@ -168,6 +174,10 @@ export const sendWaitingErrors = (phase: 'hidden' | 'exit'): void => {
       releaseDirect();
     }
   }
+  // Refused at exit is given up; refused while the page may be shown again keeps waiting for the SDK.
+  if (isExit) {
+    warnDirectDropped(forLoad.length - admitted.size);
+  }
   waitingForLoad = isExit ? [] : waitingForLoad.filter((report) => !gone.has(report));
 };
 
@@ -199,7 +209,10 @@ const sendWaitingWithoutSdk = (): void => {
   isSdkUnavailable = true;
   warnDropped();
   // At most `unreportedErrorLimit` waited, within the page's limit for errors without the SDK.
-  for (const report of waitingForLoad.splice(0).filter(() => admitDirect())) {
+  const waited = waitingForLoad.splice(0);
+  const admitted = waited.filter(() => admitDirect());
+  warnDirectDropped(waited.length - admitted.length);
+  for (const report of admitted) {
     // async-iife: bootstrap -- each event goes once its tags settle; the load's outcome is known now.
     void sendDirectlyWhenTagged(report);
   }
@@ -338,6 +351,7 @@ export const reportUiError = async (error: unknown): Promise<void> => {
   }
   if (isSdkUnavailable) {
     if (!admitDirect()) {
+      warnDirectDropped(1);
       return;
     }
     markReported();

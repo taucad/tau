@@ -40,7 +40,7 @@
 
 import { Topic } from '@taucad/events';
 import { metaConfig } from '#constants/meta.constants.js';
-import { askLiveBuild, readBuildId } from '#lib/build-identity.js';
+import { askLiveBuild, liveBuildIdTimeout, readBuildId } from '#lib/build-identity.js';
 import type { LiveBuildAnswer } from '#lib/build-identity.js';
 
 const channelName = `${metaConfig.databasePrefix}build-id`;
@@ -128,6 +128,14 @@ export const lookupConfirmDelay = 1000;
  */
 export const serverConfirmations = 2;
 
+/**
+ * Milliseconds one lookup ({@link queryLiveBuild}) may take: its question and the confirmations a
+ * verdict change needs, each within the request timeout, `lookupConfirmDelay` apart. A lookup ends
+ * when the verdict settles, however many answers that takes (an answer asked for a phase a peer's
+ * claim ended is not applied), and at the latest when this passes.
+ */
+export const lookupBudget = (1 + serverConfirmations) * liveBuildIdTimeout + serverConfirmations * lookupConfirmDelay;
+
 let state: SkewState = { phase: 'idle', superseding: undefined, vouches: false, server: 'unknown', pending: undefined };
 /** Bumped on each phase change, so a server answer asked for an earlier phase is not applied to this one. */
 let epoch = 0;
@@ -141,6 +149,9 @@ const serverVerdictTopic = new Topic<void>({ name: 'server-verdict' });
 /** A verdict change still awaits its confirmations. */
 const isConfirming = (current: SkewState): boolean =>
   current.pending !== undefined || current.phase === 'server-confirming';
+
+/** The server's word is still awaited: a verdict change is confirming, or a peer's claim awaits its answer. */
+const isUnsettled = (current: SkewState): boolean => isConfirming(current) || current.phase === 'provisional';
 
 const stopsWrites = (current: SkewState): boolean => current.phase !== 'idle' && current.phase !== 'offered';
 
@@ -248,8 +259,11 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
     if (current.phase === 'provisional' || current.phase === 'peer-superseded') {
       /* A peer's claim stopped writes: they resume only once the server has named this build as
        * often as it must name another to supersede it (DF20), never on one answer an edge leaving a
-       * build may give. */
-      return { ...common, phase: 'server-confirming', towards: 'live', checksLeft: serverConfirmations };
+       * build may give. Answers already counted towards it while the tab wrote still count. */
+      const checksLeft = current.pending?.towards === 'live' ? current.pending.checksLeft - 1 : serverConfirmations;
+      return checksLeft > 0
+        ? { ...common, phase: 'server-confirming', towards: 'live', checksLeft, pending: undefined }
+        : live();
     }
     if (current.server === 'replaced') {
       /* The server had named another build: leaving that word takes as many answers as entering
@@ -287,8 +301,13 @@ const settle = (current: SkewState, answer: LiveBuildAnswer, claimedBuildId: num
       }
       case 'provisional':
       case 'peer-superseded': {
-        // A peer shares storage: writes stop now; the verdict follows once the confirmations agree.
-        return { ...named, phase: 'server-confirming', towards: 'replaced', checksLeft: serverConfirmations };
+        /* A peer shares storage: writes stop now; the verdict follows once the confirmations agree,
+         * counting those a lone tab's verdict change had already heard. */
+        const checksLeft =
+          current.pending?.towards === 'replaced' ? current.pending.checksLeft - 1 : serverConfirmations;
+        return checksLeft > 0
+          ? { ...named, phase: 'server-confirming', towards: 'replaced', checksLeft }
+          : { ...replaced, phase: 'server-superseded' };
       }
       case 'idle':
       case 'offered': {
@@ -416,42 +435,75 @@ const dispatch = (event: SkewEvent): void => {
   }
 };
 
+/** The questions under way for every lookup, while one is. */
 let inFlightQuery: Promise<void> | undefined;
+/** Lookups whose budget has not passed: the questions go on while any is waiting. */
+let waitingLookups = 0;
 
-/** One question, then the confirmations a verdict change under way needs. */
-const askAndConfirm = async (): Promise<void> => {
+const hasWaitingLookup = (): boolean => waitingLookups > 0;
+
+/**
+ * One question, then one more every `lookupConfirmDelay` while the server's word is unsettled, not at
+ * the 30 s recheck. The reducer counts the confirmations, so an answer it did not apply (a peer's
+ * claim changed the phase meanwhile) is simply asked again; it stops once the verdict settles or no
+ * lookup is waiting any more.
+ */
+const askUntilSettled = async (): Promise<void> => {
   await askServer(undefined);
-  // A verdict change under way is confirmed now, `lookupConfirmDelay` apart, not at the 30 s recheck.
-  for (let check = 0; check < serverConfirmations && isConfirming(state); check += 1) {
+  while (isUnsettled(state) && hasWaitingLookup()) {
     // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential by definition.
     await new Promise((resolve) => {
       setTimeout(resolve, lookupConfirmDelay);
     });
+    if (!hasWaitingLookup()) {
+      return;
+    }
     // oxlint-disable-next-line no-await-in-loop -- The confirmations are sequential by definition.
     await askServer(undefined);
   }
 };
 
 /**
- * Ask the server which build is live (`/health/build`) and apply the answer: the single question
- * every consumer shares (`askLiveBuild` coalesces concurrent callers). A bundle without a build id
- * asks nothing.
+ * Ask the server which build is live (`/health/build`) and apply the answers until the verdict
+ * settles: the single lookup every consumer shares (`askLiveBuild` coalesces concurrent callers).
+ * Each caller waits at most {@link lookupBudget} from its own call. A bundle without a build id asks
+ * nothing.
  *
- * @returns Once the answer is applied; read {@link readServerVerdict} for what it changed.
+ * @returns Once the verdict has settled or the budget passed; read {@link readServerVerdict} for it.
  */
 export const queryLiveBuild = async (): Promise<void> => {
   if (buildId === 0) {
     return;
   }
-  // One question and its confirmations at a time, shared by every caller.
+  waitingLookups += 1;
+  let isWaiting = true;
+  const stopWaiting = (): void => {
+    if (isWaiting) {
+      isWaiting = false;
+      waitingLookups -= 1;
+    }
+  };
+  let budgetTimer: ReturnType<typeof setTimeout> | undefined;
+  const budget = new Promise<void>((resolve) => {
+    budgetTimer = setTimeout(() => {
+      stopWaiting();
+      resolve();
+    }, lookupBudget);
+  });
+  // One lookup at a time, shared by every caller.
   inFlightQuery ??= (async () => {
     try {
-      await askAndConfirm();
+      await askUntilSettled();
     } finally {
       inFlightQuery = undefined;
     }
   })();
-  await inFlightQuery;
+  try {
+    await Promise.race([inFlightQuery, budget]);
+  } finally {
+    clearTimeout(budgetTimer);
+    stopWaiting();
+  }
 };
 
 /**

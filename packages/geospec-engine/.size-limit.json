@@ -1,7 +1,0 @@
-[
-  {
-    "name": "total (ESM JS) — measured 4.5 kB brotli on 2026-10-20 (the CLI and pool moved to geospec)",
-    "path": "dist/**/*.mjs",
-    "limit": "5 kB"
-  }
-]

@@ -1,8 +1,7 @@
 # Licensing
 
 All Tau-authored source in the current repository is licensed under Apache-2.0. This includes the applications,
-internal libraries, tools, examples, published packages, the `geospec` authoring substrate, and
-`@taucad/geospec-engine`.
+internal libraries, tools, examples, published packages, and the `geospec` authoring substrate.
 
 Each workspace package carries its own `license` field in `package.json` and same-directory `LICENSE` file.
 Third-party code and dependencies retain their own licences and notices.
@@ -19,8 +18,8 @@ copy named `LICENSE`; the repository root retains its historical lowercase filen
 workspace package.
 
 Directory placement, package privacy, Nx tags, and architectural role do not change the licence. Tau-authored code can
-move between the editor, API, `apps/libs`, `libs`, ordinary packages, the GeoSpec substrate, and the GeoSpec engine
-without a relicensing decision.
+move between the editor, API, `apps/libs`, `libs`, ordinary packages, and the GeoSpec substrate without a relicensing
+decision.
 
 Apache-2.0 permits commercial use, modification, distribution, sublicensing, proprietary embedding, hosted operation,
 and competing offerings, subject to its licence and notice requirements. The canonical text, not this summary,
@@ -28,12 +27,10 @@ controls.
 
 ## GeoSpec and user work
 
-Both `geospec` and `@taucad/geospec-engine` are Apache-2.0. An adopter may author, execute, embed, modify, host,
-fork, and redistribute the complete first-party GeoSpec workflow without a separate Tau software licence.
-
-Engine releases publish a provenance record described by
-[`packages/geospec-engine/provenance.schema.json`](../../packages/geospec-engine/provenance.schema.json). It records the
-release date and artifact digests for reproducibility; there is no future-licence conversion clock.
+`geospec` is Apache-2.0, and so is the compiled engine it runs on, `geospec-engine`, which
+[taucad/geospec](https://github.com/taucad/geospec) publishes with its own `LICENSE`, `NOTICE` and third-party
+licences. An adopter may author, execute, embed, modify, host, fork, and redistribute the complete first-party GeoSpec
+workflow without a separate Tau software licence. There is no future-licence conversion clock.
 
 Running Tau or GeoSpec puts no licence obligation on a user's specs, models, generated UI, or verdicts. Users choose
 terms for their original work and preserve Apache requirements when redistributing Tau-authored code.

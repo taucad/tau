@@ -28,7 +28,7 @@ export function ProjectExportAction({
           <span className={labelClassName ?? 'hidden @xl/viewer:inline'}>Export</span>
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Open exporter</TooltipContent>
+      <TooltipContent>Open Export</TooltipContent>
     </Tooltip>
   );
 }

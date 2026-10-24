@@ -2,7 +2,6 @@
 mcp: minor
 host: minor
 cli: minor
-geospec-engine: minor
 ---
 
 `test_model`, `tau test` and `geospec run` print one summary of a GeoSpec run, and a requirement the engine could not decide is never called failing. The line reads `GeoSpec <runStatus>: <passed> passed, <failed> failed[, N inconclusive][, N unsupported][, N not run][, N skipped] of <total>.`; over MCP it is followed by `Failed: <ids>` for requirements decided false or broken and `Undecided: <id> (<category>)` for the rest, twenty of each at most. It replaces "GeoSpec passed P of T requirements. Failing IDs: …", which listed inconclusive and unsupported rows as failing. A planetary run whose interference claims exceed the analysis limit now reads `GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10.`, and a filtered re-run of one refused requirement no longer says "passed 0 of 1".

@@ -350,8 +350,6 @@ const config: KnipConfig = {
         // `scripts:prepare-geospec-test-consumer` stages from this directory.
         'host-tests/{f1-public-a1,m3-corpus}/vitest.config.mjs',
       ],
-    },
-    'packages/geospec-engine': {
       // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
       // STEP corpus, and each fixture manifest records its script as provenance.
       ignore: ['fixtures/scripts/*/**'],

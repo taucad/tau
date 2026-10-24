@@ -68,6 +68,26 @@
       },
       "kind": "witness",
       "ref": "CaptureTerminalAtSubmit removed: stop during queue save must not authorize a pre-stop gesture"
+    },
+    "QueuePlacement.target.cfg": {
+      "tier": "pr",
+      "expect": "pass"
+    },
+    "QueuePlacement.cross-host-replay.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "AtMostOneAcceptingHost"
+      },
+      "kind": "witness",
+      "ref": "S32: removing destination pin permits a lost-ACK command accepted by A to be accepted again by B"
+    },
+    "QueuePlacement.unscoped-rebase.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "RebaseStaysAtDestination"
+      },
+      "kind": "witness",
+      "ref": "S32: deleting a legacy anchor lets a cancelled switch to B release the original A fence"
     }
   }
 }

@@ -20,6 +20,8 @@
 \* it reads the projection only and leaves admission, delivery and the queue alone.
 \* Chat message-change wakes are throttled for React readers only; status wakes
 \* stay immediate, and admission, delivery and the queue never read either.
+\* QueuePlacement.tla separately checks host-local lost-ACK recovery and scoped
+\* legacy receipt rebasing; this module retains its single-host FIFO scope.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

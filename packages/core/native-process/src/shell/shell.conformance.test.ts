@@ -355,7 +355,9 @@ describe.runIf(enabled)('shell conformance', () => {
 
       expect(outcomes.map((outcome) => outcome.exitCode !== 0)).toStrictEqual(refused.map(() => true));
       expect(digestOf(record)).toBe(before);
-      expect(existsSync(join(records, 'new.json')) || existsSync(join(work, 'moved.json'))).toBe(false);
+      /* A move out of a read-only mount falls back to copy-then-unlink: the copy a read allows may land, the unlink
+       * never does, so the record stays where it was. */
+      expect(existsSync(join(records, 'new.json'))).toBe(false);
       expect(existsSync(join(work, 'records-moved'))).toBe(false);
     },
   );

@@ -239,8 +239,10 @@ describe.runIf(enabled)('shell service conformance', () => {
       const output = await run({ command });
       expect(output.status === 'completed' ? output.exitCode : 0, command).not.toBe(0);
     }
+    /* A move out of the read-only records falls back to copy-then-unlink: the copy a read allows may land, the unlink
+     * never does, so the record stays where it was, unchanged. */
     expect(readFileSync(record, 'utf8')).toBe('{"record":"CHAT-RECORD"}\n');
-    expect(existsSync(join(project, 'models', 'stolen.json'))).toBe(false);
+    expect(existsSync(join(project, '.tau', 'chats-moved'))).toBe(false);
   });
 
   conformance('H03', 'large output stays bounded and the full log lands in the records row', async () => {
@@ -355,7 +357,7 @@ describe.runIf(enabled)('shell service conformance', () => {
       );
       return message?.role === 'tool-output' ? message : undefined;
     };
-    return { host, transport, launches, logPath, runId, chatId, admit, outputOf };
+    return { host, transport, toolRegistry, launches, logPath, runId, chatId, admit, outputOf };
   };
 
   const shellCall = (id: string, input: JsonValue) => ({ toolCalls: [{ id, name: 'shell', input }] });
@@ -370,7 +372,7 @@ describe.runIf(enabled)('shell service conformance', () => {
 
       const offered = driven.transport.requests[0]?.tools.find((tool) => tool.name === 'shell');
       expect(offered?.description).toContain('Write Bash syntax.');
-      expect(offered?.executionMode).toBe('sequential');
+      expect(driven.toolRegistry.list().find((tool) => tool.name === 'shell')?.executionMode).toBe('sequential');
       const message = await driven.outputOf('call-h08');
       expect(message?.isError, JSON.stringify(message)).toBe(false);
       expect(message?.content).toMatchObject({ status: 'completed', exitCode: 0 });

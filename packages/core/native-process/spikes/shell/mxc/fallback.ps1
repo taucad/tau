@@ -39,9 +39,11 @@
 #       session's cmd.exe child, running in its own restricted token, reads its own secret (positive
 #       control) and is refused the other session's secret and the never-grantable set, decided from
 #       files the orchestrator inspects. Orchestrator impersonation is recorded as info only.
-#   (C) S2 interactive PTY IN-CONTAINER: s2-bash-pty.mts (Node + node-pty as the ConPTY master) runs
-#       Git for Windows Bash in a pseudoconsole as the non-admin sandbox user inside the write-
-#       restricted token and drives tty/resize/ctrl-c/job-control/UTF-8 from the terminal stream.
+#   (C) S2 interactive PTY IN-CONTAINER: token-runner.cs (PTY mode) owns the ConPTY as the UNRESTRICTED
+#       runner and drives pwsh (the D14 Windows shell) in a pseudoconsole as the non-admin sandbox user
+#       inside the write-restricted token: tty/resize/Ctrl-C/UTF-8 plus a containment probe from inside
+#       the PTY session. Job control maps to the PSJob cmdlets; POSIX fg/bg and Ctrl-Z do not apply and
+#       are recorded as honest info rows.
 #   (R) CODEX-SHAPED SPAWN: sandbox-user workloads (pwsh start probe, pwsh write/read proofs, S2) go
 #       through token-runner.cs, the Codex elevated runner shape: CreateProcessWithLogonW starts the
 #       runner as the sandbox user, which mints the token from its own logon and CreateProcessAsUserW's
@@ -528,6 +530,8 @@ $writeProven = $false
 $readProven = $false
 
 # ---- Per-session window-station + private-desktop grants (Codex windows-sandbox-rs/src/desktop.rs) ----
+
+# ---- Per-session window-station + private-desktop grants (Codex windows-sandbox-rs/src/desktop.rs) ----
 # The write-restricted child needs a desktop whose DACL admits BOTH halves of the access check: the
 # normal check (the token's user SID) and the restricted check (one of its restricting SIDs: the
 # session cap SID). Codex creates a private desktop per launch (PrivateDesktop::create, desktop.rs:362)
@@ -853,32 +857,46 @@ if ($apiOk -and $null -ne $shellPath) {
       Add-Check 'fallback.read.requiresElevated' 'cross-session READ denial requires the elevated per-account sandbox backend (distinct sandbox logons + deny-read ACEs); WRITE_RESTRICTED gates writes only' "mode=$mode (non-elevated)" $false $null
     }
 
-    # ================= (C) S2 interactive PTY IN-CONTAINER (as the non-admin sandbox user) =============
-    # Driver = Node + node-pty (ConPTY master) running Git for Windows Bash, all inside the token.
-    # pwsh stalled at startup as the sandbox user inside the token (runs 40023733988..40030269086), so
-    # the S2 child no longer depends on PowerShell or .NET. The result is published under its own
-    # name: run-nonadmin.ps1 writes s2-pty.receipt.json for a plain non-admin user (no restricted
-    # token), and that file must never be read as the in-token result.
+    # ================= (C) S2 interactive PTY IN-CONTAINER (pwsh as the non-admin sandbox user) =========
+    # The D14 bar: pwsh is the S2 shell, running in the runner-owned ConPTY inside the write-restricted
+    # token. The UNRESTRICTED runner owns the pseudoconsole and pipes (Codex conpty/mod.rs); only pwsh
+    # runs in the token, attached via PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE. node-pty and MSYS bash both
+    # fail to CREATE a pipe inside the token (ConPTY EPERM; the Cygwin signal pipe is refused with Win32
+    # error 5, run 40041468455), so the shell cannot own the master. The runner drives the same S2 checks
+    # as Linux/macOS (real tty, resize, Ctrl-C of a foreground wait, UTF-8 round-trip) plus a containment
+    # probe from inside the PTY session. pwsh has no POSIX job table, so job control maps to the PSJob
+    # cmdlets and POSIX fg/bg + Ctrl-Z are recorded as honest info rows, not pass/fail. The result is
+    # published under its own name as fallback-s2-pty.receipt.json.
     $tmpS2 = New-SessionTemp 'sess-temp-s2'
-    $s2Out = Join-Path $tmpS2 's2-bash-pty.receipt.json'
+    $s2Out = Join-Path $tmpS2 's2-pwsh-pty.receipt.json'
     $s2Final = Join-Path $drop 'fallback-s2-pty.receipt.json'
     foreach ($f in @($s2Out, $s2Final)) { if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force } }
-    $bashExe = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
-    $prereqS2 = "node=$(Test-Path -LiteralPath $s2Node) nodePty=$(Test-Path -LiteralPath $s2NodePty) bash=$(Test-Path -LiteralPath $bashExe) driver=$(Test-Path -LiteralPath $s2Driver)"
-    Add-Check 'fallback.s2Pty.prereq' 'S2 driver staged readable for the sandbox user: node.exe, node-pty (ConPTY binding), Git for Windows bash.exe, s2-bash-pty.mts' $prereqS2 ($prereqS2 -notlike '*False*') @{ node = $s2Node; bash = $bashExe; stageNote = $stageNote }
+    $prereqS2 = "runner=$(Test-Path -LiteralPath $runnerExe) pwsh=$(Test-Path -LiteralPath $pwshExe) pwshInToken=$($chosenEnv.ContainsKey('pwsh'))"
+    Add-Check 'fallback.s2Pty.prereq' 'S2 prerequisites: the Codex-shaped runner (the ConPTY master) and pwsh, proven to start as the sandbox user inside the write-restricted token' $prereqS2 (($prereqS2 -notlike '*False*') -and $chosenEnv.ContainsKey('pwsh')) @{ pwsh = $pwshExe; runner = $runnerExe }
     # The runner itself is the ConPTY master: node-pty and MSYS bash both fail to CREATE a pipe inside
-    # the write-restricted token (ConPTY EPERM; bash signal pipe Win32 error 5; run 40037048316), so the
-    # unrestricted runner owns the pseudoconsole and pipes (Codex conpty/mod.rs) and only Bash runs in
+    # the write-restricted token (ConPTY EPERM; bash signal pipe Win32 error 5; run 40041468455), so the
+    # unrestricted runner owns the pseudoconsole and pipes (Codex conpty/mod.rs) and only pwsh runs in
     # the token, attached via PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE. The runner drives the terminal checks.
     $expectUser = if ($mode -eq 'elevated') { $sandboxA.Name } else { $env:USERNAME }
+    # Containment roots: the own root grants the token's cap (cap1), so the WRITE_RESTRICTED restricting-
+    # SID check passes; the deny root grants only cap2, so the cap1 token is refused even traversal. The
+    # nonce is a synthetic GUID, never a real secret.
+    $s2Own = New-Dir (Join-Path $drop 's2-own-root')
+    $s2Deny = New-Dir (Join-Path $drop 's2-deny-root')
+    Set-ExplicitAcl $s2Own @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap1; Rights = 'Modify'; Type = 'Allow' })
+    Set-ExplicitAcl $s2Deny @(@{ Sid = $ADMINS; Rights = 'FullControl'; Type = 'Allow' }, @{ Sid = $sandboxA.Sid; Rights = 'Modify'; Type = 'Allow' }, @{ Sid = $cap2; Rights = 'Modify'; Type = 'Allow' })
+    $s2Nonce = [guid]::NewGuid().ToString('N')
     $s2LaunchPath = 'not-launched'
-    if (($mode -eq 'elevated') -and (Test-Path -LiteralPath $runnerExe) -and (Test-Path -LiteralPath $bashExe)) {
+    if (($mode -eq 'elevated') -and (Test-Path -LiteralPath $runnerExe) -and (Test-Path -LiteralPath $pwshExe) -and $chosenEnv.ContainsKey('pwsh')) {
       $gS2 = Grant-WinstaSession 's2' @($sandboxA.Sid, $cap1)
       $deskS2 = New-SessionDesktop 's2' @($sandboxA.Sid, $cap1)
       Add-Check 'fallback.desktop.s2' 'per-session private desktop + window-station ACE for the S2 session' "desk=$deskS2 winsta=$gS2" (($null -ne $deskS2) -and ($gS2 -like 'ok rc=0')) $null
-      # ptyBash + s2receipt keys put the runner into PTY mode; cmd is ignored (it spawns bash -i itself).
+      # ptyPwsh + s2receipt keys put the runner into PTY mode; cmd is ignored (it spawns pwsh itself).
+      # The chosenEnv['pwsh'] variant (what let pwsh start in the token) rides along as env.* spec lines,
+      # together with the containment roots and nonce that the in-PTY probe reads as env vars.
       $base = Join-Path $runDir 's2-pty'
-      $specLines = @("cap=$cap1", "desktop=$deskS2", "cwd=$tmpS2", "stdout=$base.out.txt", "stderr=$base.err.txt", "report=$base.report.json", "timeoutMs=180000", "cmd=unused", "ptyBash=$bashExe", "s2receipt=$s2Out")
+      $specLines = @("cap=$cap1", "desktop=$deskS2", "cwd=$tmpS2", "stdout=$base.out.txt", "stderr=$base.err.txt", "report=$base.report.json", "timeoutMs=180000", "cmd=unused", "ptyPwsh=$pwshExe", "s2receipt=$s2Out", "env.TAU_OWNROOT=$s2Own", "env.TAU_DENYROOT=$s2Deny", "env.TAU_NONCE=$s2Nonce")
+      foreach ($k in $chosenEnv['pwsh'].Keys) { $specLines += "env.$k=$($chosenEnv['pwsh'][$k])" }
       Set-Content -LiteralPath "$base.spec" -Value $specLines
       $eS2 = 0
       $hS2 = [TauRestrict]::LaunchRunner($sandboxA.Name, $sandboxA.Secure, $runnerExe, ('"' + $runnerExe + '" "' + $base + '.spec"'), $env:SystemRoot, [ref]$eS2)
@@ -887,9 +905,9 @@ if ($apiOk -and $null -ne $shellPath) {
       if ($hS2 -ne [IntPtr]::Zero) { $xS2 = [TauRestrict]::Wait($hS2, 240000); if ($xS2 -eq -1) { [TauRestrict]::Kill($hS2) }; [TauRestrict]::Close($hS2) }
       $s2RunnerReport = $null
       try { $s2RunnerReport = Get-Content -LiteralPath "$base.report.json" -Raw | ConvertFrom-Json } catch {}
-      Add-Check 'fallback.s2Pty.exit' 'S2 ConPTY driver (runner owns the pseudoconsole; Bash runs in the token) exit recorded (0 = all terminal checks pass)' "launchErr=$eS2 runnerExit=$xS2 createOk=$($s2RunnerReport.createOk) notes=$($s2RunnerReport.notes)" (($hS2 -ne [IntPtr]::Zero) -and ($xS2 -eq 0)) @{ launchPath = $s2LaunchPath }
+      Add-Check 'fallback.s2Pty.exit' 'S2 ConPTY driver (runner owns the pseudoconsole; pwsh runs in the token) exit recorded (0 = all terminal checks pass)' "launchErr=$eS2 runnerExit=$xS2 createOk=$($s2RunnerReport.createOk) notes=$($s2RunnerReport.notes)" (($hS2 -ne [IntPtr]::Zero) -and ($xS2 -eq 0)) @{ launchPath = $s2LaunchPath }
     } else {
-      Add-Check 'fallback.s2Pty.launch' 'S2 ConPTY driver launched as the sandbox user via the runner' "mode=$mode runner=$(Test-Path -LiteralPath $runnerExe) bash=$(Test-Path -LiteralPath $bashExe)" $false $null
+      Add-Check 'fallback.s2Pty.launch' 'S2 ConPTY driver launched as the sandbox user via the runner (pwsh in the token)' "mode=$mode runner=$(Test-Path -LiteralPath $runnerExe) pwsh=$(Test-Path -LiteralPath $pwshExe) pwshInToken=$($chosenEnv.ContainsKey('pwsh'))" $false $null
     }
     if (Test-Path -LiteralPath $s2Out) { try { Copy-Item -LiteralPath $s2Out -Destination $s2Final -Force } catch {} }
     if (Test-Path -LiteralPath $s2Final) {
@@ -898,17 +916,26 @@ if ($apiOk -and $null -ne $shellPath) {
         $s2Verdict = "$($s2r.verdict)"
         $s2sub = @{}; foreach ($c in $s2r.checks) { $s2sub[$c.id] = "$($c.verdict): $($c.observed)" }
         $s2sub['launchPath'] = $s2LaunchPath
-        # Attribution: both the driver process (PTY master) and the Bash inside the pty must report the
+        # Attribution: both the runner (the PTY master) and the pwsh inside the pty must report the
         # expected sandbox identity, so a foreign or stale receipt can never count.
-        $nodeUser = "$($s2r.identity.nodeUser)"; $bashUser = "$($s2r.identity.bashWhoami)"
-        $attributed = ($nodeUser -ieq $expectUser) -and ($bashUser -ieq $expectUser)
-        # External UTF-8 evidence: the bytes Bash wrote, read here by the orchestrator.
+        $runnerUser = "$($s2r.identity.runnerUser)"; $shellUser = "$($s2r.identity.shellWhoami)"
+        $attributed = ($runnerUser -ieq $expectUser) -and ($shellUser -ieq $expectUser)
+        # External UTF-8 evidence: the bytes pwsh wrote, read here by the orchestrator.
         $u8File = Join-Path $tmpS2 'u8.txt'
         $u8Hex = if (Test-Path -LiteralPath $u8File) { ([System.IO.File]::ReadAllBytes($u8File) | ForEach-Object { $_.ToString('x2') }) -join '' } else { '' }
         $u8Want = ([System.Text.Encoding]::UTF8.GetBytes("caf$([char]0xE9) $([char]0x2713) $([char]0x65E5)$([char]0x672C) $([char]::ConvertFromUtf32(0x1F600))") | ForEach-Object { $_.ToString('x2') }) -join ''
         $u8Ok = $u8Hex -eq $u8Want
+        # Authoritative containment: the own-root canary exists and holds the synthetic nonce, and the
+        # deny-root canary is absent. This is the orchestrator's own view of the bytes on disk, which
+        # overrides what the shell inside the token reported.
+        $ownCanary = Join-Path $s2Own 'canary-s2pwsh.txt'
+        $denyCanary = Join-Path $s2Deny 'canary-s2pwsh.txt'
+        $ownHeld = (Test-Path -LiteralPath $ownCanary) -and ((Get-Content -LiteralPath $ownCanary -Raw -ErrorAction SilentlyContinue) -eq $s2Nonce)
+        $denyAbsent = -not (Test-Path -LiteralPath $denyCanary)
+        $containOk = $ownHeld -and $denyAbsent
+        Add-Check 'fallback.s2Pty.containment' 'containment from inside the PTY session: the token writes its own-root canary holding the synthetic nonce and is refused the deny-root; confirmed externally on disk by the orchestrator' "ownHeld=$ownHeld denyAbsent=$denyAbsent nonce=synthetic" $containOk $null
         if (-not $attributed) { $s2Verdict = "unattributed($s2Verdict)" }
-        Add-Check 'fallback.s2Pty.inContainer' 'real Bash in a ConPTY inside the non-admin write-restricted token: tty+resize+ctrl-c+jobcontrol+utf8 all pass, receipt attributed to the sandbox user (driver and Bash), UTF-8 bytes confirmed externally' "verdict=$s2Verdict nodeUser=$nodeUser bashUser=$bashUser expect=$expectUser externalUtf8=$u8Ok bash=$($s2r.identity.bashVersion)" ($attributed -and $u8Ok -and ($s2r.verdict -eq 'pass')) $s2sub
+        Add-Check 'fallback.s2Pty.inContainer' 'real pwsh in a ConPTY inside the non-admin write-restricted token: tty+resize+ctrl-c+jobcontrol+utf8 all pass, receipt attributed to the sandbox user (runner and pwsh), UTF-8 bytes and containment confirmed externally' "verdict=$s2Verdict runnerUser=$runnerUser shellUser=$shellUser expect=$expectUser externalUtf8=$u8Ok containment=$containOk pwsh=$($s2r.identity.shellVersion)" ($attributed -and $u8Ok -and $containOk -and ($s2r.verdict -eq 'pass')) $s2sub
       } catch {
         Add-Check 'fallback.s2Pty.inContainer' 'S2 driver receipt parseable' $_.Exception.Message $false $null
       }

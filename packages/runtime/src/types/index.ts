@@ -255,3 +255,18 @@ export type {
   ResidentCacheStats,
   ResidentExportEntry,
 } from '#types/runtime-compute.types.js';
+export type {
+  RuntimeFactsStatus,
+  RuntimeLateTerminal,
+  RuntimeObservationMode,
+  RuntimeObservationSupport,
+  RuntimeObservedTermination,
+  RuntimeOperation,
+  RuntimeOperationObservation,
+  RuntimeOperationOutcome,
+  RuntimeParameterFeature,
+  RuntimePhase,
+  RuntimeRealm,
+  RuntimeTransport,
+  WorkerOperationFacts,
+} from '#types/runtime-observation.types.js';

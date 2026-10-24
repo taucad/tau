@@ -103,7 +103,10 @@ import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import type { SpanHandle } from '#types/runtime-tracer.types.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import type { WorkerTelemetryFlush } from '#framework/worker-telemetry.js';
-import { operationRootName, settleOperation } from '#framework/operation-root.js';
+import { WorkerOperationObserver } from '#framework/worker-operation-observer.js';
+import type { ObservedKernelHeap, OperationFactsNotify } from '#framework/worker-operation-observer.js';
+import type { RuntimeObservationMode, RuntimeRealm } from '#types/runtime-observation.types.js';
+import { operationRootName, settledWithReply, settleOperation } from '#framework/operation-root.js';
 import type { OperationRecord, OperationRootRequest, SettledOperation } from '#framework/operation-root.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
 import type {
@@ -582,6 +585,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * flushes the operation's spans once the terminal reply has been posted.
    */
   public onOperationSettled?: (settled: SettledOperation) => void;
+  /** Posts one operation's facts after its terminal reply, while a client observes. */
+  public onOperationFacts?: (notify: OperationFactsNotify) => void;
 
   /** Raw Zod schemas for runtime validation, keyed by kernel ID → format. Populated from kernel definitions. */
   protected readonly kernelExportZodSchemasMap = new Map<string, Partial<Record<string, z.ZodType>>>();
@@ -634,7 +639,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly ownedNativeHandles = new Map<number, { slot: EvaluationSlot; handle: unknown }>();
 
   /** Fully initialized bundlers keyed by file extension. Shared context across extensions of the same bundler. */
-  protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown }>();
+  protected loadedBundlers = new Map<string, { definition: BundlerDefinition; ctx: unknown; id?: string }>();
 
   /** Worker-owned runtime middleware plugins. */
   protected middlewarePlugins: readonly MiddlewarePlugin[];
@@ -665,6 +670,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       definition: BundlerDefinition;
       extensions: readonly string[];
       options?: Record<string, unknown>;
+      /** The registration's `BundlerPlugin.id`, carried to the `kernel.bundle` span as `bundler.id`. */
+      id?: string;
     }
   >();
 
@@ -771,6 +778,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly tracer = new RuntimeTracer();
   /** The client operation the serialized lane is running, if any. */
   private activeOperation: OperationRecord | undefined;
+  /** Operation facts: off until a client asks, then computed only after each terminal reply. */
+  private readonly observer = new WorkerOperationObserver(
+    () => this.telemetryCollector,
+    () => this.observedKernelHeap(),
+  );
 
   /** Progress callback set during render, used by entry methods to emit phase transitions */
   private onProgress?: (phase: string, detail?: Readonly<Record<string, unknown>>) => void;
@@ -851,7 +863,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly registryScope = randomUuid();
 
   /** In-flight bundler initializations to coalesce concurrent callers for the same extension */
-  private readonly bundlerInitInProgress = new Map<string, Promise<{ definition: BundlerDefinition; ctx: unknown }>>();
+  private readonly bundlerInitInProgress = new Map<
+    string,
+    Promise<{ definition: BundlerDefinition; ctx: unknown; id?: string }>
+  >();
 
   public constructor(options: KernelWorkerOptions = {}) {
     this.manifestKernelPlugins = options.kernels ?? [];
@@ -938,10 +953,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this._filesystem = this.createFileSystem();
     }
 
+    const admitted = performance.now();
+    const observed =
+      input.operationId === undefined
+        ? undefined
+        : this.observer.begin({
+            operation: 'initialize',
+            operationId: input.operationId,
+            admitted,
+            observed: this.observer.observing,
+          });
     const bootstrapSpan = this.tracer.startSpan(
       'kernel.bootstrap',
       input.operationId === undefined ? undefined : { 'operation.id': input.operationId },
     );
+    let booted = false;
     try {
       await this.loadBundlers(this.bundlerPlugins);
       await this.loadMiddleware(this.middlewarePlugins);
@@ -957,9 +983,60 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
 
       this._capabilitiesManifest = this.buildCapabilitiesManifest();
+      booted = true;
     } finally {
       bootstrapSpan.end();
+      if (observed && booted) {
+        this.observer.settle(observed);
+      }
     }
+  }
+
+  /**
+   * Set whether this worker computes operation facts. `facts` takes effect for operations admitted after it; `off`
+   * stops them from the next operation.
+   *
+   * @param mode - The mode a client asked for.
+   */
+  public setObservation(mode: RuntimeObservationMode): void {
+    this.observer.setMode(mode);
+  }
+
+  /**
+   * Set the realm this worker runs in. Called by the worker host that started it, never inferred.
+   *
+   * @param realm - The realm.
+   */
+  public setRealm(realm: RuntimeRealm): void {
+    this.observer.setRealm(realm);
+  }
+
+  /**
+   * The after-reply step: post the operation's facts when it was observed, then flush its spans.
+   *
+   * Called once an operation's terminal reply has been posted, so the reply never waits for either.
+   *
+   * @param operationId - The operation whose reply was posted, when the caller knows it.
+   */
+  public afterTerminalReply(operationId?: string): void {
+    let end: number | undefined;
+    try {
+      end = this.observer.afterTerminalReply(operationId, (notify) => {
+        this.onOperationFacts?.(notify);
+      });
+    } catch {
+      end = undefined; // Observation must not change runtime outcomes.
+    }
+    this.telemetryCollector?.flush(end);
+  }
+
+  /**
+   * The heap sources of the kernel the current operation ran on, for observation only.
+   *
+   * @returns The kernel's hooks, or `undefined` when no kernel is selected.
+   */
+  protected observedKernelHeap(): ObservedKernelHeap | undefined {
+    return undefined;
   }
 
   /**
@@ -2179,6 +2256,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const next = Promise.withResolvers<void>();
     this.operationTail = next.promise;
     this.admittedOperations += 1;
+    // Observation is decided at admission, so a mode change never splits one operation.
+    const admitted = root === undefined ? 0 : performance.now();
+    const observedAtAdmission = root !== undefined && this.observer.observing;
     // Background publication yields to every admitted operation at its next await.
     this.computeHost?.interruptPublication();
     let record: OperationRecord | undefined;
@@ -2198,6 +2278,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
          * the operation starts — including one started after an earlier sibling ended — nests
          * under it. */
         record = { operation: root.operation, operationId: root.operationId };
+        const observed = this.observer.begin({
+          operation: root.operation,
+          operationId: root.operationId,
+          admitted,
+          observed: observedAtAdmission,
+        });
+        if (observed) {
+          record.observed = observed;
+        }
         rootSpan = this.tracer.startSpan(operationRootName(root.operation), {
           ...root.attributes,
           'operation.id': root.operationId,
@@ -2219,6 +2308,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           'operation.outcome': settled.outcome,
           ...(settled.errorType === undefined ? {} : { 'error.type': settled.errorType }),
         });
+        if (record.observed && settledWithReply(settled)) {
+          this.observer.settle(record.observed);
+        }
         try {
           this.onOperationSettled?.(settled);
         } catch {
@@ -2236,6 +2328,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       next.resolve();
       if (this.admittedOperations === 0) {
         this.computeHost?.notifyIdle();
+        this.observer.idle();
       }
     }
   }
@@ -3156,6 +3249,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * @param attributes - Attributes the root ends with; later keys win.
    */
+  /**
+   * Record the transcoder the running operation selected, for its facts.
+   *
+   * @param plugin - The transcoder's id.
+   */
+  private noteObservedPlugin(plugin: string): void {
+    const observed = this.activeOperation?.observed;
+    if (observed) {
+      observed.plugin = plugin;
+    }
+  }
+
   private noteOperationAttributes(attributes: Record<string, string | number | boolean>): void {
     const record = this.activeOperation;
     if (record) {
@@ -3193,6 +3298,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     /* The operation root is this transcode's `kernel.transcode` span; it says which transcoder ran. */
     this.noteOperationAttributes({ transcoder: transcoder.id });
+    this.noteObservedPlugin(transcoder.id);
 
     const admittedOptions = admitKernelOptions(
       edge.optionsSchema,
@@ -3425,6 +3531,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             definition,
             extensions,
             options: bundlerEntry.options,
+            id: bundlerEntry.id,
           });
         }
       }
@@ -3611,6 +3718,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         let resolvedParameters: Readonly<Record<string, unknown>>;
         try {
           resolvedParameters = resolveParameterInputValues(entry.parameterManifest, chainParameters);
+          const observed = this.activeOperation?.observed;
+          if (observed) {
+            // Retained only while a client observes; counted after the reply.
+            observed.parameters = { manifest: entry.parameterManifest, resolved: resolvedParameters };
+          }
         } catch (error) {
           computeSpan.end();
           const diagnostic = error instanceof ParameterAdmissionError ? error.diagnostics[0] : undefined;
@@ -4181,7 +4293,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   protected async ensureBundlerForExtension(
     extension: string,
-  ): Promise<{ definition: BundlerDefinition; ctx: unknown }> {
+  ): Promise<{ definition: BundlerDefinition; ctx: unknown; id?: string }> {
     const existing = this.loadedBundlers.get(extension);
     if (existing) {
       return existing;
@@ -4754,6 +4866,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return meshResult;
       }
       meshSpanAttributes = tessellationSpanAttributes(meshResult.data.tessellation, meshResult.issues);
+      const observed = this.activeOperation?.observed;
+      const triangles = meshResult.data.tessellation?.triangles;
+      if (observed && typeof triangles === 'number' && Number.isFinite(triangles) && triangles >= 0) {
+        observed.triangles = triangles;
+      }
 
       // Compose the display result: mesh-phase artifact plus create-phase warnings.
       // The durable handle snapshot stays in `serializedNativeHandleSlot`, which the
@@ -5032,6 +5149,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ? selectedDeclaration.schema
       : zodSchemas?.[transcoderRoute.sourceFormat];
     const transcoder = this.loadedTranscoders.get(transcoderRoute.transcoderId!);
+    this.noteObservedPlugin(transcoderRoute.transcoderId!);
     const matchingEdge = transcoder?.edges.find(
       (edge) => edge.from === transcoderRoute.sourceFormat && edge.to === format,
     );
@@ -5961,7 +6079,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     definition: BundlerDefinition;
     extensions: readonly string[];
     options?: Record<string, unknown>;
-  }): Promise<{ definition: BundlerDefinition; ctx: unknown }> {
+    id?: string;
+  }): Promise<{ definition: BundlerDefinition; ctx: unknown; id?: string }> {
     const { definition, extensions, options: bundlerOptions } = pending;
     const initSpan = this.tracer.startSpan('kernel.bundler-context-init');
 
@@ -5972,7 +6091,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const context = await definition.initialize(validatedOptions, {
         filesystem: this.bundlerFilesystem,
       });
-      const loaded = { definition, ctx: context };
+      const loaded = { definition, ctx: context, ...(pending.id === undefined ? {} : { id: pending.id }) };
 
       for (const extension of extensions) {
         this.loadedBundlers.set(extension, loaded);
@@ -7171,7 +7290,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
         const bundleResult = await bundler.definition.bundle({ entryPath }, { signal }, bundler.ctx);
         signal.throwIfAborted();
-        bundleSpan.end();
+        bundleSpan.end(bundler.id === undefined ? undefined : { 'bundler.id': bundler.id });
         this.bundleResultCache.set(entryPath, bundleResult);
         return bundleResult;
       },
@@ -7238,7 +7357,25 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
     });
     const operationId = randomUuid();
-    return this.computeHost.capability(signal, operationId);
+    const capability = this.computeHost.capability(signal, operationId);
+    const observed = this.activeOperation?.observed;
+    if (observed === undefined) {
+      return capability;
+    }
+    if (capability.status === 'off') {
+      observed.reuse = 'off';
+      return capability;
+    }
+    const { evaluate } = capability;
+    return {
+      ...capability,
+      evaluate: async (evaluation) => {
+        const result = await evaluate(evaluation);
+        // Any computation in the operation makes it `computed`; only an operation served wholly from cache is `cache`.
+        observed.reuse = result.source === 'computed' || observed.reuse === 'computed' ? 'computed' : 'cache';
+        return result;
+      },
+    };
   }
 
   /**

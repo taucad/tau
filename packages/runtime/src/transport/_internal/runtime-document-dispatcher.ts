@@ -16,6 +16,7 @@ import type {
   WireRendering,
 } from '#types/runtime-document-protocol.types.js';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
+import type { RuntimeObservationMode } from '#types/runtime-observation.types.js';
 import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.types.js';
 import { createComputeStoreChannelClient } from '#transport/_internal/compute-store-channel.js';
 import { runtimeChannelSessionKey } from '#transport/_internal/runtime-channel-bindings.js';
@@ -23,6 +24,9 @@ import type { BinaryEncoder, DocumentWorkerDispatcherOptions } from '#transport/
 
 /** Operation ids remembered while their terminal reply and their settlement meet; older ids are forgotten. */
 const pendingReplyLimit = 64;
+
+/** The observation modes this worker supports, advertised in its `initialize` result. */
+const observationModes: readonly RuntimeObservationMode[] = ['facts'];
 
 const inlineBinary: BinaryEncoder = (_key, source) => {
   const bytes = new Uint8Array(source);
@@ -91,16 +95,23 @@ export function createDocumentWorkerDispatcher(
       ids.delete(ids.values().next().value!);
     }
   };
-  const afterTerminalReply = (): void => {
+  /* The after-reply step: the operation's facts (only while a client observes), then its spans. */
+  const afterTerminalReply = (operationId: string | undefined): void => {
     try {
-      worker.flushTelemetry();
+      worker.afterTerminalReply(operationId);
     } catch {
       // Telemetry is observational and must not change runtime outcomes.
     }
   };
+  worker.onOperationFacts = (facts) => {
+    notify('operationFacts', facts);
+  };
+  if (options?.realm !== undefined) {
+    worker.setRealm(options.realm);
+  }
   const notifyReplied = (operationId: string): void => {
     if (settledBeforeReply.delete(operationId)) {
-      afterTerminalReply();
+      afterTerminalReply(operationId);
     } else {
       remember(repliedBeforeSettle, operationId);
     }
@@ -114,7 +125,7 @@ export function createDocumentWorkerDispatcher(
       settled.outcome === 'cancelled' ||
       settled.outcome === 'timed-out'
     ) {
-      afterTerminalReply(); // Replied already, or no reply will come.
+      afterTerminalReply(settled.operationId); // Replied already, or no reply will come.
       return;
     }
     remember(settledBeforeReply, settled.operationId);
@@ -123,10 +134,13 @@ export function createDocumentWorkerDispatcher(
    * Run the after-reply step once the channel has posted this call's result.
    *
    * @param value - The exact object the call returns as its result payload.
+   * @param operationId - The call's operation id, when the client sent one.
    * @returns The same value.
    */
-  const replyThen = <T extends WeakKey>(value: T): T => {
-    afterCallReply.set(value, afterTerminalReply);
+  const replyThen = <T extends WeakKey>(value: T, operationId: string | undefined): T => {
+    afterCallReply.set(value, () => {
+      afterTerminalReply(operationId);
+    });
     return value;
   };
   worker.onDescribed = (event) => {
@@ -195,6 +209,7 @@ export function createDocumentWorkerDispatcher(
     const { promise: trap, cleanup } = createErrorTrap();
     try {
       const { memoryHandle } = args;
+      worker.setObservation(args.observation ?? 'off');
       worker.setDevtoolsTelemetryEnabled(memoryHandle?.devtoolsTelemetry === true);
       worker.setCompiledWasmModules(memoryHandle?.compiledWasmModules ?? []);
       if (memoryHandle?.signalBuffer) {
@@ -232,11 +247,11 @@ export function createDocumentWorkerDispatcher(
         trap,
       ]);
       initialized = true;
-      return replyThen({ capabilities: worker.capabilitiesManifest });
+      return replyThen({ capabilities: worker.capabilitiesManifest, observation: observationModes }, args.operationId);
     } catch (error) {
       computeStore?.dispose();
       computeStore = undefined;
-      afterTerminalReply();
+      afterTerminalReply(args.operationId);
       throw error;
     } finally {
       initializing = false;
@@ -264,13 +279,14 @@ export function createDocumentWorkerDispatcher(
    * Run a call, flushing its spans when it throws: the error reply needs no after-reply step.
    *
    * @param run - The call.
+   * @param operationId - The call's operation id, when the client sent one.
    * @returns The call's result.
    */
-  const afterThrow = async <T>(run: () => Promise<T>): Promise<T> => {
+  const afterThrow = async <T>(run: () => Promise<T>, operationId: string | undefined): Promise<T> => {
     try {
       return await run();
     } catch (error) {
-      afterTerminalReply();
+      afterTerminalReply(operationId);
       throw error;
     }
   };
@@ -287,26 +303,25 @@ export function createDocumentWorkerDispatcher(
           return (await initialize(args as RuntimeDocumentProtocol['calls']['initialize']['args'])) as CallResult;
         }
         case 'describe': {
+          const describeArgs = args as RuntimeDocumentProtocol['calls']['describe']['args'];
           return replyThen(
-            await afterThrow(async () =>
-              worker.describe(args as RuntimeDocumentProtocol['calls']['describe']['args'], signal),
-            ),
+            await afterThrow(async () => worker.describe(describeArgs, signal), describeArgs.operationId),
+            describeArgs.operationId,
           ) as CallResult;
         }
         case 'export': {
+          const exportArgs = args as RuntimeDocumentProtocol['calls']['export']['args'];
           let result: Awaited<ReturnType<typeof worker.exportDocument>>;
           try {
-            result = await afterThrow(async () =>
-              worker.exportDocument(args as RuntimeDocumentProtocol['calls']['export']['args'], signal),
-            );
+            result = await afterThrow(async () => worker.exportDocument(exportArgs, signal), exportArgs.operationId);
           } finally {
             flushLogs();
           }
           if (!result.success) {
-            return replyThen(result) as CallResult;
+            return replyThen(result, exportArgs.operationId) as CallResult;
           }
           const { files, transferables } = encodeExport(result.files);
-          const wire: WireExportResult = replyThen({ ...result, files });
+          const wire: WireExportResult = replyThen({ ...result, files }, exportArgs.operationId);
           const response: WithTransferables<RuntimeDocumentProtocol['calls']['export']['result']> = {
             value: wire,
             transferables,
@@ -334,11 +349,13 @@ export function createDocumentWorkerDispatcher(
           return response;
         }
         case 'transcode': {
-          const result = await afterThrow(async () =>
-            worker.transcode(args as RuntimeDocumentProtocol['calls']['transcode']['args'], signal),
+          const transcodeArgs = args as RuntimeDocumentProtocol['calls']['transcode']['args'];
+          const result = await afterThrow(
+            async () => worker.transcode(transcodeArgs, signal),
+            transcodeArgs.operationId,
           );
           if (!result.success) {
-            return replyThen(result) as CallResult;
+            return replyThen(result, transcodeArgs.operationId) as CallResult;
           }
           const transferables: Transferable[] = [];
           const data = result.data.map((file, index) => {
@@ -347,7 +364,7 @@ export function createDocumentWorkerDispatcher(
             return { ...file, bytes: delivery.value };
           });
           const response: WithTransferables<RuntimeDocumentProtocol['calls']['transcode']['result']> = {
-            value: replyThen({ ...result, data }),
+            value: replyThen({ ...result, data }, transcodeArgs.operationId),
             transferables,
           };
           return response;
@@ -396,6 +413,10 @@ export function createDocumentWorkerDispatcher(
         }
         case 'binaryMaterialised': {
           acknowledgeBinary((args as RuntimeDocumentProtocol['notifies']['binaryMaterialised']['args']).key);
+          break;
+        }
+        case 'observe': {
+          worker.setObservation((args as RuntimeDocumentProtocol['notifies']['observe']['args']).mode);
           break;
         }
       }

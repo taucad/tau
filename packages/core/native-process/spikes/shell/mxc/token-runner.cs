@@ -20,7 +20,8 @@
 // Usage: token-runner.exe <spec-file>. The spec is key=value lines (split at the first '='):
 //   cap=<S-1-5-21-...>  desktop=<WinSta0\name>  cwd=<dir>  stdout=<file>  stderr=<file>
 //   report=<file>  timeoutMs=<n>  cmd=<full command line>  env.<NAME>=<value> (any number)
-//   ptyBash=<bash.exe> s2receipt=<file>  -> PTY mode: the runner owns the ConPTY and drives Bash.
+//   ptyPwsh=<pwsh.exe> | ptyBash=<bash.exe>  s2receipt=<file>  -> PTY mode: the runner owns the ConPTY
+//     and drives the shell in the token. The containment probe reads env.TAU_OWNROOT/TAU_DENYROOT/TAU_NONCE.
 // The runner writes <report> (JSON) with what it observed; the orchestrator decides from files.
 // Compiles with the .NET Framework csc (C# 5). Synthetic only; it never sees a password.
 using System;
@@ -189,7 +190,7 @@ public static class TauTokenRunner {
   // write-restricted token (ConPTY EPERM; bash signal pipe Win32 error 5), so the pipe owner must be
   // the unrestricted runner. The runner then drives tty/resize/ctrl-c/jobcontrol/utf8 from the stream.
   static readonly List<string> ptyChecks = new List<string>();
-  static string identityBashWhoami = null, identityBashVersion = null;
+  static string shellWhoami = null, shellVersion = null, shellKind = null;
   static readonly StringBuilder transcript = new StringBuilder();
   static readonly object tlock = new object();
   static IntPtr ptyOutRead = IntPtr.Zero, ptyInWrite = IntPtr.Zero, ptyHpc = IntPtr.Zero;
@@ -217,9 +218,12 @@ public static class TauTokenRunner {
   }
 
   // Returns child exit, or -1 on timeout (job killed). Writes the S2 receipt + transcript + u8.txt.
-  static int RunPtyBash(Dictionary<string, string> spec, Dictionary<string, string> envOverrides, out string note) {
+  // pwsh=true drives PowerShell (the D14 Windows shell); pwsh=false drives Git for Windows Bash. Either
+  // way the UNRESTRICTED runner owns the pseudoconsole; only the shell runs in the token.
+  static int RunPty(Dictionary<string, string> spec, Dictionary<string, string> envOverrides, bool pwsh, out string note) {
     note = "";
-    string bash = spec["ptyBash"]; string scratch = spec["cwd"]; string receipt = spec["s2receipt"];
+    shellKind = pwsh ? "pwsh" : "bash";
+    string shell = spec[pwsh ? "ptyPwsh" : "ptyBash"]; string scratch = spec["cwd"];
     IntPtr inR, inW, outR, outW;
     if (!CreatePipe(out inR, out inW, IntPtr.Zero, 0)) { note = "CreatePipe in err=" + Marshal.GetLastWin32Error(); return -2; }
     if (!CreatePipe(out outR, out outW, IntPtr.Zero, 0)) { note = "CreatePipe out err=" + Marshal.GetLastWin32Error(); return -2; }
@@ -256,17 +260,23 @@ public static class TauTokenRunner {
     si.StartupInfo.Desktop = spec["desktop"];
     si.StartupInfo.hStdInput = (IntPtr)(-1); si.StartupInfo.hStdOutput = (IntPtr)(-1); si.StartupInfo.hStdError = (IntPtr)(-1);
     si.lpAttributeList = list;
-    // Bash's env: HOME/TEMP/TMP=scratch, UTF-8 locale, CHERE_INVOKING; keep it off the profile.
+    // Shell env: HOME/TEMP/TMP=scratch, kept off the roaming profile. Bash also gets a UTF-8 locale and
+    // CHERE_INVOKING; pwsh gets the telemetry/update-check opt-outs. Any env.* from the spec (the
+    // containment roots and nonce) is already merged into envOverrides.
     envOverrides["HOME"] = scratch; envOverrides["TEMP"] = scratch; envOverrides["TMP"] = scratch;
-    envOverrides["LANG"] = "C.UTF-8"; envOverrides["LC_ALL"] = "C.UTF-8"; envOverrides["CHERE_INVOKING"] = "1"; envOverrides["PS1"] = "$ ";
+    if (pwsh) {
+      envOverrides["POWERSHELL_TELEMETRY_OPTOUT"] = "1"; envOverrides["POWERSHELL_UPDATECHECK"] = "Off";
+    } else {
+      envOverrides["LANG"] = "C.UTF-8"; envOverrides["LC_ALL"] = "C.UTF-8"; envOverrides["CHERE_INVOKING"] = "1"; envOverrides["PS1"] = "$ ";
+    }
     IntPtr env = EnvBlock(envOverrides);
-    string cmd = "\"" + bash + "\" --noprofile --norc -i";
+    string cmd = pwsh ? ("\"" + shell + "\" -NoLogo -NoProfile") : ("\"" + shell + "\" --noprofile --norc -i");
     PROCESS_INFORMATION pi;
     bool ok = CreateProcessAsUser(tok, null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, false,
       CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT, env, scratch, ref si, out pi);
-    if (!ok) { int e = Marshal.GetLastWin32Error(); note = "CreateProcessAsUser(bash) err=" + e; PtyCheck("s2.bash.start", "Bash spawned in the runner-owned ConPTY in the token", "CreateProcessAsUser err=" + e, false); WritePtyReceipt(spec, -2); return -2; }
+    if (!ok) { int e = Marshal.GetLastWin32Error(); note = "CreateProcessAsUser(" + shellKind + ") err=" + e; PtyCheck("s2." + shellKind + ".start", shellKind + " spawned in the runner-owned ConPTY in the token", "CreateProcessAsUser err=" + e, false); WritePtyReceipt(spec, -2); return -2; }
 
-    try { DriveBash(scratch); } catch (Exception e) { PtyCheck("s2.driver.error", "driver ran without throwing", e.Message, false); }
+    try { if (pwsh) DrivePwsh(scratch); else DriveBash(scratch); } catch (Exception e) { PtyCheck("s2.driver.error", "driver ran without throwing", e.Message, false); }
 
     uint w2 = WaitForSingleObject(pi.hProcess, 8000);
     int exit = -1;
@@ -287,8 +297,8 @@ public static class TauTokenRunner {
     if (ready == null) return;
 
     RunLine("echo \"W\"\"HO_$(whoami)_E\"\"ND\"; echo \"B\"\"V_${BASH_VERSION}_E\"\"ND\"", "BV_([^\\r\\n]*)_END", 15000);
-    var mw = new System.Text.RegularExpressions.Regex("WHO_([^\\r\\n]*?)_END").Match(Trans()); identityBashWhoami = mw.Success ? mw.Groups[1].Value : null;
-    var mv = new System.Text.RegularExpressions.Regex("BV_([^\\r\\n]*)_END").Match(Trans()); identityBashVersion = mv.Success ? mv.Groups[1].Value : null;
+    var mw = new System.Text.RegularExpressions.Regex("WHO_([^\\r\\n]*?)_END").Match(Trans()); shellWhoami = mw.Success ? mw.Groups[1].Value : null;
+    var mv = new System.Text.RegularExpressions.Regex("BV_([^\\r\\n]*)_END").Match(Trans()); shellVersion = mv.Success ? mv.Groups[1].Value : null;
 
     var tty = RunLine("if test -t 0 && test -t 1; then echo \"TTY_\"YES; else echo \"TTY_\"NO; fi", "TTY_(YES|NO)", 15000);
     PtyCheck("s2.tty.attached", "stdin and stdout of the interactive Bash are a terminal (test -t 0/1)", tty != null ? tty.Value : "no answer", tty != null && tty.Groups[1].Value == "YES");
@@ -323,16 +333,74 @@ public static class TauTokenRunner {
     TermWrite("exit\r"); System.Threading.Thread.Sleep(1200);
   }
 
+  // The D14 bar: pwsh as the S2 shell in the runner-owned ConPTY, inside the token. Same S2 checks as
+  // Linux/macOS (tty, resize, Ctrl-C of a foreground wait, UTF-8 round-trip) plus a containment probe
+  // from inside the PTY session. Job control maps to PSJob cmdlets; POSIX fg/bg and Ctrl-Z do not apply
+  // and are recorded honestly as info rows.
+  static void DrivePwsh(string scratch) {
+    // PSReadLine rewrites the input line with ANSI as you type; drop it so the transcript stays clean.
+    // Force UTF-8 on the console so the round-trip is byte-exact, and use a fixed, markerless prompt.
+    var ready = RunLine("Remove-Module PSReadLine -ErrorAction SilentlyContinue; [Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $OutputEncoding=[System.Text.Encoding]::UTF8; function prompt { 'PSX> ' }; Write-Host (\"RD\"+\"Y_\"+(40+2))", "RDY_42", 40000);
+    PtyCheck("s2.pwsh.start", "pwsh started in the runner-owned ConPTY inside the token and answered a marker", ready != null ? "answered RDY_42" : "no answer; tail=" + Tail(400), ready != null);
+    if (ready == null) return;
+
+    RunLine("Write-Host (\"WH\"+\"O_\"+[Environment]::UserName+\"_END\"); Write-Host (\"P\"+\"V_\"+$PSVersionTable.PSVersion.ToString()+\"_END\")", "PV_([^\\r\\n]*)_END", 15000);
+    var mw = new System.Text.RegularExpressions.Regex("WHO_([^\\r\\n]*?)_END").Match(Trans()); shellWhoami = mw.Success ? mw.Groups[1].Value : null;
+    var mv = new System.Text.RegularExpressions.Regex("PV_([^\\r\\n]*)_END").Match(Trans()); shellVersion = mv.Success ? mv.Groups[1].Value : null;
+
+    var tty = RunLine("$r=(-not [Console]::IsInputRedirected)-and(-not [Console]::IsOutputRedirected); Write-Host (\"TT\"+\"Y_\"+$(if($r){'YES'}else{'NO'}))", "TTY_(YES|NO)", 15000);
+    PtyCheck("s2.tty.attached", "stdin and stdout of the interactive pwsh are a real console (Console.IsInput/OutputRedirected are both false)", tty != null ? tty.Value : "no answer", tty != null && tty.Groups[1].Value == "YES");
+
+    COORD rs; rs.X = 100; rs.Y = 40; ResizePseudoConsole(ptyHpc, rs); System.Threading.Thread.Sleep(700);
+    var sz = RunLine("Write-Host (\"S\"+\"Z_\"+[Console]::WindowHeight+\" \"+[Console]::WindowWidth+\"_END\")", "SZ_([^\\r\\n]*)_END", 15000);
+    PtyCheck("s2.pty.resize", "after ResizePseudoConsole(100x40), Console reports WindowHeight/Width \"40 100\"", sz != null ? sz.Groups[1].Value : "no answer", sz != null && sz.Groups[1].Value.Trim() == "40 100");
+
+    int from = Trans().Length; long t0 = Environment.TickCount;
+    TermWrite("Start-Sleep -Seconds 30\r"); System.Threading.Thread.Sleep(1500); TermWrite("\x03"); System.Threading.Thread.Sleep(400); TermWrite("Write-Host (\"C\"+\"C_\"+\"DONE\")\r");
+    var cc = WaitFor("CC_DONE", from, 20000); long ms = Environment.TickCount - t0;
+    PtyCheck("s2.ctrlc.interrupt", "Ctrl-C (0x03) interrupts a foreground Start-Sleep 30 and the prompt returns under 10s (pwsh stops the pipeline -> PipelineStoppedException; there is no POSIX 130 exit code)", "ccDone=" + (cc != null) + " elapsedMs=" + ms, cc != null && ms < 10000);
+
+    var jb = RunLine("$j=Start-Job { Start-Sleep 300 }; Start-Sleep -Milliseconds 500; Write-Host (\"J\"+\"B_\"+$j.State+\"_END\")", "JB_([^\\r\\n]*)_END", 20000);
+    bool running = jb != null && jb.Groups[1].Value.Trim() == "Running";
+    var kl = RunLine("Stop-Job $j; Wait-Job $j -Timeout 5 > $null; Write-Host (\"K\"+\"L_\"+(Get-Job -Id $j.Id).State+\"_END\")", "KL_([^\\r\\n]*)_END", 15000);
+    bool jstopped = kl != null && kl.Groups[1].Value.Trim() == "Stopped";
+    PtyCheck("s2.jobcontrol", "pwsh background job: Start-Job runs (State=Running) and Stop-Job terminates it (State=Stopped)", "startState=" + (jb != null ? jb.Groups[1].Value.Trim() : "none") + " stopState=" + (kl != null ? kl.Groups[1].Value.Trim() : "none"), running && jstopped);
+    PtyInfo("s2.jobcontrol.posix", "POSIX fg/bg and Ctrl-Z suspend do not apply in pwsh; it has no POSIX job table and uses the PSJob cmdlets (Start-Job/Stop-Job/Receive-Job) instead");
+
+    // UTF-8 built from code points (accented, check mark, CJK, astral emoji) so csc stays codepage-free.
+    // $HOME on Windows ignores $env:HOME, so write under $env:TEMP, which the runner pinned to scratch.
+    string sample = "café ✓ 日本 \U0001F600";
+    string build = "$s=[string]::Concat([char]0x63,[char]0x61,[char]0x66,[char]0xE9,' ',[char]0x2713,' ',[char]0x65E5,[char]0x672C,' ',[System.Char]::ConvertFromUtf32(0x1F600)); [IO.File]::WriteAllText((Join-Path $env:TEMP 'u8.txt'),$s,(New-Object System.Text.UTF8Encoding($false))); Write-Host (\"U\"+\"8_\"+$s+\"_END\")";
+    var u8 = RunLine(build, "U8_([^\\r\\n]*)_END", 15000);
+    string fileHex = "";
+    try { fileHex = BitConverter.ToString(File.ReadAllBytes(Path.Combine(scratch, "u8.txt"))).Replace("-", "").ToLowerInvariant(); } catch { }
+    string wantHex = BitConverter.ToString(Encoding.UTF8.GetBytes(sample)).Replace("-", "").ToLowerInvariant();
+    bool echoed = u8 != null && u8.Groups[1].Value == sample;
+    PtyCheck("s2.unicode.utf8RoundTrip", "typed UTF-8 (accented, CJK, emoji) echoes back through the pty and lands as exact UTF-8 bytes in a file pwsh wrote", "echoed=" + echoed + " fileBytesMatch=" + (fileHex == wantHex), echoed && fileHex == wantHex);
+
+    // Containment, as seen from inside the PTY session: the token writes its own-root canary (a dir its
+    // cap is granted on) and is refused the deny-root (a dir its cap is not on). The orchestrator checks
+    // the bytes on disk authoritatively; these rows record what the shell inside the token observed.
+    var own = RunLine("Set-Content -LiteralPath (Join-Path $env:TAU_OWNROOT 'canary-s2pwsh.txt') -Value $env:TAU_NONCE -NoNewline -ErrorAction Stop; Write-Host (\"OW\"+\"N_done_END\")", "OWN_done_END", 15000);
+    PtyCheck("s2.contain.ownRoot", "inside the PTY session the token writes its own-root canary (the cap-granted dir)", own != null ? "wrote canary-s2pwsh.txt" : "no answer; tail=" + Tail(400), own != null);
+    var deny = RunLine("try { Set-Content -LiteralPath (Join-Path $env:TAU_DENYROOT 'canary-s2pwsh.txt') -Value $env:TAU_NONCE -NoNewline -ErrorAction Stop; Write-Host (\"DE\"+\"NY_WROTE_END\") } catch { Write-Host (\"DE\"+\"NY_\"+$_.Exception.GetType().Name+\"_END\") }", "DENY_([^\\r\\n]*)_END", 15000);
+    bool denied = deny != null && deny.Groups[1].Value != "WROTE";
+    PtyCheck("s2.contain.denyRoot", "inside the PTY session the token is refused a write to the deny-root (a dir its cap is not on)", deny != null ? deny.Groups[1].Value : "no answer", denied);
+
+    TermWrite("exit\r"); System.Threading.Thread.Sleep(1200);
+  }
+
   static string Tail(int n) { string t = Trans(); return t.Length > n ? t.Substring(t.Length - n) : t; }
 
   static void WritePtyReceipt(Dictionary<string, string> spec, int verdictCode) {
     bool pass = verdictCode == 0;
-    string json = "{\"kind\":\"s2-bash-pty-in-token\",\"identity\":{\"nodeUser\":" + Esc(Environment.UserName) +
-      ",\"bashPath\":" + Esc(spec.ContainsKey("ptyBash") ? spec["ptyBash"] : null) + ",\"bashWhoami\":" + Esc(identityBashWhoami) +
-      ",\"bashVersion\":" + Esc(identityBashVersion) + ",\"ptyMaster\":\"runner-conpty\",\"logonSid\":" + Esc(ptyLogon) + ",\"tokenElevated\":" + ptyElevated + "}" +
+    string shellPath = spec.ContainsKey("ptyPwsh") ? spec["ptyPwsh"] : (spec.ContainsKey("ptyBash") ? spec["ptyBash"] : null);
+    string json = "{\"kind\":\"s2-" + shellKind + "-pty-in-token\",\"identity\":{\"runnerUser\":" + Esc(Environment.UserName) +
+      ",\"shellKind\":" + Esc(shellKind) + ",\"shellPath\":" + Esc(shellPath) + ",\"shellWhoami\":" + Esc(shellWhoami) +
+      ",\"shellVersion\":" + Esc(shellVersion) + ",\"ptyMaster\":\"runner-conpty\",\"logonSid\":" + Esc(ptyLogon) + ",\"tokenElevated\":" + ptyElevated + "}" +
       ",\"checks\":[" + string.Join(",", ptyChecks.ToArray()) + "],\"transcriptTail\":" + Esc(Tail(4000)) + ",\"verdict\":" + (pass ? "\"pass\"" : "\"fail\"") + "}";
     try { File.WriteAllText(spec["s2receipt"], json); } catch { }
-    try { File.WriteAllText(Path.Combine(spec["cwd"], "s2-bash-transcript.txt"), Trans()); } catch { }
+    try { File.WriteAllText(Path.Combine(spec["cwd"], "s2-" + shellKind + "-transcript.txt"), Trans()); } catch { }
   }
 
   public static int Main(string[] args) {
@@ -350,10 +418,12 @@ public static class TauTokenRunner {
       report = spec["report"];
       File.WriteAllText(report + ".started", "runner=" + Environment.UserName);
       SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX); // inherited by the child (runner_client.rs)
-      // PTY mode: the runner owns the ConPTY and drives Bash in the token (Codex conpty/mod.rs shape).
-      if (spec.ContainsKey("ptyBash")) {
-        string pnote; int prc = RunPtyBash(spec, envOverrides, out pnote);
-        string pjson = "{\"runnerUser\":" + Esc(Environment.UserName) + ",\"mode\":\"ptyBash\",\"createOk\":" + (prc != -2 ? "true" : "false") +
+      // PTY mode: the runner owns the ConPTY and drives the shell in the token (Codex conpty/mod.rs shape).
+      // ptyPwsh selects PowerShell (the D14 Windows shell); ptyBash selects Git for Windows Bash.
+      if (spec.ContainsKey("ptyPwsh") || spec.ContainsKey("ptyBash")) {
+        bool pwsh = spec.ContainsKey("ptyPwsh");
+        string pnote; int prc = RunPty(spec, envOverrides, pwsh, out pnote);
+        string pjson = "{\"runnerUser\":" + Esc(Environment.UserName) + ",\"mode\":" + Esc(pwsh ? "ptyPwsh" : "ptyBash") + ",\"createOk\":" + (prc != -2 ? "true" : "false") +
           ",\"exit\":" + prc + ",\"timedOut\":false,\"notes\":" + Esc(pnote) + "}";
         try { File.WriteAllText(report, pjson); } catch { }
         return prc == 0 ? 0 : 1;

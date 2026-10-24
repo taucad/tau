@@ -286,6 +286,12 @@ const settingsCatalog = [
       },
       { id: 'open-tabs', label: 'Open Tabs', description: 'Include all open editor tabs', keywords: ['context'] },
       { id: 'testing-tools', label: 'Enable Testing Tools', description: 'Allow the agent to run and edit tests' },
+      {
+        id: 'default-permissions',
+        label: 'Default permissions',
+        description: 'Whether new chats ask before the agent gets extra folders or network access',
+        keywords: ['ask', 'bypass', 'approvals', 'shell', 'sandbox'],
+      },
     ],
   },
   {
@@ -364,7 +370,13 @@ const platformSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
         ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
         : section,
     )
-  : cloudSections.filter((section) => section.id !== 'machines' && section.id !== 'browser');
+  : cloudSections
+      .filter((section) => section.id !== 'machines' && section.id !== 'browser')
+      /* The permission selector governs the desktop shell, which the web build has none of (D1). */
+      .map((section) => ({
+        ...section,
+        entries: section.entries.filter((entry) => entry.id !== 'default-permissions'),
+      }));
 
 export const settingsSections: readonly SettingsSectionDefinition[] = platformSections
   .filter((section) => section.id !== 'machines' || featureFlagDefaults.machines)

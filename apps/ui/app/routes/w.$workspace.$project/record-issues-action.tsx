@@ -111,12 +111,24 @@ const resetCopy: Record<RecordIssueKind, { title: string; description: (project:
 };
 
 /**
- * The project's settings records that need a person, in the viewer cluster after
- * the revision trigger. Renders nothing while every record is fine.
+ * The project's settings records that need a person. On desktop, a trigger in the
+ * viewer cluster after the revision trigger opens them in a popover; on phones the
+ * project sheet lists them `inline` under the status line that counts them (D2,
+ * I4). Renders nothing while every record is fine.
  *
- * @returns The trigger, its popover and its Reset confirmation.
+ * @param props - Where focus goes when the trigger is gone, the layout, and what
+ * happens before a file opens (the phone sheet closes itself).
+ * @returns The trigger and its popover, or the inline list, and the Reset confirmation.
  */
-export function RecordIssuesAction({ fallbackFocus }: { readonly fallbackFocus: () => void }): React.JSX.Element {
+export function RecordIssuesAction({
+  fallbackFocus,
+  variant = 'trigger',
+  onBeforeOpenFile,
+}: {
+  readonly fallbackFocus: () => void;
+  readonly variant?: 'trigger' | 'inline';
+  readonly onBeforeOpenFile?: () => void;
+}): React.JSX.Element {
   const { projectId, projectRef, editorRef } = useProject();
   const issues = useRecordIssues(projectId);
   const summary = summarizeRecordIssues(issues);
@@ -134,17 +146,47 @@ export function RecordIssuesAction({ fallbackFocus }: { readonly fallbackFocus: 
     [fallbackFocus],
   );
   const [resetting, setResetting] = useState<RecordIssue>();
+  /* Inline, the reset opens from a row's own menu, so focus goes back to that row's trigger while it exists. */
+  const inlineList = useRef<HTMLDivElement>(null);
+  const resetPath = useRef<string | undefined>(undefined);
+  const resetFrom = (issue: RecordIssue): void => {
+    resetPath.current = issue.path;
+    setResetting(issue);
+  };
+  const rowTrigger = (): HTMLElement | undefined =>
+    [...(inlineList.current?.querySelectorAll<HTMLElement>('[data-record-actions]') ?? [])].find(
+      (candidate) => candidate.dataset['recordActions'] === resetPath.current,
+    );
   const projectName = projectRef.getSnapshot().context.project?.name ?? 'this project';
   const name = summary
     ? `${summary.label} · ${String(summary.count)} ${summary.count === 1 ? 'record' : 'records'}`
     : '';
+  const openFile = (issue: RecordIssue): void => {
+    onBeforeOpenFile?.();
+    editorRef.send({ type: 'openFile', path: issue.path, source: 'user' });
+  };
   // The dialog outlives the trigger: a reset that settles the last record removes the trigger, not the dialog.
   return (
     <>
-      <span role='status' className='sr-only'>
-        {name}
-      </span>
-      {summary ? (
+      {/* Inline, the status line that counts these records is what announces them. */}
+      {variant === 'inline' ? null : (
+        <span role='status' className='sr-only'>
+          {name}
+        </span>
+      )}
+      {summary && variant === 'inline' ? (
+        <div ref={inlineList}>
+          <RecordIssuesList
+            summary={summary}
+            issues={issues}
+            projectName={projectName}
+            isDebug={debug}
+            onOpenFile={openFile}
+            onReset={resetFrom}
+          />
+        </div>
+      ) : null}
+      {summary && variant === 'trigger' ? (
         <RecordIssuesPopover
           summary={summary}
           issues={issues}
@@ -152,9 +194,7 @@ export function RecordIssuesAction({ fallbackFocus }: { readonly fallbackFocus: 
           projectName={projectName}
           isDebug={debug}
           triggerRef={setTrigger}
-          onOpenFile={(issue) => {
-            editorRef.send({ type: 'openFile', path: issue.path, source: 'user' });
-          }}
+          onOpenFile={openFile}
           onReset={setResetting}
         />
       ) : null}
@@ -169,7 +209,10 @@ export function RecordIssuesAction({ fallbackFocus }: { readonly fallbackFocus: 
         <AlertDialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (trigger.current?.isConnected) {
+            const row = variant === 'inline' ? rowTrigger() : undefined;
+            if (row?.isConnected) {
+              row.focus();
+            } else if (trigger.current?.isConnected) {
               trigger.current.focus();
             } else {
               fallbackFocus();
@@ -248,31 +291,65 @@ function RecordIssuesPopover({
         aria-label={summary.label}
         className='max-h-[70dvh] w-80 max-w-[calc(100vw-2rem)] overflow-auto p-0'
       >
-        <div className='px-3 pt-3 pb-2'>
-          <p className='text-sm font-medium'>{summary.label}</p>
-          <p className='text-xs text-muted-foreground'>
-            {projectName} · {summary.count} {summary.count === 1 ? 'settings record' : 'settings records'}
-          </p>
-        </div>
-        <ul className='divide-y border-t'>
-          {issues.map((issue) => (
-            <RecordIssueRow
-              key={issue.path}
-              issue={issue}
-              isDebug={isDebug}
-              onOpenFile={() => {
-                setOpen(false);
-                onOpenFile(issue);
-              }}
-              onReset={() => {
-                setOpen(false);
-                onReset(issue);
-              }}
-            />
-          ))}
-        </ul>
+        <RecordIssuesList
+          summary={summary}
+          issues={issues}
+          projectName={projectName}
+          isDebug={isDebug}
+          onOpenFile={(issue) => {
+            setOpen(false);
+            onOpenFile(issue);
+          }}
+          onReset={(issue) => {
+            setOpen(false);
+            onReset(issue);
+          }}
+        />
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** The records' heading and rows, in the desktop popover and in the phone project sheet alike. */
+function RecordIssuesList({
+  summary,
+  issues,
+  projectName,
+  isDebug,
+  onOpenFile,
+  onReset,
+}: {
+  readonly summary: NonNullable<ReturnType<typeof summarizeRecordIssues>>;
+  readonly issues: readonly RecordIssue[];
+  readonly projectName: string;
+  readonly isDebug: boolean;
+  readonly onOpenFile: (issue: RecordIssue) => void;
+  readonly onReset: (issue: RecordIssue) => void;
+}): React.JSX.Element {
+  return (
+    <>
+      <div className='px-3 pt-3 pb-2'>
+        <p className='text-sm font-medium'>{summary.label}</p>
+        <p className='text-xs text-muted-foreground'>
+          {projectName} · {summary.count} {summary.count === 1 ? 'settings record' : 'settings records'}
+        </p>
+      </div>
+      <ul className='divide-y border-t'>
+        {issues.map((issue) => (
+          <RecordIssueRow
+            key={issue.path}
+            issue={issue}
+            isDebug={isDebug}
+            onOpenFile={() => {
+              onOpenFile(issue);
+            }}
+            onReset={() => {
+              onReset(issue);
+            }}
+          />
+        ))}
+      </ul>
+    </>
   );
 }
 
@@ -368,7 +445,12 @@ function RecordIssueRow({
         {issue.state === 'invalid' && issue.reset ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size='sm' variant='ghost' aria-label={`More actions for ${name}`}>
+              <Button
+                size='sm'
+                variant='ghost'
+                aria-label={`More actions for ${name}`}
+                data-record-actions={issue.path}
+              >
                 <Ellipsis aria-hidden />
               </Button>
             </DropdownMenuTrigger>

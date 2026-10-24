@@ -138,16 +138,21 @@ test('reloads authored records and preserves invalid and newer bytes', async () 
     await target.emulateColorScheme('dark');
     await target.screenshot(undefined, 'record-recovery-dark.png');
     await target.setViewport({ width: 320, height: 720 });
-    // Responsive layout replacement closes the old popover; reopen the surviving action by keyboard.
-    await target.focus(settingsTrigger);
+    // On a phone the status line counts the record and the project sheet lists it (W2: D2, I4); open it by keyboard.
+    const titleButton = selectors.getByCss('[data-slot="project-title-button"]');
+    await target.expectVisible(titleButton);
+    expect(await target.textContent(titleButton)).toContain('1 issue');
+    await target.focus(titleButton);
     await target.keyboardPress('Enter');
-    const popover = selectors.getByRole('dialog', { name: 'Settings not applied', exact: true });
-    await target.expectVisible(popover);
-    const bounds = await target.boundingBox(popover);
+    const projectSheet = selectors.getByCss('[data-slot="project-sheet"]');
+    await target.expectVisible(projectSheet.getByRole('listitem', { name: 'Pane layout', exact: true }));
+    const bounds = await target.boundingBox(projectSheet);
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
     await target.screenshot(undefined, 'record-recovery-320.png');
+    await target.keyboardPress('Escape');
     await target.setViewport({ width: 1440, height: 900 });
+    const popover = selectors.getByRole('dialog', { name: 'Settings not applied', exact: true });
     await target.focus(settingsTrigger);
     await target.keyboardPress('Enter');
     await target.evaluate(() => {

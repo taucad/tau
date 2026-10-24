@@ -71,6 +71,8 @@ vi.mock('#routes/w.$workspace.$project/chat-interface-nav.js', () => ({
   surfaceTitle: (id: string) => id,
 }));
 vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+/* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
+vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
 describe('ChatInterface code splitting (B-27, D-UI-16)', () => {
   it('loads only the mobile shell and the open tab on a phone', async () => {

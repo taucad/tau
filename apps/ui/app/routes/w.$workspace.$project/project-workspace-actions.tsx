@@ -1,11 +1,8 @@
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
-import { PanelLeft } from 'lucide-react';
-import { useSelector } from '@xstate/react';
 import { Separator } from '@taucad/ui/components/separator';
-import { SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
+import { useSidebar } from '#components/ui/sidebar.js';
 import { ViewerHeaderActions } from '@taucad/workbench-panes/shell/viewer-header-actions';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
-import { useProject } from '#hooks/use-project.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { RecordIssuesAction } from '#routes/w.$workspace.$project/record-issues-action.js';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -27,18 +24,21 @@ const GroupSeparator = (): React.JSX.Element => (
  * tabs on its left. The chat lane's toggle is not here: it heads the chat pane
  * header, or the viewer's tab bar while the lane is closed.
  *
+ * Below `md` the cluster is not drawn at all: the phone top bar
+ * (`MobileProjectTopBar`, H1) owns the sidebar, the status and Share, and its
+ * project sheet owns Revisions, Export and Details, so no destination shows twice
+ * (D2, I4).
+ *
  * @param properties - Dockview's header-action props for the group.
- * @returns The cluster in the top-right group, nothing in every other.
+ * @returns The cluster in the top-right group on desktop, nothing in every other group or on a phone.
  */
 export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps): React.JSX.Element | undefined {
   const { openPanel, registerRecordRecoveryFocus, restoreRecordRecoveryFocus } = useProjectWorkspace();
   const isTopRight = useIsTopRightGroup(properties.group, properties.containerApi);
-  const { projectRef } = useProject();
   const { workbench: workbenchVisible } = useWorkspaceLanes();
-  const { isMobile, openMobile } = useSidebar();
-  const projectName = useSelector(projectRef, (snapshot) => snapshot.context.project?.name) ?? 'Project';
+  const { isMobile } = useSidebar();
 
-  if (!isTopRight) {
+  if (!isTopRight || isMobile) {
     return undefined;
   }
 
@@ -48,12 +48,6 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
       onOpenPane={openPanel}
       leading={
         <>
-          {isMobile && !openMobile ? (
-            <SidebarTrigger className='h-7 w-auto max-w-44 gap-1.5 px-2'>
-              <PanelLeft aria-hidden className='size-3.5 shrink-0' />
-              <span className='hidden truncate @xl/viewer:inline'>{projectName}</span>
-            </SidebarTrigger>
-          ) : null}
           <GroupSeparator />
           {/* S29/A19: always on — the chat may be working somewhere else at any
               time, and this is the one place outside the pane that says where you
@@ -63,7 +57,7 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
           <RecordIssuesAction fallbackFocus={restoreRecordRecoveryFocus} />
         </>
       }
-      trailing={!isMobile && !workbenchVisible ? <WorkbenchToggleSlot /> : undefined}
+      trailing={workbenchVisible ? undefined : <WorkbenchToggleSlot />}
     />
   );
 }

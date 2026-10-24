@@ -24,7 +24,7 @@ on:
         default: macos,windows-arm,linux-vm
       sets:
         description: >-
-          Comma-separated result sets to run, or all (core, core-r06r07 on WIN-ARM only, core-default, r01-rate4, r01,
+          Comma-separated result sets to run, or all (core, core-r06r07 and packaged-r06 on WIN-ARM only, core-default, r01-rate4, r01,
           packaged, voiceover, nvda, orca, r01-diag on MAC-X only). Lowercase names, no spaces; anything but all skips the
           WIN-ARM administrator-labelled steps
         default: all
@@ -228,7 +228,8 @@ jobs:
             "core-r06r07=--skip-build --software-gl --kinds $env:KINDS --suite r06,r07 --out `"$env:DROP/core-r06r07`"",
             "r01-rate4=--skip-build --software-gl --kinds $env:KINDS --suite r01 --rounds 3 --rate 4 --out `"$env:DROP/r01-rate4`"",
             "r01=--skip-build --software-gl --kinds $env:KINDS --suite r01 --rounds 3 --out `"$env:DROP/r01`"",
-            "packaged=--skip-build --software-gl --packaged --kinds $env:KINDS --suite integrity,r02,r06 --out `"$env:DROP/packaged`"",
+            "packaged=--skip-build --software-gl --packaged --kinds $env:KINDS --suite integrity,r02 --out `"$env:DROP/packaged`"",
+            "packaged-r06=--skip-build --software-gl --packaged --kinds $env:KINDS --suite r06 --out `"$env:DROP/packaged-r06`"",
             "nvda=--skip-build --software-gl --kinds $env:KINDS --suite r04nvda --out `"$env:DROP/nvda`"",
             "core-default=--skip-build --kinds $env:KINDS --suite integrity,r02,r04,r06 --out `"$env:DROP/core-default`""
           )
@@ -269,7 +270,7 @@ jobs:
           status=0
           node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP" --sets "$SETS" \
             core=integrity,disposal,r02,r03,r04,r05 core-r06r07=r06,r07 core-default=integrity,r02,r04,r06 r01-rate4=r01 r01=r01 \
-            packaged=integrity,r02,r06 nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || status=1
+            packaged=integrity,r02 packaged-r06=r06 nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || status=1
           if [[ "$SETS" == all ]]; then
             node apps/ui/scripts/s3-renderer/native/summarize.mts "$DROP-admin" nvda=r04nvda | tee -a "$GITHUB_STEP_SUMMARY" || true
           fi

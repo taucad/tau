@@ -35,6 +35,8 @@ export type Terminal = {
   readonly rows: number;
   readonly rendererType: 'webgl' | 'canvas';
   readonly renderer?: TerminalRenderer;
+  /** The hidden input textarea inside the opened element. */
+  readonly textarea?: HTMLTextAreaElement;
   readonly buffer: {
     readonly active: {
       readonly type: 'normal' | 'alternate';

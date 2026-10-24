@@ -249,8 +249,10 @@ const mirrorDelay = 150;
  * A visually hidden copy of the visible screen inside AurigaX's focusable `role=textbox` element. AurigaX draws to a
  * canvas only, so NVDA's review cursor (which reads the focused editable's text) found nothing but "graphic". The
  * mirror gives the textbox one text row per screen row, hides the canvas from the accessibility tree and, while the
- * textbox itself has focus, collapses the DOM caret onto the cursor cell so review starts at the prompt. It stands
- * still during IME composition, which AurigaX runs in the same element.
+ * textbox itself has focus, collapses the DOM caret onto the cursor cell so review starts at the prompt. AurigaX's
+ * hidden textarea (a second tab stop, and the focus target of a canvas click) hands focus back to the textbox, which
+ * receives the same key, composition and paste events, so the caret logic always applies. The mirror stands still
+ * during IME composition, which AurigaX runs in the same element.
  */
 const createScreenMirror = (
   terminal: AurigaxTerminal,
@@ -269,7 +271,14 @@ const createScreenMirror = (
     clipPath: 'inset(50%)',
     whiteSpace: 'pre',
   });
-  container.append(mirror);
+  container.prepend(mirror);
+  const { textarea } = terminal;
+  const refocus = (): void => {
+    container.focus({ preventScroll: true });
+  };
+  textarea?.setAttribute('tabindex', '-1');
+  textarea?.setAttribute('aria-hidden', 'true');
+  textarea?.addEventListener('focus', refocus);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let composing = false;
   /* One row as text: empty cells (codepoint 0 after a tab or cursor move) become spaces, wide-character spacers add
@@ -340,6 +349,7 @@ const createScreenMirror = (
     schedule,
     dispose: () => {
       clearTimeout(timer);
+      textarea?.removeEventListener('focus', refocus);
       container.removeEventListener('compositionstart', compositionStart);
       container.removeEventListener('compositionend', compositionEnd);
       mirror.remove();

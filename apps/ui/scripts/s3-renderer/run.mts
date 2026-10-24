@@ -92,7 +92,7 @@ const { _electron: electron } = await import('playwright');
 let packagedApp: { executable: string; clientRoot: string } | undefined;
 const softwareGlArguments = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
 /** Launches that needed a second attempt, written into every suite result so a retry is never silent. */
-const launchRetries: Array<{ kind: Kind; at: string; error: string }> = [];
+const launchRetries: Array<{ kind: Kind; at: string; error: string; processes?: string[] }> = [];
 
 const sleep = async (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -243,6 +243,13 @@ const packageFixture = async (): Promise<{ executable: string; clientRoot: strin
   return { executable, clientRoot: packagedClient };
 };
 
+/** Image name, PID and memory of the Electron and fixture processes, from `tasklist`. */
+const windowsProcesses = (): string[] =>
+  sh('tasklist', ['/fo', 'csv', '/nh'])
+    .split('\n')
+    .filter((line) => /^"(electron|TauS3Fixture|node)\.exe"/i.test(line))
+    .map((line) => line.trim());
+
 const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promise<Session> => {
   const scale = Number(values.scale);
   const arguments_ = [
@@ -278,7 +285,13 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
       if (attempt === 3) {
         throw error;
       }
-      launchRetries.push({ kind, at: new Date().toISOString(), error: String(error).split('\n')[0]! });
+      launchRetries.push({
+        kind,
+        at: new Date().toISOString(),
+        error: String(error).split('\n')[0]!,
+        // What else is running when the handshake stalls (Windows on Arm): stray fixture or Electron processes?
+        ...(isWindows && { processes: windowsProcesses() }),
+      });
     }
   }
   const page = await app.firstWindow();
@@ -995,6 +1008,23 @@ const r04Run = async (kind: Kind) => {
         properties?: Array<{ name: string; value: { value?: unknown } }>;
       }>;
     };
+    /* Where a screen reader's caret would start: keyboard focus into the pane, more output, then the DOM caret's line. */
+    await session.page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
+    await session.page.keyboard.press('Tab');
+    await call(session, 'write', '\r\nS3-A11Y-CARET-LINE');
+    await call(session, 'settle', 500);
+    const caret = await session.page.evaluate(() => {
+      const active = document.activeElement;
+      const anchor = document.getSelection()?.anchorNode;
+      return {
+        activeElement: active ? `${active.tagName.toLowerCase()}[role=${active.getAttribute('role') ?? ''}]` : 'none',
+        caretLine: (anchor instanceof Element ? anchor : anchor?.parentElement)?.textContent ?? null,
+      };
+    });
     const visible = tree.nodes.filter((node) => !node.ignored);
     const text = visible.map((node) => `${node.role?.value ?? ''}:${node.name?.value ?? ''}`);
     const live = visible.filter((node) => node.properties?.some((property) => property.name === 'live'));
@@ -1003,6 +1033,7 @@ const r04Run = async (kind: Kind) => {
       kindOfEvidence:
         'Chromium accessibility tree via CDP (supplementary DOM/AX evidence, not an assistive-technology receipt)',
       outputLineInTree: text.some((entry) => entry.includes('S3-A11Y-LINE-ONE')),
+      caret,
       outputLineInPaneDomText: (await call<string>(session, 'paneText')).includes('S3-A11Y-LINE-ONE'),
       cjkLineInTree: text.some((entry) => entry.includes('S3-A11Y-LINE-TWO')),
       liveRegions: live.map((node) => `${node.role?.value}:${node.name?.value ?? ''}`),

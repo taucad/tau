@@ -3,37 +3,9 @@ import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { scrubSentryEvent, scrubUrl, sentryEnvironment, sentryRelease } from '#lib/sentry-event.lib.js';
 import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
-import type { QueuedUiError } from '#lib/queued-ui-error.js';
-
-/**
- * Remove the query string and fragment, then any invitation token, from a URL.
- *
- * @param url - A URL an event or breadcrumb carries.
- * @returns The URL without credentials.
- */
-const scrubUrl = (url: string): string => redactInvitationTokens(url.split(/[?#]/u, 1)[0] ?? '');
-
-/**
- * Scrub an error event before it leaves the browser: no query strings, no invitation tokens, no headers, cookies
- * or user. Invitation tokens and verification codes are bearer credentials that live in URLs.
- *
- * @param event - The event the SDK is about to send.
- * @returns The scrubbed event.
- * @public
- */
-export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
-  if (event.request) {
-    const { url } = event.request;
-    event.request = url === undefined ? {} : { url: scrubUrl(url) };
-  }
-  delete event.user;
-  // Stack frames and messages can quote the page URL too.
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON round trip of the same event.
-  return JSON.parse(redactInvitationTokens(JSON.stringify(event))) as ErrorEvent;
-};
 
 /** The mechanism the SDK's global handlers stamp on an unhandled promise rejection. */
 const unhandledRejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
@@ -64,10 +36,6 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
 export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
   isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
 
-const staleBuildTags: ReadonlySet<unknown> = new Set<StaleBuildTag>(['superseded', 'current', 'unknown']);
-
-const isStaleBuildTag = (value: unknown): value is StaleBuildTag => staleBuildTags.has(value);
-
 /** Fingerprint shared by chunk failures a deploy explains, so they group apart from genuine ones. */
 export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
 
@@ -88,11 +56,8 @@ export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
 export const createBeforeSend = (describe: (failure: unknown) => Promise<StaleBuildTag>) => {
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
   const tagged = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> => {
-    /* A queued error a later page delivers carries the decision its own page made; this page knows
-     * nothing of it. Otherwise held until the failure's decision settles (bounded): the tracker
-     * hears a failure before it is decided. */
-    const carried = event.tags?.['stale_build'];
-    const tag = isStaleBuildTag(carried) ? carried : await describe(hint?.originalException);
+    // Held until the failure's decision settles (bounded): the tracker hears a failure before it is decided.
+    const tag = await describe(hint?.originalException);
     const annotated: ErrorEvent = {
       ...event,
       // oxlint-disable-next-line naming-convention -- A Sentry tag name, filtered on by operators.
@@ -106,15 +71,6 @@ export const createBeforeSend = (describe: (failure: unknown) => Promise<StaleBu
   return (event: ErrorEvent, hint?: EventHint): ErrorEvent | null | Promise<ErrorEvent | null> =>
     isStaleModuleError(hint?.originalException) ? tagged(event, hint) : beforeSendSentryEvent(event, hint);
 };
-
-/**
- * The Sentry release for a build, so every event names the deploy it came from.
- *
- * @param id - The build id (`#lib/build-identity`).
- * @returns `tau-ui@<build id>`, or `undefined` for a bundle without one.
- * @public
- */
-export const sentryRelease = (id: number): string | undefined => (id === 0 ? undefined : `tau-ui@${String(id)}`);
 
 /**
  * Longest text a console breadcrumb keeps, per logged argument and for its message (D-UI-31).
@@ -198,7 +154,7 @@ export const initSentry = (): void => {
   }
   Sentry.init({
     dsn,
-    environment: ENV.SENTRY_ENVIRONMENT ?? ENV.NODE_ENV,
+    environment: sentryEnvironment(),
     release: sentryRelease(readBuildId()),
     sendDefaultPii: false,
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
@@ -217,47 +173,4 @@ export const captureUiError = (error: unknown): void => {
   if (Sentry.isInitialized()) {
     Sentry.captureException(error);
   }
-};
-
-/**
- * Rebuild a queued error a previous page reported, as close to the original as its stored fields allow.
- *
- * @param entry - The stored error.
- * @returns An `Error` with its name, message and stack.
- */
-const rebuild = (entry: QueuedUiError): Error => {
-  const error = new Error(entry.message);
-  error.name = entry.name;
-  if (entry.stack !== undefined) {
-    error.stack = entry.stack;
-  }
-  return error;
-};
-
-/**
- * Capture an error that waited for the SDK (`#lib/error-reporting`), with the time it was reported
- * and the tags it was queued with. A no-op before `initSentry` ran or without a DSN.
- *
- * @param entry - The stored error.
- * @param original - The value itself, when this page queued it; else it is rebuilt from `entry`.
- * @public
- */
-export const captureQueuedUiError = (entry: QueuedUiError, original?: unknown): void => {
-  if (!Sentry.isInitialized()) {
-    return;
-  }
-  Sentry.withScope((scope) => {
-    /* This page's own value is tagged by `beforeSend` from its settled decision; one a previous page
-     * queued carries that page's. */
-    const { stale_build: staleBuild, ...tags } = entry.tags;
-    const carried = original === undefined && staleBuild !== undefined;
-    // oxlint-disable-next-line naming-convention -- A Sentry tag name, filtered on by operators.
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
-    scope.setTags(carried ? { ...tags, stale_build: staleBuild } : tags);
-    scope.addEventProcessor((event) => ({
-      ...event,
-      timestamp: entry.time / 1000,
-    }));
-    Sentry.captureException(original ?? rebuild(entry));
-  });
 };

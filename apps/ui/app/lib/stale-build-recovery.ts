@@ -52,12 +52,7 @@ import {
   serverConfirmations,
 } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import {
-  isErrorTrackerListening,
-  reportUiError,
-  retagQueuedErrors,
-  setQueuedErrorTagger,
-} from '#lib/error-reporting.js';
+import { isErrorTrackerListening, reportUiError, sendWaitingErrors, setErrorDescriber } from '#lib/error-reporting.js';
 import { readSessionStorage } from '#lib/session-storage.js';
 import { isWeakKey } from '#lib/weak-key.js';
 
@@ -166,16 +161,27 @@ export type StaleBuildTag = 'superseded' | 'current' | 'unknown';
  * | `window` `unhandledrejection`             | `global`   | Yes (`GlobalHandlers` `onunhandledrejection`)  |
  * | `window` `vite:preloadError`              | `preload`  | No: a Vite event Sentry never listens to       |
  * | React boundary (route page, `onCaughtError`) | `boundary` | No: a caught error reaches no global handler |
+ * | The error tracker's own SDK failing to load | `sdk`      | Never reported: there is nothing to report it with |
  *
  * Vite rethrows a preload failure into the import that asked for it, so a `preload` sighting is
  * usually followed by a `boundary` or `unhandledrejection` one; the recovery waits
  * {@link preloadFollowUpDelay} for it before deciding Sentry has not seen the failure. Analytics
- * hears each failure decided `current` once, at decision time, wherever it was caught.
+ * hears each failure decided `current` once, at decision time, wherever it was caught, except an
+ * `sdk` one: the SDK's chunk failing on a build the server still runs (a content blocker) ends with
+ * one console warning, never as a genuine failure.
  */
-export type FailureSource = 'boundary' | 'global' | 'preload';
+export type FailureSource = 'boundary' | 'global' | 'preload' | 'sdk';
 
 /** Whether Sentry's own handlers capture failures from each channel (see {@link FailureSource}). */
-const capturedBySentry: Readonly<Record<FailureSource, boolean>> = { global: true, preload: false, boundary: false };
+const capturedBySentry: Readonly<Record<FailureSource, boolean>> = {
+  global: true,
+  preload: false,
+  boundary: false,
+  sdk: false,
+};
+
+/** Whether only the error tracker's own load reported a failure ({@link FailureSource} `sdk`). */
+const isSdkOnly = (sources: ReadonlySet<FailureSource>): boolean => sources.size === 1 && sources.has('sdk');
 
 /**
  * Milliseconds the slowest lookup `build-skew` makes takes: one answer and its confirmations, each
@@ -185,11 +191,11 @@ const slowestLookup = (1 + serverConfirmations) * liveBuildIdTimeout + serverCon
 
 /**
  * Milliseconds the error tracker's `beforeSend` waits for a failure's decision before tagging it with
- * what is known: a reload's wait to stall ({@link reloadTimeout}, during which a `reloading` outcome
- * is provisional) and the stall check's lookup, plus a margin for the decision's own work. The page
- * leaving settles every wait at once.
+ * what is known, from the whole chain a decision can take: its own lookup, a reload's wait to stall
+ * ({@link reloadTimeout}, during which a `reloading` outcome is provisional), the stall check's
+ * lookup, and a margin for the decision's own work. The page leaving settles every wait at once.
  */
-export const staleBuildTagWait = reloadTimeout + slowestLookup + 2000;
+export const staleBuildTagWait = slowestLookup + reloadTimeout + slowestLookup + 2000;
 
 /** Milliseconds a failure only `vite:preloadError` reported waits for the channel Vite rethrows it into. */
 export const preloadFollowUpDelay = 1000;
@@ -303,6 +309,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   /** Failures only Vite's preloader has reported, waiting for the channel it rethrows into. */
   const awaitingFollowUp = new Set<WeakKey>();
   let hasLeft = false;
+  let hasWarnedSdkBlocked = false;
 
   /** Hand a failure to the error tracker once, unless a channel the tracker captures itself saw it. */
   const reportToErrorTracker = (failure: WeakKey): void => {
@@ -344,7 +351,13 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
     record.outcome = outcome;
     record.verdict = liveBuild.readVerdict();
-    if (outcome === 'current' && !record.reportedToAnalytics) {
+    if (outcome === 'current' && isSdkOnly(record.sources)) {
+      // The SDK's chunk is blocked, not gone (a content blocker): nothing to report, and nothing to report it with.
+      if (!hasWarnedSdkBlocked) {
+        hasWarnedSdkBlocked = true;
+        console.warn('[stale-build-recovery] the error tracker could not be loaded on the live build');
+      }
+    } else if (outcome === 'current' && !record.reportedToAnalytics) {
       record.reportedToAnalytics = true;
       options.onGenuineFailure?.(failure);
     }
@@ -484,7 +497,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         })();
       }
       // After the decision is under way, so the tracker's `beforeSend` can wait for it (`classifySettled`).
-      reportToErrorTracker(failure);
+      if (!isSdkOnly(record.sources)) {
+        reportToErrorTracker(failure);
+      }
       return record.decision;
     },
     classify(failure) {
@@ -610,13 +625,15 @@ const getPageRecovery = (): StaleBuildRecovery => {
     canReloadSafely: () => !hasUserInteracted && performance.now() <= autoReloadWindow,
   });
   const recovery = pageRecovery;
-  // A failure queued for a later page carries this page's decision, kept current as decisions settle.
-  setQueuedErrorTagger(
-    (failure): Readonly<Record<string, string>> =>
+  // An error sent without the SDK is tagged as `beforeSend` would tag it.
+  setErrorDescriber({
+    now: (failure): Readonly<Record<string, string>> =>
       // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
       isStaleModuleError(failure) ? { stale_build: recovery.classify(failure) } : {},
-  );
-  recovery.subscribeOutcomes(retagQueuedErrors);
+    settled: async (failure): Promise<Readonly<Record<string, string>>> =>
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
+      isStaleModuleError(failure) ? { stale_build: await recovery.classifySettled(failure) } : {},
+  });
   return pageRecovery;
 };
 
@@ -688,9 +705,11 @@ export const classifyStaleBuildFailure = async (failure: unknown): Promise<Stale
 export const readStaleBuildTag = (failure: unknown): StaleBuildTag => getPageRecovery().classify(failure);
 
 /**
- * Hand a failed load of the error tracker's own SDK (`startErrorReporting`) to the recovery when a
- * deploy explains it: its chunk is one the new deploy may no longer serve. The failure may arrive
- * wrapped, so its `cause` is checked too.
+ * Hand a failed load of the error tracker's own SDK (`startErrorReporting`) to the recovery: its
+ * chunk may be one a new deploy no longer serves, and the page then reloads or offers the reload.
+ * It is never reported (there is nothing to report it with); on a build the server still runs (a
+ * content blocker) it ends with one console warning. The failure may arrive wrapped, so its `cause`
+ * is checked too.
  *
  * @param failure - Why the SDK could not be loaded.
  */
@@ -699,7 +718,7 @@ export const recoverFromSdkLoadFailure = (failure: unknown): void => {
   const stale = isStaleModuleError(failure) ? failure : isStaleModuleError(cause) ? cause : undefined;
   if (stale !== undefined) {
     // async-iife: bootstrap -- the recovery decides, and acts, on its own.
-    void recoverFromStaleBuild(stale, 'global');
+    void recoverFromStaleBuild(stale, 'sdk');
   }
 };
 
@@ -773,9 +792,12 @@ export const installStaleBuildRecovery = (): (() => void) => {
     globalThis.addEventListener(type, listener as EventListener, { capture: true });
   }
   // The page is going: settle what a pending reload covered, and store queued errors with their decisions.
-  const onPageHide = (): void => {
-    getPageRecovery().leave();
-    retagQueuedErrors();
+  const onPageHide = (event: PageTransitionEvent): void => {
+    // A page kept in the back/forward cache may come back: only a page that is really going settles.
+    if (!event.persisted) {
+      getPageRecovery().leave();
+    }
+    sendWaitingErrors();
   };
   globalThis.addEventListener('pagehide', onPageHide);
   return () => {

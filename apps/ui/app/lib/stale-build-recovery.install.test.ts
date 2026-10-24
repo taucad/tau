@@ -6,8 +6,8 @@ const lookupConfirmDelay = 1000;
 vi.mock('#lib/error-reporting.js', () => ({
   reportUiError,
   isErrorTrackerListening: () => true,
-  setQueuedErrorTagger: () => undefined,
-  retagQueuedErrors: () => undefined,
+  setErrorDescriber: () => undefined,
+  sendWaitingErrors: () => undefined,
 }));
 
 /** This bundle's build id and the deploy that replaced it, set by {@link load} from the real module. */
@@ -83,6 +83,75 @@ afterEach(() => {
 });
 
 describe('installStaleBuildRecovery', () => {
+  it("should hold the tracker's tag until a covered failure is decided again, even when every lookup is as slow as allowed", async () => {
+    const { installStaleBuildRecovery, readStaleBuildOutcome, classifyStaleBuildFailure, staleBuildTagWait } =
+      await load();
+    const { liveBuildIdTimeout } = await import('#lib/build-identity.js');
+    let served = deployedBuildId;
+    // Each answer arrives just inside the request timeout.
+    vi.stubGlobal('fetch', async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, liveBuildIdTimeout - 1);
+      });
+      return Response.json({ buildId: served });
+    });
+    stubReload();
+    uninstall = installStaleBuildRecovery();
+    const failure = new TypeError('Importing a module script failed.');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: failure }));
+    const tag = classifyStaleBuildFailure(failure);
+    // The decision's own lookup (an answer and two confirmations) ends in a reload; then the server names this build.
+    await vi.advanceTimersByTimeAsync(3 * liveBuildIdTimeout + 2 * lookupConfirmDelay);
+    expect(readStaleBuildOutcome(failure)).toBe('reloading');
+    served = ownBuildId;
+    await vi.advanceTimersByTimeAsync(staleBuildTagWait);
+
+    expect(readStaleBuildOutcome(failure)).toBe('current');
+    await expect(tag).resolves.toBe('current');
+  });
+
+  it('should treat a page kept in the back/forward cache as not gone, and decide what its reload covered again', async () => {
+    const { installStaleBuildRecovery, readStaleBuildOutcome, readReloadState, reloadTimeout } = await load();
+    const fetchMock = stubServer(deployedBuildId);
+    stubReload();
+    uninstall = installStaleBuildRecovery();
+    const failure = new TypeError('Importing a module script failed.');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: failure }));
+    await settle();
+    globalThis.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: true }));
+    globalThis.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    fetchMock.mockImplementation(async () => Response.json({ buildId: ownBuildId }));
+    await vi.advanceTimersByTimeAsync(reloadTimeout + lookupConfirmDelay * 3);
+
+    expect(readReloadState()).toBe('idle');
+    expect(readStaleBuildOutcome(failure)).toBe('current');
+  });
+
+  it("should end quietly when the error tracker's own chunk fails on the live build (a content blocker)", async () => {
+    const { recoverFromSdkLoadFailure, readStaleBuildOutcome, subscribeGenuineFailures } = await load();
+    stubServer(ownBuildId);
+    const heard: unknown[] = [];
+    const unsubscribe = subscribeGenuineFailures((failure) => {
+      heard.push(failure);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const first = new TypeError('Importing a module script failed.');
+    const again = new TypeError('Importing a module script failed.');
+
+    recoverFromSdkLoadFailure(new Error('Failed to load the SDK', { cause: first }));
+    await settle();
+    recoverFromSdkLoadFailure(again);
+    await settle();
+
+    expect(readStaleBuildOutcome(first)).toBe('current');
+    expect(reportUiError).not.toHaveBeenCalled();
+    expect(heard).toStrictEqual([]);
+    expect(warn).toHaveBeenCalledOnce();
+    unsubscribe();
+  });
+
   it('should decide a failure the reload covered again when the reload stalls and the server names this build', async () => {
     const {
       installStaleBuildRecovery,

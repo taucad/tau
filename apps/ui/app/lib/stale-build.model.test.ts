@@ -5,8 +5,9 @@
  * (so edges can disagree), a fake BroadcastChannel and a model error tracker. fast-check explores
  * bounded sequences of announcements, server answers, chunk failures, timer ticks, error-tracker
  * start-up, refreshes and automatic reloads (which a page may leave on, or stall), and the
- * invariants below are checked after every step. Each tab keeps its `sessionStorage` across its
- * pages, so errors one page queued are delivered by the next.
+ * invariants below are checked after every step. Each tab keeps its `sessionStorage` (the reload
+ * guard and budget) across its pages. An error reported once the SDK failed to load is sent without
+ * it, as an envelope the model ingest counts alongside the SDK's own captures.
  */
 import process from 'node:process';
 import { array, assert, asyncProperty, constant, constantFrom, oneof, record, tuple } from 'fast-check';
@@ -16,7 +17,6 @@ import type * as BuildIdentity from '#lib/build-identity.js';
 import type * as BuildSkew from '#filesystem/build-skew.js';
 import type * as StaleBuildRecovery from '#lib/stale-build-recovery.js';
 import type * as ErrorReporting from '#lib/error-reporting.js';
-import type { QueuedUiError } from '#lib/queued-ui-error.js';
 
 const buildX = 1_792_726_000_000;
 const buildY = buildX + 4_113_029;
@@ -107,7 +107,7 @@ type Tab = {
   /** This tab's `sessionStorage`: it outlives the tab's pages. */
   readonly storage: Map<string, string>;
   /** The current page's `pagehide` listeners. */
-  pageHide: Array<() => void>;
+  pageHide: Array<(event: { readonly persisted: boolean }) => void>;
   /** The `stale_build` tag each tracked failure's event was sent with (`beforeSend` holds it). */
   readonly tags: Map<unknown, Promise<StaleBuildRecovery.StaleBuildTag>>;
   /** The edge once answered `none` (no build endpoint): the newer build wins and nothing is asked again. */
@@ -169,26 +169,6 @@ const loadTab = async (tab: Tab): Promise<void> => {
       captureUiError: (error: unknown) => {
         captureValue(error);
       },
-      captureQueuedUiError: (entry: QueuedUiError, original?: unknown) => {
-        if (original !== undefined) {
-          // This page's own value: `beforeSend` tags it from its decision.
-          captureValue(original);
-          return;
-        }
-        // Rebuilt from storage, a new value each time: nothing deduplicates it but the queue.
-        const owner = model.tabs.find((candidate) =>
-          candidate.failures.some(({ failure }) => isEntryOf(entry, failure)),
-        );
-        const failure = owner?.failures.find((candidate) => isEntryOf(entry, candidate.failure))?.failure;
-        if (owner !== undefined) {
-          owner.tracked.set(failure, (owner.tracked.get(failure) ?? 0) + 1);
-          const carried = entry.tags['stale_build'] as StaleBuildRecovery.StaleBuildTag | undefined;
-          owner.tags.set(
-            failure,
-            Promise.resolve(carried ?? owner.recovery!.readStaleBuildTag(new Error(entry.message))),
-          );
-        }
-      },
     };
   });
   tab.errorReporting = await import('#lib/error-reporting.js');
@@ -204,8 +184,27 @@ const loadTab = async (tab: Tab): Promise<void> => {
   model.installing = undefined;
 };
 
-const isEntryOf = (entry: QueuedUiError, failure: unknown): boolean =>
-  failure instanceof Error && failure.message === entry.message;
+/**
+ * The model ingest: an event sent without the SDK (`sendSentryEventDirectly`) is counted for the
+ * failure whose message it carries (each failure's is unique), with the tag it was sent with.
+ */
+const ingest = async (_url: string, init: { readonly body?: unknown }): Promise<Response> => {
+  const event = JSON.parse(String(init.body).split('\n')[2] ?? '{}') as {
+    readonly tags?: Readonly<Record<string, string>>;
+    readonly exception?: { readonly values?: ReadonlyArray<{ readonly value?: string }> };
+  };
+  const message = event.exception?.values?.[0]?.value;
+  for (const tab of model.tabs) {
+    const failure = tab.failures.find(
+      (candidate) => candidate.failure instanceof Error && candidate.failure.message === message,
+    )?.failure;
+    if (failure !== undefined) {
+      tab.tracked.set(failure, (tab.tracked.get(failure) ?? 0) + 1);
+      tab.tags.set(failure, Promise.resolve(event.tags?.['stale_build'] as StaleBuildRecovery.StaleBuildTag));
+    }
+  }
+  return new Response('{}');
+};
 
 /** The SDK captures a value once per page that holds it, as Sentry marks what it captured. */
 function captureValue(error: unknown): void {
@@ -223,7 +222,7 @@ function captureValue(error: unknown): void {
 const leavePage = async (tab: Tab): Promise<void> => {
   const page = tab.recovery!;
   for (const listener of tab.pageHide) {
-    listener();
+    listener({ persisted: false });
   }
   for (const { failure, recovery } of tab.failures) {
     if (recovery === page) {
@@ -460,8 +459,9 @@ beforeEach(() => {
   vi.stubGlobal('BroadcastChannel', FakeChannel);
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   // The page's own reload is a request the model's `leave` step completes; every page listener is its page's.
-  vi.stubGlobal('location', { reload: () => undefined });
-  vi.stubGlobal('addEventListener', (type: string, listener: () => void) => {
+  vi.stubGlobal('location', { href: 'https://taucad.dev/w/model', reload: () => undefined });
+  vi.stubGlobal('fetch', ingest);
+  vi.stubGlobal('addEventListener', (type: string, listener: (event: { readonly persisted: boolean }) => void) => {
     if (type === 'pagehide' && model.installing !== undefined) {
       model.installing.pageHide.push(listener);
     }
@@ -521,16 +521,7 @@ const runModel = async (
     for (const tab of tabs) {
       // oxlint-disable-next-line no-await-in-loop -- Each tab's reporting starts in turn.
       await startTracker(tab);
-      // A page whose SDK failed to load keeps its errors for the next: the tab moves on.
-      if (tab.errorReporting?.isErrorTrackerListening() !== true) {
-        // oxlint-disable-next-line no-await-in-loop -- Each tab's page in turn.
-        await leavePage(tab);
-        // oxlint-disable-next-line no-await-in-loop -- Each tab's reporting starts in turn.
-        await startTracker(tab);
-      }
     }
-    await vi.advanceTimersByTimeAsync(tabs[0].recovery!.staleBuildTagWait + 1000);
-    await flush();
     await checkEnd(tabs);
     inspect?.(tabs);
     // I6: no phase stops writes for good without a recheck, unless the server confirmed
@@ -597,7 +588,7 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
     );
   }, 60_000);
 
-  it('deliver errors queued before an automatic reload once, from the next page', async () => {
+  it('send errors reported after a failed SDK load without it, once, with the decision of the page that saw them', async () => {
     await runModel(
       youngReplacedTab,
       [
@@ -608,8 +599,11 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
       ],
       ([tab]) => {
         expect(tab.failures).toHaveLength(2);
-        // Both went with the page that saw them, and were sent with the decision it had made.
+        // Both were sent by the page that saw them, with the decision it had made when it went.
         expect([...tab.tagsAtLeave.values()]).toStrictEqual(['superseded', 'superseded']);
+        for (const { failure } of tab.failures) {
+          expect(tab.tracked.get(failure)).toBe(1);
+        }
       },
     );
   }, 60_000);

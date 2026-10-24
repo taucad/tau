@@ -121,11 +121,12 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
     readonly ref?: React.Ref<ChatTextareaHandle>;
     readonly onSubmit?: ChatTextareaProperties['onSubmit'];
     readonly className?: string;
+    readonly enableMobileCollapse?: boolean;
   }): React.JSX.Element => {
     capturedTextarea.onSubmit = properties.onSubmit;
     capturedTextarea.className = properties.className;
     useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus }), []);
-    return <div data-testid='chat-textarea' />;
+    return <div data-testid='chat-textarea' data-collapsible={properties.enableMobileCollapse === true} />;
   },
 }));
 
@@ -264,6 +265,7 @@ vi.mock('react-virtuoso', () => ({
 }));
 
 const { ChatHistory } = await import('#routes/w.$workspace.$project/chat-history.js');
+const { ResponsiveSurfaceProvider } = await import('@taucad/ui/hooks/use-mobile');
 
 const draftAttachment = storedRef({ hash: 'f'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' });
 
@@ -335,6 +337,19 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(screen.getByRole('button', { name: 'Scroll to bottom' }).parentElement).toBe(
       screen.getByTestId('chat-textarea').parentElement,
     );
+  });
+
+  it.each([
+    ['a phone', true],
+    ['desktop and tablets', false],
+  ] as const)('lets the composer rest as one row only on %s (D14, D12)', (_device, isMobile) => {
+    render(
+      <ResponsiveSurfaceProvider isMobile={isMobile} container={undefined}>
+        <ChatHistory />
+      </ResponsiveSurfaceProvider>,
+    );
+
+    expect(screen.getByTestId('chat-textarea')).toHaveAttribute('data-collapsible', String(isMobile));
   });
 
   it('calls cadChat.submit with the text and attachment references from the textarea', async () => {

@@ -478,6 +478,107 @@ describe('ChatTextareaDesktop draft rehydration', () => {
       renderComposer('', codexSession);
       expect(composerBox()).not.toHaveAttribute('data-collapsed');
     });
+
+    /** The bar's controls a collapsed row keeps: those outside the collapsible groups, in order. */
+    const restingControls = (): string[] =>
+      [...document.querySelectorAll<HTMLButtonElement>('[data-slot=composer-bar] button')]
+        .filter((button) => !button.closest('[data-slot=composer-collapsible]'))
+        .map((button) => button.ariaLabel ?? '');
+
+    it('should rest as + / microphone / Send, with the model selector folded away (D14, D18)', async () => {
+      dictationDependencies.available = true;
+      renderComposer('', codexSession, { enableMobileCollapse: true });
+      await screen.findByRole('button', { name: 'Dictate' });
+
+      expect(composerBox()).toHaveAttribute('data-collapsed');
+      expect(restingControls()).toEqual(['Add', 'Dictate', 'Send']);
+      const agent = document.querySelector('[data-slot=agent-trigger]')!;
+      expect(agent.closest('[data-slot=composer-collapsible]')).toHaveClass(
+        '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:invisible',
+      );
+    });
+
+    it('should unfold to the model selector → microphone → Send once focused (D18)', async () => {
+      dictationDependencies.available = true;
+      const view = renderComposer('', codexSession, { enableMobileCollapse: true, isFocused: true });
+      await screen.findByRole('button', { name: 'Dictate' });
+
+      expect(composerBox()).not.toHaveAttribute('data-collapsed');
+      expect(
+        [...view.container.querySelectorAll<HTMLButtonElement>('[data-slot=composer-right] button')].map(
+          (button) => button.getAttribute('aria-label') ?? button.dataset['slot'],
+        ),
+      ).toEqual(['agent-trigger', 'Dictate', 'Send']);
+    });
+
+    it('should keep the resting row while a turn streams, with Stop in Send’s place ending it', async () => {
+      dictationDependencies.available = true;
+      const cancel = vi.fn();
+      const submit = vi.fn().mockResolvedValue(undefined);
+      renderComposer('', codexSession, {
+        enableMobileCollapse: true,
+        status: 'streaming',
+        handleCancelClick: cancel,
+        handleSubmit: submit,
+      });
+      await screen.findByRole('button', { name: 'Dictate' });
+
+      expect(composerBox()).toHaveAttribute('data-collapsed');
+      expect(restingControls()).toEqual(['Add', 'Dictate', 'Stop']);
+      expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+      await userEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(submit).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['Add', 'ready'],
+      ['Dictate', 'ready'],
+      ['Send', 'ready'],
+      ['Stop', 'streaming'],
+    ] as const)(
+      'should give %s the same words in its tooltip as its name, its key hint hidden from touch (I6, I7)',
+      async (name, status) => {
+        dictationDependencies.available = true;
+        renderComposer('A draft', codexSession, { enableMobileCollapse: true, status });
+        const control = await screen.findByRole('button', { name });
+
+        await userEvent.hover(control);
+        const tooltip = await screen.findByRole('tooltip');
+        // KeyShortcut chips, the only spans that set letter tracking.
+        const hints = [...tooltip.querySelectorAll('span')].filter((span) => span.className.includes('tracking-'));
+        expect(hints).toHaveLength(name === 'Send' || name === 'Stop' ? 1 : 0);
+        for (const hint of hints) {
+          expect(hint).toHaveClass('pointer-coarse:hidden');
+        }
+        let words = tooltip.textContent;
+        for (const hint of hints) {
+          words = words.replace(hint.textContent, '');
+        }
+        expect(words.trim()).toBe(name);
+      },
+    );
+
+    it('should give the bar 40px touch targets that never overlap, and leave fine pointers untouched (I3)', () => {
+      renderComposer('', codexSession, { enableMobileCollapse: true });
+      const bar = document.querySelector('[data-slot=composer-bar]')!;
+
+      // A 28px control plus 6px each side is 40px; 12px apart, neighbouring hit areas meet.
+      expect(bar).toHaveClass(
+        'pointer-coarse:[&_button]:relative',
+        'pointer-coarse:[&_button]:after:absolute',
+        'pointer-coarse:[&_button]:after:-inset-1.5',
+        'pointer-coarse:gap-3',
+      );
+      for (const cluster of bar.querySelectorAll('[data-slot=composer-left], [data-slot=composer-right]')) {
+        expect(cluster).toHaveClass('pointer-coarse:gap-3');
+      }
+      // Every touch rule is coarse-only, so a desktop pointer keeps the bar it had.
+      const touchOnly = [bar, ...bar.querySelectorAll('[data-slot^=composer-]')].flatMap((element) =>
+        [...element.classList].filter((name) => name.includes('gap-3') || name.includes('after:')),
+      );
+      expect(touchOnly.every((name) => name.startsWith('pointer-coarse:'))).toBe(true);
+    });
   });
 
   it('should show skill recovery in the functional composer after catalog closure', async () => {

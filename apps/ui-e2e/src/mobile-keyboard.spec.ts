@@ -56,6 +56,17 @@ test.each([{ pan: true }, { pan: false }])(
   'keeps the chat composer whole above the keyboard (Safari pans: $pan)',
   async ({ pan }) => {
     await expectTypable(selectors.getByCss(composerSelector).first(), { pan });
+    // The unfolded bar rides with the editor: Send stays on screen above the keyboard (D14).
+    await expect
+      .poll(async () =>
+        target.evaluateLocator(selectors.getByRole('button', { name: 'Send', exact: true }).first(), (send) => {
+          const box = send.getBoundingClientRect();
+          const viewport = globalThis.visualViewport;
+          const bottom = (viewport?.offsetTop ?? 0) + (viewport?.height ?? innerHeight);
+          return box.height > 0 && box.top >= (viewport?.offsetTop ?? 0) && box.bottom <= bottom + 0.5;
+        }),
+      )
+      .toBe(true);
     // The nav would ride up over the composer with Safari's pan, so it steps aside while typing.
     await expect.poll(async () => target.isVisible(navButton('Chat'))).toBe(false);
 

@@ -32,6 +32,7 @@ import {
   FloatingPanelErrorContent,
 } from '#components/ui/floating-panel.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
@@ -159,6 +160,8 @@ const ExpandedChatHistory = memo(function ({
     () => chatAttachmentDirectories(projectId, activeChatId),
     [activeChatId, projectId],
   );
+  // D14: only a phone's composer rests as one row; desktop and tablets keep the full bar (D12).
+  const isMobile = useIsMobile();
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
   const focusComposer = useCallback(() => {
@@ -266,7 +269,9 @@ const ExpandedChatHistory = memo(function ({
                     tooltipContent={(isOpen) => (
                       <div className='flex items-center gap-2'>
                         {isOpen ? 'Close' : 'Open'} Chat
-                        <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+                        <KeyShortcut variant='tooltip' className='pointer-coarse:hidden'>
+                          {formattedKeyCombination}
+                        </KeyShortcut>
                       </div>
                     )}
                   />
@@ -321,7 +326,7 @@ const ExpandedChatHistory = memo(function ({
               </div>
               <ChatTextarea
                 ref={chatTextareaRef}
-                enableMobileCollapse
+                enableMobileCollapse={isMobile}
                 mode='main'
                 enableAutoFocus={false}
                 onSubmit={onSubmit}

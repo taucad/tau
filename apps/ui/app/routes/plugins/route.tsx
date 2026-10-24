@@ -49,6 +49,8 @@ export type StoreItem = {
   readonly icon: LucideIcon;
   readonly status?: 'available' | 'installed' | 'shadowed';
   readonly accent: string;
+  /** Made and maintained by Tau, so the Built by Tau filter keeps it. */
+  readonly builtByTau?: boolean;
 };
 
 const featuredPlugins: StoreItem[] = [
@@ -88,6 +90,7 @@ const featuredPlugins: StoreItem[] = [
     icon: Store,
     status: 'installed',
     accent: 'bg-primary/10 text-primary',
+    builtByTau: true,
   },
 ];
 
@@ -143,6 +146,7 @@ function skillToStoreItem(skill: TauStoreSkill, index: number): StoreItem {
     description: skill.description,
     icon: Blocks,
     accent: skillAccentClasses[index % skillAccentClasses.length]!,
+    builtByTau: true,
   };
 }
 
@@ -154,6 +158,7 @@ function systemSkillToStoreItem(skill: SystemSkill): StoreItem {
     icon: Blocks,
     status: 'installed',
     accent: 'bg-primary/10 text-primary',
+    builtByTau: true,
   };
 }
 
@@ -169,6 +174,15 @@ function StoreItemRow({
   const Icon = item.icon;
   const isInstalled = status === 'installed' || status === 'shadowed';
   const canInstall = item.slug !== undefined && status === 'available';
+  // One phrase for the accessible name and the tooltip, true to each state.
+  const label =
+    status === 'shadowed'
+      ? `${item.name} installed, shadowed by your own skill`
+      : isInstalled
+        ? `${item.name} installed`
+        : canInstall
+          ? `Install ${item.name}`
+          : `${item.name} is not available yet`;
 
   return (
     <li className='flex min-w-0 items-center gap-3 py-3'>
@@ -183,15 +197,9 @@ function StoreItemRow({
         size='icon-xs'
         variant={isInstalled ? 'ghost' : 'secondary'}
         className='shrink-0 rounded-full'
-        aria-label={
-          status === 'shadowed'
-            ? `${item.name} installed but shadowed`
-            : isInstalled
-              ? `${item.name} installed`
-              : `Install ${item.name}`
-        }
+        aria-label={label}
         disabled={!canInstall || onInstall === undefined}
-        title={!canInstall && !isInstalled ? 'This integration is not available yet' : undefined}
+        title={label}
         onClick={() => {
           if (canInstall && item.slug) {
             onInstall?.(item.slug);
@@ -372,14 +380,19 @@ export function PluginStoreView({
   readonly statusContent?: React.ReactNode;
 }): React.JSX.Element {
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<'plugins' | 'skills'>('plugins');
+  // Each kind is an optional filter: neither pressed lists plugins and skills together.
+  const [kind, setKind] = useState<'plugins' | 'skills' | undefined>(undefined);
   const [builtByTau, setBuiltByTau] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const systemSkills = systemSkillsCatalog.map((item) => systemSkillToStoreItem(item));
   const storeSkills = tauStoreSkills.map((item, index) => skillToStoreItem(item, index));
   const matches = (item: StoreItem): boolean =>
+    (!builtByTau || item.builtByTau === true) &&
     `${item.name} ${item.description}`.toLowerCase().includes(query.toLowerCase());
+  const toggleKind = (next: 'plugins' | 'skills'): void => {
+    setKind((current) => (current === next ? undefined : next));
+  };
   return (
     <PageContent className='space-y-6'>
       <PageHeader
@@ -389,20 +402,20 @@ export function PluginStoreView({
             <div className='flex items-center gap-1'>
               <Button
                 size='sm'
-                variant={tab === 'plugins' ? 'secondary' : 'ghost'}
-                aria-pressed={tab === 'plugins'}
+                variant={kind === 'plugins' ? 'secondary' : 'ghost'}
+                aria-pressed={kind === 'plugins'}
                 onClick={() => {
-                  setTab('plugins');
+                  toggleKind('plugins');
                 }}
               >
                 Plugins
               </Button>
               <Button
                 size='sm'
-                variant={tab === 'skills' ? 'secondary' : 'ghost'}
-                aria-pressed={tab === 'skills'}
+                variant={kind === 'skills' ? 'secondary' : 'ghost'}
+                aria-pressed={kind === 'skills'}
                 onClick={() => {
-                  setTab('skills');
+                  toggleKind('skills');
                 }}
               >
                 Skills
@@ -446,16 +459,20 @@ export function PluginStoreView({
       />
 
       {statusContent}
-      {tab === 'plugins' && !builtByTau ? (
+      {kind === 'skills' ? null : (
         <StoreSection title='Featured' items={featuredPlugins.filter((item) => matches(item))} />
-      ) : null}
-      <StoreSection title='System' items={systemSkills.filter((item) => matches(item))} />
-      <StoreSection
-        title='Skills'
-        items={storeSkills.filter((item) => matches(item))}
-        getStatus={getSkillInstallStatus}
-        onInstall={installSkill}
-      />
+      )}
+      {kind === 'plugins' ? null : (
+        <>
+          <StoreSection title='System' items={systemSkills.filter((item) => matches(item))} />
+          <StoreSection
+            title='Skills'
+            items={storeSkills.filter((item) => matches(item))}
+            getStatus={getSkillInstallStatus}
+            onInstall={installSkill}
+          />
+        </>
+      )}
 
       {/* Below the collections: the first viewport belongs to the lists (page composition Rule 14). */}
       <section className='flex h-40 items-center justify-center overflow-hidden rounded-md border bg-[linear-gradient(135deg,color-mix(in_oklab,var(--information)_18%,var(--background)),color-mix(in_oklab,var(--feature)_14%,var(--background)),color-mix(in_oklab,var(--warning)_12%,var(--background)))]'>
@@ -494,7 +511,7 @@ export function PluginStoreView({
           size='xs'
           className='h-7 rounded-md px-2 text-xs'
           onClick={() => {
-            setTab('skills');
+            setKind('skills');
             setQuery('');
             searchRef.current?.focus();
           }}

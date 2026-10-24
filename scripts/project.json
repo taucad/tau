@@ -148,7 +148,6 @@
             "bundler-core",
             "esbuild",
             "geospec",
-            "geospec-engine",
             "camera",
             "spatial",
             "geometry-core",
@@ -177,7 +176,19 @@
             "python-kernel-core",
             "build123d",
             "smlibpy",
-            "native-process-core"
+            "native-process-core",
+            "jobs",
+            "workbench",
+            "agent-host",
+            "bambu",
+            "carvera",
+            "grbl",
+            "mcp",
+            "slicer",
+            "zoo",
+            "skills",
+            "host",
+            "cli"
           ]
         }
       ],

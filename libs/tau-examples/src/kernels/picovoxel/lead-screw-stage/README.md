@@ -11,7 +11,7 @@ GLB/glTF exports retain motion only when requested with `content: { includeTopol
 Run geometry acceptance from the Tau root:
 
 ```bash
-node --import tsx packages/geospec-engine/src/cli/main.ts run libs/tau-examples/src/kernels/picovoxel/lead-screw-stage --test-timeout 300000 --workers 1 --json
+node --import tsx packages/cli/scripts/geospec.mts run libs/tau-examples/src/kernels/picovoxel/lead-screw-stage --test-timeout 300000 --workers 1 --json
 ```
 
 `libs/tau-examples/src/picovoxel-kinematics.test.ts` checks the delivered topology, materials, parameter-dependent limits, coupled pose and Reset through the public runtime.

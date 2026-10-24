@@ -20,7 +20,8 @@ import { describe, it, expect } from 'vitest';
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const nodeBin = process.execPath;
-const geospecCli = resolve(repoRoot, 'packages/geospec-engine/src/cli/main.ts');
+// `geospec run` with Tau's exporter, the composition `tau test` runs (packages/cli/scripts/geospec.mts).
+const geospecCli = resolve(repoRoot, 'packages/cli/scripts/geospec.mts');
 
 type GeoSpecReportFile = {
   file: string;

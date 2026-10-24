@@ -108,6 +108,19 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' > "$
 [[ "$(cat "$output/guest-boot-id.txt")" != "$(cat /proc/sys/kernel/random/boot_id)" ]]
 printf 'Full guest infrastructure proof passed; any selected harness outcome is recorded separately.\n' | tee "$output/result.txt"
 
+if [[ "$mode" != qualification ]]; then
+  # Installed sandbox bwrap on the stock image: Tau-scoped profile only, shipped sysctl untouched.
+  # Qualification guests install real candidates under the same package names, so they skip this fixture.
+  (cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture'
+  for deb in "$work"/bwrap-fixture/*.deb; do
+    # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.
+    ssh "${ssh_options[@]}" tau@127.0.0.1 "cat > ~/bwrap-fixture/$(basename "$deb")" < "$deb"
+  done
+  ssh "${ssh_options[@]}" tau@127.0.0.1 'bash -s' \
+    < "$REPO_ROOT/apps/desktop/scripts/hosted-linux-bwrap-guest.sh" | tee "$output/bwrap-proof.txt"
+fi
+
 if [[ "$mode" != proof ]]; then
   # Reuse the verified Node installation from setup-nx. No host home/cache or signing material is copied.
   node_root="$(dirname "$(dirname "$(command -v node)")")"

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EditorStateMachineRef } from '#machines/editor.machine.js';
 import { holdUnheardReveal, subscribeWorkbenchReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 
@@ -28,7 +28,33 @@ function createEditor(): { editorRef: EditorStateMachineRef; emit: (type: string
   return { editorRef, emit };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('subscribeWorkbenchReveal', () => {
+  it('should drop a held reveal no pane took within 10s, so a pane opened later does not jump to it', () => {
+    vi.useFakeTimers();
+    const { editorRef, emit } = createEditor();
+    emit('modelComponentRevealRequested');
+    vi.advanceTimersByTime(10_001);
+
+    const late = vi.fn();
+    subscribeWorkbenchReveal(editorRef, 'model', late);
+    expect(late).not.toHaveBeenCalled();
+  });
+
+  it('should still hand over a held reveal taken within 10s, as a slow cold chunk needs', () => {
+    vi.useFakeTimers();
+    const { editorRef, emit } = createEditor();
+    emit('kinematicsRevealRequested');
+    vi.advanceTimersByTime(9000);
+
+    const prompt = vi.fn();
+    subscribeWorkbenchReveal(editorRef, 'kinematics', prompt);
+    expect(prompt).toHaveBeenCalledExactlyOnceWith(target);
+  });
+
   it('should hand a reveal no pane heard to the next pane that subscribes, once', () => {
     const { editorRef, emit } = createEditor();
     emit('modelComponentRevealRequested');

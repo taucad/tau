@@ -54,7 +54,7 @@ import {
   createSkillBundleOverlay,
   createSkillBundleRegistry,
 } from '@taucad/agent-tools/registry';
-import type { ReadSkillResource, ShellSource } from '@taucad/agent-tools/registry';
+import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
@@ -79,6 +79,7 @@ import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import type { JsonObject, ToolRegistry } from '@taucad/agent-host';
 
 import type { ProjectRevisions } from '#revisions.js';
+import type { HostShell } from '#shell/shell-service.js';
 import { prepareKernelDescription, prepareKernelInputSchema, prepareKernelToolName } from '#prepare-kernel-tool.js';
 
 type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
@@ -657,7 +658,7 @@ export type HostToolRegistryOptions = {
    * so they never offer `shell`. It reads each call's checkout by run id, never this registry's root. A function is read
    * at every listing and call, so the tool appears once the probe settles.
    */
-  readonly shell?: ShellSource | undefined;
+  readonly shell?: HostShell | (() => HostShell | undefined) | undefined;
 };
 
 /**

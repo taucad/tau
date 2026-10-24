@@ -115,10 +115,11 @@ export const pollOnce = async (
   options: Pick<WorkerOptions, 'context' | 'concurrency' | 'backfillShare'>,
   retry = new Map<string, { failures: number; at: number }>(),
   pollMilliseconds = 10_000,
-  probe: ProbeState = { up: false, checkedAt: undefined },
+  probe?: ProbeState,
 ): Promise<boolean> => {
   const { context } = options;
-  const reachable = await probeDestination(context, probe);
+  const probeState = probe ?? { up: false, checkedAt: undefined };
+  const reachable = await probeDestination(context, probeState);
   context.metrics.up(reachable);
   if (reachable) {
     await markTombstonedOwners(context);
@@ -148,7 +149,7 @@ export const pollOnce = async (
       if (result.outcome === 'failed') {
         if (result.failure.stage === 'dest_write' || result.failure.stage === 'retention') {
           // The copy refused a write: probe again next poll rather than trust a standing probe.
-          probe.checkedAt = undefined;
+          probeState.checkedAt = undefined;
         }
         const failures = (retry.get(candidate.projectId)?.failures ?? 0) + 1;
         retry.set(candidate.projectId, {

@@ -40,7 +40,12 @@ export type NativeSandboxLaunch = {
   readonly commandId: string;
 };
 
-const physicalVariants = (paths: readonly string[]): string[] => {
+/**
+ * Each path and its physical spelling, so a deny or grant holds whichever spelling a process opens.
+ *
+ * @internal
+ */
+export const physicalVariants = (paths: readonly string[]): string[] => {
   const variants = new Set<string>();
   for (const path of paths) {
     variants.add(path);
@@ -56,9 +61,10 @@ const physicalVariants = (paths: readonly string[]): string[] => {
 /**
  * Roots a native worker may never read: every user home, removable volume, and shared temporary storage.
  *
+ * @internal
  * @returns Logical and physical spellings of each root.
  */
-const deniedReadRoots = (): string[] =>
+export const deniedReadRoots = (): string[] =>
   physicalVariants([homedir(), '/Users', '/home', '/root', '/Volumes', '/mnt', '/media', '/tmp', tmpdir()]);
 
 /**
@@ -69,9 +75,10 @@ const deniedReadRoots = (): string[] =>
  * any checkout or app bundle below `/home` or `/tmp` — would otherwise hide its own helper and
  * every launch would exit 127 before the worker ran.
  *
+ * @internal
  * @returns The vendored seccomp directory on Linux; nothing elsewhere.
  */
-const sandboxRuntimeReadRoots = (): string[] => {
+export const sandboxRuntimeReadRoots = (): string[] => {
   if (process.platform !== 'linux') {
     return [];
   }
@@ -88,9 +95,10 @@ const sandboxRuntimeReadRoots = (): string[] => {
  * Reading the roots back from the same export keeps a runtime upgrade from re-opening the hole with a
  * new default. Character devices stay writable because the worker's stdio needs them.
  *
+ * @internal
  * @returns Every default write root except the `/dev` devices.
  */
-const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((path) => !path.startsWith('/dev/'));
+export const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((path) => !path.startsWith('/dev/'));
 
 /**
  * The capability profile handed to the sandbox runtime, spelled locally so the published

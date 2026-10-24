@@ -1,0 +1,509 @@
+/* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
+// @vitest-environment node
+/*
+ * The native shell conformance suite (testing contract: `native-process-core:test:shell-conformance`, T02 and the
+ * E rows a provider owns). It runs the real sandbox provider and the machine's own Bash, never a fixture or a mock:
+ * every row starts with a positive control that must succeed inside the same sandbox, then the negatives, and every
+ * network negative is judged by a canary listener outside the sandbox, not by the sandboxed command's own report.
+ *
+ * Off unless `TAU_SHELL_CONFORMANCE=1`, which only the noncacheable Nx target sets. `TAU_SHELL_CONFORMANCE_ROW` names
+ * the row (LNX-U, LNX-D, MAC-A, MAC-X), `TAU_SHELL_CONFORMANCE_RECEIPT` where the JSON receipt goes, and on Linux
+ * `TAU_SHELL_CONFORMANCE_BWRAP` the installed, profiled bubblewrap. macOS terminal rows are recorded
+ * `operator-validation-pending` and never run here (ruling 2026-10-24T05:39Z).
+ */
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  statfsSync,
+  writeFileSync,
+} from 'node:fs';
+import { createRequire } from 'node:module';
+import { lookup } from 'node:dns/promises';
+import { createServer } from 'node:net';
+import type { AddressInfo, Server } from 'node:net';
+import { arch, networkInterfaces, platform, release, tmpdir, version } from 'node:os';
+import { dirname, join } from 'node:path';
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import { resolveShellExecutable, shellCommandArguments, shellVersionCommand } from '#shell/shell-identity.js';
+import type { ShellExecutable } from '#shell/shell-identity.js';
+import type { ShellLaunch, ShellProcess, ShellProvider } from '#shell/shell-provider.js';
+import { createSandboxShellProvider } from '#shell/srt-shell-provider.js';
+
+const enabled = process.env['TAU_SHELL_CONFORMANCE'] === '1';
+const row = process.env['TAU_SHELL_CONFORMANCE_ROW'] ?? 'unnamed';
+const linux = process.platform === 'linux';
+const bwrapPath = process.env['TAU_SHELL_CONFORMANCE_BWRAP'] ?? '/usr/bin/bwrap';
+const resolveFromHere = createRequire(import.meta.url);
+
+type RowResult = Readonly<{
+  id: string;
+  title: string;
+  status: 'pass' | 'fail' | 'operator-validation-pending' | 'residual-disclosed';
+  detail?: string;
+}>;
+
+const results: RowResult[] = [];
+
+/** A conformance row: the outcome lands in the receipt whether it passes or fails. */
+const conformance = (id: string, title: string, body: () => Promise<void>): void => {
+  it(`${id}: ${title}`, { timeout: 60_000 }, async () => {
+    try {
+      await body();
+      results.push({ id, title, status: 'pass' });
+    } catch (error) {
+      results.push({ id, title, status: 'fail', detail: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  });
+};
+
+const digestOf = (path: string): string => `sha256:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+
+const commandOutput = (file: string, arguments_: readonly string[]): string => {
+  try {
+    return execFileSync(file, arguments_, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  } catch (error) {
+    return `unavailable: ${error instanceof Error ? error.message.split('\n')[0]! : String(error)}`;
+  }
+};
+
+const text = async (chunks: AsyncIterable<Uint8Array<ArrayBuffer>>): Promise<string> => {
+  const decoder = new TextDecoder();
+  let result = '';
+  for await (const chunk of chunks) {
+    result += decoder.decode(chunk, { stream: true });
+  }
+  return result + decoder.decode();
+};
+
+const delay = async (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+let root = '';
+let work = '';
+let readonly = '';
+let secret = '';
+let outside = '';
+let home = '';
+let shell: ShellExecutable;
+let provider: ShellProvider;
+let shellVersion = '';
+let ready = false;
+
+const launchOf = (command: string, overrides: Partial<ShellLaunch> = {}): ShellLaunch => ({
+  executablePath: shell.path,
+  arguments: shellCommandArguments('bash', command),
+  workingDirectory: work,
+  commandId: `conformance#${String(results.length + 1)}`,
+  filesystem: { readable: [readonly, home], writable: [work], denied: [secret] },
+  network: { domains: [] },
+  environment: { PATH: '/usr/bin:/bin', HOME: work, TMPDIR: work, LANG: 'C' },
+  stdio: { kind: 'pipes' },
+  signal: new AbortController().signal,
+  ...overrides,
+});
+
+const start = async (launch: ShellLaunch): Promise<ShellProcess> => {
+  const outcome = await provider.launch(launch);
+  if (outcome.status !== 'started') {
+    throw new Error(`the provider did not start the launch: ${JSON.stringify(outcome)}`);
+  }
+  return outcome.process;
+};
+
+/** Run one command to completion in the sandbox and collect what it printed. */
+const run = async (
+  command: string,
+  overrides: Partial<ShellLaunch> = {},
+): Promise<{ stdout: string; stderr: string; exitCode: number | undefined }> => {
+  const process_ = await start(launchOf(command, overrides));
+  if (process_.kind !== 'pipes') {
+    throw new Error('expected a pipes launch');
+  }
+  const [stdout, stderr, exit] = await Promise.all([text(process_.stdout), text(process_.stderr), process_.exited]);
+  return { stdout, stderr, exitCode: 'exitCode' in exit ? exit.exitCode : undefined };
+};
+
+/** A loopback-and-interface TCP listener outside the sandbox that counts every connection it ever sees. */
+const canary = async (): Promise<{ server: Server; port: number; connections: () => number }> => {
+  let connections = 0;
+  const server = createServer((socket) => {
+    connections += 1;
+    socket.end('HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n');
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '0.0.0.0', resolve);
+  });
+  const { port } = server.address() as AddressInfo;
+  return { server, port, connections: () => connections };
+};
+
+const interfaceAddress = (): string | undefined =>
+  Object.values(networkInterfaces())
+    .flat()
+    .find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
+
+const nodePtyBinary = (): string | undefined => {
+  const base = dirname(resolveFromHere.resolve('node-pty/package.json'));
+  return [
+    join(base, 'build', 'Release', 'pty.node'),
+    join(base, 'prebuilds', `${process.platform}-${process.arch}`, 'pty.node'),
+  ].find((path) => existsSync(path));
+};
+
+const operatingSystem = (): Record<string, string> => {
+  if (process.platform === 'darwin') {
+    return {
+      productVersion: commandOutput('/usr/bin/sw_vers', ['-productVersion']),
+      buildVersion: commandOutput('/usr/bin/sw_vers', ['-buildVersion']),
+    };
+  }
+  const osRelease = existsSync('/etc/os-release') ? readFileSync('/etc/os-release', 'utf8') : '';
+  const field = (name: string): string => new RegExp(`^${name}="?([^"\\n]*)"?$`, 'mu').exec(osRelease)?.[1] ?? '';
+  return { id: field('ID'), versionId: field('VERSION_ID'), prettyName: field('PRETTY_NAME') };
+};
+
+const linuxSecurity = (): Record<string, string> | undefined => {
+  if (!linux) {
+    return undefined;
+  }
+  const read = (path: string): string => (existsSync(path) ? readFileSync(path, 'utf8').trim() : 'absent');
+  return {
+    apparmorEnabled: read('/sys/module/apparmor/parameters/enabled'),
+    restrictUnprivilegedUserns: read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns'),
+    unprivilegedUsernsClone: read('/proc/sys/kernel/unprivileged_userns_clone'),
+  };
+};
+
+const receipt = (): Record<string, unknown> => {
+  const runtimeRoot = dirname(resolveFromHere.resolve('@anthropic-ai/sandbox-runtime/package.json'));
+  const runtime = JSON.parse(readFileSync(join(runtimeRoot, 'package.json'), 'utf8')) as { version: string };
+  const pty = JSON.parse(readFileSync(resolveFromHere.resolve('node-pty/package.json'), 'utf8')) as { version: string };
+  const ptyBinary = nodePtyBinary();
+  const seccomp = join(runtimeRoot, 'vendor', 'seccomp', process.arch === 'arm64' ? 'arm64' : 'x64', 'apply-seccomp');
+  const server = process.env['GITHUB_SERVER_URL'];
+  const repository = process.env['GITHUB_REPOSITORY'];
+  const runId = process.env['GITHUB_RUN_ID'];
+  return {
+    schema: 'tau.shell-conformance.receipt/1',
+    row,
+    recordedAt: new Date().toISOString(),
+    source: {
+      sha: process.env['GITHUB_SHA'] ?? commandOutput('git', ['rev-parse', 'HEAD']),
+      run: server && repository && runId ? `${server}/${repository}/actions/runs/${runId}` : 'local',
+    },
+    host: {
+      platform: platform(),
+      arch: arch(),
+      kernel: release(),
+      kernelVersion: version(),
+      os: operatingSystem(),
+      filesystemType: `0x${statfsSync(root).type.toString(16)}`,
+      linuxSecurity: linuxSecurity(),
+    },
+    node: { version: process.versions.node, abi: process.versions.modules, electron: process.versions['electron'] },
+    provider: {
+      name: provider.name,
+      sandboxRuntime: runtime.version,
+      seccompHelper: linux && existsSync(seccomp) ? { path: seccomp, digest: digestOf(seccomp) } : undefined,
+      bwrap: linux
+        ? {
+            path: bwrapPath,
+            realPath: realpathSync(bwrapPath),
+            digest: digestOf(bwrapPath),
+            version: commandOutput(bwrapPath, ['--version']),
+          }
+        : undefined,
+      seatbelt:
+        process.platform === 'darwin'
+          ? { path: '/usr/bin/sandbox-exec', digest: digestOf('/usr/bin/sandbox-exec') }
+          : undefined,
+    },
+    shell: { ...shell, version: shellVersion },
+    nodePty: {
+      version: pty.version,
+      binary: ptyBinary,
+      digest: ptyBinary === undefined ? undefined : digestOf(ptyBinary),
+    },
+    results,
+  };
+};
+
+describe.runIf(enabled)('shell conformance', () => {
+  beforeAll(async () => {
+    if (process.platform !== 'linux' && process.platform !== 'darwin') {
+      throw new Error(`${process.platform} is not a row of this suite yet.`);
+    }
+    if (linux && !existsSync(bwrapPath)) {
+      throw new Error(`no bubblewrap at ${bwrapPath}; a conformance row never falls back to another one.`);
+    }
+    const resolved = await resolveShellExecutable({ platform: process.platform, environment: process.env });
+    if ('status' in resolved) {
+      throw new Error(resolved.message);
+    }
+    shell = resolved;
+    root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-shell-conformance-')));
+    work = join(root, 'work');
+    readonly = join(root, 'readonly');
+    secret = join(root, 'secret');
+    outside = join(root, 'outside');
+    home = join(root, 'home');
+    for (const directory of [work, readonly, secret, outside, join(home, '.ssh')]) {
+      mkdirSync(directory, { recursive: true });
+    }
+    writeFileSync(join(readonly, 'granted.txt'), 'GRANTED-READ\n');
+    writeFileSync(join(secret, 'canary.txt'), 'SECRET-CANARY\n');
+    writeFileSync(join(outside, 'canary.txt'), 'OUTSIDE-CANARY\n');
+    writeFileSync(join(home, 'notes.txt'), 'HOME-NOTES\n');
+    writeFileSync(join(home, '.ssh', 'id_canary'), 'SSH-CANARY\n');
+    provider = createSandboxShellProvider({ bwrapPath, home });
+    ready = true;
+  });
+
+  afterAll(() => {
+    const path = process.env['TAU_SHELL_CONFORMANCE_RECEIPT'];
+    if (path !== undefined && ready) {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `${JSON.stringify(receipt(), undefined, 2)}\n`);
+    }
+    if (root !== '') {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  conformance('C01', 'the fixed-path Bash runs in the sandbox and reports its version', async () => {
+    const result = await run(shellVersionCommand('bash'));
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(result.stdout).toMatch(/^\d+\.\d+/u);
+    shellVersion = result.stdout;
+  });
+
+  conformance('C02', 'granted roots read and write; denied, ungranted and baseline paths do not', async () => {
+    const positive = await run('cat ../readonly/granted.txt ../home/notes.txt && printf WROTE > out.txt');
+
+    expect(positive.exitCode, positive.stderr).toBe(0);
+    expect(positive.stdout).toBe('GRANTED-READ\nHOME-NOTES\n');
+    expect(readFileSync(join(work, 'out.txt'), 'utf8')).toBe('WROTE');
+
+    const before = [join(secret, 'canary.txt'), join(outside, 'canary.txt'), join(home, '.ssh', 'id_canary')].map(
+      (path) => digestOf(path),
+    );
+    /* Reads and writes the mount table refuses must fail inside the sandbox. */
+    const refused = [
+      `cat ${secret}/canary.txt`,
+      `cat ${outside}/canary.txt`,
+      `cat ${home}/.ssh/id_canary`,
+      `printf X > ${readonly}/written.txt`,
+      `printf X > ${outside}/written.txt`,
+    ];
+    /*
+     * A denied path inside a granted root may be masked by a private empty mount (bubblewrap's tmpfs) rather than
+     * refused, so a write there can succeed into the mask. Only the bytes outside the sandbox judge it.
+     */
+    const masked = [`printf X > ${secret}/canary.txt`, `printf X > ${home}/.ssh/id_canary`];
+    const outcomes = await Promise.all([...refused, ...masked].map(async (probe) => run(probe)));
+
+    expect(outcomes.slice(0, refused.length).map((outcome) => outcome.exitCode !== 0)).toStrictEqual(
+      refused.map(() => true),
+    );
+    expect(outcomes.map((outcome) => outcome.stdout).join('')).not.toMatch(/CANARY/u);
+    expect(existsSync(join(readonly, 'written.txt')) || existsSync(join(outside, 'written.txt'))).toBe(false);
+    expect(
+      [join(secret, 'canary.txt'), join(outside, 'canary.txt'), join(home, '.ssh', 'id_canary')].map((path) =>
+        digestOf(path),
+      ),
+    ).toStrictEqual(before);
+  });
+
+  conformance('C03', 'startup hooks are refused and the shell sees only the environment it was given', async () => {
+    const positive = await run('printf %s "$GIVEN"', {
+      environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', GIVEN: 'GIVEN-VALUE' },
+    });
+
+    expect(positive.stdout).toBe('GIVEN-VALUE');
+
+    const hooked = await provider.launch(
+      launchOf('true', { environment: { PATH: '/usr/bin:/bin', BASH_ENV: join(outside, 'canary.txt') } }),
+    );
+    const environment = await run('env');
+
+    expect(hooked.status).toBe('unsupported');
+    expect(environment.stdout).not.toMatch(
+      /^(?:SSH_AUTH_SOCK|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|GITHUB_TOKEN)=/mu,
+    );
+  });
+
+  conformance('C04', 'a granted name is reachable through the launch proxy', async () => {
+    const result = await run('curl -sS -o /dev/null -w %{http_code} --max-time 20 https://example.com/', {
+      network: { domains: ['example.com'] },
+    });
+
+    expect(result.stdout, result.stderr).toMatch(/^[23]\d\d$/u);
+  });
+
+  conformance(
+    'C05',
+    'no grant, a rebinding name and direct sockets never reach a canary outside the sandbox',
+    async () => {
+      const listener = await canary();
+      try {
+        const control = await fetch(`http://127.0.0.1:${String(listener.port)}/`);
+
+        expect(control.status).toBe(204);
+        expect(listener.connections()).toBe(1);
+
+        const rebinding = await lookup('localtest.me', { all: true });
+
+        expect(rebinding.map(({ address }) => address)).toContain('127.0.0.1');
+        const address = interfaceAddress();
+        const port = String(listener.port);
+        const probes = [
+          { command: `curl -fsS --max-time 5 http://127.0.0.1:${port}/`, domains: [] },
+          { command: `curl -fsS --max-time 5 http://localtest.me:${port}/`, domains: ['localtest.me'] },
+          { command: `curl -fsS --max-time 5 --noproxy '*' http://127.0.0.1:${port}/`, domains: [] },
+          { command: `exec 3<>/dev/tcp/127.0.0.1/${port}`, domains: [] },
+          ...(address === undefined
+            ? []
+            : [
+                { command: `curl -fsS --max-time 5 --noproxy '*' http://${address}:${port}/`, domains: [] },
+                { command: `exec 3<>/dev/tcp/${address}/${port}`, domains: [] },
+              ]),
+        ];
+        const outcomes = await Promise.all(
+          probes.map(async ({ command, domains }) => run(command, { network: { domains } })),
+        );
+        await delay(500);
+
+        /* The canary is the judge; a refusal may be a proxy error status, which `--fail` turns into a failed exit. */
+        expect(listener.connections()).toBe(1);
+        expect(
+          outcomes.map((outcome) => outcome.exitCode !== 0),
+          outcomes.map((outcome) => outcome.stderr.trim()).join('\n'),
+        ).toStrictEqual(probes.map(() => true));
+      } finally {
+        listener.server.close();
+      }
+    },
+  );
+
+  conformance('C06', 'background and detached descendants stop before the launch settles', async () => {
+    const beat = join(work, 'beat');
+    const detached = join(work, 'detached');
+    const writer = (path: string): string => `while :; do printf b >> ${path}; sleep 0.1; done`;
+    const command = [
+      `( ${writer(beat)} ) &`,
+      ...(linux ? [`setsid sh -c '${writer(detached)}' &`] : []),
+      'sleep 1',
+      'exit 0',
+    ].join('\n');
+    const result = await run(command);
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(statSync(beat).size).toBeGreaterThan(0);
+    const sizes = [beat, ...(linux ? [detached] : [])].map((path) => statSync(path).size);
+    await delay(1500);
+
+    expect([beat, ...(linux ? [detached] : [])].map((path) => statSync(path).size)).toStrictEqual(sizes);
+  });
+
+  if (!linux) {
+    it('C06b: a setsid or double-forked daemon started before termination (macOS residual)', () => {
+      results.push({
+        id: 'C06b',
+        title: 'setsid/double-fork escape from the macOS process tracker',
+        status: 'residual-disclosed',
+        detail: 'Seatbelt has no PID namespace; the tracker kills remembered descendants and the group (A24).',
+      });
+    });
+  }
+
+  conformance('C07', 'abort stops a running command and settles once', async () => {
+    const controller = new AbortController();
+    const process_ = await start(launchOf('sleep 300', { signal: controller.signal }));
+    const startedAt = Date.now();
+    controller.abort();
+    const exit = await process_.exited;
+
+    expect(exit).toStrictEqual({ signal: 'SIGKILL' });
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  });
+
+  if (linux) {
+    conformance('C08', 'the Terminal shell owns its tty with job control, resize and Ctrl-C', async () => {
+      const process_ = await start(
+        launchOf('', {
+          arguments: ['--noprofile', '--norc', '--noediting', '-i'],
+          environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', PS1: '', TERM: 'dumb' },
+          stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } },
+        }),
+      );
+      if (process_.kind !== 'terminal') {
+        throw new Error('expected a terminal launch');
+      }
+      let transcript = '';
+      const reading = (async () => {
+        const decoder = new TextDecoder();
+        for await (const chunk of process_.output) {
+          transcript += decoder.decode(chunk, { stream: true });
+        }
+      })();
+      const waitFor = async (marker: string): Promise<void> => {
+        for (const deadline = Date.now() + 15_000; !transcript.includes(marker); ) {
+          if (Date.now() > deadline) {
+            throw new Error(`no ${marker} in ${JSON.stringify(transcript)}`);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- polls the transcript until the marker arrives.
+          await delay(20);
+        }
+      };
+      const type = (line: string): void => {
+        process_.write(new TextEncoder().encode(line));
+      };
+
+      type('test -t 0 && echo TTY-$((40+2)); case $- in *m*) echo JOBS-$((2+3)) ;; esac\n');
+      await waitFor('TTY-42');
+      await waitFor('JOBS-5');
+      process_.resize({ columns: 137, rows: 43 });
+      type('echo SIZE-$(stty size | tr " " x)\n');
+      await waitFor('SIZE-43x137');
+      type('sleep 30\n');
+      await delay(300);
+      type('\u0003');
+      type('echo AFTER-$((1+1))\n');
+      await waitFor('AFTER-2');
+      type('exit 3\n');
+
+      expect(await process_.exited).toStrictEqual({ exitCode: 3 });
+      await reading;
+    });
+  } else {
+    conformance('C08', 'the Terminal stays refused until the own-pty validation run', async () => {
+      const outcome = await provider.launch(
+        launchOf('', { stdio: { kind: 'terminal', size: { columns: 80, rows: 24 } } }),
+      );
+
+      expect(outcome.status).toBe('unsupported');
+    });
+
+    it('C09: macOS own-pty Terminal containment', () => {
+      results.push({
+        id: 'C09',
+        title: 'macOS own-pty Terminal containment',
+        status: 'operator-validation-pending',
+        detail: 'Not run by agents; the operator runs the own-pty validation (ruling 2026-10-24T05:39Z).',
+      });
+    });
+  }
+});

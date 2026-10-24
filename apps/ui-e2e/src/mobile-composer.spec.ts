@@ -99,6 +99,11 @@ beforeEach(async () => {
   await target.setViewport(iosViewport);
   await target.navigate('/__e2e/chat-attachments');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+  // A project opens on the model stage (Option B); the composer lives on the Chat surface.
+  await target.click(
+    selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name: 'Chat', exact: true }),
+    { touch: true },
+  );
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
   // The spec guards touch rules on its own: this context must report a coarse pointer.
   expect(await target.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);

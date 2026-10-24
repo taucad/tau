@@ -174,7 +174,8 @@ const readCount = (value: string | null, limit: number): number => {
 };
 
 const createSeedProject = (mainFixture: string | undefined): Omit<ProjectManifest, '$schema'> => ({
-  name: 'sgenoud/models file-tree e2e',
+  // The touch-parameters seed has its own name, so a spec that reopens it from the list never picks another seed.
+  name: mainFixture === 'touch-parameters' ? 'Touch parameters e2e' : 'sgenoud/models file-tree e2e',
   description: 'Deterministic local seed for the project file tree e2e surface.',
   tags: ['e2e', 'replicad'],
   assets: {

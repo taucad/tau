@@ -15,7 +15,7 @@ import * as target from '#support/external-target.js';
  */
 
 const seedRoute = '/__e2e/project-file-tree?main=touch-parameters';
-const seedProjectName = 'sgenoud/models file-tree e2e';
+const seedProjectName = 'Touch parameters e2e';
 
 const navigation = (): Locator => selectors.getByRole('navigation', { name: 'Workbench' });
 const navButton = (name: string): Locator => navigation().getByRole('button', { name, exact: true });
@@ -51,8 +51,9 @@ type Measurement = Readonly<{
 /**
  * Measures one open pane in the page. Self-contained: it is serialized into the target page.
  *
- * A control meets the floor through its own box or through a label that activates it (a switch row, a checkbox
- * label). An inline link inside running text is exempt, as WCAG 2.5.8 exempts it.
+ * A control meets the floor through its own box, through a label that activates it (a checkbox or radio label), or,
+ * for a parameter switch, through its switch row: the switch's ::after spans the row, and a pseudo-element has no
+ * box of its own to measure. An inline link inside running text is exempt, as WCAG 2.5.8 exempts it.
  */
 const measurePane = (region: Element): Measurement => {
   const floor = 24;
@@ -84,6 +85,10 @@ const measurePane = (region: Element): Measurement => {
       ...(control.closest('label') ? [control.closest('label')!] : []),
     ];
     if (labels.some((label) => isShown(label) && meets(label.getBoundingClientRect()))) {
+      continue;
+    }
+    const switchRow = control.getAttribute('role') === 'switch' ? control.closest('[data-switch-row]') : null;
+    if (switchRow !== null && isShown(switchRow) && meets(switchRow.getBoundingClientRect())) {
       continue;
     }
     undersized.push(nameOf(control));

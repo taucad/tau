@@ -14,6 +14,13 @@ import type { CopyCandidate } from '#api/git/mirror/watermark.js';
  * An idle poll counts one `noop` round, so `tau_mirror_rounds_total` exists
  * whenever the copier does and `storage-mirror-absent` can tell a dead copier
  * from an idle one (W14).
+ *
+ * The probe is a B2 version listing, a Class C transaction, which a B2 account's
+ * daily transaction cap counts. Probing on every 10-second poll sent about 8,600
+ * a day while idle. On staging (2026-10-24) the probe began failing at 19:43Z,
+ * and the copier backed off without logging why. A successful probe therefore
+ * stands for {@link probeTtlMilliseconds}, a failed write clears it early, and
+ * a failed probe is logged with its reason (`tau_mirror.destination_down`).
  */
 
 const minute = 60 * 1000;
@@ -25,6 +32,15 @@ const day = 24 * 60 * minute;
  * usually lands first and copies it in its own round.
  */
 export const lateLfsGraceMilliseconds = minute;
+
+/** How long a successful probe stands, so an idle poll sends nothing to B2. */
+export const probeTtlMilliseconds = 5 * minute;
+
+/** The last probe's answer, kept across polls by the worker. */
+export type ProbeState = {
+  up: boolean;
+  checkedAt: number | undefined;
+};
 
 /** Jittered exponential backoff to W13's 5-minute ceiling. */
 export const backoffMilliseconds = (failures: number, base: number, random: () => number = Math.random): number => {
@@ -73,14 +89,36 @@ const runPool = async (items: readonly CopyCandidate[], limit: number, run: (ite
   );
 };
 
+/** Probes the copy unless a successful probe still stands; a refusal is logged with its reason. */
+const probeDestination = async (context: CopierContext, state: ProbeState): Promise<boolean> => {
+  const now = retentionClock(context).at.getTime();
+  if (state.up && state.checkedAt !== undefined && now - state.checkedAt < probeTtlMilliseconds) {
+    return true;
+  }
+  const probe = await context.destination.probe(context.signal);
+  state.up = probe.up;
+  state.checkedAt = now;
+  if (!probe.up) {
+    context.report?.({
+      event: 'tau_mirror.destination_down',
+      status: probe.status,
+      code: probe.code,
+      message: probe.message,
+    });
+  }
+  return probe.up;
+};
+
 /** One poll: probe, owner markers, copy rounds, gauges. Returns whether the destination answered. */
+// oxlint-disable-next-line max-params -- the worker's state across polls, each optional for a single poll
 export const pollOnce = async (
   options: Pick<WorkerOptions, 'context' | 'concurrency' | 'backfillShare'>,
   retry = new Map<string, { failures: number; at: number }>(),
   pollMilliseconds = 10_000,
+  probe: ProbeState = { up: false, checkedAt: undefined },
 ): Promise<boolean> => {
   const { context } = options;
-  const reachable = await context.destination.probe(context.signal);
+  const reachable = await probeDestination(context, probe);
   context.metrics.up(reachable);
   if (reachable) {
     await markTombstonedOwners(context);
@@ -108,6 +146,10 @@ export const pollOnce = async (
     await runPool(candidates, options.concurrency, async (candidate) => {
       const result = await copyRepository(context, candidate);
       if (result.outcome === 'failed') {
+        if (result.failure.stage === 'dest_write' || result.failure.stage === 'retention') {
+          // The copy refused a write: probe again next poll rather than trust a standing probe.
+          probe.checkedAt = undefined;
+        }
         const failures = (retry.get(candidate.projectId)?.failures ?? 0) + 1;
         retry.set(candidate.projectId, {
           failures,
@@ -211,12 +253,13 @@ export const runMirrorWorker = async (options: WorkerOptions): Promise<void> => 
     drilling = running();
   };
   const retry = new Map<string, { failures: number; at: number }>();
+  const probe: ProbeState = { up: false, checkedAt: undefined };
   let downPolls = 0;
   while (!signal.aborted) {
     let wait = options.pollMilliseconds;
     try {
       // oxlint-disable-next-line no-await-in-loop -- polls are sequential by design
-      const reachable = await pollOnce(options, retry, options.pollMilliseconds);
+      const reachable = await pollOnce(options, retry, options.pollMilliseconds, probe);
       downPolls = reachable ? 0 : downPolls + 1;
       if (reachable) {
         startDrill();

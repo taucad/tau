@@ -140,25 +140,32 @@ passed its own-root positive control in the same run. Otherwise the check reads 
 fails; `summarize.mts` also flags any such vacuous pass as an integrity violation. Orchestrator
 impersonation results are recorded as `info` only.
 
-| check                                 | proven by                                                                                                                                          |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fallback.write.ownAllowed.*`         | each pwsh child (same account, different cap SID) writes its own root                                                                              |
-| `fallback.write.crossDenied.*`        | the same child's write to the other root is refused; no canary lands there                                                                         |
-| `fallback.read.ownAllowed.*`          | each cmd.exe child, as its own sandbox user, copies its own secret out (exact match)                                                               |
-| `fallback.read.crossDenied.*`         | the other session's secret never appears in that child's exfil file                                                                                |
-| `fallback.read.neverGrantable`        | the never-grantable secret never appears in either child's exfil file                                                                              |
-| `fallback.pwsh.{write,read}.*`        | pwsh re-runs the write/read isolation proofs as the sandbox user in the token (external canaries, own-root controls)                               |
-| `fallback.s2Pty.inContainer` (S2 PTY) | `token-runner.exe` (PTY mode) owns the ConPTY; Git for Windows Bash runs in the token, driven through it (tty, resize, Ctrl-C, job control, UTF-8) |
+| check                                 | proven by                                                                                                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fallback.write.ownAllowed.*`         | each pwsh child (same account, different cap SID) writes its own root                                                                                                           |
+| `fallback.write.crossDenied.*`        | the same child's write to the other root is refused; no canary lands there                                                                                                      |
+| `fallback.read.ownAllowed.*`          | each cmd.exe child, as its own sandbox user, copies its own secret out (exact match)                                                                                            |
+| `fallback.read.crossDenied.*`         | the other session's secret never appears in that child's exfil file                                                                                                             |
+| `fallback.read.neverGrantable`        | the never-grantable secret never appears in either child's exfil file                                                                                                           |
+| `fallback.pwsh.{write,read}.*`        | pwsh re-runs the write/read isolation proofs as the sandbox user in the token (external canaries, own-root controls)                                                            |
+| `fallback.s2Pty.inContainer` (S2 PTY) | `token-runner.exe` (PTY mode) owns the ConPTY; pwsh (the D14 Windows shell) runs in the token, driven through it (tty, resize, Ctrl-C, PSJob control, UTF-8, containment probe) |
 
-S2's PTY master is the **unrestricted runner** (`token-runner.cs` PTY mode, Codex `conpty/mod.rs`
-shape), not node-pty: both node-pty and MSYS Bash fail to CREATE a pipe inside the write-restricted
-token (ConPTY `EPERM`; Bash "couldn't create signal pipe", Win32 error 5; run 40037048316). So the
-runner creates the pseudoconsole and pipes, spawns Git for Windows Bash in the token attached via
-`PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`, and drives tty/resize/Ctrl-C/job-control/UTF-8 from the
-terminal stream. The S2 receipt (`fallback-s2-pty.receipt.json`) is attributed to the sandbox user by
-both the runner and the Bash inside the pty; the UTF-8 bytes Bash wrote are re-read by the
-orchestrator. `WRITE_RESTRICTED` gates writes only, so read isolation rests on distinct sandbox users
-plus deny-read ACEs.
+S2's shell is **pwsh** (the ratified D14 Windows shell), and its PTY master is the **unrestricted
+runner** (`token-runner.cs` PTY mode, Codex `conpty/mod.rs` shape), not node-pty: both node-pty and
+MSYS Bash fail to CREATE a pipe inside the write-restricted token (ConPTY `EPERM`; Bash "couldn't
+create signal pipe", Win32 error 5; run 40041468455). So the runner creates the pseudoconsole and
+pipes, spawns pwsh in the token attached via `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`, and drives
+tty/resize/Ctrl-C/UTF-8 plus a containment probe from the terminal stream. The S2 checks mirror
+Linux/macOS: a real tty (`Console.IsInput/OutputRedirected` both false), `ResizePseudoConsole` to
+40x100, Ctrl-C (0x03) interrupting a foreground `Start-Sleep` under 10s, and a UTF-8 round-trip.
+Because pwsh has no POSIX job table, job control maps to the PSJob cmdlets (`Start-Job`/`Stop-Job`,
+State `Running`→`Stopped`), and POSIX fg/bg + Ctrl-Z suspend are recorded honestly as info rows, not
+pass/fail. The containment probe writes an own-root canary (a dir whose ACL grants the token's cap)
+holding a synthetic nonce and is refused a deny-root (granted only the other cap); the orchestrator
+confirms both on disk. The S2 receipt (`fallback-s2-pty.receipt.json`) is attributed to the sandbox
+user by both the runner (`identity.runnerUser`) and the pwsh inside the pty (`identity.shellWhoami`);
+the UTF-8 bytes pwsh wrote are re-read by the orchestrator. `WRITE_RESTRICTED` gates writes only, so
+read isolation rests on distinct sandbox users plus deny-read ACEs.
 
 ### Codex token/spawn parity (recorded in the receipt as `fallback.codexParity`)
 
@@ -186,11 +193,13 @@ loaded profile) and MSYS `bash.exe` (signal-pipe Win32 error 5) still cannot cre
 inside the token, which is why the runner, not node-pty, owns the ConPTY for S2.
 
 Run 40041468455 (both rows): pwsh start, pwsh write isolation and pwsh read isolation pass, and every
-grant is revoked. The runner-owned ConPTY works (Bash is spawned in the token on the runner's
-pseudoconsole), but **S2 with MSYS Bash is still not proven**: Bash itself creates its Cygwin signal
-pipe at startup and the write-restricted token is refused (`couldn't create signal pipe`, Win32 error
-5), whoever owns the PTY. Since D14 makes PowerShell the Windows shell, the next S2 step is pwsh in
-the runner-owned ConPTY.
+grant is revoked. The runner-owned ConPTY works, but **S2 with MSYS Bash is not provable**: Bash
+itself creates its Cygwin signal pipe at startup and the write-restricted token is refused (`couldn't
+create signal pipe`, Win32 error 5), whoever owns the PTY. Since D14 makes PowerShell the Windows
+shell, S2 now drives **pwsh** in the runner-owned ConPTY (the D14 bar): the same tty/resize/Ctrl-C/
+UTF-8 checks as Linux/macOS, PSJob-mapped job control with POSIX fg/bg + Ctrl-Z recorded as info, and
+an in-PTY containment probe confirmed externally. The per-row `fallback.s2Pty.*` verdicts are recorded
+in the latest dispatch run's receipts.
 
 ## Running
 

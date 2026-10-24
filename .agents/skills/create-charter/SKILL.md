@@ -47,7 +47,7 @@ Do not generate every future implementation todo during chartering. Make work pa
 
 ## Human decisions and handoff
 
-Agents own facts, decomposition, reversible details consistent with rulings, experiments and reconciliation. Surface a human choice only when evidence cannot choose the desired objective, a governing invariant or a material trade-off between valid outcomes, or when authority is missing.
+Agents own facts, decomposition, reversible details consistent with rulings (including size-limit raises inside the [npm policy](../../../docs/policy/npm-policy.md) band), experiments and reconciliation. Surface a human choice only when evidence cannot choose the desired objective, a governing invariant or a material trade-off between valid outcomes, or when authority is missing.
 
 Each decision brief states the question plainly, why it changes downstream work, resolved evidence, the recommendation, viable alternatives, affected decision/work IDs, and what can continue meanwhile. Link the detailed evidence; do not ask the operator to synthesize the lane reports. Record the resulting ruling and update affected dependencies.
 

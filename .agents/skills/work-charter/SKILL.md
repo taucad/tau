@@ -64,7 +64,7 @@ Context, quota and interruption are continuation events. Persist usable evidence
 
 ## Human attention and closeout
 
-Resolve empirical facts and reversible details consistent with intent autonomously. Ask only about an unresolved objective/invariant, a material trade-off between valid outcomes, unavailable evidence that changes the authorized result, or missing authority. Supply the recommendation, resolved evidence, affected task IDs and independent work that can continue. Do not re-ask for authorization already present.
+Resolve empirical facts and reversible details consistent with intent autonomously; a size-limit raise inside the [npm policy](../../../docs/policy/npm-policy.md) band is one. Ask only about an unresolved objective/invariant, a material trade-off between valid outcomes, unavailable evidence that changes the authorized result, or missing authority. Supply the recommendation, resolved evidence, affected task IDs and independent work that can continue. Do not re-ask for authorization already present.
 
 Close out only the selected scope after semantic acceptance and relevant review. Record changed paths, observed checks, unresolved limitations and the next-ready set. Validate research/artifact links, check the separate Tau Brain Git boundary (commit Brain paths with `pnpm agent-env commit`), and distinguish local saving, commit and backup. Do not silently commit, push, publish, schedule a future run or implement the unselected remainder.
 

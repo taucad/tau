@@ -346,6 +346,11 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_git_route_holds_total: 'OB5',
   tau_git_route_hold_duration: 'OB5',
   tau_git_route_lookup_duration: 'OB5',
+  // DC1 ships the hop's grant, forward and receipt series; OB4's hop row reads them.
+  tau_git_grants_rejected_total: 'OB4',
+  tau_git_forward_errors_total: 'OB4',
+  tau_git_receipts_total: 'OB4',
+  tau_git_slow_body_aborts_total: 'OB4',
 };
 
 /**

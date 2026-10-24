@@ -35,6 +35,7 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
+import { StorageGitService } from '#api/git/worker/storage-git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
@@ -42,6 +43,7 @@ import { decodeManifest } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import { loopbackExecutor, loopbackReceiptChannel } from '#testing/loopback-executor.js';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
 
 /*
@@ -118,8 +120,22 @@ const quietMetrics = (): MetricsService =>
     },
   }) as unknown as MetricsService;
 
+/*
+ * DC1: the API forwards each RPC to tau-storage. Here the worker runs in
+ * process behind the loopback executor and shares the store, so a manifest
+ * read held below is held whether the API (an advertisement) or the worker
+ * (a push's or fetch's hydrate) makes it.
+ */
 const createService = (store: RepositoryStore, owners: OwnerInFlightGate): GitRepositoryService => {
-  const service = new GitRepositoryService(
+  // oxlint-disable-next-line prefer-const -- assigned after the worker whose receipt channel closes over it
+  let api: GitRepositoryService | undefined;
+  const worker = new StorageGitService({
+    store,
+    receipts: loopbackReceiptChannel(async (receipt) => api?.applyReceipt(receipt)),
+  });
+  worker.leaseReservationFloorBytes = 1024;
+  worker.readLeaseDiskFreeBytes = async () => 1024 ** 4;
+  api = new GitRepositoryService(
     databaseStub(),
     {
       getEntitlements: async () => ({ tier: 'pro', canSyncFiles: true }),
@@ -136,11 +152,11 @@ const createService = (store: RepositoryStore, owners: OwnerInFlightGate): GitRe
     new ShutdownService(),
     quietMetrics(),
     RepositoryRouteGuard.open(),
+    loopbackExecutor(worker),
+    undefined,
     owners,
   );
-  service.leaseReservationFloorBytes = 1024;
-  service.readLeaseDiskFreeBytes = async () => 1024 ** 4;
-  return service;
+  return api;
 };
 
 /** The seeded store, with every manifest read of `ownerId`'s repository held until `open`. */
@@ -260,7 +276,6 @@ describe('the owner cap inside the git service (DA6)', () => {
           committedBy: ownerId,
           body: Readable.from([Buffer.from('0000')]),
           gzipped: false,
-          maximumInputBytes: 1024 ** 2,
         });
       } catch (error) {
         return error;
@@ -300,7 +315,6 @@ describe('the owner cap inside the git service (DA6)', () => {
         committedBy: ownerId,
         body: Readable.from([Buffer.from('0000')]),
         gzipped: false,
-        maximumInputBytes: 1024 ** 2,
       }),
     ).rejects.toBeDefined();
     expect(cap.inFlight(ownerId)).toEqual({ requests: 0, pushes: 0 });
@@ -322,7 +336,6 @@ describe('the owner cap inside the git service (DA6)', () => {
         access,
         body: Readable.from([]),
         gzipped: false,
-        maximumInputBytes: 1024,
       }),
     ).rejects.toBeDefined();
     expect(cap.inFlight(ownerId)).toEqual({ requests: 0, pushes: 0 });
@@ -336,7 +349,6 @@ describe('the owner cap inside the git service (DA6)', () => {
       access,
       body: Readable.from([Buffer.from(`${pktLine(`want ${mainHead}\n`)}0000${pktLine('done\n')}`)]),
       gzipped: false,
-      maximumInputBytes: 1024 ** 2,
     });
     expect(cap.inFlight(ownerId)).toEqual({ requests: 1, pushes: 0 });
     const pack = await buffer(output);
@@ -358,7 +370,6 @@ describe('the owner cap inside the git service (DA6)', () => {
       access,
       body,
       gzipped: false,
-      maximumInputBytes: 1024 ** 2,
       abort: abort.signal,
     });
     output.resume();

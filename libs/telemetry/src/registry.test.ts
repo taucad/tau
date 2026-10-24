@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(157);
+    expect(metrics).toHaveLength(161);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -127,6 +127,35 @@ describe('TauMetrics', () => {
     /* A hold is at most about 5 s, so its buckets end there; a lookup is a cache hit or one indexed read. */
     expect(TauMetrics.gitRouteHoldDuration.buckets.at(-1)).toBeGreaterThanOrEqual(5);
     expect(TauMetrics.gitRouteLookupDuration.buckets.at(0)).toBeLessThanOrEqual(0.0001);
+  });
+
+  /* Hosted Remote Storage DC1: the grant, forward and receipt series between tau-api and tau-storage. */
+  it('should declare the storage grant, forward and receipt instruments with bounded reasons', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.gitGrantsRejected,
+        TauMetrics.gitForwardErrors,
+        TauMetrics.gitReceipts,
+        TauMetrics.gitSlowBodyAborts,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_git_grants_rejected_total: { type: 'counter', unit: '{grant}' },
+      tau_git_forward_errors_total: { type: 'counter', unit: '{request}' },
+      tau_git_receipts_total: { type: 'counter', unit: '{receipt}' },
+      tau_git_slow_body_aborts_total: { type: 'counter', unit: '{request}' },
+    });
+    for (const reason of ['unknown_kid', 'version', 'iat_skew', 'path', 'replay', 'signature']) {
+      expect(TauMetrics.gitGrantsRejected.attributes.safeParse({ reason }).success).toBe(true);
+    }
+    expect(TauMetrics.gitGrantsRejected.attributes.safeParse({ reason: 'proj_1' }).success).toBe(false);
+    for (const reason of ['grant_rejected', 'unreachable', 'timeout', 'aborted', 'malformed_response']) {
+      expect(TauMetrics.gitForwardErrors.attributes.safeParse({ reason }).success).toBe(true);
+    }
+    for (const outcome of ['applied', 'duplicate', 'ledger_unavailable', 'manifest_mismatch', 'rejected', 'stale']) {
+      expect(TauMetrics.gitReceipts.attributes.safeParse({ outcome }).success).toBe(true);
+    }
+    expect(TauMetrics.gitReceipts.attributes.safeParse({ outcome: 'rid_1' }).success).toBe(false);
   });
 
   it('should split retryable refusals out of error as busy on the sync edge', () => {
@@ -421,11 +450,12 @@ describe('TauMetrics', () => {
   it('should use pluralized names or mass nouns for counters', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
     // `copied`: W13's catalogue fixes `tau_mirror_{objects,bytes}_copied_total` (W14 OB6).
+    // `rejected`: the W14 catalogue's `tau_git_grants_rejected_total` (Hosted Remote Storage DC1, OB4).
     // `usage`, `missing`, `attention`, `reuse`, `dropped`, `unavailable`, `partial`: Runtime Observability package §1
     // fixes `tau.runtime.{kernel_usage,facts_missing,job_attention,reuse}` and `tau.telemetry.{client.dropped,
     // spans.dropped,ingest.unavailable,ingest.partial}`; dashboards and named views use those names.
     const validSuffixes =
-      /s$|cost$|microusd$|picousd$|flagged$|copied$|usage$|missing$|attention$|reuse$|dropped$|unavailable$|partial$/;
+      /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$|usage$|missing$|attention$|reuse$|dropped$|unavailable$|partial$/;
     for (const counter of counters) {
       // A `_by_<dimension>` tail names the breakdown, not the counted thing: `operations_by_release`.
       const lastSegment = (counter.name.split('.').at(-1) ?? '').replace(/_by_\w+$/u, '');

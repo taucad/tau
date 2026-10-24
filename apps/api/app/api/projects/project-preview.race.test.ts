@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
+import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { requestProjectDeletion } from '#api/projects/project-deletion.js';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
@@ -77,7 +78,7 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('preview PUT 
     budget.consumeDailyBudget.mockResolvedValue({ allowed: true, count: 1 });
     const controller = new ProjectPreviewController(
       new ProjectAccessService(databaseService),
-      new ProjectPreviewService(storage),
+      new ProjectPreviewService(storage, objectStoragePreviewWriter(storage)),
       budget,
       databaseService,
     );

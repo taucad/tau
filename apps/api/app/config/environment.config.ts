@@ -310,6 +310,25 @@ export const environmentSchemaBase = z.object({
     .default('0')
     .describe('Dev/e2e only: let the git proxy reach private, loopback and http:// remotes'),
 
+  /*
+   * The tau-storage hop (north star DC1). With a URL, every git RPC executes in
+   * the private tau-storage app behind a grant this API signs, and comes back
+   * with a receipt tau-storage signs; an unreachable tau-storage answers 503 and
+   * never falls back. Unset URL: the same worker runs inside this API under
+   * process-only keys (`forwarding/git-execution.ts`, `git_execution=in_process`),
+   * which is production until a production tau-storage exists. Outside production the fixed development
+   * keys stand in for unset keys (`forwarding/contract/development-keys.ts`).
+   */
+  TAU_STORAGE_URL: unsetWhenEmpty(z.string().optional()).describe(
+    'tau-storage base URL (Flycast); a local stack may list several, comma-separated',
+  ),
+  TAU_STORAGE_GRANT_SIGNING_KEY: unsetWhenEmpty(z.string().optional()).describe(
+    'JSON {kid, alg: "Ed25519", privateKeyPem}: the grant signing key (tau-cloud modules/storage-signing-keys)',
+  ),
+  TAU_STORAGE_RECEIPT_PUBLIC_KEYS: unsetWhenEmpty(z.string().optional()).describe(
+    'JSON array of one or two {kid, alg: "Ed25519", publicKeyPem}: tau-storage receipt verification keys',
+  ),
+
   // OpenTelemetry
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().optional().describe('OTLP endpoint for traces and logs'),
   OTEL_EXPORTER_OTLP_HEADERS: z.string().optional().describe('OTLP auth headers (e.g., Grafana Cloud Basic auth)'),
@@ -326,6 +345,19 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       message: 'TAU_LLM_PROVIDER_UPSTREAM_URL requires BILLING_ENVIRONMENT=development',
       path: ['TAU_LLM_PROVIDER_UPSTREAM_URL'],
     });
+  }
+
+  /* DC1: a production API forwarding git to tau-storage holds both real keys; never the development pair. */
+  if (data.NODE_ENV === 'production' && data.TAU_STORAGE_URL !== undefined) {
+    for (const name of ['TAU_STORAGE_GRANT_SIGNING_KEY', 'TAU_STORAGE_RECEIPT_PUBLIC_KEYS'] as const) {
+      if (data[name] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          message: `${name} is required when TAU_STORAGE_URL is set in production`,
+          path: [name],
+        });
+      }
+    }
   }
 
   if (data.TAU_TRANSCRIPTION_UPSTREAM_URL !== undefined && data.NODE_ENV === 'production') {

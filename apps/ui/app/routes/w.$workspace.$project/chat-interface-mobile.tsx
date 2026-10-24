@@ -321,17 +321,17 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   }, []);
 
   // A surface the person chooses takes focus; one restored from storage or opened by the app does not.
-  const shouldFocusSurface = useRef(false);
+  const surfaceToFocus = useRef<MobilePanelId | undefined>(undefined);
   const chooseSurface = useCallback(
     (id: MobilePanelId) => {
-      shouldFocusSurface.current = id !== 'viewer';
+      surfaceToFocus.current = id === 'viewer' ? undefined : id;
       handleTabChange(id);
     },
     [handleTabChange],
   );
   useEffect(() => {
-    if (shouldFocusSurface.current && drawerOpen && section) {
-      shouldFocusSurface.current = false;
+    if (surfaceToFocus.current === activeTab && drawerOpen && section) {
+      surfaceToFocus.current = undefined;
       section.focus({ preventScroll: true });
     }
   }, [activeTab, drawerOpen, section]);

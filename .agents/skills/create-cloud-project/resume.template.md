@@ -66,6 +66,7 @@ Operational constraints (operator-standing):
 - IaC: never revert the stack PR that carries `prevent_destroy`; roll forward with `removed {}`; every change carries a change proposal and merges only on the expected speculative plan.
 - Brain commits: small, by path, pushed to `main`; `pnpm docs:validate` first; source map regenerated when a handbook page's `sources` change.
 - Release-train rules the program's packages follow or leave.
+- Size budgets follow `npm-policy.md` § 7 "Changing a size budget": raises inside the band are FYIs, with the program-start ref for `pnpm size:raises --program-base`. Reserve more only by a charter ruling.
 - Where Darwin verification happens (CI), and that the operator is never asked to run suites.
 
 ## 5. The sequence

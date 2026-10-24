@@ -6,14 +6,14 @@ import { dirname, posix, win32 } from 'node:path';
 /**
  * The shell language a host runs (D14): Bash on macOS and Linux, PowerShell on Windows.
  *
- * @internal
+ * @public
  */
 export type ShellKind = 'bash' | 'powershell';
 
 /**
  * The machine's own shell, resolved from fixed paths only and bound to the bytes on disk.
  *
- * @internal
+ * @public
  */
 export type ShellExecutable = Readonly<{
   kind: ShellKind;
@@ -29,11 +29,11 @@ export type ShellExecutable = Readonly<{
  * Why no shell was resolved. `shell-missing` covers an absent shell and one Tau refuses to trust, such as a
  * user-writable or Store copy.
  *
- * @internal
+ * @public
  */
 export type ShellExecutableRefusal = Readonly<{ status: 'shell-missing'; message: string }>;
 
-/** @internal */
+/** @public */
 export type ResolveShellExecutableOptions = Readonly<{
   platform: NodeJS.Platform;
   /** The host's environment, for `ProgramFiles`, `SystemRoot` and the profile roots on Windows. */
@@ -43,7 +43,7 @@ export type ResolveShellExecutableOptions = Readonly<{
 const digestOf = async (path: string): Promise<string> => {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(path)) {
-    hash.update(chunk as Uint8Array);
+    hash.update(chunk as Uint8Array<ArrayBuffer>);
   }
   return `sha256:${hash.digest('hex')}`;
 };
@@ -51,6 +51,7 @@ const digestOf = async (path: string): Promise<string> => {
 const missing = (message: string): ShellExecutableRefusal => ({ status: 'shell-missing', message });
 
 /** Group- or other-writable, or not owned by root: someone other than the administrator could replace it. */
+// oxlint-disable-next-line no-bitwise -- file mode bits.
 const posixUntrusted = (mode: number, uid: number): boolean => uid !== 0 || (mode & 0o022) !== 0;
 
 const resolvePosix = async (): Promise<ShellExecutable | ShellExecutableRefusal> => {
@@ -62,6 +63,7 @@ const resolvePosix = async (): Promise<ShellExecutable | ShellExecutableRefusal>
     return missing('Bash is not installed at /bin/bash.');
   }
   const file = await stat(real);
+  // oxlint-disable-next-line no-bitwise -- file mode bits.
   if (!file.isFile() || (file.mode & 0o111) === 0) {
     return missing(`${real} is not an executable file.`);
   }
@@ -116,7 +118,8 @@ const resolveWindows = async (
     // oxlint-disable-next-line no-await-in-loop -- see above.
     const real = await realpath(candidate.path);
     // oxlint-disable-next-line no-await-in-loop -- see above.
-    const realRoot = (await realpath(candidate.root)).toLowerCase();
+    const realRootPath = await realpath(candidate.root);
+    const realRoot = realRootPath.toLowerCase();
     const lower = real.toLowerCase();
     if (
       link.isSymbolicLink() ||
@@ -133,7 +136,7 @@ const resolveWindows = async (
     return { kind: 'powershell', path: candidate.path, realPath: real, digest: await digestOf(real) };
   }
   return missing(
-    'Neither PowerShell 7 (%ProgramFiles%\\PowerShell\\7\\pwsh.exe) nor Windows PowerShell 5.1 is installed at its fixed path.',
+    String.raw`Neither PowerShell 7 (%ProgramFiles%\PowerShell\7\pwsh.exe) nor Windows PowerShell 5.1 is installed at its fixed path.`,
   );
 };
 
@@ -145,7 +148,7 @@ const resolveWindows = async (
  * `%SystemRoot%\System32\WindowsPowerShell\v1.0`; a copy that is a link, or that resolves into the Store alias folder
  * or a per-user profile root, is refused. Nothing is bundled and nothing is substituted.
  *
- * @internal
+ * @public
  * @param options - Platform and host environment.
  * @returns The executable and its digest, or a `shell-missing` refusal.
  */
@@ -165,7 +168,7 @@ export const resolveShellExecutable = async (
  * Arguments that run one noninteractive command (blueprint, Bash invocation and result): Bash reads no startup file;
  * PowerShell loads no profile and keeps the machine's own execution policy.
  *
- * @internal
+ * @public
  * @param kind - The shell language.
  * @param command - The command text, passed as one argument and never reinterpreted.
  * @returns The arguments after the executable.
@@ -178,7 +181,7 @@ export const shellCommandArguments = (kind: ShellKind, command: string): readonl
 /**
  * Arguments that start the interactive Terminal shell.
  *
- * @internal
+ * @public
  * @param kind - The shell language.
  * @returns The arguments after the executable.
  */
@@ -188,7 +191,7 @@ export const shellInteractiveArguments = (kind: ShellKind): readonly string[] =>
 /**
  * The command a provider runs to report the shell's version, inside the same sandbox as any other launch.
  *
- * @internal
+ * @public
  * @param kind - The shell language.
  * @returns The command text for {@link shellCommandArguments}.
  */

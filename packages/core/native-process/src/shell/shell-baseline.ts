@@ -3,7 +3,7 @@ import { join, win32 } from 'node:path';
 /**
  * Where the baseline read-deny set is computed for.
  *
- * @internal
+ * @public
  */
 export type ShellBaselineOptions = Readonly<{
   platform: NodeJS.Platform;
@@ -56,7 +56,7 @@ const homeEntries: readonly string[] = [
  *
  * Windows named pipes (`\\.\pipe\*`) are not filesystem paths; the Windows provider fences them itself.
  *
- * @internal
+ * @public
  * @param options - Platform, home root and host environment.
  * @returns Absolute native paths, without duplicates.
  */

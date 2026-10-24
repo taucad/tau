@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { readdir, readFile } from 'node:fs/promises';
 
-/** One row of the host process table. @internal */
+/** One row of the host process table. @public */
 export type ProcessRow = Readonly<{ pid: number; ppid: number; pgid: number; zombie: boolean }>;
 
 /**
@@ -40,10 +40,11 @@ const darwinTable = async (): Promise<readonly ProcessRow[]> =>
     execFile(
       '/bin/ps',
       ['-A', '-o', 'pid=,ppid=,pgid=,stat='],
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables keep their wire names.
       { env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' }, maxBuffer: 16 * 1024 * 1024 },
       (error, stdout) => {
-        if (error) {
-          reject(error);
+        if (error !== null) {
+          reject(new Error(`ps failed: ${error.message}`, { cause: error }));
           return;
         }
         resolve(
@@ -65,7 +66,7 @@ const darwinTable = async (): Promise<readonly ProcessRow[]> =>
 /**
  * The host process table: `/proc` on Linux, `ps` on macOS.
  *
- * @internal
+ * @public
  * @returns Every visible process.
  */
 export const processTable = async (): Promise<readonly ProcessRow[]> =>
@@ -74,7 +75,7 @@ export const processTable = async (): Promise<readonly ProcessRow[]> =>
 /**
  * Every live process descended from `root` by parent links, plus every live member of process group `group`.
  *
- * @internal
+ * @public
  * @param table - A process table.
  * @param root - The tree's root process id.
  * @param group - A process group whose members are also owned.
@@ -116,7 +117,7 @@ const freezeRounds = 16;
 /** How often survivors are looked for while waiting for them to stop. */
 const pollMilliseconds = 10;
 
-/** @internal */
+/** @public */
 export type TerminateTreeOptions = Readonly<{
   /** The tree's root, normally the provider's direct child. */
   root: number;
@@ -137,11 +138,15 @@ export type TerminateTreeOptions = Readonly<{
  * itself, with one disclosed residual (A24 as amended 2026-10-24): a descendant that left both the tree and the group
  * (`setsid` plus a double fork) before termination began is not seen. It stays inside its Seatbelt profile.
  *
- * @internal
+ * @public
  * @param options - The tree, its group and the deadline.
  * @returns Process ids still alive at the deadline; empty when the tree is gone.
  */
 export const terminateOwnedProcesses = async (options: TerminateTreeOptions): Promise<readonly number[]> => {
+  /* A launch that never started has no tree; signalling group 1 or -1 would reach unrelated processes. */
+  if (!Number.isInteger(options.root) || options.root <= 1 || !Number.isInteger(options.group) || options.group <= 1) {
+    return [];
+  }
   const read = options.table ?? processTable;
   const frozen = new Set<number>();
   for (let round = 0; round < freezeRounds; round += 1) {
@@ -176,6 +181,8 @@ export const terminateOwnedProcesses = async (options: TerminateTreeOptions): Pr
       signal(pid, 'SIGKILL');
     }
     // oxlint-disable-next-line no-await-in-loop -- see above.
-    await new Promise((resolve) => setTimeout(resolve, pollMilliseconds));
+    await new Promise((resolve) => {
+      setTimeout(resolve, pollMilliseconds);
+    });
   }
 };

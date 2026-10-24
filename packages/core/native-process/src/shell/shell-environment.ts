@@ -94,7 +94,7 @@ const namePattern = /^[^=\0]+$/u;
 /**
  * The environment entries a contained shell may not receive.
  *
- * @internal
+ * @public
  * @param environment - The complete child environment the host built.
  * @returns The refused names, in input order; empty when the environment is acceptable.
  */

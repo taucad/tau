@@ -15,7 +15,10 @@ import { createInterface } from 'node:readline';
 
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 
-/** @internal */
+import { startGuardProxy } from '#shell/srt-guard-proxy.js';
+import type { GuardProxy } from '#shell/srt-guard-proxy.js';
+
+/** @public */
 export type SupervisorJob = Readonly<{
   /** The complete sandbox-runtime configuration for this launch. */
   profile: Record<string, unknown>;
@@ -23,9 +26,11 @@ export type SupervisorJob = Readonly<{
   command: string;
   workingDirectory: string;
   commandId: string;
+  /** Route granted names through the address guard (D26); set whenever the profile allows any domain. */
+  guard: boolean;
 }>;
 
-/** @internal */
+/** @public */
 export type SupervisorReply =
   | Readonly<{ status: 'ready'; argv: readonly string[] }>
   | Readonly<{ status: 'unavailable'; message: string }>;
@@ -37,12 +42,12 @@ const reply = async (value: SupervisorReply): Promise<void> =>
     });
   });
 
-const sandboxMarker = (argv: readonly string[]): string | undefined => {
+const sandboxMarker = (argv: readonly string[], bwrapPath: string): string | undefined => {
   const [, flag, wrapped] = argv;
   if (argv.length !== 3 || flag !== '-c' || wrapped === undefined) {
     return 'the sandbox runtime returned a vector Tau does not recognise.';
   }
-  if (process.platform === 'linux' && !wrapped.startsWith('bwrap ')) {
+  if (process.platform === 'linux' && !wrapped.startsWith(`${bwrapPath} --new-session --die-with-parent `)) {
     return 'the sandbox runtime did not start bwrap.';
   }
   if (process.platform === 'darwin' && !wrapped.includes(" /usr/bin/sandbox-exec -p '(version 1)")) {
@@ -50,6 +55,8 @@ const sandboxMarker = (argv: readonly string[]): string | undefined => {
   }
   return undefined;
 };
+
+let guard: GuardProxy | undefined;
 
 const prepare = async (job: SupervisorJob): Promise<SupervisorReply> => {
   if (process.platform !== 'linux' && process.platform !== 'darwin') {
@@ -59,12 +66,16 @@ const prepare = async (job: SupervisorJob): Promise<SupervisorReply> => {
     return { status: 'unavailable', message: `${process.platform} has no supported sandbox backend.` };
   }
   const profile = job.profile as Parameters<typeof SandboxManager.initialize>[0];
-  const ripgrep = (profile as { ripgrep?: { command: string } }).ripgrep;
+  const { ripgrep } = profile as { ripgrep?: { command: string } };
   const dependencies = await SandboxManager.checkDependenciesAsync(ripgrep);
   /* The runtime only warns when its seccomp helper is missing; without it Unix sockets are open (D26). */
   const fatal = [...dependencies.errors, ...dependencies.warnings.filter((warning) => /seccomp/iu.test(warning))];
   if (fatal.length > 0) {
     return { status: 'unavailable', message: fatal.join('; ') };
+  }
+  if (job.guard) {
+    guard = await startGuardProxy();
+    (profile.network as Record<string, unknown>)['parentProxy'] = { http: guard.url, https: guard.url };
   }
   await SandboxManager.initialize(profile);
   const { argv } = await SandboxManager.wrapWithSandboxArgv(
@@ -75,7 +86,7 @@ const prepare = async (job: SupervisorJob): Promise<SupervisorReply> => {
     job.workingDirectory,
     { commandId: job.commandId },
   );
-  const problem = sandboxMarker(argv);
+  const problem = sandboxMarker(argv, String((profile as { bwrapPath?: string }).bwrapPath ?? 'bwrap'));
   return problem === undefined ? { status: 'ready', argv } : { status: 'unavailable', message: problem };
 };
 
@@ -104,4 +115,7 @@ if (initialized) {
   SandboxManager.cleanupAfterCommand();
 }
 await SandboxManager.reset();
+await guard?.[Symbol.asyncDispose]();
+/* The runtime's Linux network bridges keep referenced children until the process ends. */
+// oxlint-disable-next-line unicorn/no-process-exit -- the supervisor is its own process and must end here.
 process.exit(0);

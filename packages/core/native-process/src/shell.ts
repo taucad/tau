@@ -2,8 +2,7 @@
 /**
  * `@taucad/native-process-core/shell`: the contained shell launch-session seam (blueprint W2). Internal until the
  * host shell service (W3) consumes it; nothing here is part of the published API.
- *
- * @packageDocumentation
+ 
  */
 export type {
   ShellExit,
@@ -34,3 +33,7 @@ export type {
   ShellExecutableRefusal,
   ShellKind,
 } from '#shell/shell-identity.js';
+export { createSandboxShellProvider } from '#shell/srt-shell-provider.js';
+export type { SandboxShellProviderOptions } from '#shell/srt-shell-provider.js';
+export { createFakeShellProvider } from '#shell/shell-fake.js';
+export type { FakeShellProvider, FakeShellScript } from '#shell/shell-fake.js';

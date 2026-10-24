@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { ChatInterfaceNav, chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 
@@ -64,13 +64,32 @@ describe('All surfaces', () => {
     );
     expect(groups).toEqual({
       Design: ['Model tree', 'Kinematics', 'Print'],
-      Activity: ['Browser', 'Revisions', 'Agents', 'Jobs'],
+      Activity: ['Revisions', 'Agents'],
       Project: ['Files', 'Editor', 'Export', 'Share', 'Details'],
       Diagnostics: ['Telemetry', 'Console'],
     });
     for (const primary of ['Chat', 'Parameters', 'Model']) {
       expect(within(sheet).queryByRole('button', { name: primary })).not.toBeInTheDocument();
     }
+  });
+
+  it.each([
+    [undefined, ['Revisions', 'Agents']],
+    ['desktop', ['Browser', 'Revisions', 'Agents']],
+  ] as const)('should list Browser only in the desktop app and Jobs nowhere (TAU_TARGET=%s)', (buildTarget, activity) => {
+    vi.stubEnv('TAU_TARGET', buildTarget);
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    render(<ControlledNav />);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
+
+    const group = within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('region', { name: 'Activity' });
+    expect(
+      within(group)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(activity);
   });
 
   it('should hide Print without Machines and the diagnostics without debug mode, as the desktop launcher does', () => {

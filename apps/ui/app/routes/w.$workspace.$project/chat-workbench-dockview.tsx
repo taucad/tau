@@ -57,6 +57,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
+import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 import {
   languageFromExtension,
   tauFileDragMime,
@@ -509,7 +510,9 @@ const sharedWorkbenchSurfaceIds = new Set<WorkbenchPanelId>([
 ]);
 
 export const isWorkbenchSurfaceAllowed = (id: WorkbenchPanelId, profile: WorkbenchProfile): boolean =>
-  (id !== 'print' || isFeatureEnabled('machines')) && (profile === 'editor' || sharedWorkbenchSurfaceIds.has(id));
+  isSurfaceShipped(id) &&
+  (id !== 'print' || isFeatureEnabled('machines')) &&
+  (profile === 'editor' || sharedWorkbenchSurfaceIds.has(id));
 
 const visibleWorkbenchSurfaceGroups = (
   isTauDebugEnabled: boolean,
@@ -549,7 +552,7 @@ export function replaceWorkbenchPlaceholderWithUtility({
   readonly placeholder: IDockviewPanel;
   readonly panelId: WorkbenchUtilityPanelId;
 }): void {
-  if (panelId === 'print' && !isFeatureEnabled('machines')) {
+  if (!isSurfaceShipped(panelId) || (panelId === 'print' && !isFeatureEnabled('machines'))) {
     return;
   }
   const definition = workbenchPanels[panelId];
@@ -887,7 +890,7 @@ export function openWorkbenchUtility(
   panelId: WorkbenchUtilityPanelId,
   group?: DockviewGroupPanel,
 ): void {
-  if (panelId === 'print' && !isFeatureEnabled('machines')) {
+  if (!isSurfaceShipped(panelId) || (panelId === 'print' && !isFeatureEnabled('machines'))) {
     return;
   }
   const definition = workbenchPanels[panelId];
@@ -946,6 +949,10 @@ export function restoreWorkbenchLayout({
         position: { direction: 'within', referenceGroup: legacyMachinesPanel.group },
       });
       api.removePanel(legacyMachinesPanel);
+    }
+    // A layout saved by another build, or before Jobs was withdrawn, can hold a surface this build does not offer.
+    for (const unshipped of api.panels.filter((panel) => !isSurfaceShipped(panel.api.component))) {
+      api.removePanel(unshipped);
     }
     if (!isTauDebugEnabled) {
       for (const panelId of [workbenchPanels.kernel.id, workbenchPanels.console.id]) {

@@ -333,7 +333,7 @@ function LiveComponentTree({
             <span className='truncate'>Weight · 0 of {leafPartIds.length} parts known</span>
             <span className='shrink-0 font-mono'>Unknown</span>
             {leafPartIds.length > 0 ? (
-              <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline'>
+              <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline pointer-coarse:min-h-6'>
                 Missing
               </CollapsibleTrigger>
             ) : undefined}
@@ -691,7 +691,13 @@ function ComponentRows({
 export function ExplorerEmptyState(): React.JSX.Element {
   return (
     <div className='size-full p-2'>
-      <PanelEmptyState icon={Box} title='No model components available' className='rounded-xl border bg-card' />
+      {/* Explains when parts appear (PN-TREE-3). */}
+      <PanelEmptyState
+        icon={Box}
+        title='No model components available'
+        description='Parts appear here after the model renders.'
+        className='rounded-xl border bg-card'
+      />
     </div>
   );
 }

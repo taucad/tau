@@ -1,6 +1,6 @@
 [
   {
-    "name": "total (ESM JS) — measured 233.46 kB brotli on 2026-10-24 (232.95 kB before host-side hashFiles revalidation, +0.51 kB); 234 kB adds hashFiles to the 233 kB budget for the Tau project config, the memory bounds, Machines and the Node preparation host",
+    "name": "total (ESM JS) — measured 233.75 kB brotli on 2026-10-24; 234 kB adds compute read-cache sizing by binding and device (T5: the Memory publication staging and the root refetch, ~0.7 kB) to the 233 kB budget for the Tau project config, memory bounds, Machines and the Node preparation host",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
     "limit": "234 kB"
   },

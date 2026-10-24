@@ -214,6 +214,8 @@ vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => 
   ProjectManifestIssueBanner: () => null,
 }));
 vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+/* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
+vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
 const { ProjectWorkspaceProvider } = await import('#routes/w.$workspace.$project/project-workspace-context.js');
 const { ChatInterfaceMobile } = await import('#routes/w.$workspace.$project/chat-interface-mobile.js');

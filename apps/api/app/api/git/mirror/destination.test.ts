@@ -2,7 +2,12 @@ import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { DeleteObjectCommand, DeleteObjectsCommand, PutObjectLegalHoldCommand, S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it } from 'vitest';
-import { ForbiddenDestinationCommandError, S3MirrorDestination, allowedCommands } from '#api/git/mirror/destination.js';
+import {
+  ForbiddenDestinationCommandError,
+  S3MirrorDestination,
+  allowedCommands,
+  readCommands,
+} from '#api/git/mirror/destination.js';
 
 /**
  * The adapter against canned B2 answers, one test per DT0 finding (2026-10-24,
@@ -23,7 +28,7 @@ type Answer = {
   body?: string;
 };
 
-const fakeClient = (answer: (request: Recorded) => Answer) => {
+const fakeClient = (answer: (request: Recorded) => Answer, options: { readOnly?: boolean } = {}) => {
   const requests: Recorded[] = [];
   const client = new S3Client({
     region: 'us-east-005',
@@ -76,6 +81,7 @@ const fakeClient = (answer: (request: Recorded) => Answer) => {
         credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
       },
       client,
+      options,
     ),
     client,
   };
@@ -296,6 +302,36 @@ describe('S3MirrorDestination on B2 (DT0)', () => {
       expect(requests).toHaveLength(0);
     },
   );
+
+  it('should refuse every write at the client for a read-only holder (the restore key, the verify drill)', async () => {
+    const { destination, requests } = fakeClient(
+      (request) => (request.method === 'GET' ? { status: 200, body: listing(version(key, 'v1')) } : { status: 200 }),
+      { readOnly: true },
+    );
+
+    await expect(
+      destination.put(key, new Uint8Array(Buffer.from('abc')), {
+        contentLength: 3,
+        sha256: 'ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=',
+        retainUntil: new Date('2026-11-23T00:00:00.000Z'),
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenDestinationCommandError);
+    await expect(destination.extendRetention(key, 'v1', new Date('2026-11-23T00:00:00.000Z'))).rejects.toBeInstanceOf(
+      ForbiddenDestinationCommandError,
+    );
+    expect(requests).toHaveLength(0);
+
+    const listed = [];
+    for await (const found of destination.listVersions('tenants/')) {
+      listed.push(found.versionId);
+    }
+    expect(listed).toStrictEqual(['v1']);
+    expect([...readCommands].sort()).toStrictEqual([
+      'GetObjectCommand',
+      'HeadObjectCommand',
+      'ListObjectVersionsCommand',
+    ]);
+  });
 
   it('should allow exactly list, head, get, put and retention', () => {
     expect([...allowedCommands].sort()).toStrictEqual([

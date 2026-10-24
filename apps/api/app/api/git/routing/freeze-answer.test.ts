@@ -37,6 +37,8 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
+import { StorageGitService } from '#api/git/worker/storage-git.service.js';
+import { loopbackExecutor, loopbackReceiptChannel } from '#testing/loopback-executor.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { createMemoryRepositoryStore } from '#testing/publication-lease.fixture.js';
@@ -146,7 +148,12 @@ const createService = (
   routes: RepositoryRouteGuard,
   metrics: MetricsService = recordingMetrics().metrics,
 ): GitRepositoryService => {
-  const service = new GitRepositoryService(
+  /* DC1: the API forwards every RPC to an in-process tau-storage service. */
+  const worker = new StorageGitService({ store, receipts: loopbackReceiptChannel(), metrics });
+  /* DA3: a 1 TiB stand-in disk, so a push's quarantine reservation never meets the runner's free space. */
+  worker.leaseReservationFloorBytes = 1024;
+  worker.readLeaseDiskFreeBytes = async () => 1024 ** 4;
+  return new GitRepositoryService(
     databaseStub(),
     {
       getEntitlements: async () => ({ tier: 'pro', canSyncFiles: true }),
@@ -163,11 +170,8 @@ const createService = (
     new ShutdownService(),
     metrics,
     routes,
+    loopbackExecutor(worker),
   );
-  /* DA3: a 1 TiB stand-in disk, so a push's quarantine reservation never meets the runner's free space. */
-  service.leaseReservationFloorBytes = 1024;
-  service.readLeaseDiskFreeBytes = async () => 1024 ** 4;
-  return service;
 };
 
 const frozen: RepositoryRoute = {

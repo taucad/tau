@@ -61,6 +61,12 @@ export const packOf = (content: string): { key: string; bytes: Uint8Array<ArrayB
   };
 };
 
+/** Index bytes shaped as git's: a body, then its pack's checksum, then the SHA-1 of everything before. */
+export const indexOf = (pack: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => {
+  const body = Buffer.concat([Buffer.from('\u00FFtOc'), Buffer.from(pack.subarray(-20))]);
+  return new Uint8Array(Buffer.concat([body, createHash('sha1').update(body).digest()]));
+};
+
 type StoredVersion = {
   versionId: string;
   bytes: Uint8Array<ArrayBuffer>;
@@ -267,7 +273,7 @@ export class FakeSource implements MirrorSource {
       `${locator.projectId}-${String((base?.generation ?? 0) + 1)}-${randomBytes(4).toString('hex')}`,
     );
     this.objects.set(`${repo(locator)}${pack.key}`, pack.bytes);
-    const index = new Uint8Array(Buffer.from(`idx:${pack.key}`));
+    const index = indexOf(pack.bytes);
     this.objects.set(`${repo(locator)}${pack.key.slice(0, -'.pack'.length)}.idx`, index);
     const entry: ManifestPack = {
       key: pack.key,
@@ -406,6 +412,32 @@ export class FakeLedger implements MirrorLedger {
   public async candidate(projectId: string): Promise<CopyCandidate | undefined> {
     const row = this.rows.get(projectId);
     return row === undefined ? undefined : this.toCandidate(row);
+  }
+
+  public async lfsStragglers(args: {
+    limit: number;
+    finalizedBefore: Date;
+    exclude: ReadonlySet<string>;
+  }): Promise<CopyCandidate[]> {
+    return [...this.rows.values()]
+      .filter(
+        (row) =>
+          row.copiedGeneration > 0 &&
+          row.generation <= row.copiedGeneration &&
+          row.copyPendingSince === undefined &&
+          !this.tombstones.has(row.ownerId) &&
+          !args.exclude.has(row.projectId) &&
+          this.lfs.some(
+            (object) =>
+              object.projectId === row.projectId &&
+              object.copiedAt === undefined &&
+              object.finalizedAt !== undefined &&
+              object.finalizedAt <= args.finalizedBefore,
+          ),
+      )
+      .sort((left, right) => (left.projectId < right.projectId ? -1 : 1))
+      .slice(0, args.limit)
+      .map((row) => this.toCandidate(row));
   }
 
   public async tombstone(ownerId: string): Promise<TombstonedOwner | undefined> {

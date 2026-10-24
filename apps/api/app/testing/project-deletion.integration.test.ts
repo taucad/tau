@@ -12,6 +12,7 @@ import {
   readOwnedProjectDeletion,
   requestProjectDeletion,
 } from '#api/projects/project-deletion.js';
+import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { decodeManifest, encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
 import { retentionWindowMilliseconds } from '#api/git/store/limits.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
@@ -206,7 +207,7 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     const at = new Date('2026-10-24T00:00:00.000Z');
     expect(await store.readManifest(fixture)).toBeUndefined();
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
-    expect(await completeProjectDeletion({ database, store, ...fixture, at })).toEqual({
+    expect(await completeProjectDeletion({ database, fence: storeTombstoneFence(store), ...fixture, at })).toEqual({
       projectId: fixture.projectId,
       state: 'deleted',
       deletedAt: at.toISOString(),
@@ -239,7 +240,9 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     const intent = await readProjectDeletion(database, fixture.projectId);
     const at = new Date('2026-10-24T01:00:00.000Z');
     const results = await Promise.all(
-      Array.from({ length: 3 }, async () => completeProjectDeletion({ database, store, ...fixture, at })),
+      Array.from({ length: 3 }, async () =>
+        completeProjectDeletion({ database, fence: storeTombstoneFence(store), ...fixture, at }),
+      ),
     );
     expect(results).toEqual(
       Array.from({ length: 3 }, () => ({
@@ -251,9 +254,14 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     const receipt = await readProjectDeletion(database, fixture.projectId);
     const fenced = await store.readManifest(fixture);
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: false });
-    expect(await completeProjectDeletion({ database, store, ...fixture, at: new Date('2026-11-01') })).toEqual(
-      results[0],
-    );
+    expect(
+      await completeProjectDeletion({
+        database,
+        fence: storeTombstoneFence(store),
+        ...fixture,
+        at: new Date('2026-11-01'),
+      }),
+    ).toEqual(results[0]);
     expect(await readProjectDeletion(database, fixture.projectId)).toEqual(receipt);
     expect(await store.readManifest(fixture)).toEqual(fenced);
     expect(receipt?.requestedAt).toEqual(intent?.requestedAt);
@@ -312,7 +320,11 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
           state: 'deleting',
         });
         expect(
-          await completeProjectDeletion({ database: restarted, store: createMemoryRepositoryStore(), ...fixture }),
+          await completeProjectDeletion({
+            database: restarted,
+            fence: storeTombstoneFence(createMemoryRepositoryStore()),
+            ...fixture,
+          }),
         ).toMatchObject({ projectId: fixture.projectId, state: 'deleted' });
         await expect(assertProjectActive(restarted, fixture.projectId, fixture.ownerId)).rejects.toThrow(GoneException);
       } finally {
@@ -338,7 +350,7 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     };
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
     const at = new Date();
-    expect(await completeProjectDeletion({ database, store: broken, ...fixture, at })).toEqual({
+    expect(await completeProjectDeletion({ database, fence: storeTombstoneFence(broken), ...fixture, at })).toEqual({
       projectId: fixture.projectId,
       state: 'deleting',
     });
@@ -353,7 +365,9 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     expect(pending?.nextAttemptAt.getTime()).toBeGreaterThan(at.getTime());
     expect(await store.readManifest(fixture)).toBeUndefined();
     await expect(assertProjectActive(database, fixture.projectId, fixture.ownerId)).rejects.toThrow(GoneException);
-    expect(await completeProjectDeletion({ database, store, ...fixture })).toMatchObject({ state: 'deleted' });
+    expect(await completeProjectDeletion({ database, fence: storeTombstoneFence(store), ...fixture })).toMatchObject({
+      state: 'deleted',
+    });
     expect(await readProjectDeletion(database, fixture.projectId)).toMatchObject({ lastError: null, attempts: 2 });
   });
 
@@ -369,13 +383,22 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     };
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
     const at = new Date('2026-10-24T02:00:00.000Z');
-    expect(await completeProjectDeletion({ database, store: lostAcknowledgement, ...fixture, at })).toMatchObject({
+    expect(
+      await completeProjectDeletion({ database, fence: storeTombstoneFence(lostAcknowledgement), ...fixture, at }),
+    ).toMatchObject({
       state: 'deleting',
     });
     const tombstone = await store.readManifest(fixture);
     expect(tombstone).toBeDefined();
     expect(await readProjectDeletion(database, fixture.projectId)).toMatchObject({ deletedAt: null });
-    expect(await completeProjectDeletion({ database, store, ...fixture, at: new Date('2026-10-25') })).toEqual({
+    expect(
+      await completeProjectDeletion({
+        database,
+        fence: storeTombstoneFence(store),
+        ...fixture,
+        at: new Date('2026-10-25'),
+      }),
+    ).toEqual({
       projectId: fixture.projectId,
       state: 'deleted',
       deletedAt: at.toISOString(),
@@ -393,7 +416,7 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
       ),
     ).toEqual({ storageBytes: 1400, lfsBytes: 350 });
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
-    await completeProjectDeletion({ database, store: createMemoryRepositoryStore(), ...fixture });
+    await completeProjectDeletion({ database, fence: storeTombstoneFence(createMemoryRepositoryStore()), ...fixture });
     expect(
       await withOwnerLock(database, fixture.ownerId, async (transaction) =>
         readOwnerUsage(transaction, fixture.ownerId),
@@ -434,7 +457,9 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
       },
     };
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
-    expect(await completeProjectDeletion({ database, store: racing, ...fixture })).toMatchObject({ state: 'deleted' });
+    expect(await completeProjectDeletion({ database, fence: storeTombstoneFence(racing), ...fixture })).toMatchObject({
+      state: 'deleted',
+    });
     const stored = await store.readManifest(fixture);
     if (!stored) {
       throw new Error('CAS retry failed to leave a storage fence');
@@ -473,7 +498,7 @@ describe('project deletion against isolated PostgreSQL and repository CAS', () =
     };
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
     const started = performance.now();
-    expect(await completeProjectDeletion({ database, store: stalled, ...fixture })).toEqual({
+    expect(await completeProjectDeletion({ database, fence: storeTombstoneFence(stalled), ...fixture })).toEqual({
       projectId: fixture.projectId,
       state: 'deleting',
     });

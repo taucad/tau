@@ -18,7 +18,7 @@ Tau makes use of, and is based in part on, facilities provided by the **Open CAS
 OCCT runs in the web and desktop apps as WebAssembly and, in the desktop app, as a native library, through these
 components:
 
-- The GeoSpec engine (`geospec-engine` 0.3.1), built from OCCT upstream
+- The GeoSpec engine (`geospec-engine` 0.4.0), built from OCCT upstream
   revision `3d097a0328e71b826377d4814ab05ec3c3d23871` ([source](https://github.com/taucad/geospec))
 - libcascade 3.1.0 ([source](https://github.com/taucad/opencascade.js))
 - occt-import-js 0.0.23 ([source](https://github.com/kovacsv/occt-import-js))
@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 807 packages, with the license each declares.
+The web and desktop apps include the following 808 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -487,10 +487,10 @@ Their copyright notices and full license texts ship inside each package and are 
 | [function-bind](https://github.com/Raynos/function-bind) | 1.1.2 | MIT |
 | [gaxios](https://github.com/googleapis/google-cloud-node) | 7.3.1 | Apache-2.0 |
 | [gcp-metadata](https://github.com/googleapis/google-cloud-node-core) | 8.1.2 | Apache-2.0 |
-| [geospec-engine](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
-| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
-| [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
-| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.3.1 | Apache-2.0 |
+| [geospec-engine](https://github.com/taucad/geospec) | 0.4.0 | Apache-2.0 |
+| [geospec-engine-darwin-arm64](https://github.com/taucad/geospec) | 0.4.0 | Apache-2.0 |
+| [geospec-engine-linux-arm64-gnu](https://github.com/taucad/geospec) | 0.4.0 | Apache-2.0 |
+| [geospec-engine-linux-x64-gnu](https://github.com/taucad/geospec) | 0.4.0 | Apache-2.0 |
 | [get-east-asian-width](https://github.com/sindresorhus/get-east-asian-width) | 1.7.0 | MIT |
 | [get-intrinsic](https://github.com/ljharb/get-intrinsic) | 1.3.0 | MIT |
 | [get-nonce](https://github.com/theKashey/get-nonce) | 1.0.1 | MIT |
@@ -624,6 +624,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [node-domexception](https://github.com/jimmywarting/node-domexception) | 1.0.0 | MIT |
 | [node-fetch](https://github.com/node-fetch/node-fetch) | 3.3.2 | MIT |
 | [node-forge](https://github.com/digitalbazaar/forge) | 1.4.0 | (BSD-3-Clause OR GPL-2.0) |
+| [node-pty](https://github.com/microsoft/node-pty) | 1.1.0 | MIT |
 | [number-allocator](https://github.com/redboltz/number-allocator) | 1.0.14 | MIT |
 | [object-assign](https://github.com/sindresorhus/object-assign) | 4.1.1 | MIT |
 | [object-inspect](https://github.com/inspect-js/object-inspect) | 1.13.4 | MIT |

@@ -6,6 +6,7 @@ import { PaneButton } from '@taucad/workbench-panes/components/pane-button';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisions, useWithRestoreTargets } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
+import type { RevisionStatusProjection } from '@taucad/revisions';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatRecords } from '#hooks/use-chat-records.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
@@ -90,6 +91,53 @@ function RevisionHoverCard({
   );
 }
 
+/** The focused chat's other branch, and the verb that moves the workbench onto it. @public */
+export type FollowChat = Readonly<{
+  /** The focused chat, as History's card names it. */
+  chatName: string;
+  /** The line the focused chat works on. */
+  branch: string;
+  /** Pin the workbench to the chat's checkout. */
+  follow: () => void;
+}>;
+
+/**
+ * Whether the focused chat works on a branch other than the workbench's, read
+ * once here so the desktop trigger and the phone status line cannot disagree
+ * about when *Follow chat* applies (I4).
+ *
+ * @param status - The revision status projection, from the caller's {@link useRevisionFacts}.
+ * @param branch - The line the workbench is on.
+ * @returns The chat's branch and the verb, or `undefined` while the chat is where the workbench is.
+ * @public
+ */
+export function useFollowChat(
+  status: RevisionStatusProjection | undefined,
+  branch: string | undefined,
+): FollowChat | undefined {
+  const commands = useRevisionCommands();
+  const { editorRef, projectId } = useProject();
+  const { chats } = useChatRecords(projectId);
+  const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
+  if (status === undefined || focusedChatId === undefined) {
+    return undefined;
+  }
+  const focusedChat = chats.find((chat) => chat.id === focusedChatId);
+  const chatCheckoutId = focusedChat?.checkoutId;
+  const chatBranch =
+    chatCheckoutId === undefined ? undefined : status.branches.find((row) => row.checkoutId === chatCheckoutId)?.name;
+  if (focusedChat === undefined || chatCheckoutId === undefined || chatBranch === undefined || chatBranch === branch) {
+    return undefined;
+  }
+  return {
+    chatName: focusedChat.name,
+    branch: chatBranch,
+    follow: () => {
+      commands.pinTo(chatCheckoutId);
+    },
+  };
+}
+
 /**
  * The workbench's checkout in the header (S29): `[glyph] main` at rest, where
  * one glyph says the most urgent thing about it. Hover or focus shows the card
@@ -108,11 +156,9 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
   const { revisions } = useRevisions();
   const { where, facts, status } = useRevisionFacts();
   const { branch } = where;
-  const commands = useRevisionCommands();
-  const { editorRef, projectId } = useProject();
-  const { chats } = useChatRecords(projectId);
+  const { projectId } = useProject();
   const { openPanel } = useProjectWorkspace();
-  const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
+  const followChat = useFollowChat(status, branch);
   /* Before the first save of a project backed up by default, the pane's own line (D19). */
   const pendingBackup =
     backupByDefaultNotice(useTauCloudIntent(projectId), useTauCloudEligibility(), status?.remote) === 'pending';
@@ -124,11 +170,6 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
     return undefined;
   }
 
-  const focusedChat = chats.find((chat) => chat.id === focusedChatId);
-  const chatCheckoutId = focusedChat?.checkoutId;
-  const chatBranch =
-    chatCheckoutId === undefined ? undefined : status.branches.find((row) => row.checkoutId === chatCheckoutId)?.name;
-  const hasDiverged = chatBranch !== undefined && chatBranch !== branch;
   const label = branch ?? 'Setting up';
 
   return (
@@ -157,25 +198,21 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
               backupCopy(status.sync, where, status.remote) ??
               (pendingBackup ? 'Backs up to Tau Cloud automatically after your first save' : 'No backup connected')
             }
-            chat={hasDiverged && focusedChat !== undefined ? `${focusedChat.name} · on ${chatBranch}` : undefined}
+            chat={followChat === undefined ? undefined : `${followChat.chatName} · on ${followChat.branch}`}
             revisions={revisions}
           />
         </HoverCardContent>
       </HoverCard>
-      {hasDiverged && focusedChatId !== undefined ? (
+      {followChat === undefined ? null : (
         <PaneButton
           size='label'
-          aria-label={`Follow chat, which is working on ${chatBranch}`}
-          tooltip={`Switch the workbench to ${chatBranch}`}
-          onClick={() => {
-            if (chatCheckoutId !== undefined) {
-              commands.pinTo(chatCheckoutId);
-            }
-          }}
+          aria-label={`Follow chat, which is working on ${followChat.branch}`}
+          tooltip={`Switch the workbench to ${followChat.branch}`}
+          onClick={followChat.follow}
         >
           Follow chat
         </PaneButton>
-      ) : null}
+      )}
     </span>
   );
 }

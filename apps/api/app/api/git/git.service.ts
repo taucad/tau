@@ -1,13 +1,6 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
-import { spawn } from 'node:child_process';
-import type { ChildProcessByStdio } from 'node:child_process';
-import { mkdir, readdir, rm, stat, statfs } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import process from 'node:process';
-import type { Readable, Writable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
-import { createGunzip } from 'node:zlib';
+import { createHash, randomUUID } from 'node:crypto';
+import type { Readable } from 'node:stream';
 import {
   BadRequestException,
   ForbiddenException,
@@ -16,13 +9,11 @@ import {
   HttpStatus,
   Inject,
   Injectable,
-  InternalServerErrorException,
   Logger,
   NotFoundException,
   Optional,
   PayloadTooLargeException,
   ServiceUnavailableException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { storageLimitBytesByTier } from '@taucad/billing';
@@ -31,12 +22,7 @@ import { withOwnerLock, readOwnerUsage } from '#database/owner-lock.js';
 import { DatabaseService } from '#database/database.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
-import type {
-  GitAdmissionAttributes,
-  GitCommitAttemptAttributes,
-  GitOperation,
-  HotProjectRank,
-} from '#telemetry/metrics.js';
+import type { GitOperation, GitReceiptOutcome } from '#telemetry/metrics.js';
 import { project, projectDeletion, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
@@ -47,83 +33,100 @@ import type {
 } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import {
-  ceilingRefusalMarker,
   hydratesFromOthersPerOwnerPerDay,
   hydratesPerCallerPerDay,
-  incompleteRepositoryMarker,
   isRemovableRef,
-  quotaOverrunSlackBytes,
   quotaRefusalSentence,
   repositoryStoreKey,
 } from '#api/git/git.constants.js';
 import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
-import { advertiseReferences, installedGitDialect } from '#api/git/advertisement.js';
-import { defaultAdmissionWaitMilliseconds, LeaseAdmission } from '#api/git/admission/lease-admission.js';
-import type { LeaseTicket } from '#api/git/admission/lease-admission.js';
-import {
-  hydratedBytes,
-  pushQuarantineBound,
-  reservationFloorBytes,
-  reservationFor,
-} from '#api/git/admission/reservation.js';
-import type { LeaseKind } from '#api/git/admission/reservation.js';
-import { HotProjects, hotProjectRanks } from '#api/git/hot-projects.js';
 import { OwnerInFlightGate } from '#api/git/admission/owner-in-flight.js';
-import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
-import type { HotProject } from '#api/git/hot-projects.js';
-import { commitLease } from '#api/git/store/commit.js';
-import type { MovedRef } from '#api/git/store/commit.js';
-import type { SweepOutcome } from '#api/git/store/sweep.js';
-import { RepositoryStoreError } from '#api/git/store/errors.js';
-import type { FaultInjector } from '#api/git/store/fault-points.js';
+import { advertiseReferences } from '#api/git/advertisement.js';
+import type { AdvertisementDialect } from '#api/git/advertisement.js';
+import { developmentPublicKeysJson } from '#api/git/forwarding/contract/development-keys.js';
+import { parsePublicKeys } from '#api/git/forwarding/contract/keys.js';
+import type { VerificationKeys } from '#api/git/forwarding/contract/keys.js';
+import { verifyReceipt } from '#api/git/forwarding/contract/receipt.js';
+import type { StorageReceipt } from '#api/git/forwarding/contract/receipt.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import type { GitExecutor, GrantFacts } from '#api/git/forwarding/git-executor.js';
+import { memoryReceiptLedger } from '#api/git/forwarding/receipt-ledger.js';
+import type { ReceiptLedger } from '#api/git/forwarding/receipt-ledger.js';
+import { unconfiguredExecutor } from '#api/git/forwarding/unconfigured-executor.js';
+import { refusalCode, refusalFor } from '#api/git/git-refusals.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
 import { copyPendingOnAdvance } from '#api/git/mirror/watermark.js';
-import { markLfsReachability } from '#api/git/lfs-reachability.js';
-import { hydrateLease, readLeaseManifest } from '#api/git/store/lease.js';
-import type { PrereadManifest, RepositoryLease } from '#api/git/store/lease.js';
-import { repositoryByteCeiling } from '#api/git/store/limits.js';
+import { writeLfsReachability } from '#api/git/lfs-reachability-marks.js';
+import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
+import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
+import type { GitChildRunner, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 
 /**
- * The Tau Hosted Remote's request path over the repository store (charter D1,
- * D3, D4).
+ * The Tau Hosted Remote's request path in tau-api (charter D1, D3, D4; north
+ * star DC1).
  *
- * Every RPC hydrates a disposable lease from object storage, runs stock git
- * over it and throws it away; the ref advertisement reads the manifest alone
- * (DB1). Nothing on this machine is durable state
- * (NI1), nothing here holds a per-repository lock (NI3, the manifest's
- * conditional write is the lock), and nothing enumerates every repository
- * (NI10).
+ * The API authorizes, budgets and accounts; it no longer executes git. Every
+ * RPC is forwarded to tau-storage under a grant that carries the facts the
+ * worker needs (Z1), and every commit or repair comes back as a receipt the
+ * API checks against the manifest it re-reads with its own credential before
+ * it changes a row. The API holds no lease, no `git` child and no lease disk:
+ * its container runs with a read-only root and no tmpfs. The ref
+ * advertisement reads the manifest alone (DB1).
  */
 
-/**
- * What the git binaries are allowed to see. Never the API's own environment:
- * the hook is a child process and has no business reading database or
- * object-store credentials. The cast is the workspace's own idiom for a
- * curated child environment (`app/testing/billing-load/cluster.ts`), since
- * `NodeJS.ProcessEnv` is augmented with the validated API schema.
- */
-/* eslint-disable @typescript-eslint/naming-convention -- these are process environment variable names, not identifiers */
-const childEnvironment = (
-  repositoryPath: string,
-  extra: Readonly<Record<string, string>> = {},
-): Record<string, string> => ({
-  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-  HOME: path.dirname(repositoryPath),
-  LANG: 'C',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-  GIT_TERMINAL_PROMPT: '0',
-  ...extra,
+/** One pkt-line flush: the body `git push` authenticates a chunked push with. */
+const flushPacketBytes = 4;
+
+/** The caller a derived-state repair is made as: nobody's account, and nobody's hydrate budget. */
+const derivedStateCaller = 'system:derived-state';
+
+/** A read lease the publication materializer holds through tau-storage (until DC3). */
+export type ReadLease = {
+  /** An opaque handle the materializer's git runner ({@link GitRepositoryService.leaseGit}) resolves. */
+  readonly directory: string;
+  readonly locator: RepositoryLocator;
+  /** The manifest the reads are pinned to. `undefined` is generation 0. */
+  readonly manifest: Manifest | undefined;
+};
+
+/** How the API checks receipts: tau-storage's verification keys and the applied-receipt ledger. */
+export type ReceiptVerification = {
+  readonly keys: VerificationKeys;
+  readonly ledger: ReceiptLedger;
+};
+
+/** Injection token for {@link ReceiptVerification}. */
+export const receiptVerificationKey = Symbol('ReceiptVerification');
+
+/** What a process outside production checks receipts with when nothing is bound: the development key. */
+const developmentReceiptVerification = (): ReceiptVerification => ({
+  keys: parsePublicKeys(developmentPublicKeysJson('receipt'), 'TAU_STORAGE_RECEIPT_PUBLIC_KEYS'),
+  ledger: memoryReceiptLedger(),
 });
-/* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+
+/** How long tau-api trusts the git dialect tau-storage last named. */
+const dialectTtlMilliseconds = 5 * 60_000;
+
+/** Runs `release` at most once, however many paths reach it. */
+const once = (release: () => void): (() => void) => {
+  let released = false;
+  return () => {
+    if (!released) {
+      released = true;
+      release();
+    }
+  };
+};
+
+/** SHA-256 of a manifest's stored bytes, as a receipt names it. */
+const digestOf = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
 
 /** What `authorize` resolved for one request. */
 export type GitAccess = {
@@ -213,183 +216,22 @@ export type GitLfsReservation =
       }>;
     };
 
-const gitExecutable = 'git';
-
-/**
- * Whether a process id still names a running process.
- *
- * Signal 0 delivers nothing and only asks the question. `ESRCH` is the one
- * answer that means "gone"; `EPERM` is somebody else's process, which is very
- * much alive and must never have its leases swept.
- *
- * @param pid - The process id a lease directory is named after.
- * @returns True unless the kernel says no such process.
- */
-const processAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-};
-
-/**
- * Bytes under one directory, for the sweep's log line.
- *
- * @param directory - The directory to measure.
- * @returns The sum of its files' sizes.
- */
-const directoryBytes = async (directory: string): Promise<number> => {
-  const entries = await readdir(directory, { withFileTypes: true });
-  const sizes = await Promise.all(
-    entries.map(async (entry) => {
-      const held = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        return directoryBytes(held);
-      }
-      const measured = await stat(held);
-      return measured.size;
-    }),
-  );
-  return sizes.reduce((total, size) => total + size, 0);
-};
-
-/** A clone of a large repository is slow; an abandoned child is forever. */
-const rpcTimeoutMilliseconds = 10 * 60 * 1000;
-
-/** `update-ref` and the publication materializer's `for-each-ref` and `cat-file`. */
-const commandTimeoutMilliseconds = 60 * 1000;
-
-/** What a 503 from this service tells the client to wait, in seconds. */
-export const gitRetryAfterSeconds = 5;
-
-/**
- * One pkt-line flush (`0000`), which is the whole body of the request `git push`
- * sends to authenticate a chunked push. A request no larger than this carried no
- * commands and no pack, so it changed nothing.
- */
-const flushPacketBytes = 4;
-
-/**
- * What each lease operation can write to disk (DA3): only a push brings a
- * quarantine, and no request-path operation runs a full `repack -a -d`.
- */
-const leaseKindOf = (operation: GitOperation): LeaseKind =>
-  operation === 'receive_pack' ? 'push' : operation === 'compact' ? 'compaction' : 'fetch';
-
-/** An admitted lease (DA3): its disk ticket, and the manifest its reservation was sized from. */
-type LeaseAdmissionGrant = {
-  readonly locator: RepositoryLocator;
-  readonly preread: PrereadManifest;
-  readonly ticket: LeaseTicket;
-  /** Gives the admission back; every path must call it once the lease is disposed. */
-  readonly release: () => void;
-};
-
-/** The pack bytes a manifest names: what a hydrate draws, and the repository's size once committed. */
-const manifestPackBytes = (manifest: Manifest | undefined): number =>
-  (manifest?.packs ?? []).reduce((total, pack) => total + pack.bytes, 0);
-
-/**
- * Store refusals raised before the conditional manifest write, so they are not CAS attempts:
- * `tau.git.commit.attempts` counts writes, and these reach the client as their own refusal codes.
- */
-const refusedBeforeManifestWrite: ReadonlySet<string> = new Set([
-  'deadline',
-  'loose-objects',
-  'connectivity',
-  'ceiling-exceeded',
-]);
-
-/** Ranks `1`..`10` with what each holds; an empty rank reads 0 so every series keeps reporting. */
-const rankedValues = (
-  ranked: readonly HotProject[] | undefined,
-  value: (project: HotProject) => number,
-): Array<[number, HotProjectRank]> =>
-  Array.from({ length: hotProjectRanks }, (_, index) => {
-    const entry = ranked?.[index];
-    return [entry === undefined ? 0 : value(entry), String(index + 1) as HotProjectRank];
-  });
-
 @Injectable()
 export class GitRepositoryService {
-  /**
-   * The per-lease floor every reservation carries (DA3, `admission/reservation.ts`).
-   * Public so the admission suites can raise it past any real disk.
-   *
-   * ponytail: a mutable field rather than an injected bound; a deployment that
-   * needs another figure gets an environment variable on the day it has one.
-   */
-  public leaseReservationFloorBytes = reservationFloorBytes;
-
-  /** How long a refused admission waits for a release (DA3). Public for the same suites. */
-  public admissionWaitMilliseconds = defaultAdmissionWaitMilliseconds;
-
-  /**
-   * W2's crash seam (`store/fault-points.ts`), threaded into every commit so a
-   * suite can kill a committer at a named point. Unset in a deployment, where
-   * it costs one `await` of `undefined` per push.
-   */
-  public faults: FaultInjector | undefined;
-
-  /**
-   * D20's per-repository ceiling on non-LFS bytes. Public for the same reason
-   * as the figure above: the refusal suite proves the hook's sentence and its
-   * file list without pushing a gigabyte.
-   */
-  public repositoryByteCeiling = repositoryByteCeiling;
-
   readonly #logger = new Logger(GitRepositoryService.name);
 
   /**
-   * Where leases are built. The worker's ephemeral disk, which is what D33's
-   * admission figure is measured against — never a mounted volume, because
-   * there is no longer one.
-   */
-  readonly #leaseParent = path.join(tmpdir(), 'tau-git-leases', String(process.pid));
-
-  /**
-   * This worker's lease reservations, process-local and deliberately so: they
-   * bound *this* worker's disk, which no other worker shares. Reserved by real
-   * bytes and shared fairly between owners (DA3, `admission/lease-admission.ts`).
-   * The owner and repository gates are gone, because the manifest's
-   * conditional write is the repository's lock (NI3) and the owner-keyed
-   * advisory lock is LFS and quota's (D18).
-   */
-  readonly #admission = new LeaseAdmission({ readFreeBytes: async () => this.recordedLeaseDiskFreeBytes() });
-
-  /** The boot sweep, which admission waits on so it never builds a lease the sweep is removing. */
-  readonly #bootSweep: Promise<void>;
-
-  /**
-   * Work a request started that outlives its response: the lease disposal
-   * that follows a fetch, whose child closes after the bytes are on the wire,
-   * the D13 announcement and a compacting commit's sweep. Held in a set
-   * rather than fired and forgotten, so a failure has somewhere to be logged
-   * and a caller can wait for it.
+   * Work a request started that outlives its response: the D13 announcement.
+   * Held in a set rather than fired and forgotten, so a failure has somewhere
+   * to be logged and a caller can wait for it.
    */
   readonly #background = new Set<Promise<void>>();
 
-  /** The projects whose sweep is running (`sweepAfterReply`). */
-  readonly #sweeping = new Set<string>();
+  /** The read leases open now, by handle: the grant facts and the generation each is pinned to. */
+  readonly #readLeases = new Map<string, { readonly facts: GrantFacts; readonly generation: number }>();
 
-  /**
-   * Committed writes per project per minute, for the rank-only hot-project
-   * gauges (DA2). Project ids leave this process only on the
-   * `git.hot_projects` log line, never as a metric label.
-   */
-  readonly #hotProjects = new HotProjects((closed) => {
-    this.#logger.log(
-      {
-        event: 'git.hot_projects',
-        minuteStart: closed.minuteStart.toISOString(),
-        byCommits: closed.byCommits.map((entry, index) => ({ rank: index + 1, ...entry })),
-        byWriters: closed.byWriters.map((entry, index) => ({ rank: index + 1, ...entry })),
-      },
-      'git.hot_projects',
-    );
-  });
+  /** The git dialect tau-storage last named, and when it was asked; see {@link storageDialect}. */
+  #dialect: { readonly at: number; readonly dialect: Promise<AdvertisementDialect> } | undefined;
 
   public constructor(
     private readonly databaseService: DatabaseService,
@@ -403,33 +245,16 @@ export class GitRepositoryService {
     private readonly durableEvents: DurableEventsService,
     @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
     @Optional() private readonly metrics: MetricsService = new MetricsService(),
-    /* DW1/DW2: holds a frozen repository's requests before any lease; open outside the module. */
+    /* DW1/DW2: holds a frozen repository's requests before any grant; open outside the module. */
     @Optional() private readonly routes: RepositoryRouteGuard = RepositoryRouteGuard.open(),
-    /* DA6: the owner's in-flight cap (10 requests, 5 pushes); open outside the module. */
+    /* DC1: the boot-time git execution (`forwarding/git-execution.ts`). Unbound outside the module, every RPC answers 503. */
+    @Optional() @Inject(gitExecutorKey) private readonly executor: GitExecutor = unconfiguredExecutor(),
+    @Optional()
+    @Inject(receiptVerificationKey)
+    private readonly receipts: ReceiptVerification = developmentReceiptVerification(),
+    /* DA6: the owner's in-flight cap (10 requests, 5 pushes), taken before a grant is minted; open outside the module. */
     @Optional() private readonly owners: OwnerInFlightGate = OwnerInFlightGate.open(),
-  ) {
-    /* A crash restarts a Machine in place on the same rootfs, so boot is the
-       first chance to give the dead worker's disk back (W10 defect 2). Tracked
-       rather than awaited: nothing may wait on a sweep to serve a request. */
-    this.#bootSweep = this.sweepAbandonedLeases({ atBoot: true });
-    this.track(this.#bootSweep);
-    this.metrics.gitHotProjectCommitRate.addCallback((result) => {
-      for (const [rate, rank] of rankedValues(
-        this.#hotProjects.lastFullMinute()?.byCommits,
-        (entry) => entry.commits / 60,
-      )) {
-        result.observe(rate, { rank });
-      }
-    });
-    this.metrics.gitHotProjectWriters.addCallback((result) => {
-      for (const [writers, rank] of rankedValues(
-        this.#hotProjects.lastFullMinute()?.byWriters,
-        (entry) => entry.writers,
-      )) {
-        result.observe(writers, { rank });
-      }
-    });
-  }
+  ) {}
 
   /**
    * Who may do what with this repository, and what the plan still allows.
@@ -749,56 +574,74 @@ export class GitRepositoryService {
   }
 
   /**
-   * Builds a lease for this project, runs `work` against it and disposes it.
+   * A read lease over this project's repository, held through tau-storage, for
+   * the publication materializer and the publish path (until DC3 moves both
+   * to tau-storage).
    *
-   * The one way anything in this application touches a repository. Admission
-   * is taken before the hydrate and released after the dispose, so the counter
-   * covers the whole window the disk is occupied.
-   *
-   * The publication routes' entry, so their leases count as `derive` on the
-   * admission and lease series; this service's own routes name theirs.
+   * The lease is a handle, not a directory: every git command the work runs
+   * through {@link leaseGit} becomes one `git-read` naming the handle as its
+   * session, pinned to the generation of the manifest read here. The worker
+   * hydrates one lease for the session and runs every command over it, so a
+   * materialization costs one hydrate and a push landing between two of its
+   * commands moves nothing they read (review S1); a lease hydrated past that
+   * generation answers `409` rather than mixing two revisions. In process
+   * that is always one lease; forwarded, Fly may spread a session's commands
+   * over workers, each of which then holds its own. The session ends with the
+   * work. The hydrate budget of whoever asked is spent once, here, as it was
+   * for the lease this replaces (D22).
    *
    * @param access - What `authorize` resolved.
-   * @param work - What to do with the disposable bare directory.
+   * @param work - What to do with the lease.
+   * @param options - `spendBudget: false` for derived-state repair, which is nobody's read.
    * @returns Whatever `work` returned.
-   * @throws ServiceUnavailableException When this worker has no disk for another lease.
    */
-  public async withLease<T>(access: GitAccess, work: (lease: RepositoryLease) => Promise<T>): Promise<T> {
-    return this.leaseFor('derive', access, work);
+  public async withLease<T>(
+    access: GitAccess,
+    work: (lease: ReadLease) => Promise<T>,
+    options: { readonly spendBudget?: boolean } = {},
+  ): Promise<T> {
+    const routed = await this.routes.admit(access.projectId);
+    const handle = `tau-storage-lease:${randomUUID()}`;
+    let facts: GrantFacts | undefined;
+    try {
+      const locator = await this.resolveActiveLocator(access);
+      const manifest = await this.readLiveManifest(locator);
+      if (options.spendBudget !== false) {
+        await this.spendHydrate(access, 'derive');
+      }
+      facts = await this.grantFacts(access, { committedBy: access.callerId, authoritative: false });
+      this.#readLeases.set(handle, { facts, generation: manifest?.generation ?? 0 });
+      return await work({ directory: handle, locator, manifest });
+    } catch (error) {
+      throw refusalFor(error, this.#logger);
+    } finally {
+      this.#readLeases.delete(handle);
+      if (facts !== undefined) {
+        /* Best effort: a lost end leaves the worker's idle timer to dispose the lease. */
+        await this.executor.endRead(facts, handle).catch((error: unknown) => {
+          this.#logger.warn({ err: error, projectId: access.projectId }, 'A read session could not be ended');
+        });
+      }
+      routed();
+    }
   }
 
   /**
-   * {@link withLease} for a named operation (DA2).
-   *
-   * @param operation - What the lease is for, as `tau.git.admissions` and `tau.git.leases.active` label it.
-   * @param access - What `authorize` resolved.
-   * @param work - What to do with the disposable bare directory.
-   * @returns Whatever `work` returned.
+   * The publication materializer's git runner over a {@link withLease} handle:
+   * one read-only `git-read` per command, all in the handle's session.
    */
-  public async leaseFor<T>(
-    operation: GitOperation,
-    access: GitAccess,
-    work: (lease: RepositoryLease) => Promise<T>,
-  ): Promise<T> {
-    const admitted = await this.admitLease(access, operation);
-    let lease: RepositoryLease | undefined;
-    try {
-      lease = await this.hydrate(admitted);
-      return await work(lease);
-    } catch (error) {
-      throw this.refusalFor(error);
-    } finally {
-      /* The admission comes back whatever the disposal did, and a disposal
-         failure never replaces the refusal this request was about to answer
-         (review F2). `rm -rf` suppresses ENOENT but not EBUSY, EACCES or
-         EPERM, and a throw here used to skip `release()` for the life of the
-         process — after which every request on this worker answered
-         `GIT_LEASE_DISK_FULL` forever, and a lost race reached the client as a
-         500 instead of the 503 it is. */
-      await this.disposeQuietly(lease, access.projectId);
-      admitted.release();
+  public readonly leaseGit: GitChildRunner = async (directory, args, stdin) => {
+    const held = this.#readLeases.get(directory);
+    if (held === undefined) {
+      throw new Error('No read lease is open at this handle');
     }
-  }
+    return this.executor.gitRead(held.facts, {
+      args,
+      ...(stdin === undefined ? {} : { stdin }),
+      generation: held.generation,
+      session: directory,
+    });
+  };
 
   /**
    * `info/refs?service=…`: the ref advertisement, answered from the manifest
@@ -811,11 +654,10 @@ export class GitRepositoryService {
    * object-store cost. The bytes are stock git's over the lease that manifest
    * hydrates (`advertisement.ts`).
    *
-   * Derived-state repair (D19) is not done here, because it needs the lease
-   * this route no longer builds. It stays on the `upload-pack`, `receive-pack`
-   * and removal leases, so a repository whose row trails its manifest is
-   * repaired by the RPC that follows this advertisement (W6 G8, review FR5),
-   * until DC1 moves the comparison to every grant.
+   * Derived-state repair (D19) is not done here. Every grant carries the
+   * derived generation this API recorded, so the RPC that follows this
+   * advertisement repairs a repository whose row trails its manifest (FR5,
+   * DC1), and the scheduler repairs an idle one.
    *
    * The route step still applies (DW1/DW2): a frozen repository is held, then
    * answered `429 GIT_REPOSITORY_FROZEN`, before its manifest is read, and a
@@ -842,9 +684,9 @@ export class GitRepositoryService {
           `repository ${locator.projectId} is tombstoned and advertises no refs`,
         );
       }
-      return advertiseReferences({ service, refs: manifest?.refs ?? {}, dialect: await installedGitDialect() });
+      return advertiseReferences({ service, refs: manifest?.refs ?? {}, dialect: await this.storageDialect() });
     } catch (error) {
-      throw this.refusalFor(error);
+      throw refusalFor(error, this.#logger);
     } finally {
       owned();
       routed();
@@ -852,11 +694,13 @@ export class GitRepositoryService {
   }
 
   /**
-   * `git-upload-pack`: a read. Hydrate, serve, dispose; no commit.
+   * `git-upload-pack`: a read, forwarded to tau-storage.
    *
-   * The child's stdout is streamed rather than buffered — a clone at D20's
-   * ceiling is a gigabyte and nothing about a read needs it in memory — and the
-   * lease lives until the child closes.
+   * The pack streams from tau-storage to the client without being buffered
+   * here, and the request holds its route and owner slots until the stream
+   * closes. A repair receipt riding on the response — tau-storage found the
+   * manifest ahead of the generation this API recorded (FR5) — is applied
+   * before the first byte is relayed, as the lease-side repair was.
    *
    * @param args - The access, the request body and the client's abort signal.
    * @returns The stream the response is written from.
@@ -865,42 +709,36 @@ export class GitRepositoryService {
     access: GitAccess;
     body: Readable;
     gzipped: boolean;
-    maximumInputBytes: number;
     abort?: AbortSignal;
   }): Promise<Readable> {
-    const admitted = await this.admitLease(args.access, 'upload_pack');
-    let lease: RepositoryLease | undefined;
+    const { access } = args;
+    const release = await this.admitRpc(access, 'upload_pack');
     try {
-      lease = await this.hydrate(admitted);
-      await this.repairDerivedState(args.access, lease);
-      const held = lease;
-      const child = this.spawnService({
-        lease: held,
-        service: 'git-upload-pack',
-        maximumInputBytes: args.maximumInputBytes,
+      const facts = await this.grantFacts(access, { committedBy: access.callerId, authoritative: false });
+      await this.spendHydrate(access, 'upload_pack');
+      const { output, receipt } = await this.executor.uploadPack(facts, {
+        body: args.body,
+        gzipped: args.gzipped,
         ...(args.abort === undefined ? {} : { abort: args.abort }),
       });
-      child.on('close', () => {
-        this.track(this.disposeAfterFetch(held, admitted.release, args.access.projectId));
-      });
-      this.pipeRequestBody({ ...args, child, service: 'git-upload-pack' });
-      return child.stdout;
+      /* The slot is held until the pack has been relayed; `release` runs once. */
+      output.once('end', release);
+      output.once('close', release);
+      await this.applyReceipt(receipt, access);
+      return output;
     } catch (error) {
-      // Same shape as `withLease`'s `finally` (review F2).
-      await this.disposeQuietly(lease, args.access.projectId);
-      admitted.release();
-      throw this.refusalFor(error);
+      release();
+      throw refusalFor(error, this.#logger);
     }
   }
 
   /**
-   * `git-receive-pack`: a push.
+   * `git-receive-pack`: a push, forwarded to tau-storage.
    *
-   * The whole response is withheld until `commitLease` resolves (D4, NI2), so
-   * git's own report-status is buffered rather than streamed: a client that
-   * read `ok refs/heads/main` off the wire before the manifest was durable
-   * would have been told a lie the protocol cannot take back. Buffering costs
-   * nothing — report-status is a few pkt-lines whatever the pack was.
+   * tau-storage withholds git's report-status until `commitLease` resolves
+   * (D4, NI2), and this API relays it only once the receipt is applied, so a
+   * client that reads `ok refs/heads/main` finds the generation, the
+   * announcement and the derived state already behind it, as before.
    *
    * @param args - The access, the pusher, the request body and the abort signal.
    * @returns Git's report-status, verbatim (NI13).
@@ -911,92 +749,29 @@ export class GitRepositoryService {
     committedBy: string;
     body: Readable;
     gzipped: boolean;
-    maximumInputBytes: number;
     abort?: AbortSignal;
   }): Promise<Uint8Array<ArrayBuffer>> {
-    return this.leaseFor('receive_pack', args.access, async (lease) => {
-      await this.repairDerivedState(args.access, lease);
-      const ceilingRemaining = Math.max(
-        0,
-        this.repositoryByteCeiling - (lease.manifest?.packs ?? []).reduce((total, pack) => total + pack.bytes, 0),
+    const { access } = args;
+    const release = await this.admitRpc(access, 'receive_pack');
+    try {
+      const facts = await this.grantFacts(access, { committedBy: args.committedBy, authoritative: true });
+      await this.spendHydrate(access, 'receive_pack');
+      const result = await this.forwardWrite(access, async () =>
+        this.executor.receivePack(facts, {
+          body: args.body,
+          gzipped: args.gzipped,
+          ...(args.abort === undefined ? {} : { abort: args.abort }),
+        }),
       );
-      const child = this.spawnService({
-        lease,
-        service: 'git-receive-pack',
-        /* The quarantine bound admission reserved (DA3): git stops reading there, so the push
-           cannot write more than its reservation whatever the plan has left. */
-        maximumInputBytes: Math.min(
-          args.maximumInputBytes,
-          pushQuarantineBound({
-            planRemainingBytes: args.access.remainingBytes,
-            ceilingRemainingBytes: ceilingRemaining,
-            slackBytes: quotaOverrunSlackBytes,
-          }),
-        ),
-        ...(args.abort === undefined ? {} : { abort: args.abort }),
-        environment: {
-          /* The `pre-receive` hook reads all three: it refuses a push that did
-             not come through this admission check, one whose quarantine does
-             not fit in what is left of the plan, and one that would take the
-             repository past D20's ceiling (D17, D20). */
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-          TAU_GIT_PUSH_ADMITTED: '1',
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-          TAU_GIT_QUOTA_REMAINING_BYTES: String(args.access.remainingBytes),
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-          TAU_GIT_CEILING_REMAINING_BYTES: String(ceilingRemaining),
-          /* D17: the plan refusal's sentence, addressed to this caller. */
-          ...(args.access.quotaAudience === undefined
-            ? {}
-            : {
-                // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
-                TAU_GIT_QUOTA_SENTENCE: quotaRefusalSentence(args.access.quotaAudience, args.access.storageLimitBytes),
-              }),
-        },
-      });
-
-      const output = this.collect(child.stdout);
-      const request = this.pipeRequestBody({ ...args, child, service: 'git-receive-pack' });
-      const [body] = await Promise.all([output, this.awaitChild(child), request.done]);
-
-      if (request.counter.bytes <= flushPacketBytes) {
-        /* The flush-only body `git push` authenticates a chunked push with.
-           Nothing arrived, so there is nothing to commit and no generation to
-           record. */
-        return body;
+      if (result.bodyBytes > flushPacketBytes || result.receipt !== undefined) {
+        await this.applyReceipt(result.receipt, access);
       }
-
-      /* The stop gate (D4 makes this safe): a push that has not started to
-         commit when the process begins to stop is refused before its first
-         upload, and the client re-pushes against a Machine that is staying.
-         One that has started finishes, because the drain waits for it. */
-      this.refuseWhenStopping('This server is restarting; retry the push.');
-      this.metrics.syncPackBytes.record(request.counter.bytes, { 'tau.sync.operation': 'push' });
-      const result = await this.commit({
-        store: this.store,
-        lease,
-        committedBy: args.committedBy,
-        ...(args.access.viaDevice === undefined ? {} : { viaDevice: args.access.viaDevice }),
-        byteCeiling: this.repositoryByteCeiling,
-        ...(this.faults === undefined ? {} : { faults: this.faults }),
-      });
-      if (result.committed) {
-        /* The push is durable: a failure to record its generation must not
-           answer 500 for it. The row trails the manifest, which is the case
-           `repairDerivedState` repairs on the next request. */
-        try {
-          await this.recordGeneration(args.access.projectId, result.manifest.generation);
-        } catch (error) {
-          this.#logger.warn(
-            { err: error, projectId: args.access.projectId, generation: result.manifest.generation },
-            'A committed push could not record its generation; the next request repairs it',
-          );
-        }
-        await this.derive({ access: args.access, lease, manifest: result.manifest, moved: result.moved });
-        this.sweepAfterReply(args.access.projectId, result);
-      }
-      return body;
-    });
+      return result.report;
+    } catch (error) {
+      throw refusalFor(error, this.#logger);
+    } finally {
+      release();
+    }
   }
 
   /**
@@ -1015,13 +790,13 @@ export class GitRepositoryService {
    * does not bring it back (`materializePublishedTags` skips it). Publishing it
    * again is the owner's explicit act.
    *
-   * The decision, the retirement and the manifest commit run inside one
-   * transaction holding the project's publication lock — the lock the publish
-   * path takes — so a publish cannot land between the check and the removal,
-   * and a failed commit rolls the retirement back. The removal is a commit
-   * like a push: the same lease, the same conditional manifest write, and the
-   * same appended attribution record (EQ11) carrying the ref without a tip;
-   * that record, plus the log line, is the audit.
+   * The decision and the retirement run inside one transaction holding the
+   * project's publication lock, and the transaction commits only once
+   * tau-storage answered that the removal's manifest commit landed (DC1): a
+   * publish cannot land between the check and the removal, and a failed
+   * commit rolls the retirement back. tau-storage refuses the removal if the
+   * ref no longer holds the tip read here. The appended attribution record
+   * (EQ11), carrying the ref without a tip, plus the log line, is the audit.
    *
    * @param args - The access, the ref, the authenticated caller and the publication they confirmed.
    * @returns `confirm` with the publication to show, or `removed` with the tip it held.
@@ -1050,17 +825,20 @@ export class GitRepositoryService {
     }
     const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : undefined;
 
-    const removal = await this.leaseFor('remove_ref', access, async (lease): Promise<RefRemoval> => {
-      /* Before the transaction: a repair re-materializes under the same lock. */
-      await this.repairDerivedState(access, lease);
-      const held = lease.manifest?.refs[ref]?.oid;
+    const release = await this.admitRpc(access, 'remove_ref');
+    let removal: RefRemoval;
+    try {
+      const locator = await this.resolveActiveLocator(access);
+      const live = await this.readLiveManifest(locator);
+      const held = live?.refs[ref]?.oid;
       if (held === undefined) {
         throw new NotFoundException({ code: 'GIT_REF_NOT_FOUND', message: `This repository has no ${ref}.` });
       }
-      /* The push's stop gate: a removal that has not started to commit when the
-         process begins to stop is refused before it retires a publication, and
-         the client retries against a Machine that is staying. */
+      /* The push's stop gate: a removal that has not started when the process
+         begins to stop is refused before it retires a publication. */
       this.refuseWhenStopping('This server is restarting; retry the removal.');
+      const facts = await this.grantFacts(access, { committedBy: args.committedBy, authoritative: true });
+      await this.spendHydrate(access, 'remove_ref');
       const decided = await this.databaseService.database.transaction(async (transaction) => {
         await assertActiveProjectLocked(
           transaction,
@@ -1089,40 +867,27 @@ export class GitRepositoryService {
             .set({ unpublishedAt: new Date() })
             .where(eq(publication.id, affected.id));
         }
-        await this.runGit(['update-ref', '-d', ref, held], lease.directory);
-        const result = await this.commit({
-          store: this.store,
-          lease,
-          committedBy: args.committedBy,
-          byteCeiling: this.repositoryByteCeiling,
-          ...(this.faults === undefined ? {} : { faults: this.faults }),
-        });
-        return { outcome: 'removed', result, affected } as const;
+        const removed = await this.forwardWrite(access, async () =>
+          this.executor.removeRef({ ...facts, ref, tip: held }),
+        );
+        return { outcome: 'removed', removed, affected } as const;
       });
       if (decided.outcome === 'confirm') {
-        return decided;
+        removal = decided;
+      } else {
+        await this.applyReceipt(decided.removed.receipt, access);
+        removal = {
+          outcome: 'removed',
+          ref,
+          tip: held,
+          ...(decided.affected === undefined ? {} : { publication: decided.affected }),
+        };
       }
-      if (decided.result.committed) {
-        /* The removal is durable, so, as for a push, a failed generation write
-           is left to the next request's repair rather than answered as 500. */
-        try {
-          await this.recordGeneration(access.projectId, decided.result.manifest.generation);
-        } catch (error) {
-          this.#logger.warn(
-            { err: error, projectId: access.projectId, generation: decided.result.manifest.generation },
-            'A committed ref removal could not record its generation; the next request repairs it',
-          );
-        }
-        await this.derive({ access, lease, manifest: decided.result.manifest, moved: decided.result.moved });
-        this.sweepAfterReply(access.projectId, decided.result);
-      }
-      return {
-        outcome: 'removed',
-        ref,
-        tip: held,
-        ...(decided.affected === undefined ? {} : { publication: decided.affected }),
-      };
-    });
+    } catch (error) {
+      throw refusalFor(error, this.#logger);
+    } finally {
+      release();
+    }
     if (removal.outcome === 'removed') {
       this.#logger.log(
         { projectId: access.projectId, ref, tip: removal.tip, by: args.committedBy, retired: removal.publication?.id },
@@ -1133,14 +898,77 @@ export class GitRepositoryService {
   }
 
   /**
-   * Free bytes of the lease filesystem, as `statfs` reports them. Public so
-   * the admission suites can stand in a 7.3 GiB staging Machine.
+   * Repairs one project's derived state with no client waiting (FR5; the
+   * scheduler in `forwarding/derive-scheduler.ts`): a `derive` grant, whose
+   * receipt is applied like any other. Nobody's hydrate budget is spent.
    *
-   * @returns Free bytes available to this process.
+   * @param target - The project and its owner.
+   * @returns The receipt's outcome, or `undefined` when tau-storage found nothing owed.
    */
-  public async readLeaseDiskFreeBytes(): Promise<number> {
-    const { bavail, bsize } = await statfs(this.#leaseParent);
-    return bavail * bsize;
+  public async repairDerivedState(target: {
+    readonly projectId: string;
+    readonly ownerId: string;
+  }): Promise<GitReceiptOutcome | undefined> {
+    const access: GitAccess = {
+      projectId: target.projectId,
+      ownerId: target.ownerId,
+      role: 'owner',
+      callerId: derivedStateCaller,
+      remainingBytes: 0,
+      storageLimitBytes: 0,
+    };
+    const routed = await this.routes.admit(access.projectId);
+    try {
+      await this.resolveActiveLocator(access);
+      const facts = await this.grantFacts(access, { committedBy: derivedStateCaller, authoritative: false });
+      const { receipt } = await this.executor.derive(facts);
+      return await this.applyReceipt(receipt, access);
+    } catch (error) {
+      throw refusalFor(error, this.#logger);
+    } finally {
+      routed();
+    }
+  }
+
+  /**
+   * Applies a receipt tau-storage signed (DC1; W9 Finding 2, "Receipt").
+   *
+   * In order, and nothing changes until every check passed: the signature
+   * under a known `kid` and the receipt's age; the owner and project the
+   * request was for (a posted receipt: the project's own owner); then the
+   * manifest, re-read here with this API's own read credential, whose SHA-256,
+   * generation and incarnation must equal the receipt's. A `retained` receipt,
+   * known only after a sweep, needs the same incarnation and a manifest at or
+   * past its generation. Only then is the `(rid, kind)` claimed in the shared
+   * ledger, so a replay to any API Machine changes no row, and the derived
+   * state written: the generation, the D13 announcement, the publications the
+   * manifest's tags leave stale, the LFS reachability marks from the receipt's
+   * whole walk, and the derived generation with the accounting.
+   *
+   * A receipt that fails is counted and dropped, never raised: the push it
+   * follows is durable, and the next grant's `recordedGeneration` repairs what
+   * it did not say. A ledger that cannot be reached is logged as an error and
+   * counted `ledger_unavailable`. In process the ledger is this process's
+   * memory, so derived state never waits on Redis (review S4).
+   *
+   * @param token - The receipt, if one came back.
+   * @param expected - The request's owner and project; omitted for a posted receipt.
+   * @returns The outcome, or `undefined` when there was no receipt.
+   */
+  public async applyReceipt(
+    token: string | undefined,
+    expected?: Pick<GitAccess, 'ownerId' | 'projectId'>,
+  ): Promise<GitReceiptOutcome | undefined> {
+    if (token === undefined) {
+      return undefined;
+    }
+    const outcome = await this.checkAndApplyReceipt(token, expected).catch((error: unknown) => {
+      this.#logger.warn({ err: error }, 'A storage receipt could not be applied; the next request repairs it');
+      const rejected: GitReceiptOutcome = 'rejected';
+      return rejected;
+    });
+    this.metrics.gitReceipts.add(1, { outcome });
+    return outcome;
   }
 
   /** Waits for the work a finished request left running. */
@@ -1175,58 +1003,14 @@ export class GitRepositoryService {
   }
 
   /**
-   * Starts a compacting commit's sweep without the reply waiting on it (W13b):
-   * the sweep lists `packs/` and `retired/`, which grow with every push inside
-   * the retention window. Tracked, so `settled()` waits for it. At most one
-   * runs per project; a compaction that finds one running leaves its garbage
-   * to the next, which only delays a deletion, because a sweep deletes only
-   * keys the manifest it was handed does not list.
-   */
-  private sweepAfterReply(
-    projectId: string,
-    result: { compacted: boolean; sweep: () => Promise<SweepOutcome | undefined> },
-  ): void {
-    if (!result.compacted || this.#sweeping.has(projectId)) {
-      return;
-    }
-    this.#sweeping.add(projectId);
-    this.track(
-      (async (): Promise<void> => {
-        let outcome: 'ok' | 'error' = 'error';
-        try {
-          const swept = await result.sweep();
-          /* D18: the retired bytes the store still keeps, as this listing saw
-             them. ponytail: two workers' sweeps of one project may land out of
-             order, leaving the older listing's figure until the next sweep. */
-          if (swept !== undefined) {
-            await this.databaseService.database.transaction(async (transaction) => {
-              await assertActiveProjectLocked(transaction, projectId);
-              await transaction
-                .update(projectGit)
-                .set({ retainedBytes: swept.retainedBytes })
-                .where(eq(projectGit.projectId, projectId));
-            });
-          }
-          outcome = 'ok';
-        } finally {
-          this.metrics.syncSweeps.add(1, { outcome });
-          this.#sweeping.delete(projectId);
-        }
-      })(),
-    );
-  }
-
-  /**
-   * What the publication materializer needs from this service.
-   *
-   * Public so the publication routes can materialize through a lease of their
-   * own rather than a second git runner (W4c).
+   * What the publication materializer needs from this service: the database,
+   * the storage driver, and git over a {@link withLease} handle.
    */
   public get materializerDependencies(): MaterializerDependencies {
     return {
       databaseService: this.databaseService,
       storage: this.storage,
-      git: async (repositoryPath, args, stdin) => this.runGit(args, repositoryPath, stdin),
+      git: this.leaseGit,
       /* The one answer to "where is this object" lives in W4b's leaf module, so
          binding it here keeps the materializer out of the LFS service's import
          cycle. Two statements because the member read of an awaited call is a
@@ -1238,222 +1022,235 @@ export class GitRepositoryService {
     };
   }
 
-  /**
-   * Removes the lease directories of workers that are no longer running (W10
-   * defect 2).
-   *
-   * A worker killed mid-push cannot unlink its own lease, and admission counts
-   * the *free* bytes of the disk those leases sit on — so every crash used to
-   * cost this machine that lease's disk headroom permanently.
-   * Leases therefore live under `tau-git-leases/<pid>/`, and a sibling is only
-   * removed when its pid is gone: two API processes share one `tmpdir` locally
-   * and must never sweep each other.
-   *
-   * Runs on service init *and* before every admission, because a surviving
-   * worker is the only process that will ever boot again after a crash in
-   * place, and admission is the moment the leaked bytes matter.
-   *
-   * At boot it also removes this process's own directory. A Machine restarted
-   * in place usually starts the API under the same pid, so the dead run's
-   * directory looks alive to the sibling check forever; and at boot this
-   * process holds no lease yet, so whatever is there is the dead run's.
-   *
-   * ponytail: unthrottled — a `readdir` of a handful of names plus a signal-0
-   * per name. Add a throttle if a machine ever hosts thousands of siblings.
-   */
-  private async sweepAbandonedLeases({ atBoot = false }: { readonly atBoot?: boolean } = {}): Promise<void> {
-    const root = path.dirname(this.#leaseParent);
-    let siblings: readonly string[];
-    try {
-      siblings = await readdir(root);
-    } catch {
-      /* Nothing has run on this machine yet. */
-      return;
+  private async checkAndApplyReceipt(
+    token: string,
+    expected: Pick<GitAccess, 'ownerId' | 'projectId'> | undefined,
+  ): Promise<GitReceiptOutcome> {
+    const verified = verifyReceipt(token, { keys: this.receipts.keys });
+    if (!verified.ok) {
+      this.#logger.warn({ reason: verified.reason }, 'A storage receipt was refused');
+      return 'rejected';
     }
-    const abandoned = siblings.filter(
-      (name) => /^\d+$/u.test(name) && ((atBoot && Number(name) === process.pid) || !processAlive(Number(name))),
-    );
-    if (abandoned.length === 0) {
-      return;
-    }
-    let reclaimed = 0;
-    for (const name of abandoned) {
-      const held = path.join(root, name);
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- one dead worker at a time; the list is tiny and the removal is I/O, not CPU
-        reclaimed += await directoryBytes(held);
-        // oxlint-disable-next-line no-await-in-loop -- as above
-        await rm(held, { recursive: true, force: true });
-      } catch (error) {
-        this.#logger.warn({ err: error, directory: held }, 'A dead worker’s lease directory could not be removed');
+    const { receipt } = verified;
+    if (expected === undefined) {
+      const [row] = await this.databaseService.database
+        .select({ ownerId: project.ownerId })
+        .from(project)
+        .where(eq(project.id, receipt.project))
+        .limit(1);
+      if (row?.ownerId !== receipt.owner) {
+        this.#logger.warn({ projectId: receipt.project }, 'A posted storage receipt named another owner');
+        return 'rejected';
       }
+    } else if (receipt.owner !== expected.ownerId || receipt.project !== expected.projectId) {
+      this.#logger.warn({ projectId: expected.projectId }, 'A storage receipt named another repository');
+      return 'rejected';
     }
-    this.#logger.log(
-      { directories: abandoned.length, bytes: reclaimed },
-      'Reclaimed the lease directories of workers that are no longer running',
+
+    const read = await this.store.readManifest(
+      repositoryLocator({ ownerId: receipt.owner, projectId: receipt.project }),
     );
+    if (read === undefined) {
+      return 'manifest_mismatch';
+    }
+    const manifest = decodeManifest(read.manifest);
+    if (manifest.incarnation !== receipt.incarnation) {
+      return 'manifest_mismatch';
+    }
+    if (receipt.kind === 'retained') {
+      if (manifest.generation < receipt.generation) {
+        return 'manifest_mismatch';
+      }
+    } else if (digestOf(read.manifest) !== receipt.manifestSha256 || manifest.generation !== receipt.generation) {
+      /* A later commit already moved the manifest on: that one's receipt says
+         everything this one would, so this one is stale rather than forged. */
+      return manifest.generation > receipt.generation ? 'stale' : 'manifest_mismatch';
+    }
+
+    let claimed: boolean;
+    try {
+      claimed = await this.receipts.ledger.claim(receipt.rid, receipt.kind);
+    } catch (error) {
+      /* Loud, not silent (review S4): nothing is derived until the scheduler's
+         repair or the next grant, so the outage is an error and its own count. */
+      this.#logger.error(
+        { err: error, projectId: receipt.project, generation: receipt.generation, kind: receipt.kind },
+        'The receipt ledger is unavailable; derived state waits for a repair',
+      );
+      return 'ledger_unavailable';
+    }
+    if (!claimed) {
+      return 'duplicate';
+    }
+    try {
+      if (receipt.kind === 'retained') {
+        await this.recordRetainedBytes(receipt);
+      } else {
+        await this.recordGenerationQuietly(receipt.project, receipt.generation);
+        await this.derive(receipt, manifest);
+      }
+    } catch (error) {
+      await this.receipts.ledger.release(receipt.rid, receipt.kind).catch(() => undefined);
+      throw error;
+    }
+    return 'applied';
+  }
+
+  /** The retired bytes a sweep kept (D18), as its listing saw them. */
+  private async recordRetainedBytes(receipt: StorageReceipt): Promise<void> {
+    const { retainedBytes } = receipt;
+    if (retainedBytes === undefined) {
+      return;
+    }
+    await this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, receipt.project);
+      await transaction.update(projectGit).set({ retainedBytes }).where(eq(projectGit.projectId, receipt.project));
+    });
+  }
+
+  /** {@link recordGeneration}, logged rather than raised: the commit it follows is durable. */
+  private async recordGenerationQuietly(projectId: string, generation: number): Promise<void> {
+    try {
+      await this.recordGeneration(projectId, generation);
+    } catch (error) {
+      this.#logger.warn(
+        { err: error, projectId, generation },
+        'A committed manifest could not record its generation; the next request repairs it',
+      );
+    }
   }
 
   /**
-   * Admits one more lease while this worker's disk can hold what it will
-   * write (DA3; blueprint OD2, which replaces D33's flat 2.5 GiB).
+   * Holds the route and owner steps for one forwarded RPC (DW1/DW2, DA6).
    *
-   * The manifest is read first, so the reservation is the lease's real bytes
-   * by kind (`admission/reservation.ts`): a fetch reserves its packs plus a
-   * 64 MiB floor, a push adds the quarantine bound `receive.maxInputSize`
-   * enforces and, when its pack would compact, the `--keep-pack` transient.
-   * That read is the one the hydrate would have made, so it is handed on and
-   * costs nothing extra. Disk and owner fairness are then decided against the
-   * free bytes `statfs` reads on every admission (`admission/lease-admission.ts`):
-   * an owner that already holds a lease may hold at most half the lease disk
-   * in bytes, which no longer collapses to one lease per Machine, and a
-   * refusal waits up to {@link admissionWaitMilliseconds} for a release first.
-   *
-   * The daily hydrate budgets ({@link spendHydrate}) sit after it (D22,
-   * L6-F3), because every lease is a full read of the owner's repository from
-   * object storage billed to the owner.
-   *
-   * ponytail: the hydrate budget counts leases, not bytes; count manifest pack
-   * bytes instead if a small repository's hydrates ever need a different
-   * ceiling from a large one's.
-   *
-   * Each decision is a `tau.git.admissions` outcome; an admitted lease is held
-   * on `tau.git.leases.active` until its release, and the reservation and the
-   * free bytes `statfs` read are the two disk gauges (DA2).
-   *
-   * @param access - Whose repository the lease hydrates, and who asked.
-   * @param operation - What the lease is for, as the admission and lease series label it.
-   * @returns The grant, whose release every path must call.
-   * @throws HttpException `429` when a daily hydrate budget is spent, or `429 GIT_OWNER_IN_FLIGHT_LIMIT` over the owner's in-flight cap (DA6).
-   * @throws ServiceUnavailableException When the lease does not fit, or the owner already holds its share.
+   * @returns The release, which every path must call; it runs once.
+   * @throws HttpException `429 GIT_REPOSITORY_FROZEN` when the freeze hold is spent, or `429 GIT_OWNER_IN_FLIGHT_LIMIT` over the owner's in-flight cap (DA6).
    */
-  private async admitLease(access: GitAccess, operation: GitOperation): Promise<LeaseAdmissionGrant> {
-    /* The route step first (DW1/DW2): a frozen repository is held here, before it costs a slot
-       or its manifest is read to size one (DA3). */
+  private async admitRpc(access: GitAccess, operation: GitOperation): Promise<() => void> {
+    /* An API Machine that is stopping takes no new RPC, so its drain is only what it already forwarded. */
+    this.refuseWhenStopping('The repository service is restarting; retry shortly.');
     const routed = await this.routes.admit(access.projectId);
-    let owned: () => void = () => undefined;
     try {
-      /* The owner step next (DA6): an owner over its in-flight cap is refused 429 before its
-         manifest is read or a slot is reserved, and holds its slot until the lease is released. */
-      owned = await this.owners.admit({ ownerId: access.ownerId, operation });
-      const grant = await this.admitLeaseSlot(access, operation);
-      return {
-        ...grant,
-        release: () => {
-          grant.release();
-          owned();
-          routed();
-        },
-      };
+      /* DA6: after the route step, so a held request holds no owner slot, and before a grant is minted. */
+      const owned = await this.owners.admit({ ownerId: access.ownerId, operation });
+      return once(() => {
+        owned();
+        routed();
+      });
     } catch (error) {
-      owned();
       routed();
       throw error;
     }
   }
 
-  /** {@link admitLease}'s manifest read, real-byte disk and owner-share, and hydrate-budget steps (DA3). */
-  private async admitLeaseSlot(access: GitAccess, operation: GitOperation): Promise<LeaseAdmissionGrant> {
-    const { ownerId } = access;
-    const admission = (outcome: GitAdmissionAttributes['outcome']): void => {
-      this.metrics.gitAdmissions.add(1, { 'tau.git.operation': operation, outcome });
+  /**
+   * The facts a grant carries (Z1): whose repository, who is asking, what the
+   * plan allows, the quota sentence, the derived generation this API recorded
+   * (FR5) and the route, read past the cache for a write (FR13).
+   */
+  private async grantFacts(
+    access: GitAccess,
+    args: { readonly committedBy: string; readonly authoritative: boolean },
+  ): Promise<GrantFacts> {
+    const [route, [row]] = await Promise.all([
+      this.routes.grantRoute(access.projectId, args.authoritative),
+      this.databaseService.database
+        .select({ derivedGeneration: projectGit.derivedGeneration })
+        .from(projectGit)
+        .where(eq(projectGit.projectId, access.projectId))
+        .limit(1),
+    ]);
+    return {
+      owner: access.ownerId,
+      project: access.projectId,
+      callerId: access.callerId,
+      committedBy: args.committedBy,
+      ...(access.viaDevice === undefined ? {} : { viaDevice: access.viaDevice }),
+      remainingBytes: access.remainingBytes,
+      storageLimitBytes: access.storageLimitBytes,
+      ...(access.quotaAudience === undefined
+        ? {}
+        : { quotaSentence: quotaRefusalSentence(access.quotaAudience, access.storageLimitBytes) }),
+      recordedGeneration: row?.derivedGeneration ?? 0,
+      route,
     };
-    await this.#bootSweep;
-    await this.sweepAbandonedLeases();
-    await mkdir(this.#leaseParent, { recursive: true });
-    let locator: RepositoryLocator;
-    let preread: PrereadManifest;
-    try {
-      locator = await this.resolveActiveLocator(access);
-      preread = await readLeaseManifest(this.store, locator);
-    } catch (error) {
-      throw this.refusalFor(error);
-    }
-    const packBytes = (preread.manifest?.packs ?? []).map((pack) => pack.bytes);
-    const kind = leaseKindOf(operation);
-    const reservationBytes = reservationFor(
-      {
-        kind,
-        packBytes,
-        ...(kind === 'push'
-          ? {
-              quarantineBytes: pushQuarantineBound({
-                planRemainingBytes: access.remainingBytes,
-                ceilingRemainingBytes: Math.max(0, this.repositoryByteCeiling - manifestPackBytes(preread.manifest)),
-                slackBytes: quotaOverrunSlackBytes,
-              }),
-            }
-          : {}),
-      },
-      this.leaseReservationFloorBytes,
-    );
-    const decided = await this.#admission.admit({
-      ownerId,
-      reservationBytes,
-      waitMilliseconds: this.admissionWaitMilliseconds,
-    });
-    if (!decided.admitted) {
-      admission(decided.refusal);
-      throw decided.refusal === 'disk_full'
-        ? new ServiceUnavailableException({
-            code: 'GIT_LEASE_DISK_FULL',
-            message: 'This server has no room for another repository right now; retry shortly.',
-          })
-        : new ServiceUnavailableException({
-            code: 'GIT_LEASE_OWNER_BUSY',
-            message: 'This account already has repository work running on this server; retry shortly.',
-          });
-    }
-    /* Reserved before the budget's round trip, so the decision and the
-       reservation stay one synchronous step and no concurrent admission slips
-       between them; a refused budget gives the reservation straight back. */
-    const { ticket } = decided;
-    let active = false;
-    let released = false;
-    const release = (): void => {
-      if (!released) {
-        released = true;
-        ticket.release();
-        if (active) {
-          this.metrics.gitLeasesActive.add(-1, { 'tau.git.operation': operation });
-        }
-        this.recordReservedBytes();
-      }
-    };
-    try {
-      await this.spendHydrate(access);
-      /* A push that committed while this request waited for room would make the read stale, and the
-         commit against it a lost race: read again, once, only after a wait. */
-      if (decided.waited) {
-        preread = await readLeaseManifest(this.store, locator);
-      }
-    } catch (error) {
-      if (
-        error instanceof HttpException &&
-        (error.getResponse() as { code?: unknown }).code === 'GIT_HYDRATE_BUDGET_EXHAUSTED'
-      ) {
-        admission('budget_exhausted');
-      }
-      release();
-      throw this.refusalFor(error);
-    }
-    admission('admitted');
-    active = true;
-    this.metrics.gitLeasesActive.add(1, { 'tau.git.operation': operation });
-    this.recordReservedBytes();
-    return { locator, preread, ticket, release };
   }
 
-  /** {@link readLeaseDiskFreeBytes}, recorded on the free-bytes gauge at every admission attempt (DA2). */
-  private async recordedLeaseDiskFreeBytes(): Promise<number> {
-    const free = await this.readLeaseDiskFreeBytes();
-    this.metrics.gitDiskFreeBytes.record(free);
-    return free;
+  /**
+   * Runs a write on tau-storage, answering a race lost to a freeze's fence
+   * with the freeze answer rather than the `503` a lost race is (DW2).
+   */
+  private async forwardWrite<T>(access: GitAccess, write: () => Promise<T>): Promise<T> {
+    try {
+      return await write();
+    } catch (error) {
+      if (refusalCode(error) === 'GIT_PUSH_RACE_LOST') {
+        throw (await this.routes.refusalForLostRace(access.projectId)) ?? error;
+      }
+      throw error;
+    }
   }
 
-  /** The lease disk this Machine has reserved now: the sum of admitted leases' real-byte reservations (DA3). */
-  private recordReservedBytes(): void {
-    this.metrics.gitLeaseReservedBytes.record(this.#admission.reservedBytes);
+  /** The manifest of a live repository; a tombstoned one is refused. */
+  private async readLiveManifest(locator: RepositoryLocator): Promise<Manifest | undefined> {
+    const read = await this.store.readManifest(locator);
+    const manifest = read === undefined ? undefined : decodeManifest(read.manifest);
+    if (isTombstoned(manifest)) {
+      throw new RepositoryStoreError('tombstoned', `repository ${locator.projectId} is tombstoned`);
+    }
+    return manifest;
+  }
+
+  /**
+   * Refuses work that has not started once the process begins to stop
+   * (503 `GIT_SERVICE_RESTARTING`).
+   *
+   * @param message - What the client is told to retry.
+   */
+  /**
+   * The dialect of tau-storage's git (DB1, DC1), asked at most every five
+   * minutes, so an image that changes the pinned git is followed without an
+   * API restart; a failed answer is not kept.
+   */
+  private async storageDialect(): Promise<AdvertisementDialect> {
+    const now = Date.now();
+    if (this.#dialect === undefined || now - this.#dialect.at > dialectTtlMilliseconds) {
+      this.#dialect = { at: now, dialect: this.executor.dialect() };
+    }
+    const held = this.#dialect;
+    try {
+      return await held.dialect;
+    } catch (error) {
+      if (this.#dialect === held) {
+        this.#dialect = undefined;
+      }
+      throw error;
+    }
+  }
+
+  private refuseWhenStopping(message: string): void {
+    if (this.shutdown.signal.aborted) {
+      throw new ServiceUnavailableException({ code: 'GIT_SERVICE_RESTARTING', message });
+    }
+  }
+
+  /**
+   * Runs `work` after the reply, held where `settled()` and the shutdown
+   * registry both see it.
+   */
+  private track(work: Promise<void>): void {
+    const settle = async (): Promise<void> => {
+      try {
+        await work;
+      } catch (error) {
+        this.#logger.warn({ err: error }, 'Background work after a response failed');
+      } finally {
+        this.#background.delete(tracked);
+      }
+    };
+    const tracked = settle();
+    this.#background.add(tracked);
+    this.shutdown.track(tracked);
   }
 
   /**
@@ -1473,9 +1270,13 @@ export class GitRepositoryService {
    * nor the collaborators' allowance.
    *
    * @param access - Whose repository, and who is asking.
+   * @param operation - What the read is for, as `tau.git.admissions` labels a refusal.
    * @throws HttpException `429` with `retryAfterSeconds` when a bucket is spent.
    */
-  private async spendHydrate(access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>): Promise<void> {
+  private async spendHydrate(
+    access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>,
+    operation: GitOperation,
+  ): Promise<void> {
     const own = access.callerId === access.ownerId;
     const shared = !own && access.viaDevice === undefined;
     const buckets = [
@@ -1489,6 +1290,7 @@ export class GitRepositoryService {
       // oxlint-disable-next-line no-await-in-loop -- the aggregate is spent only once the caller's own bucket admitted the read
       const budget = await this.rateLimiter.consumeWindowBudget({ ...bucket, windowSeconds: 86_400 });
       if (!budget.allowed) {
+        this.metrics.gitAdmissions.add(1, { 'tau.git.operation': operation, outcome: 'budget_exhausted' });
         throw new HttpException(
           {
             code: 'GIT_HYDRATE_BUDGET_EXHAUSTED',
@@ -1499,330 +1301,6 @@ export class GitRepositoryService {
         );
       }
     }
-  }
-
-  /**
-   * Hydrates the lease admission sized, from the manifest it read, timed as
-   * the `hydrate` lease phase. Once the packs are on disk the ticket says so,
-   * and admission stops counting them a second time (DA3).
-   */
-  private async hydrate(admitted: LeaseAdmissionGrant): Promise<RepositoryLease> {
-    const startedAt = performance.now();
-    try {
-      const lease = await hydrateLease({
-        store: this.store,
-        locator: admitted.locator,
-        parentDirectory: this.#leaseParent,
-        preread: admitted.preread,
-      });
-      admitted.ticket.landed(hydratedBytes((lease.manifest?.packs ?? []).map((pack) => pack.bytes)));
-      /* Every hydrate reads its packs from the object store today; `cache` arrives with DC2. */
-      this.metrics.gitHydrateBytes.record(manifestPackBytes(lease.manifest), {
-        'tau.git.hydrate.source': 'object_store',
-      });
-      return lease;
-    } finally {
-      this.metrics.syncLeaseDuration.record((performance.now() - startedAt) / 1000, {
-        'tau.sync.lease.phase': 'hydrate',
-      });
-    }
-  }
-
-  /**
-   * `commitLease`, timed as the `commit` lease phase, counting a lost conditional manifest write.
-   *
-   * A push and a ref removal are both `push` commits. A write the store reports `lost` is
-   * `lost_race` whether a racing writer or an exhausted R2 rate limit lost it (`commit.ts`
-   * reconciles both to `lost`); telling `throttled` and `indeterminate` apart needs the store's
-   * own attempts (W14 N10).
-   */
-  private async commit(args: Parameters<typeof commitLease>[0]): ReturnType<typeof commitLease> {
-    /* DW1, FR13: a lease hydrated from a migration fence reads the route past this Machine's cache. */
-    await this.routes.assertCommittable(args.lease.locator.projectId, args.lease.manifest);
-    const startedAt = performance.now();
-    const attempt = (outcome: GitCommitAttemptAttributes['outcome']): void => {
-      this.metrics.gitCommitAttempts.add(1, { outcome, 'tau.git.commit.kind': 'push' });
-      this.metrics.gitCommitDuration.record((performance.now() - startedAt) / 1000, {
-        'tau.git.commit.phase': 'total',
-        'tau.git.commit.kind': 'push',
-      });
-    };
-    try {
-      const result = await commitLease(args);
-      if (result.committed) {
-        attempt('committed');
-        this.metrics.gitRepositorySize.record(manifestPackBytes(result.manifest));
-        this.#hotProjects.record(
-          args.lease.locator.projectId,
-          args.viaDevice === undefined ? args.committedBy : `${args.committedBy}:${args.viaDevice}`,
-        );
-      }
-      return result;
-    } catch (error) {
-      if (error instanceof RepositoryStoreError && error.code === 'lost') {
-        this.metrics.syncManifestConflicts.add(1);
-        attempt('lost_race');
-        /* DW2: a race lost to a freeze's fence gets the freeze answer, not the 503. */
-        throw (await this.routes.refusalForLostRace(args.lease.locator.projectId)) ?? error;
-      } else if (!(error instanceof RepositoryStoreError && refusedBeforeManifestWrite.has(error.code))) {
-        attempt('error');
-      }
-      throw error;
-    } finally {
-      this.metrics.syncLeaseDuration.record((performance.now() - startedAt) / 1000, {
-        'tau.sync.lease.phase': 'commit',
-      });
-    }
-  }
-
-  /**
-   * Turns a store refusal into the HTTP answer the charter names for it.
-   *
-   * Returns the refusal rather than raising it, so every caller reads as
-   * `throw this.refusalFor(error)` and the throw site stays where the control
-   * flow is.
-   *
-   * @param error - Whatever the store, the lease or the commit raised.
-   * @returns The exception to throw.
-   */
-  private refusalFor(error: unknown): Error {
-    if (!(error instanceof RepositoryStoreError)) {
-      return error instanceof Error ? error : new Error(String(error));
-    }
-    switch (error.code) {
-      case 'lost':
-      case 'deadline': {
-        /* D4: a lost race is not a failed push, it is a push that has to happen
-           again. The client re-pushes against the manifest that won. */
-        return new ServiceUnavailableException({
-          code: 'GIT_PUSH_RACE_LOST',
-          message: 'Another push for this project committed first; retry.',
-        });
-      }
-      case 'incarnation-changed': {
-        return new NotFoundException({
-          code: 'GIT_REPOSITORY_NOT_FOUND',
-          message: 'Repository not found',
-        });
-      }
-      case 'tombstoned': {
-        return new GoneException({
-          code: 'GIT_REPOSITORY_DELETED',
-          message: 'This project has been deleted.',
-        });
-      }
-      case 'ceiling-exceeded': {
-        /* `pre-receive` bounds what *arrives*, so the backstop is reachable
-           without a bug: a compacting commit repacks the retained pack together
-           with the arrival, and a repack that deltifies worse than its inputs
-           is larger than the sum the hook measured (review F12). Nothing is
-           durable either way — the assertion runs before the first upload. */
-        this.#logger.log({ message: error.message }, 'The D20 ceiling was reached past the pre-receive hook');
-        /* Opens with the hook's marker so a client files it as the ceiling,
-           which no plan clears (RV-W8 F2), whichever gate refused it. */
-        return new PayloadTooLargeException({
-          code: 'GIT_REPOSITORY_CEILING_EXCEEDED',
-          message: `${ceilingRefusalMarker} — ${error.message}`,
-        });
-      }
-      case 'loose-objects':
-      case 'connectivity': {
-        return new UnprocessableEntityException({
-          code: 'GIT_PUSH_NOT_COMMITTABLE',
-          message: error.message,
-        });
-      }
-      case 'missing-pack': {
-        /* Terminal, not retryable (D22, L6-F8): the manifest names a pack the
-           store does not hold, and only an operator restore repairs that. A
-           `500` rather than a `503`, so it never widens the retryable class,
-           and a sentence opening with the marker so a leg that sees only text
-           (stock git's `text/plain` body) can classify it too. The store's own
-           sentence names internal keys, so it goes to the log instead. */
-        this.#logger.error({ message: error.message }, 'A repository manifest names a pack the store does not hold');
-        return new InternalServerErrorException({
-          code: 'GIT_REPOSITORY_INCOMPLETE',
-          message: `${incompleteRepositoryMarker} — it is missing data only an operator restore brings back; retrying will not help.`,
-        });
-      }
-    }
-  }
-
-  /**
-   * One smart-HTTP RPC child over a lease.
-   *
-   * @param args - The lease, the service and the bounds.
-   * @returns The spawned child.
-   */
-  private spawnService(args: {
-    lease: RepositoryLease;
-    service: GitSmartService;
-    maximumInputBytes: number;
-    environment?: Readonly<Record<string, string>>;
-    abort?: AbortSignal;
-  }): ChildProcessByStdio<Writable, Readable, Readable> {
-    const write = args.service === 'git-receive-pack';
-    const child = spawn(
-      gitExecutable,
-      [
-        ...(write ? ['-c', `receive.maxInputSize=${String(args.maximumInputBytes)}`] : []),
-        args.service.replace('git-', ''),
-        '--stateless-rpc',
-        args.lease.directory,
-      ],
-      {
-        env: childEnvironment(args.lease.directory, args.environment) as NodeJS.ProcessEnv,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: rpcTimeoutMilliseconds,
-        killSignal: 'SIGKILL',
-        ...(args.abort === undefined ? {} : { signal: args.abort }),
-      },
-    );
-    const stderr: Array<Uint8Array<ArrayBuffer>> = [];
-    child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
-    // An aborted or timed-out child emits `error`; without a listener that is
-    // an unhandled exception on the process.
-    child.on('error', (error) => {
-      this.#logger.warn({ err: error, service: args.service }, 'git smart-HTTP child ended early');
-    });
-    child.on('close', (code) => {
-      if (code !== 0) {
-        this.#logger.warn(
-          {
-            service: args.service,
-            code,
-            stderr: Buffer.concat(stderr).toString('utf8').slice(0, 2000),
-          },
-          'git smart-HTTP service exited non-zero',
-        );
-      }
-    });
-    return child;
-  }
-
-  /**
-   * Refuses a commit that has not started once the process begins to stop
-   * (503 `GIT_SERVICE_RESTARTING`); one already committing finishes under the drain.
-   *
-   * @param message - What the client is told to retry.
-   */
-  private refuseWhenStopping(message: string): void {
-    if (this.shutdown.signal.aborted) {
-      throw new ServiceUnavailableException({ code: 'GIT_SERVICE_RESTARTING', message });
-    }
-  }
-
-  /**
-   * Runs `work` after the reply. Every post-reply promise this service starts
-   * (announcements, sweeps, fetch disposal, the boot lease sweep) comes through
-   * here, so `settled()` and the shutdown registry, which waits for it until
-   * the stop's abandon phase, both see it.
-   */
-  private track(work: Promise<void>): void {
-    const settle = async (): Promise<void> => {
-      try {
-        await work;
-      } catch (error) {
-        /* Nothing is awaiting this promise but `settled()`, so an unhandled
-           rejection here would be the process's problem rather than the
-           request's (review F10). */
-        this.#logger.warn({ err: error }, 'Background work after a response failed');
-      } finally {
-        this.#background.delete(tracked);
-      }
-    };
-    const tracked = settle();
-    this.#background.add(tracked);
-    this.shutdown.track(tracked);
-  }
-
-  /**
-   * Disposes a fetch's lease once its child has closed, and gives the
-   * admission back. A failure here leaks a temporary directory, which is
-   * recoverable; failing the response the client already has is not.
-   */
-  private async disposeAfterFetch(lease: RepositoryLease, release: () => void, projectId: string): Promise<void> {
-    await this.disposeQuietly(lease, projectId);
-    release();
-  }
-
-  /**
-   * Disposes a lease and never raises (review F2).
-   *
-   * Every caller has something more important to do next — give the admission
-   * back, or raise the refusal the request actually earned — and a `rm -rf`
-   * that hit EBUSY must not take either of those away. What it costs is a
-   * temporary directory, which is recoverable; what the alternative cost was is
-   * a worker that refuses every later request.
-   */
-  private async disposeQuietly(lease: RepositoryLease | undefined, projectId: string): Promise<void> {
-    try {
-      await lease?.dispose();
-    } catch (error) {
-      this.#logger.warn({ err: error, projectId }, 'Lease disposal failed; its directory is left behind');
-    }
-  }
-
-  /** Every byte a child wrote to stdout. */
-  private async collect(stream: Readable): Promise<Uint8Array<ArrayBuffer>> {
-    const chunks: Array<Uint8Array<ArrayBuffer>> = [];
-    for await (const chunk of stream) {
-      chunks.push(chunk as Uint8Array<ArrayBuffer>);
-    }
-    return Buffer.concat(chunks);
-  }
-
-  /**
-   * Resolves when the child has exited, whatever its status.
-   *
-   * `receive-pack` exits 0 on a push it refused entirely, so its code is never
-   * the commit signal — the ref-map difference is (`store/commit.ts`). This
-   * only orders the commit after the child.
-   */
-  private async awaitChild(child: ChildProcessByStdio<Writable, Readable, Readable>): Promise<void> {
-    if (child.exitCode !== null || child.signalCode !== null) {
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      child.once('close', () => {
-        resolve();
-      });
-      child.once('error', () => {
-        resolve();
-      });
-    });
-  }
-
-  /**
-   * Streams the request body into the child, counting what actually arrived.
-   *
-   * @returns A promise that also carries the running byte count.
-   */
-  private pipeRequestBody(args: {
-    body: Readable;
-    child: ChildProcessByStdio<Writable, Readable, Readable>;
-    gzipped: boolean;
-    service: GitSmartService;
-    maximumInputBytes: number;
-  }): { done: Promise<void>; counter: { bytes: number } } {
-    const counter = { bytes: 0 };
-    const ceiling = args.maximumInputBytes;
-    const source = args.gzipped ? args.body.pipe(createGunzip()) : args.body;
-    source.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-      counter.bytes += chunk.byteLength;
-      if (ceiling > 0 && counter.bytes > ceiling) {
-        source.destroy(new Error(`The request body exceeded ${String(ceiling)} bytes.`));
-      }
-    });
-    const done = (async (): Promise<void> => {
-      try {
-        await pipeline(source, args.child.stdin);
-      } catch (error) {
-        this.#logger.warn({ err: error, service: args.service }, 'git smart-HTTP request body failed');
-        args.child.kill('SIGKILL');
-      }
-    })();
-    return { done, counter };
   }
 
   /**
@@ -1858,25 +1336,23 @@ export class GitRepositoryService {
   }
 
   /**
-   * Re-derives everything that follows from a committed manifest (D19).
+   * Re-derives everything that follows from a committed manifest (D19), from
+   * a receipt the manifest check accepted.
    *
-   * Byte accounting is the manifest's own live pack bytes, so nothing walks a
-   * directory to find out how large a repository is any more. Publications and
-   * LFS reachability read through the lease that is already open.
+   * Byte accounting is the manifest's own live pack bytes. LFS reachability is
+   * the receipt's whole walk, written in the same owner-locked transaction as
+   * the derived generation and only while that generation is behind the
+   * receipt's, so a slow receipt for generation 5 landing after 6 changes
+   * nothing. Publications are materialized for the tags the manifest names
+   * whose live publication does not record the commit the tag peels to — a
+   * read through tau-storage, and only when one is stale (DC3 moves it there).
    *
-   * A failure here is logged and swallowed on purpose. The push is durable by
-   * the time this runs, and telling a client its committed push failed is the
-   * one lie this path must not tell; the generation mismatch it leaves behind
-   * is what the next request repairs.
+   * A failure here is logged and swallowed on purpose: the push is durable,
+   * and the generation mismatch it leaves behind is what the next request (or
+   * the scheduler) repairs.
    */
-  private async derive(args: {
-    access: GitAccess;
-    lease: RepositoryLease;
-    manifest: Manifest;
-    /** The refs this commit moved, or every ref of the manifest on a repair. */
-    moved: readonly MovedRef[];
-  }): Promise<void> {
-    const { access, manifest } = args;
+  private async derive(receipt: StorageReceipt, manifest: Manifest): Promise<void> {
+    const access = { projectId: receipt.project, ownerId: receipt.owner };
     try {
       await assertProjectActive(this.databaseService.database, access.projectId);
     } catch (error) {
@@ -1891,37 +1367,11 @@ export class GitRepositoryService {
     }
     /* D13: tell every open client of this project that the remote moved. First
        and whatever the rebuild below does, because the manifest is already
-       durable and a reader parked on the long poll makes no git request that
-       would repair it. Fire-and-forget rather than a timeout: the append is a
-       database transaction a timeout could not cancel, so bounding the wait
-       would only stop this request knowing whether it landed while it still
-       held the lease; tracked, it holds neither the lease nor the response and
-       `settled()` still waits for it. A repair re-announces its generation
-       with its heads, which costs nothing on a device that already holds
-       them. */
-    this.track(this.announce(access, manifest.generation, args.moved));
+       durable. Tracked rather than awaited, as before. */
+    this.track(this.announce(access, manifest.generation, receipt.movedRefs));
     const storageBytes = manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
     try {
-      const tags = args.moved.flatMap((ref) =>
-        ref.ref.startsWith('refs/tags/') && ref.after !== undefined ? [{ ref: ref.ref, oid: ref.after }] : [],
-      );
-      if (tags.length > 0) {
-        await materializePublishedTags(this.materializerDependencies, {
-          projectId: access.projectId,
-          ownerId: access.ownerId,
-          directory: args.lease.directory,
-          tags,
-        });
-      }
-      await markLfsReachability(
-        { database: this.databaseService.database },
-        {
-          projectId: access.projectId,
-          ownerId: access.ownerId,
-          directory: args.lease.directory,
-          at: new Date(),
-        },
-      );
+      await this.materializeStalePublications(access, manifest);
     } catch (error) {
       this.#logger.warn(
         { err: error, projectId: access.projectId, generation: manifest.generation },
@@ -1934,6 +1384,19 @@ export class GitRepositoryService {
     try {
       await withOwnerLock(this.databaseService.database, access.ownerId, async (transaction) => {
         await assertActiveProjectLocked(transaction, access.projectId);
+        const [row] = await transaction
+          .select({ derivedGeneration: projectGit.derivedGeneration })
+          .from(projectGit)
+          .where(eq(projectGit.projectId, access.projectId))
+          .limit(1);
+        if (row !== undefined && row.derivedGeneration >= manifest.generation) {
+          return;
+        }
+        await writeLfsReachability(transaction, {
+          projectId: access.projectId,
+          referenced: receipt.reachableLfsOids,
+          at: new Date(),
+        });
         await transaction
           .insert(projectGit)
           .values({
@@ -1947,19 +1410,14 @@ export class GitRepositoryService {
             target: projectGit.projectId,
             set: {
               storageBytes,
-              /* `generation` moves with the marker: this row is the proof that the
-               store reached this generation, so a repair that runs because
-               `recordGeneration` never did must leave the two columns agreeing
-               (review F1). */
+              /* `generation` moves with the marker (review F1). */
               generation: manifest.generation,
               derivedGeneration: manifest.generation,
               copyPendingSince: copyPendingOnAdvance(manifest.generation),
               updatedAt: new Date(),
             },
-            /* Compare-and-swap (review F4). A request repairing generation 5 and a
-             request committing generation 6 are not ordered by anything, and the
-             slower of the two must not take `derived_generation` — and
-             `storage_bytes` with it — backwards. */
+            /* Compare-and-swap (review F4): the slower of two derivations never
+               takes `derived_generation`, or `storage_bytes`, backwards. */
             setWhere: lt(projectGit.derivedGeneration, manifest.generation),
           });
       });
@@ -1972,11 +1430,59 @@ export class GitRepositoryService {
   }
 
   /**
+   * Materializes the live publications whose tag, in this manifest, peels to a
+   * commit the row does not record — after a push that moved it, or a crash
+   * that lost the push's receipt. One query, and a read lease only when a
+   * publication is actually stale.
+   */
+  private async materializeStalePublications(
+    access: Pick<GitAccess, 'projectId' | 'ownerId'>,
+    manifest: Manifest,
+  ): Promise<void> {
+    const rows = await this.databaseService.database
+      .select({ tag: publication.tag, revisionId: publication.revisionId, manifestKey: publication.manifestKey })
+      .from(publication)
+      .where(and(eq(publication.projectId, access.projectId), isNull(publication.unpublishedAt)));
+    const stale = rows.flatMap((row) => {
+      const ref = `refs/tags/${row.tag}`;
+      const held = manifest.refs[ref];
+      return held !== undefined && (row.manifestKey === '' || (held.peeled ?? held.oid) !== row.revisionId)
+        ? [{ ref, oid: held.oid }]
+        : [];
+    });
+    if (stale.length === 0) {
+      return;
+    }
+    await this.withLease(
+      {
+        ...access,
+        role: 'owner',
+        callerId: derivedStateCaller,
+        remainingBytes: 0,
+        storageLimitBytes: 0,
+      },
+      async (lease) => {
+        await materializePublishedTags(this.materializerDependencies, {
+          projectId: access.projectId,
+          ownerId: access.ownerId,
+          directory: lease.directory,
+          tags: stale,
+        });
+      },
+      { spendBudget: false },
+    );
+  }
+
+  /**
    * One `revision` entry for a committed manifest (D13), with each moved ref's
    * new head so a client that already holds them asks for nothing (W13e); a
    * failure is logged, never raised.
    */
-  private async announce(access: GitAccess, generation: number, moved: readonly MovedRef[]): Promise<void> {
+  private async announce(
+    access: Pick<GitAccess, 'projectId' | 'ownerId'>,
+    generation: number,
+    moved: StorageReceipt['movedRefs'],
+  ): Promise<void> {
     try {
       await this.durableEvents.appendRevision({
         projectId: access.projectId,
@@ -1991,89 +1497,5 @@ export class GitRepositoryService {
         'Committed manifest not announced on the revision stream; open clients learn of it on their next fetch',
       );
     }
-  }
-
-  /**
-   * Repairs derived state a worker that died after its commit left behind (D19).
-   *
-   * **The manifest decides, never the row** (review F1). The row was the
-   * gate here once — `derived_generation >= generation` — and that made the
-   * repair blind to the one window it exists for: a worker killed between
-   * `commitLease` and `recordGeneration` leaves the store at N+1 and the row
-   * at N/N, which reads as "caught up" forever. The tag is durable and
-   * advertised, the publication is never materialized, and the LFS objects the
-   * push made reachable keep their `unreachable_at` and become eligible for
-   * retirement — W4's "no reachable pointer without bytes" broken permanently.
-   *
-   * This request already hydrated a lease, so it already holds the only
-   * authority on what committed. A missing row is generation 0.
-   *
-   * One row read per git request. On a mismatch the whole derivation is re-run
-   * over the lease this request holds, against every tag the manifest names
-   * rather than the ref-map difference of a push nobody recorded.
-   */
-  private async repairDerivedState(access: GitAccess, lease: RepositoryLease): Promise<void> {
-    const { manifest } = lease;
-    if (manifest === undefined) {
-      return;
-    }
-    const rows = await this.databaseService.database
-      .select({
-        generation: projectGit.generation,
-        derivedGeneration: projectGit.derivedGeneration,
-      })
-      .from(projectGit)
-      .where(eq(projectGit.projectId, access.projectId))
-      .limit(1);
-    const derivedGeneration = rows[0]?.derivedGeneration ?? 0;
-    if (derivedGeneration >= manifest.generation) {
-      return;
-    }
-    this.#logger.log(
-      { projectId: access.projectId, generation: manifest.generation, derivedGeneration },
-      'Repairing derived state left behind by an interrupted worker',
-    );
-    await this.derive({
-      access,
-      lease,
-      manifest,
-      moved: Object.entries(manifest.refs).map(([ref, value]) => ({ ref, after: value.oid })),
-    });
-  }
-
-  /**
-   * One bounded git invocation whose whole output is wanted.
-   *
-   * @param args - Arguments after `git`.
-   * @param cwd - Where the child runs; also its `HOME`.
-   * @param stdin - Written to the child and closed, when given.
-   * @returns The child's whole stdout.
-   * @throws Error When git exits non-zero.
-   */
-  private async runGit(args: readonly string[], cwd: string, stdin?: string): Promise<Uint8Array<ArrayBuffer>> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(gitExecutable, [...args], {
-        cwd,
-        env: childEnvironment(cwd) as NodeJS.ProcessEnv,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: commandTimeoutMilliseconds,
-        killSignal: 'SIGKILL',
-      });
-      const stdout: Array<Uint8Array<ArrayBuffer>> = [];
-      const stderr: Array<Uint8Array<ArrayBuffer>> = [];
-      child.stdout.on('data', (chunk: Uint8Array<ArrayBuffer>) => stdout.push(chunk));
-      child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
-      child.on('error', reject);
-      child.on('close', (code) => {
-        if (code === 0) {
-          resolve(Buffer.concat(stdout));
-          return;
-        }
-        reject(new Error(`git ${args.join(' ')} exited ${String(code)}: ${Buffer.concat(stderr).toString('utf8')}`));
-      });
-      if (stdin !== undefined) {
-        child.stdin.end(stdin);
-      }
-    });
   }
 }

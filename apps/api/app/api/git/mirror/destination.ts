@@ -87,6 +87,20 @@ export const allowedCommands: ReadonlySet<string> = new Set([
   'PutObjectRetentionCommand',
 ]);
 
+/**
+ * The commands a read-only holder may send: the restore (`TAU_S3_RESTORE_*`,
+ * listFiles, readFiles, readFileRetentions) and `tau-mirror`'s verify drill. Its
+ * key could not write anyway; the guard makes a write a local refusal too.
+ */
+export const readCommands: ReadonlySet<string> = new Set([
+  'ListObjectVersionsCommand',
+  'HeadObjectCommand',
+  'GetObjectCommand',
+]);
+
+/** What restore and the drill read the copy through: version listing, `HEAD` and `GET` of one version. */
+export type CopyReader = Pick<MirrorDestination, 'name' | 'listVersions' | 'head' | 'get'>;
+
 /** Thrown at the client when code tries to send a command outside {@link allowedCommands}. */
 export class ForbiddenDestinationCommandError extends Error {
   public constructor(command: string) {
@@ -121,11 +135,11 @@ const isForbidden = (error: unknown): boolean =>
   (error as { $metadata?: { httpStatusCode?: number } } | undefined)?.$metadata?.httpStatusCode === 403;
 
 /** Refuses any command outside the allow-list before it is signed. */
-const guardCommands = (client: S3Client): void => {
+const guardCommands = (client: S3Client, allowed: ReadonlySet<string>): void => {
   client.middlewareStack.add(
     (next, context) => async (arguments_) => {
       const command = context.commandName ?? 'UnknownCommand';
-      if (!allowedCommands.has(command)) {
+      if (!allowed.has(command)) {
         throw new ForbiddenDestinationCommandError(command);
       }
       return next(arguments_);
@@ -177,7 +191,12 @@ export class S3MirrorDestination implements MirrorDestination {
 
   private readonly bucket: string;
 
-  public constructor(account: DestinationAccount, client?: S3Client) {
+  /**
+   * @param account - The bucket and the key that reaches it.
+   * @param client - A client to reuse (tests).
+   * @param options - `readOnly` narrows the guard to {@link readCommands}.
+   */
+  public constructor(account: DestinationAccount, client?: S3Client, options: { readOnly?: boolean } = {}) {
     this.bucket = account.bucket;
     this.client =
       client ??
@@ -190,7 +209,7 @@ export class S3MirrorDestination implements MirrorDestination {
         requestChecksumCalculation: 'WHEN_REQUIRED',
         responseChecksumValidation: 'WHEN_REQUIRED',
       });
-    guardCommands(this.client);
+    guardCommands(this.client, options.readOnly === true ? readCommands : allowedCommands);
     retentionContentMd5(this.client);
   }
 

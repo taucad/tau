@@ -5,6 +5,7 @@ import { useProject } from '#hooks/use-project.js';
 import { mobileDrawerOpenSnapPoint, mobileDrawerSnapPoints, mobilePanelIds } from '#constants/editor.constants.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import type { PaneviewPanelState, PanelState } from '#types/editor.types.js';
+import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 export type ChatInterfaceState = {
   // Loading state
@@ -43,9 +44,10 @@ export function useChatInterfaceState(): ChatInterfaceState {
   const mobileActiveTab = useSelector(editorRef, (state) => state.context.panelState.mobileActiveTab);
 
   // A surface persisted by a build that no longer has it falls back to the model rather than an empty sheet.
-  const activeTab: MobilePanelId = (mobilePanelIds as readonly string[]).includes(mobileActiveTab)
-    ? mobileActiveTab
-    : 'viewer';
+  const activeTab: MobilePanelId =
+    (mobilePanelIds as readonly string[]).includes(mobileActiveTab) && isSurfaceShipped(mobileActiveTab)
+      ? mobileActiveTab
+      : 'viewer';
 
   const setActiveTab = useCallback(
     (value: MobilePanelId) => {

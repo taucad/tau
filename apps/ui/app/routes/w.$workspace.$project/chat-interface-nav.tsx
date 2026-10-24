@@ -25,6 +25,7 @@ import type { MobileWorkbenchDestinationCue } from '#components/mobile-workbench
 import type { MobilePanelId } from '#constants/editor.constants.js';
 import { useFeature } from '#flags/use-feature.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
+import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 /** Every mobile surface, by its workbench title, so label, sheet name and accessible name agree (I6). */
 export const chatTabs = [
@@ -72,8 +73,8 @@ export const secondarySurfaceGroups: readonly SurfaceGroup[] = [
 export const secondarySurfaces: readonly MobilePanelId[] = secondarySurfaceGroups.flatMap(({ surfaces }) => surfaces);
 
 /**
- * The All groups this person can open, gated as the desktop launcher gates them: Print behind Machines, Telemetry and
- * Console behind debug mode.
+ * The All groups this person can open, gated as the desktop launcher gates them: Browser in the desktop app only, Jobs
+ * nowhere, Print behind Machines, Telemetry and Console behind debug mode.
  *
  * @returns The visible groups, without empty ones.
  */
@@ -82,7 +83,10 @@ export function useVisibleSurfaceGroups(): readonly SurfaceGroup[] {
   const isTauDebugEnabled = useFeature('tauDebug');
   return secondarySurfaceGroups.flatMap((group) => {
     const surfaces = group.surfaces.filter(
-      (id) => (id !== 'print' || isMachinesEnabled) && ((id !== 'kernel' && id !== 'console') || isTauDebugEnabled),
+      (id) =>
+        isSurfaceShipped(id) &&
+        (id !== 'print' || isMachinesEnabled) &&
+        ((id !== 'kernel' && id !== 'console') || isTauDebugEnabled),
     );
     return surfaces.length === 0 ? [] : [{ ...group, surfaces }];
   });

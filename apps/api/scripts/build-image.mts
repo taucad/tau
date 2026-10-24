@@ -63,6 +63,7 @@ const main = (): void => {
     'api:build:billing-command',
     'api:build:maintenance-command',
     'api:build:mirror-command',
+    'api:build:storage-worker',
   ]) {
     nx('run', target, '--exclude-task-dependencies');
   }

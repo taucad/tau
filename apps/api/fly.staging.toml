@@ -88,6 +88,11 @@ TAU_AUTH_ALLOWED_EMAIL_DOMAINS = '["tau.new","fontein.co"]'
 # TAU_S3_BUCKET, TAU_S3_ENDPOINT, TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY
 # are pushed as Fly secrets by module.fly_api_secrets (repos/tau-cloud) — not set here.
 TAU_S3_PUBLIC_BASE_URL = 'https://cdn.taucad.dev'
+# DC1: git RPCs are forwarded to the private tau-storage app over its Flycast
+# address (apps/storage/fly.staging.toml). Set together with the secrets
+# TAU_STORAGE_GRANT_SIGNING_KEY and TAU_STORAGE_RECEIPT_PUBLIC_KEYS, which a
+# production-mode boot requires once this is set (tau-cloud P2.5).
+TAU_STORAGE_URL = 'http://tau-storage-staging.flycast'
 TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'
 
@@ -111,6 +116,13 @@ auto_start_machines = true
 # needs to keep one Machine serving; the count itself is `fly scale count app=2`.
 min_machines_running = 2
 processes = ['app']
+
+# FR11 (DC1): a push is silent between its last body byte and tau-storage's
+# compare-and-swap for up to the 5-minute commit deadline, and the client's
+# connection to this proxy is idle for all of it. 600 s is the deadline plus
+# margin, the same value as tau-storage's Flycast service; DB2 measures it.
+[http_service.http_options]
+idle_timeout = 600
 
 [[http_service.checks]]
 interval = "10s"

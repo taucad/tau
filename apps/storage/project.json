@@ -1,0 +1,25 @@
+{
+  "name": "storage",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/storage",
+  "projectType": "application",
+  "metadata": {
+    "description": "Deploy unit for tau-storage, the private git storage app (north star DC1). Its code is the api project's storage worker, built from apps/api/Dockerfile's `storage` target; this project holds only its Fly config so ci.yml's staging plan deploys it, before the API, whenever api or this config changes."
+  },
+  "tags": ["scope:api", "type:app", "deploy:staging"],
+  "implicitDependencies": ["api"],
+  "targets": {
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/storage/fly.staging.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore --build-target storage --no-public-ips"
+      }
+    },
+    "deploy:prod": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "echo 'tau-storage has no production config yet: DC1 deploys staging only (apps/storage/fly.staging.toml).' >&2 && exit 1"
+      }
+    }
+  }
+}

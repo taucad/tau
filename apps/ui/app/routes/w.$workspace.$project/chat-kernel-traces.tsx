@@ -365,13 +365,14 @@ function TreeRow({
               </>
             ) : undefined}
 
-            <span className='mr-1.5 flex size-4 shrink-0 items-center justify-center'>
+            {/* The expand toggle is 16px for a mouse and the 24px floor under a coarse pointer (I3). */}
+            <span className='mr-1.5 flex size-4 shrink-0 items-center justify-center pointer-coarse:size-6'>
               {hasChildren ? (
                 <button
                   type='button'
                   className={nestedActionVariants({
                     className:
-                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline',
+                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline pointer-coarse:size-6',
                   })}
                   aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} children for ${node.entry.name}`}
                   aria-expanded={!isCollapsed}
@@ -523,13 +524,14 @@ function TimelineRow({
           }}
         >
           <span className='flex min-w-0 items-center' style={{ paddingLeft: node.depth * 12 }}>
-            <span className='mr-1.5 flex size-4 shrink-0 items-center justify-center'>
+            {/* The expand toggle is 16px for a mouse and the 24px floor under a coarse pointer (I3). */}
+            <span className='mr-1.5 flex size-4 shrink-0 items-center justify-center pointer-coarse:size-6'>
               {hasChildren ? (
                 <button
                   type='button'
                   className={nestedActionVariants({
                     className:
-                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline',
+                      'flex size-4 items-center justify-center rounded-sm outline-none focus-visible:focus-outline pointer-coarse:size-6',
                   })}
                   aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} children for ${node.entry.name}`}
                   aria-expanded={!isCollapsed}

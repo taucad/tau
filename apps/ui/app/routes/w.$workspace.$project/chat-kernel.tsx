@@ -166,7 +166,7 @@ export function TelemetryPanelContent(): React.JSX.Element {
           aria-label='Filter telemetry'
           placeholder='Filter telemetry…'
           value={query}
-          className='h-7 min-w-0 bg-background'
+          className='h-7 min-w-0 bg-background pointer-coarse:h-10'
           onChange={(event) => {
             setQuery(event.target.value);
           }}

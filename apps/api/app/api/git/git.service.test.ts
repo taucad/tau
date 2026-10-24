@@ -1,16 +1,23 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
 import { finished } from 'node:stream/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { GoneException, Logger, NotFoundException, ServiceUnavailableException, VersioningType } from '@nestjs/common';
+import {
+  GoneException,
+  HttpException,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+  VersioningType,
+} from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
@@ -32,10 +39,24 @@ import type { DatabaseService } from '#database/database.service.js';
 import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { MemoryOwnerInFlightCap, OwnerInFlightGate } from '#api/git/admission/owner-in-flight.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { StorageGitService } from '#api/git/worker/storage-git.service.js';
+import type { LeaseRequest } from '#api/git/lease-host.js';
+import type { RepositoryLease } from '#api/git/store/lease.js';
+import { loopbackExecutor, loopbackReceiptChannel } from '#testing/loopback-executor.js';
+import { developmentPublicKeysJson, developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
+import { parsePublicKeys, parseSigningKey } from '#api/git/forwarding/contract/keys.js';
+import { signReceipt } from '#api/git/forwarding/contract/receipt.js';
+import {
+  DeriveScheduler,
+  deriveLagGraceSeconds,
+  deriveScanIntervalMilliseconds,
+} from '#api/git/forwarding/derive-scheduler.js';
+import type { StorageReceiptFacts } from '#api/git/forwarding/contract/receipt.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
-import type { MetricsService } from '#telemetry/metrics.js';
-import type { GitAccess } from '#api/git/git.service.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import type { GitAccess, ReceiptVerification } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
@@ -212,7 +233,7 @@ const databaseStub = (
                 ? [{ projectId, ownerId }]
                 : []
               : table === project
-                ? [{ storageAccountId: control.storageAccountId ?? null }]
+                ? [{ storageAccountId: control.storageAccountId ?? null, ownerId }]
                 : [{ generation: row.generation, derivedGeneration: row.derivedGeneration }],
         }),
     }),
@@ -256,6 +277,50 @@ const roomyBudget = {
   consumeWindowBudget: async () => ({ allowed: true, count: 1, retryAfterSeconds: 1 }),
 } as unknown as PublicationRateLimiterService;
 
+/**
+ * Each API service's tau-storage worker (DC1): the suites drive the API
+ * through an in-process loopback executor, and the lease, admission and commit
+ * knobs live on the worker now.
+ */
+const workers = new WeakMap<GitRepositoryService, StorageGitService>();
+
+const workerOf = (service: GitRepositoryService): StorageGitService => {
+  const worker = workers.get(service);
+  if (worker === undefined) {
+    throw new Error('This service has no loopback worker');
+  }
+  return worker;
+};
+
+/** Holds a lease on the service's worker for `work`, as the API's own `withLease` did before DC1. */
+// oxlint-disable-next-line max-params -- the lease host's own (operation, request, work) plus the service it runs on
+const holdLease = async <T>(
+  service: GitRepositoryService,
+  who: Pick<GitAccess, 'ownerId' | 'projectId' | 'remainingBytes'> & Partial<GitAccess>,
+  work: (lease: RepositoryLease) => Promise<T>,
+  operation = 'derive',
+): Promise<T> =>
+  (
+    workerOf(service) as unknown as {
+      runLease: (operation: string, request: LeaseRequest, work: (lease: RepositoryLease) => Promise<T>) => Promise<T>;
+    }
+  ).runLease(
+    operation,
+    {
+      locator: async () => repositoryLocator({ ownerId: who.ownerId, projectId: who.projectId }),
+      ownerId: who.ownerId,
+      remainingBytes: who.remainingBytes,
+    },
+    work,
+  );
+
+/** Waits for both sides' post-reply work: the API's announcements, the worker's disposals and sweeps. */
+const settledBoth = async (service: GitRepositoryService): Promise<void> => {
+  await workerOf(service).settled();
+  await service.settled();
+  await workerOf(service).settled();
+};
+
 const createService = (
   store: RepositoryStore,
   database: DatabaseService,
@@ -264,14 +329,26 @@ const createService = (
     durableEvents = mock<DurableEventsService>(),
     shutdown = new ShutdownService(),
     metrics,
+    owners,
+    receipts,
   }: {
     rateLimiter?: PublicationRateLimiterService;
     durableEvents?: DurableEventsService;
     shutdown?: ShutdownService;
     metrics?: MetricsService;
+    owners?: OwnerInFlightGate;
+    receipts?: ReceiptVerification;
   } = {},
-): GitRepositoryService =>
-  new GitRepositoryService(
+): GitRepositoryService => {
+  // oxlint-disable-next-line prefer-const -- assigned after the worker whose receipt channel closes over it
+  let api: GitRepositoryService | undefined;
+  const worker = new StorageGitService({
+    store,
+    shutdown,
+    ...(metrics === undefined ? {} : { metrics }),
+    receipts: loopbackReceiptChannel(async (receipt) => api?.applyReceipt(receipt)),
+  });
+  api = new GitRepositoryService(
     database,
     { getEntitlements: async () => ({ tier: 'pro', canSyncFiles: true }) } as unknown as CommercialEntitlementsService,
     mock<ObjectStorageService>({
@@ -293,7 +370,14 @@ const createService = (
     durableEvents,
     shutdown,
     metrics,
+    undefined,
+    loopbackExecutor(worker),
+    receipts,
+    owners,
   );
+  workers.set(api, worker);
+  return api;
+};
 
 const access: GitAccess = {
   projectId,
@@ -318,13 +402,12 @@ type FetchDisposal = { disposeAfterFetch: (...args: never[]) => Promise<void> };
  * rest of the post-reply work, which a row may be holding open.
  */
 const fetchOnce = async (service: GitRepositoryService, who: GitAccess): Promise<void> => {
-  const disposal = vi.spyOn(service as unknown as FetchDisposal, 'disposeAfterFetch');
+  const disposal = vi.spyOn(workerOf(service) as unknown as FetchDisposal, 'disposeAfterFetch');
   try {
     const output = await service.uploadPack({
       access: who,
       body: flushBody(),
       gzipped: false,
-      maximumInputBytes: 1024,
     });
     output.resume();
     await finished(output);
@@ -344,7 +427,6 @@ const pushProbe = async (service: GitRepositoryService, who: GitAccess): Promise
     committedBy: who.callerId,
     body: flushBody(),
     gzipped: false,
-    maximumInputBytes: 1024,
   });
 
 /**
@@ -379,7 +461,7 @@ describe('abandoned lease directories', () => {
         memoryStore(),
         databaseStub({ storageBytes: 0, generation: 0, derivedGeneration: 0 }, { failTransaction: false }),
       );
-      await service.settled();
+      await settledBoth(service);
 
       expect(existsSync(deadDirectory), 'a dead worker’s lease directory must be reclaimed').toBe(false);
       expect(existsSync(livingDirectory), 'a living worker’s lease directory is not this worker’s to remove').toBe(
@@ -400,7 +482,7 @@ describe('abandoned lease directories', () => {
       memoryStore(),
       databaseStub({ storageBytes: 0, generation: 0, derivedGeneration: 0 }, { failTransaction: false }),
     );
-    await service.settled();
+    await settledBoth(service);
 
     expect(existsSync(path.join(ownDirectory, 'pack')), 'a previous run’s lease must be reclaimed at boot').toBe(false);
   });
@@ -470,7 +552,7 @@ describe('GitRepositoryService derived state (D19)', () => {
       expect(read).not.toHaveBeenCalled();
     } finally {
       read.mockRestore();
-      await service.settled();
+      await settledBoth(service);
     }
   });
 
@@ -488,7 +570,7 @@ describe('GitRepositoryService derived state (D19)', () => {
       expect(read).not.toHaveBeenCalled();
     } finally {
       read.mockRestore();
-      await service.settled();
+      await settledBoth(service);
     }
   });
 
@@ -503,7 +585,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     };
     const service = createService(store, databaseStub(row, control));
     await fetchOnce(service, access);
-    await service.settled();
+    await settledBoth(service);
     expect(row).toEqual({ generation: 1, derivedGeneration: 0, storageBytes: 0 });
   });
 
@@ -522,7 +604,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     expect(row.storageBytes).toBe(0);
     /* D13 (review finding 4): the manifest is durable, so it is announced even
        though the rebuild failed; a parked reader makes no request that repairs it. */
-    await service.settled();
+    await settledBoth(service);
     expect(durableEvents.appendRevision.mock.calls).toEqual([
       [{ projectId, ownerId, generation: 1, refs: ['refs/heads/main', 'refs/tags/v1'], heads }],
     ]);
@@ -540,7 +622,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     expect(row.derivedGeneration).toBe(1);
     expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
     appended.resolve({ appended: false, reason: 'not-found' });
-    await service.settled();
+    await settledBoth(service);
   }, 60_000);
 
   /* One stop mechanism: the post-reply announcement is held open by the API's
@@ -569,7 +651,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     const service = createService(store, databaseStub(row, control), { durableEvents });
 
     await fetchOnce(service, access);
-    await service.settled();
+    await settledBoth(service);
 
     expect(row.derivedGeneration).toBe(1);
     /* D13: one `revision` entry for the committed manifest: its refs and their heads (W13e). */
@@ -633,10 +715,10 @@ describe('GitRepositoryService derived state (D19)', () => {
     /* One lease fits and a second does not, so a leaked admission is visible as
        the next request being refused. */
     const { bavail, bsize } = await statfs(tmpdir());
-    service.leaseReservationFloorBytes = Math.floor(bavail * bsize * 0.6);
+    workerOf(service).leaseReservationFloorBytes = Math.floor(bavail * bsize * 0.6);
 
     await expect(
-      service.withLease(access, async (lease) => {
+      holdLease(service, access, async (lease) => {
         (lease as { dispose: () => Promise<void> }).dispose = async () => {
           throw new Error('EBUSY: resource busy or locked');
         };
@@ -646,7 +728,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     ).rejects.toMatchObject({ response: { code: 'GIT_PUSH_RACE_LOST' } });
 
     let admitted = false;
-    await service.withLease(access, async () => {
+    await holdLease(service, access, async () => {
       admitted = true;
     });
     expect(admitted, 'the failed disposal leaked this worker’s lease admission').toBe(true);
@@ -657,13 +739,344 @@ describe('GitRepositoryService derived state (D19)', () => {
       store,
       databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
     );
-    service.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
-    service.admissionWaitMilliseconds = 0;
+    workerOf(service).leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    workerOf(service).admissionWaitMilliseconds = 0;
 
     await expect(fetchOnce(service, access)).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
     });
   });
+});
+
+/**
+ * DC1's receipt rules and the repair after a lost receipt (W9 Finding 2). The
+ * API changes a row only for a receipt that is signed, names this repository,
+ * and matches the manifest it re-reads with its own credential; a replay of an
+ * applied receipt changes nothing. A worker that died between its commit and
+ * its receipt leaves only "a committed manifest the row has not heard of",
+ * which the next request repairs in full: generation, publications and LFS
+ * marks.
+ */
+describe('storage receipts and the repair after a lost one (DC1)', () => {
+  const store = memoryStore();
+  const locator = repositoryLocator({ ownerId, projectId });
+  const receiptKey = parseSigningKey(developmentSigningKeyJson('receipt'), 'receipt');
+  let manifestBytes: Uint8Array<ArrayBuffer>;
+
+  beforeAll(async () => {
+    const client = scratch('dc1-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'DC1');
+    git(client, 'config', 'user.email', 'dc1@tau.test');
+    writeFileSync(path.join(client, 'main.scad'), 'cube(12);\n');
+    git(client, 'add', '.');
+    git(client, 'commit', '--quiet', '-m', 'the revision whose receipt was lost');
+    git(client, 'tag', '-a', 'v1', '-m', 'v1');
+    /* The commit-and-swap with no receipt after it: exactly what a worker killed between the two leaves. */
+    const lease = await hydrateLease({ store, locator, parentDirectory: scratch('dc1-lease') });
+    try {
+      execFileSync('git', ['push', lease.directory, 'main', 'refs/tags/v1'], {
+        cwd: client,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: gitEnvironment,
+      });
+      const committed = await commitLease({ store, lease, committedBy: ownerId });
+      expect(committed.committed).toBe(true);
+    } finally {
+      await lease.dispose();
+    }
+    const read = await store.readManifest(locator);
+    manifestBytes = read?.manifest ?? new Uint8Array();
+  }, 60_000);
+
+  const receiptFor = (overrides: Partial<StorageReceiptFacts> = {}): string => {
+    const manifest = decodeManifest(manifestBytes as ManifestBytes);
+    return signReceipt(
+      {
+        rid: randomBytes(16).toString('hex'),
+        kind: 'commit',
+        owner: ownerId,
+        project: projectId,
+        generation: manifest.generation,
+        incarnation: manifest.incarnation,
+        manifestSha256: createHash('sha256').update(manifestBytes).digest('hex'),
+        movedRefs: [{ ref: 'refs/heads/main', after: manifest.refs['refs/heads/main']?.oid }],
+        materializedTags: [],
+        reachableLfsOids: [],
+        ...overrides,
+      },
+      { key: receiptKey },
+    );
+  };
+
+  it('should change no row for a receipt whose manifest digest differs from the stored manifest', async () => {
+    const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
+    const updates: Array<Record<string, unknown>> = [];
+    const opened = vi.fn();
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(
+      store,
+      databaseStub(row, { failTransaction: false, updates, beforeTransaction: opened }),
+      { durableEvents },
+    );
+
+    const outcome = await service.applyReceipt(receiptFor({ manifestSha256: 'f'.repeat(64) }), access);
+    await settledBoth(service);
+
+    expect(outcome).toBe('manifest_mismatch');
+    expect(row).toEqual({ generation: 0, derivedGeneration: 0, storageBytes: 0 });
+    expect(updates).toEqual([]);
+    expect(opened).not.toHaveBeenCalled();
+    expect(durableEvents.appendRevision).not.toHaveBeenCalled();
+  });
+
+  it('should change no row for a receipt whose rid was already applied', async () => {
+    const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
+    const receipt = receiptFor();
+
+    expect(await service.applyReceipt(receipt, access)).toBe('applied');
+    await settledBoth(service);
+    expect(row.derivedGeneration).toBe(1);
+
+    /* Put the row back, so a second application would be visible. */
+    Object.assign(row, { generation: 0, derivedGeneration: 0, storageBytes: 0 });
+    durableEvents.appendRevision.mockClear();
+    expect(await service.applyReceipt(receipt, access)).toBe('duplicate');
+    await settledBoth(service);
+    expect(row).toEqual({ generation: 0, derivedGeneration: 0, storageBytes: 0 });
+    expect(durableEvents.appendRevision).not.toHaveBeenCalled();
+  });
+
+  it('should count a receipt whose ledger is unreachable as ledger_unavailable and change no row (review S4)', async () => {
+    const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const metrics = new MetricsService();
+    const counted = vi.spyOn(metrics.gitReceipts, 'add');
+    const service = createService(store, databaseStub(row, { failTransaction: false }), {
+      durableEvents,
+      metrics,
+      receipts: {
+        keys: parsePublicKeys(developmentPublicKeysJson('receipt'), 'TAU_STORAGE_RECEIPT_PUBLIC_KEYS'),
+        ledger: {
+          claim: async () => {
+            throw new Error('Redis is down');
+          },
+          release: async () => undefined,
+        },
+      },
+    });
+
+    expect(await service.applyReceipt(receiptFor(), access)).toBe('ledger_unavailable');
+    await settledBoth(service);
+
+    expect(counted).toHaveBeenCalledWith(1, { outcome: 'ledger_unavailable' });
+    expect(row).toEqual({ generation: 0, derivedGeneration: 0, storageBytes: 0 });
+    expect(durableEvents.appendRevision).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a receipt for another repository, and one signed with a key it does not hold', async () => {
+    const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
+    const service = createService(store, databaseStub(row, { failTransaction: false }));
+    expect(await service.applyReceipt(receiptFor({ project: 'proj-another' }), access)).toBe('rejected');
+    const forged = signReceipt(
+      {
+        rid: randomBytes(16).toString('hex'),
+        kind: 'commit',
+        owner: ownerId,
+        project: projectId,
+        generation: 1,
+        incarnation: decodeManifest(manifestBytes as ManifestBytes).incarnation,
+        manifestSha256: createHash('sha256').update(manifestBytes).digest('hex'),
+        movedRefs: [],
+        materializedTags: [],
+        reachableLfsOids: [],
+      },
+      { key: parseSigningKey(developmentSigningKeyJson('grant'), 'grant') },
+    );
+    expect(await service.applyReceipt(forged, access)).toBe('rejected');
+    expect(row).toEqual({ generation: 0, derivedGeneration: 0, storageBytes: 0 });
+  });
+
+  it('should repair generation, publications and LFS marks on the next fetch after a worker died between its commit and its receipt', async () => {
+    const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
+    const updates: Array<Record<string, unknown>> = [];
+    const durableEvents = mock<DurableEventsService>();
+    /* A live publication of v1 that the lost receipt never materialized. */
+    const publications = [{ tag: 'v1', revisionId: '0'.repeat(40), manifestKey: '', unpublishedAt: null }];
+    const service = createService(store, databaseStub(row, { failTransaction: false, updates, publications }), {
+      durableEvents,
+    });
+    const reads = vi.spyOn(workerOf(service), 'gitRead');
+
+    await fetchOnce(service, access);
+    await settledBoth(service);
+
+    expect(row.generation).toBe(1);
+    expect(row.derivedGeneration).toBe(1);
+    expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
+    /* The stale publication was materialized over a read lease of the committed generation. */
+    expect(reads.mock.calls.map(([, request]) => request.args[0])).toContain('rev-parse');
+    /* The LFS reachability pass ran inside the derivation: every pointer this
+       walk did not reach is marked with the moment it was first unreachable. */
+    expect(updates.some((update) => 'unreachableAt' in update)).toBe(true);
+  }, 60_000);
+});
+
+/**
+ * DC1 review S1: the publication materializer's reads share one lease. One
+ * hydrate per materialization, as before DC1, and a push that lands between
+ * two of its commands moves nothing they read.
+ */
+describe('read sessions (DC1 review S1)', () => {
+  it('should run every read of one withLease over one lease that a push in between does not move', async () => {
+    const store = memoryStore();
+    const locator = repositoryLocator({ ownerId, projectId });
+    const client = scratch('s1-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'S1');
+    git(client, 'config', 'user.email', 's1@tau.test');
+    const pushCommit = async (file: string): Promise<void> => {
+      writeFileSync(path.join(client, file), `${file}\n`);
+      git(client, 'add', '.');
+      git(client, 'commit', '--quiet', '-m', file);
+      const lease = await hydrateLease({ store, locator, parentDirectory: scratch('s1-lease') });
+      try {
+        execFileSync('git', ['push', lease.directory, 'main'], {
+          cwd: client,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: gitEnvironment,
+        });
+        const committed = await commitLease({ store, lease, committedBy: ownerId });
+        expect(committed.committed).toBe(true);
+      } finally {
+        await lease.dispose();
+      }
+    };
+    await pushCommit('a.scad');
+    const service = createService(
+      store,
+      databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
+    );
+    const worker = workerOf(service);
+    const hydrates = vi.spyOn(worker as unknown as { hydrate: (...args: never[]) => Promise<unknown> }, 'hydrate');
+    const head = async (directory: string): Promise<string> =>
+      Buffer.from(await service.leaseGit(directory, ['rev-parse', 'refs/heads/main']))
+        .toString('utf8')
+        .trim();
+
+    const [before, after] = await service.withLease(access, async (lease) => {
+      const first = await head(lease.directory);
+      await pushCommit('b.scad');
+      return [first, await head(lease.directory)];
+    });
+    await settledBoth(service);
+
+    expect(after, 'a push between two reads must not move what the second one reads').toBe(before);
+    expect(hydrates, 'one lease per withLease, however many commands it runs').toHaveBeenCalledOnce();
+    expect(worker.reservedLeaseBytes, 'the session ends with the work').toBe(0);
+  }, 60_000);
+});
+
+/**
+ * DC1's two back-pressure rows. The owner step (DA6's seam, called by the API
+ * before a grant is minted): an owner at its in-flight cap is refused `429`
+ * with a jittered `Retry-After` while another owner is served, and tau-storage
+ * never sees the refused request. The slow-body floor (on tau-storage, after
+ * the hydrate): a body moving fewer than 8 KiB in a 30 s window is aborted and
+ * its lease slot comes back.
+ */
+describe('owner in-flight cap and slow bodies (DC1)', () => {
+  const store = memoryStore();
+
+  /** DA6's gate with its in-process count, the request cap shrunk to one so the suite can fill it. */
+  const cappedGate = (cap: number): { readonly gate: OwnerInFlightGate; readonly held: (owner: string) => number } => {
+    const counts = new MemoryOwnerInFlightCap({ requests: cap });
+    return { gate: new OwnerInFlightGate({ cap: counts }), held: (owner) => counts.inFlight(owner).requests };
+  };
+
+  it('should refuse the next RPC from an owner at its cap with 429 while another owner is served', async () => {
+    const { gate, held } = cappedGate(1);
+    const service = createService(
+      store,
+      databaseStub({ generation: 0, derivedGeneration: 0, storageBytes: 0 }, { failTransaction: false }),
+      { owners: gate },
+    );
+    const worker = workerOf(service);
+    const served = vi.spyOn(worker, 'uploadPack');
+    /* Owner A's first RPC stays in flight: its body has not ended. */
+    const pending = new PassThrough();
+    const first = service.uploadPack({ access, body: pending, gzipped: false });
+    await vi.waitFor(() => {
+      expect(held(ownerId)).toBe(1);
+    });
+
+    const refused = await service
+      .uploadPack({ access, body: flushBody(), gzipped: false })
+      .catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(HttpException);
+    expect((refused as HttpException).getStatus()).toBe(429);
+    const answer = (refused as HttpException).getResponse() as { code: string; retryAfterSeconds: number };
+    expect(answer.code).toBe('GIT_OWNER_IN_FLIGHT_LIMIT');
+    expect(answer.retryAfterSeconds).toBeGreaterThanOrEqual(1);
+    /* Refused before a grant: tau-storage saw only owner A's first request. */
+    expect(served).toHaveBeenCalledTimes(1);
+
+    const other: GitAccess = { ...access, ownerId: 'user-dc1-other', callerId: 'user-dc1-other' };
+    const output = await service.uploadPack({ access: other, body: flushBody(), gzipped: false });
+    output.resume();
+    await finished(output);
+    expect(served).toHaveBeenCalledTimes(2);
+
+    pending.end(Buffer.from('0000'));
+    const firstOutput = await first;
+    firstOutput.resume();
+    await finished(firstOutput);
+    await settledBoth(service);
+    expect(held(ownerId)).toBe(0);
+    expect(held('user-dc1-other')).toBe(0);
+  }, 60_000);
+
+  it('should hold the slow-body floor at 8 KiB per 30 s window', () => {
+    const worker = new StorageGitService({ store, receipts: loopbackReceiptChannel() });
+    expect(worker.slowBodyMinimumBytes).toBe(8 * 1024);
+    expect(worker.slowBodyWindowMilliseconds).toBe(30_000);
+  });
+
+  it('should abort a push body moving less than the floor and give its lease slot back', async () => {
+    const { metrics, on } = recordingMetrics();
+    const service = createService(
+      store,
+      databaseStub({ generation: 0, derivedGeneration: 0, storageBytes: 0 }, { failTransaction: false }),
+      { metrics },
+    );
+    const worker = workerOf(service);
+    worker.slowBodyWindowMilliseconds = 200;
+    /* A pkt-line command trickled a few bytes at a time: well under 8 KiB in any window. */
+    const trickle = new PassThrough();
+    trickle.write(Buffer.from('0094'));
+    const pushing = (async (): Promise<unknown> => {
+      try {
+        return await service.receivePack({ access, committedBy: ownerId, body: trickle, gzipped: false });
+      } catch (error) {
+        return error;
+      }
+    })();
+    await vi.waitFor(() => {
+      expect(worker.reservedLeaseBytes).toBeGreaterThan(0);
+    });
+
+    const refused = await pushing;
+    await settledBoth(service);
+
+    expect(refused).toBeInstanceOf(HttpException);
+    expect((refused as HttpException).getStatus()).toBe(408);
+    expect(((refused as HttpException).getResponse() as { code: string }).code).toBe('GIT_REQUEST_BODY_TOO_SLOW');
+    expect(on('gitSlowBodyAborts').add).toHaveBeenCalledWith(1, { 'tau.git.operation': 'receive_pack' });
+    expect(worker.reservedLeaseBytes).toBe(0);
+    expect(trickle.destroyed).toBe(true);
+  }, 60_000);
 });
 
 /**
@@ -842,10 +1255,10 @@ describe('GitRepositoryService advertisement from the manifest (DB1)', () => {
       databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
       { metrics, rateLimiter: limiter },
     );
-    await service.settled();
+    await settledBoth(service);
     /* No lease fits on this disk, so any lease would be refused `GIT_LEASE_DISK_FULL`. */
-    service.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
-    service.admissionWaitMilliseconds = 0;
+    workerOf(service).leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    workerOf(service).admissionWaitMilliseconds = 0;
     vi.mocked(hydrateLease).mockClear();
 
     for (const service_ of ['git-upload-pack', 'git-receive-pack'] as const) {
@@ -865,9 +1278,9 @@ describe('GitRepositoryService advertisement from the manifest (DB1)', () => {
     expect(on('gitHydrateBytes').record).not.toHaveBeenCalled();
     expect(on('syncLeaseDuration').record).not.toHaveBeenCalled();
 
-    /* The fetch that follows still takes its lease, and is still refused for disk. */
+    /* The fetch that follows still spends the budget, which the API does before it forwards (DC1). */
     await expect(fetchOnce(service, advertisedAccess)).rejects.toMatchObject({
-      response: { code: 'GIT_LEASE_DISK_FULL' },
+      response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
     });
   });
 
@@ -945,7 +1358,7 @@ describe('GitRepositoryService advertisement from the manifest (DB1)', () => {
     const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
 
     await service.advertiseRefs(advertisedAccess, 'git-upload-pack');
-    await service.settled();
+    await settledBoth(service);
     expect(row, 'an advertisement holds no lease to derive over').toStrictEqual({
       generation: 1,
       derivedGeneration: 0,
@@ -954,7 +1367,7 @@ describe('GitRepositoryService advertisement from the manifest (DB1)', () => {
     expect(durableEvents.appendRevision).not.toHaveBeenCalled();
 
     await fetchOnce(service, advertisedAccess);
-    await service.settled();
+    await settledBoth(service);
     expect(row.derivedGeneration, 'the fetch after the advertisement repairs the trailing row').toBe(1);
     expect(row.storageBytes).toBeGreaterThan(0);
     expect(durableEvents.appendRevision.mock.calls).toEqual([
@@ -978,7 +1391,7 @@ describe('GitRepositoryService advertisement from the manifest (DB1)', () => {
     expect(row.derivedGeneration).toBe(0);
 
     await pushProbe(service, advertisedAccess);
-    await service.settled();
+    await settledBoth(service);
     expect(row).toMatchObject({ generation: 1, derivedGeneration: 1 });
   }, 60_000);
 });
@@ -1028,8 +1441,8 @@ describe('GitRepositoryService security floor (W9)', () => {
     const service = createService(store, caughtUp());
     const { bavail, bsize } = await statfs(tmpdir());
     /* Room for eight leases on this disk, whatever its size. */
-    service.leaseReservationFloorBytes = Math.floor((bavail * bsize) / 8.5);
-    service.admissionWaitMilliseconds = 0;
+    workerOf(service).leaseReservationFloorBytes = Math.floor((bavail * bsize) / 8.5);
+    workerOf(service).admissionWaitMilliseconds = 0;
     const ownerB: GitAccess = { ...access, ownerId: 'user-w9-b', callerId: 'user-w9-b' };
     const ownerC: GitAccess = { ...access, ownerId: 'user-w9-c', callerId: 'user-w9-c' };
     const gate = Promise.withResolvers<void>();
@@ -1038,7 +1451,7 @@ describe('GitRepositoryService security floor (W9)', () => {
     const hold = async (who: GitAccess): Promise<void> => {
       const admitted = Promise.withResolvers<void>();
       held.push(
-        service.withLease(who, async () => {
+        holdLease(service, who, async () => {
           admitted.resolve();
           await gate.promise;
         }),
@@ -1051,7 +1464,7 @@ describe('GitRepositoryService security floor (W9)', () => {
         // oxlint-disable-next-line no-await-in-loop -- each lease is admitted before the next is asked for
         await hold(access);
       }
-      await expect(service.withLease(access, async () => undefined)).rejects.toMatchObject({
+      await expect(holdLease(service, access, async () => undefined)).rejects.toMatchObject({
         response: { code: 'GIT_LEASE_OWNER_BUSY' },
       });
       await hold(ownerB);
@@ -1062,7 +1475,7 @@ describe('GitRepositoryService security floor (W9)', () => {
       await Promise.all(held);
     }
     /* Every admission came back: the first owner is admitted again. */
-    await expect(service.withLease(access, async () => 'admitted')).resolves.toBe('admitted');
+    await expect(holdLease(service, access, async () => 'admitted')).resolves.toBe('admitted');
   }, 60_000);
 
   /* D22 ruling: a caller's daily bucket is its own per owner, and everybody
@@ -1402,7 +1815,7 @@ describe('GitRepositoryService security floor (W9)', () => {
       const service = createService(store, caughtUp(), { durableEvents });
 
       await service.removeRef({ access, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId });
-      await service.settled();
+      await settledBoth(service);
 
       const read = await store.readManifest(locator);
       const manifest = decodeManifest(read?.manifest ?? new Uint8Array());
@@ -1461,10 +1874,10 @@ describe('GitRepositoryService security floor (W9)', () => {
         });
         expect(warn).toHaveBeenCalledWith(
           expect.objectContaining({ projectId }),
-          expect.stringContaining('A committed ref removal could not record its generation'),
+          expect.stringContaining('A committed manifest could not record its generation'),
         );
         expect(await manifestReferences()).not.toHaveProperty(['refs/tags/v2']);
-        await service.settled();
+        await settledBoth(service);
       } finally {
         recordGeneration.mockRestore();
         warn.mockRestore();
@@ -1603,6 +2016,79 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('derived_generation is 
     expect(afterStale?.derivedGeneration, 'a slower deriver rewound the marker').toBe(2);
     expect(Number(afterStale?.storageBytes), 'a slower deriver rewound the byte accounting').toBe(generationTwoBytes);
   }, 120_000);
+
+  /**
+   * DC1: an idle repository whose receipt was lost has no next request to
+   * repair it, so the scheduler does. One scan a minute, for rows that have
+   * trailed for over a minute: a seeded lagging row is repaired by the first
+   * scan that sees it, inside the ten minutes DC1 allows.
+   */
+  it('repairs an idle repository whose derived generation trails, from the scheduler alone', async () => {
+    expect(deriveScanIntervalMilliseconds + deriveLagGraceSeconds * 1000).toBeLessThanOrEqual(10 * 60_000);
+    const idleProjectId = `proj-dc1-idle-${randomBytes(5).toString('hex')}`;
+    const freshProjectId = `proj-dc1-fresh-${randomBytes(5).toString('hex')}`;
+    await database.insert(project).values([
+      { id: idleProjectId, ownerId: casOwnerId, name: 'idle' },
+      { id: freshProjectId, ownerId: casOwnerId, name: 'fresh' },
+    ]);
+    const idleStore = memoryStore();
+    const client2 = scratch('dc1-idle-client');
+    git(client2, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client2, 'config', 'user.name', 'DC1');
+    git(client2, 'config', 'user.email', 'dc1@tau.test');
+    writeFileSync(path.join(client2, 'main.scad'), 'cube(3);\n');
+    git(client2, 'add', '.');
+    git(client2, 'commit', '--quiet', '-m', 'committed, receipt lost, never touched again');
+    for (const target of [idleProjectId, freshProjectId]) {
+      // oxlint-disable-next-line no-await-in-loop -- two seeded repositories, one after the other
+      const lease = await hydrateLease({
+        store: idleStore,
+        locator: repositoryLocator({ ownerId: casOwnerId, projectId: target }),
+        parentDirectory: scratch('dc1-idle-lease'),
+      });
+      try {
+        execFileSync('git', ['push', lease.directory, 'main'], {
+          cwd: client2,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: gitEnvironment,
+        });
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        const committed = await commitLease({ store: idleStore, lease, committedBy: casOwnerId });
+        expect(committed.committed).toBe(true);
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await lease.dispose();
+      }
+    }
+    /* The idle row has trailed for two minutes; the fresh one only now, so its own receipt still goes first. */
+    await database.insert(projectGit).values([
+      {
+        projectId: idleProjectId,
+        generation: 1,
+        derivedGeneration: 0,
+        storageBytes: 0,
+        updatedAt: new Date(Date.now() - 120_000),
+      },
+      { projectId: freshProjectId, generation: 1, derivedGeneration: 0, storageBytes: 0 },
+    ]);
+
+    const service = createService(idleStore, { database } as unknown as DatabaseService);
+    const scheduler = new DeriveScheduler({ database } as unknown as DatabaseService, service);
+    const applied = await scheduler.scan();
+    await settledBoth(service);
+
+    const idle = await database.query.projectGit.findFirst({ where: eq(projectGit.projectId, idleProjectId) });
+    const fresh = await database.query.projectGit.findFirst({ where: eq(projectGit.projectId, freshProjectId) });
+    expect(applied).toBe(1);
+    expect(idle?.derivedGeneration).toBe(1);
+    expect(Number(idle?.storageBytes)).toBeGreaterThan(0);
+    expect(fresh?.derivedGeneration, 'the scan took a row inside its grace').toBe(0);
+
+    /* Past its grace, the next scan takes the other one too. */
+    expect(await scheduler.scan({ graceSeconds: 0 })).toBe(1);
+    const later = await database.query.projectGit.findFirst({ where: eq(projectGit.projectId, freshProjectId) });
+    expect(later?.derivedGeneration).toBe(1);
+  }, 120_000);
 });
 
 /*
@@ -1731,7 +2217,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
   it('counts an admitted lease, holds it active for its work, reserves its disk and measures its hydrate', async () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
-    service.leaseReservationFloorBytes = 1024;
+    workerOf(service).leaseReservationFloorBytes = 1024;
 
     await fetchOnce(service, telemetryAccess);
 
@@ -1758,8 +2244,8 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
   it('counts a lease refused for disk as disk_full and never holds it', async () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
-    service.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
-    service.admissionWaitMilliseconds = 0;
+    workerOf(service).leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    workerOf(service).admissionWaitMilliseconds = 0;
 
     await expect(pushProbe(service, telemetryAccess)).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
@@ -1778,18 +2264,18 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     const service = createService(store, caughtUp(), { metrics });
     const { bavail, bsize } = await statfs(tmpdir());
     /* Room for two leases on this disk, so a second would take the owner past half of it. */
-    service.leaseReservationFloorBytes = Math.floor((bavail * bsize) / 2.5);
-    service.admissionWaitMilliseconds = 0;
+    workerOf(service).leaseReservationFloorBytes = Math.floor((bavail * bsize) / 2.5);
+    workerOf(service).admissionWaitMilliseconds = 0;
     const gate = Promise.withResolvers<void>();
     const admitted = Promise.withResolvers<void>();
-    const held = service.withLease(telemetryAccess, async () => {
+    const held = holdLease(service, telemetryAccess, async () => {
       admitted.resolve();
       await gate.promise;
     });
     await admitted.promise;
 
     try {
-      await expect(service.withLease(telemetryAccess, async () => undefined)).rejects.toMatchObject({
+      await expect(holdLease(service, telemetryAccess, async () => undefined)).rejects.toMatchObject({
         response: { code: 'GIT_LEASE_OWNER_BUSY' },
       });
     } finally {
@@ -1803,7 +2289,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     ]);
   }, 60_000);
 
-  it('counts a spent hydrate budget as budget_exhausted and gives the reservation back', async () => {
+  it('counts a spent hydrate budget as budget_exhausted before tau-storage reserves anything', async () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), {
       metrics,
@@ -1811,7 +2297,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
         consumeWindowBudget: async () => ({ allowed: false, count: 1, retryAfterSeconds: 60 }),
       } as unknown as PublicationRateLimiterService,
     });
-    service.leaseReservationFloorBytes = 1024;
+    workerOf(service).leaseReservationFloorBytes = 1024;
 
     await expect(fetchOnce(service, telemetryAccess)).rejects.toMatchObject({
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
@@ -1822,20 +2308,21 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
       outcome: 'budget_exhausted',
     });
     expect(on('gitLeasesActive').add).not.toHaveBeenCalled();
-    expect(on('gitLeaseReservedBytes').record.mock.calls.at(-1)).toEqual([0]);
+    /* DC1: the API spends the budget before it forwards, so no lease disk was ever reserved. */
+    expect(on('gitLeaseReservedBytes').record).not.toHaveBeenCalled();
   });
 
   it('counts a committed write, its duration and the repository size, and ranks the project by rank alone', async () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
-    service.leaseReservationFloorBytes = 1024;
+    workerOf(service).leaseReservationFloorBytes = 1024;
 
     await service.removeRef({
       access: telemetryAccess,
       ref: 'refs/heads/conflicts/main/device-a',
       committedBy: ownerId,
     });
-    await service.settled();
+    await settledBoth(service);
 
     expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
       'tau.git.operation': 'remove_ref',
@@ -1882,7 +2369,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     const { metrics, on } = recordingMetrics();
     const losing: RepositoryStore = { ...store, commitManifest: async () => 'lost' };
     const service = createService(losing, caughtUp(), { metrics });
-    service.leaseReservationFloorBytes = 1024;
+    workerOf(service).leaseReservationFloorBytes = 1024;
 
     await expect(
       service.removeRef({ access: telemetryAccess, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId }),
@@ -1922,8 +2409,8 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
   /** A service whose lease filesystem reports `freeBytes`, refusing at once instead of waiting. */
   const onDisk = (freeBytes: number, options: Parameters<typeof createService>[2] = {}): GitRepositoryService => {
     const service = createService(store, caughtUp(), options);
-    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(freeBytes);
-    service.admissionWaitMilliseconds = 0;
+    vi.spyOn(workerOf(service), 'readLeaseDiskFreeBytes').mockResolvedValue(freeBytes);
+    workerOf(service).admissionWaitMilliseconds = 0;
     return service;
   };
 
@@ -1938,7 +2425,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
     for (let lease = 0; lease < count; lease += 1) {
       const admitted = Promise.withResolvers<void>();
       held.push(
-        service.withLease(who, async () => {
+        holdLease(service, who, async () => {
           admitted.resolve();
           await gate.promise;
         }),
@@ -1985,7 +2472,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
 
     const close = await holdLeases(service, bytesAccess, 16);
     try {
-      await expect(service.withLease(bytesAccess, async () => 'seventeenth')).resolves.toBe('seventeenth');
+      await expect(holdLease(service, bytesAccess, async () => 'seventeenth')).resolves.toBe('seventeenth');
     } finally {
       await close();
     }
@@ -1997,7 +2484,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
 
     const close = await holdLeases(service, bytesAccess, 1);
     try {
-      await expect(service.withLease(bytesAccess, async () => 'second')).resolves.toBe('second');
+      await expect(holdLease(service, bytesAccess, async () => 'second')).resolves.toBe('second');
     } finally {
       await close();
     }
@@ -2018,7 +2505,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
       },
     };
     const service = createService(counting, caughtUp(), { metrics });
-    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(stagingFreeBytes);
+    vi.spyOn(workerOf(service), 'readLeaseDiskFreeBytes').mockResolvedValue(stagingFreeBytes);
 
     await fetchOnce(service, bytesAccess);
 
@@ -2050,8 +2537,8 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
     }));
     const { metrics, on } = recordingMetrics();
     const service = createService(large, caughtUp(), { metrics });
-    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(stagingFreeBytes);
-    service.admissionWaitMilliseconds = 0;
+    vi.spyOn(workerOf(service), 'readLeaseDiskFreeBytes').mockResolvedValue(stagingFreeBytes);
+    workerOf(service).admissionWaitMilliseconds = 0;
     const reservation = hydrated(gibibyte) + floorBytes;
 
     try {
@@ -2069,7 +2556,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
       }
       expect(on('gitLeaseReservedBytes').record.mock.calls.at(-1)).toEqual([6 * reservation]);
       await expect(
-        service.withLease({ ...bytesAccess, ownerId: 'user-da3-g', callerId: 'user-da3-g' }, async () => undefined),
+        holdLease(service, { ...bytesAccess, ownerId: 'user-da3-g', callerId: 'user-da3-g' }, async () => undefined),
       ).rejects.toMatchObject({ response: { code: 'GIT_LEASE_DISK_FULL' } });
       await Promise.all(closes.map(async (close) => close()));
     } finally {
@@ -2083,7 +2570,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
   it('refuses a push at the D20 ceiling with GIT_LEASE_DISK_FULL when its bytes do not fit, while a fetch still does', async () => {
     /* Room for the hydrate and the floor, and half the quarantine bound a push at the ceiling still needs. */
     const service = onDisk(hydrated(committedBytes) + floorBytes + slackBytes / 2);
-    service.repositoryByteCeiling = committedBytes;
+    workerOf(service).repositoryByteCeiling = committedBytes;
 
     await expect(pushProbe(service, bytesAccess)).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
@@ -2094,9 +2581,9 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
   it('runs receive-pack with the quarantine bound it reserved as receive.maxInputSize', async () => {
     const service = onDisk(stagingFreeBytes);
     const ceiling = committedBytes + 10 * mebibyte;
-    service.repositoryByteCeiling = ceiling;
+    workerOf(service).repositoryByteCeiling = ceiling;
     const spawned = vi.spyOn(
-      service as unknown as { spawnService: (args: { maximumInputBytes: number }) => unknown },
+      workerOf(service) as unknown as { spawnService: (args: { maximumInputBytes: number }) => unknown },
       'spawnService',
     );
 
@@ -2105,7 +2592,6 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
       committedBy: ownerId,
       body: flushBody(),
       gzipped: false,
-      maximumInputBytes: bytesAccess.remainingBytes + slackBytes,
     });
 
     /* The plan has 10 GiB left and the ceiling 10 MiB: git stops reading at the ceiling plus the slack. */
@@ -2123,11 +2609,13 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
     };
     const service = createService(counting, caughtUp());
     /* The first lease takes more than half the lease disk, so the owner's second waits for it. */
-    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(2 * (hydrated(committedBytes) + floorBytes) + 1);
-    service.admissionWaitMilliseconds = 2000;
+    vi.spyOn(workerOf(service), 'readLeaseDiskFreeBytes').mockResolvedValue(
+      2 * (hydrated(committedBytes) + floorBytes) + 1,
+    );
+    workerOf(service).admissionWaitMilliseconds = 2000;
 
     const close = await holdLeases(service, bytesAccess, 1);
-    const second = service.withLease(bytesAccess, async () => 'after the wait');
+    const second = holdLease(service, bytesAccess, async () => 'after the wait');
     setTimeout(() => {
       void close();
     }, 50);
@@ -2136,10 +2624,10 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
     /* One read each, and one more for the lease that waited: a push may have committed meanwhile. */
     expect(reads).toBe(3);
 
-    service.admissionWaitMilliseconds = 50;
+    workerOf(service).admissionWaitMilliseconds = 50;
     const again = await holdLeases(service, bytesAccess, 1);
     try {
-      await expect(service.withLease(bytesAccess, async () => undefined)).rejects.toMatchObject({
+      await expect(holdLease(service, bytesAccess, async () => undefined)).rejects.toMatchObject({
         response: { code: 'GIT_LEASE_OWNER_BUSY' },
       });
     } finally {

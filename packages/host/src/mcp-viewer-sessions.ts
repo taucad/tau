@@ -22,6 +22,7 @@ import { tauViewerAcceptedViewFields } from '@taucad/mcp/viewer-protocol';
 import type {
   TauViewerCaptureReplyInput,
   TauViewerImage,
+  TauViewerPoseCommand,
   TauViewerShowResult,
   TauViewerEntryStatus,
   TauViewerSyncInput,
@@ -81,6 +82,12 @@ export type McpViewerSessions = Readonly<{
     context?: McpViewerCallContext,
   ): Promise<McpViewerViewStateResult | TauMcpViewerFailure>;
   captureReply(input: TauViewerCaptureReplyInput): Readonly<{ accepted: boolean }>;
+  /** A `pose_model` command for the pages of `scope`: each page showing its model applies it once. */
+  posed(command: Omit<TauViewerPoseCommand, 'sequence'>, scope?: string): void;
+  /** How many live pages of `scope` show a model. */
+  viewers(modelId: string, scope?: string): number;
+  /** The freshest view a live page of `scope` reports for a model. */
+  viewOf(modelId: string, scope?: string): TauViewerViewState | undefined;
   /** Answer every held sync and fail every pending capture. */
   close(): void;
 }>;
@@ -94,6 +101,8 @@ type Page = {
   captures: string[];
   /** Captures a sync already handed the page; they no longer cut a held sync short while the page works on them. */
   delivered: Set<string>;
+  /** The last pose command a sync handed the page. */
+  posed: number;
   wake?: () => void;
   /** Whether the page's last sync followed `show_model`. */
   follows: boolean;
@@ -144,6 +153,9 @@ export const createMcpViewerSessions = (options: McpViewerSessionsOptions = {}):
   const liveByEntry = new Map<string, Latest>();
   /** The newest status of each watched source. */
   const statusByEntry = new Map<string, StatusRecord>();
+  /** The latest pose command in each scope; the `undefined` key is the process scope. */
+  const poseByScope = new Map<string | undefined, TauViewerPoseCommand>();
+  let poseSequence = 0;
   let closed = false;
 
   /** Whether a page and a call share a conversation: either names none, or both name the same one. */
@@ -173,6 +185,14 @@ export const createMcpViewerSessions = (options: McpViewerSessionsOptions = {}):
   const unseenStatus = (page: Page): boolean =>
     page.entry !== undefined && (statusByEntry.get(page.entry)?.version ?? 0) > page.statusSeen;
 
+  /** The pose command a page has not been handed: its conversation's or the process scope's, whichever came later. */
+  const unposed = (page: Page): TauViewerPoseCommand | undefined => {
+    const own = page.scope === undefined ? undefined : poseByScope.get(page.scope);
+    const shared = poseByScope.get(undefined);
+    const latest = own === undefined || (shared !== undefined && shared.sequence > own.sequence) ? shared : own;
+    return latest !== undefined && latest.sequence > page.posed ? latest : undefined;
+  };
+
   const answer = (page: Page, input: TauViewerSyncInput): TauViewerSyncResult => {
     /* A capture the page has not heard of goes first; one it works on is repeated in case a reply was lost. */
     const requestId = page.captures.find((id) => !page.delivered.has(id)) ?? page.captures[0];
@@ -189,16 +209,24 @@ export const createMcpViewerSessions = (options: McpViewerSessionsOptions = {}):
     if (status !== undefined) {
       page.statusSeen = status.version;
     }
+    const pose = unposed(page);
+    if (pose !== undefined) {
+      page.posed = pose.sequence;
+    }
     return {
       version,
       accepts: tauViewerAcceptedViewFields,
       ...(show === undefined ? {} : { show: show.result }),
       ...(status === undefined ? {} : { status: { [status.entryPath]: status.status } }),
       ...(requestId === undefined ? {} : { capture: { requestId } }),
+      ...(pose === undefined ? {} : { pose }),
     };
   };
   const isReady = (page: Page, input: TauViewerSyncInput): boolean =>
-    page.captures.some((id) => !page.delivered.has(id)) || unseen(page, input) !== undefined || unseenStatus(page);
+    page.captures.some((id) => !page.delivered.has(id)) ||
+    unseen(page, input) !== undefined ||
+    unseenStatus(page) ||
+    unposed(page) !== undefined;
 
   /** Wake every page the watched source's news reaches: those showing it, and those following `show_model`. */
   const wakeFor = (entry: string): void => {
@@ -257,10 +285,12 @@ export const createMcpViewerSessions = (options: McpViewerSessionsOptions = {}):
       const { scope, signal, entry } = context;
       let page = pages.get(input.pageId);
       if (page === undefined) {
+        /* A page that opens later takes the pose that holds now. */
         page = {
           lastSeen: now(),
           captures: [],
           delivered: new Set(),
+          posed: 0,
           follows: input.follow,
           liveSeen: 0,
           statusSeen: 0,
@@ -357,6 +387,21 @@ export const createMcpViewerSessions = (options: McpViewerSessionsOptions = {}):
         input.image === undefined ? { error: input.error ?? 'The viewer sent no image.' } : { image: input.image },
       );
       return { accepted: true };
+    },
+    posed(command, scope) {
+      poseSequence += 1;
+      poseByScope.set(scope, { ...command, sequence: poseSequence });
+      for (const page of pages.values()) {
+        if (sharesScope(page, scope)) {
+          page.wake?.();
+        }
+      }
+    },
+    viewers(modelId, scope) {
+      return livePages(scope).filter(([, page]) => page.view.model.id === modelId).length;
+    },
+    viewOf(modelId, scope) {
+      return livePages(scope).find(([, page]) => page.view.model.id === modelId)?.[1].view;
     },
     close() {
       closed = true;

@@ -168,4 +168,35 @@ describe('createMcpViewerSessions', () => {
     await expect(second).resolves.toEqual({ accepts, version: 0 });
     sessions.close();
   });
+
+  it('should hand each page a pose command once, waking a held sync, and count the pages showing its model', async () => {
+    const sessions = createMcpViewerSessions({ hold: 5000 });
+    await sessions.sync({ pageId: 'tab-page-1', version: 0, follow: true, wait: false, view: viewOf('gear', 10) });
+    const held = sessions.sync({ pageId: 'tab-page-1', version: 0, follow: true, wait: true });
+    const command = { modelId: 'gear', animation: { id: 'spin', action: 'seek', time: 2, speed: 1 } } as const;
+    sessions.posed(command);
+
+    await expect(held).resolves.toEqual({ accepts, version: 0, pose: { ...command, sequence: 1 } });
+    await expect(sessions.sync({ pageId: 'tab-page-1', version: 0, follow: true, wait: false })).resolves.toEqual({
+      accepts,
+      version: 0,
+    });
+    expect(sessions.viewers('gear')).toBe(1);
+    expect(sessions.viewers('other')).toBe(0);
+    expect(sessions.viewOf('gear')?.model.id).toBe('gear');
+    sessions.close();
+  });
+
+  it('should keep a pose command to its conversation', async () => {
+    const sessions = createMcpViewerSessions({ hold: 20 });
+    sessions.posed({ modelId: 'gear', coordinates: { sun: 90 } }, 'thread-a');
+
+    await expect(
+      sessions.sync({ pageId: 'tab-page-b', version: 0, follow: true, wait: false }, { scope: 'thread-b' }),
+    ).resolves.not.toHaveProperty('pose');
+    await expect(
+      sessions.sync({ pageId: 'tab-page-a', version: 0, follow: true, wait: false }, { scope: 'thread-a' }),
+    ).resolves.toMatchObject({ pose: { sequence: 1, modelId: 'gear', coordinates: { sun: 90 } } });
+    sessions.close();
+  });
 });

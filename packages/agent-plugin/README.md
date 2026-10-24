@@ -10,7 +10,7 @@ Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and k
 ## Why this package?
 
 - **One plugin for both hosts.** This package's folder is a Codex plugin and a Claude Code plugin; each host reads its own manifest and MCP server config.
-- **The agent sees the part it builds.** Ten Tau tools evaluate a model, run its GeoSpec tests, return screenshots as images, export STEP, STL, 3MF or glTF, read and edit its parameters, arrange the Tau workbench, show it in the Tau viewer and prepare native kernels; see [Tools](#tools).
+- **The agent sees the part it builds.** Eleven Tau tools evaluate a model, run its GeoSpec tests, return screenshots as images, export STEP, STL, 3MF or glTF, read and edit its parameters, arrange the Tau workbench, show it in the Tau viewer, drive its mechanism and prepare native kernels; see [Tools](#tools).
 - **You see it too.** `show_model` opens the Tau viewer: inside Codex desktop and Claude Desktop as an MCP App, and as a local browser link in the CLIs.
 - **Kernel knowledge when a task needs it.** An onboarding skill, `tau`, plus API skills for replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy, PicoGK, GeoSpec and the workbench.
 - **Nothing to install inside the plugin.** It has no dependencies: a small launcher finds your Tau CLI, or fetches the matching release with `npx`.
@@ -90,6 +90,7 @@ The same prompt works in `codex` after the Codex install. The agent writes `main
 | `apply_parameter_operation` | Edits a model's parameters through a checked write; Tau shows the same values                 | `.tau/parameters/` in the project             |
 | `show_model`                | Shows a model in the Tau viewer; a CAD source or STEP/STL/3MF/OBJ becomes GLB first           | Nothing: a rendered source stays in memory    |
 | `view_state`                | Reports the viewer's model, selected, added and hidden parts, camera; `capture` adds an image | Nothing                                       |
+| `pose_model`                | Plays, pauses, seeks or resets an animation, or sets joints, of the shown model's mechanism   | The GLB, when it shows a source first         |
 | `prepare_kernel`            | Downloads the native runtime a `.py` or `.cs` model needs, once per computer                  | The shared payload store, outside the project |
 
 The tools load with the session in both hosts rather than waiting behind tool search. `test_model` is listed only when the server can resolve the GeoSpec engine, which `@taucad/cli` installs with itself; a server without it does not register the tool, so a client calling it anyway gets the MCP unknown-tool error.

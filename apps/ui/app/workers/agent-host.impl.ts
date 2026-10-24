@@ -18,6 +18,7 @@ import {
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { materializeCaptureCamera } from '@taucad/agent-tools/capture';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
@@ -382,13 +383,7 @@ const createRuntimeRpcClients = (options: {
         const exportOptions: Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'] = {
           ...job.exportOptions,
           mode: 'single',
-          camera: {
-            framing: 'bounds',
-            direction: [camera.direction[0], camera.direction[1], camera.direction[2]],
-            up: [camera.up[0], camera.up[1], camera.up[2]],
-            margin: camera.margin,
-            projection: { kind: 'perspective', verticalFieldOfView: camera.projection.verticalFieldOfView },
-          },
+          camera: materializeCaptureCamera(camera),
         };
         return options.imageService.export({ ...job, exportOptions });
       }

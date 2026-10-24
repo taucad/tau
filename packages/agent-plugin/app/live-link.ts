@@ -9,7 +9,10 @@ import type {
   TauViewerCamera,
   TauViewerComponent,
   TauViewerImage,
+  TauViewerMechanism,
   TauViewerModel,
+  TauViewerPlayback,
+  TauViewerPoseCommand,
   TauViewerShowResult,
   TauViewerEntryStatus,
   TauViewerSyncResult,
@@ -53,6 +56,14 @@ export const viewStateOf = (
     composition: 'inline' | 'tab';
     interactedAt: number;
     references: readonly GeometryComponentReference[];
+    /** The shown unit's mechanism, playback and coordinates, when its Kinematics actor loaded one. */
+    motion?:
+      | Readonly<{
+          mechanism: TauViewerMechanism;
+          playback: TauViewerPlayback;
+          coordinates: Readonly<Record<string, number>>;
+        }>
+      | undefined;
   }>,
 ): TauViewerViewState => {
   const { model, unit, camera } = input;
@@ -83,6 +94,9 @@ export const viewStateOf = (
         selector: reference.selector,
       }),
     ),
+    ...(input.motion === undefined
+      ? {}
+      : { mechanism: input.motion.mechanism, playback: input.motion.playback, coordinates: input.motion.coordinates }),
   };
 };
 
@@ -193,6 +207,8 @@ export type LiveLinkPage = Readonly<{
   capture(): Promise<TauViewerImage | Readonly<{ error: string }>>;
   /** The project's file list moved to this version (`app_sync`'s `filesVersion`); the Files pane lists again. */
   filesVersion?(filesVersion: number): void;
+  /** Apply a `pose_model` command to the shown model's Kinematics actor. */
+  pose(command: TauViewerPoseCommand): void;
 }>;
 
 /** Timing of the live link; tests shorten it. */
@@ -251,6 +267,7 @@ export const startLiveLink = (
   const control: { stopped: boolean; resume?: (() => void) | undefined } = { stopped: false };
   let retry = retryFloor;
   const answered = new Set<string>();
+  let posed = 0;
   let activeUntil = Date.now() + activeFor;
   /* A page that opened on its link's model first takes the server's version without following, so a show made before
    * it opened never replaces that model; it follows every show after. */
@@ -293,6 +310,10 @@ export const startLiveLink = (
     }
     if (result.filesVersion !== undefined) {
       page.filesVersion?.(result.filesVersion);
+    }
+    if (result.pose !== undefined && result.pose.sequence > posed) {
+      posed = result.pose.sequence;
+      page.pose(result.pose);
     }
     const requestId = result.capture?.requestId;
     if (requestId !== undefined && !answered.has(requestId)) {

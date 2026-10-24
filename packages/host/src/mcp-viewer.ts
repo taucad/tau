@@ -29,6 +29,7 @@ import type { EntryRender, EntrySession, EntrySessionRuntime } from '#mcp-entry-
 import { readBytesRange, readModelRange, snapshotModelFile } from '#mcp-viewer-read.js';
 import type { ModelFileIdentity } from '#mcp-viewer-read.js';
 import { createMcpViewerSessions } from '#mcp-viewer-sessions.js';
+import { createMcpViewerPoser } from '#mcp-viewer-pose.js';
 import { createDirectShare } from '#mcp-viewer-share.js';
 import { createMcpViewerFiles, drawnFormats, isOpenablePath, isSourcePath } from '#mcp-viewer-files.js';
 import type { McpViewerFilesOptions } from '#mcp-viewer-files.js';
@@ -371,6 +372,9 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
   };
   const token = randomBytes(24).toString('base64url');
   const sessions = createMcpViewerSessions(options.sessions);
+  const poser = createMcpViewerPoser(sessions);
+  /** The id of the model shown last per project folder and conversation, which `pose_model` drives by default. */
+  const lastShownId = new Map<string, string>();
   const workbench = createMcpViewerWorkbench(options.workbench);
   const files = createMcpViewerFiles(options.files);
   /** The `filesVersion` each page heard last, so a change between two syncs answers the next at once. */
@@ -655,6 +659,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     const { model } = rendered;
     const scope = conversationOf(callOptions.meta);
     lastShown.set(lastShownKey(root, scope), model.sourceFile ?? model.path);
+    lastShownId.set(lastShownKey(root, scope), model.id);
     if (scope !== undefined) {
       conversationRoot.set(scope, root);
       conversationByCall.set(callOptions.toolCallId, scope);
@@ -969,6 +974,40 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     },
     async captureReply(input) {
       return sessions.captureReply(input);
+    },
+    async pose(input, callOptions) {
+      const root = rootOf(callOptions.meta);
+      const scope = conversationOf(callOptions.meta);
+      let entry = shown.get(lastShownId.get(lastShownKey(root, scope)) ?? '');
+      const { targetFile } = input;
+      const named = targetFile === undefined ? undefined : inside(root, targetFile);
+      if (
+        targetFile !== undefined &&
+        (named === undefined ||
+          (entry?.model.sourceFile !== posix(relative(root, named)) &&
+            (entry?.kind !== 'file' || entry.absolutePath !== named)))
+      ) {
+        /* The pose_model tool drives the model the viewer shows: show the named one first. */
+        const result = await showPath(root, { path: targetFile }, callOptions);
+        if (isFailure(result)) {
+          return result;
+        }
+        entry = shown.get(result.model.id);
+      }
+      if (entry === undefined) {
+        return failure('NO_MODEL', 'No model is shown yet. Call show_model, or pass targetFile.');
+      }
+      if (entry.kind === 'file') {
+        return poser.pose({ model: entry.model, absolutePath: entry.absolutePath }, input, scope);
+      }
+      /* A watched source poses its newest render, the one its pages now draw. */
+      const session = entrySessions?.get(entry.session.key) ?? entry.session;
+      const render = session.current() ?? session.bytesOf(entry.model.id);
+      if (render === undefined) {
+        return failure('NOT_LIVE', `The watch on ${entry.model.path} ended; show it again.`);
+      }
+      const model = shown.get(render.id)?.model ?? describeRender(session, render).model;
+      return poser.pose({ model, bytes: render.bytes }, input, scope);
     },
     async workbenchState(input) {
       const entry = shown.get(input.modelId);

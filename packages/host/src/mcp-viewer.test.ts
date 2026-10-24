@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TauMcpViewerCallOptions } from '@taucad/mcp';
+import { tauViewerAcceptedViewFields } from '@taucad/mcp/viewer-protocol';
 import type { TauViewerShowResult, TauViewerSyncResult } from '@taucad/mcp/viewer-protocol';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 
@@ -35,6 +36,61 @@ let runtime: ScriptedRuntime;
 let liveRuntime: ReturnType<typeof vi.fn<NonNullable<LocalMcpViewerOptions['liveRuntime']>>>;
 /** What the next render of a source answers; a broken source fails. */
 let renderOf: (entryPath: string, count: number) => ScriptedRender;
+
+/** A one-joint mechanism: a sun turning about +Z, with a `four-sun-turns` animation. */
+const sunMechanism = {
+  schemaVersion: 1,
+  units: { length: 'm', angle: 'deg' },
+  root: 'frame',
+  links: { frame: { components: ['component:Frame'] }, sun: { components: ['component:Sun'] } },
+  joints: { sun: { type: 'revolute', parent: 'frame', child: 'sun', origin: [0, 0, 0], axis: [0, 0, 1] } },
+  animations: [
+    {
+      id: 'four-sun-turns',
+      duration: 8,
+      loop: 'repeat',
+      keyframes: [
+        { time: 0, coordinates: { sun: 0 } },
+        { time: 8, coordinates: { sun: 1440 } },
+      ],
+    },
+  ],
+};
+
+/**
+ * A GLB whose topology payload declares {@link sunMechanism}; `mark` names the generator, so each mark has its own
+ * digest.
+ */
+const mechanismGlb = (mark = 0): Uint8Array<ArrayBuffer> => {
+  const payload = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      components: [],
+      mechanism: sunMechanism,
+    }),
+  );
+  const bin = new Uint8Array(Math.ceil(payload.byteLength / 4) * 4);
+  bin.set(payload);
+  const text = JSON.stringify({
+    asset: { version: '2.0', generator: String(mark) },
+    extensions: { [tauCadTopologyExtension]: { topologyBufferView: 0 } },
+    buffers: [{ byteLength: bin.byteLength }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: payload.byteLength }],
+  });
+  const json = new TextEncoder().encode(text.padEnd(Math.ceil(text.length / 4) * 4, ' '));
+  const topology = new Uint8Array(28 + json.byteLength + bin.byteLength);
+  const view = new DataView(topology.buffer);
+  view.setUint32(0, 0x46_54_6c_67, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, topology.byteLength, true);
+  view.setUint32(12, json.byteLength, true);
+  view.setUint32(16, 0x4e_4f_53_4a, true);
+  topology.set(json, 20);
+  view.setUint32(20 + json.byteLength, bin.byteLength, true);
+  view.setUint32(24 + json.byteLength, 0x00_4e_49_42, true);
+  topology.set(bin, 28 + json.byteLength);
+  return topology;
+};
 
 const shownModel = (result: unknown): TauViewerShowResult => {
   if (typeof result !== 'object' || result === null || !('model' in result)) {
@@ -398,37 +454,7 @@ describe('createLocalMcpViewer', () => {
   });
 
   it('should report whether the shown GLB preserved its source mechanism', async () => {
-    const payload = new TextEncoder().encode(
-      JSON.stringify({
-        schemaVersion: 1,
-        components: [],
-        mechanism: {
-          links: { frame: {}, sun: {} },
-          joints: { sun: {} },
-          animations: [{ id: 'four-sun-turns' }],
-        },
-      }),
-    );
-    const bin = new Uint8Array(Math.ceil(payload.byteLength / 4) * 4);
-    bin.set(payload);
-    const text = JSON.stringify({
-      asset: { version: '2.0' },
-      extensions: { [tauCadTopologyExtension]: { topologyBufferView: 0 } },
-      buffers: [{ byteLength: bin.byteLength }],
-      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: payload.byteLength }],
-    });
-    const json = new TextEncoder().encode(text.padEnd(Math.ceil(text.length / 4) * 4, ' '));
-    const topology = new Uint8Array(28 + json.byteLength + bin.byteLength);
-    const view = new DataView(topology.buffer);
-    view.setUint32(0, 0x46_54_6c_67, true);
-    view.setUint32(4, 2, true);
-    view.setUint32(8, topology.byteLength, true);
-    view.setUint32(12, json.byteLength, true);
-    view.setUint32(16, 0x4e_4f_53_4a, true);
-    topology.set(json, 20);
-    view.setUint32(20 + json.byteLength, bin.byteLength, true);
-    view.setUint32(24 + json.byteLength, 0x00_4e_49_42, true);
-    topology.set(bin, 28 + json.byteLength);
+    const topology = mechanismGlb();
     renderOf = () => ({ bytes: topology });
 
     const rendered = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
@@ -436,6 +462,66 @@ describe('createLocalMcpViewer', () => {
 
     expect(rendered.mechanism).toEqual({ preserved: true, joints: 1, animations: ['four-sun-turns'] });
     expect(bare.mechanism).toEqual({ preserved: false, joints: 0, animations: [] });
+  });
+
+  it('should pose the model shown last, showing a named one first', async () => {
+    await expect(viewer.pose!({ coordinates: { sun: 1 } }, inline)).resolves.toMatchObject({ errorCode: 'NO_MODEL' });
+
+    await viewer.show({ targetFile: 'src/bracket.ts' }, inline);
+    const named = await viewer.pose!({ targetFile: 'models/part.glb' }, inline);
+    const again = await viewer.pose!({}, inline);
+
+    /* Neither GLB carries a mechanism; the second call poses the part the first one showed, without a render. */
+    expect(named).toMatchObject({
+      errorCode: 'NO_MECHANISM',
+      message: expect.stringContaining('models/part.glb') as string,
+    });
+    expect(again).toMatchObject({
+      errorCode: 'NO_MECHANISM',
+      message: expect.stringContaining('models/part.glb') as string,
+    });
+    expect(runtime.documents).toHaveLength(1);
+  });
+
+  it('should pose the newest render of a watched source and hand its pages that render', async () => {
+    renderOf = (_entryPath, count) => ({ bytes: mechanismGlb(count) });
+    const { model } = shownModel(await viewer.show({ targetFile: 'src/bracket.ts' }, inline));
+    const card = {
+      pageId: 'card-source',
+      follow: false,
+      view: {
+        model: { id: model.id, title: model.title, path: model.path, sourceFile: model.sourceFile },
+        selected: [],
+        hidden: [],
+        isolated: [],
+        sectionActive: false,
+        measurementCount: 0,
+        composition: 'inline',
+        interactedAt: 1,
+      },
+    } as const;
+    const first = syncedOf(await viewer.sync({ ...card, version: 0, wait: false }, inline));
+    await runtime.edit('src/bracket.ts');
+    const rendered = syncedOf(await viewer.sync({ ...card, version: first.version, wait: false }, inline));
+    const newest = rendered.show?.model.id;
+    expect(newest).toBeDefined();
+    expect(newest).not.toBe(model.id);
+
+    /* The render held in memory carries the mechanism; the command names the render the page now draws. */
+    const posed = await viewer.pose!({ animation: { id: 'four-sun-turns', action: 'seek', time: 1 } }, inline);
+    const handed = syncedOf(
+      await viewer.sync(
+        { ...card, view: { ...card.view, model: { ...card.view.model, id: newest! } }, version: 0, wait: false },
+        inline,
+      ),
+    );
+
+    expect(posed).toMatchObject({
+      model: { path: 'src/bracket.ts', sourceFile: 'src/bracket.ts' },
+      mechanism: { joints: 1, animations: ['four-sun-turns'] },
+      playback: { status: 'paused', animationId: 'four-sun-turns', time: 1 },
+    });
+    expect(handed.pose).toMatchObject({ modelId: newest, animation: { id: 'four-sun-turns', action: 'seek' } });
   });
 
   it('should show the main entry, then the model shown last, when no target is named', async () => {
@@ -639,7 +725,7 @@ describe('createLocalMcpViewer', () => {
       const synced = await held;
       expect(synced.status).toBe(200);
       expect(await synced.json()).toEqual({
-        accepts: ['references', 'sourceRevision', 'settings'],
+        accepts: [...tauViewerAcceptedViewFields],
         version: 2,
         show: { ...next, select: ['component:arm'] },
       });

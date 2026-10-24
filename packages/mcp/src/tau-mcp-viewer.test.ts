@@ -489,6 +489,9 @@ describe('Tau MCP viewer', () => {
         section: { active: false, cuts: [] },
         measurements: [],
       },
+      mechanism: { preserved: true, joints: 2, animations: ['four-sun-turns'] },
+      playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
+      coordinates: { sun: 360, carrier: 90 },
     };
     for (const field of tauViewerAcceptedViewFields) {
       // oxlint-disable-next-line no-await-in-loop -- one field at a time.
@@ -496,7 +499,7 @@ describe('Tau MCP viewer', () => {
       expect(taken.isError).toBeFalsy();
     }
     /* What an older server does with a field it does not take: the whole sync fails, hence the guard. */
-    const rejected = await sync({ playback: { playing: true } });
+    const rejected = await sync({ explodedView: { factor: 2 } });
     expect(rejected.isError).toBe(true);
     await client.close();
   });
@@ -610,6 +613,78 @@ describe('Tau MCP viewer', () => {
 
     const result = await client.callTool({ name: 'show_model', arguments: { targetFile: 'missing.ts' } });
     expect(result).toEqual({ isError: true, content: [{ type: 'text', text: 'NOT_FOUND: No such file.' }] });
+    await client.close();
+  });
+});
+
+describe('pose_model', () => {
+  const posed = {
+    model: { path: '.tau/artifacts/bracket.glb', sourceFile: 'src/bracket.ts' },
+    mechanism: { joints: 2, animations: ['four-sun-turns'] },
+    playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
+    coordinates: { sun: 360, carrier: 90 },
+    atLimit: [],
+    viewers: 1,
+  } as const;
+
+  it('should be listed only for a viewer that poses, and forward the command', async () => {
+    const pose = vi.fn<NonNullable<TauMcpViewer['pose']>>(async () => posed);
+    const client = await connect(clients.claudeCode, { ...createViewer(), pose });
+    const without = await connect(clients.claudeCode);
+
+    const unlisted = await without.listTools();
+    expect(unlisted.tools.map((tool) => tool.name)).not.toContain('pose_model');
+    const tools = await client.listTools();
+    const listed = tools.tools.find((tool) => tool.name === 'pose_model');
+    expect(listed?.annotations?.readOnlyHint).toBe(false);
+    const result = await client.callTool({
+      name: 'pose_model',
+      arguments: { animation: { id: 'four-sun-turns', action: 'seek', time: 2 } },
+    });
+
+    expect(pose).toHaveBeenCalledWith(
+      { animation: { id: 'four-sun-turns', action: 'seek', time: 2 } },
+      expect.objectContaining({ presentation: 'text' }),
+    );
+    expect(result.structuredContent).toEqual(posed);
+    expect((result.content as Array<{ text: string }>)[0]?.text).toBe(
+      [
+        'Posed src/bracket.ts (2 joints; animations four-sun-turns).',
+        'Motion: animation four-sun-turns paused at 2 s (speed 1); coordinates sun 360, carrier 90.',
+        '1 viewer page applies it.',
+      ].join('\n'),
+    );
+    await client.close();
+    await without.close();
+  });
+
+  it('should refuse a seek without time before calling the viewer', async () => {
+    const pose = vi.fn<NonNullable<TauMcpViewer['pose']>>(async () => posed);
+    const client = await connect(clients.claudeCode, { ...createViewer(), pose });
+
+    const result = await client.callTool({
+      name: 'pose_model',
+      arguments: { animation: { id: 'four-sun-turns', action: 'seek' } },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(pose).not.toHaveBeenCalled();
+    await client.close();
+  });
+
+  it('should report the page playback in view_state', async () => {
+    const viewer = createViewer();
+    const moving = { ...view, playback: posed.playback, coordinates: posed.coordinates };
+    const client = await connect(clients.claudeCode, {
+      ...viewer,
+      viewState: vi.fn<TauMcpViewer['viewState']>(async () => ({ view: moving })),
+    });
+
+    const result = await client.callTool({ name: 'view_state', arguments: {} });
+
+    expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
+      'Motion: animation four-sun-turns paused at 2 s (speed 1); coordinates sun 360, carrier 90.',
+    );
     await client.close();
   });
 });

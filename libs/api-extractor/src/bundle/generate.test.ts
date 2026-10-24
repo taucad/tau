@@ -99,8 +99,9 @@ describe('generateBundles', () => {
   it('ships the approved workbench content with the document API names and canonical record field', () => {
     const shipped = readFileSync(join(workspaceRoot, 'packages/workbench/agent/workbench/SKILL.md'), 'utf8');
     // The document API migration retains evaluate_model while durable records retain renderTimeout;
-    // INVALID_RECORD guidance points at the project's Settings not applied action.
-    expect(digest(Buffer.from(shipped))).toBe('a6bf45e64c0b5e96e44523ed13c57affec8d8a7379fe23b4e6be7b99c89e812b');
+    // INVALID_RECORD guidance points at the project's Settings not applied action; `screenshot`
+    // captures a saved workbench view.
+    expect(digest(Buffer.from(shipped))).toBe('f04c1067e6c0d0e17caf3c95c8f03cc41928925fb62bd16f64961bbc8703ebae');
   });
 
   it('should expose all PicoVoxel Tau authoring types through the shipped reference index', () => {

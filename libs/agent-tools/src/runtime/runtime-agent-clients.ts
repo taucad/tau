@@ -6,6 +6,7 @@ import type {
   RpcImageClient,
   RpcParameterClient,
   RpcRuntimeClient,
+  CaptureWorkbenchView,
 } from '@taucad/chat/rpc';
 import type { GetParametersOutput } from '@taucad/chat/schemas/tools/parameter';
 import type { ModelMechanism, ModelSummary } from '@taucad/chat/schemas/tools/evaluate-model';
@@ -21,7 +22,7 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { assertRootedPath } from '@taucad/utils/path';
-import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
+import type { ScreenshotAngle, ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
 
 import { projectParameterValues } from '#runtime/parameter-values.js';
 import { reportModelMechanism } from '#runtime/model-mechanism.js';
@@ -29,6 +30,7 @@ import type { RenderedArtifact } from '#runtime/glb-chunks.js';
 import { summarizeRenderedModel } from '#runtime/model-summary.js';
 import { validateExport } from '#runtime/export-validation.js';
 import type { ModelAdmissionLimits } from '#runtime/model-summary.js';
+import { poseModelGlb } from '#runtime/model-pose.js';
 
 import {
   buildCaptureExportOptions,
@@ -36,6 +38,8 @@ import {
   describeCaptureSection,
   resolveCaptureSectionKeep,
 } from '#capture/capture-views.js';
+import { workbenchViewCamera, workbenchViewSections } from '#capture/capture-workbench-view.js';
+import type { CaptureExportOptionsInput } from '#capture/capture-views.js';
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
 
 const captureSize = 1600;
@@ -60,6 +64,72 @@ const withSectionGuidance = async <Result>(
       { cause: error },
     );
   }
+};
+
+/** The result `message`: the workbench view drawn, what a section kept and where a pose put each coordinate. */
+const captureMessage = (
+  section: ScreenshotSection | undefined,
+  posed: Readonly<{ coordinates: Readonly<Record<string, number>>; atLimit: readonly string[] }> | undefined,
+  workbench?: readonly string[],
+): Readonly<{ message?: string }> => {
+  const sentences = [
+    ...(workbench ?? []),
+    ...(section === undefined ? [] : [describeCaptureSection(section)]),
+    ...(posed === undefined
+      ? []
+      : [
+          `Posed: ${
+            Object.entries(posed.coordinates)
+              .map(([id, value]) => `${id} ${String(Number(value.toPrecision(6)))}`)
+              .join(', ') || 'no degrees of freedom'
+          }${posed.atLimit.length === 0 ? '' : `; at a limit: ${posed.atLimit.join(', ')}`}.`,
+        ]),
+  ];
+  return sentences.length === 0 ? {} : { message: sentences.join(' ') };
+};
+
+/**
+ * A saved workbench view as one capture: its raster camera, cuts and display, the identity they add to the image
+ * key, the sentences the result `message` opens with, and the canonical angle a preset names; or why it cannot be
+ * drawn.
+ *
+ * @param view - The view the screenshot handler resolved from its record, if any.
+ * @returns The capture, a refusal, or `undefined` without a view.
+ */
+const savedCapture = (
+  view: CaptureWorkbenchView | undefined,
+):
+  | Readonly<{
+      status: 'capture';
+      workbench: NonNullable<CaptureExportOptionsInput['workbench']>;
+      identity: string;
+      sentences: readonly string[];
+      angle: ScreenshotAngle | undefined;
+    }>
+  | Readonly<{ status: 'refused'; message: string }>
+  | undefined => {
+  if (view === undefined) {
+    return undefined;
+  }
+  const camera = workbenchViewCamera(view);
+  if (camera.status === 'refused') {
+    return camera;
+  }
+  const sections = workbenchViewSections(view);
+  if (sections.status === 'refused') {
+    return sections;
+  }
+  return {
+    status: 'capture',
+    workbench: { camera: camera.camera, planes: sections.planes, display: view.display },
+    identity: `:workbench:${JSON.stringify([view.camera, view.fieldOfView, view.upDirection, view.display, view.section])}`,
+    sentences: [
+      `Workbench view ${view.id}: ${camera.label}, ${view.fieldOfView === 0 ? 'orthographic' : `${String(view.fieldOfView)}° field of view`}.`,
+      ...(sections.description === undefined ? [] : [sections.description]),
+      'The grid, pinned measurements and components hidden in the viewer are not drawn.',
+    ],
+    angle: view.camera.kind === 'preset' ? view.camera.preset : undefined,
+  };
 };
 
 /** Per-call parameter values as the runtime's caller overrides; absent means the stored group alone. */
@@ -136,10 +206,60 @@ export type CreateRuntimeAgentClientsInput = Readonly<{
 /** Inputs for adapting one host-owned parameter actor per source target. @public */
 export type CreateRuntimeParameterAgentClientInput = Readonly<{
   mapRuntimeError: RuntimeAgentErrorMapper;
+  /**
+   * The current digest of each project file, by rooted path: `sha256:<hex>`, or `'missing'`. With it, a read whose
+   * resolved manifest names only unchanged source files answers from the actor's snapshot, without the runtime
+   * round-trip a resolve costs while `test_model` holds the runtime (LRP-11). The sidecar is watched, so its values
+   * are current either way.
+   */
+  sourceDigests?: (paths: readonly string[]) => Promise<Readonly<Record<string, string>>>;
   parameterActorFor(
     targetFile: string,
   ): ActorRefFrom<typeof parameterSetMachine> | Promise<ActorRefFrom<typeof parameterSetMachine>>;
 }>;
+
+type ParameterSetSnapshot = SnapshotFrom<typeof parameterSetMachine>;
+
+/**
+ * The actor's resolved snapshot when nothing its manifest was compiled from has changed, or `undefined` when the
+ * read must resolve.
+ *
+ * @param actor - The target's parameter actor.
+ * @param mode - The resolution mode the read asks for.
+ * @param sourceDigests - The host's current file digests.
+ * @returns The snapshot to answer from, or `undefined`.
+ */
+const unchangedSnapshot = async (
+  actor: ActorRefFrom<typeof parameterSetMachine>,
+  mode: string | undefined,
+  sourceDigests: CreateRuntimeParameterAgentClientInput['sourceDigests'],
+): Promise<ParameterSetSnapshot | undefined> => {
+  const snapshot = actor.getSnapshot();
+  const { current } = snapshot.context;
+  if (
+    sourceDigests === undefined ||
+    !snapshot.matches({ open: 'ready' }) ||
+    current === undefined ||
+    (current.manifest.identity.resolution.mode ?? 'default') !== (mode ?? 'default')
+  ) {
+    return undefined;
+  }
+  const { sourceFiles } = current.manifest.identity;
+  const paths = Object.keys(sourceFiles);
+  if (paths.length === 0) {
+    return undefined;
+  }
+  let digests: Readonly<Record<string, string>>;
+  try {
+    digests = await sourceDigests(paths);
+  } catch {
+    return undefined;
+  }
+  // The actor may have moved on while the files were read; only the snapshot that was checked answers.
+  return paths.every((path) => digests[path] === sourceFiles[path]) && actor.getSnapshot() === snapshot
+    ? snapshot
+    : undefined;
+};
 
 const unresolvedParameters = (
   diagnostic: Readonly<{ code: string; message: string }>,
@@ -165,21 +285,26 @@ export function createRuntimeParameterAgentClient(input: CreateRuntimeParameterA
         context?.signal?.throwIfAborted();
         const targetFile = assertRootedPath(request.targetFile);
         const actor = await input.parameterActorFor(targetFile);
-        // The actor refreshes bytes for a read in its current mode, so a plan awaiting confirmation survives it.
-        actor.send({
-          type: 'resolve',
-          resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
-        });
-        const result: SnapshotFrom<typeof parameterSetMachine> = await waitFor(
-          actor,
-          (snapshot) =>
-            snapshot.matches({ open: 'ready' }) ||
-            snapshot.matches({ open: 'confirmation' }) ||
-            snapshot.matches({ open: 'disconnected' }) ||
-            snapshot.matches({ open: 'uncertain' }) ||
-            snapshot.status === 'done',
-          { signal: context?.signal },
-        );
+        const unchanged = await unchangedSnapshot(actor, request.resolutionMode, input.sourceDigests);
+        if (unchanged === undefined) {
+          // The actor refreshes bytes for a read in its current mode, so a plan awaiting confirmation survives it.
+          actor.send({
+            type: 'resolve',
+            resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
+          });
+        }
+        const result: ParameterSetSnapshot =
+          unchanged ??
+          (await waitFor(
+            actor,
+            (snapshot) =>
+              snapshot.matches({ open: 'ready' }) ||
+              snapshot.matches({ open: 'confirmation' }) ||
+              snapshot.matches({ open: 'disconnected' }) ||
+              snapshot.matches({ open: 'uncertain' }) ||
+              snapshot.status === 'done',
+            { signal: context?.signal },
+          ));
         const { current } = result.context;
         const available = result.matches({ open: 'ready' }) || result.matches({ open: 'confirmation' });
         if (!available || current === undefined) {
@@ -699,6 +824,13 @@ export const createRuntimeAgentClients = (
               message: `section applies to 3D views only; view ${rendering.view} is a 2D drawing. Omit section for this view.`,
             };
           }
+          if (artifact.mimeType === 'image/svg+xml' && captureInput.pose !== undefined) {
+            return {
+              success: false,
+              errorCode: rpcClientErrorCode.validationError,
+              message: `pose applies to 3D views only; view ${rendering.view} is a 2D drawing. Omit pose for this view.`,
+            };
+          }
           if (artifact.mimeType === 'image/svg+xml') {
             const files = requireImageFiles(
               await input.exportImage({
@@ -722,20 +854,42 @@ export const createRuntimeAgentClients = (
               { count: 1, mimeType: 'image/png' },
             );
             context?.signal?.throwIfAborted();
-            return { success: true, images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }], ...provenance };
+            return {
+              success: true,
+              images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }],
+              ...provenance,
+              ...(captureInput.workbenchView === undefined
+                ? {}
+                : {
+                    message: `Workbench view ${captureInput.workbenchView.id} selects the 2D view ${rendering.view}; its camera, cuts and display apply to 3D views only.`,
+                  }),
+            };
           }
           assertGlb(artifact.content);
+          const posed = captureInput.pose === undefined ? undefined : poseModelGlb(artifact.content, captureInput.pose);
+          if (posed?.status === 'refused') {
+            return { success: false, errorCode: rpcClientErrorCode.validationError, message: posed.message };
+          }
+          const saved = savedCapture(captureInput.workbenchView);
+          if (saved?.status === 'refused') {
+            return { success: false, errorCode: rpcClientErrorCode.validationError, message: saved.message };
+          }
           const exportOptions = buildCaptureExportOptions({
             mode: captureInput.mode,
             size: captureSize,
             ...(captureInput.includeEdges === undefined ? {} : { includeEdges: captureInput.includeEdges }),
             ...(captureInput.section === undefined ? {} : { section: captureInput.section }),
+            ...(saved === undefined ? {} : { workbench: saved.workbench }),
           });
           // The image service keys captures by identity, so a cut is part of it.
           const sectionIdentity =
             captureInput.section === undefined
               ? ''
               : `:section:${captureInput.section.plane}:${captureInput.section.offset}:${resolveCaptureSectionKeep(captureInput.section)}`;
+          /* A pose changes the drawn geometry, so it is part of both keys. */
+          const poseKey = captureInput.pose === undefined ? '' : `:pose:${JSON.stringify(captureInput.pose)}`;
+          /* A single capture names its canonical angle: the isometric default, or the preset a saved view frames. */
+          const singleAngle: ScreenshotAngle | undefined = saved === undefined ? 'isometric' : saved.angle;
           const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
           const names =
             captureInput.mode === 'multi_angle'
@@ -745,11 +899,11 @@ export const createRuntimeAgentClients = (
             await withSectionGuidance(captureInput.section, async () =>
               input.exportImage({
                 kind: 'capture',
-                identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}${sectionIdentity}`,
+                identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}${sectionIdentity}${saved?.identity ?? ''}${poseKey}`,
                 sourceFormat: 'glb',
                 sourcePath: targetFile,
-                geometryHash: rendering.hash,
-                content: artifact.content,
+                geometryHash: `${rendering.hash}${poseKey}`,
+                content: posed?.content ?? artifact.content,
                 format: 'webp',
                 signal: context?.signal,
                 exportOptions,
@@ -764,9 +918,15 @@ export const createRuntimeAgentClients = (
             images:
               captureInput.mode === 'multi_angle'
                 ? canonicalCaptureViews.map(({ id }, index) => ({ ...echo, angle: id, dataUrl: dataUrls[index]! }))
-                : [{ ...echo, angle: 'isometric', dataUrl: dataUrls[0]! }],
+                : [
+                    {
+                      ...echo,
+                      ...(singleAngle === undefined ? {} : { angle: singleAngle }),
+                      dataUrl: dataUrls[0]!,
+                    },
+                  ],
             ...provenance,
-            ...(captureInput.section === undefined ? {} : { message: describeCaptureSection(captureInput.section) }),
+            ...captureMessage(captureInput.section, posed, saved?.sentences),
           };
         } finally {
           view.close();

@@ -9,7 +9,7 @@ wordBudgetOverride: 600
 
 # Agent Plugin
 
-The Tau plugin, `@taucad/agent-plugin`, gives the coding agent you already use Tau's CAD tools and skills. They evaluate a model, run its GeoSpec tests, return screenshots, export files, arrange the [workbench](./workbench-records) and show the model in the Tau viewer.
+The Tau plugin, `@taucad/agent-plugin`, gives the coding agent you already use Tau's CAD tools and skills. They evaluate a model, run its GeoSpec tests, take screenshots (of a saved [workbench](./workbench-records) view too), export files, arrange the workbench and show the model in the Tau viewer.
 
 It needs Node.js 24 or later, and starts your installed Tau CLI or fetches the matching release on first use:
 
@@ -36,7 +36,7 @@ Name the project folder in the launcher's arguments:
 }
 ```
 
-Start a new thread after installing: the tools appear only there. The plugin is not in the Anthropic or OpenAI directories; install it from `taucad/marketplace`.
+Start a new thread after installing; only it has the tools. The plugin is in `taucad/marketplace`, not the Anthropic or OpenAI directories.
 
 ## Check
 
@@ -56,11 +56,11 @@ Troubleshooting, kernel choice and what to tell the user are in the [agent guide
 
 The tab, full view and browser page add Share, Export, a workbench toggle, grid, section, measure and fit. Add to chat gives the agent the card's model or a right-clicked part; the browser page copies it instead.
 
-A tab or full view follows each model the agent shows, and the agent can select parts in it. A shown source stays live: each edit to the file or its parameters redraws every open view. `view_state` reports the model, selected and hidden parts and camera, plus an image with `capture`. `show_model` also opens STEP, STL, 3MF and OBJ files.
+A tab or full view follows each model the agent shows and lets it select parts; a shown source redraws on each edit to its file or parameters. `view_state` reports the model, selected and hidden parts, camera and playback, plus an image with `capture`. `pose_model` plays, pauses, seeks or resets an animation or sets joints, answering every coordinate. `show_model` also opens STEP, STL, 3MF and OBJ files.
 
-The **workbench** lists parts, parameters, the selected part's properties and display switches. A changed parameter is saved and the model redraws; a drag previews live and saves on release. The agent uses the same values through `get_parameters` and `apply_parameter_operation`. Camera and hidden parts are saved, so Tau reopens the view.
+The **workbench** lists parts, parameters, the selected part's properties and display switches. A parameter change saves and redraws; a drag previews live and saves on release. The agent uses the same values through `get_parameters` and `apply_parameter_operation`. Tau saves the camera and hidden parts to reopen the view.
 
-The viewer makes no network request. Model files reach it through a tool only the page can call, in compressed chunks, so a large mesh loads without dropping the connection. The browser link answers only on your machine, with a session token.
+The viewer makes no network request: models reach it in compressed chunks through a page-only tool, so large meshes load without dropping the connection. The browser link answers only on your machine, with a session token.
 
 ## Printing
 
@@ -68,4 +68,4 @@ Start the agent with `TAU_HOST_MACHINES=true` to use the machines you set up in 
 
 ## Where files go
 
-Exports land in `.tau/artifacts/`, workbench changes in `.tau/workbench/`; a viewed model stays in the server's memory. Screenshots stay in a temporary folder the server removes.
+Exports land in `.tau/artifacts/`, workbench changes in `.tau/workbench/`; a viewed model stays in server memory. Screenshots stay in a temporary folder the server removes.

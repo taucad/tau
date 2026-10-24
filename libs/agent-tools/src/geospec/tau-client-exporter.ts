@@ -297,6 +297,70 @@ const exportThrough = async (
   };
 };
 
+/** At most this many exports are kept for reuse in one scope; the oldest goes first. */
+const keptExports = 16;
+
+/** JSON with object keys in order, so equal requests give equal keys however their objects were built. */
+const canonicalJson = (value: unknown): string =>
+  JSON.stringify(value, (_key, entry: unknown) =>
+    entry !== null && typeof entry === 'object' && !Array.isArray(entry) && !ArrayBuffer.isView(entry)
+      ? Object.fromEntries(Object.entries(entry).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)))
+      : entry,
+  );
+
+/**
+ * What decides a Runtime export's bytes: the source, the format and every option the loader forwards. GeoSpec keys
+ * its own admissions by more (ingest options, units), so two loads it keeps apart can share one export.
+ */
+const exportKey = (request: GeoSpecModelExportRequest): string =>
+  canonicalJson({
+    file: request.file,
+    format: request.format,
+    projectPath: request.projectPath,
+    parameters: request.parameters,
+    mesh: request.mesh,
+    region: request.region,
+    inline: request.inline,
+  });
+
+/** A caller's own copy, so an admission that transfers or mutates the bytes leaves the kept export intact. */
+const copyArtifact = (artifact: GeoSpecModelArtifact): GeoSpecModelArtifact => ({
+  ...artifact,
+  bytes: new Uint8Array(artifact.bytes),
+  ...(artifact.resources === undefined
+    ? {}
+    : { resources: artifact.resources.map(({ name, bytes }) => ({ name, bytes: new Uint8Array(bytes) })) }),
+  ...(artifact.exportOptions === undefined ? {} : { exportOptions: structuredClone(artifact.exportOptions) }),
+});
+
+const sameSources = (left: GeoSpecConsumedSources | undefined, right: GeoSpecConsumedSources | undefined): boolean => {
+  if (left === undefined || right === undefined || left.length !== right.length) {
+    return false;
+  }
+  const digests = new Map(left.map(({ path, sha256 }) => [path, sha256]));
+  return right.every(({ path, sha256 }) => digests.get(path) === sha256);
+};
+
+/**
+ * The source files a project load reads now, as the Runtime snapshots them, or `undefined` when it cannot say.
+ *
+ * @param client - The connected Runtime client.
+ * @param file - The project path of the model.
+ * @returns The consumed sources.
+ */
+const currentSources = async (client: TauExporterClient, file: string): Promise<GeoSpecConsumedSources | undefined> => {
+  if (client.snapshotSource === undefined) {
+    return undefined;
+  }
+  const snapshot = await client.snapshotSource({ source: { path: file } });
+  if (!snapshot.success) {
+    return undefined;
+  }
+  return snapshot.sourceRevision === undefined
+    ? snapshot.data.files.map(({ path, sha256 }) => ({ path, sha256 }))
+    : consumedFrom(snapshot.sourceRevision.files);
+};
+
 const release = async (created: TauExporterClient): Promise<void> => {
   if (created.shutdown) {
     await created.shutdown();
@@ -350,27 +414,66 @@ export const tauClientExporter = async (options: TauClientExporterOptions): Prom
     }
   };
   const extensions = options.extensions ?? kernelExtensions(await connected());
+  /*
+   * One scope's exports by request (LRP-11). A GeoSpec run loads one model for many requirements, often with ingest
+   * options that keep the loads apart while the Runtime export is the same; each export holds the runtime thread for
+   * seconds, so a load whose sources are unchanged reuses it and the viewer and parameter tools stay responsive.
+   */
+  const kept = new Map<string, Promise<GeoSpecModelArtifact>>();
+  const reusable = async (
+    client: TauExporterClient,
+    request: GeoSpecModelExportRequest,
+    artifact: GeoSpecModelArtifact,
+  ): Promise<boolean> => {
+    if (request.inline !== undefined) {
+      // The request carries every source, and the key holds them.
+      return true;
+    }
+    try {
+      return sameSources(artifact.consumedSources, await currentSources(client, request.file));
+    } catch {
+      // An unverifiable closure exports afresh, and that export reports any real error.
+      return false;
+    }
+  };
   return {
     id: options.id ?? 'tau',
     extensions: [...extensions],
     capabilities: { formats: ['glb', 'step'], parameters: true, region: true, inlineSources: true },
     async export(request) {
-      return exportThrough(await connected(), request);
+      const client = await connected();
+      const key = exportKey(request);
+      const earlier = kept.get(key);
+      if (earlier !== undefined) {
+        const artifact = await earlier.catch(() => undefined);
+        if (artifact !== undefined && (await reusable(client, request, artifact))) {
+          return copyArtifact(artifact);
+        }
+      }
+      const pending = exportThrough(client, request);
+      /* The exporting load gets the bytes themselves; the scope keeps its own copy for the loads that reuse it. */
+      // oxlint-disable-next-line promise/prefer-await-to-then -- The kept copy settles beside the caller's promise.
+      const stored = pending.then(copyArtifact);
+      kept.delete(key);
+      kept.set(key, stored);
+      if (kept.size > keptExports) {
+        kept.delete(kept.keys().next().value!);
+      }
+      // A failed export is never reused: the next load of the same request exports again.
+      // async-iife: bootstrap -- Drop only a failed entry; the caller awaits the export itself.
+      // oxlint-disable-next-line promise/prefer-await-to-then -- Settlement callback must not replace the caller's promise.
+      void stored.then(undefined, () => {
+        if (kept.get(key) === stored) {
+          kept.delete(key);
+        }
+      });
+      return pending;
     },
     async revision(request) {
-      const current = await connected();
-      if (current.snapshotSource === undefined) {
-        return undefined;
-      }
-      const snapshot = await current.snapshotSource({ source: { path: request.file } });
-      if (!snapshot.success) {
-        return undefined;
-      }
-      return snapshot.sourceRevision === undefined
-        ? snapshot.data.files.map(({ path, sha256 }) => ({ path, sha256 }))
-        : consumedFrom(snapshot.sourceRevision.files);
+      return currentSources(await connected(), request.file);
     },
     async close() {
+      kept.clear();
       const pending = owned;
       owned = undefined;
       if (pending === undefined) {

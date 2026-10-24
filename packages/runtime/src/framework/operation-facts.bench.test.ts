@@ -189,6 +189,7 @@ const record = (
 };
 
 const shaped = (bindings: Record<string, Record<string, unknown>>, defaults: Record<string, unknown>) =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- parameterFacts reads only bindings and defaults; the fixture is a partial manifest.
   ({ bindings, defaults }) as unknown as ParameterManifest;
 
 describe('operation facts cost (advisory)', () => {

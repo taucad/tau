@@ -16,6 +16,7 @@ import {
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import type { RuntimePhase } from '#types/runtime-observation.types.js';
+import { workerOperationFactsSchema } from '#types/runtime-wire-common.schemas.js';
 import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 
 /** One span of a chain: its own time in milliseconds and its children, run in order. */
@@ -175,6 +176,32 @@ describe('workerFactsFromEntries on the real chains', () => {
     expect(workerFactsFromEntries([stray, ...entries], rootSpanId).phases).toEqual({ prepare: 2, resolve: 5 });
   });
 
+  it('should report a slowest third-party wrap as _OTHER, never its own name', () => {
+    const vendor = `Vendor${'X'.repeat(200)}`;
+    const entries: TelemetryEntry[] = [
+      { name: 'kernel.evaluate', startTime: 0, duration: 10, detail: { spanId: '1' }, workerTimeOrigin: 0 },
+      {
+        name: `middleware.wrap(${vendor})`,
+        startTime: 0,
+        duration: 6,
+        detail: { spanId: '2', parentSpanId: '1' },
+        workerTimeOrigin: 0,
+      },
+      {
+        name: 'middleware.wrap(GeometryCache)',
+        startTime: 0,
+        duration: 1,
+        detail: { spanId: '3', parentSpanId: '1' },
+        workerTimeOrigin: 0,
+      },
+    ];
+    const facts = workerFactsFromEntries(entries, '1');
+    expect(facts.middleware).toMatchObject({ slowestId: '_OTHER', slowest: 6 });
+    expect(
+      workerOperationFactsSchema.safeParse({ queue: 0, execution: 10, cold: false, reuse: 'none', ...facts }).success,
+    ).toBe(true);
+  });
+
   it('should close third-party middleware names to _OTHER once in ran, and carry the bundler id', () => {
     const entries: TelemetryEntry[] = [
       { name: 'kernel.evaluate', startTime: 0, duration: 10, detail: { spanId: '1' }, workerTimeOrigin: 0 },
@@ -255,6 +282,7 @@ const structure = (properties: Record<string, unknown>, required: readonly strin
 });
 /** A manifest-shaped object; `parameterFacts` reads only the bindings and the defaults. */
 const shaped = (bindings: Record<string, Record<string, unknown>>, defaults: Record<string, unknown>) =>
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- parameterFacts reads only bindings and defaults; the fixture is a partial manifest.
   ({ bindings, defaults }) as unknown as ParameterManifest;
 
 describe('parameterFacts', () => {

@@ -170,9 +170,20 @@ Model/projection events belong to documents/views. `LogEntry` includes level (`L
 
 Each `initialize`, `describe`, `evaluate`, `render`, `export`, and `transcode` attempt (`RuntimeOperation`) settles as exactly one `RuntimeOperationObservation` when an `operation` subscriber exists: a `RuntimeOperationOutcome`, the `RuntimeTransport`, issue and adaptation codes, any `ResourceLimitDetails`, and a `RuntimeObservedTermination` when the host exited. Subscribers cannot change results; a throwing subscriber is isolated.
 
-`observe(mode)` takes a `RuntimeObservationMode` (`'off'` by default). With `'facts'`, a worker that advertised it (`workerObservation`, the `RuntimeObservationSupport` of its `initialize` result) computes `WorkerOperationFacts` after the reply: queue and execution time, `cold`, reuse, heap with its source and `RuntimeRealm`, `RuntimePhase` durations, middleware names, and parameter counts with `RuntimeParameterFeature` flags. The client joins them for one second; `RuntimeFactsStatus` reports `joined`, `none`, `not-observed`, `missing-timeout`, or `missing-worker-gone`. A reply arriving after an attempt timed out, was cancelled, or was abandoned is emitted once as `operation-late`.
+`observe(mode)` takes a `RuntimeObservationMode` (`'off'` by default). With `'facts'`, a worker advertising it (`workerObservation`; `RuntimeObservationSupport`) computes `WorkerOperationFacts` after the reply: queue and execution time, `cold`, reuse, heap with its source and `RuntimeRealm`, `RuntimePhase` durations, middleware names, and parameter counts with `RuntimeParameterFeature` flags. The client joins them for one second; `RuntimeFactsStatus` reports `joined`, `none`, `not-observed`, `missing-timeout`, or `missing-worker-gone`. A reply after a timed-out, cancelled, or abandoned attempt is emitted once as `operation-late`.
 
-```ts
+```typescript
+import { createRuntimeClient } from '@taucad/runtime/client';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
+import { replicad } from '@taucad/replicad';
+import { esbuild } from '@taucad/esbuild';
+
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const client = createRuntimeClient({
+  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+});
 client.observe('facts');
 client.on('operation', ({ operation, outcome, facts, worker }) => {
   console.debug(operation, outcome.type, facts, worker?.phases);

@@ -164,7 +164,7 @@ export const workerFactsFromEntries = (
       }
       if (self > slowest) {
         slowest = self;
-        slowestId = name;
+        slowestId = reported;
       }
       if (above !== undefined) {
         phases[above] = (phases[above] ?? 0) - self;

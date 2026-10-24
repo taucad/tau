@@ -148,11 +148,13 @@ export class WorkerOperationObserver {
     return this.mode === 'facts';
   }
 
-  /** @param mode - The mode a client asked for; `off` stops facts from the next operation. */
+  /**
+   * @param mode - The mode a client asked for; `off` stops facts from the next admitted operation. An operation
+   *   admitted under `facts` keeps its facts, so a mode change never splits one.
+   */
   public setMode(mode: RuntimeObservationMode): void {
     this.mode = mode;
     if (mode === 'off') {
-      this.settled.clear();
       this.sampler?.stop();
     }
   }
@@ -177,7 +179,8 @@ export class WorkerOperationObserver {
       this.served++;
     }
     const collector = this.collector();
-    if (!input.observed || !this.observing || collector === undefined) {
+    // Admission decided: a mode change between admission and dequeue does not split the operation.
+    if (!input.observed || collector === undefined) {
       return undefined;
     }
     if (this.realm === 'utility' || this.realm === 'process') {
@@ -203,7 +206,7 @@ export class WorkerOperationObserver {
    */
   public settle(observed: ObservedOperation): void {
     const collector = this.collector();
-    if (!this.observing || collector === undefined) {
+    if (collector === undefined) {
       return;
     }
     const settledAt = performance.now();
@@ -255,7 +258,8 @@ export class WorkerOperationObserver {
     operationId: string | undefined,
     post: (notify: OperationFactsNotify) => void,
   ): number | undefined {
-    if (operationId === undefined || !this.observing) {
+    // Only an operation admitted under `facts` has a settled entry; the current mode does not matter.
+    if (operationId === undefined) {
       return undefined;
     }
     const settled = this.settled.get(operationId);

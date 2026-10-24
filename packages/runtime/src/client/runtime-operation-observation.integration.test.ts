@@ -33,7 +33,14 @@ const parameters = {
   defaults: { width: 10 },
 } as const;
 
-type Faults = Readonly<{ heap?: number; evaluate?: Error; render?: Error; export?: Error }>;
+type Faults = Readonly<{
+  heap?: number;
+  evaluate?: Error;
+  render?: Error;
+  export?: Error;
+  /** Holds `describe` until it settles, so a test can act while the operation is in flight. */
+  describeGate?: () => Promise<void>;
+}>;
 
 /** A thrown error that carries kernel issues, as kernels report typed failures. */
 class IssueError extends Error {
@@ -59,6 +66,7 @@ const createClient = (faults: Faults = {}) => {
       return { resolved: [entryPath], unresolved: [] };
     },
     async describe() {
+      await faults.describeGate?.();
       return createKernelSuccess({ parameters });
     },
     ...(faults.heap === undefined ? {} : { observedHeapBytes: () => faults.heap }),
@@ -203,6 +211,39 @@ describe('operation observation over the in-process transport', () => {
         ]);
       });
     } finally {
+      await client.shutdown();
+    }
+  });
+
+  it('should keep the facts of an operation admitted under facts when observation stops mid-flight', async () => {
+    const gate = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const client = createClient({
+      describeGate: async () => {
+        entered.resolve();
+        await gate.promise;
+      },
+    });
+    const seen: RuntimeOperationObservation[] = [];
+    client.on('operation', (observation) => seen.push(observation));
+    client.observe('facts');
+    try {
+      const described = client.describe({ source });
+      // The worker admitted the describe under `facts` and is running it.
+      await entered.promise;
+      client.observe('off');
+      gate.resolve();
+      await described;
+      await vi.waitFor(() => {
+        expect(byOperation(seen, 'describe')).toHaveLength(1);
+      });
+      expect(byOperation(seen, 'describe')[0]).toMatchObject({ facts: 'joined', worker: { reuse: 'none' } });
+      await client.describe({ source });
+      await vi.waitFor(() => {
+        expect(byOperation(seen, 'describe').map(({ facts }) => facts)).toEqual(['joined', 'not-observed']);
+      });
+    } finally {
+      gate.resolve();
       await client.shutdown();
     }
   });

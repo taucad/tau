@@ -123,7 +123,7 @@ test('keeps the Model hierarchy filterable, accessible, and reorderable through 
   await target.setViewport({ width: 1440, height: 900 });
   await openSeededProject();
   await openSecondGeometryUnit();
-  await openCommand('Open model structure');
+  await openCommand('Open model tree');
 
   const main = disclosure(mainPath);
   const secondary = disclosure(secondaryPath);
@@ -344,7 +344,7 @@ test('shows decoded part previews in the real Model rows and selected Properties
       nextTimer = now + 16;
     }, 16);
   });
-  await openCommand('Open model structure');
+  await openCommand('Open model tree');
 
   const list = selectors.getByRole('list', { name: `Model components for ${mainPath}` });
   await target.expectVisible(list, 60_000);
@@ -688,7 +688,7 @@ test('defers a cold part preview worker and resumes automatic previews after exp
   expect(workerNamesBefore).not.toContain('tau-headless-image-transcoder-worker');
   await beginProbe();
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
-  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open model structure');
+  await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open model tree');
   await target.keyboardPress('Enter');
   const list = selectors.getByRole('list', { name: 'Model components for public/models/preview-mixed.js' });
   for (let motion = 0; motion < 4; motion++) {
@@ -874,7 +874,7 @@ test('admits previews for newly mounted virtual Model rows after scrolling', asy
   await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
   await openSecondGeometryUnit('public/models/preview-virtual.js');
-  await openCommand('Open model structure');
+  await openCommand('Open model tree');
   const list = selectors.getByRole('list', { name: 'Model components for public/models/preview-virtual.js' });
   await target.expectVisible(list, 60_000);
   const mountedBefore = await target.evaluateLocator(

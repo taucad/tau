@@ -442,6 +442,27 @@ describe('ArButton launch path', () => {
     expect(document.querySelector('[data-slot="ar-session-overlay"]')).not.toBeInTheDocument();
   });
 
+  it('ends a session the viewer unmounted from while the model loaded', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    const load = deferred<() => void>();
+    sceneMocks.present.mockImplementationOnce(async () => load.promise);
+    const { unmount } = render(<ArButton artifact={glbArtifact} runtimeDocument={createRuntimeDocument().document} />, {
+      wrapper: TooltipProvider,
+    });
+    await settle();
+    await userEvent.click(arButton());
+    await screen.findByRole('button', { name: 'Exit AR' });
+
+    unmount();
+    await waitFor(() => {
+      expect(session.end).toHaveBeenCalled();
+    });
+    await act(async () => {
+      load.reject(new Error('Aborted: the session ended'));
+    });
+    expect(document.querySelector('[data-slot="ar-session-overlay"]')).not.toBeInTheDocument();
+  });
+
   it('treats Exit during the model load as a return, not a failed launch', async () => {
     installPlatform(platforms.androidChromeWebXr);
     const load = deferred<() => void>();

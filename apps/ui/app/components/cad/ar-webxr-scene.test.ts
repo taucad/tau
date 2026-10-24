@@ -171,4 +171,20 @@ describe('presentGlbInArSession', () => {
     expect(model.position.toArray()).toEqual([0, 0, 0]);
     expect(model.visible).toBe(false);
   });
+  it('frees the renderer and the parsed model when the session cannot be attached', async () => {
+    const session = new FakeSession();
+    const { renderer } = mocks;
+    const refused = new DOMException('The session already ended', 'InvalidStateError');
+    renderer.xr['setSession'] = async () => {
+      throw refused;
+    };
+    const disposeGeometry = vi.spyOn(geometry, 'dispose');
+
+    await expect(presentGlbInArSession(session as unknown as XRSession, glb, { onPlaced: vi.fn() })).rejects.toBe(
+      refused,
+    );
+    expect(renderer.dispose).toHaveBeenCalledOnce();
+    expect(renderer.forceContextLoss).toHaveBeenCalledOnce();
+    expect(disposeGeometry).toHaveBeenCalled();
+  });
 });

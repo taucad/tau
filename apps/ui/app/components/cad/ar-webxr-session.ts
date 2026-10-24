@@ -45,15 +45,21 @@ function createOverlay(): { root: HTMLDivElement; hint: HTMLParagraphElement; ex
  * and no external app or URL is involved. Call it from a click handler, since the session request needs the
  * person's gesture; the Three.js scene loads only after the session is granted.
  *
- * @param options - The GLB bytes, and `onEnd`, called once whenever the session ends after it started.
+ * @param options - The GLB bytes; `onStarted`, called with the presentation as soon as the session is granted, so the
+ *   host can end it while the model still loads; and `onEnd`, called once whenever the session ends after it started.
  * @returns The running presentation.
  * @throws The session request's `DOMException` (`NotAllowedError`, `NotSupportedError`, …), or the scene's error after
  *   the session was ended again. A session that ended while the model loaded resolves as an inactive presentation.
  */
 export async function startWebXrAr({
   glb,
+  onStarted,
   onEnd,
-}: Readonly<{ glb: Uint8Array<ArrayBuffer>; onEnd: () => void }>): Promise<WebXrArPresentation> {
+}: Readonly<{
+  glb: Uint8Array<ArrayBuffer>;
+  onStarted?: (presentation: WebXrArPresentation) => void;
+  onEnd: () => void;
+}>): Promise<WebXrArPresentation> {
   const { xr } = navigator;
   if (!xr) {
     throw new DOMException('WebXR is not available in this browser.', 'NotSupportedError');
@@ -108,6 +114,8 @@ export async function startWebXrAr({
   overlay.exit.addEventListener('click', () => {
     void end();
   });
+  const presentation: WebXrArPresentation = { isActive: () => isActive, end };
+  onStarted?.(presentation);
 
   try {
     const { presentGlbInArSession } = await import('#components/cad/ar-webxr-scene.js');
@@ -133,5 +141,5 @@ export async function startWebXrAr({
     throw error;
   }
 
-  return { isActive: () => isActive, end };
+  return presentation;
 }

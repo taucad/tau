@@ -202,7 +202,8 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
   }, []);
 
   // End a running session with the viewer that started it.
-  // A session still starting is ended when it resolves (see `activateAr`).
+  // A session granted while the model loads is ended through `onStarted`; one still being requested is ended when
+  // it resolves (see `activateAr`).
   useEffect(() => {
     isUnmountedRef.current = false;
     return () => {
@@ -228,6 +229,14 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
       try {
         const presentation = await startWebXrAr({
           glb,
+          onStarted(started) {
+            if (isUnmountedRef.current) {
+              void started.end();
+              return;
+            }
+
+            presentationRef.current = started;
+          },
           onEnd() {
             presentationRef.current = undefined;
             setIsPresenting(false);

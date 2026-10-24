@@ -28,6 +28,7 @@ export const toolName = {
   getPrintProfiles: 'get_print_profiles',
   requestJob: 'request_job',
   checkJob: 'check_job',
+  shell: 'shell',
 } as const satisfies Record<string, string>;
 
 /** @public */

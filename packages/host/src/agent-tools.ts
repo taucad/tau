@@ -54,7 +54,7 @@ import {
   createSkillBundleOverlay,
   createSkillBundleRegistry,
 } from '@taucad/agent-tools/registry';
-import type { ReadSkillResource } from '@taucad/agent-tools/registry';
+import type { ReadSkillResource, ShellSource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { ModelAdmissionLimits } from '@taucad/agent-tools/runtime';
@@ -651,6 +651,13 @@ export type HostToolRegistryOptions = {
    * process's environment, read fail-closed: a value other than unset, empty or `open` is `locked`.
    */
   readonly acquisition?: 'open' | 'locked' | undefined;
+  /**
+   * The contained shell `shell` runs on, once `probeHostShell` answered `available` (D1). Only the desktop
+   * services host passes one: `tau mcp` and the daemon mint run ids and checkouts themselves and cannot ask a person,
+   * so they never offer `shell`. It reads each call's checkout by run id, never this registry's root. A function is read
+   * at every listing and call, so the tool appears once the probe settles.
+   */
+  readonly shell?: ShellSource | undefined;
 };
 
 /**
@@ -1047,6 +1054,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       skillResolver,
       testingEnabled: geospec !== undefined,
       acquisition,
+      ...(options.shell === undefined ? {} : { shell: options.shell }),
     });
     return { registry, settingsOwner };
   };

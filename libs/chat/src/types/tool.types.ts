@@ -37,6 +37,7 @@ import type {
   StopMachineInput,
   StopMachineOutput,
 } from '#schemas/tools/machine.tool.schema.js';
+import type { ShellInput, ShellOutput } from '#schemas/tools/shell.tool.schema.js';
 import type {
   ApplyParameterOperationInput,
   ApplyParameterOperationOutput,
@@ -182,6 +183,7 @@ export type MyTools = InferUITools<{
   [toolName.getPrintProfiles]: AiTool<GetPrintProfilesInput, GetPrintProfilesOutput>;
   [toolName.requestJob]: AiTool<RequestJobInput, RequestJobOutput>;
   [toolName.checkJob]: AiTool<CheckJobInput, CheckJobOutput>;
+  [toolName.shell]: AiTool<ShellInput, ShellOutput>;
 }>;
 
 /**

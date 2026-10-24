@@ -95,6 +95,11 @@ export type ProjectHostOptions = Pick<
     /** Each revision fact; reporting only, never fatal. */
     onRevisionEvent: (event: HostRevisionEvent) => void;
     /**
+     * The contained shell `shell` runs on, given this host's run→checkout map (D1, F5). Only the desktop composition
+     * passes it; the MCP endpoint never lists `shell`, so external agents cannot reach it.
+     */
+    shell?: ((checkouts: ReadonlyMap<string, TurnCheckout>) => HostToolRegistryOptions['shell']) | undefined;
+    /**
      * W8 TS-S4: build this project's placement port. Every attempt is placed and settled through it and runs on its
      * grant's tools; the launcher reconciles the chats whose leases it holds (RH-R16). Absent: the in-process session
      * over this project's revisions ({@link ProjectRevisions.placement}), whose grants are the host's tool registry
@@ -244,7 +249,9 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     events: options.onRevisionEvent,
   });
 
-  /* One registry over every run's root (`checkouts`), or one rooted at a placed attempt's checkout. */
+  /* One registry over every run's root (`checkouts`), or one rooted at a placed attempt's checkout. The shell reads
+   * each call's checkout by run id from this host's map, whichever registry serves the call. */
+  const shell = options.shell?.(checkouts);
   const registryOptions = {
     revisions: revisions.history,
     filesystem: (root: string) => fileSystem.open(root),
@@ -259,6 +266,7 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
     /* `prepare_kernel` (D7, D37): offered to Tau's agent and, through the host-local MCP endpoint, to ACP agents. */
     ...(options.prepareKernel === undefined ? {} : { prepareKernel: options.prepareKernel }),
     ...(options.preparableKernels === undefined ? {} : { preparableKernels: options.preparableKernels }),
+    ...(shell === undefined ? {} : { shell }),
   };
   const toolRegistry = createHostToolRegistry({ ...registryOptions, workspaceRoot, checkouts });
   const toolRegistryFor = (root: string, filesystem?: HostToolFileSystem): ToolRegistry =>

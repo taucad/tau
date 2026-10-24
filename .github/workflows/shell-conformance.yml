@@ -20,6 +20,9 @@ on:
     paths:
       - 'packages/core/native-process/**'
       - 'packages/host/src/shell/**'
+      - 'packages/host/src/agent-tools.ts'
+      - 'libs/agent-tools/src/registry/shell-tool.ts'
+      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
       - 'packages/host/project.json'
       - 'apps/desktop/scripts/linux-apt-package.mts'
       - 'apps/desktop/scripts/hosted-linux-bwrap-fixture.mts'
@@ -31,6 +34,9 @@ on:
     paths:
       - 'packages/core/native-process/**'
       - 'packages/host/src/shell/**'
+      - 'packages/host/src/agent-tools.ts'
+      - 'libs/agent-tools/src/registry/shell-tool.ts'
+      - 'libs/chat/src/schemas/tools/shell.tool.schema.ts'
       - 'apps/desktop/scripts/linux-apt-package.mts'
       - 'pnpm-lock.yaml'
       - '.github/workflows/shell-conformance.yml'

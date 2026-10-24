@@ -528,7 +528,7 @@ describe('RevisionStatusAction', () => {
     render(<RevisionStatusAction />, { wrapper });
 
     const trigger = await screen.findByRole('button', {
-      name: 'Open Revisions. You are on main, Rev 12. Saved, Access removed.',
+      name: 'Open Revisions. You are on main, Rev 12. Saved, Cloud copy unavailable.',
     });
     expect(trigger.querySelector('[data-slot="revision-icon"]')).toHaveClass('lucide-history');
   });

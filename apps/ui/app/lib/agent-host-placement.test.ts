@@ -163,21 +163,27 @@ describe('listAgentHostPlacements', () => {
     expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
   });
 
-  /* XD2: asking again keeps the last answer readable until the new one is in (stale while revalidating). */
-  it('should keep the last answer readable while the origin is asked again', async () => {
+  /*
+   * XD2: only a fresh "no daemon" may decline a placement: past its reuse interval the answer reads as unknown, so a
+   * legacy origin placement opened then is kept and the origin asked again, not declined on an old answer.
+   */
+  it('should read a stale no-daemon answer as unknown until the origin answers again', async () => {
     vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
     try {
       await listAgentHostPlacements({ discoverOrigin: async () => undefined, listHosts: async () => [] });
+      expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
       vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+
+      expect(isPlacementOnThisDeviceNow('origin')).toBeUndefined();
       const answer = Promise.withResolvers<undefined>();
       const listing = listAgentHostPlacements({
         discoverOrigin: async () => answer.promise,
         listHosts: async () => [],
       });
-
-      expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
+      expect(isPlacementOnThisDeviceNow('origin')).toBeUndefined();
       answer.resolve(undefined);
       await listing;
+      expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
     } finally {
       vi.useRealTimers();
     }

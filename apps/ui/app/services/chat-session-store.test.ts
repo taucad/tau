@@ -6376,6 +6376,60 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     store.release(chatId);
   });
 
+  /* XD2: a legacy origin placement opened past the reuse interval of a failed probe is kept and asked about again. */
+  it('should keep a legacy origin placement opened more than 30 s after a failed probe, and ask the origin again', async () => {
+    const placementModule = await import('#lib/agent-host-placement.js');
+    vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
+    vi.stubGlobal('location', { origin: 'http://127.0.0.1:7777' });
+    const fetch = vi.fn<typeof globalThis.fetch>().mockRejectedValueOnce(new TypeError('network down'));
+    fetch.mockResolvedValue(
+      new Response(JSON.stringify({ v: 1, agent: true, label: 'Studio', workspaceRoot: '/work' }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetch);
+    placementModule.resetOriginAgentHostAnswer();
+    try {
+      await expect(placementModule.isPlacementOnThisDevice('origin')).resolves.toBe(false);
+      vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+      const chatId = 'chat_legacy_after_failed_probe';
+      const deps = createStubDeps();
+      deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+      let legacy: string | undefined = 'origin';
+      const { store, session } = await openLoaded(
+        {
+          ...deps,
+          isPlacementOnThisDevice: placementModule.isPlacementOnThisDevice,
+          isPlacementOnThisDeviceNow: placementModule.isPlacementOnThisDeviceNow,
+          adoptLegacyChatPlacement: async (_chatId, _projectId, accept) => {
+            if (legacy === undefined || !(await accept(legacy))) {
+              return undefined;
+            }
+            const adopted = legacy;
+            legacy = undefined;
+            return adopted;
+          },
+        },
+        chatId,
+      );
+
+      await vi.waitFor(() => {
+        expect(placementOnDisk(deps, chatId)).toBe('origin');
+      });
+      expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+        kind: 'tau',
+        model,
+        hostId: 'origin',
+      });
+      expect(fetch).toHaveBeenCalledTimes(2);
+      store.release(chatId);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      placementModule.resetOriginAgentHostAnswer();
+    }
+  });
+
   it('should not hold the load on finishing a half-done legacy adoption', async () => {
     const chatId = 'chat_adoption_slow';
     const deps = createStubDeps();

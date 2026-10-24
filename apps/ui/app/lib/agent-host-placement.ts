@@ -487,8 +487,8 @@ type OriginAsk = {
   readonly askedAt: number;
   /** The answer once it is in: read without waiting by {@link isPlacementOnThisDeviceNow}. */
   settled?: boolean;
-  /** The answer before this ask, shown while this one is in flight (stale while revalidating). */
-  readonly last?: boolean;
+  /** The answer before this ask and when it was asked, read while this one is in flight. */
+  readonly last?: Readonly<{ found: boolean; askedAt: number }>;
 };
 let originHostsAgent: OriginAsk | undefined;
 
@@ -525,12 +525,14 @@ const originForListing = async (discover?: typeof discoverOriginAgentHost): Prom
  * @returns The ask, recorded before it is awaited, so concurrent readers share it.
  */
 const askOrigin = (discover: typeof discoverOriginAgentHost = discoverOriginAgentHost): OriginAsk => {
-  const previous = originHostsAgent?.settled ?? originHostsAgent?.last;
+  const before = originHostsAgent;
+  const last = before?.settled === undefined ? before?.last : { found: before.settled, askedAt: before.askedAt };
+  const previous = last?.found;
   const asking: OriginAsk = {
     descriptor: Promise.resolve(undefined),
     answer: Promise.resolve(false),
     askedAt: Date.now(),
-    ...(previous === undefined ? {} : { last: previous }),
+    ...(last === undefined ? {} : { last }),
   };
   const settle = (found: boolean): void => {
     asking.settled = found;
@@ -593,8 +595,17 @@ export const isPlacementOnThisDeviceNow = (hostId: TauAgentHostId): boolean | un
   if (known !== undefined) {
     return known;
   }
-  /* The last answer stays readable while an ask is in flight; only a page never answered reads as unknown. */
-  return originHostsAgent?.settled ?? originHostsAgent?.last;
+  /*
+   * A found daemon is found for the page's life, even while it is asked again. A "no daemon" declines only while it is
+   * fresh: past the reuse interval it reads as unknown, so a placement is kept and the origin asked again, never
+   * declined on an old answer.
+   */
+  const asked = originHostsAgent;
+  const answer = asked?.settled === undefined ? asked?.last : { found: asked.settled, askedAt: asked.askedAt };
+  if (answer === undefined) {
+    return undefined;
+  }
+  return answer.found || Date.now() - answer.askedAt < originAnswerReuse ? answer.found : undefined;
 };
 
 /**

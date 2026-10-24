@@ -672,6 +672,8 @@ export const createTurnPlacementPort = <Tools>(
     const timer = setTimeout(() => {
       expired.resolve(undefined);
     }, bound); // Bound: checkoutOpenMilliseconds.
+    /* A bound never keeps a host's process open at shutdown (Node's timers). */
+    (timer as { unref?: () => void }).unref?.();
     try {
       actor.send({ type: 'addCheckout', requestId, branch, from: '' });
       /* The registry answers every add by its id (RM-R11); a stopped root ends the wait too. */

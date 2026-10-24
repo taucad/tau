@@ -678,10 +678,23 @@ describe('createTurnPlacementPort (TS-S3)', () => {
       openTools: ({ filesystem: view }) => view,
       checkoutOpenBound: 50,
     });
+    /* The bound never keeps a host's process open: its timer is unref'd, as every other bound's is. */
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const realSetTimeout = globalThis.setTimeout;
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: () => void, timerDelay?: number) => {
+      const timer = realSetTimeout(handler, timerDelay);
+      if (timerDelay === 50) {
+        timers.push(timer);
+      }
+      return timer;
+    }) as typeof setTimeout);
 
     const answer = await placement.admit({ requestId: 'admit:run-1:1', key });
+    spy.mockRestore();
 
     expect(answer).toMatchObject({ status: 'refused', code: 'REVISIONS_UNAVAILABLE' });
+    expect(timers).not.toHaveLength(0);
+    expect(timers.every((timer) => !timer.hasRef())).toBe(true);
   });
 
   /* XD4: an unborn branch runs only on a checkout that already tracks it; otherwise it waits only for a remote. */

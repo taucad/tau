@@ -179,6 +179,8 @@ export type CreateTauAgentHostOptions = {
         pausedRunHold?: number;
         /** How long a command waits for a chat's closing incarnation before `WRITER_LOCKED`; ten seconds. */
         closingWait?: number;
+        /** How long an approval waits to read the segments; {@link approvalRefreshMilliseconds}. */
+        approvalRefresh?: number;
       }>
     | undefined;
   /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
@@ -347,6 +349,14 @@ export const runHeartbeatMilliseconds = 60_000;
  * @public
  */
 export const pausedRunHoldMilliseconds = 30 * 60 * 1000;
+
+/**
+ * How long an approval waits to read the other devices' segments before it is refused `SEGMENTS_UNREADABLE` (`wait`)
+ * rather than continue a paused run on a fence it could not check: ten seconds.
+ *
+ * @public
+ */
+export const approvalRefreshMilliseconds = 10_000;
 
 const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
 
@@ -1273,10 +1283,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
   /*
    * Each chat's commands, in the order they arrive, until each has reached the registry: whatever a command awaits
-   * first (a term check, an approval's fence) the commands behind it wait for, so a Stop never overtakes the Send or
-   * the Approve before it. The newest command's turn; a command with none ahead adds no wait.
+   * first (a term check, an approval's fence) the commands behind it wait for. A Stop does not wait: it is applied at
+   * once, and the commands still waiting when it arrives are refused `COMMAND_SUPERSEDED`. The newest command's turn; a
+   * command with none ahead adds no wait.
    */
   const dispatchOrder = new Map<string, Promise<void>>();
+  /** Each chat's Stops so far: a command that waited on its checks across one is superseded, not run. */
+  const stops = new Map<string, number>();
   /**
    * A new term for a turn another device's turn came between (XD1). An incarnation keeps one term while it stays
    * open, and a term's rows merge together, ordered by the term's start (CL-R14): a turn written under a term that
@@ -1337,6 +1350,29 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * @param chatId - Its chat.
    * @returns The refusal, or `undefined` to apply it.
    */
+  /** A segment read bounded for an approval: one that does not finish in time is a segment that cannot be read. */
+  const boundedRefresh = async (log: DurableEventLog): Promise<void> => {
+    const clock: HostClock = options.clock ?? globalThis;
+    const expired = Promise.withResolvers<'expired'>();
+    const timer: unknown = clock.setTimeout(() => {
+      expired.resolve('expired');
+    }, options.delays?.approvalRefresh ?? approvalRefreshMilliseconds); // Bound: approvalRefreshMilliseconds.
+    (timer as { unref?: () => void } | undefined)?.unref?.();
+    try {
+      const read = log.refresh?.();
+      const settled = async (): Promise<'read'> => {
+        await read;
+        return 'read';
+      };
+      if (read !== undefined && (await Promise.race([settled(), expired.promise])) === 'expired') {
+        throw Object.assign(new Error('The other devices’ copies of this chat could not be read in time.'), {
+          code: 'SEGMENTS_UNREADABLE' satisfies RefusalCode,
+        });
+      }
+    } finally {
+      clock.clearTimeout(timer);
+    }
+  };
   const refuseApprovalForeignRun = async (commandId: string, chatId: string): Promise<CommandAnswer | undefined> => {
     const store = stores.get(chatId);
     const opened = store?.log;
@@ -1345,7 +1381,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
     try {
       const log = await opened;
-      await log.refresh?.();
+      await boundedRefresh(log);
       await refuseForeignRun(chatId, log);
       return undefined;
     } catch (error) {
@@ -2264,33 +2300,56 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     /* One dispatch of this command: what it refreshes is not refreshed again within it, and only within it. */
     const dispatch: { refreshed?: DurableEventLog } = {};
     const ordered = command.payload.chatId;
-    const ahead = dispatchOrder.get(ordered);
-    const turn = Promise.withResolvers<void>();
-    dispatchOrder.set(ordered, turn.promise);
     let answer: Promise<CommandAnswer>;
-    try {
-      if (ahead !== undefined) {
-        await ahead;
-      }
-      if (command.type === 'start' || command.type === 'resume') {
-        dispatches.set(command.commandId, dispatch);
-        /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
-        const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId);
-        if (rehoming !== undefined) {
-          await rehoming;
-        }
-      }
-      if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
-        const held = await refuseApprovalForeignRun(command.commandId, command.payload.chatId);
-        if (held !== undefined) {
-          return held;
-        }
-      }
+    if (command.type === 'cancel') {
+      /* A Stop never waits behind another command's checks: it is applied at once, and supersedes them. */
+      stops.set(ordered, (stops.get(ordered) ?? 0) + 1);
       answer = registry.execute(command);
-    } finally {
-      turn.resolve();
-      if (dispatchOrder.get(ordered) === turn.promise) {
-        dispatchOrder.delete(ordered);
+    } else {
+      const stopsSeen = stops.get(ordered) ?? 0;
+      const superseded = (): CommandAnswer | undefined =>
+        (stops.get(ordered) ?? 0) === stopsSeen
+          ? undefined
+          : {
+              commandId: command.commandId,
+              generation: storeOf(ordered).ledger?.maxEpoch ?? 0,
+              status: 'refused',
+              effect: 'not-applied',
+              code: 'COMMAND_SUPERSEDED',
+              message: 'A Stop for this chat arrived while this command waited on its checks, so it was not run.',
+            };
+      const ahead = dispatchOrder.get(ordered);
+      const turn = Promise.withResolvers<void>();
+      dispatchOrder.set(ordered, turn.promise);
+      try {
+        if (ahead !== undefined) {
+          await ahead;
+        }
+        if (command.type === 'start' || command.type === 'resume') {
+          dispatches.set(command.commandId, dispatch);
+          /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
+          const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId);
+          if (rehoming !== undefined) {
+            await rehoming;
+          }
+        }
+        if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
+          const held = await refuseApprovalForeignRun(command.commandId, command.payload.chatId);
+          const stopped = superseded();
+          if (stopped !== undefined || held !== undefined) {
+            return stopped ?? held!;
+          }
+        }
+        const stopped = superseded();
+        if (stopped !== undefined) {
+          return stopped;
+        }
+        answer = registry.execute(command);
+      } finally {
+        turn.resolve();
+        if (dispatchOrder.get(ordered) === turn.promise) {
+          dispatchOrder.delete(ordered);
+        }
       }
     }
     if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {

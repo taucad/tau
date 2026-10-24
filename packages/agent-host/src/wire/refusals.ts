@@ -58,6 +58,11 @@ export const refusals = {
   RUN_ABANDONED: { owner: 'host', retry: 'resume' },
   /** This chat admitted no run. */
   NO_RUN_ADMITTED: { owner: 'host', retry: 'never' },
+  /**
+   * A Stop for this chat arrived while this command still waited on its checks: the Stop is applied at once, and the
+   * commands that were waiting are not run. Send it again if it is still wanted.
+   */
+  COMMAND_SUPERSEDED: { owner: 'host', retry: 'never' },
   /** A rewinding trigger did not retain an unchanged strict history prefix. */
   HISTORY_PREFIX_INVALID: { owner: 'host', retry: 'never' },
   /** A second, differing settlement for one attempt. */

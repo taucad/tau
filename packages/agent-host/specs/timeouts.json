@@ -93,6 +93,14 @@
       "owner": "XD3"
     },
     {
+      "id": "APPROVAL-REFRESH",
+      "bound": "An approval waits at most ten seconds to read the other devices' segments, then is refused SEGMENTS_UNREADABLE (wait) instead of continuing a paused run on a fence it could not check",
+      "site": "packages/agent-host/src/host/tau-agent-host.ts",
+      "token": "approvalRefreshMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
       "id": "CHAT-CLOSING-WAIT",
       "bound": "A command that reaches a chat whose incarnation is closing waits at most ten seconds for its log to close, then is refused WRITER_LOCKED (wait)",
       "site": "packages/agent-host/src/host/chat-run-registry.ts",

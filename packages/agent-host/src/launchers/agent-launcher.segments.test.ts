@@ -77,6 +77,7 @@ const launch = (
     pausedRunHold?: number;
     idleEviction?: number;
     closingWait?: number;
+    approvalRefresh?: number;
     publish?: NonNullable<TurnPlacementPort['publish']>;
   }> = {},
 ): AgentLauncher => {
@@ -94,6 +95,7 @@ const launch = (
       ...(options.pausedRunHold === undefined ? {} : { pausedRunHold: options.pausedRunHold }),
       ...(options.idleEviction === undefined ? {} : { idleEviction: options.idleEviction }),
       ...(options.closingWait === undefined ? {} : { closingWait: options.closingWait }),
+      ...(options.approvalRefresh === undefined ? {} : { approvalRefresh: options.approvalRefresh }),
     },
   });
   launchers.push(launcher);
@@ -379,8 +381,8 @@ describe('a chat continued on a second device', () => {
         }
       }, 10_000);
 
-      /* A chat's commands keep their order through every term check: a Stop never overtakes the Send before it. */
-      it('should apply a Stop after the Send before it when two term checks run ahead of them', async () => {
+      /* A Stop never waits behind term checks: the Send still checking when it arrives is superseded, never run. */
+      it('should supersede a Send still behind term checks when a Stop arrives', async () => {
         const desktop = await workspace();
         const store = createNodeChatStore({ workspaceRoot: desktop });
         const hold = { refresh: false };
@@ -442,9 +444,9 @@ describe('a chat continued on a second device', () => {
           released.resolve();
           await first;
 
-          await expect(send).resolves.toMatchObject({ status: 'applied' });
-          const stopped = await stop;
-          expect(stopped, JSON.stringify(stopped)).toMatchObject({ status: 'applied' });
+          await expect(send).resolves.toMatchObject({ status: 'refused', code: 'COMMAND_SUPERSEDED' });
+          /* Nothing ran, so there is nothing to stop. */
+          await expect(stop).resolves.toMatchObject({ status: 'refused', code: 'NO_RUN_ADMITTED' });
         } finally {
           gate.resolve();
         }
@@ -1139,6 +1141,72 @@ describe('a chat continued on a second device', () => {
     const heartbeatCount = async (root: string): Promise<number> =>
       heartbeatsAfter(rowsOf(await readFile(ownLog(root), 'utf8')), 'paused').length;
 
+    /*
+     * A Stop is applied at once, never behind another command's checks: an Approve whose read of the other devices'
+     * segments stalls is refused once it is superseded, and the run stops.
+     */
+    it('should stop the run at once and refuse an Approve stalled behind its segment read', async () => {
+      const root = await workspace();
+      const store = createNodeChatStore({ workspaceRoot: root });
+      const stall = { armed: false };
+      const binding = chatStoreBinding(store) as { openWriter: (id: string) => Promise<EventLogAppender> };
+      const open = binding.openWriter;
+      binding.openWriter = async (id) => {
+        const log = await open(id);
+        const { refresh } = log;
+        return refresh === undefined
+          ? log
+          : Object.assign(log, {
+              refresh: async () => {
+                if (stall.armed) {
+                  await new Promise<never>(() => {
+                    /* A read that never returns. */
+                  });
+                }
+                await refresh.call(log);
+              },
+            });
+      };
+      const launcher = launch(
+        store,
+        {
+          ...recordingModel('answer').transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await new Promise((resolve) => {
+              request.signal.addEventListener('abort', resolve, { once: true });
+            });
+            yield { type: 'completed', stopReason: 'aborted' };
+          },
+        },
+        { approvalRefresh: 100 },
+      );
+      await launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', trigger: 'submit', message: { id: 'user-1', role: 'user', content: 'go' } },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'running'));
+      await launcher.execute({
+        type: 'interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', kind: 'approval', prompt: 'Write?' },
+      });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
+      await sleep(100);
+      stall.armed = true;
+
+      const approve = launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+      const stopped = await launcher.execute({ type: 'cancel', commandId: key(), payload: { chatId, runId: 'run-1' } });
+      const approved = await approve;
+
+      expect(stopped, JSON.stringify(stopped)).toMatchObject({ status: 'applied' });
+      expect(approved, JSON.stringify(approved)).toMatchObject({ status: 'refused', code: 'COMMAND_SUPERSEDED' });
+    }, 10_000);
+
     /* A heartbeat never opens a term: an old paused chat that is only reopened writes nothing, and pushes nothing. */
     it('should write no heartbeat for a paused run a new incarnation only reopens', async () => {
       const { root, launcher } = await pausedRunOn({ runHeartbeat: 20 });
@@ -1230,8 +1298,8 @@ describe('a chat continued on a second device', () => {
       expect(after.filter((row) => row.type !== 'run.heartbeat')).toEqual([]);
     });
 
-    /* A chat's commands are answered in the order they arrive: a Stop sent after an Approve never overtakes it. */
-    it('should apply an Approve before the Stop sent right after it', async () => {
+    /* A Stop sent right after an Approve still checking its fence is applied at once, and the Approve is not run. */
+    it('should supersede an Approve still checking its fence when a Stop arrives', async () => {
       const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 60_000 });
       await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
       /* Past the pause's own settlement, so the Stop meets the paused run, not a settling one. */
@@ -1244,10 +1312,10 @@ describe('a chat continued on a second device', () => {
       });
       const stop = launcher.execute({ type: 'cancel', commandId: key(), payload: { chatId, runId: 'run-1' } });
       const approved = await approve;
-      await stop;
+      const stopped = await stop;
 
-      /* Had the Stop gone first, it would have cancelled the paused run and its approval with it. */
-      expect(approved, JSON.stringify(approved)).toMatchObject({ status: 'applied' });
+      expect(stopped, JSON.stringify(stopped)).toMatchObject({ status: 'applied' });
+      expect(approved, JSON.stringify(approved)).toMatchObject({ status: 'refused', code: 'COMMAND_SUPERSEDED' });
     });
 
     /* Inside its own hold the paused run still holds the chat: a segment it cannot read does not block its approval. */

@@ -48,7 +48,6 @@ import { PostgresMirrorLedger, copyPendingOnAdvance } from '#api/git/mirror/wate
  * through a real `git index-pack`. The run lands in `mirror_drill_run`.
  */
 
-/* eslint-disable @typescript-eslint/naming-convention -- environment variable names */
 const databaseUrl = process.env.DATABASE_URL;
 const copyBucket = process.env['TAU_S3_COPY_BUCKET'] ?? 'tau-content-second-copy';
 const copyEndpoint = process.env['TAU_S3_COPY_ENDPOINT'] ?? process.env.TAU_S3_ENDPOINT;
@@ -56,7 +55,6 @@ const copyCredentials = {
   accessKeyId: process.env['TAU_S3_COPY_ACCESS_KEY_ID'] ?? process.env.TAU_S3_ACCESS_KEY_ID,
   secretAccessKey: process.env['TAU_S3_COPY_SECRET_ACCESS_KEY'] ?? process.env.TAU_S3_SECRET_ACCESS_KEY,
 };
-/* eslint-enable @typescript-eslint/naming-convention -- end environment variable names */
 
 const run = randomUUID().slice(0, 8);
 const ownerId = `user_dr2_${run}`;

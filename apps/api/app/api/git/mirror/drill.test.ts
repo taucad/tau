@@ -228,6 +228,7 @@ describe('runVerifyDrill', () => {
 
     const result = await runVerifyDrill(drill(h).context);
 
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- a drill check name, as the metric label carries it
     expect(result).toMatchObject({ outcome: 'fail', failed: { lfs: 1, missing: 1, hidden_versions: 1 } });
   });
 

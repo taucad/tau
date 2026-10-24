@@ -54,13 +54,21 @@ class IncludeEdgesTest(unittest.TestCase):
                 self.assertEqual(default[key], [])
             self.assertTrue(mesh["indices"])
 
+    def assert_baseline(self, mesh: dict, name: str) -> None:
+        # Topology is exact; positions differ in the last bit across platforms' math libraries.
+        self.assertEqual(mesh["lineIndices"], BASELINE[name]["lineIndices"])
+        self.assertEqual(mesh["edgeGroups"], BASELINE[name]["edgeGroups"])
+        self.assertEqual(len(mesh["lines"]), len(BASELINE[name]["lines"]))
+        for value, expected in zip(mesh["lines"], BASELINE[name]["lines"]):
+            self.assertAlmostEqual(value, expected, delta=1e-12)
+
     def test_with_edges_returns_the_unchanged_lines(self) -> None:
         for name, shape in shapes():
             located, _triangles = worker._triangulate(shape, 0.05, math.radians(20))
-            mesh = worker._mesh_arrays(shape, located, 0.05, math.radians(20), include_edges=True)
-            self.assertEqual({key: mesh[key] for key in LINE_KEYS}, BASELINE[name])
-            shaped = worker._mesh_shape(shape, 0.05, math.radians(20), include_edges=True)
-            self.assertEqual({key: shaped[key] for key in LINE_KEYS}, BASELINE[name])
+            self.assert_baseline(
+                worker._mesh_arrays(shape, located, 0.05, math.radians(20), include_edges=True), name
+            )
+            self.assert_baseline(worker._mesh_shape(shape, 0.05, math.radians(20), include_edges=True), name)
 
     def test_glb_without_lines_has_no_line_primitive_or_edge_material(self) -> None:
         components, meshes = worker._topology((Box(2, 3, 4),), 0.05, math.radians(20))

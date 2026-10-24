@@ -85,7 +85,7 @@ export const TitlebarNavigation = ({
 
   return (
     <>
-      <SidebarTrigger aria-label='Toggle Sidebar' onSidebarResize={onSidebarResize} />
+      <SidebarTrigger onSidebarResize={onSidebarResize} />
       {hasWordmark && open && !isMobile ? (
         <Link
           to='/'

@@ -23,6 +23,38 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { billingNavRoutes } from '#cloud/nav-billing.js';
 
+/**
+ * The phone sheet header reads [close][wordmark → Home] … [Search] (D10). Wide screens keep search as
+ * the Search row under the header instead. In the browser each control is a 40px target; the desktop
+ * app's narrow window keeps its compact titlebar row.
+ */
+function PhoneSidebarHeaderControls({
+  isDesktopTarget: desktopTarget,
+}: {
+  readonly isDesktopTarget: boolean;
+}): React.JSX.Element {
+  return (
+    <>
+      <SidebarTrigger className={cn(!desktopTarget && 'size-10')} />
+      <SidebarMenuButton
+        asChild
+        tooltip='Home'
+        className={cn(
+          'w-auto min-w-0 gap-0 p-1! group-data-[collapsible=icon]:p-0! [&>svg]:h-7 [&>svg]:w-auto',
+          !desktopTarget && 'h-10',
+        )}
+      >
+        <Link to='/'>
+          <TauTextWordmark className='py-1 text-primary' />
+          <span className='sr-only'>Home</span>
+        </Link>
+      </SidebarMenuButton>
+      <span aria-hidden className='flex-1' />
+      <Commands />
+    </>
+  );
+}
+
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   const { state, isMobile } = useSidebar();
   const flags = useFeatureFlags();
@@ -61,24 +93,12 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
           isMobile && desktopTarget && 'h-9 pl-(--desktop-titlebar-inset) [&_:is(a,button)]:[app-region:no-drag]',
         )}
       >
-        {isMobile ? <SidebarTrigger /> : null}
-        {isMobile ? (
-          <SidebarMenuButton
-            asChild
-            tooltip='Home'
-            className='min-w-0 flex-1 gap-0 p-1! group-data-[collapsible=icon]:p-0! [&>svg]:h-7 [&>svg]:w-auto'
-          >
-            <Link to='/'>
-              <TauTextWordmark className='py-1 text-primary' />
-              <span className='sr-only'>Home</span>
-            </Link>
-          </SidebarMenuButton>
-        ) : null}
+        {isMobile ? <PhoneSidebarHeaderControls isDesktopTarget={desktopTarget} /> : null}
       </SidebarHeader>
       <SidebarContent className='gap-0'>
         <div className='sticky top-0 z-10 space-y-1 bg-sidebar px-2 pb-1'>
           {/* Global search entries register when search opens. */}
-          <Commands />
+          {isMobile ? null : <Commands />}
           <NavChat isCompact={isCompact} />
         </div>
         <div className='flex-1 overflow-y-auto'>

@@ -97,13 +97,15 @@ describe('SidebarTrigger', () => {
     mobile.value = true;
     const user = userEvent.setup();
     renderTrigger();
-    const trigger = screen.getByRole('button', { name: 'Toggle Sidebar' });
+    const trigger = screen.getByRole('button', { name: 'Open sidebar' });
 
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger).not.toHaveAttribute('aria-controls');
 
     await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    // On phones the open sheet's control closes it, and says so (I6).
+    expect(trigger).toHaveAccessibleName('Close sidebar');
 
     await user.click(screen.getByRole('button', { name: 'Navigate' }));
     expect(trigger).toHaveAttribute('aria-expanded', 'false');

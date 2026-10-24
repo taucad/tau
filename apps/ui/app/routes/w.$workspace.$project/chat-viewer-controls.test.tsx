@@ -10,7 +10,8 @@ import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
 
-const mocks = vi.hoisted(() => ({ hasGridReadout: true }));
+const mocks = vi.hoisted(() => ({ hasGridReadout: true, isMobile: false }));
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }));
 const editorSnapshot = { context: { focusedChatId: 'chat-test' as string | undefined } };
 const editorRef = { getSnapshot: () => editorSnapshot, subscribe: () => ({ unsubscribe: () => undefined }) };
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ editorRef }) }));
@@ -37,6 +38,7 @@ afterEach(() => {
   activeActor?.stop();
   activeActor = undefined;
   mocks.hasGridReadout = true;
+  mocks.isMobile = false;
   editorSnapshot.context.focusedChatId = 'chat-test';
 });
 
@@ -69,7 +71,12 @@ const showSvg = (actor: GraphicsActor): void => {
 
 const renderBar = (
   actor: GraphicsActor,
-  properties: { shouldEnableCapture?: boolean; leading?: React.ReactNode; aboveControls?: React.ReactNode } = {},
+  properties: {
+    shouldEnableCapture?: boolean;
+    leading?: React.ReactNode;
+    aboveControls?: React.ReactNode;
+    mobileAction?: React.ReactNode;
+  } = {},
 ): void => {
   render(
     <KeyboardProvider>
@@ -117,12 +124,43 @@ describe('ChatViewerControls', () => {
       expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
     });
 
-    it('should never shrink below its rows, so no row spills out of the bar in a narrow strip', () => {
+    it('should stay within a narrow strip, wrapping its rows rather than spilling out of the bar', () => {
       renderBar(startGraphics());
 
       expect(
         screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]'),
-      ).toHaveClass('max-w-full', 'min-w-min');
+      ).toHaveClass('max-w-full', 'min-w-0', 'max-h-full', 'min-h-0');
+    });
+
+    it('should put the mobile action in place of fullscreen on phones, after Fit view', () => {
+      mocks.isMobile = true;
+      renderBar(startGraphics(), { mobileAction: <button type='button' aria-label='View in your space' /> });
+
+      expect(controlNames()).toEqual([
+        'Grid 10 mm, units and grid',
+        'Section view',
+        'Measure',
+        'Fit view',
+        'View in your space',
+        'Capture view to chat',
+        'Viewer settings',
+      ]);
+    });
+
+    it('should offer neither fullscreen nor AR on a phone that cannot launch AR', () => {
+      mocks.isMobile = true;
+      renderBar(startGraphics());
+
+      expect(controlNames()).not.toContain('Enter fullscreen');
+      expect(controlNames()).not.toContain('View in your space');
+      expect(screen.getByRole('button', { name: 'Fit view' })).toBeInTheDocument();
+    });
+
+    it('should keep fullscreen and leave the mobile action out on desktop', () => {
+      renderBar(startGraphics(), { mobileAction: <button type='button' aria-label='View in your space' /> });
+
+      expect(controlNames()).toContain('Enter fullscreen');
+      expect(controlNames()).not.toContain('View in your space');
     });
 
     it('should hint the S, M and F shortcuts in the tooltips', async () => {

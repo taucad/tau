@@ -78,6 +78,16 @@ describe('AgentSettings', () => {
 
     await userEvent.click(screen.getByText('Include all open editor tabs'));
 
+    expect(mockSetIncludeOpenFiles).toHaveBeenCalledTimes(1);
+    expect(mockSetIncludeOpenFiles).toHaveBeenCalledWith(false);
+  });
+
+  it('should toggle a switch once when the switch itself is tapped inside its row', async () => {
+    renderAgentSettings();
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Open Tabs' }));
+
+    expect(mockSetIncludeOpenFiles).toHaveBeenCalledTimes(1);
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledWith(false);
   });
 

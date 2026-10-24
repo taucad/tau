@@ -2,7 +2,7 @@ import { GithubRepositorySettings } from '#components/settings/github-repository
 import { BrowserSettingsPanel } from '#components/browser/browser-settings.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
@@ -135,6 +135,22 @@ export function SettingsDialog(): React.JSX.Element {
     },
     [close],
   );
+  // A menu item that opens settings has already unmounted, with focus on the body, by the time the
+  // dialog renders. Remember the last focus while closed, resolved to its menu's trigger while the
+  // menu still exists.
+  const lastFocus = useRef<HTMLElement>(undefined);
+  useEffect(() => {
+    if (isOpen) {
+      return;
+    }
+    const remember = (event: FocusEvent): void => {
+      lastFocus.current = event.target instanceof Element ? resolveOpener(event.target) : undefined;
+    };
+    document.addEventListener('focusin', remember);
+    return () => {
+      document.removeEventListener('focusin', remember);
+    };
+  }, [isOpen]);
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       {isOpen ? (
@@ -143,10 +159,35 @@ export function SettingsDialog(): React.JSX.Element {
           openSection={open}
           close={close}
           linkedSetting={target}
+          lastFocus={lastFocus}
         />
       ) : null}
     </Dialog>
   );
+}
+
+/**
+ * Resolve the element that opened settings. A menu item or popover row unmounts as settings opens,
+ * so focus goes back to the trigger that opened that menu instead, through any nested menus.
+ */
+function resolveOpener(element: Element): HTMLElement | undefined {
+  let current: Element | undefined = element;
+  for (let depth = 0; current instanceof HTMLElement && depth < 4; depth++) {
+    const layer: HTMLElement | undefined =
+      current.closest<HTMLElement>('[role=menu], [role=listbox], [data-radix-popper-content-wrapper]') ?? undefined;
+    if (!layer) {
+      return current;
+    }
+    const owner: Element = layer.querySelector('[role=menu], [role=listbox], [role=dialog]') ?? layer;
+    const document_: Document = current.ownerDocument;
+    const ids: string[] = [layer.id, owner.id].filter((id) => id !== '');
+    const controller: Element | undefined =
+      ids
+        .map((id) => document_.querySelector(`[aria-controls="${CSS.escape(id)}"]`))
+        .find((trigger) => trigger !== null) ?? undefined;
+    current = controller ?? document_.querySelector('[aria-expanded="true"][aria-haspopup]') ?? undefined;
+  }
+  return undefined;
 }
 
 /** The section a plain open lands on; on a phone it opens the section list instead. */
@@ -159,12 +200,15 @@ export function SettingsSurface({
   close,
   linkedSetting,
   isEmbedded = false,
+  lastFocus,
 }: {
   readonly activeSection: SettingsSection;
   readonly openSection: (section?: SettingsSection, target?: SettingId) => void;
   readonly close: () => void;
   readonly linkedSetting?: string;
   readonly isEmbedded?: boolean;
+  /** Where focus last was before the host opened settings, for when the opener has since unmounted. */
+  readonly lastFocus?: React.RefObject<HTMLElement | undefined>;
 }): React.JSX.Element {
   const Content = isEmbedded ? EmbeddedSettingsContent : DialogContent;
   const isMobile = useIsMobile();
@@ -174,12 +218,11 @@ export function SettingsSurface({
   const listRef = useRef<HTMLElement>(null);
   // Settings opens from the URL rather than a dialog trigger, so the dialog has no trigger to return
   // focus to. Whatever held focus when the surface mounted is the opener.
-  const [opener] = useState(() => {
-    if (typeof document === 'undefined') {
-      return undefined;
-    }
-    return document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-  });
+  const [opener] = useState(() =>
+    typeof document === 'undefined' || !document.activeElement || document.activeElement === document.body
+      ? undefined
+      : resolveOpener(document.activeElement),
+  );
   // State, not a ref: the dialog mounts its content after the first effects run, and a
   // deep link opening the dialog has to wait for it.
   const [content, setContent] = useState<HTMLDivElement>();
@@ -188,6 +231,8 @@ export function SettingsSurface({
   }, []);
   // Phones show one level at a time. A plain open (`open()` writes the default section) starts on
   // the section list; an open that names another section or a setting lands on its detail.
+  // `?settings=general` therefore lands on the list on a phone, as do `/settings` and
+  // `/settings/general`, which redirect to it: the URL cannot tell "General" from "settings".
   const [isListShown, setIsListShown] = useState(() => activeSection === defaultSection && !linkedSetting);
   const [request, setRequest] = useState({ section: activeSection, setting: linkedSetting });
   if (request.section !== activeSection || request.setting !== linkedSetting) {
@@ -199,7 +244,8 @@ export function SettingsSurface({
   const isReturning = useRef(false);
   const showsList = isMobile && isListShown;
   const showsDetail = !isMobile || !isListShown;
-  const results = searchSettings(query);
+  const results = useMemo(() => searchSettings(query), [query]);
+  const isSearching = query.trim().length > 0;
   const active = settingsSections.find((section) => section.id === activeSection)!;
 
   // A deep link from outside the dialog (`?setting=`) reveals its control like a search result does.
@@ -297,6 +343,11 @@ export function SettingsSurface({
     >
       <SearchInput
         ref={searchRef}
+        // On a phone the field is a 40px target, and Clear's hit area grows to 40px around its glyph.
+        className={cn(isMobile && 'h-10')}
+        containerClassName={cn(
+          isMobile && '[&>[data-slot=button]]:after:absolute [&>[data-slot=button]]:after:-inset-2',
+        )}
         aria-label='Search settings'
         placeholder='Search settings…'
         value={query}
@@ -338,12 +389,17 @@ export function SettingsSurface({
         // A deep link owns focus: its reveal moves it to the content, not the dialog's first button.
         if (linkedDestination) {
           event.preventDefault();
+        } else if (showsList) {
+          // The phone list opens ready to search, not on its close control.
+          event.preventDefault();
+          searchRef.current?.focus();
         }
       }}
       onCloseAutoFocus={(event) => {
         event.preventDefault();
-        if (opener?.isConnected && opener !== opener.ownerDocument.body) {
-          opener.focus();
+        const returnTo = opener ?? lastFocus?.current;
+        if (returnTo?.isConnected) {
+          returnTo.focus();
         }
       }}
       onEscapeKeyDown={(event) => {
@@ -362,7 +418,8 @@ export function SettingsSurface({
         {isMobile && !showsList ? null : (
           <SettingsNavigationPane isMobile={isMobile} close={close} search={search} listRef={listRef}>
             <SettingsNavigationItems
-              query={query}
+              results={results}
+              isSearching={isSearching}
               activeSection={activeSection}
               destination={destination}
               isMobile={isMobile}
@@ -413,7 +470,7 @@ function SettingsNavigationPane({
         </SettingsSheetHeader>
       ) : (
         <Button variant='ghost' className='w-full justify-start' onClick={close}>
-          <ArrowLeft className='size-4' aria-hidden='true' /> Back to app
+          <X className='size-4' aria-hidden='true' /> Close settings
         </Button>
       )}
       <div className={cn(isMobile && 'px-3')}>{search}</div>
@@ -430,21 +487,22 @@ function SettingsNavigationPane({
 
 /** Section rows, or search results while there is a query; a phone gets 44px rows with group labels. */
 function SettingsNavigationItems({
-  query,
+  results,
+  isSearching,
   activeSection,
   destination,
   isMobile,
   navigate,
 }: {
-  readonly query: string;
+  readonly results: ReturnType<typeof searchSettings>;
+  readonly isSearching: boolean;
   readonly activeSection: SettingsSection;
   readonly destination: { section: SettingsSection; id?: string } | undefined;
   readonly isMobile: boolean;
   readonly navigate: (section: SettingsSection, id?: string) => void;
 }): React.JSX.Element {
-  const results = searchSettings(query);
   const resultCount = results.reduce((total, group) => total + group.entries.length, 0);
-  if (query.trim().length > 0) {
+  if (isSearching) {
     return (
       <div className='space-y-4'>
         <p role='status' className='px-2 text-xs text-muted-foreground'>

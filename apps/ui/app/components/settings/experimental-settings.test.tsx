@@ -43,6 +43,16 @@ describe('ExperimentalSettings', () => {
 
     await userEvent.click(screen.getByText('Tau Debug'));
 
+    expect(mockState.setFlag).toHaveBeenCalledTimes(1);
+    expect(mockState.setFlag).toHaveBeenCalledWith('tauDebug', !featureFlagDefaults.tauDebug);
+  });
+
+  it('should toggle a flag once when the switch itself is tapped inside its row', async () => {
+    render(<ExperimentalSettings />);
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Tau Debug' }));
+
+    expect(mockState.setFlag).toHaveBeenCalledTimes(1);
     expect(mockState.setFlag).toHaveBeenCalledWith('tauDebug', !featureFlagDefaults.tauDebug);
   });
 });

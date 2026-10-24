@@ -7,6 +7,12 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SidebarProvider } from '@taucad/ui/components/sidebar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
@@ -82,11 +88,31 @@ function SettingsOpener(): React.JSX.Element {
   );
 }
 
+/** Opens settings the way the user menu does: from an item that unmounts with its menu. */
+function SettingsMenu(): React.JSX.Element {
+  const { open } = useSettingsDialog();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger>Account</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem
+          onSelect={() => {
+            open('general');
+          }}
+        >
+          Settings
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function SettingsTestSurface({ url = '/home/project?settings=general' }: { readonly url?: string }): React.JSX.Element {
   return (
     <MemoryRouter initialEntries={[url]}>
       <SidebarProvider>
         <SettingsOpener />
+        <SettingsMenu />
         <SettingsDialog />
       </SidebarProvider>
     </MemoryRouter>
@@ -132,10 +158,10 @@ describe('SettingsDialog', () => {
     expect(renderSecuritySettings).toHaveBeenCalledOnce();
   });
 
-  it('should close settings when Back to app is selected', async () => {
+  it('should close settings when Close settings is selected', async () => {
     render(<SettingsTestSurface />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Back to app' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Close settings' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -218,7 +244,7 @@ describe('SettingsDialog', () => {
     const opener = screen.getByRole('button', { name: 'Open settings' });
 
     await user.click(opener);
-    await user.click(screen.getByRole('button', { name: 'Back to app' }));
+    await user.click(screen.getByRole('button', { name: 'Close settings' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await waitFor(() => {
@@ -226,13 +252,33 @@ describe('SettingsDialog', () => {
     });
   });
 
-  it('should keep the desktop sidebar and section side by side', () => {
+  it('should return focus to the menu trigger when settings opened from a menu item close', async () => {
+    const user = userEvent.setup();
+    render(<SettingsTestSurface url='/home/project' />);
+    const trigger = screen.getByRole('button', { name: 'Account' });
+
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    await user.click(await screen.findByRole('menuitem', { name: 'Settings' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Close settings' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it('should show the desktop navigation and section together without a back control', () => {
     render(<SettingsTestSurface />);
 
     expect(screen.getByRole('navigation', { name: 'Settings navigation' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'General settings' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 1, name: 'General' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Back to app' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Back to Settings' })).not.toBeInTheDocument();
   });
 
@@ -254,9 +300,11 @@ describe('SettingsDialog', () => {
 
       const navigation = screen.getByRole('navigation', { name: 'Settings navigation' });
       expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-      expect(screen.getByRole('searchbox', { name: 'Search settings' })).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByRole('searchbox', { name: 'Search settings' })).toHaveFocus();
+      });
       expect(screen.queryByRole('region', { name: 'General settings' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Back to app' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Back to Settings' })).not.toBeInTheDocument();
       for (const group of ['Personal', 'Workspace', 'Advanced']) {
         expect(screen.getByText(group)).toBeInTheDocument();
       }

@@ -20,7 +20,7 @@ test('searches grouped settings and returns to the underlying route', async () =
   await target.expectFocused(dialog.getByRole('region', { name: 'Theme' }));
   await target.screenshot(dialog, 'settings-search-theme.png');
 
-  await target.click(dialog.getByRole('button', { name: 'Back to app' }));
+  await target.click(dialog.getByRole('button', { name: 'Close settings' }));
 
   await target.expectHidden(dialog);
   const returnedUrl = new URL(await target.currentUrl());
@@ -78,6 +78,9 @@ test('opens settings on a phone as a section list that steps into one section an
   expect(await target.evaluateLocator(navigation, (element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   const row = await target.boundingBox(security);
   expect(row?.height).toBeGreaterThanOrEqual(40);
+  const field = await target.boundingBox(searchbox);
+  expect(field?.height).toBeGreaterThanOrEqual(40);
+  await target.expectFocused(searchbox);
   await target.screenshot(dialog, 'settings-mobile-list.png');
 
   await target.click(security);

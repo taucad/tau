@@ -28,7 +28,11 @@ const sheetSettled = async (): Promise<void> =>
       });
     });
     const sheet = handle.closest('[data-slot=drawer-content]');
-    await Promise.all((sheet?.getAnimations() ?? []).map(async (animation) => animation.finished));
+    if (!sheet) {
+      throw new Error('The grabber is not inside the sheet.');
+    }
+    // A cancelled transition has settled too: a newer one replaced it or the sheet stopped moving.
+    await Promise.all(sheet.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
   });
 
 type Box = { readonly x: number; readonly y: number; readonly width: number; readonly height: number };
@@ -132,6 +136,7 @@ test.each([
     await target.click(navButton('Parameters'), { touch: true });
     const surface = selectors.getByRole('region', { name: 'Parameters', exact: true });
     await target.expectVisible(surface, 60_000);
+    await sheetSettled();
 
     const handle = await boxOf(grabber(), 'The grabber');
     const header = await boxOf(

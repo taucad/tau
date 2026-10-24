@@ -353,6 +353,7 @@ describe('ChatInterfaceMobile', () => {
     ['jobs', 'Jobs'],
     ['kernel', 'Telemetry'],
     ['console', 'Console'],
+    ['share', 'Share'],
   ])(
     'should give the %s pane a title and a Close named after it that returns to the model (D4, I6)',
     async (id, title) => {

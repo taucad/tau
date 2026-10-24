@@ -158,7 +158,12 @@ function MobileSurface({ id }: { readonly id: MobilePanelId }): React.ReactNode 
       return <ChatConverter />;
     }
     case 'share': {
-      return <ProjectShareWorkbenchPanel />;
+      // The share body has no header of its own; on a phone it gets the title and Close every pane has (PN-SHR-1).
+      return (
+        <MobilePane id={id}>
+          <ProjectShareWorkbenchPanel />
+        </MobilePane>
+      );
     }
     case 'revisions': {
       // The pane's own title and Close, as every other panel here (L3-F15).

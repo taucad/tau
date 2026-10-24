@@ -116,40 +116,6 @@
       ]
     },
     {
-      "bom-ref": "06b8afe042694a5c75c0cda8277b1f035084a9d532c1657334e7d14c80f350d2",
-      "type": "file",
-      "name": "tau-worker/worker.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "06b8afe042694a5c75c0cda8277b1f035084a9d532c1657334e7d14c80f350d2"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9",
       "type": "library",
       "name": "psutil",
@@ -3705,6 +3671,40 @@
         {
           "name": "taucad:target",
           "value": "darwin-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "f9d3aeaae63f46ca2824f998e4cac1187d3f1210f583cf8db5d6948c67976e62",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "f9d3aeaae63f46ca2824f998e4cac1187d3f1210f583cf8db5d6948c67976e62"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
         }
       ]
     },

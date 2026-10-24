@@ -597,9 +597,11 @@ def _triangulate(shape: Any, linear_tolerance: float, angular_tolerance: float) 
     return located, triangles
 
 
-def _mesh_shape(shape: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
+def _mesh_shape(
+    shape: Any, linear_tolerance: float, angular_tolerance: float, include_edges: bool = False
+) -> dict[str, Any]:
     located, _triangles = _triangulate(shape, linear_tolerance, angular_tolerance)
-    return _mesh_arrays(shape, located, linear_tolerance, angular_tolerance)
+    return _mesh_arrays(shape, located, linear_tolerance, angular_tolerance, include_edges)
 
 
 def _edge_points(shape: Any, linear_tolerance: float, angular_tolerance: float) -> list[list[Any]]:
@@ -642,7 +644,10 @@ def _edge_points(shape: Any, linear_tolerance: float, angular_tolerance: float) 
     return [points[edge] for edge in edges]
 
 
-def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float, angular_tolerance: float) -> dict[str, Any]:
+def _mesh_arrays(
+    shape: Any, located: Any, linear_tolerance: float, angular_tolerance: float, include_edges: bool = False
+) -> dict[str, Any]:
+    """Surface arrays, plus the B-rep edge lines only when the caller asked for `includeEdges`."""
     # _triangulate has already meshed absolutely. Native tessellate_with_uvs
     # reuses that triangulation and supplies smooth normals and native face UVs.
     surface = tessellate_surface(located, linear_tolerance, angular_tolerance, pretriangulated=True)
@@ -650,7 +655,8 @@ def _mesh_arrays(shape: Any, located: Any, linear_tolerance: float, angular_tole
     lines: list[float] = []
     line_indices: list[int] = []
     edge_groups: list[dict[str, int]] = []
-    for edge_id, edge in enumerate(_edge_points(located, linear_tolerance, angular_tolerance), 1):
+    sampled = _edge_points(located, linear_tolerance, angular_tolerance) if include_edges else []
+    for edge_id, edge in enumerate(sampled, 1):
         points = [_point(point) for point in edge]
         start = len(line_indices)
         for first, second in zip(points, points[1:]):
@@ -674,6 +680,7 @@ def _topology(
     linear_tolerance: float,
     angular_tolerance: float,
     max_triangles: int | None = None,
+    include_edges: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """Components and their meshes. Raises `_OverBudget` before building any mesh arrays when the
     triangulated parts together exceed `max_triangles`."""
@@ -730,7 +737,7 @@ def _topology(
     if max_triangles is not None and triangles > max_triangles:
         raise _OverBudget(triangles)
     meshes = {
-        component_id: _mesh_arrays(shape, located, linear_tolerance, angular_tolerance)
+        component_id: _mesh_arrays(shape, located, linear_tolerance, angular_tolerance, include_edges)
         for component_id, shape, located, _count in triangulated
     }
     return components, meshes
@@ -901,6 +908,7 @@ class Worker:
                     params["linearTolerance"],
                     math.radians(params["angularTolerance"]),
                     params.get("maxTriangles"),
+                    params.get("includeEdges") is True,
                 )
             except _OverBudget as exceeded:
                 return {"triangles": exceeded.triangles, "vertices": exceeded.triangles * 3}

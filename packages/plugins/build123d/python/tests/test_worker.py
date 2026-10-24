@@ -164,7 +164,7 @@ class WorkerTest(unittest.TestCase):
         curved.label = "Curved"
         components, meshes = worker._topology((assembly, curved), 0.05, 0.1)
         for shape in (Box(1, 2, 3), Cylinder(1, 2), Sphere(1).rotate(Axis.X, 37)):
-            mesh = worker._mesh_shape(shape, 0.05, 0.1)
+            mesh = worker._mesh_shape(shape, 0.05, 0.1, include_edges=True)
             self.assertEqual(len(mesh["positions"]), len(mesh["normals"]))
             self.assertEqual(len(mesh["uvs"]) * 3, len(mesh["positions"]) * 2)
             self.assertEqual(len(mesh["faceGroups"]), len(shape.faces()))
@@ -255,10 +255,10 @@ class WorkerTest(unittest.TestCase):
 
         retained = Cylinder(1, 2)
         exact_before = worker._brep_bytes(retained)
-        fine = worker._mesh_shape(retained, 0.05, 0.1)
-        coarse = worker._mesh_shape(retained, 0.25, 0.5)
-        fine_again = worker._mesh_shape(retained, 0.05, 0.1)
-        fresh_coarse = worker._mesh_shape(Cylinder(1, 2), 0.25, 0.5)
+        fine = worker._mesh_shape(retained, 0.05, 0.1, include_edges=True)
+        coarse = worker._mesh_shape(retained, 0.25, 0.5, include_edges=True)
+        fine_again = worker._mesh_shape(retained, 0.05, 0.1, include_edges=True)
+        fresh_coarse = worker._mesh_shape(Cylinder(1, 2), 0.25, 0.5, include_edges=True)
 
         self.assertTrue(fine_again == fine, "fine A changed after coarse B")
         self.assertTrue(coarse == fresh_coarse, "coarse B differs from a fresh shape")

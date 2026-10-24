@@ -4340,6 +4340,9 @@ importers:
         specifier: workspace:*
         version: link:../../core/python-kernel
     devDependencies:
+      '@gltf-transform/core':
+        specifier: 'catalog:'
+        version: 4.5.1
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../../libs/agent-tools
@@ -4349,6 +4352,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../middleware
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime

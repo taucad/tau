@@ -16,7 +16,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '#components/tooltip.js'
 const sidebarDefaultOpen = true;
 const sidebarDefaultKeyboardShortcutKey = 'b';
 const sidebarWidth = 'calc(var(--spacing) * 56)';
-const sidebarWidthMobile = 'calc(var(--spacing) * 72)';
+/** The phone sheet keeps at least 48px of the page visible to tap out, even at 320px. */
+const sidebarWidthMobile = 'min(calc(var(--spacing) * 72), calc(100% - var(--spacing) * 12))';
 const sidebarWidthIcon = 'calc(var(--spacing) * 2)';
 
 type SidebarContextProperties = {

@@ -267,11 +267,17 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t9_words_never_invalid
 #print axioms ChatLedger.t9_words_merge_once
 #print axioms ChatLedger.t9_copy_then_turn
+#print axioms ChatLedger.copied_grows
+#print axioms ChatLedger.foldlM_copied_grows
+#print axioms ChatLedger.copied_said_again
+#print axioms ChatLedger.t9_copy_then_turn_ever
 #print axioms ChatLedger.transition_nodup
 #print axioms ChatLedger.foldlM_nodup
 #print axioms ChatLedger.t9_history_ids_once
 #print axioms ChatLedger.t9_two_devices_one_turn
 #print axioms ChatLedger.t9_copy_merged_first
+#print axioms ChatLedger.t9_copy_rewound_stays_gone
+#print axioms ChatLedger.t9_retry_after_rewind
 #print axioms ChatLedger.t9_words_commit
 #print axioms ChatLedger.t8_interrupt_resolved_once
 #print axioms ChatLedger.t8_duplicate_interrupt_resolution
@@ -284,3 +290,8 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t7_d5_conflict_kept_and_reported
 #print axioms ChatLedger.t7_merge_not_prefix_stable
 #print axioms ChatLedger.d26_duplicate_boundary_keeps_semantic_term
+#print axioms ChatLedger.t10_approval_refused_after_takeover
+#print axioms ChatLedger.t10_approval_admitted_as_resume
+#print axioms ChatLedger.t10_new_term_after_foreign_rows
+#print axioms ChatLedger.t10_resume_not_taken_over
+#print axioms ChatLedger.t10_old_term_merges_ahead

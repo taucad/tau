@@ -13,15 +13,16 @@
  * - A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>`; `epoch` and `attempt` 0 mean absent.
  * - Kinds: `L` lifecycle, `S` settlement, `H` turn commit, `O`/`R` interrupt requested/resolved, `P` invocation
  *   prepared, `V` invocation settled, `M` assistant reply, `U` opaque (only written raw), `W` a person's turn said as its
- *   run settled (`abandonedTurnOf`, id `w-<arg>`), `C` that turn as its run's own device said it (merge traces only).
+ *   run settled (`abandonedTurnOf`, id `w-<arg>`), `C` that turn as its run's own device said it, `K` a rewind that
+ *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`.
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { appendChatRows } from '#host/tau-agent-host.js';
+import { appendChatRows, termAdmission } from '#host/tau-agent-host.js';
 import {
   chatRunState,
   emptyChatLedger,
@@ -81,7 +82,7 @@ type Random = ReturnType<typeof randomOf>;
 const below = (random: Random, bound: number) => Math.floor(random() * bound);
 const pick = <T>(random: Random, items: readonly T[]): T => items[below(random, items.length)]!;
 
-type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U' | 'W' | 'C';
+type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U' | 'W' | 'C' | 'K';
 /** `undefinedKeys`: the row object carries optional keys set to `undefined`, invisible to the oracle and to the bytes. */
 type Row = {
   term: number;
@@ -230,6 +231,9 @@ const bodyOf = (row: Pick<Row, 'term' | 'seq' | 'run' | 'kind' | 'argument'>): R
     case 'C': {
       return { type: 'message.appended', message: { id: `w-${argument}`, role: 'user', content: 'x' } };
     }
+    case 'K': {
+      return { type: 'history.rewound', trigger: 'retry', retainedMessageIds: [] };
+    }
     case 'U': {
       // A newer build's rows: an unknown type, a history row of a newer version, an unknown lifecycle state.
       return argument === 0
@@ -262,12 +266,17 @@ const keyText = (key: RowKey | undefined) => (key === undefined ? '-' : `${termO
 const listText = (items: readonly string[]) => (items.length === 0 ? '-' : items.join(','));
 const runOf = (runId: string) => runId.slice(1);
 
-/** Merge rows print as `<term>:<seq>:<run>:O<arg>:<ms>`, whatever their kind: an interrupt's `i<arg>`, a turn's `w-<arg>`. */
+/**
+ * Merge rows print as `<term>:<seq>:<run>:O<arg>:<ms>`, whatever their kind: an interrupt's `i<arg>`, a turn's `w-<arg>`,
+ * a rewind's 0.
+ */
 const mergedText = (event: AgentLogEvent) => {
   const argument =
     event.type === 'message.appended'
       ? event.message.id.slice('w-'.length)
-      : (event as Extract<AgentLogEvent, { type: 'interrupt.recorded' }>).interruptId.slice(1);
+      : event.type === 'history.rewound'
+        ? '0'
+        : (event as Extract<AgentLogEvent, { type: 'interrupt.recorded' }>).interruptId.slice(1);
   return `${termOf(event.leaderEpoch)}:${event.sequence}:${runOf(event.runId)}:O${argument}:${Date.parse(event.recordedAt) - base}`;
 };
 
@@ -646,7 +655,7 @@ const logTrace = async (random: Random, name: string, profile: Profile): Promise
   return { text, expected };
 };
 
-type MergeRow = Omit<Row, 'kind'> & { kind: 'O' | 'W' | 'C' };
+type MergeRow = Omit<Row, 'kind'> & { kind: 'O' | 'W' | 'C' | 'K' };
 const segmentBytes = (rows: readonly MergeRow[]): Uint8Array<ArrayBuffer> =>
   encoder.encode(rows.map((row) => `${JSON.stringify(eventOf(row))}\n`).join(''));
 
@@ -771,9 +780,11 @@ const skewedSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRo
 /**
  * Devices that each say people's turns as runs settle (`W`, round 16): the same turn, said under different terms by
  * different devices, between interrupt rows, and sometimes the run's own row of it (`C`), before or after a copy. The
- * history folds every copy of one turn, and the run's own row after a copy, as one message.
+ * history folds every copy of one turn, and the run's own row after a copy, as one message. With `rewinds`, rewinds
+ * that retain nothing (`K`, round 17) fall between them, over two turns and two runs: a run's turn taken from a copy and
+ * rewound stays removed whatever row of that run's turn merges later, and another run's row of it is the message again.
  */
-const wordsSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow[] }> => {
+const wordsSegmentsOf = (random: Random, rewinds = false): Array<{ device: number; rows: MergeRow[] }> => {
   const devices = 2 + below(random, 2);
   let nextTerm = 0;
   return Array.from({ length: devices }, (_unused, device) => {
@@ -784,8 +795,23 @@ const wordsSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow
       clock += below(random, 20);
       for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
         const draw = random();
-        const kind = draw < 0.5 ? 'W' : draw < 0.65 ? 'C' : 'O';
-        rows.push({ term, seq, run: 1, kind, argument: below(random, 4), ms: clock, epoch: term + 1, attempt: 0 });
+        const kind = rewinds
+          ? draw < 0.4
+            ? 'W'
+            : draw < 0.6
+              ? 'C'
+              : draw < 0.8
+                ? 'K'
+                : 'O'
+          : draw < 0.5
+            ? 'W'
+            : draw < 0.65
+              ? 'C'
+              : 'O';
+        const argument = kind === 'K' ? 0 : below(random, rewinds ? 2 : 4);
+        /* With rewinds, a later run's row of a turn sometimes re-admits it, as a Retry does. */
+        const run = rewinds ? 1 + below(random, 2) : 1;
+        rows.push({ term, seq, run, kind, argument, ms: clock, epoch: term + 1, attempt: 0 });
         clock += below(random, 4);
       }
     }
@@ -846,7 +872,7 @@ const boundedSegmentsOf = (
 /** The segments of every merge shape but `bounded`, which also draws the bounds its readers fold at. */
 const unboundedSegmentsOf = (
   random: Random,
-  layout: 'ties' | 'overlap' | 'skewed' | 'words' | undefined,
+  layout: 'ties' | 'overlap' | 'skewed' | 'words' | 'rewinds' | undefined,
   duplicates: boolean,
 ): Array<{ device: number; rows: MergeRow[] }> => {
   if (layout === undefined) {
@@ -855,13 +881,16 @@ const unboundedSegmentsOf = (
   if (layout === 'skewed') {
     return skewedSegmentsOf(random);
   }
-  return layout === 'words' ? wordsSegmentsOf(random) : layoutSegmentsOf(random, layout);
+  if (layout === 'words' || layout === 'rewinds') {
+    return wordsSegmentsOf(random, layout === 'rewinds');
+  }
+  return layoutSegmentsOf(random, layout);
 };
 
 const mergeTrace = (
   random: Random,
   name: string,
-  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'bounded' }>,
+  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'rewinds' | 'bounded' }>,
 ): Trace => {
   const { duplicates, layout } = shape;
   const bounded = layout === 'bounded' ? boundedSegmentsOf(random) : undefined;
@@ -892,7 +921,7 @@ const mergeTrace = (
     text.push(`MERGEB ${bound}`);
     expected.push(`MB ${listText(mergeSegmentsUpTo(parsed, base + bound).rows.map((event) => keyText(event)))}`);
   }
-  if (layout === 'words') {
+  if (layout === 'words' || layout === 'rewinds') {
     const history = createEventLogReducer('history');
     for (const event of merged) {
       history.replay(event);
@@ -951,6 +980,23 @@ const interruptResolutionTrace = (): Trace => {
   };
 };
 
+/** The host's admission of a start, a Resume and an approval across devices, every input (T10, round 17). */
+const admissionTrace = (): Trace => {
+  const text = ['T admissions'];
+  const expected = ['T admissions'];
+  for (const verb of ['start', 'resume', 'approve'] as const) {
+    for (const takenOver of [false, true]) {
+      for (const foreignWrote of [false, true]) {
+        text.push(`ADMIT ${verb} ${takenOver ? 1 : 0} ${foreignWrote ? 1 : 0}`);
+        expected.push(`QA ${termAdmission(verb, { takenOver, foreignWrote })}`);
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
 const historyKinds: readonly Kind[] = ['L', 'L', 'L', 'L', 'S', 'S', 'S', 'H', 'O'];
 const baseProfile: Profile = {
   appendKinds: historyKinds,
@@ -973,9 +1019,10 @@ type Corpus = {
   readonly duplicates?: boolean;
   /**
    * Merge traces of one shape: terms tied at one millisecond across devices, a file overlapping its old copy, devices
-   * with skewed clocks, people's turns said by more than one device, or a clock far ahead read at a bound.
+   * with skewed clocks, people's turns said by more than one device (with rewinds between them, or not), or a clock far
+   * ahead read at a bound.
    */
-  readonly layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'bounded';
+  readonly layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'rewinds' | 'bounded';
 };
 
 /** The tables, then `count` traces of the corpus's kind, from one seeded stream. */
@@ -995,6 +1042,9 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
   }
   if (corpus.name === 'invocations') {
     traces.push(interruptResolutionTrace());
+  }
+  if (corpus.name === 'base') {
+    traces.push(admissionTrace());
   }
   return traces;
 };
@@ -1043,6 +1093,7 @@ const corpora: readonly Corpus[] = [
   { name: 'overlapping-segments', seed: 20_261_024, count: 120, merge: true, layout: 'overlap' },
   { name: 'skewed-clocks', seed: 20_261_025, count: 120, merge: true, layout: 'skewed' },
   { name: 'shared-turns', seed: 20_261_026, count: 120, merge: true, layout: 'words' },
+  { name: 'rewound-turns', seed: 20_261_029, count: 120, merge: true, layout: 'rewinds' },
   { name: 'future-rows', seed: 20_261_027, count: 120, merge: true, layout: 'bounded' },
   {
     name: 'abandoned-turns',

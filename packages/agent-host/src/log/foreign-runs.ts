@@ -29,8 +29,9 @@ export type ForeignRun = Readonly<{
   /** The key of the run's newest row. */
   tip: RowKey;
   /**
-   * When this device first read the run's newest row, on this device's clock: the run's rows last changed here then.
-   * Staleness is measured from it alone, so no other device's clock, fast, slow or corrupt, decides it.
+   * When the run's rows last changed on this device, on this device's clock: its segment's modification time here,
+   * else when this reader first read the run's newest row. Staleness is measured from it alone, so no other device's
+   * clock, fast, slow or corrupt, decides it, and every reader on this device reads the same time for it.
    */
   observedAt: number;
   /** The person's message the run holds: its committed turn, else the message it was admitted with. */
@@ -53,32 +54,45 @@ export type ForeignRun = Readonly<{
  * and a live run still holds. Past it the device is gone, offline or partitioned: the run is abandoned for the fence,
  * so a dead device cannot lock a chat, and the device that goes on appends the person's turn the run holds
  * (`abandonedTurnOf`). The bound is read on this device's clock from when it saw the run change, never from the
- * run's `recordedAt`: a device whose clock is wrong can neither hold a chat forever nor let one go early. A device
- * that has only just started reading a chat waits the bound out once before it treats a quiet run as abandoned.
+ * run's `recordedAt`: a device whose clock is wrong can neither hold a chat forever nor let one go early. "Saw it
+ * change" is when the run's segment last changed on this device (its modification time), so the page and the agent
+ * host agree; only a segment read with no modification time waits the bound out once from first sight.
  *
  * @public
  */
 export const foreignRunStaleMilliseconds = 10 * 60 * 1000;
 
 /**
- * When this process first saw each foreign run's newest row, by device, run and row key: every log and page of this
- * device reads the same sightings, so a chat reopened here does not wait the bound out again. Bounded; the oldest
- * sightings go first.
+ * When this module instance first saw each foreign run's newest row, by device, run and row key: the fallback for a
+ * segment read with no modification time ({@link ParsedLogSegment.receivedAt}). Bounded; the sightings read least
+ * recently go first, so a run still being read keeps its time.
  */
 const sightings = new Map<string, number>();
 const sightingsLimit = 4096;
 
-const sighted = (run: Omit<ForeignRun, 'observedAt' | 'takenOver'>, now: number): number => {
-  const key = JSON.stringify([run.deviceId, run.runId, run.tip.leaderEpoch, run.tip.sequence]);
-  const seen = sightings.get(key);
-  if (seen !== undefined) {
-    return seen;
+/*
+ * When this device saw a run change (round 17). A segment's modification time on this device is when its newest rows
+ * arrived here, as this device's clock stamped the write: sync writes a segment only when its bytes change, so every
+ * reader on the device (the page, the agent host's worker) reads the same time for it, however late each first reads
+ * it. A run's rows are the segment's, so the run changed no later than that. Only a segment with no modification time
+ * falls back to when this module instance first saw the run's newest row.
+ */
+const sighted = (
+  run: Omit<ForeignRun, 'observedAt' | 'takenOver'>,
+  receivedAt: number | undefined,
+  now: number,
+): number => {
+  if (receivedAt !== undefined) {
+    return receivedAt;
   }
-  sightings.set(key, now);
+  const key = JSON.stringify([run.deviceId, run.runId, run.tip.leaderEpoch, run.tip.sequence]);
+  const seen = sightings.get(key) ?? now;
+  sightings.delete(key);
+  sightings.set(key, seen);
   if (sightings.size > sightingsLimit) {
     sightings.delete(sightings.keys().next().value!);
   }
-  return now;
+  return seen;
 };
 
 const unsettledStates: ReadonlySet<RunLifecycleState> = new Set(['admitted', 'running', 'paused']);
@@ -162,7 +176,8 @@ const foldRuns = (deviceId: string, prior: RunFold | undefined, rows: readonly A
  * {@link unsettledForeignRuns} over segments already parsed (`parseLogSegments`), for a reader that holds them.
  *
  * @param segments - Other devices' parsed segments.
- * @param now - This device's time, in epoch milliseconds: when a run whose newest row is new here is seen.
+ * @param now - This device's time, in epoch milliseconds: when a run whose newest row is new here is seen, for a
+ *   segment read with no modification time.
  * @returns Every unsettled run, segment by segment.
  * @public
  */
@@ -172,9 +187,9 @@ export const unsettledParsedRuns = (
 ): readonly ForeignRun[] => {
   const folds = segments.map((segment) => runFoldOf(segment));
   const saidAbandoned = new Set(folds.flatMap((fold) => [...fold.saidAbandoned]));
-  return folds.flatMap((fold) =>
+  return folds.flatMap((fold, index) =>
     fold.runs.map((run) => {
-      const observedAt = sighted(run, now);
+      const observedAt = sighted(run, segments[index]!.receivedAt, now);
       const takenOver = saidAbandoned.has(run.runId);
       const prior = observed.get(run);
       if (prior?.observedAt === observedAt && (prior.takenOver === true) === takenOver) {

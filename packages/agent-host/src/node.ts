@@ -339,10 +339,10 @@ const syncDirectory = async (directory: string): Promise<void> => {
 const nodeSegmentsReader = (directory: string): (() => Promise<readonly ChatLogSegment[]>) =>
   createChatSegmentsReader({
     list: async () => readOrAbsent(async () => readdir(directory), []),
-    version: async (name) =>
+    stat: async (name) =>
       readOrAbsent(async () => {
         const { size, mtimeMs } = await stat(join(directory, name));
-        return `${String(size)}:${String(mtimeMs)}`;
+        return { size, modifiedAt: mtimeMs };
       }, undefined),
     read: async (name) => readOrAbsent(async () => new Uint8Array(await readFile(join(directory, name))), undefined),
   });

@@ -161,12 +161,16 @@ export type ChatSegmentsSource = Readonly<{
   /** One entry's bytes, `undefined` when it vanished meanwhile. */
   read: (name: string) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   /**
-   * A fingerprint of one entry that changes whenever its bytes do (its size and a modification time), read without its
-   * bytes. `undefined` when there is none to trust — no modification time, or the entry vanished — and the bytes are
-   * read instead. Without it every call reads every segment.
+   * One entry's size and modification time (epoch milliseconds, this device's clock), read without its bytes: together
+   * a fingerprint that changes whenever its bytes do, and the modification time is when its rows last arrived here
+   * ({@link ChatLogSegment.receivedAt}). `undefined` when there is none to trust — no modification time, or the entry
+   * vanished — and the bytes are read instead. Without it every call reads every segment.
    */
-  version?: ((name: string) => Promise<string | undefined>) | undefined;
+  stat?: ((name: string) => Promise<SegmentStat | undefined>) | undefined;
 }>;
+
+/** A segment file's size and modification time, for {@link ChatSegmentsSource.stat}. @internal */
+export type SegmentStat = Readonly<{ size: number; modifiedAt: number }>;
 
 /**
  * Read every other device's segment of one chat, again on each call (XD1).
@@ -229,7 +233,8 @@ export const createChatSegmentsReader = (
     const found = await Promise.all(
       names.map(async (name): Promise<ChatLogSegment | undefined> => {
         const deviceId = segmentDeviceIdOf(name)!;
-        const version = await source.version?.(name).catch(() => undefined);
+        const stat = await source.stat?.(name).catch(() => undefined);
+        const version = stat === undefined ? undefined : `${String(stat.size)}:${String(stat.modifiedAt)}`;
         const prior = known.get(name);
         if (version !== undefined && prior?.version === version) {
           return prior.segment;
@@ -248,7 +253,9 @@ export const createChatSegmentsReader = (
         }
         /* With no fingerprint to trust the bytes were read; unchanged ones keep their identity, so nothing refolds. */
         const segment =
-          prior !== undefined && sameBytes(prior.segment.bytes, bytes) ? prior.segment : { deviceId, bytes };
+          prior !== undefined && prior.version === version && sameBytes(prior.segment.bytes, bytes)
+            ? prior.segment
+            : { deviceId, bytes, ...(stat === undefined ? {} : { receivedAt: stat.modifiedAt }) };
         known.set(name, { version, segment });
         return segment;
       }),

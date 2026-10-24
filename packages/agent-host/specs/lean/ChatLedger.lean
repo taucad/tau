@@ -26,10 +26,11 @@ namespace ChatLedger
 /-- `W` is the person's turn appended as its run settled before committing it (`abandonedTurnOf`): a user
 `message.appended` row whose message id `w-<arg>` names its content, so two devices that append it append the same
 message. `C` is that turn as the run's own device said it (a person's `message.appended` with no internal kind): the
-row a copy `W` repeats, which merges after the copy when its device's clock ran far ahead. `C` rows appear only in
-merge traces. -/
+row a copy `W` repeats, which merges after the copy when its device's clock ran far ahead. `K` is a history rewind
+that retains nothing (`history.rewound` with no retained ids): it removes every message the history holds. `C` and `K`
+rows appear only in merge traces. -/
 inductive Kind where
-  | L | S | H | O | R | P | V | M | U | W | C
+  | L | S | H | O | R | P | V | M | U | W | C | K
   deriving DecidableEq, Repr, Inhabited
 
 structure Row where
@@ -55,6 +56,7 @@ def canonArg : Kind → Nat → Nat
   | .M, a => if a < 4 then a else 4 + a % 4
   | .V, a => a % 16
   | .U, a => min a 2
+  | .K, _ => 0
   | _, a => a
 
 /-- The row's canonical form (`canonicalJson`): two rows are the same row iff their `fp`s are equal. -/
@@ -183,26 +185,33 @@ def msgId (e : Row) : Option (Nat × Nat × Nat × Nat) :=
   | _ => none
 
 /-- `knownMessageIds`, `preparedInvocations`, `settledInvocations` (attempt ids `a<n>` as `n`), and `copiedTurns`:
-the ids the history first took from a copy `W`. -/
+the ids the history first took from a copy `W`. `ids` is also the history's messages, in order: every row these traces
+reach that removes a message (`K`) removes it from both. `copied` is never cleared, a rewind's included, and keeps
+each turn with the run whose copy it was: a later run's row of the same turn (a Retry) is a new message. -/
 structure Hist where
   ids : List (Nat × Nat × Nat × Nat) := []
   prepared : List Nat := []
   settled : List Nat := []
-  copied : List (Nat × Nat × Nat × Nat) := []
+  copied : List ((Nat × Nat × Nat × Nat) × Nat) := []
 
-/-- `transitionOf`: `none` is `HISTORY_INVALID`. A person's turn the history already holds is the same message said
-again: a copy `W` of it, or the run's own row `C` after a copy (`turnSaidAgain`), changes nothing (XD3, round 16). -/
+/-- `transitionOf`: `none` is `HISTORY_INVALID`. A person's turn said again is the same message (`turnSaidAgain`, XD3):
+a copy `W` of a turn the history holds, or any row of that run's turn it first took from a copy, `W` or the run's own
+`C`, changes nothing, whether that turn is still held or a rewind has removed it since (round 17). Another run's row of
+the turn after a rewind removed it (a Retry re-admits the person's message) is the message again. A rewind `K` removes
+every message. -/
 def Hist.transition (h : Hist) (e : Row) : Option Hist :=
   match msgId e with
   | some id =>
-    if id ∈ h.ids then (if e.kind = .W ∨ (e.kind = .C ∧ id ∈ h.copied) then some h else none)
-    else some { h with ids := h.ids ++ [id], copied := if e.kind = .W then h.copied ++ [id] else h.copied }
+    if (e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then some h
+    else if id ∈ h.ids then (if e.kind = .W then some h else none)
+    else some { h with ids := h.ids ++ [id], copied := if e.kind = .W then h.copied ++ [(id, e.run)] else h.copied }
   | none =>
     match e.kind with
     | .P => if e.arg % 4 ∈ h.prepared then none else some { h with prepared := h.prepared ++ [e.arg % 4] }
     | .V =>
       if e.arg % 4 ∈ h.prepared ∧ e.arg % 4 ∉ h.settled then some { h with settled := h.settled ++ [e.arg % 4] }
       else none
+    | .K => some { h with ids := [] }
     | _ => some h
 
 structure Reducer where
@@ -574,6 +583,7 @@ def Ledger.known (L : Ledger) (e : Row) : Ledger :=
   | .U => L
   | .W => let en := L.entry e.run; L.put e.run { en with committed := true }
   | .C => L
+  | .K => L
 
 /-- The term rules' bookkeeping for a row that is not a redelivery: its anomaly, its term, the position. -/
 def Ledger.book (L0 : Ledger) (e : Row) (broken : Bool) (ep : Nat) : Ledger :=
@@ -799,6 +809,29 @@ def hostSettle (F : File) (run c : Nat) : Settled :=
       | .refused r => .refused r
   | c => .code c
 
+/-! ## tau-agent-host.ts: a command that runs or continues a run, across devices (XD1, XD3; round 17) -/
+
+/-- The commands admitted across devices: a turn's start, a Resume, and an approval of a paused run's request (a
+denial or a cancellation ends the run, and a Stop is never held back). -/
+inductive Verb where
+  | start | resume | approve
+  deriving DecidableEq, Repr
+
+/-- `TermAdmission`: refused `RUN_TAKEN_OVER`; admitted under a new term, the incarnation closed first; or admitted
+under the term the incarnation holds. -/
+inductive Admission where
+  | takenOver | newTerm | sameTerm
+  deriving DecidableEq, Repr
+
+/-- `termAdmission(verb, {takenOver, foreignWrote})`. `takenOver`: another device's segment says the run's turn
+(`runTakenOver`): it found the run abandoned and went on, so an approval would let the tool act on a project that
+device has changed since. `wrote`: this device read another device's rows since the incarnation's term began
+(`foreignWroteSinceTermBegan`), so rows under that term would merge ahead of them. An approval continues the run: past
+the takeover it is admitted exactly as a Resume is. -/
+def admission (v : Verb) (takenOver wrote : Bool) : Admission :=
+  if v = .approve ∧ takenOver = true then .takenOver
+  else if wrote then .newTerm else .sameTerm
+
 /-! ## segments.ts: `mergeLogSegments` (CL-R14) -/
 
 structure Copy where
@@ -817,6 +850,7 @@ structure MTerm where
 
 def Kind.ix : Kind → Nat
   | .L => 0 | .S => 1 | .H => 2 | .O => 3 | .R => 4 | .P => 5 | .V => 6 | .M => 7 | .U => 8 | .W => 9 | .C => 10
+  | .K => 11
 
 /-- A row's `canonicalJson` as a sort key. For the merge's interrupt rows (keys sorted: epoch, interruptId,
 leaderEpoch, phase, reason, recordedAt, runId, sequence, type, version) the first six fields are exactly its code-unit

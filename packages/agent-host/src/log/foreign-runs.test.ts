@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   foreignRunStaleMilliseconds,
@@ -185,5 +185,47 @@ describe('the cross-device run fence (XD3)', () => {
     const newer = run(now - 60_000, 'run-newer');
 
     expect(liveForeignRun([older, newer], now)).toBe(newer);
+  });
+
+  /*
+   * Round 17: the page and the agent host's worker are two module instances on one device. Each first reads a segment
+   * when it happens to, so a sighting each keeps for itself makes them disagree about the same run for up to the bound.
+   * Both read the same file's modification time here, so both measure from it.
+   */
+  it('should measure a run from when its segment last changed on this device, whichever reader first reads it', async () => {
+    const rows = [lifecycle('run-shared', 0, { state: 'admitted', at: '2026-10-23T09:00:00.000Z' })];
+    const parsed = { deviceId: 'device-desktop', events: rows, receivedAt: now - foreignRunStaleMilliseconds - 1 };
+    vi.resetModules();
+    const page = await import('#log/foreign-runs.js');
+    vi.resetModules();
+    const host = await import('#log/foreign-runs.js');
+
+    const [seenByPage] = page.unsettledParsedRuns([parsed], now - foreignRunStaleMilliseconds);
+    const [seenByHost] = host.unsettledParsedRuns([parsed], now);
+
+    expect(seenByPage?.observedAt).toBe(now - foreignRunStaleMilliseconds - 1);
+    expect(seenByHost?.observedAt).toBe(now - foreignRunStaleMilliseconds - 1);
+    expect(host.isAbandonedForeignRun(seenByHost!, now)).toBe(page.isAbandonedForeignRun(seenByPage!, now));
+  });
+
+  /* Round 17: a segment with no modification time falls back to first sight; a sighting read again stays the newest. */
+  it('should keep a sighting that is read again when the oldest sightings go', async () => {
+    vi.resetModules();
+    const fresh = await import('#log/foreign-runs.js');
+    const many = (from: number, count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        lifecycle(`run-${String(from + index)}`, 0, { state: 'admitted', at: '2026-10-23T09:00:00.000Z' }),
+      );
+    const read = (events: readonly AgentLogEvent[], at: number) =>
+      fresh.unsettledParsedRuns([{ deviceId: 'device-desktop', events }], at);
+    const first = many(0, 1);
+
+    read(first, 1);
+    read(many(1, 4095), 2);
+    read(first, 3);
+    read(many(4096, 1), 4);
+
+    expect(read(first, 5)[0]?.observedAt).toBe(1);
+    expect(read(many(1, 1), 6)[0]?.observedAt).toBe(6);
   });
 });

@@ -144,8 +144,8 @@
     "id": "M20",
     "drift": "a person's turn said by two devices breaks the history instead of merging as one (T9: t9_words_merge_once)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "(if e.kind = .W ∨ (e.kind = .C ∧ id ∈ h.copied) then some h else none)",
-    "replace": "none"
+    "find": "if (e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then some h\n    else if id ∈ h.ids then (if e.kind = .W then some h else none)",
+    "replace": "if id ∈ h.ids then none"
   },
   {
     "id": "M21",
@@ -165,14 +165,49 @@
     "id": "M23",
     "drift": "the run's own row of a turn a copy already said breaks the history instead of merging as one (T9: t9_copy_then_turn)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "e.kind = .W ∨ (e.kind = .C ∧ id ∈ h.copied)",
-    "replace": "e.kind = .W"
+    "find": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then",
+    "replace": "e.kind = .W ∧ (id, e.run) ∈ h.copied then"
   },
   {
     "id": "M24",
     "drift": "the history forgets which turns it took from a copy, so the run's own row of one breaks it (T9: t9_copy_merged_first)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "copied := if e.kind = .W then h.copied ++ [id] else h.copied",
+    "find": "copied := if e.kind = .W then h.copied ++ [(id, e.run)] else h.copied",
     "replace": "copied := h.copied"
+  },
+  {
+    "id": "M25",
+    "drift": "a turn taken from a copy is said again only while the history still holds it, so after a rewind the run's own row brings it back (T9: t9_copy_then_turn_ever)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then",
+    "replace": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied ∧ id ∈ h.ids then"
+  },
+  {
+    "id": "M26",
+    "drift": "a rewind forgets which turns the history took from a copy (T9: t9_copy_rewound_stays_gone)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "| .K => some { h with ids := [] }",
+    "replace": "| .K => some { h with ids := [], copied := [] }"
+  },
+  {
+    "id": "M27",
+    "drift": "an approval continues a run another device took over (T10: t10_approval_refused_after_takeover)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "if v = .approve ∧ takenOver = true then .takenOver",
+    "replace": "if False then .takenOver"
+  },
+  {
+    "id": "M28",
+    "drift": "an approval keeps the term it held before another device's rows, so its rows merge ahead of them (T10: t10_new_term_after_foreign_rows)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "else if wrote then .newTerm else .sameTerm",
+    "replace": "else if wrote ∧ v ≠ .approve then .newTerm else .sameTerm"
+  },
+  {
+    "id": "M29",
+    "drift": "a turn taken from one run's copy is said again for every run, so a Retry after a rewind never brings the person's message back (T9: t9_retry_after_rewind)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then",
+    "replace": "(e.kind = .W ∨ e.kind = .C) ∧ h.copied.any (fun x => decide (x.1 = id)) then"
   }
 ]

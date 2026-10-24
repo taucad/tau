@@ -9,6 +9,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -471,6 +473,70 @@ describe('a chat continued on a second device', () => {
         } finally {
           gate.resolve();
         }
+      });
+
+      /*
+       * Round 17: a Send answered before it reached the registry (superseded here) releases what its dispatch held, as
+       * one answered by the registry does: once the host closes the chat's log, nothing keeps that log alive.
+       */
+      it('should release a superseded Send’s dispatch, keeping no closed log alive', async () => {
+        setFlagsFromString('--expose-gc');
+        const collect = runInNewContext('gc') as () => void;
+        const desktop = await workspace();
+        const store = createNodeChatStore({ workspaceRoot: desktop });
+        const hold = { refresh: false };
+        const released = Promise.withResolvers<void>();
+        const opened: Array<WeakRef<EventLogAppender>> = [];
+        const binding = chatStoreBinding(store) as { openWriter: (id: string) => Promise<EventLogAppender> };
+        const open = binding.openWriter;
+        binding.openWriter = async (id) => {
+          const log = await open(id);
+          opened.push(new WeakRef(log));
+          const { refresh } = log;
+          return refresh === undefined
+            ? log
+            : Object.assign(log, {
+                refresh: async () => {
+                  await refresh.call(log);
+                  if (hold.refresh) {
+                    hold.refresh = false;
+                    await released.promise;
+                  }
+                },
+              });
+        };
+        const onDesktop = launch(store, recordingModel('answer').transport);
+        await turn(onDesktop, 'run-desktop-1', 'first');
+        await sleep(50);
+        hold.refresh = true;
+
+        const send = onDesktop.execute({
+          type: 'start',
+          commandId: key(),
+          payload: {
+            chatId,
+            runId: 'run-desktop-2',
+            trigger: 'submit',
+            message: { id: 'user-run-desktop-2', role: 'user', content: 'second' },
+          },
+        });
+        const stop = onDesktop.execute({
+          type: 'cancel',
+          commandId: key(),
+          payload: { chatId, runId: 'run-desktop-2' },
+        });
+        await stop;
+        released.resolve();
+        await expect(send).resolves.toMatchObject({ status: 'refused', code: 'COMMAND_SUPERSEDED' });
+        await onDesktop.close();
+        for (let round = 0; round < 5; round++) {
+          // oxlint-disable-next-line no-await-in-loop -- each round lets the last one's releases run before collecting.
+          await sleep(10);
+          collect();
+        }
+
+        expect(opened.length).toBeGreaterThan(0);
+        expect(opened.filter((log) => log.deref() !== undefined)).toEqual([]);
       });
 
       /*
@@ -1623,6 +1689,91 @@ describe('a chat continued on a second device', () => {
       );
 
       expect(transcriptOf(requests.at(-1))).toContain('user: from the phone');
+    });
+
+    /*
+     * Round 17: an approval continues the paused run, so it is admitted as a Resume is. Once another device found the
+     * run abandoned, said its turn and went on, the approved tool would act on a project that device changed: the
+     * approval is refused, typed, before any row.
+     */
+    it('should refuse an approval of a paused run another device took over', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 30 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      const at = new Date(Date.now() + 1000).toISOString();
+      const phone = (sequence: number, runId: string, body: Record<string, unknown>): string =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt: at, runId, ...body })}\n`;
+      const segments = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(segments, { recursive: true });
+      await writeFile(
+        join(segments, 'device-phone.jsonl'),
+        phone(0, 'run-1', {
+          type: 'message.appended',
+          message: {
+            id: 'user-1',
+            role: 'user',
+            content: 'go',
+            metadata: { tauInternal: { kind: 'abandoned-turn' } },
+          },
+        }) +
+          phone(1, 'run-phone', { type: 'run.lifecycle', state: 'admitted' }) +
+          phone(2, 'run-phone', { type: 'run.lifecycle', state: 'completed' }),
+      );
+      const before = rowsOf(await readFile(ownLog(root), 'utf8')).length;
+
+      const answer = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+
+      expect(answer).toMatchObject({ status: 'refused', code: 'RUN_TAKEN_OVER', effect: 'not-applied' });
+      expect(refusalOf('RUN_TAKEN_OVER').retry).toBe('never');
+      const after = rowsOf(await readFile(ownLog(root), 'utf8')).slice(before);
+      expect(after.filter((row) => row.type !== 'run.heartbeat')).toEqual([]);
+      /* A denial ends the paused run, and is never refused. */
+      const denied = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'denied' },
+      });
+      expect(denied).toMatchObject({ status: 'applied' });
+    });
+
+    /*
+     * Round 17: an approval admitted after another device's turn writes under a new term, as a Resume does, so its rows
+     * merge after that turn on every device instead of under the paused run's old term, ahead of it.
+     */
+    it('should write an approval after another device’s turn under a new term', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 30 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'run.lifecycle' && row.state === 'paused'));
+      const at = new Date(Date.now() + 1000).toISOString();
+      const phone = (sequence: number, body: Record<string, unknown>): string =>
+        `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt: at, runId: 'run-phone', ...body })}\n`;
+      const segments = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(segments, { recursive: true });
+      await writeFile(
+        join(segments, 'device-phone.jsonl'),
+        phone(0, { type: 'run.lifecycle', state: 'admitted' }) +
+          phone(1, {
+            type: 'message.appended',
+            message: { id: 'phone-user', role: 'user', content: 'from the phone' },
+          }) +
+          phone(2, { type: 'run.lifecycle', state: 'completed' }),
+      );
+
+      const approval = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+
+      expect(approval).toMatchObject({ status: 'applied' });
+      const rows = rowsOf(await readFile(ownLog(root), 'utf8'));
+      const paused = rows.find((row) => row.type === 'run.lifecycle' && row.state === 'paused');
+      const resolved = rows.find((row) => row.type === 'interrupt.recorded' && row.phase === 'resolved');
+      expect(resolved?.leaderEpoch).toBeDefined();
+      expect(resolved?.leaderEpoch).not.toBe(paused?.leaderEpoch);
+      expect(Date.parse(resolved!.recordedAt)).toBeGreaterThan(Date.parse(at));
     });
 
     it('should keep a paused run alive with heartbeats while its session is open here', async () => {

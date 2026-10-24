@@ -8,6 +8,7 @@ import { foreignClockAheadMilliseconds, mergeSegmentsUpTo } from '#log/segments.
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
 import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
+import { isAbandonedTurn } from '#log/event-types.js';
 
 /**
  * Result of an idempotent event-log append: whether a row was written, and the log's end cursor after it, so a
@@ -130,6 +131,14 @@ export type EventLogAppender = {
    */
   foreignWroteSinceTermBegan?(): Promise<boolean>;
   /**
+   * Whether another device took this device's run over (XD3, round 17): its segment, as the last open or refresh read
+   * it, says the run's turn as data (`abandonedTurnOf`), which a device appends only when it found the run abandoned
+   * and went on past it. A row of this device's own read back from a segment never counts. Absent where `refresh` is.
+   *
+   * @param runId - This device's run, as its own rows name it.
+   */
+  runTakenOver?(runId: string): Promise<boolean>;
+  /**
    * When a row written now is stamped (XD1, a hybrid logical clock): `now`, or one millisecond past the newest term
    * start in the history the last open or refresh folded, and past every row of another device's unsettled run that
    * fold held out of the history, whichever is later. The merge orders terms by their start, so a turn stamped this
@@ -185,6 +194,30 @@ export type EventLogAppenderOptions = Readonly<{
   /** This device's time in epoch milliseconds, which the foreign-run staleness bound reads; `Date.now` by default. */
   now?: (() => number) | undefined;
 }>;
+
+/**
+ * The message ids a row introduces into a history: what a later row may name.
+ *
+ * @param event - The row.
+ * @returns The ids it introduces.
+ */
+const introducedBy = (event: AgentLogEvent): readonly string[] => {
+  switch (event.type) {
+    case 'message.appended':
+    case 'turn.history-projection-committed': {
+      return [event.message.id];
+    }
+    case 'safeguard.recorded': {
+      return event.action === 'terminate' ? [] : [event.message.id];
+    }
+    case 'history.compacted': {
+      return [event.summary.id];
+    }
+    default: {
+      return [];
+    }
+  }
+};
 
 /** The own segment's device id in a merge: the empty string, which no segment file can be named. */
 const ownDeviceId = '';
@@ -404,7 +437,49 @@ export const createEventLogAppender = async (
     );
   };
   let mergedReplayAnomalies: EventLogAnomaly[] = [];
+  /*
+   * Round 17: what is gone is one rule for every history this log folds, however many segments remain. A message is
+   * gone when no row here introduces it: not this device's, nor any segment's as read, held-out runs' rows included. A
+   * row naming a gone message leaves that name out; a name some row here introduces, only later, still breaks the
+   * history.
+   */
+  let introduced = new Set<string>();
+  const introduce = (events: readonly AgentLogEvent[]): void => {
+    for (const event of events) {
+      for (const id of introducedBy(event)) {
+        introduced.add(id);
+      }
+    }
+  };
+  introduce(ownRows);
+  /* Every name the rows read now introduce: this device's and every segment's as last parsed. */
+  const introduceRead = (): void => {
+    introduced = new Set();
+    introduce(ownRows);
+    for (const segment of foreign) {
+      introduce(segment.events);
+    }
+  };
+  /* The names the merged fold left out as gone: should a segment bring one later, the merge is folded again whole. */
+  let mergedGone = new Set<string>();
   let merged: ReturnType<typeof createEventLogReducer> | undefined;
+  /* Whether the merged fold goes on with `rows`: they extend what it replayed, and nothing it left out as gone is back. */
+  const keepsMerged = (rows: readonly AgentLogEvent[]): boolean =>
+    merged !== undefined && extendsMerged(rows) && ![...mergedGone].some((messageId) => introduced.has(messageId));
+  /* A merged fold from nothing, which leaves out as gone, and records, each name no row read introduces. */
+  const freshMerged = (): ReturnType<typeof createEventLogReducer> => {
+    const left = new Set<string>();
+    mergedGone = left;
+    return createEventLogReducer('history', {
+      gone: (messageId) => {
+        if (introduced.has(messageId)) {
+          return false;
+        }
+        left.add(messageId);
+        return true;
+      },
+    });
+  };
   let mergedAnomalies: EventLogAnomaly[] = [];
   let segmentFailure: EventLogAnomaly | undefined;
   /** When a term this fold left out as dated past the bound comes within it, so the history takes it up then. */
@@ -420,6 +495,7 @@ export const createEventLogAppender = async (
     if (segments.length === 0) {
       stampFloor = Number.NEGATIVE_INFINITY;
       foreign = [];
+      introduceRead();
       foreignUnsettled = [];
       merged = undefined;
       mergedRows = [];
@@ -437,7 +513,9 @@ export const createEventLogAppender = async (
     foreign = segments.map((segment) => ({
       deviceId: segment.deviceId,
       events: parse(segment.deviceId, segment.bytes),
+      receivedAt: segment.receivedAt,
     }));
+    introduceRead();
     /*
      * XD3: a run another device has not settled stays out of the history, live or not, unless this device ran it (its
      * own rows read back from a segment): its dangling turn would otherwise be answered here, or its open tool calls
@@ -494,8 +572,8 @@ export const createEventLogAppender = async (
       refoldAt = refoldAt === undefined ? within : Math.min(refoldAt, within);
     }
     /* Only what the rows add past those already replayed, when they extend them; otherwise the whole merge again. */
-    const extends_ = merged !== undefined && extendsMerged(rows);
-    const next = extends_ ? merged! : createEventLogReducer('history');
+    const extends_ = keepsMerged(rows);
+    const next = extends_ ? merged! : freshMerged();
     const replayAnomalies = extends_ ? mergedReplayAnomalies : [];
     for (const row of rows.slice(extends_ ? mergedRows.length : 0)) {
       const replayed = next.replay(row);
@@ -574,7 +652,7 @@ export const createEventLogAppender = async (
       return undefined;
     }
     if (lenient === undefined) {
-      lenient = createEventLogReducer('log', { missingMessages: 'skip' });
+      lenient = createEventLogReducer('log', { gone: (messageId) => !introduced.has(messageId) });
       for (const event of events) {
         lenient.replay(event);
       }
@@ -586,6 +664,9 @@ export const createEventLogAppender = async (
     message:
       "This device's rows name messages no segment here holds (another device's segment is gone); the history leaves those names out.",
   };
+  /** The merged fold's anomalies now: what it left out as gone, too, as its rows are replayed and appended. */
+  const mergedAnomaliesNow = (): EventLogAnomaly[] =>
+    mergedGone.size === 0 ? mergedAnomalies : [...mergedAnomalies, gone];
   const divergence: EventLogAnomaly = {
     kind: 'history',
     message: "The other devices' segments do not fold onto this device's log; the history is this device's rows alone.",
@@ -722,6 +803,7 @@ export const createEventLogAppender = async (
         }
         events.push(transition.event);
         ownRows.push(transition.event);
+        introduce([transition.event]);
         noteOwn(transition.event);
         cursorOf.set(transition.event, events.length - 1);
         byteLength += bytes.byteLength;
@@ -764,7 +846,7 @@ export const createEventLogAppender = async (
         if (history() === own) {
           return [...anomalies, divergence, ...failure];
         }
-        return [...anomalies.filter((anomaly) => anomaly.kind !== 'history'), ...mergedAnomalies, ...failure];
+        return [...anomalies.filter((anomaly) => anomaly.kind !== 'history'), ...mergedAnomaliesNow(), ...failure];
       }),
     ...(storage.segments === undefined
       ? {}
@@ -788,6 +870,20 @@ export const createEventLogAppender = async (
               }
               const seen = termFrontier.rows;
               return [...foreignFrontier()].some(([deviceId, rows]) => rows > (seen.get(deviceId) ?? 0));
+            }),
+          runTakenOver: async (runId: string) =>
+            enqueue(async () => {
+              assertOpen();
+              const said = foreign.flatMap((segment) =>
+                segment.events.filter(
+                  (event) =>
+                    event.runId === runId && event.type === 'message.appended' && isAbandonedTurn(event.message),
+                ),
+              );
+              return said.some(
+                (event) =>
+                  !ownRows.some((row) => row.leaderEpoch === event.leaderEpoch && row.sequence === event.sequence),
+              );
             }),
           foreignRuns: async () =>
             enqueue(async () => {

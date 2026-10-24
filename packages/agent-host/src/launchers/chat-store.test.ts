@@ -5,6 +5,15 @@ import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
 
 const encoder = new TextEncoder();
 
+/** A fingerprint written `size:modifiedAt`, as the platforms' stat gives it. */
+const statOf = (version: string | undefined) => {
+  if (version === undefined) {
+    return undefined;
+  }
+  const [size, modifiedAt] = version.split(':').map(Number);
+  return { size: size!, modifiedAt: modifiedAt! };
+};
+
 /** A chat's `events/` directory: each entry's bytes and a fingerprint that moves when they do. */
 const directory = (files: Map<string, Readonly<{ bytes: string; version: string | undefined }>>) => {
   const read = vi.fn(async (name: string) => {
@@ -15,7 +24,7 @@ const directory = (files: Map<string, Readonly<{ bytes: string; version: string 
     read,
     reader: createChatSegmentsReader({
       list: async () => [...files.keys()],
-      version: async (name) => files.get(name)?.version,
+      stat: async (name) => statOf(files.get(name)?.version),
       read,
     }),
   };
@@ -76,6 +85,19 @@ describe('a chat’s segments, read again on each refresh (XD1)', () => {
     expect(second).toBe(first);
   });
 
+  /* Round 17: when a segment last changed here is the one time every reader on this device measures a run from. */
+  it('should say when each segment last changed on this device', async () => {
+    const files = new Map([['device-desktop.jsonl', { bytes: 'a\n', version: '2:1000' }]]);
+    const { reader } = directory(files);
+
+    const [first] = await reader();
+    files.set('device-desktop.jsonl', { bytes: 'a\n', version: '2:2000' });
+    const [second] = await reader();
+
+    expect(first?.receivedAt).toBe(1000);
+    expect(second?.receivedAt).toBe(2000);
+  });
+
   it('should drop a segment whose file went away', async () => {
     const files = new Map([['device-desktop.jsonl', { bytes: 'a\n', version: '2:1' }]]);
     const { reader } = directory(files);
@@ -109,7 +131,7 @@ describe('a chat’s segments, read again on each refresh (XD1)', () => {
       const reader = createChatSegmentsReader(
         {
           list: async () => ['device-desktop.jsonl'],
-          version: async () => version(),
+          stat: async () => statOf(version()),
           read: async () => {
             throw Object.assign(new Error('EISDIR: illegal operation on a directory'), { code: 'EISDIR' });
           },

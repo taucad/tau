@@ -583,6 +583,8 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
         ? {}
         : { foreignWroteSinceTermBegan: log.foreignWroteSinceTermBegan.bind(log) }),
       ...(log.historyUnknown === undefined ? {} : { historyUnknown: log.historyUnknown.bind(log) }),
+      /* Whether another device said this device's run's turn and went on past it (XD3). */
+      ...(log.runTakenOver === undefined ? {} : { runTakenOver: log.runTakenOver.bind(log) }),
       close: async () => {
         writers.delete(chatId);
         writerGenerations.delete(chatId);

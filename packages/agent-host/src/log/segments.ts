@@ -53,6 +53,12 @@ export type ChatLogSegment = {
    * did not change (XD3); its `bytes` are then empty.
    */
   readonly unreadable?: string | undefined;
+  /**
+   * When the segment file last changed on this device, in epoch milliseconds on this device's clock (its modification
+   * time): when its newest rows arrived here. The foreign-run fence measures staleness from it, so every reader on the
+   * device agrees (XD3). `undefined` when the platform gives none.
+   */
+  readonly receivedAt?: number | undefined;
 };
 
 /**
@@ -137,7 +143,12 @@ export const mergeLogSegments = (
 ): readonly AgentLogEvent[] => mergeSegmentRows(parseLogSegments(segments), options);
 
 /** One device's segment, already parsed: a writer's own rows as it holds them, or a segment it read. @public */
-export type ParsedLogSegment = Readonly<{ deviceId: string; events: readonly AgentLogEvent[] }>;
+export type ParsedLogSegment = Readonly<{
+  deviceId: string;
+  events: readonly AgentLogEvent[];
+  /** {@link ChatLogSegment.receivedAt}. */
+  receivedAt?: number | undefined;
+}>;
 
 /**
  * Parse each segment once, for a reader that both merges them and reads their runs (`mergeSegmentRows`,
@@ -148,7 +159,11 @@ export type ParsedLogSegment = Readonly<{ deviceId: string; events: readonly Age
  * @public
  */
 export const parseLogSegments = (segments: readonly ChatLogSegment[]): readonly ParsedLogSegment[] =>
-  segments.map((segment) => ({ deviceId: segment.deviceId, events: parseEventLogBytes(segment.bytes).events }));
+  segments.map((segment) => ({
+    deviceId: segment.deviceId,
+    events: parseEventLogBytes(segment.bytes).events,
+    receivedAt: segment.receivedAt,
+  }));
 
 /**
  * {@link mergeLogSegments} over rows already parsed, for a writer that holds its own rows in memory. The kept rows

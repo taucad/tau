@@ -6712,3 +6712,17 @@ BATCH 1 5 308 - -
 BATCH 2 4 - - -
 BATCH 2 2 958 - -
 X
+T admissions
+ADMIT start 0 0
+ADMIT start 0 1
+ADMIT start 1 0
+ADMIT start 1 1
+ADMIT resume 0 0
+ADMIT resume 0 1
+ADMIT resume 1 0
+ADMIT resume 1 1
+ADMIT approve 0 0
+ADMIT approve 0 1
+ADMIT approve 1 0
+ADMIT approve 1 1
+X

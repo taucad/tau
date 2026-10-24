@@ -121,6 +121,35 @@ describe('an event log with other devices’ segments (XD1)', () => {
       ).toBe(true);
     });
 
+    /*
+     * Round 17: the rule is the merge's, however many segments remain. One device's segment gone and another's present,
+     * the names of what is gone are left out of the merge, and the rest folds with the device still there.
+     */
+    it('should leave out what a gone segment held while another device’s segment is still there', async () => {
+      const tabletTurn = [
+        said({ leaderEpoch: 'epoch-tablet', sequence: 0, at: '2026-10-23T09:30:00.000Z', text: 'tablet asks' }),
+      ];
+      const log = await openLog(builtOn, { current: [segment('device-tablet', tabletTurn)] });
+
+      expect(await log.historyIntact()).toBe(true);
+      expect(ids(await log.messages())).toEqual(['epoch-phone-2', 'epoch-tablet-0']);
+      const anomalies = await log.anomalies();
+      expect(
+        anomalies.some((anomaly) => anomaly.kind === 'history' && anomaly.message.includes('no segment here holds')),
+      ).toBe(true);
+    });
+
+    /* A name a segment here does hold, but only after the row that names it, is a broken history, never a gone one. */
+    it('should not leave out a name that a segment here holds', async () => {
+      const lateDesktop = [
+        said({ leaderEpoch: 'epoch-desktop', sequence: 0, at: '2026-10-23T09:30:00.000Z', text: 'desktop asks' }),
+      ];
+      const log = await openLog(builtOn, { current: [segment('device-desktop', lateDesktop)] });
+      await log.refresh?.();
+
+      expect(ids(await log.messages())).not.toEqual(['epoch-phone-2', 'epoch-desktop-0']);
+    });
+
     it('should fold the merged history again once the segment is back', async () => {
       const segments: { current: readonly ChatLogSegment[] } = { current: [] };
       const log = await openLog(builtOn, segments);

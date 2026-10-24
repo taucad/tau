@@ -567,12 +567,12 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
           createChatSegmentsReader({
             list: async () => opfsNames(directory, segmentsPath(chatId)),
             /* `getFile` reads the metadata, not the bytes. */
-            version: async (name) => {
+            stat: async (name) => {
               const file = await opfsFile(directory, `${segmentsPath(chatId)}/${name}`, false);
               const blob = await file?.getFile();
               return blob === undefined || blob.lastModified <= 0
                 ? undefined
-                : `${String(blob.size)}:${String(blob.lastModified)}`;
+                : { size: blob.size, modifiedAt: blob.lastModified };
             },
             read: async (name) => bytesOf(`${segmentsPath(chatId)}/${name}`),
           }),
@@ -623,13 +623,13 @@ export const createBrowserChatStore = (options: BrowserChatStoreOptions): ChatSt
               ...(stat === undefined
                 ? {}
                 : {
-                    version: async (name: string) =>
+                    stat: async (name: string) =>
                       readOrAbsent(async () => {
                         const { size, mtimeMs } = await stat.call(fileSystem, `${directory}/${name}`, {
                           content: 'head',
                         });
                         /* Size alone cannot tell a rewrite of the same length: with no modification time, read the bytes. */
-                        return mtimeMs !== undefined && mtimeMs > 0 ? `${String(size)}:${String(mtimeMs)}` : undefined;
+                        return mtimeMs !== undefined && mtimeMs > 0 ? { size, modifiedAt: mtimeMs } : undefined;
                       }, undefined),
                   }),
               /* One round trip: a segment that went away is the read's `ENOENT`. */

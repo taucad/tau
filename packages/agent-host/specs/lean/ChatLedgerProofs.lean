@@ -748,6 +748,7 @@ theorem grows_known (L : Ledger) (e : Row) : Grows L (L.known e) := by
   · exact grows_of_same fun _ => rfl
   · exact grows_of_same (same_put rfl)
   · exact grows_of_same fun _ => rfl
+  · exact grows_of_same fun _ => rfl
 
 theorem same_book (L : Ledger) (e : Row) (broken : Bool) (ep : Nat) : SameSettle L (L.book e broken ep) := by
   unfold Ledger.book
@@ -1141,6 +1142,7 @@ theorem terms_known (L : Ledger) (e : Row) : (L.known e).terms = L.terms := by
   · split
     · exact terms_markShown _ _
     · rfl
+  · rfl
   · rfl
   · rfl
   · rfl
@@ -3775,43 +3777,111 @@ theorem t9_words_never_invalid (h : Hist) (e : Row) (he : e.kind = .W) : (h.tran
   unfold Hist.transition msgId
   rw [he]
   dsimp only
-  split <;> simp
+  split
+  · simp
+  · split <;> simp
 
 /-- **T9** (merge as one): the same turn said again, by any device, changes nothing. -/
-theorem t9_words_merge_once (h : Hist) (e e' : Row) (he : e.kind = .W) (he' : e'.kind = .W) (ha : e.arg = e'.arg) :
+theorem t9_words_merge_once (h : Hist) (e e' : Row) (he : e.kind = .W) (he' : e'.kind = .W) (ha : e.arg = e'.arg)
+    (hr : e.run = e'.run) :
     (h.transition e).bind (·.transition e') = h.transition e := by
   unfold Hist.transition msgId
   rw [he, he']
   dsimp only
-  rw [← ha]
-  by_cases hin : ((2, e.arg, 0, 0) : Nat × Nat × Nat × Nat) ∈ h.ids
-  · simp [hin]
-  · simp [hin]
+  rw [← ha, ← hr]
+  by_cases hc : (((2, e.arg, 0, 0) : Nat × Nat × Nat × Nat), e.run) ∈ h.copied
+  · simp [hc]
+  · by_cases hin : ((2, e.arg, 0, 0) : Nat × Nat × Nat × Nat) ∈ h.ids
+    · simp [hc, hin]
+    · simp [hc, hin]
 
 /-- **T9** (copy, then the run's own turn): the run's own row of a turn a copy already said, merged after the copy,
 changes nothing: the history holds it once and stays valid (`turnSaidAgain`). -/
 theorem t9_copy_then_turn (h : Hist) (w c : Row) (hw : w.kind = .W) (hc : c.kind = .C) (ha : w.arg = c.arg)
-    (hnew : ((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat) ∉ h.ids) :
+    (hr : w.run = c.run) (hnew : ((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat) ∉ h.ids) :
     (h.transition w).bind (·.transition c) = h.transition w := by
   unfold Hist.transition msgId
   rw [hw, hc]
   dsimp only
-  rw [← ha]
-  simp [hnew]
+  rw [← ha, ← hr]
+  by_cases hcp : (((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat), w.run) ∈ h.copied
+  · simp [hcp]
+  · simp [hcp, hnew]
+
+/-- A transition never forgets a turn the history took from a copy: `copiedTurns` only grows, a rewind's included. -/
+theorem copied_grows (h h' : Hist) (e : Row) (ht : h.transition e = some h') : ∀ x ∈ h.copied, x ∈ h'.copied := by
+  intro x hx
+  unfold Hist.transition at ht
+  split at ht
+  · split at ht
+    · cases ht; exact hx
+    · split at ht
+      · split at ht <;> first | (cases ht; exact hx) | cases ht
+      · cases ht
+        dsimp only
+        split <;> simp [hx]
+  · split at ht <;> (try split at ht) <;> first | (cases ht; exact hx) | cases ht
+
+theorem foldlM_copied_grows : ∀ (rows : List Row) (h0 h : Hist), rows.foldlM Hist.transition h0 = some h →
+    ∀ x ∈ h0.copied, x ∈ h.copied
+  | [], h0, h, hf, x, hx => by
+    simp only [List.foldlM, Option.pure_def, Option.some.injEq] at hf; subst hf; exact hx
+  | e :: rs, h0, h, hf, x, hx => by
+    simp only [List.foldlM] at hf
+    cases ht : h0.transition e with
+    | none => rw [ht] at hf; simp at hf
+    | some h1 =>
+      rw [ht] at hf
+      exact foldlM_copied_grows rs h1 h hf x (copied_grows h0 h1 e ht x hx)
+
+/-- A row of a run's turn the history took from that run's copy, `W` or the run's own `C`, changes nothing. -/
+theorem copied_said_again (h : Hist) (e : Row) (hk : e.kind = .W ∨ e.kind = .C)
+    (hcp : (((2, e.arg, 0, 0) : Nat × Nat × Nat × Nat), e.run) ∈ h.copied) : h.transition e = some h := by
+  unfold Hist.transition msgId
+  rcases hk with hk | hk <;> rw [hk] <;> simp [hcp]
+
+/-- **T9** (copy, then anything, then the run's own turn; round 17): once the history took a turn from a copy, the
+run's own row of it changes nothing whatever came between, a rewind that removed the turn included. The rewound turn
+never comes back, and the history never breaks on it. -/
+theorem t9_copy_then_turn_ever (h h2 : Hist) (w c : Row) (rows : List Row) (hw : w.kind = .W) (hc : c.kind = .C)
+    (ha : w.arg = c.arg) (hr : w.run = c.run) (hnew : ((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat) ∉ h.ids)
+    (hf : (h.transition w).bind (fun h1 => rows.foldlM Hist.transition h1) = some h2) :
+    h2.transition c = some h2 := by
+  cases hw1 : h.transition w with
+  | none => rw [hw1] at hf; simp at hf
+  | some h1 =>
+    rw [hw1] at hf
+    simp only [Option.bind_some] at hf
+    have hin : (((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat), w.run) ∈ h1.copied := by
+      unfold Hist.transition msgId at hw1
+      rw [hw] at hw1
+      dsimp only at hw1
+      by_cases hcp : (((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat), w.run) ∈ h.copied
+      · simp [hcp] at hw1; subst hw1; exact hcp
+      · simp [hcp, hnew] at hw1; subst hw1; simp
+    have := foldlM_copied_grows rows h1 h2 hf _ hin
+    exact copied_said_again h2 c (Or.inr hc) (by rw [← ha, ← hr]; exact this)
+
+/-- A rewind that retains nothing (`history.rewound`, no retained ids), under term `t`. -/
+def kr (t : Nat) : Row := { term := t, seq := 0, run := 1, kind := .K, arg := 0, ms := t, epoch := 1, attempt := 0 }
 
 /-- Every transition keeps the history's message ids distinct. -/
 theorem transition_nodup (h h' : Hist) (e : Row) (hn : h.ids.Nodup) (ht : h.transition e = some h') : h'.ids.Nodup := by
   unfold Hist.transition at ht
   split at ht
   · rename_i id _
-    by_cases hin : id ∈ h.ids
-    · simp only [hin, ite_true] at ht
-      split at ht <;> first | (cases ht; exact hn) | cases ht
-    · simp only [hin, ite_false] at ht
-      cases ht
-      exact List.nodup_append.2 ⟨hn, by simp, fun a ha b hb hab => by
-        simp only [List.mem_singleton] at hb; subst hb; subst hab; exact hin ha⟩
-  · split at ht <;> (try split at ht) <;> first | (cases ht; exact hn) | cases ht
+    by_cases hcp : (e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied
+    · simp only [hcp, and_self, ite_true, Option.some.injEq] at ht
+      subst ht; exact hn
+    · simp only [hcp, ite_false] at ht
+      by_cases hin : id ∈ h.ids
+      · simp only [hin, ite_true] at ht
+        split at ht <;> first | (cases ht; exact hn) | cases ht
+      · simp only [hin, ite_false] at ht
+        cases ht
+        exact List.nodup_append.2 ⟨hn, by simp, fun a ha b hb hab => by
+          simp only [List.mem_singleton] at hb; subst hb; subst hab; exact hin ha⟩
+  · split at ht <;> (try split at ht) <;> first | (cases ht; first | exact hn | exact List.nodup_nil) | cases ht
 
 theorem foldlM_nodup : ∀ (rows : List Row) (h0 h : Hist), h0.ids.Nodup → rows.foldlM Hist.transition h0 = some h →
     h.ids.Nodup
@@ -3847,6 +3917,19 @@ device settles it later and its row of the turn merges after the copy. The histo
 theorem t9_copy_merged_first :
     (merge [(0, [wr 1]), (1, [cr 2])]).map Row.key = [(1, 0), (2, 0)] ∧
       (histOf (merge [(0, [wr 1]), (1, [cr 2])])).map (·.ids) = some [(2, 7, 0, 0)] := by
+  decide
+
+/-- **T9** (the copy rewound; round 17): a device said the turn of a run it found abandoned, a rewind under a later term
+removed every message, and the run's own row of the turn merges last. The turn stays removed and the history valid. -/
+theorem t9_copy_rewound_stays_gone :
+    (merge [(0, [wr 1]), (1, [kr 2]), (2, [cr 3])]).map Row.key = [(1, 0), (2, 0), (3, 0)] ∧
+      (histOf (merge [(0, [wr 1]), (1, [kr 2]), (2, [cr 3])])).map (·.ids) = some [] := by
+  decide
+
+/-- **T9** (a Retry after the rewind; round 17): a later run re-admits the person's message the copy said, after a
+rewind removed it, as a Retry of a turn that failed before it was recorded does. Its row is the message again. -/
+theorem t9_retry_after_rewind :
+    (histOf (merge [(0, [wr 1]), (1, [kr 2]), (2, [{ cr 3 with run := 2 }])])).map (·.ids) = some [(2, 7, 0, 0)] := by
   decide
 
 /-- **T9** (the ledger reads it as committed): a turn said as its run settled commits the run's turn, so a Resume
@@ -3935,6 +4018,39 @@ refolds it rather than holding a cursor into it. -/
 theorem t7_merge_not_prefix_stable :
     (merge [(0, [mr 1 0 100])]).map Row.key = [(1, 0)] ∧
       (merge [(0, [mr 1 0 100]), (1, [mr 2 0 50])]).map Row.key = [(2, 0), (1, 0)] := by
+  decide
+
+/-! ## T10: an approval continues a run (XD3, round 17)
+
+An approval lets the paused run's tool act at once. It continues the run, so it is admitted as a Resume is, and it is
+refused once another device took the run over: found it abandoned, said its turn and went on. -/
+
+/-- **T10** (taken over): an approval of a run another device took over is refused, whatever else holds. -/
+theorem t10_approval_refused_after_takeover (wrote : Bool) : admission .approve true wrote = .takenOver := by
+  cases wrote <;> rfl
+
+/-- **T10** (the same admission): an approval of a run nobody took over is admitted exactly as a Resume and a start
+are. -/
+theorem t10_approval_admitted_as_resume (t wrote : Bool) :
+    admission .approve false wrote = admission .resume t wrote ∧ admission .resume t wrote = admission .start t wrote := by
+  cases t <;> cases wrote <;> decide
+
+/-- **T10** (a new term after what it read): a command admitted after this device read another device's rows since its
+term began is never admitted under that term. -/
+theorem t10_new_term_after_foreign_rows (v : Verb) (t : Bool) : admission v t true ≠ .sameTerm := by
+  cases v <;> cases t <;> decide
+
+/-- **T10** (a Resume is never refused as taken over): a Resume reads the history again and continues the run after
+whatever another device ran meanwhile. -/
+theorem t10_resume_not_taken_over (t wrote : Bool) : admission .resume t wrote ≠ .takenOver := by
+  cases t <;> cases wrote <;> decide
+
+/-- **T10** (why the new term): a row written under the term this device held before another device's turn merges
+ahead of that turn on every device; under a new term started after what it read it merges after it
+(`t7_stamped_after_read`). -/
+theorem t10_old_term_merges_ahead :
+    (merge [(0, [mr 1 0 10, mr 1 1 30]), (1, [mr 2 0 20])]).map Row.key = [(1, 0), (1, 1), (2, 0)] ∧
+      (merge [(0, [mr 1 0 10, mr 3 0 30]), (1, [mr 2 0 20])]).map Row.key = [(1, 0), (2, 0), (3, 0)] := by
   decide
 
 end ChatLedger

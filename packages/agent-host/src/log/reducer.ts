@@ -109,11 +109,13 @@ export const createEventLogReducer = (
   mode: EventLogReducerMode = 'log',
   options: Readonly<{
     /**
-     * `skip`: a row naming a message this history does not hold drops that name instead of rejecting the history. A
-     * chat log's rows can name another device's messages (XD1); once that device's segment is gone, those names have
-     * nothing to apply to, and the rest of the history still folds. `fail` (the default) rejects it (`HISTORY_INVALID`).
+     * Whether a message is gone: no row this history could ever read introduces it. A row naming a message this history
+     * does not hold drops that name when it is gone, instead of rejecting the history. A chat log's rows can name
+     * another device's messages (XD1); once that device's segment is gone, those names have nothing to apply to, and
+     * the rest of the history still folds. A name that is not gone, such as one a later row introduces, still rejects
+     * it (`HISTORY_INVALID`). Absent: nothing is gone.
      */
-    missingMessages?: 'fail' | 'skip';
+    gone?: ((messageId: string) => boolean) | undefined;
   }> = {},
 ): {
   prepare(candidate: AgentLogEvent): EventLogTransition;
@@ -139,12 +141,13 @@ export const createEventLogReducer = (
   const settledInvocations = new Set<string>();
   let messages: ProviderMessage[] = [];
   let intact = true;
-  const skipMissing = options.missingMessages === 'skip';
-  /** The ids the history holds now, kept only when missing names are skipped: each lookup is then constant. */
+  const { gone } = options;
+  const tracksPresent = gone !== undefined;
+  /** The ids the history holds now, kept only when gone names are dropped: each lookup is then constant. */
   const present = new Set<string>();
   /** Keep {@link present} in step after a change that drops or reorders messages. */
   const reindex = (): void => {
-    if (skipMissing) {
+    if (tracksPresent) {
       present.clear();
       for (const message of messages) {
         present.add(message.id);
@@ -153,24 +156,31 @@ export const createEventLogReducer = (
   };
   const appendMessage = (message: ProviderMessage): void => {
     messages.push(message);
-    if (skipMissing) {
+    if (tracksPresent) {
       present.add(message.id);
     }
   };
-  /** The person's turns this history first took as a copy (`abandonedTurnOf`), by message id. */
-  const copiedTurns = new Set<string>();
   /**
-   * Whether a person's message is a turn this history already holds (XD3): a copy of one it holds, or the run's own
-   * turn after a copy of it. A device that goes on past an abandoned run says its turn under its own term, and the run's
-   * device may later settle the run and bring its own row of that turn, merging after the copy when its clock ran far
-   * ahead. Either way it is one message, never a second (`t9_copy_then_turn` in ChatLedger.lean).
+   * The person's turns this history first took as a copy (`abandonedTurnOf`), by run and message id. Never cleared, a
+   * rewind's included: a run's turn said once stays said. Another run's row of the same message (a Retry re-admits the
+   * person's message once a rewind removed it) is not that run's turn said again.
    */
-  const turnSaidAgain = (message: ProviderMessage): boolean =>
-    knownMessageIds.has(message.id) &&
-    (isAbandonedTurn(message) || (copiedTurns.has(message.id) && isPersonsMessage(message)));
-  /** The ids a row names, less those this history does not hold when missing names are skipped. */
+  const copiedTurns = new Set<string>();
+  const copiedKey = (runId: string, messageId: string): string => JSON.stringify([runId, messageId]);
+  /**
+   * Whether a person's message is a turn this history already said (XD3): a copy of one it holds, or any row of a turn
+   * it first took from a copy. A device that goes on past an abandoned run says its turn under its own term, and the
+   * run's device may later settle the run and bring its own row of that turn, merging after the copy when its clock ran
+   * far ahead. Either way it is one message, never a second, and a rewind that removed it since does not bring it back
+   * (`t9_copy_then_turn`, `t9_copy_then_turn_ever` in ChatLedger.lean); a later run's row of it does
+   * (`t9_retry_after_rewind`).
+   */
+  const turnSaidAgain = (runId: string, message: ProviderMessage): boolean =>
+    (copiedTurns.has(copiedKey(runId, message.id)) && isPersonsMessage(message)) ||
+    (knownMessageIds.has(message.id) && isAbandonedTurn(message));
+  /** The ids a row names, less those this history does not hold and that are gone. */
   const held = (messageIds: readonly string[]): readonly string[] =>
-    skipMissing ? messageIds.filter((id) => present.has(id)) : messageIds;
+    gone === undefined ? messageIds : messageIds.filter((id) => present.has(id) || !gone(id));
 
   /** The history rules for one known row: returns its effect, or throws `HISTORY_INVALID`. */
   const transitionOf = (event: AgentLogEvent): (() => void) => {
@@ -178,7 +188,7 @@ export const createEventLogReducer = (
     switch (event.type) {
       case 'message.appended': {
         /* A person's turn appended as its run settled is the same message from every device that appends it (XD3). */
-        if (turnSaidAgain(event.message)) {
+        if (turnSaidAgain(event.runId, event.message)) {
           apply = () => undefined;
           break;
         }
@@ -186,7 +196,7 @@ export const createEventLogReducer = (
         apply = () => {
           knownMessageIds.add(event.message.id);
           if (isAbandonedTurn(event.message)) {
-            copiedTurns.add(event.message.id);
+            copiedTurns.add(copiedKey(event.runId, event.message.id));
           }
           appendMessage(event.message);
         };
@@ -252,7 +262,7 @@ export const createEventLogReducer = (
       }
       case 'turn.history-projection-committed': {
         /* The run's own commit of a turn another device already said for it changes nothing: the history went on past it. */
-        if (turnSaidAgain(event.message)) {
+        if (turnSaidAgain(event.runId, event.message)) {
           apply = () => undefined;
           break;
         }

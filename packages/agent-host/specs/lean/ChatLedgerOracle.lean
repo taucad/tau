@@ -5,7 +5,7 @@ Executable oracle over a line-based trace file, line format v2 (no `Lean.Json` i
 generator is `src/log/chat-ledger.differential.test.ts`; its output for each corpus must equal this oracle's.
 
 A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`attempt` 0: absent); kinds
-`L S H O R P V M U W C`. Commands (`#` comments and blank lines ignored):
+`L S H O R P V M U W C K`. Commands (`#` comments and blank lines ignored):
   T <name>                     start a trace: an empty file, an appender open on it, an empty reader
   E <row>                      append through the appender              → `A <i> <outcome>`
   W <row> / WJ / TEAR          another writer's row, a junk line, a torn fragment (no output)
@@ -26,6 +26,8 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   MH                           the history the merge folds to (rows that only append messages: no `H`)
                                                                            → `MH <intact> <message ids>`
   TABLES                       the three legality tables                  → `TO … / TS … / TL …`
+  ADMIT <verb> <takenOver> <wrote>   the host's admission of a start, resume or approval
+                                                                           → `QA <admission>`
   X                            end the trace
 -/
 open ChatLedger
@@ -34,7 +36,7 @@ def num (s : String) : Nat := s.toNat?.getD 0
 
 def kindOf : String → Kind
   | "L" => .L | "S" => .S | "H" => .H | "O" => .O | "R" => .R
-  | "P" => .P | "V" => .V | "M" => .M | "W" => .W | "C" => .C | _ => .U
+  | "P" => .P | "V" => .V | "M" => .M | "W" => .W | "C" => .C | "K" => .K | _ => .U
 
 def rowOf (ws : List String) : Row :=
   match ws with
@@ -218,6 +220,11 @@ def runLine (st : St) (line : String) : St × List String :=
           s!"MC {listText (conflicts.map fun ((t, q), k, d) => s!"{t}:{q}:{k}:{d}")}"])
   | ["MERGEB", b] =>
     (st, [s!"MB {listText ((mergeUpTo (num b) st.segs).map fun e => s!"{e.term}:{e.seq}")}"])
+  | ["ADMIT", v, t, w] =>
+    let verb : Verb := match v with | "resume" => .resume | "approve" => .approve | _ => .start
+    let name := match admission verb (t == "1") (w == "1") with
+      | .takenOver => "taken-over" | .newTerm => "new-term" | .sameTerm => "same-term"
+    (st, [s!"QA {name}"])
   | ["MH"] =>
     let text := match histOf (merge st.segs) with
       | some h => s!"MH 1 {listText (h.ids.map idText)}"

@@ -360,6 +360,35 @@ export const pausedRunHoldMilliseconds = 30 * 60 * 1000;
  */
 export const approvalRefreshMilliseconds = 10_000;
 
+/** A command admitted across devices: a turn's start, a Resume, or an approval of a paused run's request. @internal */
+export type AdmissionVerb = 'start' | 'resume' | 'approve';
+
+/** How {@link termAdmission} admits a command. @internal */
+export type TermAdmission = 'taken-over' | 'new-term' | 'same-term';
+
+/**
+ * How a command that runs or continues a run is admitted across devices (XD1, XD3, round 17; `admission` in
+ * ChatLedger.lean, T10). An approval lets the paused run's tool act at once, so it continues the run: it is refused
+ * `RUN_TAKEN_OVER` once another device said the run's turn and went on past it, and is otherwise admitted exactly as a
+ * Resume is. Any of them, after this device read another device's rows since its incarnation's term began, is admitted
+ * under a new term that starts after those rows, never the old one, whose rows would merge ahead of them.
+ *
+ * @internal
+ * @param verb - Which command is admitted: a start, a Resume or an approval.
+ * @param facts - `takenOver`: another device took the run over (`runTakenOver`); `foreignWrote`: another device wrote
+ *   since the term began (`foreignWroteSinceTermBegan`).
+ * @returns Refused, under a new term, or under the term the incarnation holds.
+ */
+export const termAdmission = (
+  verb: AdmissionVerb,
+  facts: Readonly<{ takenOver: boolean; foreignWrote: boolean }>,
+): TermAdmission => {
+  if (verb === 'approve' && facts.takenOver) {
+    return 'taken-over';
+  }
+  return facts.foreignWrote ? 'new-term' : 'same-term';
+};
+
 const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
 
 type AdmissionRecord = Readonly<{
@@ -1265,6 +1294,22 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * reads again. Entries live only while their dispatch does.
    */
   const dispatches = new Map<string, { refreshed?: DurableEventLog }>();
+  /**
+   * End one dispatch's entry once its command is answered: when the registry's answer settles, or at once for a
+   * command answered before it reached the registry (superseded by a Stop, refused by a check).
+   */
+  const releaseDispatch = async (
+    commandId: string,
+    dispatch: { refreshed?: DurableEventLog },
+    answer: Promise<CommandAnswer> | undefined,
+  ): Promise<void> => {
+    if (answer !== undefined) {
+      await absorbed(answer);
+    }
+    if (dispatches.get(commandId) === dispatch) {
+      dispatches.delete(commandId);
+    }
+  };
   const refreshFor = async (log: DurableEventLog, commandId: string): Promise<void> => {
     const dispatch = dispatches.get(commandId);
     if (dispatch?.refreshed === log) {
@@ -1292,6 +1337,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const dispatchOrder = new Map<string, Promise<void>>();
   /** Each chat's Stops so far: a command that waited on its checks across one is superseded, not run. */
   const stops = new Map<string, number>();
+  /** Whether the chat's open incarnation already wrote under the term it holds: only such a term can be stale. */
+  const wroteUnderTerm = (chatId: string): boolean => {
+    const leaderEpoch = registry.termOf(chatId);
+    return leaderEpoch !== undefined && stores.get(chatId)?.wrote?.leaderEpoch === leaderEpoch;
+  };
+  /*
+   * Close the incarnation, so the command that follows opens a new term. The close is started, not awaited: the command
+   * waits for it within the registry's bound (`WRITER_LOCKED` past it), and nothing behind this check, a Stop included,
+   * waits on a close that never ends.
+   */
+  const rehome = (chatId: string): void => {
+    void evictQuietly(chatId);
+  };
   /**
    * A new term for a turn another device's turn came between (XD1). An incarnation keeps one term while it stays
    * open, and a term's rows merge together, ordered by the term's start (CL-R14): a turn written under a term that
@@ -1301,29 +1359,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * starts now. What "since" means is what this host read, not when the other device's clock says it wrote. An
    * incarnation holding a live run is left alone: the command is refused as it would be anyway.
    *
-   * @param chatId - The chat.
+   * @param chatId - The chat whose incarnation may be closed.
    * @param commandId - The command the check runs for: it shares that dispatch's refresh.
+   * @param verb - The command: a start or a Resume ({@link termAdmission}).
    * @returns The check in flight, or `undefined` when there is nothing to check.
    */
-  const rehomeStaleTerm = (chatId: string, commandId: string): Promise<void> | undefined => {
+  const rehomeStaleTerm = (chatId: string, commandId: string, verb: AdmissionVerb): Promise<void> | undefined => {
     const store = stores.get(chatId);
     const opened = store?.log;
-    const leaderEpoch = registry.termOf(chatId);
-    if (opened === undefined || leaderEpoch === undefined || store?.wrote?.leaderEpoch !== leaderEpoch) {
+    if (opened === undefined || !wroteUnderTerm(chatId)) {
       return undefined;
     }
     const check = async (): Promise<void> => {
       try {
         const log = await opened;
         await refreshFor(log, commandId);
-        if ((await log.foreignWroteSinceTermBegan?.()) !== true) {
-          return;
+        const foreignWrote = (await log.foreignWroteSinceTermBegan?.()) === true;
+        if (termAdmission(verb, { takenOver: false, foreignWrote }) === 'new-term') {
+          rehome(chatId);
         }
-        /*
-         * The close is started, not awaited: the command that follows waits for it within the registry's bound
-         * (`WRITER_LOCKED` past it), and nothing behind this check, a Stop included, waits on a close that never ends.
-         */
-        void evictQuietly(chatId);
       } catch {
         /* A live run, a closed log or an unread segment: the command is answered as it would be without this. */
       }
@@ -1341,17 +1395,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
   };
 
-  /**
-   * The cross-device fence on an approval (XD3). An approval lets the paused run's tool act on it at once, and a
-   * pause stops holding the chat after {@link pausedRunHoldMilliseconds}, so another device may be running the chat
-   * by then: the approval is refused, before any row, while another device holds it. A denial or a cancellation ends
-   * the paused run and is never refused. A chat whose log is not open here has no driver waiting; its run continues
-   * only through a resume, which the fence already covers.
-   *
-   * @param commandId - The approval's command.
-   * @param chatId - Its chat.
-   * @returns The refusal, or `undefined` to apply it.
-   */
   /** A segment read bounded for an approval: one that does not finish in time is a segment that cannot be read. */
   const boundedRefresh = async (log: DurableEventLog): Promise<void> => {
     const clock: HostClock = options.clock ?? globalThis;
@@ -1375,16 +1418,62 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       clock.clearTimeout(timer);
     }
   };
-  const refuseApprovalForeignRun = async (commandId: string, chatId: string): Promise<CommandAnswer | undefined> => {
-    const store = stores.get(chatId);
-    const opened = store?.log;
-    if (opened === undefined) {
+  /**
+   * The cross-device admission of an approval (XD3, round 17). An approval lets the paused run's tool act on it at
+   * once: it continues the run, so it is admitted as a Resume is ({@link termAdmission}), after a bounded read of the
+   * other devices' segments and before any row. It is refused `RUN_TAKEN_OVER` once another device found the run
+   * abandoned, said its turn and went on past it: the tool would act on a project that device has changed since, and
+   * its rows would land beside that device's turn. It is refused while another device holds the chat, since a pause
+   * stops holding it after {@link pausedRunHoldMilliseconds}. Admitted after this device read another device's rows
+   * since its incarnation's term began, it is written under a new term that starts after them. A denial or a
+   * cancellation ends the paused run and is never refused.
+   *
+   * @param commandId - The approval's command, whose dispatch shares one refresh.
+   * @param chatId - The chat the paused run belongs to.
+   * @param runId - The paused run the approval would continue.
+   * @returns The refusal, or `undefined` to apply it.
+   */
+  const admitApproval = async (
+    commandId: string,
+    chatId: string,
+    runId: string,
+  ): Promise<CommandAnswer | undefined> => {
+    const store = storeOf(chatId);
+    const refused = (code: string, message: string, details: Record<string, unknown> | undefined): CommandAnswer => ({
+      commandId,
+      generation: store.ledger?.maxEpoch ?? 0,
+      status: 'refused',
+      effect: 'not-applied',
+      code,
+      message,
+      ...(details === undefined ? {} : { details }),
+    });
+    let log: DurableEventLog;
+    try {
+      /* Open or not, the log is read: a takeover is in the segments, whether or not a driver waits here. */
+      log = await logOf(chatId);
+    } catch {
+      /* A log that does not open is the registry's to answer. */
       return undefined;
     }
     try {
-      const log = await opened;
       await boundedRefresh(log);
-      await refuseForeignRun(chatId, log);
+      const takenOver = (await log.runTakenOver?.(runId)) === true;
+      if (!takenOver) {
+        await refuseForeignRun(chatId, log);
+      }
+      const foreignWrote = wroteUnderTerm(chatId) && (await log.foreignWroteSinceTermBegan?.()) === true;
+      const admitted = termAdmission('approve', { takenOver, foreignWrote });
+      if (admitted === 'taken-over') {
+        return refused(
+          'RUN_TAKEN_OVER' satisfies RefusalCode,
+          'Another device found this paused turn abandoned and went on with the chat, so its request can no longer be approved here. Deny it, then send what you want next.',
+          undefined,
+        );
+      }
+      if (admitted === 'new-term') {
+        rehome(chatId);
+      }
       return undefined;
     } catch (error) {
       const { code, message, details } = codedFailureDetail(error);
@@ -1394,21 +1483,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /* Inside its own hold the paused run still holds the chat for every device: an unreadable segment cannot be
        * another device's run on it, since that device's fence refuses while this run's heartbeats are fresh. Only
        * while this device's own rows fold alone, though: an unknown history refuses the approval inside the hold too. */
-      if (code === 'SEGMENTS_UNREADABLE' && pauseHeld(store) && !(await historyUnknownOf(opened))) {
+      if (code === 'SEGMENTS_UNREADABLE' && pauseHeld(store) && !(await historyUnknownOf(Promise.resolve(log)))) {
         return undefined;
       }
-      return {
-        commandId,
-        generation: store?.ledger?.maxEpoch ?? 0,
-        status: 'refused',
-        effect: 'not-applied',
+      return refused(
         code,
-        message:
-          code === 'RUN_ACTIVE_ON_ANOTHER_DEVICE'
-            ? `${message} This paused turn stopped holding the chat, and another device has taken it over; deny the request or resume the turn once that run finishes.`
-            : message,
-        ...(details === undefined ? {} : { details }),
-      };
+        code === 'RUN_ACTIVE_ON_ANOTHER_DEVICE'
+          ? `${message} This paused turn stopped holding the chat, and another device has taken it over; deny the request or resume the turn once that run finishes.`
+          : message,
+        details,
+      );
     }
   };
 
@@ -2378,20 +2462,25 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       const ahead = dispatchOrder.get(ordered);
       const turn = Promise.withResolvers<void>();
       dispatchOrder.set(ordered, turn.promise);
+      const admits = command.type === 'start' || command.type === 'resume';
+      /* The dispatch's entry is registered, and its release set up, before anything can answer the command early. */
+      if (admits) {
+        dispatches.set(command.commandId, dispatch);
+      }
+      let reached: Promise<CommandAnswer> | undefined;
       try {
         if (ahead !== undefined) {
           await ahead;
         }
-        if (command.type === 'start' || command.type === 'resume') {
-          dispatches.set(command.commandId, dispatch);
+        if (admits) {
           /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
-          const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId);
+          const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId, command.type);
           if (rehoming !== undefined) {
             await rehoming;
           }
         }
         if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
-          const held = await refuseApprovalForeignRun(command.commandId, command.payload.chatId);
+          const held = await admitApproval(command.commandId, command.payload.chatId, command.payload.runId);
           const stopped = superseded();
           if (stopped !== undefined || held !== undefined) {
             return stopped ?? held!;
@@ -2401,11 +2490,15 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         if (stopped !== undefined) {
           return stopped;
         }
-        answer = registry.execute(command);
+        reached = registry.execute(command);
+        answer = reached;
       } finally {
         turn.resolve();
         if (dispatchOrder.get(ordered) === turn.promise) {
           dispatchOrder.delete(ordered);
+        }
+        if (admits) {
+          void releaseDispatch(command.commandId, dispatch, reached);
         }
       }
     }
@@ -2442,9 +2535,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         await absorbed(answer);
         if (admissions.get(command.payload.chatId) === entry) {
           admissions.delete(command.payload.chatId);
-        }
-        if (dispatches.get(command.commandId) === dispatch) {
-          dispatches.delete(command.commandId);
         }
       };
       void release();

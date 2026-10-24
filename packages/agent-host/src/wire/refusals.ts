@@ -50,6 +50,12 @@ export const refusals = {
    * the chat. A run is never moved between devices in flight, and this device cannot stop it.
    */
   RUN_ACTIVE_ON_ANOTHER_DEVICE: { owner: 'host', retry: 'wait' },
+  /**
+   * Another device found this paused run abandoned, said its turn and went on with the chat (XD3), so an approval of
+   * its request is not applied: the tool would act on a project that device has changed since. Deny the request, then
+   * send what is wanted next.
+   */
+  RUN_TAKEN_OVER: { owner: 'host', retry: 'never' },
   /** A different command id reused this run id; mint a new run id. A re-send with the original key answers `replayed`. */
   RUN_ID_TAKEN: { owner: 'host', retry: 'never' },
   /** Nothing on this chat can be continued; the card offers "Try again" (a re-send or a rewind). */

@@ -1,18 +1,22 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PartialDeep } from 'type-fest';
 import type * as ReactRouter from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { defaultPanelState, mobilePanelIds } from '#constants/editor.constants.js';
 import type { PanelState } from '#types/editor.types.js';
 import { mergePanelState } from '#utils/panel-state.utils.js';
+import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 /*
  * I1 capability parity, driven by the real desktop registry: every Workbench surface the desktop launcher can open has
  * a phone surface, `openPanel` opens it on a phone, and a person can reach it by touch from the nav or All. A surface
- * added to the registry without a phone home fails here.
+ * added to the registry without a phone home fails here. It runs as the desktop app, the one build that ships every
+ * finished surface; Jobs is unfinished and shipped nowhere.
  */
+
+vi.stubEnv('TAU_TARGET', 'desktop');
 
 const flags = vi.hoisted(() => ({ machines: true, tauDebug: true }));
 const route = vi.hoisted(() => ({ key: 'initial', search: '', state: undefined }));
@@ -117,7 +121,15 @@ const renderWorkbench = (): void => {
 const openSurface = (): HTMLElement => screen.getByRole('status', { name: 'Open surface' });
 const navigation = (): HTMLElement => screen.getByRole('navigation', { name: 'Workbench' });
 
+/** The surfaces the desktop app ships, read once the build target is set. */
+const shippedSurfaces = (): typeof workbenchSurfaces => workbenchSurfaces.filter(({ id }) => isSurfaceShipped(id));
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
+
 beforeEach(() => {
+  vi.stubEnv('TAU_TARGET', 'desktop');
   flags.machines = true;
   flags.tauDebug = true;
   editor.listeners.clear();
@@ -142,7 +154,7 @@ describe('mobile registry parity (I1)', { timeout: 30_000 }, () => {
     }
   });
 
-  it.each(workbenchSurfaces.map((surface) => [surface.label, surface] as const))(
+  it.each(shippedSurfaces().map((surface) => [surface.label, surface] as const))(
     'should open %s on a phone through openPanel, under its desktop title',
     (label, surface) => {
       renderWorkbench();
@@ -156,7 +168,7 @@ describe('mobile registry parity (I1)', { timeout: 30_000 }, () => {
     },
   );
 
-  it.each(workbenchSurfaces.map((surface) => [surface.label] as const))(
+  it.each(shippedSurfaces().map((surface) => [surface.label] as const))(
     'should reach %s by touch from the nav or All',
     async (label) => {
       renderWorkbench();
@@ -190,8 +202,29 @@ describe('mobile registry parity (I1)', { timeout: 30_000 }, () => {
         .getAllByRole('button')
         .map((button) => button.textContent),
     ]);
-    for (const id of mobilePanelIds) {
+    for (const id of mobilePanelIds.filter((surface) => isSurfaceShipped(surface))) {
       expect(reachable, id).toContain(surfaceTitle(id));
+    }
+  });
+
+  it.each([
+    ['desktop', ['Jobs']],
+    ['web', ['Browser', 'Jobs']],
+  ] as const)('should neither list nor open an unshipped surface (%s)', (buildTarget, unshipped) => {
+    vi.stubEnv('TAU_TARGET', buildTarget);
+    renderWorkbench();
+    fireEvent.click(within(navigation()).getByRole('button', { name: 'All' }));
+    const all = screen.getByRole('dialog', { name: 'All surfaces' });
+    for (const label of unshipped) {
+      expect(within(all).queryByRole('button', { name: label })).not.toBeInTheDocument();
+    }
+    fireEvent.keyDown(all, { key: 'Escape' });
+
+    for (const label of unshipped) {
+      act(() => {
+        fireEvent.click(screen.getByRole('button', { name: `Request ${label}` }));
+      });
+      expect(openSurface()).toHaveTextContent(/^Model$/u);
     }
   });
 

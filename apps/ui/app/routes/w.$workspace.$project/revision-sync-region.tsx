@@ -319,7 +319,7 @@ function PlanGate({ onUpgrade }: { readonly onUpgrade: (() => void) | undefined 
   return (
     <button
       type='button'
-      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
+      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline pointer-coarse:min-h-6'
       onClick={onUpgrade}
     >
       Available on Pro · <CommercialUpgradeLabel />

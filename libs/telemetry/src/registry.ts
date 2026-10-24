@@ -60,6 +60,27 @@ const mirrorDestinations = ['b2'] as const;
 
 /** `kind` of an object the copier writes or the reconciler finds missing (W13 Finding 8). */
 const mirrorObjectKinds = ['pack', 'idx', 'manifest', 'segment', 'retired_marker', 'lfs', 'owner_marker'] as const;
+/** `environment` on the `tau.mirror.drill_*` series: the deployment the drill read. */
+const mirrorDrillEnvironments = ['staging', 'production', 'development'] as const;
+
+/** `check` on `tau.mirror.drill_check_failures`: the verify drill's checks, then the full DR2's I2 checks (W13 Finding 8). */
+const mirrorDrillChecks = [
+  'snapshot',
+  'missing',
+  'checksum',
+  'pack',
+  'lfs',
+  'push_log',
+  'retention',
+  'hidden_versions',
+  'deadline',
+  'error',
+  'refs',
+  'fsck',
+  'generation_floor',
+  'refuse_erased',
+] as const;
+
 /** `tau.git.route.scope`: a freeze on one repository, or the global one (DW1). */
 const routeScopes = ['repository', 'global'] as const;
 
@@ -1172,6 +1193,55 @@ export const TauMetrics = {
     }),
   }),
 
+  // --- tau-api to tau-storage (Hosted Remote Storage DC1): the grant, the forward and the receipt ---
+
+  gitGrantsRejected: defineCounter({
+    name: 'tau.git.grants.rejected',
+    unit: '{grant}',
+    description: 'Storage grants tau-storage refused before reading a byte of the body, by reason',
+    attributes: z.object({
+      reason: z.enum([
+        'malformed',
+        'unknown_kid',
+        'version',
+        'signature',
+        'iat_skew',
+        'expired',
+        'method',
+        'path',
+        'replay',
+      ]),
+    }),
+  }),
+
+  gitForwardErrors: defineCounter({
+    name: 'tau.git.forward.errors',
+    unit: '{request}',
+    description: 'Git requests tau-api could not complete through tau-storage, by reason',
+    attributes: z.object({
+      reason: z.enum(['grant_rejected', 'unconfigured', 'unreachable', 'timeout', 'aborted', 'malformed_response']),
+    }),
+  }),
+
+  gitReceipts: defineCounter({
+    name: 'tau.git.receipts',
+    unit: '{receipt}',
+    description:
+      'Storage receipts tau-api received, by outcome; only applied changed derived state, and ledger_unavailable left it to a repair',
+    attributes: z.object({
+      outcome: z.enum(['applied', 'duplicate', 'ledger_unavailable', 'manifest_mismatch', 'rejected', 'stale']),
+    }),
+  }),
+
+  gitSlowBodyAborts: defineCounter({
+    name: 'tau.git.slow_body.aborts',
+    unit: '{request}',
+    description: 'Git request bodies tau-storage aborted for moving too slowly, releasing their lease slot',
+    attributes: z.object({
+      'tau.git.operation': z.enum(gitOperations),
+    }),
+  }),
+
   syncClientAttempts: defineCounter({
     name: 'tau.sync.client.attempts',
     unit: '{attempt}',
@@ -1359,6 +1429,51 @@ export const TauMetrics = {
     unit: '{version}',
     description: 'Object versions the copy holds, from the last full reconcile',
     attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  // The verify drill (DR2-lite): `tau-mirror` reads a random sample back from the copy alone and proves
+  // it against Postgres. `check` carries the full DR2's I2 names too, so its restore drill adds no series.
+
+  mirrorDrillRuns: defineCounter({
+    name: 'tau.mirror.drill_runs',
+    unit: '{run}',
+    description: 'Second-copy drills by outcome; a sample with nothing copied yet is not a run',
+    attributes: z.object({
+      environment: z.enum(mirrorDrillEnvironments),
+      outcome: z.enum(['pass', 'fail']),
+    }),
+  }),
+
+  mirrorDrillCheckFailures: defineCounter({
+    name: 'tau.mirror.drill_check_failures',
+    unit: '{failure}',
+    description: 'Sampled repositories that failed a drill check, by check',
+    attributes: z.object({
+      environment: z.enum(mirrorDrillEnvironments),
+      check: z.enum(mirrorDrillChecks),
+    }),
+  }),
+
+  mirrorDrillLastSuccess: defineGauge({
+    name: 'tau.mirror.drill_last_success_timestamp_seconds',
+    unit: 's',
+    description: 'Unix time the newest passing drill finished, seeded from mirror_drill_run at start',
+    attributes: z.object({ environment: z.enum(mirrorDrillEnvironments) }),
+  }),
+
+  mirrorDrillDuration: defineHistogram({
+    name: 'tau.mirror.drill_duration_seconds',
+    unit: 's',
+    description: 'Wall time of one verify drill over its whole sample',
+    buckets: [1, 5, 10, 30, 60, 120, 300, 900, 1800, 3600],
+    attributes: z.object({ environment: z.enum(mirrorDrillEnvironments) }),
+  }),
+
+  mirrorDrillVerifiedBytes: defineCounter({
+    name: 'tau.mirror.drill_verified_bytes',
+    unit: 'By',
+    description: 'Bytes the drill read back from the copy and verified',
+    attributes: z.object({ environment: z.enum(mirrorDrillEnvironments) }),
   }),
 
   // --- Billing workers (F-10) ---

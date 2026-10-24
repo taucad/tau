@@ -19,6 +19,13 @@ import type { CopyCandidate } from '#api/git/mirror/watermark.js';
 const minute = 60 * 1000;
 const day = 24 * 60 * minute;
 
+/**
+ * How long an LFS object finalized after a repository's last push waits before a
+ * caught-up repository is claimed for it: long enough that the push it belongs to
+ * usually lands first and copies it in its own round.
+ */
+export const lateLfsGraceMilliseconds = minute;
+
 /** Jittered exponential backoff to W13's 5-minute ceiling. */
 export const backoffMilliseconds = (failures: number, base: number, random: () => number = Math.random): number => {
   const ceiling = 5 * minute;
@@ -34,12 +41,22 @@ export type WorkerOptions = {
   readonly backfillShare: number;
   /** Delay before the first daily pass after a start, so a crash loop does not sweep on every boot. */
   readonly dailyStartDelayMilliseconds?: number;
+  /**
+   * The verify drill (DR2-lite), once `startDelayMilliseconds` after start (default
+   * 5 minutes) and then daily. It runs beside the polls, never blocking a copy, at
+   * most one at a time, and the worker waits for it on stop.
+   */
+  readonly drill?: {
+    readonly run: () => Promise<unknown>;
+    readonly startDelayMilliseconds?: number;
+  };
 };
 
 type Schedule = {
   sweepAt: number;
   activeAt: number;
   fullDay: string | undefined;
+  drillAt: number;
 };
 
 const runPool = async (items: readonly CopyCandidate[], limit: number, run: (item: CopyCandidate) => Promise<void>) => {
@@ -70,11 +87,21 @@ export const pollOnce = async (
     const now = retentionClock(context).at.getTime();
     const waiting = new Set([...retry].filter(([, entry]) => entry.at > now).map(([projectId]) => projectId));
     const limit = options.concurrency * 4;
-    const candidates = await context.ledger.claim({
+    const claimed = await context.ledger.claim({
       limit,
       backfillLimit: Math.max(1, Math.floor(limit * options.backfillShare)),
       exclude: waiting,
     });
+    // Caught-up repositories holding LFS finalized after their last push take what room is left.
+    const late =
+      claimed.length >= limit
+        ? []
+        : await context.ledger.lfsStragglers({
+            limit: limit - claimed.length,
+            finalizedBefore: new Date(now - lateLfsGraceMilliseconds),
+            exclude: new Set([...waiting, ...claimed.map((candidate) => candidate.projectId)]),
+          });
+    const candidates = [...claimed, ...late];
     if (candidates.length === 0) {
       context.metrics.round('noop');
     }
@@ -156,6 +183,32 @@ export const runMirrorWorker = async (options: WorkerOptions): Promise<void> => 
     sweepAt: start,
     activeAt: start,
     fullDay: undefined,
+    drillAt: retentionClock(context).at.getTime() + (options.drill?.startDelayMilliseconds ?? 5 * minute),
+  };
+  let drilling: Promise<void> | undefined;
+  const startDrill = (): void => {
+    const { drill } = options;
+    const now = retentionClock(context).at.getTime();
+    if (drill === undefined || drilling !== undefined || now < schedule.drillAt || signal.aborted) {
+      return;
+    }
+    schedule.drillAt = now + day;
+    const running = async (): Promise<void> => {
+      try {
+        await drill.run();
+      } catch (error) {
+        context.report?.({
+          event: 'tau_mirror.pass_failed',
+          pass: 'drill',
+          error: error instanceof Error ? error.name : 'Error',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        drilling = undefined;
+      }
+    };
+    // Detached on purpose: the drill streams for minutes and must not hold up a copy poll.
+    drilling = running();
   };
   const retry = new Map<string, { failures: number; at: number }>();
   let downPolls = 0;
@@ -166,6 +219,7 @@ export const runMirrorWorker = async (options: WorkerOptions): Promise<void> => 
       const reachable = await pollOnce(options, retry, options.pollMilliseconds);
       downPolls = reachable ? 0 : downPolls + 1;
       if (reachable) {
+        startDrill();
         // oxlint-disable-next-line no-await-in-loop -- the daily passes run between polls
         await daily(context, schedule);
       } else {
@@ -185,4 +239,5 @@ export const runMirrorWorker = async (options: WorkerOptions): Promise<void> => 
       break;
     }
   }
+  await drilling;
 };

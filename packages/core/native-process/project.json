@@ -3,5 +3,21 @@
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "packages/core/native-process",
   "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
+  "tags": ["scope:shared", "type:package"],
+  "targets": {
+    "test:shell-conformance": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The native shell conformance rows (T02, E rows a provider owns): the real sandbox provider and the machine's own Bash, positive controls before negatives, network negatives judged by canaries outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/core/native-process",
+        "command": "../../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell.conformance.test.ts",
+        "env": {
+          "TAU_SHELL_CONFORMANCE": "1"
+        }
+      }
+    }
+  }
 }

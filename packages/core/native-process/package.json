@@ -35,6 +35,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./adopter": "./src/native-kernel-adopter.ts",
+    "./shell": "./src/shell.ts",
     "./store": "./src/store.ts",
     "./package.json": "./package.json"
   },
@@ -50,6 +51,11 @@
         "types": "./dist/native-kernel-adopter.d.mts",
         "import": "./dist/native-kernel-adopter.mjs",
         "default": "./dist/native-kernel-adopter.mjs"
+      },
+      "./shell": {
+        "types": "./dist/shell.d.mts",
+        "import": "./dist/shell.mjs",
+        "default": "./dist/shell.mjs"
       },
       "./store": {
         "types": "./dist/store.d.mts",
@@ -78,5 +84,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "catalog:"
+  },
+  "optionalDependencies": {
+    "node-pty": "catalog:"
   }
 }

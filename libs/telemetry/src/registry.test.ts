@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(110);
+    expect(metrics).toHaveLength(119);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -66,10 +66,19 @@ describe('TauMetrics', () => {
       tau_mirror_reconcile_hidden_versions: 'gauge',
       tau_mirror_destination_stored_bytes: 'gauge',
       tau_mirror_destination_object_versions: 'gauge',
+      tau_mirror_drill_runs_total: 'counter',
+      tau_mirror_drill_check_failures_total: 'counter',
+      tau_mirror_drill_last_success_timestamp_seconds: 'gauge',
+      tau_mirror_drill_duration_seconds: 'histogram',
+      tau_mirror_drill_verified_bytes_total: 'counter',
     });
+    // The copy's series name the destination; the drill's name the environment it read (W13 Finding 8).
     for (const metric of mirror) {
-      expect(Object.keys(metric.attributes.shape)).toContain('destination');
+      expect(Object.keys(metric.attributes.shape)).toContain(
+        metric.name.startsWith('tau.mirror.drill_') ? 'environment' : 'destination',
+      );
     }
+    expect(TauMetrics.mirrorDrillRuns.attributes.shape.outcome.options).toEqual(['pass', 'fail']);
     expect(TauMetrics.mirrorRounds.attributes.shape.outcome.options).toEqual([
       'copied',
       'noop',
@@ -118,6 +127,35 @@ describe('TauMetrics', () => {
     /* A hold is at most about 5 s, so its buckets end there; a lookup is a cache hit or one indexed read. */
     expect(TauMetrics.gitRouteHoldDuration.buckets.at(-1)).toBeGreaterThanOrEqual(5);
     expect(TauMetrics.gitRouteLookupDuration.buckets.at(0)).toBeLessThanOrEqual(0.0001);
+  });
+
+  /* Hosted Remote Storage DC1: the grant, forward and receipt series between tau-api and tau-storage. */
+  it('should declare the storage grant, forward and receipt instruments with bounded reasons', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.gitGrantsRejected,
+        TauMetrics.gitForwardErrors,
+        TauMetrics.gitReceipts,
+        TauMetrics.gitSlowBodyAborts,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_git_grants_rejected_total: { type: 'counter', unit: '{grant}' },
+      tau_git_forward_errors_total: { type: 'counter', unit: '{request}' },
+      tau_git_receipts_total: { type: 'counter', unit: '{receipt}' },
+      tau_git_slow_body_aborts_total: { type: 'counter', unit: '{request}' },
+    });
+    for (const reason of ['unknown_kid', 'version', 'iat_skew', 'path', 'replay', 'signature']) {
+      expect(TauMetrics.gitGrantsRejected.attributes.safeParse({ reason }).success).toBe(true);
+    }
+    expect(TauMetrics.gitGrantsRejected.attributes.safeParse({ reason: 'proj_1' }).success).toBe(false);
+    for (const reason of ['grant_rejected', 'unreachable', 'timeout', 'aborted', 'malformed_response']) {
+      expect(TauMetrics.gitForwardErrors.attributes.safeParse({ reason }).success).toBe(true);
+    }
+    for (const outcome of ['applied', 'duplicate', 'ledger_unavailable', 'manifest_mismatch', 'rejected', 'stale']) {
+      expect(TauMetrics.gitReceipts.attributes.safeParse({ outcome }).success).toBe(true);
+    }
+    expect(TauMetrics.gitReceipts.attributes.safeParse({ outcome: 'rid_1' }).success).toBe(false);
   });
 
   it('should split retryable refusals out of error as busy on the sync edge', () => {
@@ -412,7 +450,8 @@ describe('TauMetrics', () => {
   it('should use pluralized names or mass nouns for counters', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
     // `copied`: W13's catalogue fixes `tau_mirror_{objects,bytes}_copied_total` (W14 OB6).
-    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$|copied$/;
+    // `rejected`: the W14 catalogue's `tau_git_grants_rejected_total` (Hosted Remote Storage DC1, OB4).
+    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$/;
     for (const counter of counters) {
       const lastSegment = counter.name.split('.').at(-1) ?? '';
       expect(lastSegment).toMatch(validSuffixes);

@@ -161,6 +161,8 @@ const config: KnipConfig = {
       entry: [
         'app/main.ts',
         'app/*-command.ts',
+        // tau-storage (DC1): the Dockerfile `storage` target runs it, built by vite.storage-worker.config.ts.
+        'app/storage-worker.ts',
         'app/api/**/*.module.ts',
         'app/database/**/*.ts',
         'app/telemetry/**/*.ts',

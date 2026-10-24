@@ -121,8 +121,9 @@ describe('Tags', () => {
     render(<TagsHarness initialTags={['friend@example.com']} isDisabled onTagsChange={onTagsChange} />);
 
     await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'team@example.com{Enter}');
-    await user.click(screen.getByRole('button', { name: 'Remove friend@example.com' }));
 
+    // A disabled field shows its tags with no Remove button that looks usable.
+    expect(screen.queryByRole('button', { name: 'Remove friend@example.com' })).toBeNull();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
     expect(screen.queryByText('team@example.com')).not.toBeInTheDocument();
     expect(onTagsChange).not.toHaveBeenCalled();
@@ -158,5 +159,17 @@ describe('Tags', () => {
     await user.click(screen.getByRole('button', { name: 'Remove friend@example.com' }));
 
     expect(screen.getByRole('combobox', { name: 'Tags' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('gives Remove the 24px floor under a coarse pointer while it still removes the tag (I3)', async () => {
+    const user = userEvent.setup();
+    const onTagsChange = vi.fn();
+    render(<TagsHarness initialTags={['friend@example.com']} onTagsChange={onTagsChange} />);
+    const remove = screen.getByRole('button', { name: 'Remove friend@example.com' });
+
+    // Jsdom applies no media queries; the coarse rule is asserted as written and measured by the 320px e2e.
+    expect(remove).toHaveClass('size-auto', 'pointer-coarse:size-6');
+    await user.click(remove);
+    expect(onTagsChange).toHaveBeenLastCalledWith([]);
   });
 });

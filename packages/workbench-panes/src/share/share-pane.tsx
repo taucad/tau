@@ -47,7 +47,7 @@ export function SharePaneFrame({
   return (
     <section aria-labelledby={titleId} className='flex size-full min-h-0 min-w-0 flex-col bg-background'>
       <header className='shrink-0 border-b border-border p-4'>
-        <h2 id={titleId} className='text-base font-semibold'>
+        <h2 id={titleId} data-slot='share-pane-title' className='text-base font-semibold'>
           Share project
         </h2>
         <p className='mt-1 text-sm text-muted-foreground'>{description}</p>

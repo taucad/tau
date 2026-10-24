@@ -36,6 +36,15 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { getStorageEnvironment } from '#config/storage-environment.config.js';
+import { MetricsService } from '#telemetry/metrics.js';
+import { developmentSigningKeyJson } from '#api/git/forwarding/contract/development-keys.js';
+import { parseSigningKey } from '#api/git/forwarding/contract/keys.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import { StorageReceiptsController } from '#api/git/forwarding/receipts.controller.js';
+import { StorageForwarder } from '#api/git/forwarding/storage-forwarder.js';
+import { startStorageApp } from '#api/git/worker/storage-app.js';
+import type { StorageApp } from '#api/git/worker/storage-app.js';
 
 /**
  * Success criterion S2: two or more API processes serve the same repository
@@ -53,6 +62,11 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
  * directory, an in-memory lock, a cached manifest — and two applications in one
  * process share all of it, so an implementation that leaned on any of it fails
  * here exactly as it would across machines.
+ *
+ * DC1: the topology is two API applications and two tau-storage workers over
+ * one object store. The APIs hold no lease and run no git; each forwards over
+ * the real hop to the workers (preferring a different one), and a worker
+ * posts its out-of-band receipts to the first API's receipt route.
  */
 
 const suffix = randomBytes(5).toString('hex');
@@ -132,8 +146,11 @@ const runGit = async (
  * One worker: a complete application with its own container, its own service
  * instance and its own `project_git` row. Nothing is shared but the store.
  */
-const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: string; remote: string }> => {
-  const port = await reservePort();
+const startWorker = async (
+  storageUrls: readonly string[],
+  reservedPort?: number,
+): Promise<{ app: NestFastifyApplication; origin: string; remote: string }> => {
+  const port = reservedPort ?? (await reservePort());
   const origin = `http://127.0.0.1:${String(port)}`;
   const row = { storageBytes: 0, generation: 0, derivedGeneration: 0 };
   const rows = (): unknown[] => [row];
@@ -179,9 +196,18 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
 
   @Module({
     imports: [ConfigModule.forRoot({ validate: getEnvironment, isGlobal: true }), StorageModule],
-    controllers: [GitController],
+    controllers: [GitController, StorageReceiptsController],
     providers: [
       GitRepositoryService,
+      {
+        provide: gitExecutorKey,
+        useFactory: () =>
+          new StorageForwarder({
+            urls: storageUrls,
+            key: parseSigningKey(developmentSigningKeyJson('grant'), 'grant'),
+            metrics: new MetricsService(),
+          }),
+      },
       GitLfsService,
       PublicationRateLimiterService,
       S3RepositoryStore,
@@ -234,26 +260,55 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
   );
   app.enableVersioning({ type: VersioningType.URI });
   await app.init();
-  /* S2 exercises cross-worker store and manifest races, not the lease-disk admission (DA3).
-   * A 1 TiB stand-in disk keeps admission real without depending on the test runner's free space,
-   * which a push's quarantine bound (about 1 GiB) would otherwise have to fit in. */
-  app.get(GitRepositoryService).readLeaseDiskFreeBytes = async () => 1024 ** 4;
   await app.getHttpAdapter().getInstance().ready();
   await app.listen(String(port), '127.0.0.1');
 
   return { app, origin, remote: `http://tau:${token}@127.0.0.1:${String(port)}/v1/git/${projectId}.git` };
 };
 
-describe('two API workers over one object store (S2)', () => {
+/**
+ * One tau-storage worker, in process, posting receipts to `receiptUrl`.
+ *
+ * S2 exercises cross-worker store and manifest races, not the lease-disk
+ * admission (DA3). A 1 TiB stand-in disk keeps admission real without depending
+ * on the test runner's free space, which a push's quarantine bound (about 1 GiB)
+ * would otherwise have to fit in.
+ */
+const startStorage = async (receiptUrl: string): Promise<StorageApp> => {
+  const storage = await startStorageApp({
+    environment: { ...getStorageEnvironment(), PORT: 0, TAU_STORAGE_RECEIPT_URL: receiptUrl },
+    host: '127.0.0.1',
+  });
+  storage.service.readLeaseDiskFreeBytes = async () => 1024 ** 4;
+  return storage;
+};
+
+/** Kills a worker outright: every connection dropped, nothing drained. */
+const kill = async (storage: StorageApp): Promise<void> => {
+  storage.shutdown.stop();
+  storage.server.closeAllConnections();
+  await new Promise<void>((resolve) => {
+    storage.server.close(() => {
+      resolve();
+    });
+  });
+};
+
+describe('two API processes and two storage workers over one object store (S2, DC1)', () => {
   let first: Awaited<ReturnType<typeof startWorker>>;
   let second: Awaited<ReturnType<typeof startWorker>>;
+  let storageA: StorageApp;
+  let storageB: StorageApp;
   let workspace: string;
 
   beforeAll(async () => {
     process.env.TAU_API_URL = 'http://127.0.0.1:1';
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-2p-'));
-    first = await startWorker();
-    second = await startWorker();
+    const firstPort = await reservePort();
+    storageA = await startStorage(`http://127.0.0.1:${String(firstPort)}`);
+    storageB = await startStorage(`http://127.0.0.1:${String(firstPort)}`);
+    first = await startWorker([storageA.url, storageB.url], firstPort);
+    second = await startWorker([storageB.url, storageA.url]);
     assertDestructiveTestBucketAllowed(
       first.app.get(ObjectStorageService).bucketFor('private'),
       'the two-worker git suite',
@@ -268,6 +323,8 @@ describe('two API workers over one object store (S2)', () => {
     });
     await first.app.close();
     await second.app.close();
+    await storageA.close(1000);
+    await storageB.close(1000);
     await rm(workspace, { recursive: true, force: true });
   }, 60_000);
 
@@ -345,5 +402,49 @@ describe('two API workers over one object store (S2)', () => {
     const log = await gitOk(['log', '--oneline'], verify);
     expect(log.stdout).toContain('left revision');
     expect(log.stdout).toContain('right revision');
+  }, 180_000);
+  /**
+   * DC1: a push over 1 MB crosses the hop as a stream (the API buffers no
+   * pack), and a worker killed in the middle of a push loses no push a client
+   * was told succeeded. The first push is held inside worker A's commit and A
+   * is killed there; its client is refused. The retry reaches worker B (A now
+   * refuses the connection), succeeds, and is readable through the other API.
+   */
+  it('streams a push over 1 MB and loses no acknowledged push when a worker is killed mid-push', async () => {
+    const author = path.join(workspace, 'killed');
+    await gitOk(['clone', first.remote, author], workspace);
+    await writeFile(path.join(author, 'large.bin'), randomBytes(3 * 1024 * 1024));
+    await gitOk(['add', '.'], author);
+    await gitOk(['commit', '-m', 'a large revision across a killed worker'], author);
+
+    let reached!: () => void;
+    const atCommit = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let die!: (error: Error) => void;
+    storageA.service.faults = async (point) => {
+      if (point === 'before-manifest-commit') {
+        reached();
+        await new Promise<void>((_resolve, reject) => {
+          die = reject;
+        });
+      }
+    };
+    const pushing = runGit(['push', 'origin', 'HEAD:refs/heads/large'], author);
+    await atCommit;
+    await kill(storageA);
+    die(new Error('the worker was killed here'));
+    const killed = await pushing;
+    storageA.service.faults = undefined;
+
+    expect(killed.code, 'a push whose worker died before its commit must not be acknowledged').not.toBe(0);
+
+    const retried = await runGit(['push', 'origin', 'HEAD:refs/heads/large'], author);
+    expect(retried.code, retried.stderr).toBe(0);
+
+    const verify = path.join(workspace, 'verify-large');
+    await gitOk(['clone', '--branch', 'large', second.remote, verify], workspace);
+    const log = await gitOk(['log', '--oneline'], verify);
+    expect(log.stdout).toContain('a large revision across a killed worker');
   }, 180_000);
 });

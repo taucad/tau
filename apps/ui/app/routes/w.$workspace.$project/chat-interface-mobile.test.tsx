@@ -90,7 +90,14 @@ vi.mock('#routes/w.$workspace.$project/chat-editor-layout.js', () => ({ ChatEdit
 vi.mock('#routes/w.$workspace.$project/chat-details.js', () => ({ ChatDetails: () => <p>Project details</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-converter.js', () => ({ ChatConverter: () => <p>Export formats</p> }));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
-  ProjectShareWorkbenchPanel: () => <p>Share settings</p>,
+  ProjectShareWorkbenchPanel: () => (
+    <section aria-labelledby='share-frame-title'>
+      <h2 id='share-frame-title' data-slot='share-pane-title'>
+        Share project
+      </h2>
+      <p>Share settings</p>
+    </section>
+  ),
 }));
 vi.mock('#routes/w.$workspace.$project/chat-revisions.js', () => ({ ChatRevisions: () => <p>Revision list</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-explorer.js', () => ({ ModelPanelBody: () => <p>Component tree</p> }));
@@ -108,6 +115,8 @@ vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => 
   ProjectManifestIssueBanner: () => null,
 }));
 vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
+/* The project top bar (W2) has its own suite; this shell suite only needs its slot. */
+vi.mock('#routes/w.$workspace.$project/mobile-project-top-bar.js', () => ({ MobileProjectTopBar: () => null }));
 
 const renderShell = (): ReturnType<typeof render> =>
   render(
@@ -353,6 +362,7 @@ describe('ChatInterfaceMobile', () => {
     ['jobs', 'Jobs'],
     ['kernel', 'Telemetry'],
     ['console', 'Console'],
+    ['share', 'Share'],
   ])(
     'should give the %s pane a title and a Close named after it that returns to the model (D4, I6)',
     async (id, title) => {
@@ -370,6 +380,18 @@ describe('ChatInterfaceMobile', () => {
       expect(state.activeTab).toBe('viewer');
     },
   );
+
+  it('should give the phone Share pane one visible title, hiding the share frame heading (PN-SHR-1)', async () => {
+    state.drawerOpen = true;
+    state.activeTab = 'share';
+    renderShell();
+
+    const surface = await screen.findByRole('region', { name: 'Share' });
+    const frameTitle = within(surface).getByRole('heading', { name: 'Share project' });
+    // Jsdom applies no Tailwind; the wrapper's rule is what hides the frame heading on the phone.
+    expect(frameTitle.closest('[class*="[&_[data-slot=share-pane-title]]:hidden"]')).not.toBeNull();
+    expect(within(surface).getByRole('region', { name: 'Share project' })).toBeInTheDocument();
+  });
 
   it('should show the desktop refusal for Telemetry and Console while debug mode is off', async () => {
     state.flags.tauDebug = false;
@@ -409,10 +431,10 @@ describe('ChatInterfaceMobile', () => {
     const navigation = screen.getByRole('navigation', { name: 'Workbench' });
     fireEvent.click(within(navigation).getByRole('button', { name: 'All' }));
     fireEvent.click(
-      within(await screen.findByRole('dialog', { name: 'All surfaces' })).getByRole('button', { name: 'Jobs' }),
+      within(await screen.findByRole('dialog', { name: 'All surfaces' })).getByRole('button', { name: 'Agents' }),
     );
 
-    const surface = await screen.findByRole('region', { name: 'Jobs' });
+    const surface = await screen.findByRole('region', { name: 'Agents' });
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'All surfaces' })).not.toBeInTheDocument();
     });
@@ -421,10 +443,10 @@ describe('ChatInterfaceMobile', () => {
 
   it('should not take focus for a surface restored from storage', async () => {
     state.drawerOpen = true;
-    state.activeTab = 'jobs';
+    state.activeTab = 'agents';
     renderShell();
 
-    const surface = await screen.findByRole('region', { name: 'Jobs' });
+    const surface = await screen.findByRole('region', { name: 'Agents' });
     expect(surface).not.toHaveFocus();
   });
 

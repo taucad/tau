@@ -5,7 +5,10 @@ import type { RuntimeInitializeMemoryHandle } from '#transport/runtime-transport
 
 /** Parent-owned transferable compute authority prepared for one runtime client. @internal */
 export type ComputeStoreBridge = {
-  readonly memoryHandle: Pick<RuntimeInitializeMemoryHandle, 'computeBindingMode' | 'computeStorePort'>;
+  readonly memoryHandle: Pick<
+    RuntimeInitializeMemoryHandle,
+    'computeBindingMode' | 'computeStorePort' | 'computeMemoryConstrained'
+  >;
   readonly transfer: readonly Transferable[];
   readonly dispose: () => void;
 };
@@ -18,9 +21,11 @@ export type ComputeStoreBridge = {
  * @returns The memory-handle fields, the ports to transfer, and the disposer that closes them.
  */
 export const buildComputeStoreBridge = (binding: ComputeBinding | undefined): ComputeStoreBridge => {
+  const sizing =
+    binding?.mode !== 'off' && binding?.memoryConstrained === true ? { computeMemoryConstrained: true } : {};
   if (binding?.mode !== 'durable') {
     return {
-      memoryHandle: { computeBindingMode: binding?.mode ?? 'memory' },
+      memoryHandle: { computeBindingMode: binding?.mode ?? 'memory', ...sizing },
       transfer: [],
       dispose() {
         /* No authority was allocated. */
@@ -57,7 +62,7 @@ export const buildComputeStoreBridge = (binding: ComputeBinding | undefined): Co
   });
   let disposed = false;
   return {
-    memoryHandle: { computeBindingMode: 'durable', computeStorePort: channel.port2 },
+    memoryHandle: { computeBindingMode: 'durable', computeStorePort: channel.port2, ...sizing },
     transfer: [channel.port2],
     dispose() {
       if (disposed) {

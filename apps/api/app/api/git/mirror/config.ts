@@ -48,6 +48,11 @@ export const mirrorEnvironmentSchema = z.object({
   TAU_MIRROR_CONCURRENCY: positiveInteger(4),
   /** The share of each poll's batch backfill may take, so new commits are never starved (W13 Finding 2). */
   TAU_MIRROR_BACKFILL_SHARE: z.coerce.number().min(0).max(1).default(0.5),
+
+  /** The deployment the drill reads, its `mirror_drill_run.environment` and its series' `environment` label. */
+  TAU_MIRROR_ENVIRONMENT: z.enum(['staging', 'production', 'development']).default('development'),
+  /** Repositories the daily verify drill (DR2-lite) reads back from the copy; 0 turns it off. */
+  TAU_MIRROR_DRILL_SAMPLE: z.coerce.number().int().min(0).max(50).default(3),
 });
 /* eslint-enable @typescript-eslint/naming-convention -- end environment variable names */
 

@@ -883,3 +883,19 @@ describe('KinematicsPane without optional host pieces', () => {
     expect(statusRegion()).toHaveTextContent('Ready');
   });
 });
+
+describe('KinematicsPane with no geometry units (PN-KIN-2)', () => {
+  it('explains when joints appear rather than showing an empty pane', () => {
+    hostState.units = [];
+    render(
+      <WorkbenchPanesHostProvider value={createHost({ withStatus: true })}>
+        <TooltipProvider>
+          <KinematicsPane />
+        </TooltipProvider>
+      </WorkbenchPanesHostProvider>,
+    );
+
+    expect(screen.getByText('No geometry units')).toBeInTheDocument();
+    expect(screen.getByText('Joints appear here when an open model file declares a mechanism.')).toBeInTheDocument();
+  });
+});

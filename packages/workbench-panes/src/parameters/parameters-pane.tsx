@@ -1,6 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Box, CopyMinus, CopyPlus, Download, EllipsisVertical, FileCode, X as CloseIcon } from 'lucide-react';
+import {
+  Box,
+  CopyMinus,
+  CopyPlus,
+  Download,
+  EllipsisVertical,
+  FileCode,
+  SlidersHorizontal,
+  X as CloseIcon,
+} from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import type { ParameterManifest, ParameterSetOutcome } from '@taucad/parameters';
@@ -28,6 +37,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { ModifiedIndicator } from '@taucad/ui/components/modified-indicator';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { cn } from '@taucad/ui/utils/cn';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
@@ -524,7 +534,7 @@ function ParametersPanelHeader({
       <PaneviewHeaderControls data-testid='paneview-header-controls'>
         <PaneviewHeaderActionGroup
           data-testid='paneview-header-actions'
-          className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'
+          className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none pointer-coarse:opacity-100 [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'
         >
           {/* Choosing a group is an action, not status: it is revealed with the others. */}
           {groups === undefined ? null : (
@@ -658,7 +668,14 @@ function ParametersContent({ filterTerm }: { readonly filterTerm: string }): Rea
   const { units, mainEntryPath } = useParameterUnits();
 
   if (units.length === 0) {
-    return <p className='p-4 text-center text-xs text-muted-foreground'>No geometry units.</p>;
+    /* Explains why the pane is empty and what to do about it (PN-PAR-4). */
+    return (
+      <PanelEmptyState
+        icon={SlidersHorizontal}
+        title='No parameters yet'
+        description='Parameters appear when an open model file exports them. Ask the agent to expose a value as a parameter.'
+      />
+    );
   }
 
   return <ParametersPaneview units={units} mainEntryPath={mainEntryPath} filterTerm={filterTerm} />;
@@ -711,7 +728,7 @@ export function ParametersPane(): React.JSX.Element | undefined {
             aria-label='Filter parameters'
             placeholder='Filter parameters…'
             value={filterTerm}
-            className='h-7 min-w-0 bg-background'
+            className='h-7 min-w-0 bg-background pointer-coarse:h-10'
             onChange={(event) => {
               setFilterTerm(event.target.value);
             }}

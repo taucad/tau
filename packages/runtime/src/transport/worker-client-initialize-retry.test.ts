@@ -37,6 +37,7 @@ type InitializeCallPayload = {
       fileSystemPort?: MessagePort;
       computeBindingMode?: 'off' | 'memory' | 'durable';
       computeStorePort?: MessagePort;
+      computeMemoryConstrained?: boolean;
     };
   };
 };
@@ -184,6 +185,45 @@ describe('worker transport initialize filesystem bridge retries', () => {
     );
     await first.close();
     await second.close();
+  });
+
+  /** An initialize with no transferables is sent bare, without the transfer envelope. */
+  const lastMemoryHandle = () => {
+    const payload = mocks.channel.call.mock.calls.at(-1)?.[1] as InitializeCallPayload &
+      Pick<NonNullable<InitializeCallPayload['value']>, 'memoryHandle'>;
+    return payload.value?.memoryHandle ?? payload.memoryHandle;
+  };
+
+  it('public worker factories carry the device memory class with memory and durable bindings', async () => {
+    const memory = webWorkerClient({
+      createWorker: createWebWorker,
+      compute: { mode: 'memory', memoryConstrained: true },
+    });
+    mocks.channel.call.mockResolvedValue({});
+    await memory.initialize(initializePayload);
+    expect(lastMemoryHandle()).toMatchObject({
+      computeBindingMode: 'memory',
+      computeMemoryConstrained: true,
+    });
+    await memory.close();
+
+    const { workerCtor } = createNodeWorkerCtor();
+    const durable = nodeWorkerClient({
+      url: new URL('about:blank'),
+      workerCtor,
+      compute: { mode: 'durable', store: registeredComputeStore(), memoryConstrained: true },
+    });
+    await durable.initialize(initializePayload);
+    expect(lastMemoryHandle()).toMatchObject({
+      computeBindingMode: 'durable',
+      computeMemoryConstrained: true,
+    });
+    await durable.close();
+
+    const standard = webWorkerClient({ createWorker: createWebWorker, compute: { mode: 'memory' } });
+    await standard.initialize(initializePayload);
+    expect(lastMemoryHandle()).not.toHaveProperty('computeMemoryConstrained');
+    await standard.close();
   });
 
   it('public worker factory refuses a forged durable capability', async () => {

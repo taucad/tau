@@ -192,7 +192,7 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
 export type ViewerControlsProps = Readonly<{
   /** The capture control, in its own section after Fullscreen; hosts without capture leave it out. */
   capture?: React.ReactNode;
-  /** Mobile-only host action, such as AR, after Fit view. */
+  /** Capability-gated host action, such as AR: after Fit view on phones, after Fullscreen in the desktop layout. */
   mobileAction?: React.ReactNode;
   /** Request touch targets in an embedded mobile surface; defaults to compact controls. */
   enableTouchTargets?: boolean;
@@ -376,7 +376,15 @@ function ViewerControlsBody({
             </>
           )}
           <FitViewControl shortcut={keys.fitView} />
-          {isMobile ? mobileAction : <FullscreenViewControl />}
+          {/* A capability-gated host action such as AR; tablets in the desktop layout show it after Fullscreen (D12). */}
+          {isMobile ? (
+            mobileAction
+          ) : (
+            <>
+              <FullscreenViewControl />
+              {mobileAction}
+            </>
+          )}
           {capture === undefined ? null : (
             <>
               <Hairline />

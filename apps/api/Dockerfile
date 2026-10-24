@@ -2,21 +2,26 @@
 
 # Multi-stage Fly.io image for the Tau NestJS API.
 #
-# Stages: base -> deps -> build -> pruned -> runtime-base -> mirror | maintenance | runtime
+# Stages: base -> deps -> build -> pruned -> runtime-base -> mirror | maintenance | storage | runtime
 #   base         : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
 #   deps         : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
 #                  + patches); cache key independent of source edits.
 #   build        : full source + `pnpm nx build api`; reuses deps layer cache.
 #   pruned       : `pnpm deploy --prod` to materialise a self-contained app dir.
-#   runtime-base : minimal `node:24-slim` with pinned git, running as non-root `nestjs`
-#                  (uid 1001). Exposes nothing.
+#   runtime-base : minimal `node:24-slim` with the pinned git (no git-lfs), running as
+#                  non-root `nestjs` (uid 1001). Exposes nothing.
 #   mirror       : the private `tau-mirror` app (W13 DM1, the B2 second copy), built with
 #                  `--target mirror`; runs `mirror-command.js worker`, metrics on 9464 only,
 #                  no health check.
 #   maintenance  : the private `tau-maintenance` app (north star DC4), built with
 #                  `--target maintenance`; runs `maintenance-command.js`, no port, no
 #                  health check (`app/maintenance-app.test.ts`).
-#   runtime      : the API. The last stage, so a build without `--target` is the API.
+#   storage      : the private `tau-storage` app (north star DC1), built with
+#                  `--target storage`; runs `storage-worker.js` on 3100, asserts the
+#                  pinned `git --version` at build and has no git-lfs
+#                  (`app/storage-app.test.ts`).
+#   runtime      : the API, which adds the pinned git-lfs. The last stage, so a build
+#                  without `--target` is the API.
 #
 # Build choices (see also docs/research/api-docker-build-optimization.md):
 #   - `pnpm fetch` removed: split deps/build stages already bound the
@@ -35,6 +40,9 @@
 
 ARG NODE_VERSION=24.19.0
 ARG PNPM_VERSION=10.30.3
+# Pinned (charter W8): see the runtime-base stage.
+ARG GIT_VERSION=1:2.39.5-0+deb12u3
+ARG GIT_LFS_VERSION=3.3.0-1+deb12u1
 
 # ── Base ──────────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-slim AS base
@@ -104,20 +112,17 @@ WORKDIR /app
 
 # The Tau Hosted Remote is git's own binaries behind HTTP (charter D15):
 # `git upload-pack|receive-pack --stateless-rpc` serve a lease hydrated from the
-# object store, and `git-lfs` is present so a repository written by the API is one
-# a stock client can also maintain. Readiness fails by name when either is
-# missing (`git-toolchain-health.indicator.ts`).
+# object store. Since DC1 that runs in tau-storage, the `storage` target below.
 #
-# Pinned (charter W8), because these two binaries decide the bytes of every pack
-# this service writes: an unpinned `apt-get install` means a rebuild of an unchanged
-# commit can ship a different git. Both versions are the bookworm candidates of the
+# Pinned (charter W8), because git decides the bytes of every pack this service
+# writes: an unpinned `apt-get install` means a rebuild of an unchanged commit can
+# ship a different git. The versions are the bookworm candidates of the
 # `node:24-slim` base. When Debian rolls a point release the old version leaves the
-# index and this build fails loudly — bump the two ARGs, which is the intended
-# maintenance, rather than dropping the pin.
-ARG GIT_VERSION=1:2.39.5-0+deb12u3
-ARG GIT_LFS_VERSION=3.3.0-1+deb12u1
+# index and this build fails loudly — bump the ARGs at the top, which is the
+# intended maintenance, rather than dropping the pin.
+ARG GIT_VERSION
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends "git=${GIT_VERSION}" "git-lfs=${GIT_LFS_VERSION}" && \
+    apt-get install -y --no-install-recommends "git=${GIT_VERSION}" && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user before COPY so --chown can write directly into the
@@ -152,9 +157,37 @@ CMD ["node", "/app/dist/mirror-command.js", "worker"]
 FROM runtime-base AS maintenance
 CMD ["node", "/app/dist/maintenance-command.js", "worker"]
 
+# ── Storage: the private `tau-storage` app (DC1) ──────────────────────────
+# The only process that runs a repository `git` child or writes under `repos/`.
+# No git-lfs (review FR16): LFS objects never enter a git engine, they are
+# presigned to the object store by the API. The build fails unless the installed
+# git is exactly the pinned Debian package and git-lfs is absent.
+FROM runtime-base AS storage
+ARG GIT_VERSION
+RUN test "$(dpkg-query -W -f='${Version}' git)" = "${GIT_VERSION}" && \
+    upstream="${GIT_VERSION#*:}" && \
+    test "$(git --version)" = "git version ${upstream%%-*}" && \
+    ! command -v git-lfs
+ENV PORT="3100" \
+    OTEL_SERVICE_NAME="tau-storage"
+EXPOSE 3100 9464
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3100)+'/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+CMD ["node", "/app/dist/storage-worker.js"]
+
 # ── Runtime: the API ──────────────────────────────────────────────────────
 FROM runtime-base AS runtime
 LABEL fly_launch_runtime="NestJS"
+
+# git-lfs stays on the API until DC3 moves its readiness probe and the
+# publication materializer's reads to tau-storage
+# (`git-toolchain-health.indicator.ts`). Pinned like git.
+ARG GIT_LFS_VERSION
+USER root
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends "git-lfs=${GIT_LFS_VERSION}" && \
+    rm -rf /var/lib/apt/lists/*
+USER nestjs
 
 ENV PORT="3000"
 EXPOSE 3000 9464

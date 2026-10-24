@@ -4609,6 +4609,9 @@ importers:
       '@gltf-transform/core':
         specifier: 'catalog:'
         version: 4.5.1
+      '@gltf-transform/extensions':
+        specifier: 'catalog:'
+        version: 4.5.1
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -4622,6 +4625,9 @@ importers:
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../esbuild
+      '@taucad/middleware':
+        specifier: workspace:*
+        version: link:../middleware
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime

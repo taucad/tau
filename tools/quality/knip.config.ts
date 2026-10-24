@@ -331,8 +331,9 @@ const config: KnipConfig = {
       entry: ['src/**/*.test-d.ts'],
     },
     'packages/cli': {
-      // The `stage-acp` target runs it from the workspace root.
-      entry: ['scripts/stage-acp-adapters.mts'],
+      // The `stage-acp` target runs the first from the workspace root; runtime-e2e, warehouse and
+      // the example-packaging skill spawn the second, `geospec run` with Tau's exporter, by path.
+      entry: ['scripts/stage-acp-adapters.mts', 'scripts/geospec.mts'],
       // `stage-acp` copies the pinned ACP adapters into `dist-acp` by name, and `tau serve`
       // resolves them there (`acpAdapterResolveFrom`, packages/host/src/acp/registry.ts).
       ignoreDependencies: ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'],
@@ -349,8 +350,6 @@ const config: KnipConfig = {
         // `scripts:prepare-geospec-test-consumer` stages from this directory.
         'host-tests/{f1-public-a1,m3-corpus}/vitest.config.mjs',
       ],
-    },
-    'packages/geospec-engine': {
       // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
       // STEP corpus, and each fixture manifest records its script as provenance.
       ignore: ['fixtures/scripts/*/**'],

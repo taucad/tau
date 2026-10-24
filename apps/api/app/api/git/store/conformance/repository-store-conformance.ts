@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import { describe, it, expect, afterAll, beforeAll } from 'vitest';
 import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import type { ObjectStorageService, StorageAccount } from '#storage/object-storage.service.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import type { RepositoryLocator } from '#api/git/store/port.js';
+import type { ObjectSource, RepositoryLocator } from '#api/git/store/port.js';
 
 /**
  * Builds the env-gated conformance target from `TAU_S3_CONFORMANCE_*`.
@@ -72,6 +72,17 @@ const manifestBytes = (generation: number): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(JSON.stringify({ format: 1, generation, incarnation: randomBytes(4).toString('hex') }));
 
 const sha256Base64 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('base64');
+
+/** A source that streams `bytes` in 64 KiB pieces, as a file read stream would, every time it is opened. */
+const streamOf =
+  (bytes: Uint8Array<ArrayBuffer>): ObjectSource =>
+  async () => {
+    const pieces: Array<Uint8Array<ArrayBuffer>> = [];
+    for (let offset = 0; offset < bytes.byteLength; offset += 64 * 1024) {
+      pieces.push(bytes.subarray(offset, Math.min(offset + 64 * 1024, bytes.byteLength)));
+    }
+    return Readable.from(pieces);
+  };
 
 /**
  * Runs every `RepositoryStore` scenario the charter requires against one
@@ -289,6 +300,56 @@ export const describeRepositoryStoreConformance = (name: string, getDriver: () =
       expect(stored.byteLength).toBe(body.byteLength);
       expect(createHash('sha256').update(stored).digest('hex')).toBe(createHash('sha256').update(body).digest('hex'));
     });
+
+    it.each([
+      ['below the single-part ceiling', 1024 * 1024 + 7],
+      ['above the single-part ceiling, through multipart', conformanceMaxObjectBytes * 2 + 4099],
+    ])('should round-trip a streamed object %s', async (_label, bytes) => {
+      const store = newStore();
+      const locator = newLocator();
+      const body = new Uint8Array(randomBytes(bytes));
+
+      await store.putObject(locator, 'packs/streamed.pack', streamOf(body), {
+        contentLength: body.byteLength,
+        sha256: sha256Base64(body),
+      });
+
+      const stored = await collect(await store.getObject(locator, 'packs/streamed.pack'));
+
+      expect(stored.byteLength).toBe(body.byteLength);
+      expect(sha256Base64(stored)).toBe(sha256Base64(body));
+    });
+
+    it.each([
+      ['below the single-part ceiling', 1024 * 1024 + 7],
+      ['above the single-part ceiling, through multipart', conformanceMaxObjectBytes * 2 + 4099],
+    ])(
+      'should refuse a streamed object %s whose bytes do not hash to the declared SHA-256, and store nothing',
+      async (_label, bytes) => {
+        const store = newStore();
+        const locator = newLocator();
+        const body = new Uint8Array(randomBytes(bytes));
+        const declared = sha256Base64(body);
+        // One byte flipped after the digest was taken: what a pack rewritten between the
+        // hashing pass and the upload pass, or a source read that changed, would send.
+        const sent = new Uint8Array(body);
+        sent[sent.byteLength - 1] = ((sent[sent.byteLength - 1] ?? 0) + 1) % 256;
+
+        await expect(
+          store.putObject(locator, 'packs/mislabelled.pack', streamOf(sent), {
+            contentLength: sent.byteLength,
+            sha256: declared,
+          }),
+        ).rejects.toThrow();
+
+        const listed: string[] = [];
+        for await (const object of store.listObjects(locator, 'packs/')) {
+          listed.push(object.key);
+        }
+
+        expect(listed).toStrictEqual([]);
+      },
+    );
 
     it('should list every object under a prefix across several response pages', async () => {
       const store = newStore();

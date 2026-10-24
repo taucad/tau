@@ -42,7 +42,8 @@ process.env['OTEL_SEMCONV_STABILITY_OPT_IN'] ??= 'http';
 
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL semantic convention attribute names use dot-notation */
 const resource = resourceFromAttributes({
-  'service.name': 'tau-api',
+  // One image, several Fly apps: `tau-mirror` sets OTEL_SERVICE_NAME so its series are told apart (W14).
+  'service.name': process.env['OTEL_SERVICE_NAME'] ?? 'tau-api',
   'service.version': process.env['FLY_IMAGE_REF'] ?? 'dev',
   'deployment.environment': process.env['NODE_ENV'] ?? 'development',
   'cloud.provider': process.env['FLY_REGION'] ? 'fly.io' : 'local',

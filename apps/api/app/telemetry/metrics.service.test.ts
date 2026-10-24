@@ -1,7 +1,11 @@
 /* oxlint-disable @typescript-eslint/no-confusing-void-expression -- expect(() => fn()).not.toThrow() pattern */
-import { describe, it, expect, beforeEach } from 'vitest';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
+import { metrics } from '@opentelemetry/api';
+import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import { metrics as sdkMetrics } from '@opentelemetry/sdk-node';
 import { MetricsService } from '#telemetry/metrics.js';
 
 describe('MetricsService', () => {
@@ -187,6 +191,81 @@ describe('MetricsService', () => {
     it('should record gauge values without error', () => {
       expect(() => service.redisConnectionState.record(1)).not.toThrow();
       expect(() => service.redisConnectionState.record(0)).not.toThrow();
+    });
+  });
+
+  /* Hosted Remote Storage DA2/OB2: the series the W14 catalogue names are the series a scrape returns. */
+  describe('git execution metrics', () => {
+    afterEach(() => {
+      metrics.disable();
+    });
+
+    it('should export the git edge, admission, lease, hydrate and commit series under their catalogue names', async () => {
+      const exporter = new PrometheusExporter({ preventServerStart: true });
+      const provider = new sdkMetrics.MeterProvider({ readers: [exporter] });
+      metrics.setGlobalMeterProvider(provider);
+      const git = new MetricsService();
+
+      git.syncRefusals.add(1, {
+        'tau.sync.operation': 'push',
+        'tau.sync.refusal.code': 'GIT_LEASE_OWNER_BUSY',
+        'http.response.status_code': 503,
+      });
+      git.gitAdmissions.add(1, {
+        'tau.git.operation': 'receive_pack',
+        outcome: 'admitted',
+      });
+      git.gitLeasesActive.add(1, { 'tau.git.operation': 'receive_pack' });
+      git.gitLeaseReservedBytes.record(2_684_354_560);
+      git.gitDiskFreeBytes.record(7_838_315_315);
+      git.gitHydrateBytes.record(1024, {
+        'tau.git.hydrate.source': 'object_store',
+      });
+      git.gitCommitAttempts.add(1, {
+        outcome: 'committed',
+        'tau.git.commit.kind': 'push',
+      });
+      git.gitCommitDuration.record(0.2, {
+        'tau.git.commit.phase': 'total',
+        'tau.git.commit.kind': 'push',
+      });
+      git.gitRepositorySize.record(1024);
+      git.gitHotProjectCommitRate.addCallback((result) => {
+        result.observe(0.5, { rank: '1' });
+      });
+      git.gitHotProjectWriters.addCallback((result) => {
+        result.observe(3, { rank: '1' });
+      });
+
+      const body = await new Promise<string>((resolve) => {
+        const response = {
+          statusCode: 0,
+          setHeader: () => response,
+          end: (text: string) => {
+            resolve(text);
+          },
+        };
+        exporter.getMetricsRequestHandler({} as IncomingMessage, response as unknown as ServerResponse);
+      });
+      await provider.shutdown();
+
+      for (const series of [
+        'tau_sync_refusals_total{',
+        'tau_git_admissions_total{',
+        'tau_git_leases_active{',
+        'tau_git_lease_reserved_bytes{',
+        'tau_git_disk_free_bytes{',
+        'tau_git_hydrate_bytes_bucket{',
+        'tau_git_commit_attempts_total{',
+        'tau_git_commit_duration_bucket{',
+        'tau_git_repository_size_bucket{',
+        'tau_git_hot_project_commit_rate{',
+        'tau_git_hot_project_writers{',
+      ]) {
+        expect(body, series).toContain(series);
+      }
+      expect(body).toContain('tau_sync_refusal_code="GIT_LEASE_OWNER_BUSY"');
+      expect(body).toMatch(/tau_git_hot_project_writers\{[^}]*rank="1"[^}]*\} 3/u);
     });
   });
 });

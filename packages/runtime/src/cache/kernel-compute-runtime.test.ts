@@ -747,6 +747,194 @@ describe('compute capability contract', () => {
   });
 });
 
+describe('deferred whole-action publication (D1)', () => {
+  type Settled = { readonly actionDigest: ActionDigest; readonly status: string; readonly reason?: string };
+  const createDeferredHost = (options?: {
+    readonly idle?: () => boolean;
+    readonly encodeGate?: () => Promise<void>;
+    readonly unencodable?: string;
+  }) => {
+    const settled: Settled[] = [];
+    const encoded: string[] = [];
+    const codec: CacheCodec<string> = {
+      ...textCodec,
+      encode: async ({ value }) => {
+        encoded.push(value);
+        if (value === options?.unencodable) {
+          // A native handle disposed before idle has no snapshot to take.
+          throw new Error('native handle disposed');
+        }
+        await options?.encodeGate?.();
+        return new TextEncoder().encode(value);
+      },
+    };
+    const host = createComputeCapabilityHost({
+      binding: { mode: 'memory' },
+      workspace: 'w',
+      ...(options?.idle ? { isIdle: options.idle } : {}),
+      onPublicationSettled: ({ actionDigest, status, reason }) =>
+        settled.push({ actionDigest, status, ...(reason === undefined ? {} : { reason }) }),
+    });
+    const evaluate = async (input: {
+      readonly value: number;
+      readonly signal?: AbortSignal;
+      readonly label?: string;
+    }) =>
+      onCapability(host.capability(input.signal ?? signal)).evaluate({
+        action: action(input.value),
+        codec,
+        policy: 'best-effort',
+        compute: async () => input.label ?? `brep-${input.value}`,
+      });
+    return { host, settled, encoded, evaluate };
+  };
+  const nextMacrotask = async (): Promise<void> =>
+    new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+
+  it('should resolve a best-effort miss before encoding, and publish only after the delivery permit', async () => {
+    const { host, settled, encoded, evaluate } = createDeferredHost();
+
+    await expect(evaluate({ value: 1 })).resolves.toMatchObject({
+      source: 'computed',
+      value: 'brep-1',
+      publication: { status: 'deferred' },
+    });
+    await nextMacrotask();
+    expect(encoded, 'nothing encodes before delivery').toHaveLength(0);
+
+    host.permitPublication();
+    await vi.waitFor(() => {
+      expect(settled.map(({ status }) => status)).toEqual(['stored']);
+    });
+    expect(settled[0]!.actionDigest).toBe(await digestAction({ action: action(1) }));
+    expect(encoded).toEqual(['brep-1']);
+    await expect(evaluate({ value: 1 })).resolves.toMatchObject({ source: 'cache', value: 'brep-1' });
+  });
+
+  // A repeated evaluation of the same build can reuse the first one's native handle and dispose
+  // its own, so whichever result still has a live handle must be able to publish.
+  it.each(['first', 'second'])(
+    'should keep every queued result of one action until one stores, when the %s cannot encode',
+    async (unencodable) => {
+      const { host, settled, encoded, evaluate } = createDeferredHost({ unencodable });
+      await evaluate({ value: 5, label: 'first' });
+      await evaluate({ value: 5, label: 'second' });
+
+      host.permitPublication();
+      await vi.waitFor(() => {
+        expect(settled.map(({ status }) => status)).toContain('stored');
+      });
+      await nextMacrotask();
+      expect(settled.filter(({ status }) => status === 'stored')).toHaveLength(1);
+      expect(encoded, 'a stored action is not encoded again').toEqual(
+        unencodable === 'first' ? ['first', 'second'] : ['first'],
+      );
+      await expect(evaluate({ value: 5 })).resolves.toMatchObject({ source: 'cache' });
+    },
+  );
+
+  it('should publish a delivered result before a revisit of the same action looks it up, idle or not', async () => {
+    const { host, settled, encoded, evaluate } = createDeferredHost({ idle: () => false });
+    await evaluate({ value: 6 });
+    await evaluate({ value: 7 });
+    host.permitPublication();
+    await nextMacrotask();
+    expect(encoded, 'the worker is busy, so nothing publishes in the background').toHaveLength(0);
+
+    await expect(evaluate({ value: 6 })).resolves.toMatchObject({ source: 'cache', value: 'brep-6' });
+    expect(encoded, 'only the revisited action publishes').toEqual(['brep-6']);
+    expect(settled).toEqual([{ actionDigest: await digestAction({ action: action(6) }), status: 'stored' }]);
+  });
+
+  it('should never publish a result whose operation was cancelled before its delivery', async () => {
+    const { host, settled, encoded, evaluate } = createDeferredHost();
+    const operation = new AbortController();
+    await evaluate({ value: 2, signal: operation.signal });
+    operation.abort();
+
+    host.permitPublication();
+    await nextMacrotask();
+    expect(encoded).toHaveLength(0);
+    expect(settled).toEqual([
+      { actionDigest: await digestAction({ action: action(2) }), status: 'dropped', reason: 'cancelled' },
+    ]);
+  });
+
+  it('should wait for idle, yield to an admitted operation and run again at the next idle', async () => {
+    let idle = false;
+    let gate = Promise.withResolvers<void>();
+    const { host, settled, encoded, evaluate } = createDeferredHost({
+      idle: () => idle,
+      encodeGate: async () => gate.promise,
+    });
+    await evaluate({ value: 3 });
+    host.permitPublication();
+    await nextMacrotask();
+    expect(encoded, 'a busy worker defers publication').toHaveLength(0);
+
+    idle = true;
+    host.notifyIdle();
+    await vi.waitFor(() => {
+      expect(encoded).toHaveLength(1);
+    });
+    // An operation is admitted while the task is suspended in its encode.
+    idle = false;
+    host.interruptPublication();
+    gate.resolve();
+    await nextMacrotask();
+    expect(settled, 'an interrupted publication neither stores nor settles').toHaveLength(0);
+
+    gate = Promise.withResolvers<void>();
+    gate.resolve();
+    idle = true;
+    host.notifyIdle();
+    await vi.waitFor(() => {
+      expect(settled.map(({ status }) => status)).toEqual(['stored']);
+    });
+    await expect(evaluate({ value: 3 })).resolves.toMatchObject({ source: 'cache' });
+  });
+
+  it('should run again when the worker went idle while an interrupted task was still unwinding', async () => {
+    let idle = true;
+    const gate = Promise.withResolvers<void>();
+    const { host, settled, encoded, evaluate } = createDeferredHost({
+      idle: () => idle,
+      encodeGate: async () => gate.promise,
+    });
+    await evaluate({ value: 4 });
+    host.permitPublication();
+    await vi.waitFor(() => {
+      expect(encoded).toHaveLength(1);
+    });
+    // An operation interrupts the task and finishes before the task observes the interrupt; its
+    // idle notification arrives while the task is still running.
+    idle = false;
+    host.interruptPublication();
+    idle = true;
+    host.notifyIdle();
+    gate.resolve();
+
+    await vi.waitFor(() => {
+      expect(settled.map(({ status }) => status)).toEqual(['stored']);
+    });
+  });
+
+  it('should hold at most four deferred publications, dropping the oldest', async () => {
+    const { host, settled, evaluate } = createDeferredHost({ idle: () => false });
+    for (const value of [10, 11, 12, 13, 14]) {
+      // oxlint-disable-next-line no-await-in-loop -- each edit completes before the next, as in the lane.
+      await evaluate({ value });
+    }
+    expect(settled).toEqual([
+      { actionDigest: await digestAction({ action: action(10) }), status: 'dropped', reason: 'queue-full' },
+    ]);
+    await host.drain();
+    expect(settled.filter((entry) => entry.status === 'stored')).toHaveLength(4);
+  });
+});
+
 describe('opaque shared content closure', () => {
   const partsCodec: CacheCodec<Uint8Array<ArrayBuffer>> = {
     id: 'test.brep',
@@ -807,6 +995,9 @@ describe('opaque shared content closure', () => {
         compute: async () => value,
       });
     }
+    // Best-effort publication follows delivery (D1).
+    host.permitPublication();
+    await host.drain();
     const metadata = new TextEncoder().encode(await digestContent({ bytes: value }));
     expect(await control.inspect({})).toMatchObject({
       entries: 3,
@@ -932,7 +1123,12 @@ describe('opaque shared content closure', () => {
       workspace: 'parts-clear',
       control,
     });
-    const host = createComputeCapabilityHost({ binding: { mode: 'durable', store }, workspace: 'parts-clear' });
+    const settled: string[] = [];
+    const host = createComputeCapabilityHost({
+      binding: { mode: 'durable', store },
+      workspace: 'parts-clear',
+      onPublicationSettled: ({ status, reason }) => settled.push(`${status}:${reason ?? ''}`),
+    });
     onTestFinished(async () => host.dispose());
     const started = Promise.withResolvers<void>();
     const finish = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
@@ -948,7 +1144,10 @@ describe('opaque shared content closure', () => {
     await started.promise;
     await control.clear({});
     finish.resolve(new Uint8Array([42]));
-    expect(await running).toMatchObject({ source: 'computed', publication: { status: 'skipped' } });
+    expect(await running).toMatchObject({ source: 'computed', publication: { status: 'deferred' } });
+    host.permitPublication();
+    await host.drain();
+    expect(settled).toEqual([expect.stringMatching(/^skipped:/)]);
     expect(await control.inspect({})).toMatchObject({ entries: 0, logicalBytes: 0 });
   });
 

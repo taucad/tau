@@ -2,7 +2,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as Sentry from '@sentry/node';
 import type { ErrorEvent } from '@sentry/node';
-import { getSentryRelease, reportReadinessFailure, reportServerError, scrubSentryEvent } from '#telemetry/sentry.js';
+import {
+  getSentryRelease,
+  isRetryableGitRefusal,
+  reportReadinessFailure,
+  reportServerError,
+  scrubSentryEvent,
+} from '#telemetry/sentry.js';
 
 /** Events a real Sentry client produced, captured in `beforeSend` and never sent. */
 const sentEvents: ErrorEvent[] = [];
@@ -146,5 +152,28 @@ describe('getSentryRelease', () => {
 
   it('should leave the release unset when no image reference exists', () => {
     expect(getSentryRelease(undefined)).toBeUndefined();
+  });
+});
+
+describe('isRetryableGitRefusal', () => {
+  it.each(['GIT_LEASE_OWNER_BUSY', 'GIT_LEASE_DISK_FULL', 'GIT_PUSH_RACE_LOST', 'GIT_SERVICE_RESTARTING'])(
+    'should classify a 503 %s as a retryable refusal (X3)',
+    (code) => {
+      expect(isRetryableGitRefusal(503, code)).toBe(true);
+    },
+  );
+
+  it('should keep reporting an incomplete repository, which retrying cannot clear', () => {
+    expect(isRetryableGitRefusal(503, 'GIT_REPOSITORY_INCOMPLETE')).toBe(false);
+  });
+
+  it('should keep reporting a 503 whose code it does not know, or that has none', () => {
+    expect(isRetryableGitRefusal(503, 'GIT_SOMETHING_NEW')).toBe(false);
+    expect(isRetryableGitRefusal(503, 'SERVICE_UNAVAILABLE')).toBe(false);
+    expect(isRetryableGitRefusal(503, undefined)).toBe(false);
+  });
+
+  it('should keep reporting a retryable code raised with any other status', () => {
+    expect(isRetryableGitRefusal(500, 'GIT_LEASE_OWNER_BUSY')).toBe(false);
   });
 });

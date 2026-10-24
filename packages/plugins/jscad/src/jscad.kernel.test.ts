@@ -2336,7 +2336,8 @@ describe('serializeHandle', () => {
 
       const coldClient = createJscadNodeClient(projectPath, store);
       const coldRender = await coldClient.open({ source: { path: 'main.ts' } }).evaluation();
-      coldClient.terminate();
+      // A graceful shutdown drains the publication deferred past delivery; terminate would drop it.
+      await coldClient.shutdown();
       expect(coldRender.superseded).toBe(false);
       expect(coldRender.superseded ? undefined : coldRender.evaluation.success).toBe(true);
 
@@ -2344,7 +2345,7 @@ describe('serializeHandle', () => {
       const restoredExport = await restoredClient.open({ source: { path: 'main.ts' } }).export('glb', {
         options: jscadGlbExportOptions,
       });
-      restoredClient.terminate();
+      await restoredClient.shutdown();
 
       expect(restoredExport.success).toBe(true);
       if (!restoredExport.success) {
@@ -2401,7 +2402,8 @@ describe('serializeHandle', () => {
         meshNames: ['Housing', 'Carrier'],
       });
 
-      coldClient.terminate();
+      // A graceful shutdown drains the publication deferred past delivery; terminate would drop it.
+      await coldClient.shutdown();
       coldClient = undefined;
 
       restoredClient = createJscadNodeClient(projectPath, store);
@@ -2432,8 +2434,9 @@ describe('serializeHandle', () => {
         [primitiveModeTriangles, primitiveModeLines],
       ]);
     } finally {
-      coldClient?.terminate();
-      restoredClient?.terminate();
+      // Let deferred publications drain before the store closes and its directory is removed.
+      await coldClient?.shutdown();
+      await restoredClient?.shutdown();
       await compute.dispose();
       await Promise.all([
         rm(projectPath, { recursive: true, force: true }),

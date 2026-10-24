@@ -5,56 +5,54 @@ import { describe, expect, it } from 'vitest';
 import { publicationKernelExtensions } from '#api/publications/publication-runtime.utils.js';
 
 /*
- * `defaultRuntime` is the engine's own composition, not a published subpath of
- * `@taucad/geospec-engine`, so the parity test resolves it through the package root the
- * devDependency already provides. The API keeps its own table because it must not import
- * plugin packages at runtime — this test is what stops that table from drifting.
+ * `createCliRuntime` is the Tau CLI's composition, the runtime `tau export`, `tau test` and `@taucad/cli/geospec`'s
+ * `tauExporter` serve. It is not a published subpath of `@taucad/cli`, so the parity test resolves it through the
+ * package root the devDependency already provides. The API keeps its own table because it must not import plugin
+ * packages at runtime — this test is what stops that table from drifting.
  */
-const loadEngineKernelExtensions = async (): Promise<Readonly<Record<string, readonly string[]>>> => {
+const loadCliKernelExtensions = async (): Promise<Readonly<Record<string, readonly string[]>>> => {
   const requireFromHere = createRequire(import.meta.url);
-  const engineRoot = dirname(requireFromHere.resolve('@taucad/geospec-engine/package.json'));
-  const moduleUrl = pathToFileURL(resolve(engineRoot, 'src/model/default-runtime.ts')).href;
-  const { defaultRuntime } = (await import(/* @vite-ignore */ moduleUrl)) as {
-    defaultRuntime: {
+  const cliRoot = dirname(requireFromHere.resolve('@taucad/cli/package.json'));
+  const moduleUrl = pathToFileURL(resolve(cliRoot, 'src/cli-runtime.ts')).href;
+  const { createCliRuntime } = (await import(/* @vite-ignore */ moduleUrl)) as {
+    createCliRuntime: () => Promise<{
       readonly kernels: ReadonlyArray<{ readonly id: string; readonly extensions: readonly string[] }>;
-    };
+    }>;
   };
+  const runtime = await createCliRuntime();
   return Object.fromEntries(
-    defaultRuntime.kernels
-      .filter((kernel) => !engineOnlyKernelIds.has(kernel.id))
+    runtime.kernels
+      .filter((kernel) => !cliOnlyKernelIds.has(kernel.id))
       .map((kernel) => [kernel.id, kernel.extensions]),
   );
 };
 
-/** Kernels the hosted publication runtime serves that the engine's default plugin set omits. */
-const publicationOnlyKernelIds = ['zoo'];
-
 /**
- * Native kernels the engine lists when their packages are installed, binding a sealed closure from the local payload
- * store; the hosted publication runtime prepares no native closure, so it serves none of them.
+ * Native kernels the CLI lists, each binding a sealed closure from the local payload store; the hosted publication
+ * runtime prepares no native closure, so it serves none of them.
  */
-const engineOnlyKernelIds = new Set(['smlibpy', 'build123d', 'picogk']);
+const cliOnlyKernelIds = new Set(['smlibpy', 'build123d', 'picogk']);
 
 describe('publicationKernelExtensions parity', () => {
-  it('matches the engine default runtime for every shared kernel', { timeout: 30_000 }, async () => {
-    const engineExtensions = await loadEngineKernelExtensions();
+  it('matches the CLI runtime for every shared kernel', { timeout: 30_000 }, async () => {
+    const cliExtensions = await loadCliKernelExtensions();
 
     const shared = Object.fromEntries(
       publicationKernelExtensions
-        .filter((kernel) => kernel.id in engineExtensions)
+        .filter((kernel) => kernel.id in cliExtensions)
         .map((kernel) => [kernel.id, [...kernel.extensions]]),
     );
 
     expect(shared).toEqual(
-      Object.fromEntries(Object.entries(engineExtensions).map(([id, extensions]) => [id, [...extensions]])),
+      Object.fromEntries(Object.entries(cliExtensions).map(([id, extensions]) => [id, [...extensions]])),
     );
   });
 
-  it('declares exactly the engine kernels plus the publication-only ones', async () => {
-    const engineExtensions = await loadEngineKernelExtensions();
+  it('declares exactly the CLI kernels the hosted runtime can serve', { timeout: 30_000 }, async () => {
+    const cliExtensions = await loadCliKernelExtensions();
 
     expect(publicationKernelExtensions.map((kernel) => kernel.id).toSorted()).toEqual(
-      [...Object.keys(engineExtensions), ...publicationOnlyKernelIds].toSorted(),
+      Object.keys(cliExtensions).toSorted(),
     );
   });
 });

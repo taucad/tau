@@ -1,13 +1,16 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Sentry event and breadcrumb fields are SDK wire names. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ErrorEvent } from '@sentry/react';
+import * as Sentry from '@sentry/react';
+import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 import {
   beforeSendSentryEvent,
   consoleBreadcrumbTextLimit,
+  createBeforeSend,
   isUnhandledAbortRejection,
   scrubSentryBreadcrumb,
-  scrubSentryEvent,
 } from '#lib/sentry.lib.js';
+import { scrubSentryEvent, sentryEnvelopeUrl, sentryRelease, staleBuildFingerprint } from '#lib/sentry-event.lib.js';
 
 const rejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
 
@@ -129,5 +132,113 @@ describe('scrubSentryBreadcrumb', () => {
     expect(values.every((value) => (value as string).length <= consoleBreadcrumbTextLimit + 1)).toBe(true);
     expect(breadcrumb.message?.length).toBeLessThanOrEqual(consoleBreadcrumbTextLimit + 1);
     expect(breadcrumb.data?.['logger']).toBe('console');
+  });
+});
+
+/** The event the browser SDK builds for TAU-UI-6: a route boundary's capture of a stackless WebKit import failure. */
+const moduleImportEvent = (): ErrorEvent => ({
+  type: undefined,
+  exception: {
+    values: [
+      { type: 'TypeError', value: 'Importing a module script failed.', mechanism: { type: 'generic', handled: true } },
+    ],
+  },
+  request: { url: 'https://taucad.dev/w/home/ak47-receiver-curves?tab=chat' },
+});
+
+const moduleImportFailure = new TypeError('Importing a module script failed.');
+
+describe('createBeforeSend', () => {
+  it('should keep a module import failure a deploy explains, tagged and grouped apart at level info', async () => {
+    const describeFailure = vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded');
+    const beforeSend = createBeforeSend(describeFailure);
+
+    const sent = await beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
+
+    expect(sent?.tags).toMatchObject({ stale_build: 'superseded' });
+    expect(sent?.level).toBe('info');
+    expect(sent?.fingerprint).toStrictEqual([...staleBuildFingerprint]);
+    expect(describeFailure).toHaveBeenCalledExactlyOnceWith(moduleImportFailure);
+  });
+
+  it.each<StaleBuildTag>(['current', 'unknown'])(
+    'should keep a module import failure tagged %s in its usual group, scrubbed',
+    async (tag) => {
+      const beforeSend = createBeforeSend(async () => tag);
+
+      const sent = await beforeSend(moduleImportEvent(), { originalException: moduleImportFailure });
+
+      expect(sent?.tags).toMatchObject({ stale_build: tag });
+      expect(sent?.fingerprint).toBeUndefined();
+      expect(sent?.exception).toStrictEqual(moduleImportEvent().exception);
+      expect(sent?.request).toStrictEqual({ url: 'https://taucad.dev/w/home/ak47-receiver-curves' });
+    },
+  );
+
+  it('should deliver a superseded chunk failure to the transport once, tagged, and never again', async () => {
+    const sent: unknown[] = [];
+    Sentry.init({
+      dsn: 'https://public@o0.ingest.sentry.io/0',
+      defaultIntegrations: false,
+      transport: () => ({
+        send: async (envelope) => {
+          sent.push(envelope);
+          return {};
+        },
+        flush: async () => true,
+      }),
+      beforeSend: createBeforeSend(async () => 'superseded'),
+    });
+    try {
+      const failure = new TypeError('Importing a module script failed.');
+
+      Sentry.captureException(failure);
+      // A second capture of the same error, as a re-report after the fact would be, is discarded by Sentry.
+      Sentry.captureException(failure);
+      await Sentry.flush(1000);
+
+      const events = sent.map((envelope) => (envelope as [unknown, Array<[{ type: string }, ErrorEvent]>])[1][0]);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.[1].tags).toMatchObject({ stale_build: 'superseded' });
+      expect(events[0]?.[1].level).toBe('info');
+    } finally {
+      await Sentry.close();
+    }
+  });
+
+  it('should not probe the server for any other error', () => {
+    const decide = vi.fn(async (_failure: unknown): Promise<StaleBuildTag> => 'superseded');
+    const beforeSend = createBeforeSend(decide);
+
+    const sent = beforeSend(rejectionEvent('generic'), { originalException: new Error('boom') });
+
+    expect(sent).not.toBeInstanceOf(Promise);
+    expect(decide).not.toHaveBeenCalled();
+  });
+});
+
+describe('sentryEnvelopeUrl', () => {
+  it("should post to the DSN's envelope endpoint, as the SDK does", () => {
+    expect(sentryEnvelopeUrl('https://public@o0.ingest.us.sentry.io/42')).toBe(
+      'https://o0.ingest.us.sentry.io/api/42/envelope/?sentry_version=7&sentry_key=public',
+    );
+    expect(sentryEnvelopeUrl('https://public@sentry.example.com/relay/7')).toBe(
+      'https://sentry.example.com/relay/api/7/envelope/?sentry_version=7&sentry_key=public',
+    );
+  });
+
+  it('should refuse a DSN that does not parse or names no key', () => {
+    expect(sentryEnvelopeUrl('not a dsn')).toBeUndefined();
+    expect(sentryEnvelopeUrl('https://o0.ingest.sentry.io/42')).toBeUndefined();
+  });
+});
+
+describe('sentryRelease', () => {
+  it('should name the deploy an event came from by its build id', () => {
+    expect(sentryRelease(1_792_730_113_029)).toBe('tau-ui@1792730113029');
+  });
+
+  it('should leave the release unset for a bundle without a build id', () => {
+    expect(sentryRelease(0)).toBeUndefined();
   });
 });

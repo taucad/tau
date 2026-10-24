@@ -8,6 +8,12 @@ export type MemoryStoreOptions = {
   readonly maxEntries?: number;
   /** Maximum size of one entry; defaults to the total byte budget. */
   readonly maxEntryBytes?: number;
+  /**
+   * The store is not a trust boundary: its only writer is a same-realm producer that already
+   * owns each written buffer and hashed it. Writes are then stored as given, neither re-hashed
+   * nor copied; reads still return copies. Leave unset for any store that accepts foreign bytes.
+   */
+  readonly ownsProducerWrites?: boolean;
 };
 
 type Counters = { hits: number; misses: number; evictions: number };
@@ -80,13 +86,15 @@ const createMaintenance = (input: {
  * Create a defensive, byte-bounded least-recently-used content tier.
  *
  * The store verifies every supplied content digest and never shares a mutable
- * byte buffer with its callers.
+ * byte buffer with its callers, unless `ownsProducerWrites` declares a
+ * same-realm producer the only writer.
  * @param options - Hard byte and optional entry bounds.
  * @returns A bounded in-memory content store.
  * @public
  */
 export const createMemoryContentStore = (options: MemoryStoreOptions): ContentStore => {
   const limits = validateOptions(options);
+  const ownsProducerWrites = options.ownsProducerWrites === true;
   const entries = new Map<string, Uint8Array<ArrayBuffer>>();
   const counters: Counters = { hits: 0, misses: 0, evictions: 0 };
   let usedBytes = 0;
@@ -134,7 +142,7 @@ export const createMemoryContentStore = (options: MemoryStoreOptions): ContentSt
     write: async ({ digest, bytes, signal }) => {
       signal?.throwIfAborted();
       contentDigest({ value: digest });
-      if ((await digestContent({ bytes })) !== digest) {
+      if (!ownsProducerWrites && (await digestContent({ bytes })) !== digest) {
         throw new CacheCorruptionError('Content bytes do not match their declared digest.');
       }
       signal?.throwIfAborted();
@@ -148,7 +156,7 @@ export const createMemoryContentStore = (options: MemoryStoreOptions): ContentSt
         return { status: 'rejected', reason: 'entry-too-large' };
       }
       evictToFit(bytes.byteLength);
-      const owned = copyBytes(bytes);
+      const owned = ownsProducerWrites ? bytes : copyBytes(bytes);
       entries.set(digest, owned);
       usedBytes += owned.byteLength;
       return { status: 'stored' };

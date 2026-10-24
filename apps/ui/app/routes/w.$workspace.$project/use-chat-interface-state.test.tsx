@@ -206,6 +206,13 @@ describe('useChatInterfaceState mobile drawer', () => {
     expect(result.current.drawerOpen).toBe(false);
   });
 
+  it.each(['jobs', 'browser'])('falls back to the model when the persisted %s surface is not shipped here', (tab) => {
+    state.activeTab = tab;
+    const { result } = renderHook(() => useChatInterfaceState());
+    expect(result.current.activeTab).toBe('viewer');
+    expect(result.current.drawerOpen).toBe(false);
+  });
+
   it('drops the snap reset vaul sends after a close it made, so a quick reopen keeps half height', () => {
     const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
     state.activeTab = 'parameters';

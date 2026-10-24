@@ -14,14 +14,15 @@ const navigation = (): Locator => selectors.getByRole('navigation', { name: 'Wor
 const navButton = (name: string): Locator => navigation().getByRole('button', { name, exact: true });
 const allSheet = (): Locator => selectors.getByRole('dialog', { name: 'All surfaces' });
 
-/** Surfaces All lists whatever the deployment flags (Print, Telemetry and Console are gated as on desktop). */
+/**
+ * Surfaces All lists in the web build whatever the deployment flags (Print, Telemetry and Console are gated as on
+ * desktop). Browser ships only in the desktop app, and Jobs is unfinished and ships nowhere.
+ */
 const ungatedSurfaces = [
   'Model tree',
   'Kinematics',
-  'Browser',
   'Revisions',
   'Agents',
-  'Jobs',
   'Files',
   'Editor',
   'Export',
@@ -48,6 +49,8 @@ test.each([
   for (const title of ungatedSurfaces) {
     expect(listed).toContain(title);
   }
+  expect(listed).not.toContain('Browser');
+  expect(listed).not.toContain('Jobs');
   // No horizontal scroll in All at 320px (W3).
   const overflow = await target.evaluateLocator(allSheet(), (element) => element.scrollWidth - element.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);

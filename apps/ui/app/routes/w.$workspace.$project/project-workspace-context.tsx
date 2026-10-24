@@ -11,6 +11,7 @@ import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
 import { holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
+import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
 
 export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
@@ -334,6 +335,9 @@ export function ProjectWorkspaceProvider({
 
   const openPanel = useCallback(
     (panelId: WorkbenchPanelId) => {
+      if (!isSurfaceShipped(panelId)) {
+        return;
+      }
       pendingFilesRef.current = undefined;
       if (workbenchMode === 'pane') {
         onWorkbenchOpen?.();

@@ -131,17 +131,22 @@ export const startApi = async (args: {
   environment['TAU_API_URL'] = url;
   Object.assign(environment, overrides);
 
+  const completed = process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true';
+  const cwd = completed ? process.env['TAU_E2E_API_CWD'] : apiRoot;
+  if (!cwd || (completed && process.env['TAU_E2E_EXTERNAL_SERVICES'] !== 'true')) {
+    throw new Error('Completed API acceptance requires an isolated API working directory and external services.');
+  }
   const log = createWriteStream(resolve(logDirectory, `api-${label}.log`), { flags: 'w' });
   const child = spawn(
     process.execPath,
     [
-      '--env-file-if-exists=.env',
+      ...(completed ? [] : ['--env-file-if-exists=.env']),
       '--import',
       new URL('register.mjs', pathToFileURL(createRequire(import.meta.url).resolve('@oxc-node/core/package.json')))
         .href,
       resolve(apiRoot, 'dist/main.js'),
     ],
-    { cwd: apiRoot, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
+    { cwd, env: environment, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   child.stdout.pipe(log);
   child.stderr.pipe(log);

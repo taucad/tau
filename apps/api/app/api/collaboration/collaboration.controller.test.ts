@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { OwnerLockTransaction } from '#database/owner-lock.js';
 import { ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
 import { projectCollaborator, projectInvitation, user } from '#database/schema.js';
@@ -90,23 +92,31 @@ describe('CollaboratorsController', () => {
         },
       }),
     };
-    return {
-      database: {
-        ...writer,
-        select: () => ({
-          from: (table: unknown) => ({
-            leftJoin: () => ({
-              where: () => ({ limit: async (): Promise<unknown[]> => (projectRow ? [projectRow] : []) }),
-            }),
-            where: () => ({
-              limit: async (): Promise<unknown[]> => (table === user ? (viewerRow ? [viewerRow] : []) : rowsFor(table)),
-              orderBy: async (): Promise<unknown[]> => rowsFor(table),
-            }),
-          }),
+    const select = vi.fn().mockImplementation(() => ({
+      from: (table: unknown) => ({
+        leftJoin: () => ({
+          where: () => ({ limit: async (): Promise<unknown[]> => (projectRow ? [projectRow] : []) }),
         }),
-        transaction: async (run: (tx: unknown) => Promise<unknown>): Promise<unknown> => run(writer),
-      },
-    } as unknown as DatabaseService;
+        where: () => ({
+          limit: async (): Promise<unknown[]> => (table === user ? (viewerRow ? [viewerRow] : []) : rowsFor(table)),
+          orderBy: async (): Promise<unknown[]> => rowsFor(table),
+        }),
+      }),
+    }));
+    const transaction = mock<OwnerLockTransaction>({
+      select,
+      execute: vi.fn().mockResolvedValue([]),
+      insert: vi.fn().mockImplementation(writer.insert),
+      update: vi.fn().mockImplementation(writer.update),
+      delete: vi.fn().mockImplementation(writer.delete),
+    });
+    const database = mock<DatabaseService['database']>({
+      select,
+      transaction: vi
+        .fn()
+        .mockImplementation(async (run: (tx: OwnerLockTransaction) => Promise<unknown>) => run(transaction)),
+    });
+    return Object.assign(mock<DatabaseService>(), { database });
   };
 
   beforeEach(() => {
@@ -116,9 +126,9 @@ describe('CollaboratorsController', () => {
     viewerRow = { id: inviteeId, email: 'invitee@example.test', emailVerified: true };
     budget = async () => ({ allowed: true, count: 1 });
     const access = new ProjectAccessService(databaseStub());
-    const rateLimiter = {
+    const rateLimiter = mock<PublicationRateLimiterService>({
       consumeDailyBudget: vi.fn(async () => budget()),
-    } as unknown as PublicationRateLimiterService;
+    });
     collaboratorsController = new CollaboratorsController(access, rateLimiter);
     invitationsController = new InvitationsController(access);
   });

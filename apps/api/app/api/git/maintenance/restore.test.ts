@@ -7,7 +7,9 @@ import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { Database, OwnerLockTransaction } from '#database/owner-lock.js';
 import { getEnvironment } from '#config/environment.config.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -34,6 +36,11 @@ import { restoreRepository } from '#api/git/maintenance/restore.js';
  */
 
 // === harness =============================================================
+
+// The storage-only suite uses an active lifecycle; deletion refusal has its own database test.
+vi.mock('#database/project-lifecycle.js', () => ({ assertActiveProjectLocked: async () => undefined }));
+const database = mock<Database>();
+database.transaction.mockImplementation(async (run) => run(mock<OwnerLockTransaction>()));
 
 const restoreBucket = 'tau-content-restore';
 
@@ -211,7 +218,7 @@ describe('repository restore from a second bucket', () => {
     await pushAndCommit(source, locator, client.directory);
     const sourceManifest = await readManifest(source, locator);
 
-    const result = await restoreRepository({ source, primary, locator, operator: 'rifont' });
+    const result = await restoreRepository({ database, source, primary, locator, operator: 'rifont' });
 
     expect(await readManifest(primary, locator)).toStrictEqual(result.manifest);
     expect(result.manifest.generation).toBe((sourceManifest?.generation ?? 0) + 1);
@@ -235,7 +242,7 @@ describe('repository restore from a second bucket', () => {
     const before = await readManifest(primary, locator);
     const bytesBefore = await packKeys(primary, locator);
 
-    const result = await restoreRepository({ source, primary, locator, operator: 'rifont' });
+    const result = await restoreRepository({ database, source, primary, locator, operator: 'rifont' });
 
     expect(result.manifest.generation).toBe(Math.max(before?.generation ?? 0, sourceManifest?.generation ?? 0) + 1);
     expect(result.manifest.incarnation).not.toBe(before?.incarnation);
@@ -259,7 +266,7 @@ describe('repository restore from a second bucket', () => {
     await pushAndCommit(source, locator, newClient().directory);
     const sourceManifest = await readManifest(source, locator);
 
-    const result = await restoreRepository({ source, primary, locator, operator: 'rifont' });
+    const result = await restoreRepository({ database, source, primary, locator, operator: 'rifont' });
 
     const sourceKeys = new Set((sourceManifest?.packs ?? []).map((pack) => pack.key));
     const primaryKeys = new Set(await packKeys(primary, locator));
@@ -287,7 +294,9 @@ describe('repository restore from a second bucket', () => {
       checksumSha256: createHash('sha256').update(body).digest('base64'),
     });
 
-    await expect(restoreRepository({ source, primary, locator, operator: 'rifont' })).rejects.toThrow(corrupted);
+    await expect(restoreRepository({ database, source, primary, locator, operator: 'rifont' })).rejects.toThrow(
+      corrupted,
+    );
     expect(await readManifest(primary, locator)).toBeUndefined();
   }, 120_000);
 
@@ -298,6 +307,8 @@ describe('repository restore from a second bucket', () => {
     await pushAndCommit(primary, locator, primaryClient.directory);
     await commitTombstone({ store: primary, locator, committedBy: 'test' });
 
-    await expect(restoreRepository({ source, primary, locator, operator: 'rifont' })).rejects.toThrow(/tombstoned/u);
+    await expect(restoreRepository({ database, source, primary, locator, operator: 'rifont' })).rejects.toThrow(
+      /tombstoned/u,
+    );
   }, 120_000);
 });

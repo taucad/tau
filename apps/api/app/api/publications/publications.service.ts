@@ -47,6 +47,7 @@ import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { DatabaseService } from '#database/database.service.js';
+import { assertProjectActive, assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { EmailService } from '#email/email.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
@@ -64,6 +65,7 @@ import { buildPublicationViewUrl } from '#email/email-link-builder.js';
 const defaultOgImageKey = 'defaults/og.png';
 type ProjectShareCurrentPublication = NonNullable<ProjectShareEnvelope['currentPublication']>;
 type ProjectShareProject = ProjectShareEnvelope['project'];
+type PublicationTransaction = Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
 
 const normalizeRelativePath = (relativePathValue: string): string =>
   relativePathValue.replaceAll('\\', '/').replace(/^\.\/+/, '');
@@ -201,6 +203,7 @@ export class PublicationsService {
    */
   public async publishFromRevision(args: { ownerId: string; request: PublishRequest }): Promise<PublishResponse> {
     const { ownerId, request } = args;
+    await assertProjectActive(this.databaseService.database, request.projectId, ownerId);
     const sharedEmails = request.visibility === 'private' ? (request.sharedEmails ?? []) : [];
 
     if (request.visibility === 'private') {
@@ -250,6 +253,7 @@ export class PublicationsService {
            released below, and two writers reading it before either commits
            would release that manifest twice (review F2). */
           await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${request.projectId}, 0))`);
+          await assertProjectActive(tx, request.projectId, ownerId);
 
           /* The ref-removal verb retires a publication under this same lock
            (D24). A lease hydrated before a removal still holds the removed
@@ -278,6 +282,7 @@ export class PublicationsService {
             this.materializer,
             {
               publicationId,
+              heldManifestKey: currentRow?.manifestKey,
               projectId: request.projectId,
               ownerId,
               directory: lease.directory,
@@ -398,6 +403,7 @@ export class PublicationsService {
       unpublishedAt: null,
     };
 
+    await this.assertActiveProject(publication.projectId);
     return {
       publication: publicationDto,
       viewerRole,
@@ -437,6 +443,7 @@ export class PublicationsService {
 
     const sha256Hex = this.sha256HexFromManifestRef(args.path, shaRef);
 
+    await this.assertActiveProject(publication.projectId);
     return { sha256Hex, etag: `"${sha256Hex}"`, path };
   }
 
@@ -508,34 +515,37 @@ export class PublicationsService {
       await this.assertPrivateVisibilityAllowed({ ownerId: args.ownerId });
     }
 
-    // Storage first, DB second: if any copy/delete fails the publication keeps
-    // its current visibility, so the serving tier never lags the DB flag
-    // (a private flip can never leave bytes only on the anonymous origin, and
-    // a public flip can never emit CDN URLs that 404).
-    await this.reconcileStorageTier(publication, args.visibility);
+    return this.withActivePublication(publication, async (transaction, fresh) => {
+      // Storage first, DB second: if any copy/delete fails the publication keeps
+      // its current visibility, so the serving tier never lags the DB flag
+      // (a private flip can never leave bytes only on the anonymous origin, and
+      // a public flip can never emit CDN URLs that 404).
+      await this.reconcileStorageTier(fresh, args.visibility);
 
-    const [updated] = await this.databaseService.database
-      .update(schema.publication)
-      .set({ visibility: args.visibility })
-      .where(eq(schema.publication.id, publication.id))
-      .returning({
-        id: schema.publication.id,
-        visibility: schema.publication.visibility,
-      });
+      const [updated] = await transaction
+        .update(schema.publication)
+        .set({ visibility: args.visibility })
+        .where(eq(schema.publication.id, publication.id))
+        .returning({
+          id: schema.publication.id,
+          visibility: schema.publication.visibility,
+        });
 
-    if (!updated) {
-      throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
-    }
+      if (!updated) {
+        throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
+      }
 
-    return {
-      id: updated.id,
-      visibility: updated.visibility as PublicationVisibilityUpdate['visibility'],
-    };
+      return {
+        id: updated.id,
+        visibility: updated.visibility as PublicationVisibilityUpdate['visibility'],
+      };
+    });
   }
 
   public async getProjectShareEnvelope(args: { projectId: string; ownerId: string }): Promise<ProjectShareEnvelope> {
     const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
     const db = this.databaseService.database;
+    await this.assertActiveProject(args.projectId, args.ownerId);
 
     const projectRows = await db.select().from(schema.project).where(eq(schema.project.id, args.projectId)).limit(1);
     const project = projectRows[0];
@@ -614,45 +624,49 @@ export class PublicationsService {
     const publication = await this.assertPublicationOwner(args);
     const recipientEmail = this.normalizeEmail(args.recipientEmail);
 
-    if (publication.visibility !== 'private') {
-      throw new BadRequestException({
-        code: publicationApiCode.FORBIDDEN,
-        message: 'Only private publications can invite recipients',
-      });
-    }
+    const { grant, existingGrant } = await this.withActivePublication(publication, async (transaction, fresh) => {
+      if (fresh.visibility !== 'private') {
+        throw new BadRequestException({
+          code: publicationApiCode.FORBIDDEN,
+          message: 'Only private publications can invite recipients',
+        });
+      }
 
-    const existingRows = await this.databaseService.database
-      .select()
-      .from(schema.publicationAccess)
-      .where(
-        and(
-          eq(schema.publicationAccess.publicationId, publication.id),
-          eq(schema.publicationAccess.recipientEmail, recipientEmail),
-        ),
-      )
-      .limit(1);
-    const existingGrant = existingRows[0];
+      const existingRows = await transaction
+        .select()
+        .from(schema.publicationAccess)
+        .where(
+          and(
+            eq(schema.publicationAccess.publicationId, publication.id),
+            eq(schema.publicationAccess.recipientEmail, recipientEmail),
+          ),
+        )
+        .limit(1);
+      const existingGrant = existingRows[0];
 
-    const [grant] = await this.databaseService.database
-      .insert(schema.publicationAccess)
-      .values({
-        id: generatePrefixedId(idPrefix.publicationAccess),
-        publicationId: publication.id,
-        ownerId: args.ownerId,
-        recipientEmail,
-        status: 'active',
-        createdAt: new Date(),
-        revokedAt: null,
-      })
-      .onConflictDoUpdate({
-        target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
-        set: { status: 'active', revokedAt: null },
-      })
-      .returning();
+      const [grant] = await transaction
+        .insert(schema.publicationAccess)
+        .values({
+          id: generatePrefixedId(idPrefix.publicationAccess),
+          publicationId: publication.id,
+          ownerId: args.ownerId,
+          recipientEmail,
+          status: 'active',
+          createdAt: new Date(),
+          revokedAt: null,
+        })
+        .onConflictDoUpdate({
+          target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
+          set: { status: 'active', revokedAt: null },
+        })
+        .returning();
 
-    if (!grant) {
-      throw new HttpException('Publication invite failed', HttpStatus.INTERNAL_SERVER_ERROR);
-    }
+      if (!grant) {
+        throw new HttpException('Publication invite failed', HttpStatus.INTERNAL_SERVER_ERROR);
+      }
+
+      return { grant, existingGrant };
+    });
 
     if (args.notifyRecipient === true && existingGrant?.status !== 'active') {
       const ownerSnapshot = await this.resolveOwnerSnapshot(publication);
@@ -675,27 +689,28 @@ export class PublicationsService {
     ownerId: string;
     accessId: string;
   }): Promise<PublicationAccessGrant> {
-    await this.assertPublicationOwner(args);
+    const publication = await this.assertPublicationOwner(args);
+    return this.withActivePublication(publication, async (transaction) => {
+      const [grant] = await transaction
+        .update(schema.publicationAccess)
+        .set({ status: 'revoked', revokedAt: new Date() })
+        .where(
+          and(
+            eq(schema.publicationAccess.id, args.accessId),
+            eq(schema.publicationAccess.publicationId, args.publicationId),
+          ),
+        )
+        .returning();
 
-    const [grant] = await this.databaseService.database
-      .update(schema.publicationAccess)
-      .set({ status: 'revoked', revokedAt: new Date() })
-      .where(
-        and(
-          eq(schema.publicationAccess.id, args.accessId),
-          eq(schema.publicationAccess.publicationId, args.publicationId),
-        ),
-      )
-      .returning();
+      if (!grant) {
+        throw new NotFoundException({
+          code: publicationApiCode.NOT_FOUND,
+          message: 'Publication access grant not found',
+        });
+      }
 
-    if (!grant) {
-      throw new NotFoundException({
-        code: publicationApiCode.NOT_FOUND,
-        message: 'Publication access grant not found',
-      });
-    }
-
-    return this.toAccessGrantDto(grant);
+      return this.toAccessGrantDto(grant);
+    });
   }
 
   /**
@@ -726,6 +741,8 @@ export class PublicationsService {
       throw new GoneException({ code: publicationApiCode.GONE, message: 'Publication is no longer available' });
     }
 
+    await this.assertActiveProject(publication.projectId);
+
     if (identity.sessionUserId !== undefined && identity.sessionUserId === publication.ownerId) {
       this.metrics.publicationViewsRejectedTotal.add(1, { reason: 'owner_self_view' });
       return;
@@ -754,10 +771,12 @@ export class PublicationsService {
     this.metrics.publicationViewsTotal.add(1, { deduped: added === 1 ? 'unique' : 'duplicate' });
 
     if (added === 1) {
-      await this.databaseService.database
-        .update(schema.publication)
-        .set({ viewCount: sql`${schema.publication.viewCount} + 1` })
-        .where(eq(schema.publication.id, publication.id));
+      await this.withActivePublication(publication, async (transaction) => {
+        await transaction
+          .update(schema.publication)
+          .set({ viewCount: sql`${schema.publication.viewCount} + 1` })
+          .where(eq(schema.publication.id, publication.id));
+      });
     }
   }
 
@@ -988,7 +1007,10 @@ export class PublicationsService {
     /* Every read of a publication routes through here, which is where D19 puts
        the repair: a row behind the manifest is re-derived and then re-read, so
        what this returns is never a version the push already superseded. */
-    return (await this.rederivePublications(publication)) ? this.selectPublicationOrThrow(publicationId) : publication;
+    const repaired = await this.rederivePublications(publication);
+    // Repair can swallow a lifecycle refusal; check again before serving an earlier row.
+    await this.assertActiveProject(publication.projectId);
+    return repaired ? this.selectPublicationOrThrow(publicationId) : publication;
   }
 
   /** One publication row, refused when it is absent or withdrawn. */
@@ -1008,6 +1030,7 @@ export class PublicationsService {
       throw new GoneException({ code: publicationApiCode.GONE, message: 'Publication is no longer available' });
     }
 
+    await this.assertActiveProject(publication.projectId);
     return publication;
   }
 
@@ -1188,6 +1211,7 @@ export class PublicationsService {
   private async resolveOwnerSnapshot(publication: {
     readonly id: string;
     readonly ownerId: string;
+    readonly projectId: string;
     readonly ownerSnapshot: PublicationOwnerSnapshot | null;
   }): Promise<PublicationOwnerSnapshot | null> {
     if (publication.ownerSnapshot !== null) {
@@ -1197,10 +1221,12 @@ export class PublicationsService {
     if (backfilled === null) {
       return null;
     }
-    await this.databaseService.database
-      .update(schema.publication)
-      .set({ ownerSnapshot: backfilled })
-      .where(eq(schema.publication.id, publication.id));
+    await this.withActivePublication(publication, async (transaction) => {
+      await transaction
+        .update(schema.publication)
+        .set({ ownerSnapshot: backfilled })
+        .where(eq(schema.publication.id, publication.id));
+    });
     return backfilled;
   }
   /* oxlint-enable typescript-eslint/no-restricted-types -- end null-type window */
@@ -1227,7 +1253,37 @@ export class PublicationsService {
       });
     }
 
+    await this.assertActiveProject(publication.projectId);
     return publication;
+  }
+
+  /** Serialize the lifecycle decision with deletion, including cached serving. */
+  private async assertActiveProject(projectId: string, userId?: string): Promise<void> {
+    await this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, projectId, userId);
+    });
+  }
+
+  /** Keep publication mutations and their lifecycle check in the same commit. */
+  private async withActivePublication<T>(
+    publication: { readonly id: string; readonly projectId: string },
+    body: (transaction: PublicationTransaction, fresh: typeof schema.publication.$inferSelect) => Promise<T>,
+  ): Promise<T> {
+    return this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, publication.projectId);
+      const [fresh] = await transaction
+        .select()
+        .from(schema.publication)
+        .where(eq(schema.publication.id, publication.id))
+        .limit(1);
+      if (fresh === undefined) {
+        throw new NotFoundException({ code: publicationApiCode.NOT_FOUND, message: 'Publication not found' });
+      }
+      if (fresh.unpublishedAt !== null) {
+        throw new GoneException({ code: publicationApiCode.GONE, message: 'Publication is no longer available' });
+      }
+      return body(transaction, fresh);
+    });
   }
 
   private async loadViewerEmail(viewerUserId: string): Promise<string | undefined> {

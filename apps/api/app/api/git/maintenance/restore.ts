@@ -1,5 +1,8 @@
+import type { Database } from '#database/owner-lock.js';
+import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { buffer } from 'node:stream/consumers';
+import { repositoryLocator } from '#api/git/store/locator.js';
 import { writeSpilledPushLog } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { markRetired } from '#api/git/store/sweep.js';
@@ -42,6 +45,7 @@ import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
  */
 
 export type RestoreArguments = {
+  database: Database;
   /** The store holding the copy. At DG1 this is B2; today it is a second bucket. */
   source: RepositoryStore;
   /** The store the repository is restored into. */
@@ -111,8 +115,12 @@ const indexKeyOf = (packKey: string): string => `${packKey.slice(0, -'.pack'.len
  * generation belongs with the writer that makes those keys exist. Nothing
  * writes them today, so there is nothing here to read them.
  */
+/** The source adapter is explicitly selected by the operator, independent of the primary account. */
+const sourceLocator = (args: RestoreArguments): RepositoryLocator =>
+  repositoryLocator({ ownerId: args.locator.ownerId, projectId: args.locator.projectId });
+
 const readSourceManifest = async (args: RestoreArguments): Promise<Manifest> => {
-  const read = await args.source.readManifest(args.locator);
+  const read = await args.source.readManifest(sourceLocator(args));
   if (read === undefined) {
     throw new RepositoryStoreError('missing-pack', `the source store holds no manifest for ${args.locator.projectId}`);
   }
@@ -121,7 +129,7 @@ const readSourceManifest = async (args: RestoreArguments): Promise<Manifest> => 
 
 /** Copies one pack, and its stored index when the source kept one, into the primary. */
 const restorePack = async (args: RestoreArguments, pack: ManifestPack): Promise<ManifestPack> => {
-  const body = await readAll(args.source, args.locator, pack.key);
+  const body = await readAll(args.source, sourceLocator(args), pack.key);
   assertPackMatchesKey(pack.key, body);
 
   const key = restoredKey(pack.key);
@@ -131,7 +139,7 @@ const restorePack = async (args: RestoreArguments, pack: ManifestPack): Promise<
   });
 
   if (pack.indexStored) {
-    const index = await readAll(args.source, args.locator, indexKeyOf(pack.key));
+    const index = await readAll(args.source, sourceLocator(args), indexKeyOf(pack.key));
     await args.primary.putObject(args.locator, indexKeyOf(key), index, {
       contentLength: index.byteLength,
       sha256: createHash('sha256').update(index).digest('base64'),
@@ -144,7 +152,14 @@ const restorePack = async (args: RestoreArguments, pack: ManifestPack): Promise<
 
 export const restoreRepository = async (args: RestoreArguments): Promise<RestoreResult> => {
   assertSingletonProcessGroup();
+  return args.database.transaction(async (transaction) => {
+    // Operator restore holds only the project lock. Never acquire owner after it.
+    await assertActiveProjectLocked(transaction, args.locator.projectId);
+    return restoreActiveRepository(args);
+  });
+};
 
+const restoreActiveRepository = async (args: RestoreArguments): Promise<RestoreResult> => {
   const source = await readSourceManifest(args);
   if (isTombstoned(source)) {
     throw new RepositoryStoreError('tombstoned', `the source manifest for ${args.locator.projectId} is tombstoned`);

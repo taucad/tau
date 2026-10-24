@@ -18,6 +18,23 @@ const baseEnvironment = (): Record<string, unknown> => ({
 });
 
 describe('environmentSchema', () => {
+  it.each([
+    [undefined, false],
+    ['false', false],
+    ['true', true],
+  ])('should parse cloud deletion admission %s strictly', (value, expected) => {
+    const result = environmentSchema.safeParse({ ...baseEnvironment(), TAU_PROJECT_DELETION_ENABLED: value });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_PROJECT_DELETION_ENABLED).toBe(expected);
+    }
+  });
+
+  it('should reject ambiguous cloud deletion admission flags', () => {
+    const result = environmentSchema.safeParse({ ...baseEnvironment(), TAU_PROJECT_DELETION_ENABLED: '1' });
+    expect(result.success).toBe(false);
+  });
+
   /*
    * Charter D23: free-tier sync is landed code behind a launch gate. The flag
    * defaults off, and no committed deploy config turns it on: the go-live

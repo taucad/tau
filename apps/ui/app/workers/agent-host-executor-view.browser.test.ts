@@ -71,6 +71,8 @@ it('should hand both executors of project code the agent view of the workspace',
     host = await openBrowserProjectHost(
       {
         projectId,
+        // A machines-enabled host keeps the kernel runtime resident; other hosts construct it on first tool use.
+        machinesEnabled: true,
         hostId: `host-${crypto.randomUUID()}`,
         fileSystemPort: createFileSystemBridgePort(workspace).port,
         projectRootPort: createFileSystemBridgePort(workspace).port,

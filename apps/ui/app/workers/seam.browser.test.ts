@@ -610,13 +610,21 @@ describe('the seam on the browser leg', () => {
         maxBytes: agentWireLimits.batchBytes,
         ...input,
       } as Parameters<AgentChannelClient['read']>[0]);
-    await expect(read({ cursor: rows.length + 5 })).resolves.toEqual({
+    const initial = await read({});
+    expect(initial).toMatchObject({ status: 'batch', cursor: 0 });
+    if (initial.status !== 'batch') {
+      throw new Error('Expected the initial generation-qualified batch.');
+    }
+    const { sourceGeneration } = initial;
+    await expect(read({ cursor: rows.length + 5, sourceGeneration })).resolves.toEqual({
       status: 'refused',
       chatId,
       reason: 'cursor-ahead',
       expected: { endCursor: rows.length },
     });
-    await expect(read({ cursor: 1, last: { leaderEpoch: 'not-this-term', sequence: 0 } })).resolves.toMatchObject({
+    await expect(
+      read({ cursor: 1, sourceGeneration, last: { leaderEpoch: 'not-this-term', sequence: 0 } }),
+    ).resolves.toMatchObject({
       status: 'refused',
       reason: 'identity-mismatch',
     });
@@ -624,7 +632,7 @@ describe('the seam on the browser leg', () => {
     const paged: unknown[] = [];
     for (let cursor = 0; cursor < rows.length; ) {
       // oxlint-disable-next-line no-await-in-loop -- each page starts at the last one's end.
-      const page = await read({ cursor, maxBytes: 1 });
+      const page = await read({ cursor, sourceGeneration, maxBytes: 1 });
       expect(page).toMatchObject({ status: 'batch', cursor, nextCursor: cursor + 1 });
       if (page.status !== 'batch') {
         throw new Error('Expected a batch.');

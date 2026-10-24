@@ -40,31 +40,13 @@ app = 'node /app/dist/main.js'
 # The `billing-recovery` group was retired; `recover-llm-worker` remains as optional
 # scale-out if a backlog ever outruns the in-API clock.
 billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment staging --limit 100 --poll-milliseconds 5000'
-# Charter D21: purge, LFS retirement, blob collection and restore must run once, not
-# in every `app` replica — `assertSingletonProcessGroup` refuses to run in the `app`
-# group at all. Each subcommand is a one-shot that exits, so the group wraps them the
-# way the billing workers poll: do a pass, sleep, do it again. Run exactly one
-# Machine: `fly scale count app=2 revisions-maintenance=1`.
-#
-# All three periodic subcommands are here, and `retire-lfs` is why the list matters:
-# its 30-day window (`lfsRetirementWindowMilliseconds`) has no other caller anywhere
-# in the app — no `@Cron`, no scheduler — so a loop that omits it is a retirement
-# that never happens.
-#
-# `|| exit 1` on each: the command sets a non-zero exit only on a real failure, and
-# without this the shell would swallow it, sleep, and go on looking alive forever.
-# Exiting hands the failure to Fly's restart policy, which is the one signal this
-# group has: it is deliberately outside `[[metrics]]` and has no health check. A
-# refusal is *not* a failure and does not trip this — a purge that skips an owner
-# over the confirmation bound, or a tombstone whose user row is still live, records
-# the outcome and exits 0, so the pass continues to the next subcommand.
-#
-# Restore is operator-invoked on this Machine (`fly ssh console`), and reads the
-# `TAU_S3_RESTORE_*` family — Fly secrets, never values in this file.
-# ponytail: a 24 h sleep keeps one 512 MB Machine up for a nightly pass. If that idle
-# cost matters, give `maintenance-command.ts` a `--poll-milliseconds` mode like the
-# billing workers, or move the group to a scheduled Machine.
-revisions-maintenance = "sh -c 'while true; do node /app/dist/maintenance-command.js purge || exit 1; node /app/dist/maintenance-command.js retire-lfs || exit 1; node /app/dist/maintenance-command.js collect-blobs || exit 1; sleep 86400; done'"
+# Charter D21: exactly one maintenance Machine, never an app replica.
+# Recovery runs every 60 seconds with a 50-second storage budget; daily heavy
+# work runs independently and processes project cleanup before tenant cleanup.
+# Each pass records durable liveness; status requires recovery within 120 seconds.
+# One connection per lane (pool cap 2); the singleton remains at 512 MiB.
+# Restore remains operator-invoked using TAU_S3_RESTORE_* secrets.
+revisions-maintenance = "node /app/dist/maintenance-command.js worker"
 
 [env]
 NODE_ENV = 'production'

@@ -68,6 +68,7 @@ export type PutBlobArgs = {
   /** Base64 SHA-256 the backend verifies against the received bytes. */
   checksumSha256?: string;
   tier?: StorageTier;
+  signal?: AbortSignal;
 };
 
 /**
@@ -104,7 +105,12 @@ export type ObjectStorageServiceContract = {
       }
     | undefined
   >;
-  deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void>;
+  deleteBlob(args: {
+    namespace: StorageNamespace;
+    key: string;
+    tier?: StorageTier;
+    signal?: AbortSignal;
+  }): Promise<void>;
   deleteBlobs(args: {
     namespace: StorageNamespace;
     keys: readonly string[];
@@ -136,6 +142,7 @@ export type ObjectStorageServiceContract = {
     key: string;
     contentType: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<string>;
   uploadPart?(args: {
     namespace: StorageNamespace;
@@ -145,6 +152,7 @@ export type ObjectStorageServiceContract = {
     body: Uint8Array<ArrayBuffer>;
     checksumSha256: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ etag: string; checksumSha256: string }>;
   presignUploadPart(args: {
     namespace: StorageNamespace;
@@ -161,12 +169,14 @@ export type ObjectStorageServiceContract = {
     uploadId: string;
     parts: ReadonlyArray<{ partNumber: number; etag: string; checksumSha256: string }>;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void>;
   abortMultipartUpload(args: {
     namespace: StorageNamespace;
     key: string;
     uploadId: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void>;
   copyBlob?(args: {
     namespace: StorageNamespace;
@@ -363,6 +373,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           ...(args.ifMatch === undefined ? {} : { IfMatch: args.ifMatch }),
           ...(args.checksumSha256 === undefined ? {} : { ChecksumSHA256: args.checksumSha256 }),
         }),
+        { abortSignal: args.signal },
       );
 
       const etag = response.ETag?.replaceAll('"', '') ?? '';
@@ -458,7 +469,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     }
   }
 
-  public async deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void> {
+  public async deleteBlob(args: {
+    namespace: StorageNamespace;
+    key: string;
+    tier?: StorageTier;
+    signal?: AbortSignal;
+  }): Promise<void> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
     await this.client.send(
@@ -466,6 +482,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Bucket: this.resolveBucket(args.tier),
         Key: resolvedKey,
       }),
+      { abortSignal: args.signal },
     );
   }
 
@@ -622,6 +639,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     key: string;
     contentType: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<string> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     const response = await this.client.send(
@@ -631,6 +649,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         ContentType: args.contentType,
         ...(this.supportsPartChecksums ? { ChecksumAlgorithm: 'SHA256' } : {}),
       }),
+      { abortSignal: args.signal },
     );
     if (!response.UploadId) {
       throw new Error('S3 CreateMultipartUpload returned no upload ID');
@@ -676,6 +695,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     body: Uint8Array<ArrayBuffer>;
     checksumSha256: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ etag: string; checksumSha256: string }> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     const response = await this.client.send(
@@ -687,6 +707,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Body: args.body,
         ...(this.supportsPartChecksums ? { ChecksumSHA256: args.checksumSha256 } : {}),
       }),
+      { abortSignal: args.signal },
     );
     return {
       etag: response.ETag?.replaceAll('"', '') ?? '',
@@ -700,6 +721,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     uploadId: string;
     parts: ReadonlyArray<{ partNumber: number; etag: string; checksumSha256: string }>;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     await this.client.send(
@@ -717,6 +739,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           })),
         },
       }),
+      { abortSignal: args.signal },
     );
   }
 
@@ -725,6 +748,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     key: string;
     uploadId: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     await this.client.send(
@@ -733,6 +757,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         UploadId: args.uploadId,
       }),
+      { abortSignal: args.signal },
     );
   }
 

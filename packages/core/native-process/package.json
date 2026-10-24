@@ -72,14 +72,12 @@
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",
-    "zod": "^4.0.0",
-    "node-pty": "^1.1.0"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@taucad/runtime": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
-    "zod": "catalog:",
-    "node-pty": "catalog:"
+    "zod": "catalog:"
   },
   "taucad": {
     "hostTarget": "node"
@@ -87,9 +85,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "catalog:"
   },
-  "peerDependenciesMeta": {
-    "node-pty": {
-      "optional": true
-    }
+  "optionalDependencies": {
+    "node-pty": "catalog:"
   }
 }

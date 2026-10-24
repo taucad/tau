@@ -3896,12 +3896,13 @@ importers:
       '@taucad/runtime-testing':
         specifier: workspace:*
         version: link:../../runtime-testing
-      node-pty:
-        specifier: 'catalog:'
-        version: 1.1.0
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+    optionalDependencies:
+      node-pty:
+        specifier: 'catalog:'
+        version: 1.1.0
 
   packages/core/occt:
     devDependencies:
@@ -44100,6 +44101,7 @@ snapshots:
   node-pty@1.1.0:
     dependencies:
       node-addon-api: 7.1.1
+    optional: true
 
   node-releases@2.0.58: {}
 

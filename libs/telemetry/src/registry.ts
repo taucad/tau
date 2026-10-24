@@ -12,8 +12,11 @@ import {
   tauToolNames,
 } from '#ingest.js';
 
-/** `tau.sync.operation`: the client-facing request a sync series counts. */
-const syncOperationNames = ['push', 'fetch', 'lfs_upload', 'lfs_download'] as const;
+/**
+ * `tau.sync.operation`: the client-facing request a sync series counts. `advertise` is a served
+ * `info/refs` answer (DB1); an advertisement's refusal counts against the push or fetch it opens.
+ */
+const syncOperationNames = ['push', 'fetch', 'advertise', 'lfs_upload', 'lfs_download'] as const;
 
 /** `outcome` on the sync edge. `busy` is a retryable capacity refusal; `conflict` a lost manifest race. */
 const syncOutcomes = ['ok', 'ref_rejected', 'quota_refused', 'conflict', 'busy', 'unauthorized', 'error'] as const;

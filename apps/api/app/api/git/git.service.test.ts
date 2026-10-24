@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { buffer } from 'node:stream/consumers';
+import { finished } from 'node:stream/promises';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -38,8 +39,9 @@ import type { GitAccess } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { hydrateLease } from '#api/git/store/lease.js';
+import type * as LeaseModule from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
-import { decodeManifest } from '#api/git/store/manifest.js';
+import { decodeManifest, encodeManifest, tombstoneManifest } from '#api/git/store/manifest.js';
 import type {
   CommitToken,
   ManifestBytes,
@@ -55,6 +57,12 @@ import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
 import { project, projectDeletion, projectGit, user } from '#database/schema.js';
+
+/* Every lease is still a real one; the spy is how DB1 shows an advertisement builds none. */
+vi.mock('#api/git/store/lease.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof LeaseModule>();
+  return { ...actual, hydrateLease: vi.fn(actual.hydrateLease) };
+});
 
 /**
  * D19's one mechanism, on its own: the generation a push commits is recorded
@@ -296,6 +304,49 @@ const access: GitAccess = {
   storageLimitBytes: 10 * 1024 ** 3,
 };
 
+/** One pkt-line flush: a request body that names no `want` and pushes no command. */
+const flushBody = (): Readable => Readable.from([Buffer.from('0000')]);
+
+/** The post-reply step a fetch's lease ends with: disposal, then its admission given back. */
+type FetchDisposal = { disposeAfterFetch: (...args: never[]) => Promise<void> };
+
+/**
+ * One `git-upload-pack` RPC that wants nothing, read to its end: the request
+ * that takes a lease and hydrates it now that `info/refs` takes none (DB1).
+ * Resolves once the lease is disposed and its admission is back, which happens
+ * after the child closes rather than when its output ends; never waits on the
+ * rest of the post-reply work, which a row may be holding open.
+ */
+const fetchOnce = async (service: GitRepositoryService, who: GitAccess): Promise<void> => {
+  const disposal = vi.spyOn(service as unknown as FetchDisposal, 'disposeAfterFetch');
+  try {
+    const output = await service.uploadPack({
+      access: who,
+      body: flushBody(),
+      gzipped: false,
+      maximumInputBytes: 1024,
+    });
+    output.resume();
+    await finished(output);
+    await vi.waitFor(() => {
+      expect(disposal).toHaveBeenCalledOnce();
+    });
+    await disposal.mock.results[0]?.value;
+  } finally {
+    disposal.mockRestore();
+  }
+};
+
+/** The flush-only `git-receive-pack` RPC `git push` authenticates with: a lease, and no commit. */
+const pushProbe = async (service: GitRepositoryService, who: GitAccess): Promise<Uint8Array<ArrayBuffer>> =>
+  service.receivePack({
+    access: who,
+    committedBy: who.callerId,
+    body: flushBody(),
+    gzipped: false,
+    maximumInputBytes: 1024,
+  });
+
 /**
  * W10 defect 2: a worker killed mid-push leaves its lease directory behind, and
  * admission counts the free bytes of the disk those directories sit on — so a
@@ -451,7 +502,7 @@ describe('GitRepositoryService derived state (D19)', () => {
       },
     };
     const service = createService(store, databaseStub(row, control));
-    await service.advertiseRefs(access, 'git-upload-pack');
+    await fetchOnce(service, access);
     await service.settled();
     expect(row).toEqual({ generation: 1, derivedGeneration: 0, storageBytes: 0 });
   });
@@ -462,11 +513,11 @@ describe('GitRepositoryService derived state (D19)', () => {
     const durableEvents = mock<DurableEventsService>();
     const service = createService(store, databaseStub(row, control), { durableEvents });
 
-    const advertisement = await service.advertiseRefs(access, 'git-upload-pack');
+    await fetchOnce(service, access);
 
     /* The push is durable, so the request is answered: a derivation that cannot
        finish is never allowed to turn a committed push into a refusal. */
-    expect(Buffer.from(advertisement).toString('utf8')).toContain('refs/heads/main');
+    await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
     expect(row.derivedGeneration).toBe(0);
     expect(row.storageBytes).toBe(0);
     /* D13 (review finding 4): the manifest is durable, so it is announced even
@@ -484,9 +535,8 @@ describe('GitRepositoryService derived state (D19)', () => {
     durableEvents.appendRevision.mockReturnValue(appended.promise);
     const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
 
-    const advertisement = await service.advertiseRefs(access, 'git-upload-pack');
+    await fetchOnce(service, access);
 
-    expect(Buffer.from(advertisement).toString('utf8')).toContain('refs/heads/main');
     expect(row.derivedGeneration).toBe(1);
     expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
     appended.resolve({ appended: false, reason: 'not-found' });
@@ -503,7 +553,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     durableEvents.appendRevision.mockReturnValue(appended.promise);
     const shutdown = new ShutdownService();
     const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents, shutdown });
-    await service.advertiseRefs(access, 'git-upload-pack');
+    await fetchOnce(service, access);
     expect(durableEvents.appendRevision).toHaveBeenCalledOnce();
 
     expect(await shutdown.settled(Date.now() + 50), 'the registry must hold the announcement').toBeGreaterThan(0);
@@ -518,7 +568,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     const durableEvents = mock<DurableEventsService>();
     const service = createService(store, databaseStub(row, control), { durableEvents });
 
-    await service.advertiseRefs(access, 'git-upload-pack');
+    await fetchOnce(service, access);
     await service.settled();
 
     expect(row.derivedGeneration).toBe(1);
@@ -536,7 +586,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     const durableEvents = mock<DurableEventsService>();
     const service = createService(store, databaseStub(row, { failTransaction: true }), { durableEvents });
 
-    await service.advertiseRefs(access, 'git-upload-pack');
+    await fetchOnce(service, access);
 
     // The failing transaction is never opened, which is how "no work" is visible.
     expect(row.storageBytes).toBe(7);
@@ -559,7 +609,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
     const service = createService(store, databaseStub(row, { failTransaction: false }));
 
-    await service.advertiseRefs(access, 'git-upload-pack');
+    await fetchOnce(service, access);
 
     expect(row.derivedGeneration).toBe(1);
     /* The row converges on the store rather than staying behind it, so a later
@@ -609,7 +659,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     );
     service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
 
-    await expect(service.advertiseRefs(access, 'git-upload-pack')).rejects.toMatchObject({
+    await expect(fetchOnce(service, access)).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
     });
   });
@@ -687,6 +737,248 @@ describe('retained packs after a compacting sweep (D18)', () => {
     expect(retired).toBeGreaterThan(0);
     expect(updates).toContainEqual({ retainedBytes: retired });
   }, 120_000);
+});
+
+/**
+ * Hosted Remote Storage DB1: `info/refs` is answered from the manifest. It
+ * takes no lease, so it never reaches admission, the lease disk or the hydrate
+ * budget: the route that raised TAU-API-5 (`GIT_LEASE_OWNER_BUSY` on an
+ * advertisement) can no longer be refused for capacity. One manifest read is
+ * its whole object-store cost (one Class B), and its bytes are stock git's over
+ * the lease the same manifest hydrates.
+ *
+ * W6 G8 / review FR5: the derived-state repair that rode the advertisement's
+ * lease stays on the RPC leases until DC1 takes it over, so a repository whose
+ * row trails its manifest is still repaired by the request that follows.
+ */
+describe('GitRepositoryService advertisement from the manifest (DB1)', () => {
+  const store = memoryStore();
+  const advertisedProject = 'proj-db1';
+  const advertisedAccess: GitAccess = { ...access, projectId: advertisedProject };
+  const locator = repositoryLocator({ ownerId, projectId: advertisedProject });
+  const directories: string[] = [];
+  let heads: Record<string, string> = {};
+
+  /** Every store call an advertisement makes, by port member. */
+  const counted = (): { store: RepositoryStore; calls: Map<string, number> } => {
+    const calls = new Map<string, number>();
+    const count = (member: string): void => {
+      calls.set(member, (calls.get(member) ?? 0) + 1);
+    };
+    return {
+      calls,
+      store: {
+        ...store,
+        readManifest: async (at) => {
+          count('readManifest');
+          return store.readManifest(at);
+        },
+        getObject: async (at, key, range) => {
+          count('getObject');
+          return store.getObject(at, key, range);
+        },
+        listObjects: (at, prefix) => {
+          count('listObjects');
+          return store.listObjects(at, prefix);
+        },
+      },
+    };
+  };
+
+  /** A budget that refuses, and says when it was asked: an advertisement must never ask. */
+  const refusingBudget = (): { limiter: PublicationRateLimiterService; asked: Mock } => {
+    const asked = vi.fn(async () => ({ allowed: false, count: hydratesPerCallerPerDay + 1, retryAfterSeconds: 60 }));
+    return { limiter: { consumeWindowBudget: asked } as unknown as PublicationRateLimiterService, asked };
+  };
+
+  beforeAll(async () => {
+    const client = mkdtempSync(path.join(tmpdir(), 'tau-db1-client-'));
+    directories.push(client);
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'DB1');
+    git(client, 'config', 'user.email', 'db1@tau.test');
+    writeFileSync(path.join(client, 'main.scad'), 'cube(10);\n');
+    git(client, 'add', '.');
+    git(client, 'commit', '--quiet', '-m', 'first revision');
+    git(client, 'tag', '-a', 'v1', '-m', 'v1');
+    git(client, 'tag', 'v2');
+    git(client, 'branch', 'conflicts/main/device-b');
+    heads = Object.fromEntries(
+      ['refs/heads/conflicts/main/device-b', 'refs/heads/main', 'refs/tags/v1', 'refs/tags/v2'].map((ref) => [
+        ref,
+        git(client, 'rev-parse', ref).trim(),
+      ]),
+    );
+    const parent = mkdtempSync(path.join(tmpdir(), 'tau-db1-lease-'));
+    directories.push(parent);
+    const lease = await hydrateLease({ store, locator, parentDirectory: parent });
+    try {
+      execFileSync(
+        'git',
+        ['push', lease.directory, 'main', 'refs/tags/v1', 'refs/tags/v2', 'refs/heads/conflicts/main/device-b'],
+        { cwd: client, stdio: ['ignore', 'pipe', 'pipe'], env: gitEnvironment },
+      );
+      const result = await commitLease({ store, lease, committedBy: ownerId });
+      expect(result.committed).toBe(true);
+    } finally {
+      await lease.dispose();
+    }
+    vi.mocked(hydrateLease).mockClear();
+  }, 60_000);
+
+  afterAll(() => {
+    for (const directory of directories) {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('takes no lease, no disk and no hydrate budget, and reads the store once', async () => {
+    const { metrics, on } = recordingMetrics();
+    const { store: watched, calls } = counted();
+    const { limiter, asked } = refusingBudget();
+    const service = createService(
+      watched,
+      databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
+      { metrics, rateLimiter: limiter },
+    );
+    await service.settled();
+    /* No slot fits on this disk, so any lease would be refused `GIT_LEASE_DISK_FULL`. */
+    service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+    vi.mocked(hydrateLease).mockClear();
+
+    for (const service_ of ['git-upload-pack', 'git-receive-pack'] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one advertisement at a time, so each read is counted against it
+      const advertised = await service.advertiseRefs(advertisedAccess, service_);
+      expect(Buffer.from(advertised).toString('latin1')).toContain('refs/heads/main');
+    }
+
+    expect(Object.fromEntries(calls), 'one manifest GET per advertisement, and nothing else').toStrictEqual({
+      readManifest: 2,
+    });
+    expect(hydrateLease, 'an advertisement must not build a lease').not.toHaveBeenCalled();
+    expect(asked, 'an advertisement must not spend a hydrate budget').not.toHaveBeenCalled();
+    expect(on('gitAdmissions').add).not.toHaveBeenCalled();
+    expect(on('gitLeasesActive').add).not.toHaveBeenCalled();
+    expect(on('gitDiskFreeBytes').record, 'an advertisement must not read the lease disk').not.toHaveBeenCalled();
+    expect(on('gitHydrateBytes').record).not.toHaveBeenCalled();
+    expect(on('syncLeaseDuration').record).not.toHaveBeenCalled();
+
+    /* The fetch that follows still takes its lease, and is still refused for disk. */
+    await expect(fetchOnce(service, advertisedAccess)).rejects.toMatchObject({
+      response: { code: 'GIT_LEASE_DISK_FULL' },
+    });
+  });
+
+  it('answers byte-identically to stock git over the lease the same manifest hydrates', async () => {
+    const service = createService(
+      store,
+      databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
+    );
+    const parent = mkdtempSync(path.join(tmpdir(), 'tau-db1-identity-'));
+    directories.push(parent);
+    const lease = await hydrateLease({ store, locator, parentDirectory: parent });
+    try {
+      for (const service_ of ['git-upload-pack', 'git-receive-pack'] as const) {
+        const stock = execFileSync(
+          'git',
+          [service_.replace('git-', ''), '--stateless-rpc', '--advertise-refs', lease.directory],
+          { stdio: ['ignore', 'pipe', 'pipe'], env: gitEnvironment },
+        );
+        // oxlint-disable-next-line no-await-in-loop -- two services, compared one at a time
+        const served = Buffer.from(await service.advertiseRefs(advertisedAccess, service_));
+        expect(served.toString('latin1'), service_).toStrictEqual(stock.toString('latin1'));
+      }
+    } finally {
+      await lease.dispose();
+    }
+  });
+
+  it('answers a project with no manifest as stock git answers an empty repository', async () => {
+    const service = createService(
+      memoryStore(),
+      databaseStub({ generation: 0, derivedGeneration: 0, storageBytes: 0 }, { failTransaction: false }),
+    );
+    const empty = mkdtempSync(path.join(tmpdir(), 'tau-db1-empty-'));
+    directories.push(empty);
+    git(empty, 'init', '--bare', '--quiet', '--template=', '--initial-branch=main', '.');
+    for (const service_ of ['git-upload-pack', 'git-receive-pack'] as const) {
+      const stock = execFileSync('git', [service_.replace('git-', ''), '--stateless-rpc', '--advertise-refs', empty], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: gitEnvironment,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- two services, compared one at a time
+      const served = Buffer.from(await service.advertiseRefs(advertisedAccess, service_));
+      expect(served.toString('latin1'), service_).toStrictEqual(stock.toString('latin1'));
+    }
+  });
+
+  it('answers a tombstoned repository 410, as the lease did', async () => {
+    const tombstoned = memoryStore();
+    const read = await store.readManifest(locator);
+    const live = decodeManifest(read?.manifest ?? new Uint8Array());
+    expect(await tombstoned.commitManifest(locator, encodeManifest(live), 'absent')).not.toBe('lost');
+    const current = await tombstoned.readManifest(locator);
+    if (current === undefined) {
+      throw new Error('the copied manifest is missing');
+    }
+    expect(
+      await tombstoned.commitManifest(
+        locator,
+        encodeManifest(tombstoneManifest(live, { committedBy: ownerId, at: new Date() })),
+        current.token,
+      ),
+    ).not.toBe('lost');
+    const service = createService(
+      tombstoned,
+      databaseStub({ generation: 2, derivedGeneration: 2, storageBytes: 0 }, { failTransaction: false }),
+    );
+
+    await expect(service.advertiseRefs(advertisedAccess, 'git-upload-pack')).rejects.toBeInstanceOf(GoneException);
+  });
+
+  /* W6 G8, review FR5: removing the advertisement's lease must not lose the repair it carried. */
+  it('leaves the repair to the next RPC lease: an advertisement repairs nothing, the fetch after it does', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const durableEvents = mock<DurableEventsService>();
+    const service = createService(store, databaseStub(row, { failTransaction: false }), { durableEvents });
+
+    await service.advertiseRefs(advertisedAccess, 'git-upload-pack');
+    await service.settled();
+    expect(row, 'an advertisement holds no lease to derive over').toStrictEqual({
+      generation: 1,
+      derivedGeneration: 0,
+      storageBytes: 0,
+    });
+    expect(durableEvents.appendRevision).not.toHaveBeenCalled();
+
+    await fetchOnce(service, advertisedAccess);
+    await service.settled();
+    expect(row.derivedGeneration, 'the fetch after the advertisement repairs the trailing row').toBe(1);
+    expect(row.storageBytes).toBeGreaterThan(0);
+    expect(durableEvents.appendRevision.mock.calls).toEqual([
+      [
+        {
+          projectId: advertisedProject,
+          ownerId,
+          generation: 1,
+          refs: ['refs/heads/conflicts/main/device-b', 'refs/heads/main', 'refs/tags/v1', 'refs/tags/v2'],
+          heads,
+        },
+      ],
+    ]);
+  }, 60_000);
+
+  it('leaves the repair to the next RPC lease on a push too: the authenticating probe repairs the trailing row', async () => {
+    const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
+    const service = createService(store, databaseStub(row, { failTransaction: false }));
+
+    await service.advertiseRefs(advertisedAccess, 'git-receive-pack');
+    expect(row.derivedGeneration).toBe(0);
+
+    await pushProbe(service, advertisedAccess);
+    await service.settled();
+    expect(row).toMatchObject({ generation: 1, derivedGeneration: 1 });
+  }, 60_000);
 });
 
 describe('GitRepositoryService security floor (W9)', () => {
@@ -791,19 +1083,19 @@ describe('GitRepositoryService security floor (W9)', () => {
     const service = createService(store, caughtUp(), { rateLimiter: limiter });
     const reader: GitAccess = { ...access, role: 'read', callerId: 'user-w9-reader' };
 
-    await expect(service.advertiseRefs(reader, 'git-upload-pack')).rejects.toMatchObject({
+    await expect(fetchOnce(service, reader)).rejects.toMatchObject({
       status: 429,
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
     });
-    await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
+    await expect(fetchOnce(service, access)).resolves.toBeUndefined();
 
     /* The aggregate every non-owner shares: spent, it refuses a second reader
        too, and still never the owner. */
     counters.set(`git:hydrate:${ownerId}:others:w86400:${String(day)}`, hydratesFromOthersPerOwnerPerDay);
-    await expect(
-      service.advertiseRefs({ ...reader, callerId: 'user-w9-other-reader' }, 'git-upload-pack'),
-    ).rejects.toMatchObject({ status: 429 });
-    await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
+    await expect(fetchOnce(service, { ...reader, callerId: 'user-w9-other-reader' })).rejects.toMatchObject({
+      status: 429,
+    });
+    await expect(fetchOnce(service, access)).resolves.toBeUndefined();
   }, 60_000);
 
   /* RV-W10 F1: a cloud host acts for its owner but reads on its own bucket,
@@ -825,16 +1117,16 @@ describe('GitRepositoryService security floor (W9)', () => {
     const service = createService(store, caughtUp(), { rateLimiter: limiter });
     const host = await service.authorize({ projectId, userId: ownerId, mode: 'read', viaDevice: 'agent_cloud' });
 
-    await expect(service.advertiseRefs(host, 'git-upload-pack')).resolves.toBeDefined();
+    await expect(fetchOnce(service, host)).resolves.toBeUndefined();
     expect(host.callerId).toBe('device:agent_cloud');
     expect([...counters.keys()]).toEqual([`git:hydrate:${ownerId}:caller:device:agent_cloud:w86400:${String(day)}`]);
 
     counters.set(`git:hydrate:${ownerId}:caller:device:agent_cloud:w86400:${String(day)}`, hydratesPerCallerPerDay);
-    await expect(service.advertiseRefs(host, 'git-upload-pack')).rejects.toMatchObject({
+    await expect(fetchOnce(service, host)).rejects.toMatchObject({
       status: 429,
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
     });
-    await expect(service.advertiseRefs(access, 'git-upload-pack')).resolves.toBeDefined();
+    await expect(fetchOnce(service, access)).resolves.toBeUndefined();
   }, 60_000);
 
   /* RV-W10 F2: `write` in every mode, so the owner-only removal verb refuses a
@@ -872,9 +1164,7 @@ describe('GitRepositoryService security floor (W9)', () => {
       },
     } as unknown as PublicationRateLimiterService;
 
-    await expect(
-      createService(watched, caughtUp(), { rateLimiter: spent }).advertiseRefs(access, 'git-upload-pack'),
-    ).rejects.toMatchObject({
+    await expect(fetchOnce(createService(watched, caughtUp(), { rateLimiter: spent }), access)).rejects.toMatchObject({
       status: 429,
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED', retryAfterSeconds: 3600 },
     });
@@ -891,7 +1181,7 @@ describe('GitRepositoryService security floor (W9)', () => {
       },
     };
 
-    const refusal = createService(damaged, caughtUp()).advertiseRefs(access, 'git-upload-pack');
+    const refusal = fetchOnce(createService(damaged, caughtUp()), access);
     await expect(refusal).rejects.toMatchObject({ status: 500, response: { code: 'GIT_REPOSITORY_INCOMPLETE' } });
     await expect(refusal).rejects.not.toBeInstanceOf(ServiceUnavailableException);
     let message = '';
@@ -1292,7 +1582,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('derived_generation is 
     const fresh = createService(casStore, { database } as unknown as DatabaseService);
     const stale = createService(staleStore, staleDatabase);
 
-    await fresh.advertiseRefs(casAccess, 'git-upload-pack');
+    await fetchOnce(fresh, casAccess);
     const afterFresh = await database.query.projectGit.findFirst({
       where: eq(projectGit.projectId, casProjectId),
     });
@@ -1300,7 +1590,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('derived_generation is 
     expect(Number(afterFresh?.storageBytes)).toBe(generationTwoBytes);
 
     /* Now the slow one lands, still believing the marker is 0. */
-    await stale.advertiseRefs(casAccess, 'git-upload-pack');
+    await fetchOnce(stale, casAccess);
     const afterStale = await database.query.projectGit.findFirst({
       where: eq(projectGit.projectId, casProjectId),
     });
@@ -1437,15 +1727,15 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     const service = createService(store, caughtUp(), { metrics });
     service.leaseDiskBytesPerLease = 1024;
 
-    await service.advertiseRefs(telemetryAccess, 'git-upload-pack');
+    await fetchOnce(service, telemetryAccess);
 
     expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
-      'tau.git.operation': 'advertise',
+      'tau.git.operation': 'upload_pack',
       outcome: 'admitted',
     });
     expect(on('gitLeasesActive').add.mock.calls).toEqual([
-      [1, { 'tau.git.operation': 'advertise' }],
-      [-1, { 'tau.git.operation': 'advertise' }],
+      [1, { 'tau.git.operation': 'upload_pack' }],
+      [-1, { 'tau.git.operation': 'upload_pack' }],
     ]);
     expect(on('gitLeaseReservedBytes').record.mock.calls).toEqual([[1024], [0]]);
     expect(on('gitDiskFreeBytes').record).toHaveBeenCalledOnce();
@@ -1460,12 +1750,12 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     const service = createService(store, caughtUp(), { metrics });
     service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
 
-    await expect(service.advertiseRefs(telemetryAccess, 'git-receive-pack')).rejects.toMatchObject({
+    await expect(pushProbe(service, telemetryAccess)).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
     });
 
     expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
-      'tau.git.operation': 'advertise',
+      'tau.git.operation': 'receive_pack',
       outcome: 'disk_full',
     });
     expect(on('gitLeasesActive').add).not.toHaveBeenCalled();
@@ -1511,12 +1801,12 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     });
     service.leaseDiskBytesPerLease = 1024;
 
-    await expect(service.advertiseRefs(telemetryAccess, 'git-upload-pack')).rejects.toMatchObject({
+    await expect(fetchOnce(service, telemetryAccess)).rejects.toMatchObject({
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
     });
 
     expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
-      'tau.git.operation': 'advertise',
+      'tau.git.operation': 'upload_pack',
       outcome: 'budget_exhausted',
     });
     expect(on('gitLeasesActive').add).not.toHaveBeenCalled();

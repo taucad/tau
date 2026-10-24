@@ -38,7 +38,7 @@ import { ProjectAccessService } from '#api/collaboration/project-access.service.
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { pktLine, repositoryStoreKey } from '#api/git/git.constants.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -49,6 +49,8 @@ import { PublicationRateLimiterService } from '#api/publications/publication-rat
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { livePackBound } from '#api/git/store/limits.js';
+import { hydrateLease } from '#api/git/store/lease.js';
+import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore, StoredObject } from '#api/git/store/port.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 
@@ -526,6 +528,51 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(references).not.toContain('refs/tau/owners/owner_1');
   }, 120_000);
 
+  /**
+   * DB1: `info/refs` is answered from the manifest, and what reaches the client
+   * is what stock git writes over a lease of that manifest. This remote hands
+   * git no `GIT_PROTOCOL`, so a client asking for protocol v2 is answered v0,
+   * exactly as before, and falls back.
+   */
+  it('serves info/refs byte-identically to stock git over a lease of the same manifest, v2 request included', async () => {
+    const clone = path.join(workspace, 'clone');
+    await gitOk(['tag', '-a', 'db1-annotated', '-m', 'DB1'], clone);
+    await gitOk(['tag', 'db1-light'], clone);
+    await gitOk(['push', 'origin', 'refs/tags/db1-annotated', 'refs/tags/db1-light'], clone);
+
+    const lease = await hydrateLease({
+      store: app.get<RepositoryStore>(repositoryStoreKey),
+      locator: repositoryLocator({ ownerId, projectId }),
+      parentDirectory: workspace,
+    });
+    try {
+      for (const service of ['git-upload-pack', 'git-receive-pack'] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one service at a time against its own stock answer
+        const stock = await gitOk(
+          [service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', '.'],
+          lease.directory,
+        );
+        /* The annotated tag is peeled on the fetch side only, so the case covers both shapes. */
+        expect(stock.stdout.includes('refs/tags/db1-annotated^{}')).toBe(service === 'git-upload-pack');
+        for (const headers of [{}, { 'Git-Protocol': 'version=2' }] as ReadonlyArray<Record<string, string>>) {
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=${service}`, {
+            headers: { Authorization: `Bearer ${callers.owner.token}`, ...headers },
+          });
+          expect(response.status).toBe(200);
+          expect(response.headers.get('content-type')).toBe(`application/x-${service}-advertisement`);
+          // oxlint-disable-next-line no-await-in-loop -- as above
+          const body = Buffer.from(await response.arrayBuffer()).toString('utf8');
+          const prefix = `${pktLine(`# service=${service}\n`)}0000`;
+          expect(body.startsWith(prefix)).toBe(true);
+          expect(body.slice(prefix.length), `${service} ${JSON.stringify(headers)}`).toStrictEqual(stock.stdout);
+        }
+      }
+    } finally {
+      await lease.dispose();
+    }
+  }, 120_000);
+
   it('rejects a mixed stock push atomically, without accepting its ordinary branch', async () => {
     const clone = path.join(workspace, 'clone');
     await writeFile(path.join(clone, 'part.ts'), 'export const width = 13;\n', 'utf8');
@@ -596,7 +643,10 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
 
     expect(pushed.code, pushed.stderr).toBe(0);
     expect(state.generation).toBe(before);
+    /* DB1, W6 G8: the advertisement holds no lease, so the repair waits for the RPC after it. */
     await advertised();
+    expect(state.generation).toBe(before);
+    await gitOk(['clone', '--quiet', remoteUrl, path.join(workspace, 'repair-after-database-down')], workspace);
     expect(state.generation).toBeGreaterThan(before);
   }, 120_000);
 
@@ -658,9 +708,13 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
     expect(state.generation, 'a killed worker must not have recorded its generation').toBe(before.generation);
     expect(state.derivedGeneration).toBe(before.derivedGeneration);
 
-    /* The commit is durable all the same, and the plain read that proves it is
-       also the request that repairs the row: both columns agree afterwards. */
+    /* The commit is durable all the same, and the advertisement proves it from
+       the manifest. It holds no lease, so it repairs nothing (DB1, W6 G8); the
+       plain read after it is the request that repairs the row, and both columns
+       agree afterwards. */
     expect(await advertised()).toContain('refs/heads/outlived');
+    expect(state.derivedGeneration).toBe(before.derivedGeneration);
+    await gitOk(['clone', '--quiet', remoteUrl, path.join(workspace, 'repair-after-worker-death')], workspace);
     expect(state.derivedGeneration).toBeGreaterThan(before.derivedGeneration);
     expect(state.generation).toBe(state.derivedGeneration);
   }, 120_000);
@@ -728,11 +782,22 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   it('answers 503 with Retry-After when this worker has no room for another lease', async () => {
     const reservation = repositories.leaseDiskBytesPerLease;
     repositories.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
-    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+    /* DB1: the advertisement takes no lease, so a full disk never refuses it (TAU-API-5). */
+    const advertisement = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
       headers: { Authorization: `Bearer ${callers.owner.token}` },
+    });
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/git-upload-pack`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${callers.owner.token}`,
+        'Content-Type': 'application/x-git-upload-pack-request',
+      },
+      body: '0000',
     });
     repositories.leaseDiskBytesPerLease = reservation;
 
+    expect(advertisement.status).toBe(200);
+    expect(await advertisement.text()).toContain('refs/heads/main');
     expect(response.status).toBe(503);
     expect(response.headers.get('retry-after')).toBe('5');
     expect(await response.text()).toContain('retry shortly');

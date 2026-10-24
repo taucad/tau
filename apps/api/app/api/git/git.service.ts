@@ -56,6 +56,7 @@ import {
   repositoryStoreKey,
 } from '#api/git/git.constants.js';
 import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
+import { advertiseReferences, installedGitDialect } from '#api/git/advertisement.js';
 import { HotProjects, hotProjectRanks } from '#api/git/hot-projects.js';
 import type { HotProject } from '#api/git/hot-projects.js';
 import { commitLease } from '#api/git/store/commit.js';
@@ -69,6 +70,7 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import { leaseDiskBytesPerLease, repositoryByteCeiling } from '#api/git/store/limits.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
+import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
@@ -80,8 +82,9 @@ import { ObjectStorageService } from '#storage/object-storage.service.js';
  * The Tau Hosted Remote's request path over the repository store (charter D1,
  * D3, D4).
  *
- * Every request hydrates a disposable lease from object storage, runs stock
- * git over it and throws it away. Nothing on this machine is durable state
+ * Every RPC hydrates a disposable lease from object storage, runs stock git
+ * over it and throws it away; the ref advertisement reads the manifest alone
+ * (DB1). Nothing on this machine is durable state
  * (NI1), nothing here holds a per-repository lock (NI3, the manifest's
  * conditional write is the lock), and nothing enumerates every repository
  * (NI10).
@@ -242,7 +245,7 @@ const directoryBytes = async (directory: string): Promise<number> => {
 /** A clone of a large repository is slow; an abandoned child is forever. */
 const rpcTimeoutMilliseconds = 10 * 60 * 1000;
 
-/** `for-each-ref`, `cat-file`, `--advertise-refs`. */
+/** `update-ref` and the publication materializer's `for-each-ref` and `cat-file`. */
 const commandTimeoutMilliseconds = 60 * 1000;
 
 /** What a 503 from this service tells the client to wait, in seconds. */
@@ -779,17 +782,41 @@ export class GitRepositoryService {
   }
 
   /**
-   * `info/refs?service=…`: the ref advertisement, over a lease.
+   * `info/refs?service=…`: the ref advertisement, answered from the manifest
+   * (Hosted Remote Storage DB1).
+   *
+   * No lease: no admission, no lease disk, no hydrate budget and no git child,
+   * so the first leg of every push and fetch can no longer be refused for this
+   * Machine's capacity (TAU-API-5). The project's admission and storage account
+   * are checked as for any request, and the one manifest read is the whole
+   * object-store cost. The bytes are stock git's over the lease that manifest
+   * hydrates (`advertisement.ts`).
+   *
+   * Derived-state repair (D19) is not done here, because it needs the lease
+   * this route no longer builds. It stays on the `upload-pack`, `receive-pack`
+   * and removal leases, so a repository whose row trails its manifest is
+   * repaired by the RPC that follows this advertisement (W6 G8, review FR5),
+   * until DC1 moves the comparison to every grant.
    *
    * @param access - What `authorize` resolved.
    * @param service - The service the client named.
    * @returns The advertisement bytes, without the service prefix.
    */
   public async advertiseRefs(access: GitAccess, service: GitSmartService): Promise<Uint8Array<ArrayBuffer>> {
-    return this.leaseFor('advertise', access, async (lease) => {
-      await this.repairDerivedState(access, lease);
-      return this.runGit([service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', '.'], lease.directory);
-    });
+    try {
+      const locator = await this.resolveActiveLocator(access);
+      const read = await this.store.readManifest(locator);
+      const manifest = read === undefined ? undefined : decodeManifest(read.manifest);
+      if (isTombstoned(manifest)) {
+        throw new RepositoryStoreError(
+          'tombstoned',
+          `repository ${locator.projectId} is tombstoned and advertises no refs`,
+        );
+      }
+      return advertiseReferences({ service, refs: manifest?.refs ?? {}, dialect: await installedGitDialect() });
+    } catch (error) {
+      throw this.refusalFor(error);
+    }
   }
 
   /**

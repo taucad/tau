@@ -365,6 +365,33 @@ describe('GitController sync telemetry', () => {
     });
   });
 
+  /* DB1, W14 SLO-7: the advertisement is answered from the manifest, and its count and latency are its own. */
+  it.each(['git-upload-pack', 'git-receive-pack'] as const)(
+    'counts a served %s advertisement as advertise ok with its latency, and no push or fetch',
+    async (service) => {
+      const recorded = metrics();
+      const controller = controllerWith(
+        {
+          authorize: async () => access as unknown as GitAccess,
+          advertiseRefs: async () => Buffer.from('0000'),
+        },
+        recorded,
+      );
+
+      await controller.infoRefs('proj_d1.git', service, 'user-owner', ownRequest(), replyStub().reply);
+
+      expect(recorded.syncOperations.add).toHaveBeenCalledExactlyOnceWith(1, {
+        'tau.sync.operation': 'advertise',
+        outcome: 'ok',
+      });
+      expect(recorded.syncOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        'tau.sync.operation': 'advertise',
+        outcome: 'ok',
+      });
+      expect(recorded.syncRefusals.add).not.toHaveBeenCalled();
+    },
+  );
+
   it('counts a push refused for quota at the advertisement as quota_refused', async () => {
     const recorded = metrics();
     const controller = controllerWith(

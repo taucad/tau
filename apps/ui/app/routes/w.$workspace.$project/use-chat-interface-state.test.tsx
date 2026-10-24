@@ -206,13 +206,13 @@ describe('useChatInterfaceState mobile drawer', () => {
     expect(result.current.drawerOpen).toBe(false);
   });
 
-  it('drops the snap reset vaul sends after a close, so a quick reopen keeps half height', () => {
+  it('drops the snap reset vaul sends after a close it made, so a quick reopen keeps half height', () => {
     const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
     state.activeTab = 'parameters';
     const { result, rerender } = renderHook(() => useChatInterfaceState());
 
     act(() => {
-      result.current.handleTabChange('viewer');
+      result.current.handleDrawerChange(false);
     });
     rerender();
     act(() => {
@@ -241,7 +241,7 @@ describe('useChatInterfaceState mobile drawer', () => {
     const { result, rerender } = renderHook(() => useChatInterfaceState());
 
     act(() => {
-      result.current.handleTabChange('viewer');
+      result.current.handleDrawerChange(false);
     });
     rerender();
     now.mockReturnValue(1500);
@@ -268,7 +268,7 @@ describe('useChatInterfaceState mobile drawer', () => {
     const { result, rerender } = renderHook(() => useChatInterfaceState());
 
     act(() => {
-      result.current.handleTabChange('viewer');
+      result.current.handleDrawerChange(false);
     });
     rerender();
     act(() => {
@@ -276,6 +276,29 @@ describe('useChatInterfaceState mobile drawer', () => {
     });
     rerender();
     now.mockReturnValue(5000);
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
+  });
+
+  it('arms no guard for an app-driven close, which vaul sends no reset for', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    // The Model destination closes the sheet through vaul's controlled `open`.
+    act(() => {
+      result.current.handleTabChange('viewer');
+    });
+    rerender();
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+    now.mockReturnValue(1200);
+    // The person's first move to the peek right after the reopen is theirs, and is honoured.
     act(() => {
       result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
     });

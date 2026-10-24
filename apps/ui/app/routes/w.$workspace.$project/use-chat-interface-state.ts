@@ -76,9 +76,15 @@ export function useChatInterfaceState(): ChatInterfaceState {
     }
   }
 
+  /* Vaul returns to its first snap point 500ms after a close it makes (a drag down, Escape, Close). The hook owns the
+   * height a surface reopens at, so such a close arms a one-shot guard that drops that one reset, whether it lands while
+   * closed or after a quick reopen. An app-driven close (the Model destination) goes through vaul's controlled `open`
+   * and arms nothing. The guard lapses after the reset's window, so a skipped reset never swallows a later move. */
+  const vaulResetDeadlineRef = useRef(Number.NEGATIVE_INFINITY);
   const handleDrawerChange = useCallback(
     (value: boolean): void => {
       if (!value) {
+        vaulResetDeadlineRef.current = performance.now() + vaulCloseResetMilliseconds;
         setActiveTab('viewer');
       }
     },
@@ -92,15 +98,9 @@ export function useChatInterfaceState(): ChatInterfaceState {
     [setActiveTab],
   );
 
-  /* Vaul returns to its first snap point 500ms after every close. The hook owns the height a surface reopens at, so
-   * each close arms a one-shot guard that drops that one reset, whether it lands while closed or after a quick reopen.
-   * The guard lapses after the reset's window, so a reset vaul skips never swallows a later move of the person's. */
+  // A snap change while closed has nothing to move.
   const isOpenRef = useRef(drawerOpen);
-  const vaulResetDeadlineRef = useRef(Number.NEGATIVE_INFINITY);
   useEffect(() => {
-    if (isOpenRef.current && !drawerOpen) {
-      vaulResetDeadlineRef.current = performance.now() + vaulCloseResetMilliseconds;
-    }
     isOpenRef.current = drawerOpen;
   }, [drawerOpen]);
 

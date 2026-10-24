@@ -124,12 +124,26 @@ describe('ChatViewerControls', () => {
       expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
     });
 
-    it('should stay within a narrow strip, wrapping its rows rather than spilling out of the bar', () => {
+    it('should never shrink below its rows, so no row spills out of the bar in a narrow strip', () => {
       renderBar(startGraphics());
 
-      expect(
-        screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]'),
-      ).toHaveClass('max-w-full', 'min-w-0', 'max-h-full', 'min-h-0');
+      const bar = screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]');
+      expect(bar).toHaveClass('max-w-full', 'min-w-min');
+      expect(bar).not.toHaveClass('min-w-0');
+      expect(screen.getByRole('button', { name: 'Fit view' }).parentElement).not.toHaveClass('flex-wrap');
+    });
+
+    it('should fit a phone sheet, wrapping its controls and scrolling its tool rows within the space it is given', () => {
+      mocks.isMobile = true;
+      const actor = startGraphics();
+      actor.send({ type: 'setMeasureActive', payload: true });
+      renderBar(actor);
+
+      const bar = screen.getByRole('group', { name: 'Viewer controls' }).closest('[data-slot="viewer-controls"]');
+      expect(bar).toHaveClass('max-w-full', 'min-w-0', 'max-h-full', 'min-h-0');
+      expect(bar).not.toHaveClass('min-w-min');
+      expect(screen.getByRole('button', { name: 'Fit view' }).parentElement).toHaveClass('flex-wrap');
+      expect(measuringRow().closest('[data-slot="viewer-tool-rows"]')).toHaveClass('min-h-0', 'overflow-y-auto');
     });
 
     it('should put the mobile action in place of fullscreen on phones, after Fit view', () => {

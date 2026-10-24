@@ -107,6 +107,7 @@ type ToolRowProps = Readonly<{
 /** A running tool's row inside the bar: its name, its options, then Done. */
 function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): React.JSX.Element {
   const isTouch = useViewerControlSize() === 'icon-touch';
+  const isMobile = useIsMobile();
   const rowRef = useRef<HTMLDivElement>(null);
   useFocusHandOff(rowRef, resolveToolToggle);
   return (
@@ -118,7 +119,8 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
       className='flex max-w-full flex-col gap-1 border-b pb-1'
     >
       {above}
-      <div className='flex min-h-7 flex-wrap items-center gap-1'>
+      {/* A phone's row wraps within the sheet; a desktop row holds its width so the bar never shrinks below it. */}
+      <div className={cn('flex min-h-7 items-center gap-1', isMobile && 'flex-wrap')}>
         <span className='flex shrink-0 items-center gap-1 px-1 text-xs font-medium'>
           {icon}
           {/* Below 520 px the name gives way to its glyph, as the toggles' labels do, so the row fits. */}
@@ -189,6 +191,29 @@ export function ViewerControls(props: ViewerControlsProps): React.JSX.Element {
   );
 }
 
+/**
+ * The bar's layout classes. On a phone the bar fits the space it is given, wraps its controls and scrolls its tool
+ * rows; a desktop pane's bar never shrinks below its rows, so a narrow strip keeps them whole.
+ * @param isMobile - Whether the viewport is a phone's.
+ * @param isTouch - Whether the controls take touch targets.
+ * @returns The classes of the bar, its tool rows and its controls line.
+ */
+function barLayout(isMobile: boolean, isTouch: boolean): { bar: string; toolRows: string; controls: string } {
+  return {
+    bar: cn(
+      'pointer-events-auto flex max-w-full flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs',
+      isMobile ? 'max-h-full min-h-0 min-w-0' : 'min-w-min',
+    ),
+    toolRows: cn(isMobile && 'min-h-0 overflow-y-auto'),
+    controls: cn(
+      'flex items-center',
+      isMobile && 'max-w-full flex-wrap justify-center',
+      isTouch ? 'gap-0' : 'gap-1',
+      !isMobile && !isTouch && 'h-7',
+    ),
+  };
+}
+
 function ViewerControlsBody({
   capture,
   mobileAction,
@@ -200,6 +225,7 @@ function ViewerControlsBody({
 }: ViewerControlsProps): React.JSX.Element {
   const controlSize = useViewerControlSize();
   const isMobile = useIsMobile();
+  const layout = barLayout(isMobile, controlSize === 'icon-touch');
   const graphicsRef = useGraphics();
   const barRef = useRef<HTMLDivElement>(null);
   const leadingRef = useRef<HTMLDivElement>(null);
@@ -231,13 +257,9 @@ function ViewerControlsBody({
   }, []);
 
   return (
-    <div
-      ref={barRef}
-      data-slot='viewer-controls'
-      className='pointer-events-auto flex max-h-full min-h-0 max-w-full min-w-0 flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs'
-    >
+    <div ref={barRef} data-slot='viewer-controls' className={layout.bar}>
       {!is2dGeometry && (isSectionViewActive || isMeasureActive) ? (
-        <div className='min-h-0 overflow-y-auto'>
+        <div data-slot='viewer-tool-rows' className={layout.toolRows}>
           {isSectionViewActive ? (
             <ToolRow
               tool='section'
@@ -292,13 +314,7 @@ function ViewerControlsBody({
             {isLeadingStacked ? null : <Hairline />}
           </>
         )}
-        <div
-          ref={controlsRef}
-          className={cn(
-            'flex max-w-full flex-wrap items-center justify-center',
-            controlSize === 'icon-touch' ? 'gap-0' : 'gap-1',
-          )}
-        >
+        <div ref={controlsRef} className={layout.controls}>
           <GridSizeIndicator />
           <Hairline />
           {is2dGeometry ? null : (

@@ -3,7 +3,7 @@ title: 'WebGPU Shader and Pipeline Policy'
 description: 'Rules for portable Three.js shaders, generated-source evidence, and render-pipeline ownership'
 status: active
 created: '2026-05-15'
-updated: '2026-10-21'
+updated: '2026-10-24'
 related:
   - docs/policy/graphics-backend-policy.md
   - docs/policy/webgpu-rendering-pipeline.md
@@ -293,6 +293,16 @@ Calibrate appearance tolerances using reference variation, known defective contr
 Keep depth precision and required CAD behavior as invariants. Sample count, target dimensions and pass sequence are implementations that may change when their replacements satisfy the contract. Preserve classic appearance as the reference; do not degrade it to pass a candidate.
 
 Version any justified gate revision with its rationale, negative controls, authorization and fresh evidence. Preserve original thresholds and failures; never relabel an old failed run as passed under a new gate. Use explicit dispositions: functional failure, appearance investigation, benefit inconclusive, bounded acceptance, or rollout qualified. Qualification of an optimization does not promote an execution backend or require completing unrelated rollout gates first.
+
+### 16. Separate composition replacement from broader rollout
+
+Decide independently whether a replacement materially regresses its current reference and whether the resulting renderer is ready for broader rollout. Classify unresolved findings as replacement-specific regressions, demonstrated shared defects, unattributed differences, accepted numerical/coverage differences, or follow-up improvements. Similar failures in both variants do not prove a shared mechanism: compare reproduction sequence, location, severity, frequency and impact. Preserve strict picking, clipping, depth, hidden-line and missing-stroke semantics.
+
+Use a bounded comparison with independent histories and retain every admitted run. A passing rerun is not a correction. End an inconclusive investigation with a supported disposition and the next decisive experiment. An unresolved material replacement-specific regression blocks promotion; an assessed shared defect belongs to the separate release acceptance record.
+
+Once a replacement qualifies, remove its obsolete production alternative and selector. Preserve reproducible historical baselines through source revisions or research artifacts, rather than permanent competing implementations. Necessary AO-off specializations and classic compatibility fallback are separate from node composition consolidation; node WebGL2 must independently qualify before becoming the automatic fallback.
+
+**Why**: A simpler qualified owner avoids indefinite implementation duplication without concealing pre-existing renderer defects or weakening release criteria.
 
 ## Anti-Patterns
 

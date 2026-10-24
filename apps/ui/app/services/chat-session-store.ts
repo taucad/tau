@@ -185,7 +185,7 @@ export type ChatSessionDeps = {
    * `/.tau/composers` records and each project's `.tau/chats` attachments from
    * any route (D1, D13).
    */
-  client: ComposerRecordClient;
+  client: ComposerRecordClient & SegmentStatClient;
   /**
    * The device-relative placement a chat record written before placement moved to the device still names (XD2), when
    * `accept` holds for it: this device adopts it into its own placements record. The chat record keeps it (no device
@@ -684,6 +684,26 @@ type ProjectHostConnector = Readonly<{
   >;
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
 }>;
+
+/** A client that may say when a file last changed on this device (the worker filesystem's head-only stat). */
+type SegmentStatClient = Readonly<{
+  stat?:
+    | ((path: string, options: Readonly<{ content: 'head' }>) => Promise<Readonly<{ mtimeMs?: number | undefined }>>)
+    | undefined;
+}>;
+
+/**
+ * When a segment last changed on this device, its modification time (XD3, round 17): the agent host's reader reads the
+ * same file's, so the page and the fence measure another device's run from the one time. None without a stat or a
+ * modification time; the run is then measured from when this page first read it.
+ */
+const receivedAtOf = async (client: SegmentStatClient, path: string): Promise<Readonly<{ receivedAt?: number }>> => {
+  const mtimeMs = await client
+    .stat?.(path, { content: 'head' })
+    .then((stat) => stat.mtimeMs)
+    .catch(() => undefined);
+  return mtimeMs === undefined || mtimeMs <= 0 ? {} : { receivedAt: mtimeMs };
+};
 
 export class ChatSessionStore {
   readonly #sessions = new Map<string, InternalSession>();
@@ -4386,6 +4406,7 @@ export class ChatSessionStore {
       named.map(async ({ name, deviceId }) => ({
         deviceId,
         bytes: await this.#readForeignSegment(`${directory}/${name}`, client),
+        ...(await receivedAtOf(client, `${directory}/${name}`)),
       })),
     );
     if (

@@ -46,6 +46,8 @@
 \* A placement held during a load is checked against reach once it is held; queue paths unchanged.
 \* Other devices' segments reach the projection with this device's read time, so a run held
 \* elsewhere goes stale by this device's clock; queue paths unchanged.
+\* Each segment also carries when it last changed on this device (its modification time), the one
+\* time the page and the agent host both measure a foreign run from; queue paths unchanged.
 \* QueuePlacement.tla separately checks host-local lost-ACK recovery and scoped
 \* legacy receipt rebasing; this module retains its single-host FIFO scope.
 EXTENDS Naturals, Sequences, FiniteSets, TLC

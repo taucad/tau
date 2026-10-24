@@ -6765,6 +6765,36 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
 
 /* XD3: the page names another device's run as every agent host does, by the segment's device id. */
 describe('ChatSessionStore — a run on another device (XD3)', () => {
+  /* Round 17: the page measures a run from when its segment last changed on this device, as the agent host does. */
+  it('should measure a foreign run from its segment’s modification time, as the agent host reads it', async () => {
+    const projectId = 'project_run_received';
+    const chatId = 'chat_run_received';
+    const receivedAt = Date.now() - 20 * 60 * 1000;
+    const client = Object.assign(createMemoryClient(), {
+      stat: vi.fn(async (path: string) => ({ size: 0, mtimeMs: path.endsWith('.jsonl') ? receivedAt : 0 })),
+    });
+    const row = (sequence: number, state: string) =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt: new Date(receivedAt).toISOString(), runId: 'run-received', type: 'run.lifecycle', state })}\n`;
+    await client.writeFile(
+      `/projects/${projectId}/.tau/chats/${chatId}/events/device-desktop.jsonl`,
+      new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
+    );
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies(createStubDeps(client));
+    const unobserve = store.observe(chatId, projectId);
+    store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+
+    await vi.waitFor(() => {
+      expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
+        expect.objectContaining({ runId: 'run-received', observedAt: receivedAt }),
+      ]);
+    });
+    store.release(chatId);
+    unobserve();
+  });
+
   it('should name the device a foreign run is on without the segment file’s extension', async () => {
     const projectId = 'project_run_elsewhere';
     const chatId = 'chat_run_elsewhere';

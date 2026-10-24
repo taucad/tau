@@ -348,11 +348,19 @@ const hashSegment = (bytes: Uint8Array<ArrayBuffer>): number => {
   return hash >>> 0;
 };
 
-type SegmentSignature = Readonly<{ deviceId: string; byteLength: number; hash: number }>;
+type SegmentSignature = Readonly<{ deviceId: string; byteLength: number; hash: number; receivedAt?: number }>;
 
-/** Each segment's signature, in the order given: callers pass segments already in device-id order. */
+/**
+ * Each segment's signature, in the order given: callers pass segments already in device-id order. When it last changed
+ * here is part of it, as it is of the agent host's fingerprint, so both measure a foreign run from the same time.
+ */
 const signaturesOf = (sorted: readonly ChatLogSegment[]): readonly SegmentSignature[] =>
-  sorted.map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }));
+  sorted.map(({ deviceId, bytes, receivedAt }) => ({
+    deviceId,
+    byteLength: bytes.byteLength,
+    hash: hashSegment(bytes),
+    ...(receivedAt === undefined ? {} : { receivedAt }),
+  }));
 
 const signatureKey = ({ deviceId, byteLength, hash }: SegmentSignature): string =>
   `${deviceId}:${String(byteLength)}:${String(hash)}`;
@@ -1089,13 +1097,13 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
      * again while its bytes stay the same, and only its new rows when it grew, as the agent host's appender does. */
     const known = state.remote === undefined ? undefined : segmentParses.get(state.remote);
     const parses = new Map<string, KeptParse>();
-    const parsed: ParsedLogSegment[] = sorted.map(({ deviceId, bytes }, index) => {
+    const parsed: ParsedLogSegment[] = sorted.map(({ deviceId, bytes, receivedAt }, index) => {
       const key = signatureKey(signatures[index]!);
       const prior = known?.get(deviceId);
       /* The same signature is the same bytes, though a read may hand them over as a new array. */
       const parse = prior?.key === key ? prior.parse : parseSegmentFrom(prior?.parse, bytes);
       parses.set(deviceId, { key, parse });
-      return { deviceId, events: parse.events };
+      return { deviceId, events: parse.events, ...(receivedAt === undefined ? {} : { receivedAt }) };
     });
     const { views } = foldRunViews(mergeSegmentRows(parsed), {}, {});
     const unsettled = unsettledParsedRuns(parsed, event.at);

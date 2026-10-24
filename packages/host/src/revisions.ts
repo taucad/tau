@@ -1573,6 +1573,10 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'syncNow':
         actor.send({ type: 'syncNow' });
         break;
+      /* XD3, round 18: another device's run has been quiet here past the bound; a pull shows whether it stayed quiet. */
+      case 'pullRemote':
+        actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
+        break;
       case 'publishProject':
         actor.send({
           type: 'publish',

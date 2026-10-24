@@ -1244,7 +1244,7 @@ export const replicadKernel = defineKernel({
       shapes: serialized.shapes.map((entry) => ({
         shape:
           'drawing' in entry
-            ? (context.replicadLibrary.deserializeDrawing(entry.drawing) as unknown as AnyShape)
+            ? restoreDrawing(context.replicadLibrary, entry.drawing)
             : readBinaryBrep(context.replicadLibrary, entry.brep),
         ...entry.metadata,
       })),
@@ -1338,6 +1338,20 @@ const readBinaryBrep = (library: ReplicadLibrary, bytes: Uint8Array<ArrayBuffer>
 };
 
 /* oxlint-enable new-cap */
+
+/**
+ * Restore a drawing entry the way a fresh render input admits one.
+ * @param library - The realm's replicad library.
+ * @param serialized - The drawing's own serialisation.
+ * @returns The handle shape.
+ */
+const restoreDrawing = (library: ReplicadLibrary, serialized: string): AnyShape => {
+  const [entry] = normalizeRenderShapes(library.deserializeDrawing(serialized));
+  if (!entry) {
+    throw new Error('Replicad native-handle snapshot drawing is empty.');
+  }
+  return entry.shape;
+};
 
 const serializeReplicadHandle = (nativeHandle: NativeHandle, library: ReplicadLibrary) => ({
   format: replicadSnapshotFormat,

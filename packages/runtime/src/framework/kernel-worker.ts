@@ -7220,8 +7220,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           duration,
           ...(reason === undefined ? {} : { reason }),
         });
-        // Background work settles after its operation flushed; report it now, not at the next operation.
-        this.telemetryCollector?.flush();
+        // Background work settles after its operation flushed; report it now unless an admitted
+        // operation's root is still open, whose terminal reply then carries it.
+        if (this.admittedOperations === 0) {
+          this.telemetryCollector?.flush();
+        }
       },
       onScopeSettled: ({ operationId, generation, settlement }) => {
         this.tracer.startSpan('kernel.compute.reuse', { operationId }).end({

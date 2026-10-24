@@ -206,7 +206,28 @@ describe('trace projection', () => {
     expect(lanes.some(({ phase }) => phase === 'postProcessing')).toBe(false);
   });
 
-  it('omits phase chrome for non-render traces', () => {
+  it('builds phase lanes for an evaluate trace, whose root now owns dependency and parameter phases', () => {
+    const evaluate = buildTelemetryTraces([
+      makeEntry({ name: 'kernel.evaluate', startTime: 0, duration: 50, workerTimeOrigin: 1000, detail: { spanId: 'e' } }),
+      makeEntry({
+        name: 'kernel.resolve-deps',
+        startTime: 5,
+        duration: 10,
+        detail: { spanId: 'deps', parentSpanId: 'e', phase: 'resolvingDeps' },
+      }),
+      makeEntry({
+        name: 'kernel.extract-params',
+        startTime: 20,
+        duration: 15,
+        detail: { spanId: 'params', parentSpanId: 'e', phase: 'extractingParams' },
+      }),
+    ])[0]!;
+    const lanes = buildPipelineLanes(evaluate);
+    expect(lanes.map(({ phase }) => phase)).toEqual(['resolvingDeps', 'extractingParams']);
+    expect(lanes[1]?.intervals).toEqual([{ start: 20, duration: 15 }]);
+  });
+
+  it('omits phase chrome for traces that are neither renders nor evaluations', () => {
     const bootstrap = buildTelemetryTraces(entries)[0]!;
     expect(buildPipelineLanes(bootstrap)).toEqual([]);
   });

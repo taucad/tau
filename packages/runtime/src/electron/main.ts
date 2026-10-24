@@ -601,15 +601,18 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
           `registerElectronRuntimeMain: utility ${record.hostId ?? ''} resident memory ${String(bytes)} bytes exceeds ${String(limit.maxBytes)}; killing it`,
         ),
       );
-      record.exceeded = {
+      const exceeded = {
         limit: 'host.utility.resident',
         unit: 'By',
         maximum: limit.maxBytes,
         demand: { kind: 'measured', value: bytes },
         origin: 'host-option',
-      };
+      } as const;
       try {
-        record.utility.kill();
+        // Only a kill that took names the limit as the exit's cause.
+        if (record.utility.kill()) {
+          record.exceeded = exceeded;
+        }
       } catch {
         /* Best-effort */
       }

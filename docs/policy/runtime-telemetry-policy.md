@@ -78,12 +78,12 @@ kernel.bootstrap
 └── kernel.init
 ```
 
-### First Render (includes kernel selection)
+### First Evaluation (includes kernel selection)
 
 ```
-kernel.render
+kernel.evaluate
 ├── kernel.resolve-deps
-│   ├── kernel.select (first render only)
+│   ├── kernel.select (first evaluation only)
 │   │   ├── kernel.detect-import
 │   │   │   └── fs.read
 │   │   ├── {kernelId}.wasm-init
@@ -104,21 +104,31 @@ kernel.render
 │   └── deps.content-hash
 └── kernel.compute (via middleware chain)
     └── middleware.wrap({Name})
-        ├── {kernelId}.run-main / {kernelId}.call-main
-        │   ├── oc.{ClassName} (per-call mode only)
-        │   ├── {kernelId}.library.{operation} (per-call mode only)
-        │   ├── {kernelId}.library.summary (summary mode only)
-        │   ├── oc.summary (summary mode only)
-        │   └── ...
-        ├── {kernelId}.render-output / {kernelId}.convert-geometry
-        │   ├── {kernelId}.tessellate.faces
-        │   └── {kernelId}.tessellate.edges
-        └── {kernelId}.mesh-to-gltf
+        └── {kernelId}.run-main / {kernelId}.call-main
+            ├── oc.{ClassName} (per-call mode only)
+            ├── {kernelId}.library.{operation} (per-call mode only)
+            ├── {kernelId}.library.summary (summary mode only)
+            ├── oc.summary (summary mode only)
+            └── ...
 ```
 
-### Subsequent Renders (kernel already selected)
+### Render of One View
 
-The `kernel.select` subtree is absent. The `kernel.bundler-init` subtree is absent (bundler already initialized). Cached middleware results may skip inner spans.
+```
+kernel.render
+├── kernel.resolve-deps (for the projection)
+└── kernel.mesh
+    └── middleware.wrap({Name})
+        └── kernel.mesh-compute
+            ├── {kernelId}.render-output / {kernelId}.convert-geometry
+            │   ├── {kernelId}.tessellate.faces
+            │   └── {kernelId}.tessellate.edges
+            └── {kernelId}.mesh-to-gltf
+```
+
+### Subsequent Evaluations and Renders (kernel already selected)
+
+The `kernel.select` subtree is absent. The `kernel.bundler-init` subtree is absent (bundler already initialized). Cached middleware results may skip inner spans, and a render of an already evaluated view opens no `kernel.evaluate` root.
 
 ### Direct Image Transcode
 

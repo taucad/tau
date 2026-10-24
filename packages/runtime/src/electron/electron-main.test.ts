@@ -109,7 +109,8 @@ vi.mock('electron', () => {
     utilityProcess: {
       fork: vi.fn(() => {
         const utility = {
-          kill: vi.fn(),
+          // Electron answers whether the signal was delivered.
+          kill: vi.fn(() => true),
           on: vi.fn(),
           postMessage: vi.fn(),
           stdout: createStream(),
@@ -1321,6 +1322,32 @@ describe('Electron main runtime memory supervision', () => {
         expect.objectContaining({ exitCode: 1, released: false, exceeded, peakResidentBytes: 1500 }),
       );
       expect(onUtilityExit).toHaveBeenCalledWith(expect.objectContaining({ exceeded, peakResidentBytes: 1500 }));
+    } finally {
+      handle.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should not name the limit as the exit cause when its kill was refused', async () => {
+    vi.useFakeTimers();
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const onUtilityExit = vi.fn();
+    const handle = registerElectronRuntimeMain({
+      onError: vi.fn(),
+      onUtilityExit,
+      residentLimit: { maxBytes: 1000, intervalMilliseconds: 5000, sample: () => 1500 },
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+    try {
+      requestRuntimePort({ once: vi.fn(), removeListener: vi.fn() }, { postMessage: vi.fn() });
+      liveUtilities.at(-1)!.kill.mockReturnValue(false);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(liveUtilities.at(-1)!.kill).toHaveBeenCalled();
+      lastUtilityExitHandler()(1);
+      liveUtilities.at(-1)?.stderr?.end();
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(onUtilityExit).toHaveBeenCalledWith(expect.not.objectContaining({ exceeded: expect.anything() }));
     } finally {
       handle.dispose();
       vi.useRealTimers();

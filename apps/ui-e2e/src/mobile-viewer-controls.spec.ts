@@ -24,6 +24,24 @@ type Layout = Readonly<{
   rows?: Readonly<{ box: Box; scrollWidth: number; clientWidth: number }>;
 }>;
 
+/**
+ * Waits for the sheet to finish moving to its detent. The detent's value changes at once and the stage takes its new
+ * height in one step, but the sheet (and its grabber) slides there over a transition, so a box read mid-slide is not
+ * the detent's.
+ */
+const sheetSettled = async (grabber: Locator): Promise<void> =>
+  target.evaluateLocator(grabber, async (handle) => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+    const sheet = handle.closest('[data-slot=drawer-content]');
+    await Promise.all((sheet?.getAnimations() ?? []).map(async (animation) => animation.finished));
+  });
+
 const readLayout = async (): Promise<Layout> =>
   target.evaluateLocator(controls(), (group) => {
     const toBox = (element: Element): Box => {
@@ -157,6 +175,7 @@ test.each([
   await target.expectVisible(selectors.getByRole('group', { name: 'Measuring options' }));
 
   const expectBounded = async (detent: string): Promise<void> => {
+    await sheetSettled(grabber);
     // The bar settles once the sheet's move ends and the stage resizes.
     await expect
       .poll(

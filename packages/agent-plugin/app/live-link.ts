@@ -1,19 +1,24 @@
 /**
  * The page's live link to `tau mcp` (agent plugin UI blueprint W6): a long poll of `app_sync` that reports what the
- * person sees and hears of models `show_model` handed over and of captures the agent waits for.
+ * person sees and hears of models `show_model` handed over, of newer renders of the source it shows (the server
+ * watches it, PAR-1) with their build status, and of captures the agent waits for.
  */
 
-import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
+import { tauViewerAcceptedViewFields, tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type {
   TauViewerCamera,
   TauViewerComponent,
   TauViewerImage,
+  TauViewerMechanism,
   TauViewerModel,
+  TauViewerPlayback,
+  TauViewerPoseCommand,
   TauViewerShowResult,
+  TauViewerEntryStatus,
   TauViewerSyncResult,
   TauViewerViewState,
 } from '@taucad/mcp/viewer-protocol';
-import type { GeometryComponentManifest } from '@taucad/types';
+import type { GeometryComponentManifest, GeometryComponentReference } from '@taucad/types';
 import type { HostBridge } from '#app/host-bridge.js';
 
 /** What the page knows about one unit of the model it draws. */
@@ -24,10 +29,21 @@ export type ShownUnit = Readonly<{
   isolatedComponentIds: readonly string[];
 }>;
 
+const componentOf = (
+  componentId: string,
+  node: Readonly<{ name: string; kind: string; selector: string }>,
+): TauViewerComponent => ({
+  componentId,
+  label: node.name,
+  kind: node.kind,
+  ...(node.selector === '' ? {} : { selector: node.selector }),
+});
+
 /**
  * The view the page reports.
  *
- * @param input - The shown model, its unit's interaction state, the camera and the page's composition.
+ * @param input - The shown model, its unit's interaction state, the camera, the page's composition and the parts the
+ * person added to chat from the model.
  * @returns The view state.
  */
 export const viewStateOf = (
@@ -39,21 +55,21 @@ export const viewStateOf = (
     measurementCount: number;
     composition: 'inline' | 'tab';
     interactedAt: number;
+    references: readonly GeometryComponentReference[];
+    /** The shown unit's mechanism, playback and coordinates, when its Kinematics actor loaded one. */
+    motion?:
+      | Readonly<{
+          mechanism: TauViewerMechanism;
+          playback: TauViewerPlayback;
+          coordinates: Readonly<Record<string, number>>;
+        }>
+      | undefined;
   }>,
 ): TauViewerViewState => {
   const { model, unit, camera } = input;
   const selected = unit.selectedComponentIds.slice(0, 64).flatMap((componentId): TauViewerComponent[] => {
     const node = unit.manifest?.nodesById[componentId];
-    return node === undefined
-      ? []
-      : [
-          {
-            componentId,
-            label: node.name,
-            kind: node.kind,
-            ...(node.selector === '' ? {} : { selector: node.selector }),
-          },
-        ];
+    return node === undefined ? [] : [componentOf(componentId, node)];
   });
   return {
     model: {
@@ -70,7 +86,33 @@ export const viewStateOf = (
     measurementCount: input.measurementCount,
     composition: input.composition,
     interactedAt: input.interactedAt,
+    ...(model.sourceRevision === undefined ? {} : { sourceRevision: model.sourceRevision }),
+    references: input.references.slice(0, 64).map((reference) =>
+      componentOf(reference.componentId, {
+        name: reference.label,
+        kind: reference.kind,
+        selector: reference.selector,
+      }),
+    ),
+    ...(input.motion === undefined
+      ? {}
+      : { mechanism: input.motion.mechanism, playback: input.motion.playback, coordinates: input.motion.coordinates }),
   };
+};
+
+/**
+ * The view as one server takes it: an optional field it has not listed under `accepts` is left out, because its strict
+ * `app_sync` would reject the whole sync (an older `tau` on `PATH`).
+ *
+ * @param view - The page's view.
+ * @param accepts - The fields the server's last sync result listed.
+ * @returns The view without the fields the server does not take.
+ */
+const viewFor = (view: TauViewerViewState, accepts: ReadonlySet<string>): TauViewerViewState => {
+  const withheld = new Set<string>(tauViewerAcceptedViewFields.filter((field) => !accepts.has(field)));
+  return withheld.size === 0
+    ? view
+    : (Object.fromEntries(Object.entries(view).filter(([key]) => !withheld.has(key))) as TauViewerViewState);
 };
 
 /** The widest capture the page sends; the agent reads a frame, not a print. */
@@ -157,10 +199,16 @@ export type LiveLinkPage = Readonly<{
   linked(): boolean;
   /** The `tools/call` whose result opened the page, which tells the server the page's conversation. */
   toolCallId(): string | undefined;
-  /** A model `show_model` handed over that this page has not seen. */
+  /** A model this page has not seen: one `show_model` handed over, or a newer render of the source it shows. */
   show(result: TauViewerShowResult): void;
+  /** The live state of the sources the page shows, by project-relative path, as the server last reported it. */
+  status(status: Readonly<Record<string, TauViewerEntryStatus>>): void;
   /** Capture the live view once its model is drawn. */
   capture(): Promise<TauViewerImage | Readonly<{ error: string }>>;
+  /** The project's file list moved to this version (`app_sync`'s `filesVersion`); the Files pane lists again. */
+  filesVersion?(filesVersion: number): void;
+  /** Apply a `pose_model` command to the shown model's Kinematics actor. */
+  pose(command: TauViewerPoseCommand): void;
 }>;
 
 /** Timing of the live link; tests shorten it. */
@@ -174,6 +222,8 @@ export type LiveLinkOptions = Readonly<{
 
 /** The running link. */
 export type LiveLink = Readonly<{
+  /** The page's id on the server, as its syncs name it; `app_open_file` names the page with it. */
+  pageId: string;
   /** Report the view now, outside the poll (after the person changed it). */
   nudge(): void;
   stop(): void;
@@ -212,9 +262,12 @@ export const startLiveLink = (
   /* `randomUUID` needs a secure context, which a sandboxed host frame may not be. */
   const pageId = `page-${[...crypto.getRandomValues(new Uint8Array(12))].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
   let version = 0;
+  /* Nothing optional goes before the server has said it takes it. */
+  let accepts: ReadonlySet<string> = new Set();
   const control: { stopped: boolean; resume?: (() => void) | undefined } = { stopped: false };
   let retry = retryFloor;
   const answered = new Set<string>();
+  let posed = 0;
   let activeUntil = Date.now() + activeFor;
   /* A page that opened on its link's model first takes the server's version without following, so a show made before
    * it opened never replaces that model; it follows every show after. */
@@ -247,8 +300,20 @@ export const startLiveLink = (
 
   const handle = (result: TauViewerSyncResult): void => {
     version = Math.max(version, result.version);
-    if (result.show !== undefined && page.follows()) {
+    accepts = new Set(result.accepts ?? []);
+    /* The server hands a card only newer renders of its own source, and a following page whatever was shown last. */
+    if (result.show !== undefined) {
       page.show(result.show);
+    }
+    if (result.status !== undefined) {
+      page.status(result.status);
+    }
+    if (result.filesVersion !== undefined) {
+      page.filesVersion?.(result.filesVersion);
+    }
+    if (result.pose !== undefined && result.pose.sequence > posed) {
+      posed = result.pose.sequence;
+      page.pose(result.pose);
     }
     const requestId = result.capture?.requestId;
     if (requestId !== undefined && !answered.has(requestId)) {
@@ -267,7 +332,7 @@ export const startLiveLink = (
       version,
       follow: page.follows() && caughtUp,
       wait,
-      ...(view === undefined ? {} : { view }),
+      ...(view === undefined ? {} : { view: viewFor(view, accepts) }),
       ...(toolCallId === undefined ? {} : { toolCallId }),
     });
     if (isSyncResult(result)) {
@@ -302,6 +367,7 @@ export const startLiveLink = (
   void loop();
 
   return {
+    pageId,
     nudge() {
       if (!control.stopped) {
         keepActive();

@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo } from 'react';
 import type { IDockviewHeaderActionsProps, DockviewGroupPanel, DockviewApi } from 'dockview-react';
 import { Plus } from 'lucide-react';
 import { FileSelector } from '#components/files/file-selector.js';
-import type { FileSelectorDataSource } from '#components/files/file-selector.js';
+import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import { DockviewPaneAction } from '#components/panes/dockview-pane-action.js';
 import { DockviewSplitAction } from '#components/panes/dockview-split-action.js';
 

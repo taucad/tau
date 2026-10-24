@@ -1,6 +1,6 @@
 {
   "name": "@taucad/mcp",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.9",
   "description": "Model Context Protocol server for Tau's CAD tools over canonical chat RPC contracts",
   "type": "module",
   "sideEffects": false,
@@ -35,6 +35,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./viewer-protocol": "./src/viewer-protocol.ts",
+    "./viewer-read": "./src/viewer-read.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -50,6 +51,11 @@
         "import": "./dist/viewer-protocol.mjs",
         "default": "./dist/viewer-protocol.mjs"
       },
+      "./viewer-read": {
+        "types": "./dist/viewer-read.d.mts",
+        "import": "./dist/viewer-read.mjs",
+        "default": "./dist/viewer-read.mjs"
+      },
       "./package.json": "./package.json"
     },
     "imports": {}
@@ -59,13 +65,16 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "catalog:"
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@taucad/workbench": "workspace:*"
   },
   "peerDependencies": {
+    "@taucad/runtime": "^0.1.0-beta.0",
     "zod": "^4.1.0"
   },
   "devDependencies": {
     "@taucad/chat": "workspace:*",
+    "@taucad/runtime": "workspace:*",
     "zod": "catalog:"
   }
 }

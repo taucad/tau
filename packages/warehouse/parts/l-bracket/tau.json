@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_WqFzR21Smjxdk1rPd4Gtm",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "L mounting bracket",
   "description": "Parametric mounting geometry with real fastening openings and rounded section corners. Dimensions and patterns are generic, fully editable design inputs.",
   "tags": [

@@ -41,6 +41,29 @@ const fixture = (initial: Promise<DesktopUpdateSnapshot> = Promise.resolve(ready
 };
 
 describe('desktop update control', () => {
+  it('describes explicit installation without promising install on quit', async () => {
+    const source = fixture(Promise.resolve({ ...ready, installOnQuit: false }));
+    render(
+      <SidebarProvider>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Update ready' }));
+    expect(await screen.findByText(/Quitting normally leaves the update for later/u)).toBeInTheDocument();
+    expect(screen.queryByText(/installs when you quit Tau/u)).not.toBeInTheDocument();
+  });
+  it('reveals APT policy without offering an installer action', async () => {
+    const source = fixture(Promise.resolve({ ...ready, phase: 'system-managed' }));
+    render(
+      <SidebarProvider>
+        <DesktopUpdateControl bridge={source.bridge} />
+      </SidebarProvider>,
+    );
+    await act(async () => undefined);
+    source.emit({ ...ready, phase: 'system-managed', revision: 3, requestId: 1 });
+    expect(await screen.findByText('Your administrator manages updates through APT.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restart now' })).not.toBeInTheDocument();
+  });
   it('should remain absent in the browser', () => {
     render(<DesktopUpdate />);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();

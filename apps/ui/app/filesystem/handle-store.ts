@@ -54,7 +54,7 @@ import { metaConfig } from '#constants/meta.constants.js';
 import { allocateSlug, projectNameToSlug } from '#utils/project-directory.utils.js';
 import { toStorageWriteError, WorkspaceIdentityConflictError } from '#filesystem/workspace-errors.js';
 import { probeHomeOpfs } from '#filesystem/home-opfs-probe.js';
-import { hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
+import { desktopBridge, hostPathName, isDesktopTarget, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { parseProjectCreationLocation } from '#utils/project-creation-location.utils.js';
@@ -126,12 +126,11 @@ function publishProjectRootConfigurationChange(): void {
 /** Subscribe to project-root configuration mutations made by another browser context. */
 export function subscribeProjectRootConfigurationChanges(listener: () => void): () => void {
   const channel = getProjectRootConfigurationChannel();
-  if (!channel) {
-    return () => undefined;
-  }
-  channel.addEventListener('message', listener);
+  const stopNative = desktopBridge()?.directories?.onChange(listener);
+  channel?.addEventListener('message', listener);
   return () => {
-    channel.removeEventListener('message', listener);
+    channel?.removeEventListener('message', listener);
+    stopNative?.();
   };
 }
 
@@ -190,6 +189,15 @@ export type Workspace = {
 /** True when this workspace is a picked node folder rather than a webaccess handle. */
 export const isNodeWorkspace = (workspace: Workspace): workspace is Workspace & { readonly path: string } =>
   workspace.path !== undefined;
+
+/** Check current native authority without reading the folder itself. */
+export const isNodeWorkspaceConnected = async (workspace: Workspace): Promise<boolean> => {
+  if (workspace.path === nodeHomeRoot()) {
+    return true;
+  }
+  const grants = await desktopBridge()?.directories?.list();
+  return grants?.includes(workspace.path ?? '') === true;
+};
 
 /**
  * Per-project filesystem configuration, discriminated by `backend`.
@@ -1602,12 +1610,13 @@ export async function getProjectRootConfigs(
     ]);
     return { configs, handles, workspaces };
   });
-  // A node workspace is a folder on disk with no permission to lose and no
-  // handle to revoke, so its probe short-circuits to granted: it is connected
-  // whenever its row exists.
+  // The native grant is the connection authority. Keep metadata and project
+  // bindings for reconnect, but never scan a disconnected directory at boot.
+  const grantedPaths = new Set(await desktopBridge()?.directories?.list());
   const nodeRoots = new Map(
     workspaces
       .filter((workspace) => isNodeWorkspace(workspace))
+      .filter((workspace) => grantedPaths.has(workspace.path))
       .map((workspace) => [workspace.path, workspace] as const),
   );
   const entries = await Promise.all(

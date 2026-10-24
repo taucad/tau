@@ -268,7 +268,7 @@ From the assembled candidate set, verify in clean temporary projects:
 
 ## 7. Self-Driving Maintenance
 
-1. Copy the root `AGENTS.md` starter and adjacent `CLAUDE.md` import. Keep canonical root instructions within 8 KiB; each justified nested scope gets an authored body within 4 KiB and its own exact `@AGENTS.md` import. Every effective chain stays within 16 KiB. Preserve existing authored instructions during retrofit; reconcile their meaning before changing them.
+1. Copy the root `AGENTS.md` starter. Codex and Claude read it directly. Keep canonical root instructions within 8 KiB; each justified nested scope gets an authored `AGENTS.md` body within 4 KiB. Every effective chain stays within 16 KiB. Preserve existing authored instructions during retrofit; reconcile their meaning before changing them.
 2. Store repo-local skills under `.agents/skills/` and make
    `.claude/skills` a symlink. Copy `.claude/launch.json`.
 3. Verify root and nested instruction discovery in the supported Codex/Claude hosts, including the shared skill alias, natural selection and a relevant helper composition. Preserve native trust/approval settings; metadata alone is not parity evidence. Copy the three-job trusted/untrusted `claude.yml`; every untrusted checkout

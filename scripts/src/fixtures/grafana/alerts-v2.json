@@ -1,0 +1,28 @@
+{
+  "title": "tau-storage-triggers",
+  "interval": 300,
+  "rules": [
+    {
+      "uid": "trigger-stage2-project-commit-ceiling",
+      "labels": {
+        "severity": "info",
+        "service": "tau-api",
+        "component": "git",
+        "kind": "trigger",
+        "trigger": "S2-1",
+        "package": "DS1"
+      },
+      "annotations": { "runbook_url": "docs/handbooks/cloud/operate/storage-triggers.md" }
+    },
+    {
+      "uid": "storage-mirror-absent",
+      "labels": { "severity": "critical", "service": "tau-mirror", "component": "mirror" },
+      "annotations": { "runbook_url": "docs/handbooks/cloud/system/services/second-copy-b2.md" }
+    },
+    {
+      "uid": "storage-retryable-refusals",
+      "labels": { "severity": "warning", "service": "tau-api", "component": "git" },
+      "annotations": { "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md" }
+    }
+  ]
+}

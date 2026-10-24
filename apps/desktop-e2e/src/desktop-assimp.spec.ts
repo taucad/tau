@@ -139,20 +139,15 @@ const exportToProject = async (
     await expect.poll(async () => sourceSelector.textContent()).toContain(sourceEntry);
   }
 
-  const formats = page.getByRole('region', { name: 'Formats' });
+  const formats = page.getByRole('region', { name: 'Format' });
   await expectVisible(formats, 30_000);
-  const requestedFormat = formats.getByRole('button', { name: extension, exact: true });
-  for (const selected of await formats.locator('button[aria-pressed="true"]').all()) {
-    // oxlint-disable-next-line no-await-in-loop -- React must observe each toggle before the next click.
-    const selectedText = await selected.textContent();
-    if (selectedText?.trim().toLowerCase() !== extension) {
-      // oxlint-disable-next-line no-await-in-loop -- See the sequencing rationale above.
-      await selected.click();
-    }
+  await formats.getByRole('button', { name: 'Export format' }).click();
+  await page.locator('[cmdk-list]').first().waitFor();
+  const requestedFormat = page.locator(`[cmdk-item][data-value="${extension}"]`);
+  if (!(await requestedFormat.isVisible())) {
+    await page.getByRole('button', { name: /^More formats/u }).click();
   }
-  if ((await requestedFormat.getAttribute('aria-pressed')) !== 'true') {
-    await requestedFormat.click();
-  }
+  await requestedFormat.click();
 
   const download = page.getByLabel('Download to disk');
   if (await download.isChecked()) {
@@ -414,13 +409,19 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
         },
         { clientUrl, entryPath: lifecycleModelEntry, projectRoot, rendererUrl },
       );
+      /* The replacement spare is the one new utility that stays. The page can open an ephemeral client of its own
+       * meanwhile (a project thumbnail), which forks outside the pool and exits once it has rendered, so wait for that
+       * rather than taking the first sample. */
       let replacementSparePid: number | undefined;
       await expect
-        .poll(async () => {
-          const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
-          replacementSparePid = added.length === 1 ? added[0] : undefined;
-          return added.length;
-        })
+        .poll(
+          async () => {
+            const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
+            replacementSparePid = added.length === 1 ? added[0] : undefined;
+            return added.length;
+          },
+          { timeout: 60_000 },
+        )
         .toBe(1);
 
       fifoWriter = await openPendingFifoWriter(lifecycleBlockedMaterialPath);

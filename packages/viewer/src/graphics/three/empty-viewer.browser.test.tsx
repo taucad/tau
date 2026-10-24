@@ -3,7 +3,15 @@ import { cleanup, render } from '@testing-library/react';
 import { useFrame } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import type { ComponentProps } from 'react';
-import { BoxGeometry, Mesh, MeshStandardMaterial, Vector3 } from 'three';
+import {
+  BoxGeometry,
+  DepthTexture,
+  Mesh,
+  MeshStandardMaterial,
+  Vector3,
+  WebGLCubeRenderTarget,
+  WebGLRenderer,
+} from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { createActor, createAsyncLogic } from 'xstate';
 import { afterEach, expect, inject, it, vi } from 'vitest';
@@ -25,6 +33,27 @@ import {
 } from '@taucad/runtime-testing/browser/three-renderer-output';
 
 import { defaultViewerEnvironment, ViewerEnvironmentProvider } from '#environment/viewer-environment.jsx';
+import { createRenderer } from '#graphics/three/renderer.js';
+
+it('should release a cube environment after its canvas renderer has retired', async () => {
+  const canvas = document.createElement('canvas');
+  const renderer = await createRenderer('viewport', 'webgl', canvas);
+  if (!(renderer instanceof WebGLRenderer)) {
+    throw new TypeError('The WebGL canvas must own a WebGL renderer.');
+  }
+  const target = new WebGLCubeRenderTarget(16);
+  renderer.setRenderTarget(target);
+  renderer.setRenderTarget(null);
+  const disposeDepth = vi.fn();
+  target.depthTexture = new DepthTexture(16, 16);
+  target.depthTexture.addEventListener('dispose', disposeDepth);
+  renderer.dispose();
+  expect(() => {
+    target.dispose();
+    target.dispose();
+  }).not.toThrow();
+  expect(disposeDepth).toHaveBeenCalledOnce();
+});
 
 let state: RootState | undefined;
 let frames = 0;
@@ -111,7 +140,11 @@ it.each([
   await page.viewport(900, 650);
   const actor = createActor(
     graphicsMachine.provide({
-      actors: { probeWebGpu: createAsyncLogic({ run: async () => backend === 'webgpu' }) },
+      actors: {
+        probeWebGpu: createAsyncLogic({
+          run: async () => backend === 'webgpu',
+        }),
+      },
     }),
     { input: {} },
   ).start();
@@ -126,13 +159,22 @@ it.each([
   if (!(binary instanceof ArrayBuffer)) {
     throw new Error('Expected a binary GLB');
   }
-  const artifact: Artifact = { mimeType: 'model/gltf-binary', content: new Uint8Array(binary) };
+  const artifact: Artifact = {
+    mimeType: 'model/gltf-binary',
+    content: new Uint8Array(binary),
+  };
   const fixture = (
     model?: Artifact,
     { grid = true, axes = true, gizmo = true }: { grid?: boolean; axes?: boolean; gizmo?: boolean } = {},
   ): React.JSX.Element => (
     <div role='application' aria-label='CAD canvas' className='relative h-144 w-208 bg-background'>
-      <ViewerEnvironmentProvider value={{ ...defaultViewerEnvironment, colorScheme: theme, graphicsBackend: backend }}>
+      <ViewerEnvironmentProvider
+        value={{
+          ...defaultViewerEnvironment,
+          colorScheme: theme,
+          graphicsBackend: backend,
+        }}
+      >
         <KeyboardProvider>
           <GraphicsProvider graphicsRef={actor}>
             <CadViewer
@@ -160,11 +202,11 @@ it.each([
     );
     const renderer = state!.gl;
     const canvas = renderer.domElement;
-    expect(isViewportWebGpu(renderer)).toBe(backend === 'webgpu');
+    expect(isViewportWebGpu(renderer)).toBe(true);
     if (isViewportWebGpu(renderer)) {
-      expect('isWebGPUBackend' in renderer.backend && renderer.backend.isWebGPUBackend).toBe(true);
+      expect('isWebGPUBackend' in renderer.backend && renderer.backend.isWebGPUBackend).toBe(backend === 'webgpu');
       expect(renderer.samples).toBe(0);
-      expect(renderer.reversedDepthBuffer).toBe(true);
+      expect(renderer.reversedDepthBuffer).toBe(backend === 'webgpu');
     }
     const capture = async (): Promise<Uint8ClampedArray> => {
       let pixels: Uint8ClampedArray = new Uint8ClampedArray();
@@ -207,7 +249,11 @@ it.each([
     expect(Math.abs(origin.y), 'default camera centres the origin vertically').toBeLessThan(0.001);
     expect(
       origin.z,
-      JSON.stringify({ position: state!.camera.position.toArray(), near: state!.camera.near, far: state!.camera.far }),
+      JSON.stringify({
+        position: state!.camera.position.toArray(),
+        near: state!.camera.near,
+        far: state!.camera.far,
+      }),
     ).toBeGreaterThan(-1);
     expect(origin.z).toBeLessThan(1);
     await screenshot(empty, 'empty');
@@ -241,7 +287,12 @@ it.each([
     view.rerender(fixture(undefined, { grid: false, axes: false, gizmo: false }));
     const noGizmo = await capture();
     expect(difference(noAxes, noGizmo), 'gizmo contributes visible pixels').toBeGreaterThan(100);
-    const gizmoBounds = { left: canvas.width, top: canvas.height, right: 0, bottom: 0 };
+    const gizmoBounds = {
+      left: canvas.width,
+      top: canvas.height,
+      right: 0,
+      bottom: 0,
+    };
     let gizmoEdgePixels = 0;
     for (let index = 0; index < noAxes.length; index += 4) {
       if (difference(noAxes.subarray(index, index + 4), noGizmo.subarray(index, index + 4)) === 0) {
@@ -268,7 +319,10 @@ it.each([
 
     actor.send({
       type: 'updateArtifact',
-      artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array(binary) },
+      artifact: {
+        mimeType: 'model/gltf-binary',
+        content: new Uint8Array(binary),
+      },
       hash: 'box',
       sourceFile: 'main.ts',
     });

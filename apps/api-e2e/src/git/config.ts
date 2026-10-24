@@ -47,7 +47,10 @@ export const gitE2EStore = ((): {
   readonly secretAccessKey: string;
   readonly region: string;
 } => {
-  const file = readFileSync(resolve(import.meta.dirname, '../../../api/.env'), 'utf8');
+  const file =
+    process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true'
+      ? ''
+      : readFileSync(resolve(import.meta.dirname, '../../../api/.env'), 'utf8');
   const read = (name: string, fallback: string): string =>
     process.env[name] ?? new RegExp(`^${name}=(.*)$`, 'mu').exec(file)?.[1] ?? fallback;
   return {

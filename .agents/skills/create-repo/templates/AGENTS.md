@@ -11,7 +11,7 @@ pnpm nx run @@CREATE_REPO_slug@@:validate-pack
 
 ## Scope and authority
 
-Read every AGENTS.md from the repository root to each target directory before editing. Nested instructions narrow their local scope; repository policy and current user instructions retain authority. CLAUDE.md imports the adjacent canonical body. Keep root instructions within 8 KiB, nested bodies within 4 KiB and each chain within 16 KiB.
+Read every AGENTS.md from the repository root to each target directory before editing. Nested instructions narrow their local scope; repository policy and current user instructions retain authority. Codex and Claude read canonical AGENTS.md files directly. Keep root instructions within 8 KiB, nested bodies within 4 KiB and each chain within 16 KiB.
 
 ## Architecture
 
@@ -30,6 +30,6 @@ Read every AGENTS.md from the repository root to each target directory before ed
 
 Read relevant procedures in `.agents/skills/`; `.claude/skills` aliases that one authored tree. Skills are selectable and composable for the current task without a slash command. Publication, commits and external changes still require task authorization.
 
-Keep local guidance in the nearest justified AGENTS, with an adjacent `CLAUDE.md` containing only `@AGENTS.md` and a newline. Update matching learnings in place; retain evidence in the task handoff. Optional learned sections have at most 12 plain bullets of 200 characters each. Promote long rationale to its existing documentation owner. Do not overwrite authored instructions on subsequent scaffolding.
+Keep local guidance in the nearest justified AGENTS. Update matching learnings in place; retain evidence in the task handoff. Optional learned sections have at most 12 plain bullets of 200 characters each. Promote long rationale to its existing documentation owner. Do not overwrite authored instructions on subsequent scaffolding.
 
 For parallel work, record disjoint file ownership and one coordinator in the existing task queue. Check live jobs before redispatch and compare file bytes to the recorded baseline; a quiet worker or unchanged Git status does not establish completion.

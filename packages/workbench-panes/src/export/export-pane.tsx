@@ -1,6 +1,6 @@
 import Form from '@rjsf/core';
 import type { IChangeEvent } from '@rjsf/core';
-import { Check, ChevronDown, ChevronRight, Download, File as FileIcon, Info, OctagonAlert } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Download, Info, OctagonAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactElement } from 'react';
 import { useSelector } from '@xstate/react';
@@ -14,8 +14,8 @@ import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Label } from '@taucad/ui/components/label';
+import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
 import type { LengthSymbol } from '@taucad/viewer/constants/length-units';
 import type { ParameterEdit, RJSFContext } from '@taucad/viewer/parameters/rjsf-context';
@@ -31,6 +31,7 @@ import {
 } from '@taucad/viewer/parameters/rjsf-utils';
 import { rjsfValidator } from '@taucad/viewer/parameters/rjsf-validator';
 import { useWorkbenchPanesHost } from '#host/workbench-host.jsx';
+import { FormatFileIcon } from '#components/format-badge.jsx';
 import {
   compileExportConfigurationManifest,
   defaultExportPreferences,
@@ -341,10 +342,6 @@ export function ExportSchemaForm({
 
 type FileIconComponent = NonNullable<ExportSource['FileIcon']>;
 
-function PlainFileIcon({ className }: Readonly<{ filename: string; className?: string }>): ReactElement {
-  return <FileIcon className={className} />;
-}
-
 type GeometryUnitEntry = {
   entryPath: string;
 };
@@ -446,93 +443,151 @@ function getFormatInfo(format: FileExtension): { name: string; description: stri
   return format in formatConfigurations ? formatConfigurations[format] : undefined;
 }
 
-function FormatButton({
+/** Formats listed in the format picker; the rest open from its "More formats" row. */
+const commonExportFormats: ReadonlySet<FileExtension> = new Set<FileExtension>([
+  'step',
+  '3mf',
+  'glb',
+  'obj',
+  'stl',
+  'usdz',
+]);
+
+const getFormatValue = (entry: ExportFormatEntry): string => entry.format;
+
+/** The format's full name, unless it only repeats the extension (STEP). */
+function formatDescription(format: FileExtension): string | undefined {
+  const name = getFormatInfo(format)?.name;
+  return name === format.toUpperCase() ? undefined : name;
+}
+
+const getFormatKeywords = ({ format }: ExportFormatEntry): readonly string[] => {
+  const name = getFormatInfo(format)?.name;
+  return name ? [name] : [];
+};
+
+function FormatLabel({
   format,
-  isDirect,
   isSelected,
-  onToggle,
   FileIcon: FormatIcon,
 }: {
   readonly format: FileExtension;
-  readonly isDirect: boolean;
   readonly isSelected: boolean;
-  readonly onToggle: (format: FileExtension) => void;
   readonly FileIcon: FileIconComponent;
 }) {
-  const info = getFormatInfo(format);
-
-  const button = (
-    <Button
-      variant='outline'
-      size='xs'
-      aria-pressed={isSelected}
-      className={cn(
-        'justify-start uppercase',
-        isSelected && 'border-border bg-accent text-accent-foreground hover:bg-accent',
-      )}
-      onClick={() => {
-        onToggle(format);
-      }}
-    >
-      <FormatIcon filename={`file.${format}`} className='size-3.5 shrink-0' />
-      <span className='flex-1 text-left'>{format}</span>
-      {isSelected && <Check className='size-3 shrink-0' />}
-    </Button>
-  );
-
-  if (!info) {
-    return button;
-  }
-
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side='bottom' className='max-w-56'>
-        <p className='font-semibold'>{info.name}</p>
-        <p className='mt-0.5 text-[10px] leading-snug text-white/70'>{info.description}</p>
-        {!isDirect && <p className='mt-1 text-[10px] text-white/50 italic'>Transcoded</p>}
-      </TooltipContent>
-    </Tooltip>
+    <span className='flex w-full min-w-0 items-center gap-2'>
+      <FormatIcon filename={`file.${format}`} className='size-3.5 shrink-0' />
+      <span className='shrink-0 uppercase'>{format}</span>
+      <span className='min-w-0 flex-1 truncate text-xs text-muted-foreground'>{formatDescription(format)}</span>
+      {isSelected ? <Check className='size-3.5 shrink-0' /> : null}
+    </span>
   );
 }
 
-const formatGridCols = 'grid grid-cols-1 gap-1.5 @[10rem]:grid-cols-2 @[16rem]:grid-cols-3';
-
-function FormatGrid({
+function FormatSelector({
   formats,
-  selectedFormats,
-  onToggle,
+  selectedFormat,
+  onSelect,
   FileIcon: FormatIcon,
 }: {
   readonly formats: readonly ExportFormatEntry[];
-  readonly selectedFormats: FileExtension[];
-  readonly onToggle: (format: FileExtension) => void;
+  readonly selectedFormat: FileExtension | undefined;
+  readonly onSelect: (format: FileExtension) => void;
   readonly FileIcon: FileIconComponent;
 }) {
-  const groups = groupExportFormatsByFidelity(formats);
+  const [isOpen, setIsOpen] = useState(false);
+  const [isMoreOpen, setIsMoreOpen] = useState(false);
+
+  const { commonGroups, moreGroups } = useMemo(() => {
+    const hasCommonFormat = formats.some(({ format }) => commonExportFormats.has(format));
+    // Without any common format to lead with, every format stays in the first list.
+    const isCommon = (format: FileExtension): boolean => !hasCommonFormat || commonExportFormats.has(format);
+    return {
+      commonGroups: groupExportFormatsByFidelity(formats.filter(({ format }) => isCommon(format))),
+      moreGroups: groupExportFormatsByFidelity(formats.filter(({ format }) => !isCommon(format))),
+    };
+  }, [formats]);
+
+  const selectedEntry = formats.find((entry) => entry.format === selectedFormat);
+  const isMoreSelected = moreGroups.some(({ items }) => items.some((entry) => entry.format === selectedFormat));
+
+  const renderLabel = useCallback(
+    (item: ExportFormatEntry, selectedItem: ExportFormatEntry | undefined) => (
+      <FormatLabel format={item.format} isSelected={item.format === selectedItem?.format} FileIcon={FormatIcon} />
+    ),
+    [FormatIcon],
+  );
+
+  const handleSelect = useCallback(
+    (value: string) => {
+      setIsMoreOpen(false);
+      setIsOpen(false);
+      onSelect(value as FileExtension);
+    },
+    [onSelect],
+  );
+
+  const moreFormats =
+    moreGroups.length > 0 ? (
+      <>
+        <div className='border-t' />
+        <div className='p-1'>
+          <ComboBoxResponsive<ExportFormatEntry>
+            groupedItems={moreGroups}
+            renderLabel={renderLabel}
+            getValue={getFormatValue}
+            getKeywords={getFormatKeywords}
+            value={selectedEntry}
+            isOpen={isMoreOpen}
+            title='More formats'
+            description='Choose a less common export format.'
+            searchPlaceHolder='Filter formats…'
+            popoverProperties={{ side: 'right', align: 'end', className: 'w-64' }}
+            onOpenChange={setIsMoreOpen}
+            onSelect={handleSelect}
+          >
+            <button type='button' className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}>
+              <span className='flex-1 text-left'>More formats</span>
+              {isMoreSelected ? (
+                <span className='text-xs text-muted-foreground uppercase'>{selectedFormat}</span>
+              ) : null}
+              <ChevronRight className='size-3.5 shrink-0 text-muted-foreground' />
+            </button>
+          </ComboBoxResponsive>
+        </div>
+      </>
+    ) : undefined;
 
   return (
-    <TooltipProvider>
-      <div className='@container flex flex-col gap-3'>
-        {groups.map(({ name, items }) => (
-          <div key={name}>
-            <p className='mb-1.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase'>{name}</p>
-            <div className={formatGridCols}>
-              {items.map(({ format, direct }) => (
-                <FormatButton
-                  key={format}
-                  format={format}
-                  isDirect={direct}
-                  isSelected={selectedFormats.includes(format)}
-                  FileIcon={FormatIcon}
-                  onToggle={onToggle}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </TooltipProvider>
+    <ComboBoxResponsive<ExportFormatEntry>
+      groupedItems={commonGroups}
+      renderLabel={renderLabel}
+      getValue={getFormatValue}
+      getKeywords={getFormatKeywords}
+      value={selectedEntry}
+      isOpen={isOpen}
+      title='Export format'
+      description='Choose the format to export.'
+      isSearchEnabled={false}
+      popoverProperties={{ align: 'start', className: 'w-(--radix-popover-trigger-width) min-w-56' }}
+      footer={moreFormats}
+      onOpenChange={setIsOpen}
+      onSelect={handleSelect}
+    >
+      <Button variant='outline' size='sm' aria-label='Export format' className='w-full justify-between'>
+        {selectedEntry ? (
+          <span className='flex min-w-0 items-center gap-1.5'>
+            <FormatIcon filename={`file.${selectedEntry.format}`} className='size-3.5 shrink-0' />
+            <span className='shrink-0 uppercase'>{selectedEntry.format}</span>
+            <span className='truncate text-muted-foreground'>{formatDescription(selectedEntry.format)}</span>
+          </span>
+        ) : (
+          <span className='text-muted-foreground'>Select a format</span>
+        )}
+        <ChevronDown className='size-3 shrink-0 text-muted-foreground' />
+      </Button>
+    </ComboBoxResponsive>
   );
 }
 
@@ -545,7 +600,6 @@ function ExportFormatSettings({
   onError,
   onContentChange,
   onOptionsChange,
-  FileIcon: FormatIcon,
 }: {
   readonly entry: ExportFormatEntry;
   readonly formatContent: RuntimeContentInput;
@@ -555,19 +609,15 @@ function ExportFormatSettings({
   readonly onError: ((message: string) => void) | undefined;
   readonly onContentChange: (format: FileExtension, content: RuntimeContentInput) => void;
   readonly onOptionsChange: (format: FileExtension, options: Record<string, unknown>) => void;
-  readonly FileIcon: FileIconComponent;
 }) {
   const { format, provider, content, exportOptions } = entry;
   const hasDualSchemas = Boolean(content && exportOptions);
   const isModified = Object.keys(formatContent).length > 0 || Object.keys(formatOptions).length > 0;
 
   return (
-    <Collapsible defaultOpen className='overflow-hidden rounded-lg border border-border bg-background'>
+    <Collapsible className='overflow-hidden rounded-lg border border-border bg-background'>
       <CollapsibleTrigger className='group/collapsible flex h-8 w-full items-center justify-between rounded-lg px-2 text-left transition-colors duration-150 hover:bg-accent data-[state=open]:rounded-b-none data-[state=open]:bg-accent motion-reduce:transition-none'>
-        <h3 className='flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-medium text-foreground'>
-          <FormatIcon filename={`file.${format}`} className='size-3.5 shrink-0' />
-          <span className='truncate'>{format.toUpperCase()} options</span>
-        </h3>
+        <h3 className='min-w-0 flex-1 truncate text-[13px] font-medium text-foreground'>Export options</h3>
         <span className='mr-2 shrink-0 text-xs text-muted-foreground'>{isModified ? 'Modified' : 'Defaults'}</span>
         <ChevronRight className='size-3 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none' />
       </CollapsibleTrigger>
@@ -605,7 +655,7 @@ function ExportFormatSettings({
             provider={provider}
             configuration={`export/${format}/options`}
             optionStore={optionStore}
-            label='Format'
+            label='Format options'
             shouldShowLabel={hasDualSchemas}
             className={cn(hasDualSchemas && 'border-t border-border/70')}
             resolved={exportOptions}
@@ -622,24 +672,28 @@ function ExportFormatSettings({
   );
 }
 
-function formatButtonLabel(selectedFormats: FileExtension[], isExporting: boolean, hasDestination: boolean): string {
+function entryWithSettings(entry: ExportFormatEntry | undefined): ExportFormatEntry | undefined {
+  return entry?.content !== undefined || entry?.exportOptions !== undefined ? entry : undefined;
+}
+
+function formatButtonLabel(
+  selectedFormat: FileExtension | undefined,
+  isExporting: boolean,
+  hasDestination: boolean,
+): string {
   if (isExporting) {
     return 'Exporting…';
   }
 
-  if (selectedFormats.length === 0) {
-    return 'Select formats to export';
+  if (selectedFormat === undefined) {
+    return 'Select a format to export';
   }
 
   if (!hasDestination) {
     return 'Select a destination';
   }
 
-  if (selectedFormats.length === 1) {
-    return `Export ${selectedFormats[0]!.toUpperCase()}`;
-  }
-
-  return `Export ${selectedFormats.length} formats`;
+  return `Export ${selectedFormat.toUpperCase()}`;
 }
 
 type ExportStatus = Readonly<{ tone: 'success' | 'error'; message: string }>;
@@ -650,14 +704,11 @@ function DestinationSection({
   isDestinationFixed,
   shouldDownload,
   shouldSaveToProject,
-  isZipOffered,
-  isZipChosen,
   isExportDisabled,
   exportLabel,
   status,
   onDownloadToggle,
   onSaveToggle,
-  onZipToggle,
   onExport,
 }: {
   readonly hasDownload: boolean;
@@ -665,14 +716,11 @@ function DestinationSection({
   readonly isDestinationFixed: boolean;
   readonly shouldDownload: boolean;
   readonly shouldSaveToProject: boolean;
-  readonly isZipOffered: boolean;
-  readonly isZipChosen: boolean;
   readonly isExportDisabled: boolean;
   readonly exportLabel: string;
   readonly status: ExportStatus | undefined;
   readonly onDownloadToggle: (checked: boolean | 'indeterminate') => void;
   readonly onSaveToggle: (checked: boolean | 'indeterminate') => void;
-  readonly onZipToggle: (checked: boolean | 'indeterminate') => void;
   readonly onExport: () => void;
 }): ReactElement {
   return (
@@ -709,18 +757,6 @@ function DestinationSection({
               className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
             >
               Save to project
-            </Label>
-          </div>
-        ) : null}
-
-        {isZipOffered ? (
-          <div className='flex min-h-9 items-center gap-2 px-3 py-2 transition-colors hover:bg-accent/50'>
-            <Checkbox id='zip-multiple' checked={isZipChosen} onCheckedChange={onZipToggle} />
-            <Label
-              htmlFor='zip-multiple'
-              className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
-            >
-              Zip multiple exports
             </Label>
           </div>
         ) : null}
@@ -827,7 +863,7 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
   const host = useWorkbenchPanesHost();
   const units = host.useUnits();
   const { claimUnits } = host;
-  const EntryIcon = source.FileIcon ?? PlainFileIcon;
+  const EntryIcon = source.FileIcon ?? FormatFileIcon;
   const mainEntryPath = units[0]?.entryPath ?? '';
 
   const cuEntries = useMemo<GeometryUnitEntry[]>(() => units.map(({ entryPath }) => ({ entryPath })), [units]);
@@ -866,7 +902,10 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
   const [isExporting, setIsExporting] = useState(false);
   const [status, setStatus] = useState<ExportStatus>();
 
-  const { selectedFormats, zipMultiple, formatContent, formatOptions } = preferences;
+  const { formatContent, formatOptions } = preferences;
+  // One format per export; a kept list from before keeps its first format the entry still offers.
+  const selectedEntry = availableFormats.find((entry) => preferences.selectedFormats.includes(entry.format));
+  const selectedFormat = selectedEntry?.format;
   const offersDownload = source.destinations.includes('download');
   const offersProject = source.destinations.includes('project');
   const isDestinationFixed = source.destinations.length === 1;
@@ -888,13 +927,9 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
     [source.notices],
   );
 
-  const handleFormatToggle = useCallback(
+  const handleFormatSelect = useCallback(
     (format: FileExtension) => {
-      const previous = preferences.selectedFormats;
-      persistPreferences({
-        ...preferences,
-        selectedFormats: previous.includes(format) ? previous.filter((f) => f !== format) : [...previous, format],
-      });
+      persistPreferences({ ...preferences, selectedFormats: [format] });
     },
     [preferences, persistPreferences],
   );
@@ -984,15 +1019,8 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
     [preferences, persistPreferences],
   );
 
-  const handleZipToggle = useCallback(
-    (checked: boolean | 'indeterminate') => {
-      persistPreferences({ ...preferences, zipMultiple: checked === true });
-    },
-    [preferences, persistPreferences],
-  );
-
   const handleExport = useCallback(async () => {
-    if (selectedFormats.length === 0 || !hasDestination) {
+    if (selectedFormat === undefined || !hasDestination) {
       return;
     }
     setIsExporting(true);
@@ -1000,12 +1028,12 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
     try {
       const { succeeded, failed } = await source.export({
         entryPath: selectedEntryPath,
-        formats: selectedFormats,
+        formats: [selectedFormat],
         formatOptions,
         formatContent,
         download: shouldDownload,
         saveToProject: shouldSaveToProject,
-        zipMultiple: shouldDownload && zipMultiple && source.canZip === true,
+        zipMultiple: false,
       });
       const label = (formats: readonly FileExtension[]) => formats.map((f) => f.toUpperCase()).join(', ');
       if (succeeded.length > 0) {
@@ -1025,21 +1053,13 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
     hasDestination,
     notify,
     selectedEntryPath,
-    selectedFormats,
+    selectedFormat,
     shouldDownload,
     shouldSaveToProject,
     source,
-    zipMultiple,
   ]);
 
-  const formatsWithSchemas = useMemo(
-    () =>
-      selectedFormats.flatMap((format) => {
-        const entry = availableFormats.find((candidate) => candidate.format === format);
-        return entry && (entry.content !== undefined || entry.exportOptions !== undefined) ? [entry] : [];
-      }),
-    [availableFormats, selectedFormats],
-  );
+  const settingsEntry = entryWithSettings(selectedEntry);
 
   return (
     <div data-slot='export-panel-body' className='flex size-full min-h-0 flex-col overflow-hidden bg-sidebar'>
@@ -1076,33 +1096,28 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
           {entryState.hasGeometry ? (
             availableFormats.length > 0 ? (
               <>
-                <section aria-label='Formats' className='overflow-hidden rounded-xl border border-border bg-card'>
-                  <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Formats</h2>
-                  <div className='p-3'>
-                    <FormatGrid
+                <section aria-label='Format' className='overflow-hidden rounded-xl border border-border bg-card'>
+                  <h2 className='border-b px-3 py-2 text-[13px] font-medium text-foreground'>Format</h2>
+                  <div className='flex flex-col gap-3 p-3'>
+                    <FormatSelector
                       formats={availableFormats}
-                      selectedFormats={selectedFormats}
+                      selectedFormat={selectedFormat}
                       FileIcon={EntryIcon}
-                      onToggle={handleFormatToggle}
+                      onSelect={handleFormatSelect}
                     />
 
-                    {formatsWithSchemas.length > 0 ? (
-                      <div className='mt-3 flex flex-col gap-2'>
-                        {formatsWithSchemas.map((entry) => (
-                          <ExportFormatSettings
-                            key={entry.format}
-                            entry={entry}
-                            formatContent={formatContent[entry.format] ?? {}}
-                            formatOptions={formatOptions[entry.format] ?? {}}
-                            optionStore={source.optionStore}
-                            lengthDisplaySymbol={lengthDisplaySymbol}
-                            FileIcon={EntryIcon}
-                            onError={source.notices?.error}
-                            onContentChange={handleContentChange}
-                            onOptionsChange={handleOptionsChange}
-                          />
-                        ))}
-                      </div>
+                    {settingsEntry ? (
+                      <ExportFormatSettings
+                        key={settingsEntry.format}
+                        entry={settingsEntry}
+                        formatContent={formatContent[settingsEntry.format] ?? {}}
+                        formatOptions={formatOptions[settingsEntry.format] ?? {}}
+                        optionStore={source.optionStore}
+                        lengthDisplaySymbol={lengthDisplaySymbol}
+                        onError={source.notices?.error}
+                        onContentChange={handleContentChange}
+                        onOptionsChange={handleOptionsChange}
+                      />
                     ) : null}
                   </div>
                 </section>
@@ -1113,14 +1128,11 @@ function ExportPaneBody({ isShown = true, source }: ExportPaneProps & { readonly
                   isDestinationFixed={isDestinationFixed}
                   shouldDownload={shouldDownload}
                   shouldSaveToProject={shouldSaveToProject}
-                  isZipOffered={source.canZip === true && shouldDownload && selectedFormats.length > 1}
-                  isZipChosen={zipMultiple}
-                  isExportDisabled={selectedFormats.length === 0 || isExporting || !hasDestination}
-                  exportLabel={formatButtonLabel(selectedFormats, isExporting, hasDestination)}
+                  isExportDisabled={selectedFormat === undefined || isExporting || !hasDestination}
+                  exportLabel={formatButtonLabel(selectedFormat, isExporting, hasDestination)}
                   status={status}
                   onDownloadToggle={handleDownloadToggle}
                   onSaveToggle={handleSaveToggle}
-                  onZipToggle={handleZipToggle}
                   onExport={handleExport}
                 />
               </>

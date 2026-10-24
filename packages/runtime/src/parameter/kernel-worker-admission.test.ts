@@ -5,6 +5,7 @@ import type { ParameterDeclaration, ParameterManifest, ParameterProvenance } fro
 import type { OnWorkerLog } from '@taucad/types';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
+import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { KernelRuntime, GetParametersInput } from '#types/runtime-kernel.types.js';
 import type { GetParameterDeclarationsResult } from '#types/runtime.types.js';
@@ -1215,11 +1216,18 @@ describe('parameter admission in the kernel worker', () => {
     worker.declaration = createParameterDeclaration(defaults, schema);
     const file = createGeometryFile('main.ts');
     const before = structuredClone(worker.declaration);
+    const spans = vi.spyOn(RuntimeTracer.prototype, 'startSpan');
+    const publications = () => spans.mock.calls.filter(([name]) => name === 'kernel.compute.publication').length;
 
     try {
       const degrees = await worker.getParameters(file, { mode: 'default', inferenceLanguage: 'en-NZ' });
       const cached = await worker.getParameters(file, { mode: 'default', inferenceLanguage: 'en-NZ' });
       expect(worker.calls).toBe(1);
+      // Delivery permits the deferred publication, which runs once the worker is idle.
+      worker.permitComputePublication();
+      await vi.waitFor(() => {
+        expect(publications()).toBe(1);
+      });
       expect(cached).toEqual(degrees);
       expect(worker.declaration).toEqual(before);
       expect(degrees.success).toBe(true);
@@ -1286,6 +1294,7 @@ describe('parameter admission in the kernel worker', () => {
         expect(declaredOnly.success && declaredOnly.data.bindings[pointer]?.unit).toBeUndefined();
       }
     } finally {
+      spans.mockRestore();
       await worker.cleanup();
     }
   });

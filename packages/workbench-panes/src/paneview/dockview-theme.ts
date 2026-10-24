@@ -206,7 +206,8 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-right-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_.dv-pre-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
-  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-accent',
+  // Hand-written :hover misses Tailwind's hover-capable guard; a touch screen would keep the fill after a tap.
+  '[@media(hover:hover)]:[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-accent',
 
   // ── Group-hover action button visibility ──
   // Hidden by default, shown on group hover to reduce visual noise.
@@ -214,8 +215,11 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-pane-action]:transition-opacity',
   '[&_.dv-pane-action]:duration-150',
   '[&_.dv-pane-action]:ease-in-out',
-  // Show on group hover
-  '[&_.dv-groupview:hover_.dv-pane-action]:opacity-100',
+  // Show on group hover, only where a pointer can hover: WebKit spends a tap whose :hover reveals
+  // content on the hover alone, so the first tap on any header button did nothing.
+  '[@media(hover:hover)]:[&_.dv-groupview:hover_.dv-pane-action]:opacity-100',
+  // Touch screens have no hover to reveal them, so they stay visible.
+  '[@media(hover:none)]:[&_.dv-pane-action]:opacity-100',
   // Keep keyboard-focused and expanded actions visible without requiring hover.
   '[&_.dv-groupview:focus-within_.dv-pane-action]:opacity-100',
   '[&_.dv-pane-action[aria-expanded=true]]:opacity-100',

@@ -1,5 +1,7 @@
 // oxlint-disable-next-line no-restricted-imports -- Shared harness type must resolve beside this module in both browser and native test projects.
 import type { ProjectionDirectoryReceipt } from './projection-fixture-validation.ts';
+import { parseProjectManifestBytes, convertLegacyProjectManifestBytes } from '@taucad/project-core';
+import { parseProjectIdentityBytes, projectIdentityPath } from '@taucad/project-core/identity';
 import { parseEventLog, parseLogEvent, reduceEventLog } from '@taucad/agent-host';
 import type { AgentLogEvent } from '@taucad/agent-host';
 import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
@@ -191,8 +193,31 @@ const digestBytes = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> =>
     .map((value) => value.toString(16).padStart(2, '0'))
     .join('');
 
+/** Prove current identity, or explicitly validate immutable pre-migration fixture bytes without rewriting them. */
+export const validateProjectionIdentity = (
+  manifest: Uint8Array<ArrayBuffer>,
+  identity: Uint8Array<ArrayBuffer> | undefined,
+  options: { projectId: string; allowLegacy?: boolean },
+): void => {
+  const { projectId, allowLegacy = false } = options;
+  if (identity !== undefined) {
+    if (parseProjectManifestBytes(manifest).success && parseProjectIdentityBytes(identity).projectId === projectId) {
+      return;
+    }
+  } else if (allowLegacy) {
+    const legacy = convertLegacyProjectManifestBytes(manifest);
+    if (legacy.success && legacy.data.projectId === projectId) {
+      return;
+    }
+  }
+  throw new Error('Projection closure identity does not match its rooted authority.');
+};
+
 /** Validate all fixture bytes and rooted paths before any import writes. */
-export const validateProjectionClosure = async (closure: ProjectionClosure): Promise<void> => {
+export const validateProjectionClosure = async (
+  closure: ProjectionClosure,
+  options: { allowLegacy?: boolean } = {},
+): Promise<void> => {
   const version: unknown = Reflect.get(closure, 'version');
   if (version !== 2 || closure.files.length === 0) {
     throw new Error('Unsupported or empty projection closure.');
@@ -223,19 +248,21 @@ export const validateProjectionClosure = async (closure: ProjectionClosure): Pro
     }
   }
   const manifest = closure.files.find((file) => file.path === 'tau.json');
-  if (
-    !manifest ||
-    (JSON.parse(new TextDecoder().decode(decodeProjectionFile(manifest))) as { id?: string }).id !==
-      closure.project.projectId
-  ) {
-    throw new Error('Projection closure manifest identity does not match its rooted authority.');
+  const identity = closure.files.find((file) => file.path === projectIdentityPath);
+  if (!manifest) {
+    throw new Error('Projection closure has no manifest.');
   }
+  validateProjectionIdentity(decodeProjectionFile(manifest), identity ? decodeProjectionFile(identity) : undefined, {
+    projectId: closure.project.projectId,
+    allowLegacy: options.allowLegacy,
+  });
 };
 
 /** Export every physical project file through the same production rooted filesystem authority. */
 export const exportProjectionClosure = async (
   project: ProjectionWriterProject,
   paths?: readonly string[],
+  options: { allowLegacy?: boolean } = {},
 ): Promise<ProjectionClosure> => {
   const registry = new ProviderRegistry({ databasePrefix: project.databasePrefix });
   const mounts = new MountTable();
@@ -264,7 +291,7 @@ export const exportProjectionClosure = async (
           directories.push(path);
           // oxlint-disable-next-line no-await-in-loop -- Recurse in order without concurrent decoded directory closures.
           files.push(...(await walk(path)));
-        } else if (paths === undefined || path === 'tau.json' || paths.includes(path)) {
+        } else if (paths === undefined || path === 'tau.json' || path === projectIdentityPath || paths.includes(path)) {
           // oxlint-disable-next-line no-await-in-loop -- Never fan out acquisition of large fixture sources.
           const bytes = await rooted.readFile(path);
           // oxlint-disable-next-line no-await-in-loop -- Hash and encode before acquiring the next physical file.
@@ -280,7 +307,7 @@ export const exportProjectionClosure = async (
       directories: directories.sort(),
       files,
     };
-    await validateProjectionClosure(closure);
+    await validateProjectionClosure(closure, options);
     return closure;
   } finally {
     service.dispose();
@@ -289,7 +316,7 @@ export const exportProjectionClosure = async (
 
 /** Import exact binary bytes into a fresh root, then reacquire and prove the complete physical closure. */
 export const importProjectionClosure = async (closure: ProjectionClosure): Promise<ProjectionClosure> => {
-  await validateProjectionClosure(closure);
+  await validateProjectionClosure(closure, { allowLegacy: true });
   // This is a fixture transaction, not an active appender mutation or overwrite of an unrelated project.
   const registry = new ProviderRegistry({ databasePrefix: closure.project.databasePrefix });
   const mounts = new MountTable();
@@ -317,7 +344,7 @@ export const importProjectionClosure = async (closure: ProjectionClosure): Promi
   } finally {
     service.dispose();
   }
-  const actual = await exportProjectionClosure(closure.project);
+  const actual = await exportProjectionClosure(closure.project, undefined, { allowLegacy: true });
   if (
     JSON.stringify(actual.directories) !== JSON.stringify(closure.directories) ||
     actual.files.length !== closure.files.length ||
@@ -562,7 +589,20 @@ export const openProjectionDirectoryImport = async (
       ) {
         throw new Error('Raw projection chunk identity/order/byte proof mismatch.');
       }
-      await (offset === 0 ? destination.writeFile(path, bytes) : appendFile(path, bytes));
+      if (path === projectIdentityPath) {
+        // The generated identity is hidden from working-copy consumers. This trusted fixture seam restores
+        // the proved physical record directly, before normal application discovery admits the project.
+        if (
+          offset !== 0 ||
+          bytes.byteLength !== file.byteLength ||
+          parseProjectIdentityBytes(bytes).projectId !== receipt.project.projectId
+        ) {
+          throw new Error('Raw projection identity does not match its rooted authority.');
+        }
+        await rooted.writeFile(path, bytes);
+      } else {
+        await (offset === 0 ? destination.writeFile(path, bytes) : appendFile(path, bytes));
+      }
       offset += bytes.byteLength;
       if (offset === file.byteLength) {
         // Reacquire physical bytes through bounded range reads; never re-export or assemble the whole file.

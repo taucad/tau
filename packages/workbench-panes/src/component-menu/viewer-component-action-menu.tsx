@@ -31,13 +31,53 @@ export type ViewerModelComponentActionMenuProperties = {
   readonly point: ViewerModelComponentActionMenuPoint | undefined;
   readonly isOpen: boolean;
   readonly onOpenChange: (isOpen: boolean) => void;
+  /** Whether the first item takes focus on open, as when a key opened the menu; otherwise the menu focuses itself. */
+  readonly shouldFocusFirstItem?: boolean;
+  /** Where focus goes when the menu closes and took focus with it, such as the canvas region that opened it. */
+  readonly returnFocusTo?: () => HTMLElement | undefined;
+};
+
+/** The rows the arrow keys move between: every enabled `menuitem`, in document order. */
+const enabledItemsSelector = '[role="menuitem"]:not([disabled])';
+
+/**
+ * Moves focus between the menu's items as a menu's arrow keys do (APG menu pattern): ↓ and ↑ to the next and previous
+ * enabled item, without wrapping, Home and End to the first and last. Keys typed in a field inside an item, such as
+ * the opacity input, stay with the field.
+ *
+ * @param event - A key that went down inside the menu.
+ */
+const moveItemFocus = (event: React.KeyboardEvent<HTMLElement>): void => {
+  const menu = event.currentTarget;
+  const { target } = event;
+  if (!(target instanceof HTMLElement) || (target !== menu && target.getAttribute('role') !== 'menuitem')) {
+    return;
+  }
+  const items = [...menu.querySelectorAll<HTMLElement>(enabledItemsSelector)];
+  const index = items.indexOf(target);
+  const next =
+    event.key === 'ArrowDown'
+      ? items[index === -1 ? 0 : Math.min(index + 1, items.length - 1)]
+      : event.key === 'ArrowUp'
+        ? items[index === -1 ? items.length - 1 : Math.max(index - 1, 0)]
+        : event.key === 'Home'
+          ? items[0]
+          : event.key === 'End'
+            ? items.at(-1)
+            : undefined;
+  if (next === undefined) {
+    return;
+  }
+  event.preventDefault();
+  next.focus();
 };
 
 /**
- * The part menu the viewer opens at the pointer when a part is secondary-clicked: the same rows as the Model pane's
- * row menu, in a non-modal popover anchored at `point`.
+ * The part menu the viewer opens at the pointer when a part is secondary-clicked, or at a point the host names when a
+ * key opens it: the same rows as the Model pane's row menu, in a non-modal popover anchored at `point`. ↓, ↑, Home and
+ * End move focus between its items, Enter runs one, and Escape closes it, handing focus to `returnFocusTo`.
  *
- * @param props - The part's menu data, the anchor point, and the open state.
+ * @param props - The part's menu data, the anchor point, the open state and where focus starts and returns.
  * @returns The anchored menu.
  * @public
  */
@@ -46,6 +86,8 @@ export function ViewerModelComponentActionMenu({
   point,
   isOpen: shouldOpen,
   onOpenChange,
+  shouldFocusFirstItem = false,
+  returnFocusTo,
 }: ViewerModelComponentActionMenuProperties): React.JSX.Element {
   const isOpen = shouldOpen && Boolean(data && point);
   const handleRequestClose = useCallback(() => {
@@ -71,17 +113,27 @@ export function ViewerModelComponentActionMenu({
             'max-h-[min(24rem,calc(100vh-1rem))] w-auto min-w-56 overflow-x-hidden overflow-y-auto [&>*]:shrink-0',
           )}
           onOpenAutoFocus={(event) => {
-            // Only a pointer opens this menu, so it takes focus itself, as Radix menus do, instead of
-            // the popover focusing and highlighting its first row.
+            // A pointer-opened menu takes focus itself, as Radix menus do, instead of the popover focusing and
+            // highlighting its first row; a key-opened one starts on its first item.
             event.preventDefault();
-            if (event.currentTarget instanceof HTMLElement) {
-              event.currentTarget.focus({ preventScroll: true });
+            if (!(event.currentTarget instanceof HTMLElement)) {
+              return;
             }
+            const first = shouldFocusFirstItem
+              ? event.currentTarget.querySelector<HTMLElement>(enabledItemsSelector)
+              : null;
+            (first ?? event.currentTarget).focus({ preventScroll: true });
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
+            // Only focus the menu took with it: a click elsewhere keeps the focus it gave.
+            const { activeElement } = document;
+            if (activeElement === null || activeElement === document.body) {
+              returnFocusTo?.()?.focus({ preventScroll: true });
+            }
           }}
           onEscapeKeyDown={preventMenuSliderEscapeDismissal}
+          onKeyDown={moveItemFocus}
         >
           <ModelComponentViewerMenuItems {...data} onRequestClose={handleRequestClose} />
         </PopoverContent>

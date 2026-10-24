@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +14,7 @@ import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { cn } from '@taucad/ui/utils/cn';
 import { formatKeyCombination } from '@taucad/ui/utils/keys';
 import { PaneButton } from '#components/pane-button.jsx';
+import { WorkbenchTab } from '#components/workbench-tab.jsx';
 import { dockviewStyleOverrides, tauDockviewTheme } from '#paneview/dockview-theme.js';
 import { workbenchPanes } from '#registry/pane-registry.js';
 import type { WorkbenchPaneDefinition, WorkbenchPaneId } from '#registry/pane-registry.js';
@@ -25,6 +26,19 @@ const laneWidth = { minimum: 260, initial: 340, maximum: 640 } as const;
 const resizeStep = 16;
 
 /**
+ * What a lane can restore: its open tabs in order, the active one and its width in CSS pixels.
+ *
+ * @public
+ */
+export type PaneLaneLayout = Readonly<{
+  open: readonly WorkbenchPaneId[];
+  active?: WorkbenchPaneId | undefined;
+  width: number;
+}>;
+
+const clampWidth = (next: number): number => Math.min(laneWidth.maximum, Math.max(laneWidth.minimum, next));
+
+/**
  * Props for {@link PaneLane}.
  *
  * @public
@@ -34,10 +48,22 @@ export type PaneLaneProps = Readonly<{
   panes: readonly WorkbenchPaneId[];
   /** The tabs the lane opens with; the first is active. */
   initialOpen: readonly WorkbenchPaneId[];
+  /**
+   * A layout saved by {@link PaneLaneProps.onLayoutChange}, read once on mount: its tabs replace `initialOpen`, and
+   * offered panes it does not name stay closed. A pane no longer offered is dropped, and a width is clamped.
+   */
+  initialLayout?: Partial<PaneLaneLayout> | undefined;
+  /** Called with the lane's layout each time a tab opens, closes or activates, or the lane is resized. */
+  onLayoutChange?: ((layout: PaneLaneLayout) => void) | undefined;
   /** Draws one pane's body. */
   renderPane: (pane: WorkbenchPaneId) => ReactNode;
   /** Opens `pane` and makes it the active tab each time `requestId` changes (a part menu's "Show kinematics"). */
   openRequest?: Readonly<{ pane: WorkbenchPaneId; requestId: number }>;
+  /**
+   * Drawn at the end of the lane's header, after the `+` menu. A host whose own header sits beside the lane puts its
+   * workbench toggle here, so the tabs share the page's one top row and the toggle ends it, top right.
+   */
+  headerEnd?: ReactNode;
   className?: string;
 }>;
 
@@ -60,20 +86,49 @@ const groupLabels = { design: 'Design', project: 'Project' } as const;
 
 /**
  * The workbench lane outside the Tau app: a tab per open pane, the same `+` menu of panes (grouped, with their
- * shortcuts) the app's workbench offers, and a resizable edge. One pane shows at a time. Showing and hiding the lane is
- * the host's: a header's `WorkbenchToggleButton` (`components/workbench-toggle`).
+ * shortcuts) the app's workbench offers, and a resizable edge. One pane shows at a time. Its header is one 36 px row,
+ * as tall as a page header, so a host draws its own header beside the lane and the two make one top row, as the app's
+ * dock groups share theirs: the host's header ends with its actions, the lane's with `headerEnd`. Showing and hiding
+ * the lane is the host's: a `WorkbenchToggleButton` (`components/workbench-toggle`) in `headerEnd` while the lane is
+ * open, and at the end of the host's header while it is closed.
  *
  * @param props - The offered panes, the opening tabs and how to draw a pane.
  * @returns The lane.
  * @public
  */
-export function PaneLane({ panes, initialOpen, renderPane, openRequest, className }: PaneLaneProps): React.JSX.Element {
+export function PaneLane({
+  panes,
+  initialOpen,
+  initialLayout,
+  onLayoutChange,
+  renderPane,
+  openRequest,
+  headerEnd,
+  className,
+}: PaneLaneProps): React.JSX.Element {
   const [open, setOpen] = useState<readonly WorkbenchPaneId[]>(() =>
-    initialOpen.filter((pane) => panes.includes(pane)),
+    (initialLayout?.open ?? initialOpen).filter((pane) => panes.includes(pane)),
   );
-  const [active, setActive] = useState<WorkbenchPaneId | undefined>(() => open[0]);
-  const [width, setWidth] = useState<number>(laneWidth.initial);
+  const [active, setActive] = useState<WorkbenchPaneId | undefined>(() =>
+    initialLayout?.active !== undefined && open.includes(initialLayout.active) ? initialLayout.active : open[0],
+  );
+  const [width, setWidth] = useState<number>(() =>
+    initialLayout?.width === undefined || !Number.isFinite(initialLayout.width)
+      ? laneWidth.initial
+      : clampWidth(initialLayout.width),
+  );
   const drag = useRef<{ startX: number; startWidth: number } | undefined>(undefined);
+  const layoutListener = useRef(onLayoutChange);
+  layoutListener.current = onLayoutChange;
+  const isFirstLayout = useRef(true);
+  useEffect(() => {
+    /* The mounted layout is the saved one, or the opening default: only a change is reported. */
+    if (isFirstLayout.current) {
+      isFirstLayout.current = false;
+      return;
+    }
+    layoutListener.current?.({ open, active, width });
+  }, [active, open, width]);
 
   const openPane = useCallback((pane: WorkbenchPaneId) => {
     setOpen((current) => (current.includes(pane) ? current : [...current, pane]));
@@ -100,8 +155,6 @@ export function PaneLane({ panes, initialOpen, renderPane, openRequest, classNam
   const groups = (['design', 'project'] as const)
     .map((group) => ({ group, items: definitions.filter((definition) => definition.group === group) }))
     .filter(({ items }) => items.length > 0);
-
-  const clampWidth = (next: number): number => Math.min(laneWidth.maximum, Math.max(laneWidth.minimum, next));
 
   return (
     <aside
@@ -153,7 +206,7 @@ export function PaneLane({ panes, initialOpen, renderPane, openRequest, classNam
           />
         ),
       )}
-      <div className='flex h-9 shrink-0 items-center gap-1 px-1'>
+      <div className='flex h-9 shrink-0 items-center gap-1 border-b px-1'>
         <div
           role='tablist'
           aria-label='Open panes'
@@ -161,62 +214,22 @@ export function PaneLane({ panes, initialOpen, renderPane, openRequest, classNam
         >
           {open.map((pane) => {
             const { icon: Icon, title } = workbenchPanes[pane];
-            const isActive = pane === active;
             return (
-              /* As the app's dock tabs do, tabs share the header equally up to 144 px and their titles dissolve at
-               * the end, under the close glyph when it shows. A tab stops at 48 px, where its centre still clears the
+              /* The app's dock tab leaf: tabs share the header equally up to 144 px and their titles dissolve at the
+               * end, under the close glyph when it shows. A tab stops at 48 px, where its centre still clears the
                * glyph; past that the tablist scrolls, never under the header's buttons. */
-              <div
+              <WorkbenchTab
                 key={pane}
-                className={cn(
-                  'group/tab fade-row flex h-7 w-36 min-w-12 shrink items-center rounded-sm text-[13px]',
-                  isActive
-                    ? 'bg-accent text-foreground'
-                    : 'text-muted-foreground [--fade-scrim-into:var(--background)] hover:text-foreground',
-                )}
-              >
-                <button
-                  type='button'
-                  role='tab'
-                  title={title}
-                  aria-selected={isActive}
-                  aria-keyshortcuts='Delete'
-                  className='flex size-full min-w-0 items-center gap-1.5 pr-1 pl-2'
-                  onClick={() => {
-                    setActive(pane);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Delete' || event.key === 'Backspace') {
-                      event.preventDefault();
-                      closePane(pane);
-                    }
-                  }}
-                >
-                  <Icon aria-hidden className='size-3.5 shrink-0' />
-                  <span
-                    className={cn(
-                      'fade-label flex-1 text-left',
-                      isActive && '[--fade-label-size:var(--fade-label-size-actions)]',
-                    )}
-                  >
-                    {title}
-                  </span>
-                </button>
-                <button
-                  type='button'
-                  tabIndex={-1}
-                  aria-label={`Close ${title}`}
-                  className={cn(
-                    'fade-action absolute right-1 flex size-4 items-center justify-center rounded-xs opacity-0 group-focus-within/tab:opacity-100 group-hover/tab:opacity-100 hover:bg-background/60',
-                    isActive && 'opacity-100',
-                  )}
-                  onClick={() => {
-                    closePane(pane);
-                  }}
-                >
-                  <X aria-hidden className='size-3' />
-                </button>
-              </div>
+                icon={<Icon aria-hidden className='size-3.5 shrink-0' />}
+                title={title}
+                isActive={pane === active}
+                onSelect={() => {
+                  setActive(pane);
+                }}
+                onClose={() => {
+                  closePane(pane);
+                }}
+              />
             );
           })}
         </div>
@@ -250,6 +263,7 @@ export function PaneLane({ panes, initialOpen, renderPane, openRequest, classNam
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        {headerEnd}
       </div>
       <div className='min-h-0 flex-1 overflow-hidden'>
         {open.map((pane) => (

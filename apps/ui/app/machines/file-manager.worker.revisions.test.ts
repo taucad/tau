@@ -17,6 +17,7 @@ import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import type { RevisionPort } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import type { RootedFileSystem } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import {
   createCheckoutRoutes,
@@ -111,6 +112,7 @@ const harness = (
   extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & {
     onCreatePort?: () => void;
     observeFileEvents?: boolean;
+    wrapFileSystem?: (filesystem: RootedFileSystem) => RootedFileSystem;
   } = {},
 ): Harness => {
   const providers = projectIds.map(() => new MemoryProvider());
@@ -146,7 +148,10 @@ const harness = (
         }),
       );
     },
-    filesystem: (root) => service.createRootedFileSystem(root),
+    filesystem: (root) => {
+      const filesystem = service.createRootedFileSystem(root);
+      return extra.wrapFileSystem?.(filesystem) ?? filesystem;
+    },
     observe: (root, onChanged) => {
       if (extra.observeFileEvents) {
         return eventBus.subscribe((event) => {
@@ -245,6 +250,55 @@ const branchOff = async (
 };
 
 describe('the file-manager worker revision root (north star S48 jsdom 1–4)', () => {
+  it('should refuse release when the pending queue cannot be written and keep the root active', async () => {
+    let refuseQueue = true;
+    const fixture = harness(
+      ['alpha'],
+      (port) => ({
+        ...port,
+        listRemotes: async () => [{ name: 'tau', url: 'https://remote.test/project.git', kind: 'tau' }],
+        listRemoteRefs: async () => [],
+        push: async () => {
+          throw new Error('Remote is unavailable.');
+        },
+      }),
+      {
+        wrapFileSystem: (filesystem) => ({
+          ...filesystem,
+          writeFile: async (path, data) => {
+            if (refuseQueue && path.startsWith('.git/sync-pending')) {
+              throw new Error('Pending queue storage is full.');
+            }
+            await filesystem.writeFile(path, data);
+          },
+        }),
+      },
+    );
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.ts', 'first');
+    await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    try {
+      await expect(root.release()).rejects.toThrow('Pending queue storage is full.');
+      expect(root.inspect().status).toBe('active');
+      const before = root.status().headRevisionId;
+      await project.writeFile('main.ts', 'after refused close');
+      fixture.announce('alpha', ['main.ts']);
+      root.send({ command: 'saveRevision' });
+      await vi.waitFor(() => {
+        expect(root.status().headRevisionId).not.toBe(before);
+      });
+    } finally {
+      refuseQueue = false;
+      root.send({ command: 'syncNow' });
+      await vi.waitFor(() => {
+        expect(root.status().sync.state).toBe('queued');
+      });
+      await root.release();
+      expect(root.inspect().status).toBe('stopped');
+    }
+  });
+
   it('does not notify revision readers for a Workbench record write', async () => {
     const fixture = harness(['alpha'], (port) => port, { observeFileEvents: true });
     const project = fixture.service.createRootedFileSystem('/projects/alpha');

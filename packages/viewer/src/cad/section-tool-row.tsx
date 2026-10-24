@@ -1,3 +1,4 @@
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import { memo, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { flushSync } from 'react-dom';
@@ -240,6 +241,7 @@ const toPlaneOffset = (units: number, plane: SectionPlane, context: GraphicsCont
  * folds the editor away. Ghost at rest, tinted while it or its handles are hovered, bordered while open.
  */
 const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactNode {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const graphicsRef = useGraphics();
   const formatLength = useFormatLength();
   const cut = useGraphicsSelector((state) => findCut(state.context.sectionCuts, cutId));
@@ -284,8 +286,9 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
       data-selected={isSelected}
       data-hovered={isHovered}
       className={cn(
-        'group/chip flex h-7 shrink-0 items-center rounded-md border border-transparent text-xs transition-colors',
+        'group/chip flex shrink-0 items-center rounded-md border border-transparent text-xs transition-colors',
         'data-[hovered=true]:bg-accent/70',
+        isTouch ? 'min-h-11' : 'h-7',
         'data-[selected=true]:border-border data-[selected=true]:bg-background data-[selected=true]:shadow-xs',
       )}
       onPointerEnter={() => {
@@ -299,7 +302,10 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
         type='button'
         aria-expanded={isSelected}
         aria-label={name}
-        className='flex h-full items-center gap-1 rounded-md pr-1 pl-2 outline-none focus-visible:focus-outline'
+        className={cn(
+          'flex items-center gap-1 rounded-md pr-1 pl-2 outline-none focus-visible:focus-outline',
+          isTouch ? 'min-h-11' : 'h-full',
+        )}
         onClick={handleToggle}
         // Keyboard focus previews the cut as hover does; a click's focus does not keep it lit.
         onFocus={(event) => {
@@ -323,7 +329,7 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
       </button>
       <Button
         variant='ghost'
-        size='icon-xs'
+        size={isTouch ? 'icon-touch' : 'icon-xs'}
         aria-label={`Remove ${name.charAt(0).toLowerCase()}${name.slice(1)}`}
         className={cn(
           nestedActionVariants(),
@@ -343,6 +349,7 @@ const SectionChip = memo(function SectionChip({ cutId }: CutProps): React.ReactN
 
 /** Adds a plane or a revolution cutaway; the new cut opens. Refused, with the reason, at the cut limit. */
 const AddSectionMenu = memo(function AddSectionMenu(): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const graphicsRef = useGraphics();
   const cameraRig = useCameraRig();
   const isFull = useGraphicsSelector((state) => state.context.sectionCuts.length >= maxSectionCuts);
@@ -368,7 +375,7 @@ const AddSectionMenu = memo(function AddSectionMenu(): React.JSX.Element {
           <DropdownMenuTrigger asChild>
             <Button
               variant='ghost'
-              size='icon-xs'
+              size={isTouch ? 'icon-touch' : 'icon-xs'}
               aria-label='Add section'
               // `aria-disabled` rather than `disabled`, so the reason stays reachable by hover and focus.
               aria-disabled={isFull || undefined}
@@ -440,7 +447,7 @@ export function SectionOptions(): React.JSX.Element {
 // ---------------------------------------------------------------------------
 
 const sliderField =
-  'h-7 rounded-md bg-muted px-2 text-xs tabular-nums [&_[data-slot=slider-input-leading]]:text-muted-foreground';
+  'rounded-md bg-muted px-2 text-xs tabular-nums [&_[data-slot=slider-input-leading]]:text-muted-foreground';
 
 const adornment = (text: string): React.JSX.Element => (
   <span aria-hidden='true' className='ml-1 text-muted-foreground'>
@@ -455,6 +462,7 @@ const degreeAdornment = (
 );
 
 const PlaneToggle = memo(function PlaneToggle({ cutId }: CutProps): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const plane = useCutValue(cutId, readPlane);
   const cameraRig = useCameraRig();
   const update = useCutUpdate(cutId);
@@ -485,7 +493,11 @@ const PlaneToggle = memo(function PlaneToggle({ cutId }: CutProps): React.JSX.El
       onValueChange={handleChange}
     >
       {sectionPlanes.map((candidate) => (
-        <ToggleGroupItem key={candidate} value={candidate} className='h-7 min-w-9 px-2 font-mono text-xs'>
+        <ToggleGroupItem
+          key={candidate}
+          value={candidate}
+          className={cn('px-2 font-mono text-xs', isTouch ? 'h-11 min-w-11' : 'h-7 min-w-9')}
+        >
           {candidate.toUpperCase()}
         </ToggleGroupItem>
       ))}
@@ -494,6 +506,7 @@ const PlaneToggle = memo(function PlaneToggle({ cutId }: CutProps): React.JSX.El
 });
 
 const OffsetField = memo(function OffsetField({ cutId }: CutProps): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const offset = useCutValue(cutId, readOffset) ?? 0;
   const plane = useCutValue(cutId, readPlane);
   const symbol = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
@@ -548,7 +561,7 @@ const OffsetField = memo(function OffsetField({ cutId }: CutProps): React.JSX.El
       stepBase={0}
       leadingContent={<span>Offset</span>}
       trailingAdornment={adornment(symbol)}
-      className={cn(sliderField, 'w-36')}
+      className={cn(sliderField, isTouch ? 'h-11' : 'h-7', 'w-36')}
       aria-label={`Offset in ${symbol}`}
       onScrubChange={handleChange}
       onInputCommit={handleChange}
@@ -558,6 +571,7 @@ const OffsetField = memo(function OffsetField({ cutId }: CutProps): React.JSX.El
 });
 
 const FlipButton = memo(function FlipButton({ cutId }: CutProps): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const isFlipped = useCutValue(cutId, readIsFlipped) ?? false;
   const update = useCutUpdate(cutId);
   const handleFlip = useCallback(() => {
@@ -566,8 +580,8 @@ const FlipButton = memo(function FlipButton({ cutId }: CutProps): React.JSX.Elem
   return (
     <Button
       variant='ghost'
-      size='xs'
-      className='h-7 aria-pressed:bg-accent'
+      size={isTouch ? 'touch' : 'xs'}
+      className={cn('aria-pressed:bg-accent', !isTouch && 'h-7')}
       aria-pressed={isFlipped}
       onClick={handleFlip}
     >
@@ -607,6 +621,7 @@ export function AxisLabel({ axis }: Readonly<{ axis: SectionAxis }>): React.JSX.
 }
 
 const AxisToggle = memo(function AxisToggle({ cutId }: CutProps): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const axis = useCutValue(cutId, readAxis);
   const update = useCutUpdate(cutId);
   const handleChange = useCallback(
@@ -632,7 +647,7 @@ const AxisToggle = memo(function AxisToggle({ cutId }: CutProps): React.JSX.Elem
           key={candidate}
           value={candidate}
           aria-label={`${candidate.toUpperCase()} axis`}
-          className='h-7 min-w-7 px-2 font-mono text-xs font-semibold'
+          className={cn('px-2 font-mono text-xs font-semibold', isTouch ? 'h-11 min-w-11' : 'h-7 min-w-7')}
         >
           <AxisLabel axis={candidate} />
         </ToggleGroupItem>
@@ -644,6 +659,7 @@ const AxisToggle = memo(function AxisToggle({ cutId }: CutProps): React.JSX.Elem
 const clampSweep = (degrees: number): number => clamp(Math.round(degrees), minSectionSweep, maxSectionSweep);
 
 const SweepField = memo(function SweepField({ cutId }: CutProps): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const sweep = useCutValue(cutId, readSweep) ?? minSectionSweep;
   const update = useCutUpdate(cutId);
   const handleChange = useCallback(
@@ -670,7 +686,7 @@ const SweepField = memo(function SweepField({ cutId }: CutProps): React.JSX.Elem
       step={1}
       leadingContent={<span>Sweep</span>}
       trailingAdornment={degreeAdornment}
-      className={cn(sliderField, 'w-28')}
+      className={cn(sliderField, isTouch ? 'h-11' : 'h-7', 'w-28')}
       aria-label='Sweep in degrees'
       onScrubChange={handleChange}
       onInputCommit={handleChange}
@@ -680,6 +696,7 @@ const SweepField = memo(function SweepField({ cutId }: CutProps): React.JSX.Elem
 });
 
 const StartField = memo(function StartField({ cutId }: CutProps): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const start = useCutValue(cutId, readStart) ?? 0;
   const update = useCutUpdate(cutId);
   const handleChange = useCallback(
@@ -707,7 +724,7 @@ const StartField = memo(function StartField({ cutId }: CutProps): React.JSX.Elem
       step={1}
       leadingContent={<span>From</span>}
       trailingAdornment={degreeAdornment}
-      className={cn(sliderField, 'w-26')}
+      className={cn(sliderField, isTouch ? 'h-11' : 'h-7', 'w-26')}
       // The name starts with the visible label, so a voice command for it reaches the field.
       aria-label='From, start angle in degrees'
       onScrubChange={handleChange}

@@ -3,8 +3,8 @@ name: tau-example-packaging
 description: >-
   Packages a CAD example under libs/tau-examples/src/kernels/<kernel>/<example>/
   for Tau: classifies it with example.json (model, reference, test-fixture,
-  spec-fixture), writes a strict tau.json with a fresh proj_ id, shapes its
-  README or DESIGN.md, proves it with the geospec-engine CLI, regenerates the
+  spec-fixture), writes a strict id-free tau.json, shapes its
+  README or DESIGN.md, proves it with geospec run and Tau's exporter, regenerates the
   manifest and WebP thumbnails, runs the example-health and GeoSpec suite gates,
   records licence provenance for ports and decides whether it becomes a
   Community showcase entry (communityLocators) or stays a plain builtin. Use
@@ -29,7 +29,7 @@ Read [references/packaging-checklist.md](references/packaging-checklist.md) when
 | `{"kind":"test-fixture"}`                                             | In `src/test-fixtures.ts` (test seed routes only) when it has `tau.json`; never a builtin, not health-gated                                                    |
 | `{"kind":"spec-fixture"}`                                             | A spec-first GeoSpec target (`replicad/v8-engine-rev2`); not a builtin, not health-gated                                                                       |
 
-Every non-`model` class count is pinned in `libs/tau-examples/scripts/generation.test.ts` ("discovers only real entrypoints…"); change the pin with the class. There is no "published but health-excluded" state: a `model` row is health-gated, and demoting it to `reference` unpublishes it.
+Every non-`model` class count is pinned in `libs/tau-examples/scripts/generation.test.ts` ("discovers only real entrypoints…"); change the pin with the class. There is no "published but health-excluded" state: a `model` row is health-gated, and demoting it to `reference` unpublishes it. A `"geometry":"2d"` row's health check loads the drawing's STEP region faces, so every drawing it returns must be a closed profile.
 
 Thumbnails are independent of class: every row with a main file whose kernel is composed in `exampleRuntime` (`libs/tau-examples/scripts/runtime.ts`) must have a 1536×1152 `thumbnail.webp` (6 px edges), or `generation.test.ts` fails. The example shown as the featured Community card (`featuredCommunityLocator`) also sets `"featured": true` in `example.json`, which renders `thumbnail-featured.webp` with 3 px edges: that card is drawn at twice a card's size, so halving the edge width keeps the same on-screen line weight. The featured thumbnail is not a project file (Remix does not copy it).
 
@@ -39,11 +39,7 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
 
 - **Entry**: the first of `main.ts`, `main.py`, `main.cs`, `main.scad`, `main.cpp` at the example root. A row without one is never rendered, and a `model` row without one fails the health suite.
 - **Everything else is shipped**: every file except `example.json`, `thumbnail-featured.webp`, `.DS_Store` and `.tau/cache/` becomes a lazy builtin asset (the thumbnail included), so multi-file examples work and scratch files leak into the builtin. Symbolic links are rejected.
-- **`tau.json`** follows the strict `projectManifestSchema` (`libs/types/src/schemas/project-manifest.schema.ts`): `$schema`, `id`, `name`, `description`, `tags`, `assets.main.entryPath`, optional `assets.main.thumbnail`; no other keys. Generate a fresh id; never copy one from another example (duplicates throw):
-
-  ```bash
-  pnpm --dir libs/utils exec tsx -e "import { generatePrefixedId } from './src/id.utils.ts'; console.log(generatePrefixedId('proj'))"
-  ```
+- **`tau.json`** follows the strict `projectManifestSchema` (`libs/types/src/schemas/project-manifest.schema.ts`): `$schema`, `name`, `description`, `tags`, `assets.main.entryPath`, optional `assets.main.thumbnail`; no other keys. Do not include `id` or `projectId`; Tau creates identity when a project is imported. Builtins are keyed by their catalog locators.
 
   Name it for what it shows ("Rover Wheel"); the card already shows the kernel, so a kernel prefix only repeats it. Tags are lowercase and include the kernel id.
 
@@ -54,11 +50,11 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
 ## Workflow
 
 1. **Classify** with `example.json` (or none for a `model`) and adjust the `generation.test.ts` pins.
-2. **Write `tau.json`** with a fresh id. For a new public row, leave out `assets.main.thumbnail` until step 5: `generate-manifest` throws when a declared thumbnail file is missing.
+2. **Write an id-free `tau.json`**. For a new public row, leave out `assets.main.thumbnail` until step 5: `generate-manifest` throws when a declared thumbnail file is missing.
 3. **Prove the geometry** when the row has a suite:
 
    ```bash
-   node --import tsx packages/geospec-engine/src/cli/main.ts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
+   node --import tsx packages/cli/scripts/geospec.mts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
    ```
 
    Preserve selected unmet requirements as desired failing or unsupported tests; do not skip them to claim qualification. Explicitly excluded fixtures remain visible exclusions and do not certify their requirements. A runnable qualified row requires every selected requirement to pass.

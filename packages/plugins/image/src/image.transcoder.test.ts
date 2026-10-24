@@ -96,7 +96,7 @@ describe('image transcoder', () => {
 
   describe('initialize', () => {
     it('should version renderer output for export cache invalidation', () => {
-      expect(imageDefinition.version).toBe('13.0.0');
+      expect(imageDefinition.version).toBe('13.0.1');
     });
 
     it('should load the renderer and describe its adapter once during initialize', () => {

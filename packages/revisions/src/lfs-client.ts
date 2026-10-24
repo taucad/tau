@@ -26,6 +26,8 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- the git-lfs batch body (`hash_algo`) and HTTP header names (`Accept`) are spelled by their own specifications, not by ours. */
 
+/* oxlint-disable no-await-in-loop -- sequential object transfers and bounded retries keep one object resident. */
+
 import { lfsPointerFor } from '#lfs.js';
 import { remoteTransportError } from '#remotes.js';
 import type { LfsPointer } from '#lfs.js';
@@ -78,12 +80,16 @@ export type LfsClientOptions = Readonly<{
   fetch?: typeof globalThis.fetch;
   /** The remote's name, so a batch refusal is classified exactly as the git leg's (D53). */
   remote?: string;
+  /** Optional remote-specific per-file upload ceiling. Omit to defer to the remote. */
+  maximumUploadBytes?: number;
 }>;
 
 /** What one upload offers the remote. @public */
 export type LfsUploadInput = Readonly<{
   /** Every object the pushed refs reference, whether or not its bytes are on this device. */
   pointers: readonly LfsPointer[];
+  /** Cancel this operation, including capability refresh and verification. */
+  signal?: AbortSignal;
   /**
    * Read one object's bytes. Called only for an object the remote asks for:
    * an object that came *from* the remote is never downloaded just to learn it
@@ -92,24 +98,63 @@ export type LfsUploadInput = Readonly<{
   read: (oid: string) => Promise<Uint8Array<ArrayBuffer>>;
 }>;
 
+/** A pointer to download, with operation-scoped cancellation. @public */
+export type LfsDownloadInput = LfsPointer & Readonly<{ signal?: AbortSignal }>;
+
 /** One project's LFS transport. @public */
 export type LfsClient = Readonly<{
   /** Upload every object the remote does not already hold. Resolves to the oids sent. */
   upload: (input: LfsUploadInput) => Promise<readonly string[]>;
   /** Fetch one object's bytes by its pointer. */
-  download: (pointer: LfsPointer) => Promise<Uint8Array<ArrayBuffer>>;
+  download: (pointer: LfsDownloadInput) => Promise<Uint8Array<ArrayBuffer>>;
 }>;
 
 const mediaType = 'application/vnd.git-lfs+json';
 
-type BatchAction = Readonly<{ href: string; header?: Readonly<Record<string, string>> }>;
+type BatchAction = Readonly<{ href: string; header?: Readonly<Record<string, string>>; expiresAt?: number }>;
 type BatchObject = Readonly<{
   oid: string;
   size: number;
   actions?: Readonly<{ upload?: BatchAction; download?: BatchAction; verify?: BatchAction }>;
   error?: Readonly<{ code: number; message: string }>;
 }>;
-const batchActionSchema = z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() });
+const batchActionSchema = z
+  .object({
+    href: z.url(),
+    header: z.record(z.string(), z.string()).optional(),
+    expires_in: z.number().nonnegative().optional(),
+    expires_at: z.iso.datetime({ offset: true }).optional(),
+  })
+  .transform(({ expires_in: seconds, expires_at: date, ...action }) => ({
+    ...action,
+    expiresAt: Math.min(
+      seconds === undefined ? Infinity : Date.now() + seconds * 1000,
+      date === undefined ? Infinity : Date.parse(date),
+    ),
+  }));
+const transferAttempts = 3;
+const retryable = (status: number): boolean => status === 429 || status >= 500;
+const expired = (action: BatchAction): boolean => (action.expiresAt ?? Infinity) <= Date.now() + 5000;
+
+const backoff = async (attempt: number, signal?: AbortSignal): Promise<void> => {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const abort = (): void => {
+      clearTimeout(timer);
+      reject(
+        signal?.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
+      );
+    };
+    const timer = setTimeout(
+      () => {
+        signal?.removeEventListener('abort', abort);
+        resolve();
+      },
+      200 * 2 ** attempt,
+    );
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+};
 const batchObjectSchema = z.object({
   oid: z.string().regex(/^[0-9a-f]{64}$/u),
   size: z.number().int().nonnegative(),
@@ -235,20 +280,21 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
         method: init?.method,
         headers,
         ...(bytes === undefined ? {} : { body: oneChunk(bytes) }),
+        ...(init?.signal === undefined || init.signal === null ? {} : { signal: init.signal }),
       });
-      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
-      let size = 0;
-      for await (const chunk of result.body) {
-        const owned = new Uint8Array(chunk);
-        chunks.push(owned);
-        size += owned.byteLength;
-      }
-      const responseBody = new Uint8Array(size);
-      let offset = 0;
-      for (const chunk of chunks) {
-        responseBody.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
+      const responseBody = new ReadableStream<Uint8Array<ArrayBuffer>>({
+        async pull(controller) {
+          const chunk = await result.body.next();
+          if (chunk.done) {
+            controller.close();
+          } else {
+            controller.enqueue(new Uint8Array(chunk.value));
+          }
+        },
+        async cancel() {
+          await result.body.return?.();
+        },
+      });
       return new Response(responseBody, {
         status: result.statusCode,
         statusText: result.statusMessage,
@@ -260,8 +306,11 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
   const batch = async (
     operation: 'upload' | 'download',
     objects: readonly LfsPointer[],
+    signal?: AbortSignal,
   ): Promise<readonly BatchObject[]> => {
+    signal?.throwIfAborted();
     const response = await options.http.request({
+      signal,
       url: endpoint,
       method: 'POST',
       headers: { 'Content-Type': mediaType, Accept: mediaType },
@@ -308,90 +357,210 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
     return answers;
   };
 
+  const refresh = async (
+    operation: 'upload' | 'download',
+    pointer: LfsPointer,
+    signal?: AbortSignal,
+  ): Promise<BatchObject> => {
+    const [answer] = await batch(operation, [pointer], signal);
+    if (answer === undefined || answer.error !== undefined) {
+      throw new Error(`The remote refused large object ${pointer.oid}.`);
+    }
+    return answer;
+  };
+
+  const verifyObject = async (answer: BatchObject, signal?: AbortSignal): Promise<void> => {
+    const action = answer.actions?.verify;
+    if (action === undefined) {
+      return;
+    }
+    for (let attempt = 0; attempt < transferAttempts; attempt += 1) {
+      signal?.throwIfAborted();
+      let status: number | undefined;
+      try {
+        const verified = await options.http.request({
+          signal,
+          url: action.href,
+          method: 'POST',
+          headers: { 'Content-Type': mediaType, Accept: mediaType, ...action.header },
+          body: oneChunk(encoder.encode(JSON.stringify({ oid: answer.oid, size: answer.size }))),
+        });
+        status = verified.statusCode;
+        await readAll(verified.body);
+      } catch {
+        signal?.throwIfAborted();
+      }
+      if (status !== undefined && status >= 200 && status < 300) {
+        return;
+      }
+      if ((status !== undefined && !retryable(status)) || attempt === transferAttempts - 1) {
+        throw new Error(
+          `The remote did not accept large object ${answer.oid} (${String(status ?? 'network failure')}).`,
+        );
+      }
+      await backoff(attempt, signal);
+    }
+  };
+
+  const uploadObject = async (
+    initial: BatchObject,
+    content: Uint8Array<ArrayBuffer>,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    let answer = initial;
+    for (let attempt = 0; attempt < transferAttempts; attempt += 1) {
+      signal?.throwIfAborted();
+      if (attempt > 0 || (answer.actions?.upload !== undefined && expired(answer.actions.upload))) {
+        answer = await refresh('upload', initial, signal);
+      }
+      const action = answer.actions?.upload;
+      if (action === undefined) {
+        return;
+      }
+      let response: Response | undefined;
+      try {
+        response = await transfer(action.href, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/octet-stream', ...action.header },
+          body: content,
+          signal,
+          credentials: 'omit',
+          redirect: 'error',
+        });
+      } catch {
+        signal?.throwIfAborted();
+      }
+      if (response?.status === 413) {
+        throw new LfsQuotaError(quotaRefusal(await response.text()));
+      }
+      await response?.body?.cancel();
+      if (response?.ok) {
+        // Byte arrival is not finalization. Retry ambiguous verification without another PUT.
+        await verifyObject(answer, signal);
+        return;
+      }
+      if (
+        (response !== undefined && response.status !== 401 && response.status !== 403 && !retryable(response.status)) ||
+        attempt === transferAttempts - 1
+      ) {
+        throw new Error(
+          `Uploading large object ${initial.oid} failed (${String(response?.status ?? 'network failure')}).`,
+        );
+      }
+      await backoff(attempt, signal);
+    }
+  };
+
   return Object.freeze({
-    upload: async ({ pointers, read }: LfsUploadInput): Promise<readonly string[]> => {
+    upload: async ({ pointers, read, signal }: LfsUploadInput): Promise<readonly string[]> => {
+      signal?.throwIfAborted();
+      const { maximumUploadBytes } = options;
+      if (maximumUploadBytes !== undefined && pointers.some(({ size }) => size > maximumUploadBytes)) {
+        throw new Error(`Individual project files must be ${String(maximumUploadBytes / 1024 / 1024)} MiB or smaller.`);
+      }
       if (pointers.length === 0) {
         return Object.freeze([]);
       }
-      const answers = await batch('upload', pointers);
+      // Admit the whole batch before reading or transferring any bytes.
+      const answers = await batch('upload', pointers, signal);
+      const refused = answers.find((answer) => answer.error !== undefined);
+      if (refused !== undefined) {
+        throw new Error(`The remote refused large object ${refused.oid}: ${refused.error?.message}`);
+      }
       const sent: string[] = [];
       for (const answer of answers) {
-        if (answer.error !== undefined) {
-          throw new Error(`The remote refused large object ${answer.oid}: ${answer.error.message}`);
-        }
-        const action = answer.actions?.upload;
-        /* No action means the remote already holds it. That, and not a Tau
-         * ledger, is what makes one object one upload (V13). */
-        if (action === undefined) {
+        signal?.throwIfAborted();
+        if (answer.actions?.upload === undefined) {
           continue;
         }
-        /* The batch has already checked the answer is one of `pointers`. */
-        // oxlint-disable-next-line no-await-in-loop -- one object resident at a time.
         const content = await read(answer.oid);
-        /* oxlint-disable-next-line no-await-in-loop -- one transfer at a time:
-         * it bounds concurrent sockets and memory, and makes a 413 deterministic
-         * (the first object over the plan is the one the refusal names). */
-        const response = await transfer(action.href, {
-          method: 'PUT',
-          /* The presigned URL signs `application/octet-stream`, and otherwise
-           * exactly the headers the batch issued: the URL is the credential,
-           * and a second one only leaks (W11a §10). */
-          headers: { 'Content-Type': 'application/octet-stream', ...action.header },
-          body: content,
-        });
-        if (response.status === 413) {
-          // oxlint-disable-next-line no-await-in-loop -- reading the refusal that ends this loop.
-          const body = await response.text();
-          throw new LfsQuotaError(quotaRefusal(body));
+        signal?.throwIfAborted();
+        if (content.byteLength !== answer.size || lfsPointerFor(content).pointer.oid !== answer.oid) {
+          throw new Error(`Large object ${answer.oid} did not hash to its own id.`);
         }
-        if (!response.ok) {
-          throw new Error(`Uploading large object ${answer.oid} failed (${String(response.status)}).`);
-        }
-        /* The server counts an object against the plan when the client says it
-         * landed, so skipping `verify` would under-report every upload (W11a
-         * §9.6).
-         *
-         * Unlike the transfer, this is a *Tau* route behind the API's own auth
-         * guard — so it goes through the Tau client, which carries the session
-         * (a cookie in the browser, a bearer on a disk host), plus whatever
-         * header the batch issued for it. Sent through a bare `fetch` it arrives
-         * with no credential at all and the guard refuses it, failing the push
-         * after the object has already landed. */
-        const verify = answer.actions?.verify;
-        if (verify !== undefined) {
-          // oxlint-disable-next-line no-await-in-loop -- one object at a time, see above.
-          const verified = await options.http.request({
-            url: verify.href,
-            method: 'POST',
-            headers: { 'Content-Type': mediaType, Accept: mediaType, ...verify.header },
-            body: oneChunk(encoder.encode(JSON.stringify({ oid: answer.oid, size: answer.size }))),
-          });
-          if (verified.statusCode >= 400) {
-            throw new Error(`The remote did not accept large object ${answer.oid} (${String(verified.statusCode)}).`);
-          }
-        }
+        await uploadObject(answer, content, signal);
         sent.push(answer.oid);
       }
       return Object.freeze(sent);
     },
 
-    download: async (pointer: LfsPointer): Promise<Uint8Array<ArrayBuffer>> => {
-      const [answer] = await batch('download', [pointer]);
-      const action = answer?.actions?.download;
-      if (action === undefined) {
-        throw new Error(`The remote has no large object ${pointer.oid}.`);
+    download: async (pointer: LfsDownloadInput): Promise<Uint8Array<ArrayBuffer>> => {
+      const { signal } = pointer;
+      let answer = await refresh('download', pointer, signal);
+      for (let attempt = 0; attempt < transferAttempts; attempt += 1) {
+        signal?.throwIfAborted();
+        if (attempt > 0 || (answer.actions?.download !== undefined && expired(answer.actions.download))) {
+          answer = await refresh('download', pointer, signal);
+        }
+        const action = answer.actions?.download;
+        if (action === undefined) {
+          throw new Error(`The remote has no large object ${pointer.oid}.`);
+        }
+        let response: Response | undefined;
+        try {
+          response = await transfer(action.href, {
+            headers: action.header ?? {},
+            signal,
+            credentials: 'omit',
+            redirect: 'error',
+          });
+        } catch {
+          signal?.throwIfAborted();
+        }
+        if (response?.ok) {
+          const reader = response.body?.getReader();
+          let content: Uint8Array<ArrayBuffer> | undefined;
+          let received = 0;
+          let interrupted = false;
+          try {
+            content = new Uint8Array(pointer.size);
+            let complete = false;
+            while (!complete) {
+              signal?.throwIfAborted();
+              const chunk = await reader?.read();
+              complete = chunk === undefined || chunk.done;
+              if (chunk === undefined || chunk.done) {
+                break;
+              }
+              if (received + chunk.value.byteLength > pointer.size) {
+                throw new RangeError(`Large object ${pointer.oid} exceeds its declared size.`);
+              }
+              content.set(chunk.value, received);
+              received += chunk.value.byteLength;
+            }
+          } catch (error) {
+            signal?.throwIfAborted();
+            if (error instanceof RangeError) {
+              throw error;
+            }
+            interrupted = true;
+          } finally {
+            await reader?.cancel().catch(() => undefined);
+            reader?.releaseLock();
+          }
+          if (!interrupted && content !== undefined) {
+            if (received !== pointer.size || lfsPointerFor(content).pointer.oid !== pointer.oid) {
+              throw new Error(`Large object ${pointer.oid} did not hash to its own id.`);
+            }
+            return content;
+          }
+        } else {
+          await response?.body?.cancel();
+          if (
+            response !== undefined &&
+            response.status !== 401 &&
+            response.status !== 403 &&
+            !retryable(response.status)
+          ) {
+            throw new Error(`Downloading large object ${pointer.oid} failed (${String(response.status)}).`);
+          }
+        }
+        if (attempt === transferAttempts - 1) {
+          throw new Error(`Downloading large object ${pointer.oid} failed after three attempts.`);
+        }
+        await backoff(attempt, signal);
       }
-      const response = await transfer(action.href, { headers: action.header ?? {} });
-      if (!response.ok) {
-        throw new Error(`Downloading large object ${pointer.oid} failed (${String(response.status)}).`);
-      }
-      const content = new Uint8Array(await response.arrayBuffer());
-      /* Content-addressed both ways: a store that hands back the wrong bytes is
-       * caught here rather than in a tree id hours later. */
-      if (content.byteLength !== pointer.size || lfsPointerFor(content).pointer.oid !== pointer.oid) {
-        throw new Error(`Large object ${pointer.oid} did not hash to its own id.`);
-      }
-      return content;
+      throw new Error(`Downloading large object ${pointer.oid} failed.`);
     },
   });
 };

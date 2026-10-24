@@ -439,8 +439,9 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'Build123d authoring',
     title: 'Build123d authoring',
     description:
-      'Guides native Build123d BRep authoring in main.py. Use when creating or editing trusted Python CAD projects in Tau Desktop.',
-    whenToUse: 'Use when creating or editing trusted Python CAD projects in Tau Desktop.',
+      'Guides native Build123d BRep authoring in main.py. Use for trusted Python CAD projects in Tau Desktop, or in the Tau plugin after prepare_kernel.',
+    whenToUse:
+      'Use when creating or editing trusted Python CAD projects in Tau Desktop or from the Tau plugin after `prepare_kernel`.',
     corpus: committedCorpus('build123d/build123d.bundled.json'),
     groupBy: byCategory,
     core: {
@@ -468,9 +469,9 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoGK C# authoring',
     title: 'PicoGK C# authoring',
     description:
-      'Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK modeling, appearance or moving-part requests in Tau Desktop.',
+      'Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK in Tau Desktop, or in the Tau plugin after prepare_kernel.',
     whenToUse:
-      'Use for PicoGK C# models, physical materials, textures, named parts and moving mechanisms in Tau Desktop.',
+      'Use for PicoGK C# models, physical materials, textures, named parts and moving mechanisms in Tau Desktop or from the Tau plugin after `prepare_kernel`.',
     corpus: () => csharpReferenceCorpus(committedCorpus('picogk/picogk.corpus.json')(), 'modeling'),
     groupBy: (entry) => `${entry.category ?? 'CAD authoring'} — ${entry.path ?? 'other'}`,
     supplementalApi: {

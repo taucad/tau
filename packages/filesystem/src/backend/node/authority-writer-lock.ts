@@ -37,12 +37,6 @@ const throwIfAborted = (signal?: AbortSignal): void => {
 };
 
 const lockCommand = (): Readonly<{ command: string; arguments_: readonly string[] }> => {
-  if (process.versions['electron'] !== undefined && process.platform !== 'darwin') {
-    throw new NodeAuthorityWriterError(
-      'AUTHORITY_LOCK_UNSUPPORTED',
-      'Electron filesystem writer ownership is only qualified on Darwin.',
-    );
-  }
   if (process.platform === 'darwin') {
     return { command: '/usr/bin/lockf', arguments_: ['-s', '-t', '0', '3'] };
   }

@@ -37,7 +37,7 @@ import type {
   MachineSettingsService,
   MachineSettingsValue,
 } from '@taucad/types';
-import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
+import { projectIdSchema, projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import { filesystemBackends } from '@taucad/types/constants';
 import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
 import type { WireValidator } from '@taucad/rpc';
@@ -328,7 +328,6 @@ const rootedPathSchema = z.string().refine((value) => {
 const projectDirectoryPathSchema = rootedPathSchema.refine(
   (value) => value !== '' && !value.includes('/') && !value.startsWith('.'),
 );
-const projectIdSchema = projectManifestSchema.shape.id;
 
 const durabilityClassValues = ['exclusive-append', 'stream-append', 'transactional-rewrite', 'ephemeral'] as const;
 const durabilityClassSchema = z.enum(durabilityClassValues);
@@ -543,9 +542,9 @@ const manifestIssueSchema = z.discriminatedUnion('code', [
   }),
   z.looseObject({ code: z.literal('manifest-invalid'), issues: z.array(z.unknown()) }),
 ]) as z.ZodType<ProjectManifestParseIssue>;
-const adoptableProjectManifestSchema = projectManifestSchema.omit({ id: true });
 /* An identified entry's `issue` marks a degraded manifest: it routes, and its bytes await Repair. */
 const identifiedEntryShape = {
+  projectId: projectIdSchema,
   manifest: projectManifestSchema,
   locator: projectLocatorSchema,
   issue: manifestIssueSchema.optional(),
@@ -556,11 +555,23 @@ const projectDiscoveryEntrySchema: z.ZodType<ProjectDiscoveryEntry> = z.discrimi
   z.looseObject({ status: z.literal('route-blocked'), ...identifiedEntryShape }),
   z.looseObject({
     status: z.literal('adoption-required'),
-    manifest: adoptableProjectManifestSchema,
+    manifest: projectManifestSchema,
     locator: projectLocatorSchema,
     issue: manifestIssueSchema,
   }),
-  z.looseObject({ status: z.literal('invalid'), locator: projectLocatorSchema, issue: manifestIssueSchema }),
+  z.looseObject({
+    status: z.literal('invalid'),
+    locator: projectLocatorSchema,
+    issue: z.union([
+      manifestIssueSchema,
+      z.object({ code: z.enum(['identity-invalid', 'identity-unavailable']), message: z.string() }),
+      z.object({
+        code: z.literal('identity-conflict'),
+        expectedProjectId: projectIdSchema,
+        actualProjectId: projectIdSchema,
+      }),
+    ]),
+  }),
 ]);
 const projectRootDiscoveryStatusSchema: z.ZodType<ProjectRootDiscoveryStatus> = z.discriminatedUnion('status', [
   z.looseObject({ status: z.literal('complete'), root: storageRootConfigSchema }),
@@ -911,7 +922,7 @@ const callSchemas = {
   },
   adoptProjectDirectory: {
     args: z.tuple([projectLocatorSchema, z.object({ id: projectIdSchema.optional() }).optional()]),
-    result: projectManifestSchema,
+    result: z.object({ projectId: projectIdSchema, manifest: projectManifestSchema }),
   },
   permanentlyDeleteProjectDirectory: {
     args: z.tuple([permanentDeleteInputSchema]),

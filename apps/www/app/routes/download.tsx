@@ -41,7 +41,7 @@ export const content = (): React.JSX.Element => (
             >
               Choose your download {down}
             </SiteLink>
-            <p className='fine' data-download-detail>
+            <p className='fine' data-download-detail='host'>
               Mac · Windows · Linux
             </p>
           </div>
@@ -52,10 +52,13 @@ export const content = (): React.JSX.Element => (
               data-event='download'
               data-placement='download'
               aria-label='Download for Intel Mac'
+              data-download-platform='macIntel'
             >
               <DownloadLabel platform='macIntel' />
             </SiteLink>
-            <p className='fine'>Intel Mac · ZIP download</p>
+            <p className='fine' data-download-detail='macIntel'>
+              Intel Mac · ZIP download
+            </p>
           </div>
         </div>
       ),
@@ -85,12 +88,15 @@ export const content = (): React.JSX.Element => (
                 <SiteLink
                   className='text-link'
                   href={desktopDownloadHref(platform)}
+                  data-download-platform={platform}
                   data-event='download'
                   data-placement='download'
                 >
                   <DownloadLabel platform={platform} />
                 </SiteLink>
-                <p className='fine'>{desktopDownloads[platform].detail}</p>
+                <p className='fine' data-download-detail={platform}>
+                  {desktopDownloads[platform].detail}
+                </p>
               </div>
             ))}
           </div>
@@ -100,6 +106,7 @@ export const content = (): React.JSX.Element => (
         </SiteLink>
       </article>
     </div>
+    <div className='cell installer-guide' data-qualified-downloads hidden />
   </section>
 );
 export default function Page(): React.JSX.Element {

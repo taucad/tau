@@ -44,6 +44,15 @@ describe('OpenInDesktop', () => {
     expect(screen.getByText('Opening Tau Desktop')).toBeInTheDocument();
   });
 
+  it('opens the staging handler for a Windows browser, including the saved automatic preference', () => {
+    vi.stubGlobal('location', { origin: 'https://taucad.dev', href: 'https://taucad.dev/s/direct', assign });
+    vi.stubGlobal('navigator', { platform: 'Win32', userAgent: 'Windows' });
+    globalThis.localStorage.setItem('tau.open-links-in-desktop', 'true');
+    mountAt('/s/direct');
+    expect(assign).toHaveBeenCalledWith('tau-staging://s/direct');
+    expect(assign).not.toHaveBeenCalledWith('tau://s/direct');
+  });
+
   /* The fallback is a visible button, not a timer: a custom scheme gives the
      page no signal, so only the person can say it did not work. */
   it('shows the way out of opening straight away, with no timer', async () => {

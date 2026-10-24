@@ -3,6 +3,7 @@ import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
@@ -41,7 +42,7 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />);
 
     expect(screen.getByRole('switch', { name: 'Prefer WebGPU' })).toBeChecked();
-    expect(screen.getByText(/Uses WebGL when WebGPU is unavailable or cannot start/)).toBeInTheDocument();
+    expect(screen.getByText(/Uses WebGL2 when WebGPU is unavailable or cannot start/)).toBeInTheDocument();
     expect(screen.getByText('Tau Debug')).toBeInTheDocument();
     for (const hidden of [
       'Marketing Landing',
@@ -76,20 +77,26 @@ describe('ExperimentalSettings', () => {
     try {
       expect(screen.getByText('No active 3D viewer.')).toBeInTheDocument();
       act(() => {
-        actor.send({ type: 'rendererInitialized', payload: { canvasId: 'a', backend: 'webgpu' } });
+        actor.send({
+          type: 'rendererInitialized',
+          payload: { canvasId: 'a', backend: 'webgpu' },
+        });
       });
       expect(screen.getByText('Using WebGPU.')).toBeInTheDocument();
       act(() => {
-        actor.send({ type: 'rendererInitialized', payload: { canvasId: 'b', backend: 'webgl' } });
+        actor.send({
+          type: 'rendererInitialized',
+          payload: { canvasId: 'b', backend: 'webgl' },
+        });
       });
-      expect(screen.getByText('Using WebGL fallback.')).toBeInTheDocument();
+      expect(screen.getByText('Using WebGL2 fallback.')).toBeInTheDocument();
       mockState.flags = { ...featureFlagDefaults, webGpu: false };
       view.rerender(<ExperimentalSettings />);
-      expect(screen.getByText('Using WebGL.')).toBeInTheDocument();
+      expect(screen.getByText('Using WebGL2.')).toBeInTheDocument();
       act(() => {
         actor.send({ type: 'rendererRemoved', canvasId: 'a' });
       });
-      expect(screen.getByText('Using WebGL.')).toBeInTheDocument();
+      expect(screen.getByText('Using WebGL2.')).toBeInTheDocument();
       act(() => {
         actor.send({ type: 'rendererRemoved', canvasId: 'b' });
       });
@@ -104,5 +111,23 @@ describe('ExperimentalSettings', () => {
     render(<ExperimentalSettings />);
     fireEvent.click(screen.getByRole('switch', { name: 'Prefer WebGPU' }));
     expect(mockState.setFlag).toHaveBeenCalledExactlyOnceWith('webGpu', false);
+  });
+
+  it('should toggle a flag when its row text is tapped', async () => {
+    render(<ExperimentalSettings />);
+
+    await userEvent.click(screen.getByText('Tau Debug'));
+
+    expect(mockState.setFlag).toHaveBeenCalledTimes(1);
+    expect(mockState.setFlag).toHaveBeenCalledWith('tauDebug', !featureFlagDefaults.tauDebug);
+  });
+
+  it('should toggle a flag once when the switch itself is tapped inside its row', async () => {
+    render(<ExperimentalSettings />);
+
+    await userEvent.click(screen.getByRole('switch', { name: 'Tau Debug' }));
+
+    expect(mockState.setFlag).toHaveBeenCalledTimes(1);
+    expect(mockState.setFlag).toHaveBeenCalledWith('tauDebug', !featureFlagDefaults.tauDebug);
   });
 });

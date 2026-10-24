@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 import { Check, ChevronDown, FolderOpen, House, Plus, Settings, ShieldAlert, Unplug } from 'lucide-react';
 import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Button } from '@taucad/ui/components/button';
@@ -61,6 +62,7 @@ export function WorkspaceSelector({
   ...properties
 }: WorkspaceSelectorProperties): React.JSX.Element | undefined {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
 
   if (!state.shouldShowPicker) {
     return undefined;
@@ -124,7 +126,11 @@ export function WorkspaceSelector({
   };
 
   const manage = (): void => {
-    globalThis.window.open('/files', '_blank', 'noopener,noreferrer');
+    if (isDesktopTarget()) {
+      void navigate('/files');
+    } else {
+      globalThis.window.open('/files', '_blank', 'noopener,noreferrer');
+    }
     completeAction();
   };
 

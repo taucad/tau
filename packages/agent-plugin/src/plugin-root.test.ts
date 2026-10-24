@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 
+import {
+  codexDefaultPrompts,
+  codexLongDescription,
+  codexShortDescription,
+  packageDescription,
+  pluginDescription,
+  pluginKeywords,
+} from '#descriptions.js';
+
 /** The package folder, which is the plugin root both hosts load. The test target builds it first. */
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -19,12 +28,15 @@ type McpConfig = {
 
 /** Every bundle `nx build agent-plugin` installs, beside the committed onboarding skill `tau`. */
 const skillSlugs = [
+  'cad-build123d',
   'cad-jscad',
   'cad-manifold',
   'cad-openscad',
+  'cad-picogk',
   'cad-picovoxel',
   'cad-replicad',
   'cad-smlib',
+  'cad-smlibpy',
   'cad-tscircuit',
   'geospec-authoring',
   'tau',
@@ -52,6 +64,25 @@ describe('plugin manifests', () => {
       extensions: { 'com.openai': { onboardingSkill: 'tau' } },
     });
     expect(readJson('.claude-plugin/plugin.json')).toMatchObject({ mcpServers: './mcp/claude.json' });
+  });
+
+  it('should carry the description texts from their one source in every manifest and package.json', () => {
+    const listing = { description: pluginDescription, keywords: pluginKeywords };
+
+    expect(readJson('.claude-plugin/plugin.json')).toMatchObject(listing);
+    expect(readJson('.codex-plugin/plugin.json')).toMatchObject({
+      ...listing,
+      interface: {
+        shortDescription: codexShortDescription,
+        longDescription: codexLongDescription,
+        defaultPrompt: codexDefaultPrompts,
+      },
+    });
+    expect(readJson('.claude-plugin/marketplace.json')).toMatchObject({
+      plugins: [{ name: 'tau', description: pluginDescription }],
+    });
+    expect(readJson('package.json')).toMatchObject({ description: packageDescription });
+    expect(codexShortDescription.length).toBeLessThanOrEqual(30);
   });
 
   it('should list this folder as the tau plugin of the tau-dev marketplace', () => {
@@ -128,7 +159,7 @@ describe('attribution', () => {
 });
 
 describe('published package', () => {
-  it('should pack the manifests, MCP configs, launcher and skills, and nothing from the workspace', async () => {
+  it('should pack the manifests, MCP configs, launcher, doctor and skills, and nothing from the workspace', async () => {
     const { stdout } = await promisify(execFile)('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
       cwd: root,
     });
@@ -144,8 +175,12 @@ describe('published package', () => {
         'LICENSE',
         'NOTICE',
         'README.md',
+        'dist/doctor-probe.mjs',
+        'dist/doctor.mjs',
         'dist/index.mjs',
         'dist/launch.mjs',
+        'dist/preflight.mjs',
+        'dist/resolve-tau-cli.mjs',
         'mcp/claude.json',
         'mcp/codex.json',
         'package.json',

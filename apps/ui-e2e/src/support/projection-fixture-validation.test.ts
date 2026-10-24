@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- Node-only fixture tests run without browser aliases.
 import { validateProjectionFixtureBytes, validateProjectionDirectory } from './projection-fixture-validation.ts';
+// oxlint-disable-next-line no-restricted-imports -- Node proof tests share the browser fixture identity validator.
+import { validateProjectionIdentity } from './filesystem-projection-writer.ts';
 
 const fixture = (sequences = [0, 1, 2], expectedTurns = 1, declaredTurns = 1) => {
   const rows = sequences.map((sequence, index) => ({
@@ -25,7 +27,7 @@ const fixture = (sequences = [0, 1, 2], expectedTurns = 1, declaredTurns = 1) =>
       turns: declaredTurns,
       closure: {
         version: 2,
-        project: { projectId: 'proj_fixture' },
+        project: { projectId: 'proj_123456789012345678901' },
         directories: ['.tau', '.tau/chats', '.tau/chats/chat_fixture'],
         files: [
           {
@@ -103,7 +105,16 @@ describe('raw directory projection fixture proof', () => {
         await writeFile(join(root, file.path), bytes);
         files.push({ path: file.path, byteLength: file.byteLength, sha256: file.sha256, chunkSha256: [file.sha256] });
       }
-      const manifest = Buffer.from(JSON.stringify({ id: 'proj_fixture' }));
+      const manifest = Buffer.from(
+        JSON.stringify({
+          $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+          id: 'proj_123456789012345678901',
+          name: 'Fixture',
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'main.py' } },
+        }),
+      );
       await writeFile(join(root, 'tau.json'), manifest);
       const manifestSha256 = createHash('sha256').update(manifest).digest('hex');
       files.push({
@@ -182,5 +193,44 @@ describe('raw directory projection fixture proof', () => {
         }),
       ).rejects.toThrow('proof mismatch');
     });
+  });
+});
+
+describe('project identity in immutable fixture proofs', () => {
+  const projectId = 'proj_123456789012345678901';
+  const manifest = {
+    $schema: 'https://tau.new/schemas/tau-v1.json',
+    name: 'Fixture',
+    description: '',
+    tags: [],
+    assets: { main: { entryPath: 'main.py' } },
+  };
+  const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+
+  it('requires the generated identity alongside the current id-free manifest', () => {
+    expect(() => {
+      validateProjectionIdentity(encode(manifest), undefined, { projectId });
+    }).toThrow('identity');
+    expect(() => {
+      validateProjectionIdentity(encode(manifest), encode({ version: 1, projectId }), { projectId });
+    }).not.toThrow();
+    expect(() => {
+      validateProjectionIdentity(encode(manifest), encode({ version: 1, projectId }), {
+        projectId: 'proj_123456789012345678902',
+      });
+    }).toThrow('identity');
+  });
+
+  it('admits exact historical bytes only through the explicit legacy proof option', () => {
+    const legacy = encode({ ...manifest, $schema: 'https://tau.new/schemas/tau-schema-v1.json', id: projectId });
+    expect(() => {
+      validateProjectionIdentity(legacy, undefined, { projectId });
+    }).toThrow('identity');
+    expect(() => {
+      validateProjectionIdentity(legacy, undefined, { projectId, allowLegacy: true });
+    }).not.toThrow();
+    expect(() => {
+      validateProjectionIdentity(legacy, encode({ version: 1, projectId }), { projectId, allowLegacy: true });
+    }).toThrow('identity');
   });
 });

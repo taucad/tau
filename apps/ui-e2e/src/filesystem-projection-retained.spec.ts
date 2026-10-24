@@ -367,20 +367,34 @@ export default function main() { return [{ name: 'Base', shape: makeBaseBox(20, 
 });
 
 test('qualifies binary closure hashes and rejects tampered or escaping fixture bytes before import', async () => {
-  const manifest = [...new TextEncoder().encode(JSON.stringify({ id: 'fixture-project' }))];
+  const manifest = [
+    ...new TextEncoder().encode(
+      JSON.stringify({
+        $schema: 'https://tau.new/schemas/tau-v1.json',
+        name: 'Fixture',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'main.py' } },
+      }),
+    ),
+  ];
   const binary = [0, 255, 128, 1];
   const closure: ProjectionClosure = {
     version: 2,
     project: {
-      projectId: 'fixture-project',
+      projectId: 'proj_123456789012345678901',
       backend: 'opfs',
       providerBasePath: 'fixture-project',
       databasePrefix: 'tau-',
     },
-    directories: ['.git', '.git/objects'],
+    directories: ['.git', '.git/objects', '.tau'],
     files: [
       await encodeProjectionFile('tau.json', new Uint8Array(manifest)),
       await encodeProjectionFile('.git/objects/binary', new Uint8Array(binary)),
+      await encodeProjectionFile(
+        '.tau/project.json',
+        new TextEncoder().encode(JSON.stringify({ version: 1, projectId: 'proj_123456789012345678901' })),
+      ),
     ],
   };
   await expect(validateProjectionClosure(closure)).resolves.toBeUndefined();
@@ -395,7 +409,7 @@ test('qualifies binary closure hashes and rejects tampered or escaping fixture b
   ).rejects.toThrow('rooted fixture path');
   await expect(
     validateProjectionClosure({ ...closure, project: { ...closure.project, projectId: 'foreign-project' } }),
-  ).rejects.toThrow('manifest identity');
+  ).rejects.toThrow('identity');
 });
 
 const retainedManualEnabled =

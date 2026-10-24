@@ -23,17 +23,42 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
+import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
+import { createNodeClient } from '@taucad/runtime/node';
+import { projectManifestSchemaUrl } from '@taucad/types';
 import { validateGlbData } from '@taucad/runtime-testing';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import type { RawData } from 'ws';
 
+import { testRecord } from '#commands/test.js';
+import { loadCliRuntime } from '#runtime-options.js';
+
 const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../..');
 const cliBinPath = resolvePath(repoRoot, 'packages/cli/dist/bin/tau.mjs');
 const examplesRoot = resolvePath(repoRoot, 'libs/tau-examples/src/kernels');
+/** Whether PicoGK's tau-plugin.json declares this host: darwin-arm64, or linux-x64 on glibc 2.28 or later. */
+const picogkDeclaredHost =
+  (process.platform === 'darwin' && process.arch === 'arm64') ||
+  (process.platform === 'linux' &&
+    process.arch === 'x64' &&
+    Number(
+      (process.report.getReport() as { header?: { glibcVersionRuntime?: string } }).header?.glibcVersionRuntime?.split(
+        '.',
+      )[1] ?? 0,
+    ) >= 28);
 
 /** What one run of the built `tau` produced. */
-type Run = { readonly code: number | undefined; readonly stdout: string; readonly stderr: string };
+type Run = {
+  readonly code: number | undefined;
+  readonly signal: NodeJS.Signals | undefined;
+  readonly pid: number | undefined;
+  readonly timedOut: boolean;
+  /** Milliseconds from spawning the process until its output streams close. */
+  readonly elapsed: number;
+  readonly stdout: string;
+  readonly stderr: string;
+};
 
 let scratch = '';
 
@@ -75,7 +100,7 @@ const binArguments = (args: readonly string[]): string[] => [
  *
  * @param args - Its arguments.
  * @param options - Environment additions and a working directory.
- * @returns Its exit code and output.
+ * @returns Its exit code, termination diagnostics and fully drained output.
  */
 const tau = async (
   args: readonly string[],
@@ -86,6 +111,7 @@ const tau = async (
   } = {},
 ): Promise<Run> =>
   new Promise((resolve, reject) => {
+    const started = performance.now();
     const child = spawn(process.execPath, binArguments(args), {
       cwd: options.cwd ?? repoRoot,
       env: isolated(options.env),
@@ -93,6 +119,7 @@ const tau = async (
     });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       stdout += chunk;
     });
@@ -100,12 +127,26 @@ const tau = async (
       stderr += chunk;
     });
     const timer = setTimeout(() => {
+      timedOut = true;
       child.kill('SIGKILL');
     }, options.runTimeout ?? 300_000);
-    child.once('error', reject);
-    child.once('exit', (code) => {
+    child.once('error', (error) => {
       clearTimeout(timer);
-      resolve({ code: code ?? undefined, stdout, stderr });
+      reject(error);
+    });
+    child.once('exit', () => {
+      clearTimeout(timer);
+    });
+    child.once('close', (code, signal) => {
+      resolve({
+        code: code ?? undefined,
+        signal: signal ?? undefined,
+        pid: child.pid,
+        timedOut,
+        elapsed: Math.round(performance.now() - started),
+        stdout,
+        stderr,
+      });
     });
   });
 
@@ -220,7 +261,16 @@ beforeAll(async () => {
   await mkdir(join(scratch, 'config'), { recursive: true });
   const project = join(scratch, 'project');
   await mkdir(project);
-  await writeFile(join(project, 'tau.json'), '{}\n');
+  await writeFile(
+    join(project, 'tau.json'),
+    JSON.stringify({
+      $schema: projectManifestSchemaUrl,
+      name: 'CLI scenarios',
+      description: '',
+      tags: [],
+      assets: { main: { entryPath: 'main.ts' } },
+    }),
+  );
   await writeFile(join(project, 'main.ts'), replicadBox);
   await writeFile(join(project, 'main.py'), build123dBox);
   await writeFile(join(project, 'main.cs'), picogkSphere);
@@ -465,11 +515,9 @@ describe('T6 — a native kernel that is not prepared', () => {
     expect(pythonIssue?.code).toBe('KERNEL_NOT_PREPARED');
     expect(pythonIssue?.message).toContain('tau prepare build123d');
     expect(csharp.code).toBe(3);
-    /* PicoGK runs on darwin-arm64 only (D13): elsewhere the refusal is the unsupported target, not preparation. */
+    /* PicoGK runs on darwin-arm64 and glibc linux-x64 (D13): elsewhere the refusal is the unsupported target. */
     const [csharpIssue] = recordOf(csharp)['issues'] as Array<{ code: string }>;
-    expect(csharpIssue?.code).toBe(
-      process.platform === 'darwin' && process.arch === 'arm64' ? 'KERNEL_NOT_PREPARED' : 'KERNEL_CAPABILITY_MISSING',
-    );
+    expect(csharpIssue?.code).toBe(picogkDeclaredHost ? 'KERNEL_NOT_PREPARED' : 'KERNEL_CAPABILITY_MISSING');
   });
 
   it('should answer MCP evaluate_model on main.py with the typed refusal', async () => {
@@ -572,7 +620,9 @@ describe('T11 — tau check and tau test in CI', () => {
       { label: 'synthetic/model-error', file: join(broken, 'main.ts') },
     ];
     const statusExit: Record<string, number> = { ok: 0, error: 1, refused: 3 };
-    const outcomes: Array<{ label: string; code: number | undefined; status: unknown }> = [];
+    const outcomes: Array<
+      Pick<Run, 'code' | 'signal' | 'pid' | 'timedOut' | 'elapsed'> & { label: string; status: unknown }
+    > = [];
     const queue = [...inputs];
     const worker = async (): Promise<void> => {
       for (let input = queue.shift(); input !== undefined; input = queue.shift()) {
@@ -584,7 +634,15 @@ describe('T11 — tau check and tau test in CI', () => {
         } catch {
           status = `unparsed: ${run.stderr.slice(-400)}`;
         }
-        outcomes.push({ label: input.label, code: run.code, status });
+        outcomes.push({
+          label: input.label,
+          code: run.code,
+          signal: run.signal,
+          pid: run.pid,
+          timedOut: run.timedOut,
+          elapsed: run.elapsed,
+          status,
+        });
       }
     };
     await Promise.all(Array.from({ length: Math.max(2, Math.min(4, availableParallelism() - 1)) }, worker));
@@ -596,7 +654,10 @@ describe('T11 — tau check and tau test in CI', () => {
         log,
         outcomes
           .toSorted((left, right) => left.label.localeCompare(right.label))
-          .map(({ label, code, status }) => `${String(code)} ${String(status)} ${label}`)
+          .map(
+            ({ label, code, status, signal, pid, timedOut, elapsed }) =>
+              `${String(code)} ${String(status)} ${label}\t${JSON.stringify({ signal, pid, timedOut, elapsed })}`,
+          )
           .join('\n'),
       );
     }
@@ -626,6 +687,62 @@ describe('T11 — tau check and tau test in CI', () => {
     expect(recordOf(passed)).toMatchObject({ kind: 'test', ok: true, status: 'passed', passed: 1, failed: 0 });
     expect(failed.code, failed.stderr).toBe(1);
     expect(recordOf(failed)).toMatchObject({ kind: 'test', ok: false, status: 'failed', passed: 1, failed: 1 });
+  });
+
+  it('should serve GeoSpec subprocess protocol 1 to geospec commandExporter from tau export --out', async () => {
+    const directory = join(scratch, 'geospec-protocol');
+    await geoSpecProject(directory, false);
+    const { commandExporter } = await import('geospec/model/node');
+    const exporter = commandExporter({
+      id: 'tau',
+      extensions: ['ts'],
+      command: [process.execPath, ...binArguments(['export'])],
+      cwd: repoRoot,
+      env: isolated(),
+      capabilities: { formats: ['glb', 'step'], parameters: true, region: true },
+    });
+
+    const glb = await exporter.export({ file: 'block.ts', format: 'glb', projectPath: directory });
+    const step = await exporter.export({ file: 'block.ts', format: 'step', projectPath: directory });
+
+    expect(glb.format).toBe('glb');
+    validateGlbData(glb.bytes);
+    expect(step.format).toBe('step');
+    expect(new TextDecoder().decode(step.bytes.subarray(0, 13))).toBe('ISO-10303-21;');
+    expect(glb.consumedSources).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'block.ts' })]));
+  });
+
+  it('should give the same verdicts through tau test as a Tau host does through its runtime client', async () => {
+    const directory = join(scratch, 'geospec-parity');
+    await geoSpecProject(directory, true);
+    const client = await createNodeClient({
+      runtime: await loadCliRuntime({ projectRoot: directory, plugin: [] }),
+      projectPath: directory,
+    });
+    const files = ['block.geospec.ts'];
+    let hosted: ReturnType<typeof testRecord>;
+    try {
+      const runner = await createHostGeoSpecRunner(directory, client);
+      try {
+        hosted = testRecord(directory, files, (await runner.run({ files })) as Parameters<typeof testRecord>[2]);
+      } finally {
+        await runner.close();
+      }
+    } finally {
+      await client.shutdown();
+    }
+
+    const run = await tau(['test', directory, '--json']);
+    const verdicts = (tests: ReadonlyArray<{ file: string; name: string; status: string }>): string[] =>
+      tests.map(({ file, name, status }) => `${file} › ${name}: ${status}`).toSorted();
+
+    expect(verdicts(hosted.tests)).toEqual([
+      'block.geospec.ts › block > is 20 x 10 x 4 mm: passed',
+      'block.geospec.ts › block > is 21 mm long: failed',
+    ]);
+    expect(verdicts((recordOf(run) as { tests: Parameters<typeof verdicts>[0] }).tests)).toEqual(
+      verdicts(hosted.tests),
+    );
   });
 
   it('should refuse with exit 3 when a project has no GeoSpec suite', async () => {

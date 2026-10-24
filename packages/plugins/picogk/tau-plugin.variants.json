@@ -1,0 +1,3 @@
+{
+  "//": "Runtime variants staged for a layer target the release job builds but tau-plugin.json does not pin yet: the target and Microsoft's runtime archive, pinned by the sha512 releases.json publishes (prepare-picogk-dotnet.mts --layer checks it there). scripts/compose-tau-plugin.mts adds the variant, with the worker pin from the published layer's record, when the manifest has no variant for that record's target; a variant the manifest already pins is never read from here, so an entry is removed in the change that lands its composed pin."
+}

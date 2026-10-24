@@ -60,6 +60,7 @@ export async function handleExportModel(
     to: input.to,
     exportId: result.exportId,
     files,
+    ...(result.validation === undefined ? {} : { validation: result.validation }),
     ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
     ...(warnings.length === 0 ? {} : { warnings }),
   };

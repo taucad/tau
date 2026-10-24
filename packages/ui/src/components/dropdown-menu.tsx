@@ -1,3 +1,4 @@
+import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import * as React from 'react';
 import { DropdownMenu as DropdownMenuPrimitive } from 'radix-ui';
 import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
@@ -100,11 +101,13 @@ function DropdownMenuContent({
   ...properties
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>): React.JSX.Element {
   const fullscreenElement = useFullscreenElement();
+  const surfaceContainer = useResponsiveSurfaceContainer();
   const resolvedAlignOffset = alignOffset ?? (side === 'left' || side === 'right' ? menuSideAlignOffset : undefined);
 
   return (
-    <DropdownMenuPrimitive.Portal container={fullscreenElement}>
+    <DropdownMenuPrimitive.Portal container={surfaceContainer ?? fullscreenElement}>
       <DropdownMenuPrimitive.Content
+        collisionBoundary={surfaceContainer}
         data-slot='dropdown-menu-content'
         sideOffset={sideOffset}
         side={side}

@@ -1,0 +1,72 @@
+# Fly config for `tau-mirror`, the private copier of the hosted repositories to the B2
+# second copy (Tau Brain W13, package DM1). It copies every repository's
+# immutable objects key by key from R2 to a Backblaze B2 bucket under compliance
+# Object Lock, then the manifest as an immutable snapshot, keeps every
+# dependency of each newest snapshot locked (rolling retention), and pages on
+# any hide marker. It never deletes: the purge of erased owners is DX1's.
+#
+# Private by construction: no `[http_service]` and no `[[services]]`, so no
+# public address; the only listener is the Prometheus exporter on 9464, which
+# Fly scrapes over the private network (`[[metrics]]`). Created without an IP
+# by tau-cloud's `scripts/hosted-storage-fly-bootstrap.sh`; the deploy job
+# refuses to finish if one exists (`.github/workflows/deploy.yml`, app `mirror`).
+#
+# Secrets (names only; Terraform `module.fly_mirror_secrets` in tau-cloud pushes
+# them, change proposal P2.2): DATABASE_URL (the `tau_mirror` login, P2.3),
+# TAU_S3_ENDPOINT, TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY (the mirror's
+# read-only R2 token), TAU_S3_PRIVATE_BUCKET, TAU_S3_COPY_ENDPOINT,
+# TAU_S3_COPY_BUCKET, TAU_S3_COPY_REGION, TAU_S3_COPY_ACCESS_KEY_ID,
+# TAU_S3_COPY_SECRET_ACCESS_KEY (the B2 copy key). The app also holds
+# TAU_S3_COPY_ERASE_* for DX1; nothing in the copier reads them.
+
+app = 'tau-mirror'
+primary_region = 'syd'
+kill_signal = 'SIGTERM'
+# A round stops at its next object on SIGTERM; nothing half-written is ever visible (snapshot last).
+kill_timeout = '60s'
+
+[build]
+# Relative to this file: the API's Dockerfile, built at its `mirror` target.
+dockerfile = '../api/Dockerfile'
+build-target = 'mirror'
+
+[deploy]
+# No release_command: the API's release command owns migrations (and the
+# `tau_mirror` role); this app never migrates. The copier refuses to start
+# against a schema it was not built for.
+strategy = 'rolling'
+
+[processes]
+mirror = 'node /app/dist/mirror-command.js worker'
+
+[env]
+NODE_ENV = 'production'
+OTEL_SERVICE_NAME = 'tau-mirror'
+OTEL_METRICS_PORT = '9464'
+TAU_S3_REGION = 'auto'
+TAU_S3_FORCE_PATH_STYLE = 'false'
+TAU_S3_COPY_FORCE_PATH_STYLE = 'false'
+TAU_MIRROR_POLL_MILLISECONDS = '10000'
+TAU_MIRROR_CONCURRENCY = '4'
+TAU_MIRROR_BACKFILL_SHARE = '0.5'
+# The daily verify drill (DR2-lite): repositories read back from the copy per run, and the
+# environment its `mirror_drill_run` rows and `tau_mirror_drill_*` series carry. 0 turns it off.
+TAU_MIRROR_ENVIRONMENT = 'production'
+TAU_MIRROR_DRILL_SAMPLE = '3'
+DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
+DATABASE_IDLE_TIMEOUT_SECONDS = '60'
+DATABASE_STATEMENT_TIMEOUT_MS = '15000'
+DATABASE_LOCK_TIMEOUT_MS = '5000'
+DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
+
+# Scraped by Grafana Cloud through Fly's managed Prometheus (`app=~".*mirror.*"`, W14).
+[[metrics]]
+port = 9464
+path = '/metrics'
+
+# Change proposal P2.8 and the W13 design (1 GB). Objects up to 8 MiB are held in memory once; larger ones
+# stream twice, so memory stays flat at four rounds in flight.
+[[vm]]
+memory = '1gb'
+cpu_kind = 'shared'
+cpus = 1

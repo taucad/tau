@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { hostname } from 'node:os';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MessageChannel } from 'node:worker_threads';
 
@@ -44,7 +44,6 @@ import {
   writeHostCredential,
 } from '#credential-store.js';
 import type { HostCredential } from '#credential-store.js';
-import { readProjectId } from '#machine-host.js';
 import type { CreateNodeMachineRuntimeOptions } from '#machine-host.js';
 import { keepAwakeWhileStreaming, platformKeepAwakeBlocker } from '#keep-awake.js';
 import type { KeepAwakeBlocker } from '#keep-awake.js';
@@ -54,6 +53,7 @@ import { spliceFrameSockets } from '#frame-splice.js';
 import type { FrameSpliceCloseResult, FrameSpliceHandle } from '#frame-splice.js';
 import type { HostJobWorkerFactory, HostJobWorkerHandle } from '#job-worker.js';
 import { keyedResource } from '#keyed-resource.js';
+import { resolveNodeProjectIdentity } from '#project-identity.js';
 import { createProjectHost } from '#project-host.js';
 import type { ProjectHost } from '#project-host.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
@@ -177,7 +177,7 @@ export type HostDaemonAgentOptions = {
   /** Base the model gateway hangs off, e.g. the Tau API origin. */
   readonly gatewayBaseUrl: string;
   /**
-   * Bearer session token this daemon backs its projects up with (C67).
+   * Account session token for project backup and local-only model requests.
    *
    * Absent, a served project still knows *where* its Tau Cloud repository is
    * and says so when a remote refuses it; present, *Connect Tau Cloud*
@@ -290,7 +290,8 @@ export type HostDaemonOptions = {
    * `false` is a local-first daemon (`tau serve` without `--relay`, charter D29): it serves its agent channel and any
    * UI on loopback, never pairs and never opens the control connection, and is `ready` once the agent channel is.
    * `relayUrl` stays the Tau API origin its gateway, Zoo proxy and Tau Cloud sync talk to. A credential this
-   * machine already stored still admits Tau runs; without one they are refused `HOST_NOT_PAIRED`.
+   * machine already stored or an account session in `agent.tauApiToken` admits Tau runs; without either they are
+   * refused `HOST_NOT_PAIRED`.
    */
   readonly relay?: boolean;
 };
@@ -831,6 +832,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
+    const localAccountSession =
+      options.relay === false && agent.tauCloudEnabled !== true && agent.tauApiToken ? agent.tauApiToken : undefined;
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
       defaultConfigDirectory(),
@@ -868,11 +871,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     /* Named here rather than left to the revision port's default, because a
      * job's slice can sit in one of these checkouts: the machine
      * host's artifact reader looks in the same directory the port writes. */
-    const checkoutsDirectory = join(defaultConfigDirectory(), 'checkouts', basename(agent.workspaceRoot));
-    /* The served root is the project, and its `tau.json` id is what a job
-     * names. A root without one prints nothing: no `request_job` is
-     * offered, and every artifact is refused. */
-    const projectId = await readProjectId(providerForAgentRoot(agent.workspaceRoot));
+    const projectId = (await resolveNodeProjectIdentity({
+      workspaceRoot: agent.workspaceRoot,
+      bootstrap: true,
+      filesystem: providerForAgentRoot(agent.workspaceRoot),
+    }))!;
+    const checkoutsDirectory = join(defaultConfigDirectory(), 'checkouts', projectId);
+    /* Explicit host admission establishes the stable identity every job names,
+     * including an intentionally empty workspace before its first manifest. */
     /**
      * Find a job's file: only this project's, in the served root and
      * then its checkouts, where a candidate turn's slice lands. The digest
@@ -882,7 +888,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
      * @returns The first candidate's bytes whose digest matches.
      */
     const readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'] = async (artifact) => {
-      if (projectId === undefined || artifact.projectId !== projectId) {
+      if (artifact.projectId !== projectId) {
         throw new Error('MACHINE_ARTIFACT_NOT_FOUND');
       }
       const checkoutRoots = await readdir(checkoutsDirectory, { withFileTypes: true }).then(
@@ -912,7 +918,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const project = createProjectHost({
       workspaceRoot: agent.workspaceRoot,
       checkoutsDirectory,
-      ...(projectId === undefined ? {} : { projectId }),
+      projectId,
       /* The agent's facet rides an agent session of its own, so the host applies the agent rules whatever a call
        * claims; the route's session stays the person's. */
       ...(machines ? { machines: agentMachineFacet(machines, 'tau') } : {}),
@@ -945,7 +951,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       /* The session, not this daemon's device credential: the Git endpoints and
        * `PUT /v1/projects/<id>` authenticate an account, and a paired device
        * credential is only ever offered to the agent relay. A terminal has no
-       * cookie jar, so it is the same `TAU_API_TOKEN` `tau publish` uses. */
+       * cookie jar, so it is the same `TAU_AUTH_TOKEN` `tau publish` uses. */
       ...(agent.tauApiToken === undefined
         ? {}
         : {
@@ -967,8 +973,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
               /* No `projectId`: a `tau serve` workspace is a directory, not a
                * cloud project, so its receipts name no project by design. */
             })
-          : createGatewayModelTransport({ baseUrl: agent.gatewayBaseUrl, model: agent.model, auth: bearer }),
-      credential: () => credentialState,
+          : createGatewayModelTransport({
+              baseUrl: agent.gatewayBaseUrl,
+              model: agent.model,
+              // Local-only serving does not pair a device. Use its CLI account session;
+              // relayed hosts retain their live device credential, including revocation.
+              auth: localAccountSession === undefined ? bearer : () => localAccountSession,
+            }),
+      credential: () => (localAccountSession === undefined ? credentialState : { mode: 'session' }),
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */
@@ -1590,7 +1602,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       emit({
         type: 'warning',
         code: 'TRUSTED_PROJECTS_ONLY',
-        message: 'Remote project code executes on this machine. Connect only projects you trust.',
+        message:
+          'Remote project code, including its tau.config.* and geospec.config.*, executes on this machine. Connect only projects you trust.',
       });
     }
     // async-iife: bootstrap -- a failed mint is a warning and retries on the source's interval.

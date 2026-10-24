@@ -320,6 +320,17 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     match: 'root',
     directory: true,
   },
+  /* Identity belongs to the host lifecycle; changes must reach discovery. */
+  {
+    prefix: '.tau/project.json',
+    class: 'records',
+    versioned: false,
+    agentAccess: 'hidden',
+    watch: 'ui',
+    anchored: true,
+    match: 'root',
+    directory: false,
+  },
   /* The per-device trash tombstone the project library mirrors to disk
    * (`use-project-manager.tsx`). It answers exactly the reserved `.tau` default
    * it fell to before; the row exists so the generated ignore file names it and

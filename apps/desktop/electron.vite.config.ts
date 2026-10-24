@@ -26,7 +26,6 @@ const bundledWorkspaceDependencies = [
   '@taucad/esbuild',
   '@taucad/events',
   '@taucad/filesystem',
-  '@taucad/geospec-engine',
   '@taucad/gltf',
   '@taucad/grbl',
   '@taucad/host',
@@ -79,6 +78,7 @@ export const desktopExternalizedDependencies = [
   /* Resolves its vendored seccomp/srt-win helpers relative to its own module file. */
   '@anthropic-ai/sandbox-runtime',
   '@taulabs/openrscad-engine',
+  'electron-updater',
   'esbuild',
   'geospec-engine',
   'libassimp',
@@ -90,6 +90,7 @@ export default defineConfig(
     main: {
       define,
       build: {
+        sourcemap: 'hidden',
         externalizeDeps: {
           exclude: [...bundledWorkspaceDependencies],
           include: [...desktopExternalizedDependencies],
@@ -112,11 +113,14 @@ export default defineConfig(
     preload: {
       define,
       build: {
+        sourcemap: 'hidden',
         outDir: 'dist/preload',
-        externalizeDeps: { exclude: ['@taucad/types', 'zod'] },
+        // Sandboxed preloads can require Electron, but cannot resolve application dependencies.
+        externalizeDeps: false,
         lib: {
           entry: resolve(import.meta.dirname, 'src/preload/preload.ts'),
-          formats: ['es'],
+          formats: ['cjs'],
+          fileName: () => 'preload.cjs',
         },
       },
     },

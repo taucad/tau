@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-24'
+updated: '2026-10-25'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -19,7 +19,7 @@ related:
 
 # Graphics Backend Policy
 
-Tau prefers native WebGPU for interactive CAD on supported devices and retains the classic WebGL renderer as a compatibility fallback. PBR remains the default material model; enabled AO stays visible during motion. The visible, default-on `webGpu` feature flag selects the backend preference. Rollout qualification is owned by the [high-resolution rendering blueprint](../research/high-resolution-rendering-blueprint.md).
+Tau prefers native WebGPU for interactive CAD on supported devices and uses the shared node renderer on WebGL2 when WebGPU is unavailable or initialization fails. PBR remains the default material model; post-processing and AO are on by default and AO stays visible during motion. The viewer settings do not expose a post-processing switch. The visible, default-on `webGpu` feature flag selects the backend preference. Rollout qualification is owned by the [high-resolution rendering blueprint](../research/high-resolution-rendering-blueprint.md).
 
 Rules 15 to 17 govern the meshes kernels hand the viewer, captures and exports: how their resolution is named, bounded and reported. The [kernel tessellation blueprint](../research/kernel-tessellation-policy-blueprint.md) holds the rulings (R1, R2) and the measurements behind them.
 
@@ -29,9 +29,9 @@ Rules 15 to 17 govern the meshes kernels hand the viewer, captures and exports: 
 
 Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/ui/app/utils/graphics-backend-override.ts`: the `webGpu` feature flag prefers WebGPU when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the application flag owns the user-facing preference. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
 
-If WebGPU initialization fails, mount the classic WebGL pipeline on a fresh canvas. Do not mistake Three's node renderer with its WebGL2 backend for native WebGPU, and do not route arbitrary scene or shader errors through an initialization fallback. Dispose a partially allocated owned device; never call Three's normal renderer disposal before initialization completes.
+If WebGPU initialization fails, mount the node WebGL2 pipeline on a fresh canvas. Do not mistake Three's node renderer with its WebGL2 backend for native WebGPU, and do not route arbitrary scene or shader errors through an initialization fallback. Dispose a partially allocated owned device; never call Three's normal renderer disposal before initialization completes.
 
-Record the initialized renderer's effective backend in validation evidence. API presence, adapter-probe success and requested preferences are not proof of the selected backend. Qualify packaged CAD interaction, transparency/transmission, edge thickness, captures, lifecycle recovery, larger scenes and additional hardware before rollout. Attribute whole-pipeline comparisons to those pipelines, not to the graphics API or later fixes. Evaluate a shared node architecture immediately through the high-resolution rendering blueprint's bounded three-way comparison. Keep classic WebGL as the unchanged appearance reference and automatic compatibility fallback until forced node WebGL2 passes its own qualification gates. Node WebGL2 is diagnostic-only until then; do not silently substitute it.
+Record the initialized renderer's effective backend in validation evidence. API presence, adapter-probe success and requested preferences are not proof of the selected backend. The operator authorized node WebGL2 fallback and always-on post-processing on 2026-10-25, with broader qualification deferred in the [rollout register](../research/artifacts/high-resolution-rendering-audit/runs/2026-10-18-implementation/node-consolidation/default-rollout.md). Do not portray that product decision as completed cross-device qualification. Retain classic WebGL for explicit reference/offscreen consumers, not automatic interactive fallback. Attribute whole-pipeline comparisons to those pipelines, not to the graphics API or later fixes.
 
 Key `ThreeCanvasInstance` by backend as `ThreeProvider` does. A backend switch must recreate renderer-owned state rather than reusing an incompatible canvas, material graph, controls instance, or post-processing pipeline.
 
@@ -39,7 +39,7 @@ During consolidation, distinguish renderer family (classic or node) from the ini
 
 ### 2. Create renderers through the shared factory
 
-Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset owns interactive antialiasing and backend depth/post-processing choices; the performance-first node candidate uses single-sample scene/frame targets while classic WebGL retains its existing MSAA; `offscreen` owns bitmap-transfer choices; `showcase` owns brand surfaces built on TSL node materials (the metal morph loader), always returning Three's node renderer so one graph serves WebGPU and its WebGL 2 backend. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer.
+Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset with `nodePipeline: true` owns interactive antialiasing and backend depth/post-processing choices; the performance-first node candidate uses single-sample scene/frame targets while classic WebGL retains its existing MSAA; `offscreen` owns bitmap-transfer choices; `showcase` owns brand surfaces built on TSL node materials (the metal morph loader), always returning Three's node renderer so one graph serves WebGPU and its WebGL 2 backend. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer.
 
 A showcase surface is not an interactive viewer: it may prefer WebGPU when an adapter exists because Three falls back to the WebGL 2 backend on its own, and it must pause while offscreen, hidden, or under reduced motion. It scales its own cost to the device: tessellation, post-processing, thin-film shading and frame rate follow a quality tier, and a frame-time governor steps pixel ratio, bloom and frame rate down under load.
 

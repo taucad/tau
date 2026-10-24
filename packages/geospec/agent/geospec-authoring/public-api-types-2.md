@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-63 top-level symbols. Signatures are verbatim typescript.
+57 top-level symbols. Signatures are verbatim typescript.
 
 // Inline code-CAD model load options
 LoadModelCodeOptions: {
@@ -12,13 +12,9 @@ LoadModelCodeOptions: {
     rootDir?: never;
     /** Geometry format to export. Defaults to `glb`. */
     format?: GeoSpecModelFormat;
-    /** Explicit parameters passed to the runtime. */
+    /** Explicit parameters passed to the exporter. */
     parameters?: Record<string, unknown>;
-    /** Runtime client or lazy runtime factory. */
-    runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-    /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
-    sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
-    /** Project root used by runtime integrations. */
+    /** Absolute project root passed to the exporter. */
     projectPath?: string;
     /** STEP reader strategy used for STEP exports. */
     stepStreaming?: StepStreamingMode;
@@ -35,12 +31,11 @@ LoadModelCodeOptions: {
      */
     workUnitLimit?: number;
     /**
-     * Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model
-     * can be checked region by region. Only kernels whose direct GLB export declares a `region` option
-     * honor it; any other kernel, a STEP load or a crop the kernel does not confirm refuses with a typed
-     * diagnostic instead of loading the whole model. The cropped subject is a different subject: its
-     * admission carries the kernel's crop notice and its load evidence records `region`, so a claim on
-     * it never stands for the whole model.
+     * Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model
+     * can be checked region by region. Only an exporter that declares `region` honours it; any other
+     * exporter, or a crop the exporter cannot make, refuses with a typed diagnostic instead of loading
+     * the whole model. The cropped subject is a different subject: its load evidence records `region`,
+     * so a claim on it never stands for the whole model.
      */
     region?: GeoSpecLoadRegion;
 }
@@ -57,16 +52,10 @@ LoadModelCodeOptions: {
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
 
-  // Runtime client or lazy runtime factory
-  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-
-  // Source-specific runtime adapters, e.g
-  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
-
-  // Project root used by runtime integrations
+  // Absolute project root passed to the exporter
   projectPath?: string
 
   // STEP reader strategy used for STEP exports
@@ -84,7 +73,7 @@ LoadModelCodeOptions: {
   // Default work-unit budget for every claim on this subject
   workUnitLimit?: number
 
-  // Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model can be checked region by region
+  // Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model can be checked region by region
   region?: GeoSpecLoadRegion
 
 // Filesystem-backed model load options
@@ -100,16 +89,12 @@ LoadModelFileOptions: {
      * evidence.
      */
     rootDir?: string;
-    /** Project root used by runtime integrations. */
+    /** Absolute project root passed to the exporter. */
     projectPath?: string;
     /** Geometry format to export. Defaults to `glb`. */
     format?: GeoSpecModelFormat;
-    /** Explicit parameters passed to the runtime. */
+    /** Explicit parameters passed to the exporter. */
     parameters?: Record<string, unknown>;
-    /** Runtime client or lazy runtime factory. */
-    runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-    /** Source-specific runtime adapters, e.g. host-provided GPL-isolated kernels. */
-    sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
     /** STEP reader strategy used for STEP exports. */
     stepStreaming?: StepStreamingMode;
     /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
@@ -125,12 +110,11 @@ LoadModelFileOptions: {
      */
     workUnitLimit?: number;
     /**
-     * Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model
-     * can be checked region by region. Only kernels whose direct GLB export declares a `region` option
-     * honor it; any other kernel, a STEP load or a crop the kernel does not confirm refuses with a typed
-     * diagnostic instead of loading the whole model. The cropped subject is a different subject: its
-     * admission carries the kernel's crop notice and its load evidence records `region`, so a claim on
-     * it never stands for the whole model.
+     * Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model
+     * can be checked region by region. Only an exporter that declares `region` honours it; any other
+     * exporter, or a crop the exporter cannot make, refuses with a typed diagnostic instead of loading
+     * the whole model. The cropped subject is a different subject: its load evidence records `region`,
+     * so a claim on it never stands for the whole model.
      */
     region?: GeoSpecLoadRegion;
 }
@@ -141,20 +125,14 @@ LoadModelFileOptions: {
   // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
   rootDir?: string
 
-  // Project root used by runtime integrations
+  // Absolute project root passed to the exporter
   projectPath?: string
 
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
-
-  // Runtime client or lazy runtime factory
-  runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-
-  // Source-specific runtime adapters, e.g
-  sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
 
   // STEP reader strategy used for STEP exports
   stepStreaming?: StepStreamingMode
@@ -171,7 +149,7 @@ LoadModelFileOptions: {
   // Default work-unit budget for every claim on this subject
   workUnitLimit?: number
 
-  // Axis-aligned millimetre box the kernel crops the model to before export, so a large mesh model can be checked region by region
+  // Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model can be checked region by region
   region?: GeoSpecLoadRegion
 
 // Options accepted by {@link import ('./load-model.js').loadModel}
@@ -183,7 +161,7 @@ LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadMode
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
@@ -283,6 +261,43 @@ LoadModelSourceOptions: {
   // Default work-unit budget for every claim on this subject
   workUnitLimit?: number
 
+// Options for {@link commandExporter}
+CommandExporterOptions: {
+    readonly id: string;
+    /** File extensions without the dot, or `'*'`. */
+    readonly extensions: readonly string[];
+    /** Executable and leading arguments, such as `['python', 'export.py']`. */
+    readonly command: readonly string[];
+    /** What the command can do. Protocol 1 carries no inline sources, so `inlineSources` must not be set. */
+    readonly capabilities: GeoSpecExporterCapabilities;
+    /** Working directory of the command; defaults to the request's project root. */
+    readonly cwd?: string;
+    /** Extra environment variables, merged over this process's. */
+    readonly env?: Readonly<Record<string, string>>;
+    /** Positive milliseconds one export may run before the command is killed and the export fails. */
+    readonly exportTimeout?: number;
+}
+
+  readonly id: string
+
+  // File extensions without the dot, or `'*'`
+  readonly extensions: readonly string[]
+
+  // Executable and leading arguments, such as `['python', 'export.py']`
+  readonly command: readonly string[]
+
+  // What the command can do
+  readonly capabilities: GeoSpecExporterCapabilities
+
+  // Working directory of the command
+  readonly cwd?: string
+
+  // Extra environment variables, merged over this process's
+  readonly env?: Readonly<Record<string, string>>
+
+  // Positive milliseconds one export may run before the command is killed and the export fails
+  readonly exportTimeout?: number
+
 // Collects suites, tests, assertions, and async completion state for one GeoSpec module execution
 GeoSpecCollector: {
     tests: GeoSpecTestCase[];
@@ -316,16 +331,10 @@ GeoSpecCollector: {
 
 // Per-module collector configuration
 GeoSpecCollectorOptions: {
-    matcherWallBackstop?: number;
-    forensic?: boolean;
     nativeAssertions: GeoSpecAssertionClientOptions;
     /** Observes each selected test as it starts and settles, for host progress reporting. */
     onTestEvent?: (event: GeoSpecTestEvent) => void;
 }
-
-  matcherWallBackstop?: number
-
-  forensic?: boolean
 
   nativeAssertions: GeoSpecAssertionClientOptions
 
@@ -538,10 +547,6 @@ RunGeoSpecModuleOptions: {
     testNamePattern?: string | RegExp;
     /** Timeout for async test callbacks, in milliseconds. */
     testTimeout?: number;
-    /** Milliseconds. Non-verdict matcher infrastructure backstop. */
-    matcherWallBackstop?: number;
-    /** Emit structured forensic events for this run. */
-    forensic?: boolean;
     /** Observes each selected test as it starts and settles, for host progress reporting. */
     onTestEvent?: (event: GeoSpecTestEvent) => void;
     /**
@@ -578,12 +583,6 @@ RunGeoSpecModuleOptions: {
 
   // Timeout for async test callbacks, in milliseconds
   testTimeout?: number
-
-  // Milliseconds
-  matcherWallBackstop?: number
-
-  // Emit structured forensic events for this run
-  forensic?: boolean
 
   // Observes each selected test as it starts and settles, for host progress reporting
   onTestEvent?: (event: GeoSpecTestEvent) => void
@@ -655,8 +654,8 @@ CreateGeoSpecNativeModelLoaderOptions: {
     readonly format?: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>;
     readonly projectPath?: string;
     readonly readSource?: GeoSpecNativeSourceReader;
-    readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory;
-    readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[];
+    /** Model exporters for source-kind files; the first whose `extensions` claim the file exports it. */
+    readonly exporters?: readonly GeoSpecModelExporter[];
     /**
      * Subject handles carried between the release scopes of loaders that share one engine, keyed by
      * subjectHash. With a carrier, `releaseAll` keeps this scope's subjects for the next scope and
@@ -680,9 +679,8 @@ CreateGeoSpecNativeModelLoaderOptions: {
 
   readonly readSource?: GeoSpecNativeSourceReader
 
-  readonly runtime?: GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory
-
-  readonly sourceAdapters?: readonly GeoSpecRuntimeSourceAdapter[]
+  // Model exporters for source-kind files
+  readonly exporters?: readonly GeoSpecModelExporter[]
 
   // Subject handles carried between the release scopes of loaders that share one engine, keyed by subjectHash
   readonly carried?: Map<string, unknown>
@@ -704,7 +702,7 @@ GeoSpecNativeLoadModelOptions: LoadModelOptions<Code> & {
   // Geometry format to export
   format?: GeoSpecModelFormat
 
-  // Explicit parameters passed to the runtime
+  // Explicit parameters passed to the exporter
   parameters?: Record<string, unknown>
 
   // STEP reader strategy used for STEP exports
@@ -751,7 +749,7 @@ GeoSpecNativeModelEngine: GeoSpecNativeEngine & {
   releaseSubject(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 
 // Model loader injected into native VM runs
-// Remarks: Direct `source` loads read their source again on every call and the engine digests those exact bytes; bytes equal to an admitted subject's reuse that subject by digest, length and descriptor, and edited bytes admit a new subject. Runtime loads are coalesced per release scope (one run): a load whose file, inline code, project path, parameters, format, tolerances, region and ingest options equal an earlier successful load's reuses that admission without exporting or ingesting again. A file load is reused only while a Runtime source snapshot still matches the earlier load's complete source revision; otherwise, or when every owner of the earlier admission has released it, the load exports afresh. Failures are never reused.
+// Remarks: Direct `source` loads read their source again on every call and the engine digests those exact bytes; bytes equal to an admitted subject's reuse that subject by digest, length and descriptor, and edited bytes admit a new subject. Exported loads are coalesced per release scope (one run): a load whose file, inline code, project path, parameters, format, tolerances, region and ingest options equal an earlier successful load's reuses that admission without exporting or ingesting again. A file load is reused only while the exporter's `revision` still matches the earlier load's complete source revision; otherwise, or when every owner of the earlier admission has released it, the load exports afresh. Failures are never reused.
 GeoSpecNativeModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: GeoSpecNativeLoadModelOptions<Code>) => Promise<GeoSpecNativeModelSubject>
 
 // Subject identity returned by native STEP/GLB admission
@@ -787,7 +785,7 @@ ManagedGeoSpecNativeModelLoader: GeoSpecNativeModelLoader & {
     /**
      * Drain registered admissions, including additions while drainage awaits,
      * then release this scope's subjects (with a carrier: the previous scope's
-     * subjects this scope did not load again) and owned Runtime clients.
+     * subjects this scope did not load again), then close every exporter it exported through.
      *
      * Await the intended complete load chain before final release, and await
      * this method before closing the caller-owned engine. Calls after it returns
@@ -804,6 +802,106 @@ ManagedGeoSpecNativeModelLoader: GeoSpecNativeModelLoader & {
   // ManagedGeoSpecNativeModelLoader.releaseAll (method)
   releaseAll(): Promise<void>;
 
+// Options for {@link createNodeGeoSpecEngine}
+CreateNodeGeoSpecEngineOptions: {
+    /** Caller-inclusive CPU permits for the native addon; the WASM build is single-threaded and ignores them. */
+    readonly executionPermits?: number;
+}
+
+  // Caller-inclusive CPU permits for the native addon
+  readonly executionPermits?: number
+
+// Which build of `geospec-engine` a Node engine runs on
+GeoSpecEngineBinding: 'napi' | 'wasm'
+
+// An engine and the build it runs on
+NodeGeoSpecEngine: {
+    readonly engine: GeoSpecNativeModelEngine & {
+        close(): void;
+    };
+    readonly binding: GeoSpecEngineBinding;
+}
+
+  readonly engine: GeoSpecNativeModelEngine & {
+          close(): void;
+      }
+
+  readonly binding: GeoSpecEngineBinding
+
+// Options for the Node pool
+GeoSpecNodePoolOptions: {
+    /** Absolute project root. */
+    projectPath: string;
+    /** The `geospec.config.*` each worker imports for its exporters; absent to discover one in `projectPath`. */
+    configPath?: string;
+    /**
+     * URLs of modules each worker imports whose default export creates exporters that precede the config's (see
+     * `GeoSpecExporterModule`). A host that composes its own exporters, such as `tau test`, passes them here.
+     */
+    exporterModules?: readonly string[];
+    /** Number of outer worker isolates; defaults to one. */
+    workers?: number;
+    /**
+     * Caller-inclusive total CPU budget; defaults to one per worker. Above one
+     * permit per worker only with a single worker: every worker shares this
+     * process's OCCT library, whose admission refuses any second engine beside
+     * one holding two or more permits.
+     */
+    budget?: number;
+    /** Non-verdict shard watchdog in milliseconds. */
+    shardTimeout?: number;
+}
+
+  // Absolute project root
+  projectPath: string
+
+  // The `geospec.config.*` each worker imports for its exporters
+  configPath?: string
+
+  // URLs of modules each worker imports whose default export creates exporters that precede the config's (see `GeoSpecExporterModule`)
+  exporterModules?: readonly string[]
+
+  // Number of outer worker isolates
+  workers?: number
+
+  // Caller-inclusive total CPU budget
+  budget?: number
+
+  // Non-verdict shard watchdog in milliseconds
+  shardTimeout?: number
+
+// The slice of `node:worker_threads`' `Worker` the pool drives
+// Remarks: Declared structurally so the adapter can be exercised against a stub as well as against a real thread (D-8: vitest cannot host a TypeScript worker).
+NodeWorkerLike: {
+    postMessage(value: unknown): void;
+    on(event: 'message', listener: (value: GeoSpecPoolWorkerMessage) => void): void;
+    on(event: 'exit', listener: (code: number) => void): void;
+    on(event: 'error', listener: (error: Error) => void): void;
+    terminate(): Promise<number> | number;
+}
+
+  // NodeWorkerLike.postMessage (method)
+  postMessage(value: unknown): void;
+
+  // NodeWorkerLike.on (method)
+  on(event: 'message', listener: (value: GeoSpecPoolWorkerMessage) => void): void;
+  on(event: 'exit', listener: (code: number) => void): void;
+  on(event: 'error', listener: (error: Error) => void): void;
+
+  // NodeWorkerLike.terminate (method)
+  terminate(): Promise<number> | number;
+
+// A module whose default export creates exporters for one worker
+GeoSpecExporterModule: {
+    default: (context: {
+        readonly projectPath: string;
+    }) => Promise<readonly GeoSpecModelExporter[]>;
+}
+
+  default: (context: {
+          readonly projectPath: string;
+      }) => Promise<readonly GeoSpecModelExporter[]>
+
 GeoSpecPoolHostMessage: {
     type: 'initialize';
 } | {
@@ -811,16 +909,12 @@ GeoSpecPoolHostMessage: {
     shard: GeoSpecPoolShard;
     testNamePattern?: string;
     testTimeout?: number;
-    matcherWallBackstop?: number;
-    forensic?: boolean;
 } | {
     /** List-only collection pass: register tests, run no bodies (R3 splitting). */
     type: 'list-tests';
     shardId: number;
     file: string;
     testTimeout?: number;
-    matcherWallBackstop?: number;
-    forensic?: boolean;
 } | {
     type: 'shutdown';
 }
@@ -880,16 +974,12 @@ GeoSpecPoolWorkerMessage: {
 } | {
     type: 'initialization-error';
     message: string;
+    /** The failure's error code, such as `ERR_MODULE_NOT_FOUND` for an absent engine. */
+    code?: string;
 } | {
     type: 'file-start';
     shardId: number;
     file: string;
-} | {
-    type: 'forensic';
-    shardId: number;
-    name: string;
-    value: number;
-    unit: 'milliseconds' | 'count';
 } | {
     type: 'tests-listed';
     shardId: number;
@@ -917,25 +1007,6 @@ GeoSpecPoolWorkerMessage: {
 }
 
   type: 'ready'
-
-// One structured forensic measurement emitted by a runner
-GeoSpecForensicEvent: {
-    type: 'forensic';
-    name: string;
-    value: number;
-    unit: 'milliseconds' | 'count';
-    shardId?: number;
-}
-
-  type: 'forensic'
-
-  name: string
-
-  value: number
-
-  unit: 'milliseconds' | 'count'
-
-  shardId?: number
 
 // Public GeoSpec runner lifecycle surface
 GeoSpecRunner: {
@@ -994,14 +1065,14 @@ GeoSpecRunnerEvent: {
 } | {
     type: 'run-complete';
     result: GeoSpecRunnerResult;
-} | GeoSpecForensicEvent | {
+} | {
     type: 'abort';
     reason?: string;
 } | {
     type: 'close';
 }
 
-  type: 'forensic'
+  type: 'run-start'
 
 // One GeoSpec test file executed by a worker-style runner
 GeoSpecRunnerFileResult: {
@@ -1113,16 +1184,12 @@ GeoSpecRunnerRunOptions: {
     testNamePattern?: string | RegExp;
     /** Timeout for each async test callback, in milliseconds. */
     testTimeout?: number;
-    /** Non-verdict matcher wall backstop. Milliseconds. */
-    matcherWallBackstop?: number;
     /**
      * Engine work-unit budget for this run's claims, replacing the runner's
      * `nativeAssertions.workUnitLimit`. A `loadModel` or `expectGeo` budget still
      * wins for its own claims.
      */
     workUnitLimit?: number;
-    /** Emit structured forensic measurements for this run. */
-    forensic?: boolean;
     /**
      * Stop after the first failing file (R1). Interactive fail-fast only —
      * never the default for reward runs, which want the complete red set.
@@ -1139,17 +1206,136 @@ GeoSpecRunnerRunOptions: {
   // Timeout for each async test callback, in milliseconds
   testTimeout?: number
 
-  // Non-verdict matcher wall backstop
-  matcherWallBackstop?: number
-
   // Engine work-unit budget for this run's claims, replacing the runner's `nativeAssertions.workUnitLimit`
   workUnitLimit?: number
 
-  // Emit structured forensic measurements for this run
-  forensic?: boolean
-
   // Stop after the first failing file (R1)
   bail?: boolean
+
+// Everything the pool needs that differs between Node and the browser
+GeoSpecPoolOptions: {
+    /** Spawn one worker running `startGeoSpecPoolWorkerHost`. */
+    createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>;
+    /** Optional one-time worker initialization performed after its ready signal. */
+    initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void;
+    /** Wait for each native worker's cleanup acknowledgement before terminating it. */
+    gracefulShutdown?: boolean;
+    /** Worker count. Omit to let the caller's host auto-size before calling. */
+    workers: number;
+    /** Optional scheduling telemetry. Absent = declared order, no memory class. */
+    timings?: ShardTimings;
+    /** Per-shard non-verdict watchdog, milliseconds (R11). */
+    shardTimeout?: number;
+    /** Split files whose recorded duration exceeds this. Milliseconds. */
+    splitThreshold?: number;
+}
+
+  // Spawn one worker running `startGeoSpecPoolWorkerHost`
+  createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>
+
+  // Optional one-time worker initialization performed after its ready signal
+  initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void
+
+  // Wait for each native worker's cleanup acknowledgement before terminating it
+  gracefulShutdown?: boolean
+
+  // Worker count
+  workers: number
+
+  // Optional scheduling telemetry
+  timings?: ShardTimings
+
+  // Per-shard non-verdict watchdog, milliseconds (R11)
+  shardTimeout?: number
+
+  // Split files whose recorded duration exceeds this
+  splitThreshold?: number
+
+// One shard's recorded cost
+ShardTiming: {
+    /** Wall duration of the last recorded run, in milliseconds. */
+    durationMs: number;
+    /** Highest RSS observed for this shard, in bytes. Monotonic. */
+    peakRssBytes: number;
+}
+
+  // Wall duration of the last recorded run, in milliseconds
+  durationMs: number
+
+  // Highest RSS observed for this shard, in bytes
+  peakRssBytes: number
+
+// A mutable timings table
+ShardTimings: {
+    /** Merge one observation. Peak RSS only ever grows. */
+    record(shard: string, timing: ShardTiming): void;
+    /** The hint for one shard, or `undefined` when unknown. */
+    read(shard: string): ShardTiming | undefined;
+    /** Every recorded shard, sorted by descending duration (longest-first). */
+    longestFirst(): string[];
+    /** Persist the table. Failure is silent: telemetry never fails a run. */
+    save(): void;
+}
+
+  // Merge one observation
+  // ShardTimings.record (method)
+  record(shard: string, timing: ShardTiming): void;
+
+  // The hint for one shard, or `undefined` when unknown
+  // ShardTimings.read (method)
+  read(shard: string): ShardTiming | undefined;
+
+  // Every recorded shard, sorted by descending duration (longest-first)
+  // ShardTimings.longestFirst (method)
+  longestFirst(): string[];
+
+  // Persist the table
+  // ShardTimings.save (method)
+  save(): void;
+
+// Options accepted by {@link startGeoSpecPoolWorkerHost}
+GeoSpecPoolWorkerHostOptions: {
+    /** Filesystem containing the project and test modules. */
+    filesystem: GeoSpecRunnerOptions['filesystem'];
+    /** Native assertion client shared with this worker's model admissions. */
+    nativeAssertions: GeoSpecRunnerOptions['nativeAssertions'];
+    /** Managed native admissions, released after every shard and collection pass and before shutdown. */
+    nativeModelLoader: ManagedGeoSpecNativeModelLoader;
+    /** Additional in-memory modules made available to the VM. */
+    builtinModules?: GeoSpecRunnerOptions['builtinModules'];
+    /** Post a message to the pool host. */
+    postMessage: (message: GeoSpecPoolWorkerMessage) => void;
+    /** Subscribe to pool-host messages. */
+    onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void;
+    /** Sample this worker's resident memory in bytes (R15 telemetry); optional. */
+    measureMemoryBytes?: () => number | undefined;
+    /** Release platform resources on shutdown, after the native subjects are released. */
+    onShutdown?: () => Promise<void> | void;
+}
+
+  // Filesystem containing the project and test modules
+  filesystem: GeoSpecRunnerOptions['filesystem']
+
+  // Native assertion client shared with this worker's model admissions
+  nativeAssertions: GeoSpecRunnerOptions['nativeAssertions']
+
+  // Managed native admissions, released after every shard and collection pass and before shutdown
+  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+
+  // Additional in-memory modules made available to the VM
+  builtinModules?: GeoSpecRunnerOptions['builtinModules']
+
+  // Post a message to the pool host
+  postMessage: (message: GeoSpecPoolWorkerMessage) => void
+
+  // Subscribe to pool-host messages
+  onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void
+
+  // Sample this worker's resident memory in bytes (R15 telemetry)
+  measureMemoryBytes?: () => number | undefined
+
+  // Release platform resources on shutdown, after the native subjects are released
+  onShutdown?: () => Promise<void> | void
 
 // Runner-independent native assertion client
 GeoSpecAssertionClient: {
@@ -1233,295 +1419,3 @@ GeoSpecAuthoringInvocation: {
 GeoSpecMatcherMethods: {
     [Name in GeoSpecMatcherName]: (...arguments_: Parameters<GeoSpecMatcher[Name]>) => Result;
 }
-
-// One positive-only ancillary query
-// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports, including failed/refused reports, without assertion errors.
-GeoSpecQueryOptions: {
-    readonly capability: GeoSpecQueryCapability;
-    readonly claimId?: string;
-    readonly payload?: unknown;
-    readonly subject: GeoSpecNativeSubject;
-}
-
-  readonly capability: GeoSpecQueryCapability
-
-  readonly claimId?: string
-
-  readonly payload?: unknown
-
-  readonly subject: GeoSpecNativeSubject
-
-// Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
-MinimumDistanceFact: {
-    readonly source: 'ap242';
-    readonly assurance: 'exact-brep';
-    readonly unit: 'mm';
-    readonly coordinateSystem: 'z-up';
-    readonly subjectHash: string;
-    readonly algorithmProfile: 'geospec-minimum-distance-v1';
-    readonly occurrences: readonly [string, string];
-    readonly distance: number;
-    readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
-}
-
-  readonly source: 'ap242'
-
-  readonly assurance: 'exact-brep'
-
-  readonly unit: 'mm'
-
-  readonly coordinateSystem: 'z-up'
-
-  readonly subjectHash: string
-
-  readonly algorithmProfile: 'geospec-minimum-distance-v1'
-
-  readonly occurrences: readonly [string, string]
-
-  readonly distance: number
-
-  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
-
-// Complete AP242 minimum over two subject-bound occurrence paths
-MinimumDistanceQuery: {
-    readonly capability: 'minimumDistance';
-    readonly subject: GeoSpecNativeSubject;
-    readonly payload: {
-        readonly pair: readonly [{
-            readonly occurrencePath: string;
-        }, {
-            readonly occurrencePath: string;
-        }];
-    };
-}
-
-  readonly capability: 'minimumDistance'
-
-  readonly subject: GeoSpecNativeSubject
-
-  readonly payload: {
-          readonly pair: readonly [{
-              readonly occurrencePath: string;
-          }, {
-              readonly occurrencePath: string;
-          }];
-      }
-
-// Geometry refusal and infrastructure interruption never masquerade as facts
-MinimumDistanceResult: {
-    readonly status: 'complete';
-    readonly fact: MinimumDistanceFact;
-} | {
-    readonly status: 'refused';
-    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
-    readonly message: string;
-} | {
-    readonly status: 'interrupted';
-    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
-    readonly message: string;
-}
-
-  readonly status: 'complete'
-
-// Flat native query transport options
-GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
-    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
-    readonly payload?: unknown;
-}
-
-  readonly engine: GeoSpecNativeEngine
-
-  readonly claimId: string
-
-  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
-
-  readonly subjectSlot: string
-
-  readonly workUnitLimit: number
-
-  // The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`
-  readonly maximumWorkUnitLimit?: number
-
-  readonly subject: GeoSpecNativeSubject
-
-  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
-
-  readonly payload?: unknown
-
-// Existing positive-only ancillary operations owned by the native core
-GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
-
-// Explicit support state for one source-attributed inventory field
-GeoSpecPmiField: {
-    readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
-    readonly value: Value | null;
-    readonly reason: string | null;
-}
-
-  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
-
-  readonly value: Value | null
-
-  readonly reason: string | null
-
-// Original Part21 entity ID and exact source argument tokens
-GeoSpecPmiRawEntity: {
-    readonly sourceId: number;
-    readonly kind: string;
-    readonly arguments: readonly string[];
-}
-
-  readonly sourceId: number
-
-  readonly kind: string
-
-  readonly arguments: readonly string[]
-
-// Source-authored scalar and Rust-normalized reduced rational millimetres
-GeoSpecPmiNumber: {
-    readonly sourceId: number;
-    readonly authoredText: string;
-    readonly unitId: number;
-    readonly unitRecords: readonly GeoSpecPmiRawEntity[];
-    readonly millimetres: string;
-    readonly name: string;
-}
-
-  readonly sourceId: number
-
-  readonly authoredText: string
-
-  readonly unitId: number
-
-  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
-
-  readonly millimetres: string
-
-  readonly name: string
-
-// A uniquely forward-transferred face
-GeoSpecPmiFaceAssociation: {
-    readonly sourceFaceId: number;
-    readonly occurrenceRoute: readonly number[];
-    readonly occurrence: number | null;
-    readonly publicFaceOrdinal: number;
-}
-
-  readonly sourceFaceId: number
-
-  readonly occurrenceRoute: readonly number[]
-
-  readonly occurrence: number | null
-
-  readonly publicFaceOrdinal: number
-
-// One ordered role reference, including incomplete source/transfer evidence
-GeoSpecPmiShapeReference: {
-    readonly sourceAspectId: number | null;
-    readonly sourceUsageIds: readonly number[];
-    readonly sourceItemIds: readonly number[];
-    readonly requestedRoute: GeoSpecPmiField<readonly number[]>;
-    readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>;
-}
-
-  readonly sourceAspectId: number | null
-
-  readonly sourceUsageIds: readonly number[]
-
-  readonly sourceItemIds: readonly number[]
-
-  readonly requestedRoute: GeoSpecPmiField<readonly number[]>
-
-  readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
-
-// Normalized authored limits
-GeoSpecPmiLimits: {
-    readonly lowerMillimetres: string;
-    readonly upperMillimetres: string;
-    readonly basis: 'authored-limits' | 'nominal-plus-minus';
-}
-
-  readonly lowerMillimetres: string
-
-  readonly upperMillimetres: string
-
-  readonly basis: 'authored-limits' | 'nominal-plus-minus'
-
-// Source record preserving semantic/presentation separation and ordered roles
-GeoSpecPmiRecord: {
-    readonly sourceId: number;
-    readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation';
-    readonly channel: 'semantic' | 'presentation';
-    readonly kind: string;
-    readonly name: GeoSpecPmiField<string>;
-    readonly first: readonly GeoSpecPmiShapeReference[];
-    readonly second: readonly GeoSpecPmiShapeReference[];
-    readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>;
-    readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>;
-    readonly interpretation: GeoSpecPmiField<string>;
-    readonly raw: readonly GeoSpecPmiRawEntity[];
-}
-
-  readonly sourceId: number
-
-  readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
-
-  readonly channel: 'semantic' | 'presentation'
-
-  readonly kind: string
-
-  readonly name: GeoSpecPmiField<string>
-
-  readonly first: readonly GeoSpecPmiShapeReference[]
-
-  readonly second: readonly GeoSpecPmiShapeReference[]
-
-  readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
-
-  readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>
-
-  readonly interpretation: GeoSpecPmiField<string>
-
-  readonly raw: readonly GeoSpecPmiRawEntity[]
-
-// Positive-only inventory value inside the ordinary canonical query report
-GeoSpecPmiInventory: {
-    readonly contract: 'geospec.pmi.inventory/v1';
-    readonly status: 'semantic' | 'graphical-only' | 'empty';
-    readonly fileSchema: string;
-    readonly editionValidation: 'not-validated';
-    readonly records: readonly GeoSpecPmiRecord[];
-}
-
-  readonly contract: 'geospec.pmi.inventory/v1'
-
-  readonly status: 'semantic' | 'graphical-only' | 'empty'
-
-  readonly fileSchema: string
-
-  readonly editionValidation: 'not-validated'
-
-  readonly records: readonly GeoSpecPmiRecord[]
-
-// Strict inventory output limits
-GeoSpecPmiQueryPayload: {
-    readonly maxRecords?: number;
-    readonly maxOutputBytes?: number;
-}
-
-  readonly maxRecords?: number
-
-  readonly maxOutputBytes?: number
-
-// Complete inventory value
-GeoSpecPmiQueryValue: {
-    readonly inventory: GeoSpecPmiInventory;
-    readonly subjectHash: string;
-    readonly provenance: Readonly<Record<string, unknown>>;
-}
-
-  readonly inventory: GeoSpecPmiInventory
-
-  readonly subjectHash: string
-
-  readonly provenance: Readonly<Record<string, unknown>>

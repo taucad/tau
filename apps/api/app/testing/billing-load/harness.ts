@@ -224,7 +224,6 @@ export const loadAdmission = (input: {
   executionDeadline: new Date(Date.now() + input.executionTimeout),
   invocation: {
     contractVersion: 'billing-load-v1',
-    credentialAccount: 'billing-load-stub',
     supplierRatesValidUntil: null,
     executionTimeout: input.executionTimeout,
     supplierRates: [{ dimension: loadDimension, tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' }],

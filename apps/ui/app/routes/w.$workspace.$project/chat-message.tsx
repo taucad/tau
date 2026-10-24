@@ -1,3 +1,4 @@
+import { ChatMessageSurface } from '#components/chat/chat-message-surface.js';
 import {
   BookOpen,
   Box,
@@ -46,7 +47,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
-import { chatUserMessagePaddingClassName, chatInputTextClassName } from '#components/chat/chat-input-styles.js';
+import { chatInputTextClassName } from '#components/chat/chat-input-styles.js';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/w.$workspace.$project/chat-message-tool-edit-file.js';
@@ -243,7 +244,11 @@ const retiredToolPart = (part: unknown): DynamicToolUIPart | undefined => {
   }
   // SAFETY: a static tool part carries every field a dynamic one does; only the name moves from `type` to `toolName`.
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a persisted part of a retired tool has no static type.
-  return { ...part, type: 'dynamic-tool', toolName: type.slice(5) } as DynamicToolUIPart;
+  return {
+    ...part,
+    type: 'dynamic-tool',
+    toolName: type.slice(5),
+  } as DynamicToolUIPart;
 };
 
 // oxlint-disable-next-line complexity -- Part type dispatch requires many branches
@@ -277,7 +282,11 @@ function renderAssistantPart(
       return (
         <ChatMessageMedia
           key={`${messageId}-message-part-${index}`}
-          media={{ url: part.url, mediaType: part.mediaType, ...(part.filename ? { filename: part.filename } : {}) }}
+          media={{
+            url: part.url,
+            mediaType: part.mediaType,
+            ...(part.filename ? { filename: part.filename } : {}),
+          }}
           className='my-2'
         />
       );
@@ -791,6 +800,11 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
 
     return usageDataParts;
   });
+  // An answer with nothing visible yet (only `step-start`, empty text) has nothing to copy or date.
+  const hasVisibleContent = useChatSelector((state) => {
+    const message_ = state.messageEdits[messageId] ?? state.messagesById.get(messageId);
+    return message_?.role === messageRole.user || findLastMeaningfulPartIndex(message_?.parts ?? []) >= 0;
+  });
   const { startEditingMessage, exitEditMode } = useChatActions();
   const cadChat = useCadChatClient();
   const [isEditing, setIsEditing] = useState(false);
@@ -960,12 +974,9 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           </When>
           <When shouldRender={!isEditing}>
             {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + toolbar + padding + border = 15.125rem). Keep in sync so click-to-edit does not jump. */}
-            <div
+            <ChatMessageSurface
+              isUser={isUser}
               className={cn(
-                'flex flex-col gap-0 min-w-0',
-                isUser &&
-                  'relative z-10 cursor-action rounded-lg border bg-background px-3 outline-none hover:border-foreground/20 focus-visible:focus-outline',
-                isUser && chatUserMessagePaddingClassName,
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
@@ -988,7 +999,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               ) : (
                 <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
               )}
-            </div>
+            </ChatMessageSurface>
           </When>
           {footer}
         </div>
@@ -998,32 +1009,35 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
             time to the left of the buttons — `flex-row-reverse` gives that order
             from the same children, and the extra inset mirrors the answer row's
             own column (the user column is mx-2 against the assistant's mx-4). */}
-        <div
-          className={cn(
-            'flex flex-row items-start justify-start text-muted-foreground transition-opacity duration-150',
-            'opacity-0',
-            'group-hover/chat-message:opacity-100',
-            'group-focus-within/chat-message:opacity-100',
-            // A touch screen has no hover to reveal the row.
-            'pointer-coarse:opacity-100',
-            // An answer's last paragraph carries the markdown viewer's own bottom
-            // margin, so its row cancels the column gap; a bubble has none, so a
-            // request's row keeps it above and gives it back below, where the
-            // indicator's margin and the turn-group gap already separate the
-            // request from the answer.
-            isUser ? 'mx-2 -mb-1 flex-row-reverse' : '-mt-2',
-          )}
-        >
-          <CopyButton
-            tooltipContentProperties={{ side: 'bottom' }}
-            size='icon-xs'
-            className='pointer-coarse:size-8'
-            getText={() => serializeMessage(displayMessage)}
-            tooltip='Copy message'
-          />
-          {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
-          <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
-        </div>
+        <When shouldRender={hasVisibleContent}>
+          <div
+            className={cn(
+              // Centred: the touch-sized copy button is taller than the timestamp.
+              'flex flex-row items-center justify-start text-muted-foreground transition-opacity duration-150',
+              'opacity-0',
+              'group-hover/chat-message:opacity-100',
+              'group-focus-within/chat-message:opacity-100',
+              // A touch screen has no hover to reveal the row.
+              'pointer-coarse:opacity-100',
+              // An answer's last paragraph carries the markdown viewer's own bottom
+              // margin, so its row cancels the column gap; a bubble has none, so a
+              // request's row keeps it above and gives it back below, where the
+              // indicator's margin and the turn-group gap already separate the
+              // request from the answer.
+              isUser ? 'mx-2 -mb-1 flex-row-reverse' : '-mt-2',
+            )}
+          >
+            <CopyButton
+              tooltipContentProperties={{ side: 'bottom' }}
+              size='icon-xs'
+              className='pointer-coarse:size-8'
+              getText={() => serializeMessage(displayMessage)}
+              tooltip='Copy message'
+            />
+            {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}
+            <ChatMessageTimestamp createdAt={message.metadata?.createdAt} />
+          </div>
+        </When>
         {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
       </div>
     </article>

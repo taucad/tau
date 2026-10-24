@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { GoneException } from '@nestjs/common';
 import type { SQL } from 'drizzle-orm';
 import type { DatabaseService } from '#database/database.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -44,10 +45,11 @@ describe('GitLfsService finalized-object boundary', () => {
       etag: 'etag',
       contentLength: stored.current.byteLength,
     })),
-    presignPut: vi.fn(async () => 'https://store.test/upload'),
+    presignPut: vi.fn<ObjectStorageService['presignPut']>().mockResolvedValue('https://store.test/upload'),
     presignGet: vi.fn(async () => 'https://store.test/download'),
   };
   const repositories = {
+    resolveActiveLocator: vi.fn(async () => ({ ownerId: access.ownerId, projectId: access.projectId })),
     reserveLfsObjects: vi.fn(async (_args: { objects: ReadonlyArray<{ oid: string; size: number }> }) => ({
       status: 'reserved',
       /* Whether the reservation already holds finalized bytes, which is what
@@ -57,13 +59,13 @@ describe('GitLfsService finalized-object boundary', () => {
     readLfsObjects: vi.fn(async () => [{ oid, size: bytes.byteLength, finalized: true }]),
     finalizeLfsObject: vi
       .fn<GitRepositoryService['finalizeLfsObject']>()
-      .mockResolvedValueOnce('finalized')
-      .mockResolvedValue('already-finalized'),
+      .mockImplementation(async ({ verifyContent }) => ((await verifyContent()) ? 'finalized' : 'invalid')),
   };
 
   /* Whether the reservation row still exists when the locked clear runs; false
      is the retirement that slipped in after the unlocked `headBlob`. */
   let rowSurvivesClear = true;
+  let deleting = false;
 
   /** Every statement the service ran outside a query builder, in order. */
   let executed: SQL[];
@@ -76,12 +78,12 @@ describe('GitLfsService finalized-object boundary', () => {
     storedNamespace = 'tenants';
     reservedFinalized = false;
     rowSurvivesClear = true;
+    deleting = false;
     executed = [];
     updates = [];
     repositories.finalizeLfsObject
       .mockReset()
-      .mockResolvedValueOnce('finalized')
-      .mockResolvedValue('already-finalized');
+      .mockImplementation(async ({ verifyContent }) => ((await verifyContent()) ? 'finalized' : 'invalid'));
   });
 
   /** The strings a `select pg_advisory_xact_lock(hashtextextended($1, 0))` carries. */
@@ -97,6 +99,13 @@ describe('GitLfsService finalized-object boundary', () => {
       database: {
         transaction: async (run: (tx: unknown) => Promise<unknown>): Promise<unknown> =>
           run({
+            select: () => ({
+              from: () => ({
+                where: () => ({
+                  limit: async () => (deleting ? [{ projectId: access.projectId, ownerId: access.ownerId }] : []),
+                }),
+              }),
+            }),
             execute: async (statement: SQL): Promise<void> => {
               executed.push(statement);
             },
@@ -122,6 +131,62 @@ describe('GitLfsService finalized-object boundary', () => {
       repositories as unknown as GitRepositoryService,
       databaseStub(),
     );
+
+  it.each(['upload', 'download'] as const)(
+    'should refuse fresh %s URLs if deletion wins after object lookup',
+    async (operation) => {
+      reservedFinalized = true;
+      objectStorage.headBlob.mockImplementationOnce(async () => {
+        deleting = true;
+        return { contentType: 'application/octet-stream', size: bytes.byteLength, etag: 'etag', cacheControl: '' };
+      });
+      await expect(
+        service().batch({
+          access,
+          operation,
+          objects: [{ oid, size: bytes.byteLength }],
+          authorization: undefined,
+          endpoint: 'https://api.test/lfs',
+        }),
+      ).rejects.toBeInstanceOf(GoneException);
+      expect(objectStorage.presignPut).not.toHaveBeenCalled();
+      expect(objectStorage.presignGet).not.toHaveBeenCalled();
+      expect(updates).toEqual([]);
+    },
+  );
+
+  it('should refuse a whole upload batch before reserving when one file exceeds 100 MiB', async () => {
+    const result = await service().batch({
+      access,
+      operation: 'upload',
+      objects: [
+        { oid, size: bytes.byteLength },
+        { oid: 'a'.repeat(64), size: 104_857_601 },
+      ],
+      authorization: undefined,
+      endpoint: 'https://api.test/repo/info/lfs/objects',
+    });
+    expect(result.status).toBe(200);
+    if (result.status === 200) {
+      expect(result.body.objects.map((object) => object.error?.code)).toEqual([422, 413]);
+      expect(result.body.objects[1]?.error?.message).toContain('100 MiB');
+    }
+    expect(repositories.reserveLfsObjects).not.toHaveBeenCalled();
+    expect(objectStorage.presignPut).not.toHaveBeenCalled();
+  });
+
+  it('should admit a file of exactly 100 MiB for reservation and signing', async () => {
+    const result = await service().batch({
+      access,
+      operation: 'upload',
+      objects: [{ oid, size: 104_857_600 }],
+      authorization: undefined,
+      endpoint: 'https://api.test/repo/info/lfs/objects',
+    });
+    expect(result.status).toBe(200);
+    expect(repositories.reserveLfsObjects).toHaveBeenCalledOnce();
+    expect(objectStorage.presignPut.mock.calls[0]?.[0]).toMatchObject({ contentLength: 104_857_600 });
+  });
 
   it('signs an exact length and SHA-256 and finalizes valid bytes idempotently', async () => {
     const batch = await service().batch({
@@ -172,6 +237,69 @@ describe('GitLfsService finalized-object boundary', () => {
     expect(repositories.finalizeLfsObject).toHaveBeenCalledOnce();
   });
 
+  it('finishes streaming before entering the finalization transaction', async () => {
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const body = Readable.from(
+      (async function* () {
+        entered.resolve();
+        await resume.promise;
+        yield bytes;
+      })(),
+    );
+    objectStorage.getBlob.mockResolvedValueOnce({
+      body,
+      contentType: 'application/octet-stream',
+      etag: 'etag',
+      contentLength: bytes.byteLength,
+    });
+    const verification = service().verify({ access, oid, size: bytes.byteLength });
+    await entered.promise;
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
+    resume.resolve();
+    await expect(verification).resolves.toBe(true);
+    expect(body.destroyed).toBe(true);
+  });
+
+  it.each(['deleted', 'replaced', 'resized'] as const)('refuses an object %s after hashing', async (change) => {
+    repositories.finalizeLfsObject.mockImplementationOnce(async ({ verifyContent }) => {
+      objectStorage.headBlob.mockResolvedValueOnce(
+        change === 'deleted'
+          ? undefined
+          : {
+              contentType: 'application/octet-stream',
+              size: change === 'resized' ? bytes.byteLength + 1 : bytes.byteLength,
+              etag: change === 'replaced' ? 'different' : 'etag',
+              cacheControl: '',
+            },
+      );
+      return (await verifyContent()) ? 'finalized' : 'invalid';
+    });
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+  });
+
+  it('refuses a new tenant object shadowing the hashed legacy location even with the same ETag', async () => {
+    storedNamespace = 'blobs';
+    repositories.finalizeLfsObject.mockImplementationOnce(async ({ verifyContent }) => {
+      storedNamespace = 'tenants';
+      return (await verifyContent()) ? 'finalized' : 'invalid';
+    });
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+  });
+
+  it('requires the GET response identity and destroys a body without one', async () => {
+    const body = Readable.from([bytes]);
+    objectStorage.getBlob.mockResolvedValueOnce({
+      body,
+      contentType: 'application/octet-stream',
+      etag: '',
+      contentLength: bytes.byteLength,
+    });
+    await expect(service().verify({ access, oid, size: bytes.byteLength })).resolves.toBe(false);
+    expect(body.destroyed).toBe(true);
+    expect(repositories.finalizeLfsObject).not.toHaveBeenCalled();
+  });
+
   it('advertises a download only for a finalized row with matching stored length', async () => {
     const result = await service().batch({
       access,
@@ -209,7 +337,7 @@ describe('GitLfsService finalized-object boundary', () => {
       endpoint: 'https://api.test/repo/info/lfs/objects',
     });
 
-    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(lockedOwners()).toStrictEqual([access.ownerId, access.projectId, access.projectId]);
     expect(updates).toStrictEqual([{ unreachableAt: null }]);
   });
 
@@ -228,7 +356,7 @@ describe('GitLfsService finalized-object boundary', () => {
     if (batch.status === 200) {
       expect(batch.body.objects[0]?.actions).toBeUndefined();
     }
-    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(lockedOwners()).toStrictEqual([access.ownerId, access.projectId, access.projectId]);
     expect(updates).toStrictEqual([{ unreachableAt: null }]);
   });
 
@@ -252,7 +380,7 @@ describe('GitLfsService finalized-object boundary', () => {
     if (batch.status === 200) {
       expect(batch.body.objects[0]?.actions?.['upload']?.href).toBe('https://store.test/upload');
     }
-    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(lockedOwners()).toStrictEqual([access.ownerId, access.projectId, access.projectId]);
   });
 
   it('should reserve the unconfirmed object again so the upload it just authorized can finalize', async () => {
@@ -367,7 +495,7 @@ describe('GitLfsService finalized-object boundary', () => {
       endpoint: 'https://api.test/repo/info/lfs/objects',
     });
 
-    expect(lockedOwners()).toStrictEqual([]);
+    expect(lockedOwners()).toStrictEqual([access.projectId]);
     expect(updates).toStrictEqual([]);
   });
 });

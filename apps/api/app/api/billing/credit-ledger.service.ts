@@ -138,7 +138,6 @@ const supplierRatesSchema = z.array(supplierRateSchema).min(1).max(128);
 const invocationSchema = z
   .object({
     contractVersion: financialIdentitySchema,
-    credentialAccount: financialIdentitySchema,
     supplierRatesValidUntil: z.iso.datetime({ precision: 3 }).nullable(),
     supplierRates: supplierRatesSchema,
     supplierValuation: z
@@ -160,10 +159,9 @@ const invocationSchema = z
       .optional(),
     inputCount: z
       .object({
-        version: z.literal('openai-input-count-v1'),
+        version: z.literal('openai-input-count-v2'),
         sourceRevision: financialIdentitySchema,
         environment: z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
-        credentialAccount: financialIdentitySchema,
         modelId: financialIdentitySchema,
         createRequestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
         countRequestDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
@@ -639,7 +637,6 @@ export class CreditLedgerService {
       /* Counting is qualified in every environment (R11). The binding below, not the environment,
        * is what makes counted evidence admissible: it must be this operation's own count. */
       (invocation.inputCount.environment !== input.environment ||
-        invocation.inputCount.credentialAccount !== invocation.credentialAccount ||
         invocation.inputCount.modelId !== input.modelId ||
         input.providerId !== 'openai' ||
         invocation.inputCount.inputTokens !== invocation.jointInputMaximum?.quantity ||

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ResponsiveSurfaceProvider } from '#hooks/use-mobile.js';
 import { KeyboardProvider, useKeybinding } from '#components/keyboard.js';
 import { setPlatform } from '#utils/keys.js';
 
@@ -24,7 +25,7 @@ afterEach(() => {
 });
 
 function Binding({ enabled, onKey }: { readonly enabled: () => boolean; readonly onKey: () => void }) {
-  useKeybinding({ key: 'k' }, onKey, { enabled });
+  useKeybinding({ key: 'k' }, onKey, { enabled, ignoreInputs: true });
   return null;
 }
 
@@ -74,4 +75,35 @@ describe('useKeybinding', () => {
 
     expect(onKey).toHaveBeenCalledOnce();
   });
+});
+
+it('listens in an embedded surface document and releases its listener on unmount', () => {
+  const frame = document.createElement('iframe');
+  document.body.append(frame);
+  const container = frame.contentDocument!.body;
+  const onKey = vi.fn();
+  const view = render(
+    <ResponsiveSurfaceProvider isMobile container={container}>
+      <KeyboardProvider>
+        <Binding enabled={() => true} onKey={onKey} />
+      </KeyboardProvider>
+    </ResponsiveSurfaceProvider>,
+  );
+  fireEvent.keyDown(document, { key: 'k' });
+  expect(onKey).not.toHaveBeenCalled();
+  const input = frame.contentDocument!.createElement('input');
+  container.append(input);
+  fireEvent.keyDown(input, { key: 'k' });
+  expect(onKey).not.toHaveBeenCalled();
+  const dialog = frame.contentDocument!.createElement('div');
+  dialog.setAttribute('role', 'dialog');
+  container.append(dialog);
+  fireEvent.keyDown(dialog, { key: 'k' });
+  expect(onKey).not.toHaveBeenCalled();
+  fireEvent.keyDown(container, { key: 'k' });
+  expect(onKey).toHaveBeenCalledOnce();
+  view.unmount();
+  fireEvent.keyDown(container, { key: 'k' });
+  expect(onKey).toHaveBeenCalledOnce();
+  frame.remove();
 });

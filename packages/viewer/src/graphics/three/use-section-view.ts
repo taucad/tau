@@ -73,12 +73,12 @@ export function useSectionViewFlags(): Readonly<{ isActive: boolean }> {
   return { isActive };
 }
 
-/** Striped-diagonal spacing and stripe width of the cap material, in render units, from the zoom-aware grid. */
-export function useSectionStripes(): Readonly<{ stripeFrequency: number; stripeWidth: number }> {
+/** The cap hatch spacing, in render units, from the zoom-aware grid; the line width is constant on screen. */
+export function useSectionStripes(): Readonly<{ stripeFrequency: number }> {
   const renderFrame = useRenderFrame();
   const largeGridSize = useGraphicsSelector((state) => state.context.gridSizesComputed.largeSize);
   return useMemo(() => {
-    const stripeSpacing = largeGridSize / renderFrame.metersPerRenderUnit / 10;
-    return { stripeFrequency: stripeSpacing, stripeWidth: stripeSpacing * 0.2 };
+    // Dense section lining anchored to the model, as drafting scales hatch spacing with the drawing.
+    return { stripeFrequency: largeGridSize / renderFrame.metersPerRenderUnit / 16 };
   }, [largeGridSize, renderFrame.metersPerRenderUnit]);
 }

@@ -1,8 +1,8 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { ChatRecord } from '@taucad/chat/schemas';
-import { projectToManifest } from '@taucad/types';
 import type { useChats } from '#hooks/use-chats.js';
 import type { useChatRecords } from '#hooks/use-chat-records.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
@@ -165,7 +165,7 @@ const chat = (index: number, updatedAt = index): ChatRecord => ({
 });
 
 const project: ProjectListItem = {
-  ...projectToManifest({
+  ...createProjectFixture({
     id: 'proj_one',
     name: 'Project one',
     description: 'Project one',

@@ -52,7 +52,7 @@ export const flagRegistry = {
     showInExperimental: true,
     schema: z.boolean().default(true),
     label: 'Prefer WebGPU',
-    description: 'Uses WebGL when WebGPU is unavailable or cannot start. Turn off to prefer WebGL.',
+    description: 'Uses WebGL2 when WebGPU is unavailable or cannot start. Turn off to prefer WebGL2.',
   },
   webGpuShaderStacks: {
     showInExperimental: false,

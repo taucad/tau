@@ -40,7 +40,7 @@ const valuation: SupplierValuation = {
   longContextRates: null,
 };
 
-/** A funded account on its own route, provider and credential, so each test's meter is its own. */
+/** A funded account on its own route and provider, so each test's meter is its own. */
 const createFixture = async () => {
   const suffix = randomUUID();
   const environment = 'development';
@@ -100,7 +100,6 @@ const createFixture = async () => {
     accountId,
     sku,
     providerId: `provider-${suffix}`,
-    credentialAccount: `credential-${suffix}`,
     replica: { schemaVersion: 1, meterContractIds: policy.policy.fleet.meterContractIds },
   };
 };
@@ -131,7 +130,6 @@ const admission = (
         providerId: fixture.providerId,
         invocation: {
           contractVersion: 'supplier-contract-v1',
-          credentialAccount: fixture.credentialAccount,
           supplierRatesValidUntil: null,
           supplierRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' }],
           executionTimeout: 300_000,
@@ -144,7 +142,12 @@ const admission = (
 /** Admits, records dispatch and invocation evidence exactly as the gateway does, then terminalizes. */
 const settle = async (
   fixture: Fixture,
-  input: { readonly evidence: TerminalEvidence; readonly priced?: boolean; readonly attributed?: boolean },
+  input: {
+    readonly evidence: TerminalEvidence;
+    readonly priced?: boolean;
+    readonly attributed?: boolean;
+    readonly historicalLabel?: string;
+  },
 ): Promise<typeof creditOperation.$inferSelect> => {
   const key = randomUUID();
   const admitted = await ledger.admitOperation(
@@ -152,6 +155,15 @@ const settle = async (
   );
   if (admitted.status !== 'admitted') {
     throw new Error(`admission refused: ${admitted.status}`);
+  }
+  if (input.historicalLabel !== undefined) {
+    // Seed an already-admitted pre-removal record. Production never rewrites immutable evidence.
+    await client.begin(async (transaction) => {
+      await transaction`SET LOCAL session_replication_role = replica`;
+      await transaction`UPDATE billing.credit_operation
+        SET invocation = invocation || ${JSON.stringify({ credentialAccount: input.historicalLabel })}::jsonb
+        WHERE id = ${admitted.operationId}`;
+    });
   }
   const claim = { operationId: admitted.operationId, accountId: fixture.accountId, requestDigest: `sha256:${key}` };
   // A settlement follows a recorded dispatch intent (the credit_operation_dispatch CHECK).
@@ -198,10 +210,9 @@ const invoiceFor = (
   invoicePeriod: { periodStart: string; periodEnd: string },
   confirmed: string,
 ) => ({
-  version: 'operator-supplier-invoice-total-v1',
+  version: 'operator-supplier-invoice-total-v2',
   environment: 'development',
   provider: fixture.providerId,
-  credentialAccount: fixture.credentialAccount,
   ...invoicePeriod,
   currency: 'usd',
   confirmedTotalPicoUsd: confirmed,
@@ -222,7 +233,7 @@ const invoiceCases = async (fixture: Fixture, invoicePeriod: { periodStart: stri
         eq(billingFinancialCase.kind, 'supplier_invoice_total_mismatch'),
         eq(
           billingFinancialCase.dedupeKey,
-          `${fixture.providerId}:${fixture.credentialAccount}:${invoicePeriod.periodStart}/${invoicePeriod.periodEnd}`,
+          `provider-period-v1:${fixture.providerId}:${new Date(invoicePeriod.periodStart).toISOString()}/${new Date(invoicePeriod.periodEnd).toISOString()}`,
         ),
       ),
     );
@@ -240,6 +251,59 @@ const accountState = async (accountId: string) => {
 };
 
 describe('supplier invoice reconciliation', () => {
+  it('should reconcile historical labels and new receipts together without changing either', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+    const oldA = await settle(fixture, { evidence: usage(2n), historicalLabel: 'old-a' });
+    const oldB = await settle(fixture, { evidence: usage(3n), historicalLabel: 'old-b' });
+    const current = await settle(fixture, { evidence: usage(4n) });
+    expect(oldA.invocation).toHaveProperty('credentialAccount', 'old-a');
+    expect(current.invocation).not.toHaveProperty('credentialAccount');
+    const before = await accountState(fixture.accountId);
+    const result = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '9000'));
+    expect(result).toMatchObject({ status: 'matched', operations: 3, localEstimatePicoUsd: '9000' });
+    expect(await accountState(fixture.accountId)).toEqual(before);
+    expect(await readOperation(oldA.id)).toEqual(oldA);
+    expect(await readOperation(oldB.id)).toEqual(oldB);
+    expect(await readOperation(current.id)).toEqual(current);
+  });
+
+  it('should isolate provider, financial environment and half-open period', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+    await settle(fixture, { evidence: usage(2n) });
+    await settle({ ...fixture, providerId: 'another-provider' }, { evidence: usage(3n) });
+    const otherEnvironment = await settle(fixture, { evidence: usage(4n) });
+    const atEnd = await settle(fixture, { evidence: usage(5n) });
+    const beforeStart = await settle(fixture, { evidence: usage(6n) });
+    const atStart = await settle(fixture, { evidence: usage(7n) });
+    await client.begin(async (transaction) => {
+      await transaction`SET LOCAL session_replication_role = replica`;
+      await transaction`UPDATE billing.credit_operation SET environment = 'staging' WHERE id = ${otherEnvironment.id}`;
+      await transaction`UPDATE billing.credit_operation SET usage_occurred_at = ${invoicePeriod.periodEnd} WHERE id = ${atEnd.id}`;
+      await transaction`UPDATE billing.credit_operation SET usage_occurred_at = ${invoicePeriod.periodStart}::timestamptz - interval '1 millisecond' WHERE id = ${beforeStart.id}`;
+      await transaction`UPDATE billing.credit_operation SET usage_occurred_at = ${invoicePeriod.periodStart} WHERE id = ${atStart.id}`;
+    });
+    expect(await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '9000'))).toMatchObject({
+      status: 'matched',
+      operations: 2,
+      localEstimatePicoUsd: '9000',
+    });
+  });
+
+  it('should reject obsolete account-scoped invoice imports', async () => {
+    const fixture = await createFixture();
+    const invoicePeriod = await periodFromNow();
+    await expect(
+      reconciliation.reconcileInvoiceTotal({
+        ...invoiceFor(fixture, invoicePeriod, '0'),
+        version: 'operator-supplier-invoice-total-v1',
+        credentialAccount: 'old',
+      }),
+    ).rejects.toThrow('Invalid input');
+    expect(await invoiceCases(fixture, invoicePeriod)).toEqual([]);
+  });
+
   it('should open no case when the invoice is within tolerance of the metered supplier cost', async () => {
     const fixture = await createFixture();
     const invoicePeriod = await periodFromNow();
@@ -271,7 +335,7 @@ describe('supplier invoice reconciliation', () => {
       supplierCostPicoUsd: null,
       supplierCostUnpricedReason: 'missing_rate',
     });
-    // Admitted with no provider or invocation: no credential can claim its cost.
+    // Admitted with no provider or invocation: no provider can claim its cost.
     await settle(fixture, { evidence: usage(2n), attributed: false });
     const before = await accountState(fixture.accountId);
 
@@ -296,7 +360,7 @@ describe('supplier invoice reconciliation', () => {
       owner: 'billing-operations',
       nextStep: 'compare_confirmed_invoice_with_local_estimate',
       evidence: {
-        version: 'supplier-invoice-reconciliation-v2',
+        version: 'supplier-invoice-reconciliation-v3',
         allocation: 'aggregate_only',
         invoiceSource: 'operator-import:console-statement',
         localEstimatePicoUsd: '7000',
@@ -343,12 +407,37 @@ describe('supplier invoice reconciliation', () => {
     await settle(fixture, { evidence: usage(6n) });
 
     await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '1'));
-    await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '1'));
+    await reconciliation.reconcileInvoiceTotal({
+      ...invoiceFor(fixture, invoicePeriod, '1'),
+      periodStart: invoicePeriod.periodStart.replace('Z', '+00:00'),
+      periodEnd: invoicePeriod.periodEnd.replace('Z', '+00:00'),
+    });
     const reopened = await invoiceCases(fixture, invoicePeriod);
     expect(reopened).toHaveLength(1);
     expect(reopened[0]).toMatchObject({ state: 'open' });
 
+    const legacyCaseId = randomUUID();
+    await database.insert(billingFinancialCase).values({
+      id: legacyCaseId,
+      environment: config.environment,
+      stripeAccountId: config.stripeAccountId,
+      livemode: false,
+      kind: 'supplier_invoice_total_mismatch',
+      dedupeKey: `${fixture.providerId}:old-label:${invoicePeriod.periodStart}/${invoicePeriod.periodEnd}`,
+      sourceType: 'supplier_invoice',
+      sourceId: 'old-import',
+      evidence: { version: 'supplier-invoice-reconciliation-v2' },
+      owner: 'billing-operations',
+      nextStep: 'compare_confirmed_invoice_with_local_estimate',
+      firstEffectiveAt: new Date(),
+    });
     const corrected = await reconciliation.reconcileInvoiceTotal(invoiceFor(fixture, invoicePeriod, '6000'));
+    expect(
+      await database
+        .select({ state: billingFinancialCase.state })
+        .from(billingFinancialCase)
+        .where(eq(billingFinancialCase.id, legacyCaseId)),
+    ).toEqual([{ state: 'open' }]);
 
     expect(corrected).toMatchObject({ status: 'matched', differencePicoUsd: '0' });
     const resolved = await invoiceCases(fixture, invoicePeriod);

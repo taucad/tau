@@ -31,7 +31,6 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
-    "@taucad/geospec-engine": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/grbl": "workspace:*",
     "@taucad/host": "workspace:*",
@@ -56,6 +55,7 @@
     "@taucad/types": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
+    "electron-updater": "catalog:",
     "esbuild": "catalog:",
     "fflate": "catalog:",
     "geospec-engine": "catalog:",
@@ -74,10 +74,11 @@
     "@electron/packager": "^20.3.0",
     "@taucad/nx": "workspace:*",
     "@taucad/runtime-testing": "workspace:*",
+    "@taucad/xstate-testing": "workspace:*",
     "electron": "^43.5.1",
+    "electron-builder": "catalog:",
     "electron-vite": "catalog:electron-vite8",
     "vite": "catalog:electron-vite8",
-    "vitest": "catalog:",
-    "@taucad/xstate-testing": "workspace:*"
+    "vitest": "catalog:"
   }
 }

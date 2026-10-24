@@ -18,7 +18,6 @@ const projectZip = async (): Promise<Uint8Array<ArrayBuffer>> => {
     'repository-root/tau.json',
     JSON.stringify({
       $schema: projectManifestSchemaUrl,
-      id: 'proj_123456789012345678901',
       name: 'Birdhouse',
       description: 'Repository example',
       tags: ['test'],

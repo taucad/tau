@@ -1,4 +1,4 @@
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { defineMachine } from '@taucad/runtime/machine';
 import { z } from 'zod';
 

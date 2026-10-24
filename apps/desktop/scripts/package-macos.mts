@@ -3,14 +3,17 @@
 /**
  * Purpose: Assemble and verify Tau macOS packages, with signing/notarization selected explicitly.
  * Why: Quick Look extensions must enter Contents/PlugIns before one inside-out signing pass.
- * Environment: macOS, Xcode tools, built desktop/UI artifacts and the installed `geospec-engine` pin; network (or
- * TAU_PAYLOAD_DIR / TAU_PAYLOAD_MIRROR) for the native kernel closures it seals and ships under Resources/payloads;
+ * Environment: macOS, Xcode tools, built desktop/UI artifacts and the installed `geospec-engine` pin (the app ships no
+ * native kernel closure: it downloads each on first use);
  * TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE names that engine version's source/relink archive (required for an arm64 --release);
  * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT; optional TAU_DESKTOP_CHANNEL (production, the default, or staging);
- * Apple credentials only for --release; --unsigned skips all package signing.
- * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
+ * A signing certificate is required for --release or local signing; --unsigned skips package signing.
+ * TAU_LOCAL_CODESIGN_IDENTITY opts a staging development package into Apple Development signing
+ * (auto, an exact certificate name, or its fingerprint), preserving debugging and local overrides.
+ * Local acceptance: pnpm nx run desktop:package-macos:local (auto-selects the single development certificate).
+ * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip] [--dmg]
  * Output: <output root>/Tau-darwin-<arch>/Tau.app, copied as APFS clones of its inputs; the distribution archive
- * <output root>/Tau-macos-<arch>.zip only for --release or when --zip is passed.
+ * <output root>/Tau-macos-<arch>.zip only for --release or when --zip is passed; optional Tau-macos-<arch>.dmg with --dmg.
  * Exit codes: 0 on a verified app/ZIP; non-zero on missing artifacts, credentials, or validation failure.
  */
 
@@ -27,13 +30,20 @@ import { notarize } from '@electron/notarize';
 import { sign } from '@electron/osx-sign';
 import { packager } from '@electron/packager';
 
+import { desktopArtifactName } from '#shared/desktop-release.js';
+
 import { isQuickLookEnabled } from '#shared/quick-look.js';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { macosPackageArchitecture, macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Shared operational signing helper.
+import { localSigningIdentity } from './local-signing.mjs';
+// oxlint-disable-next-line no-restricted-imports -- Shared install container builder and verifier.
+import { createMacosDmg } from './macos-dmg.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyTree } from '@taucad/nx/runtime-closure';
 import { copyGeoSpecEngine, copyGeoSpecSourceRelink } from './runtime-closure.mjs';
+import { uploadDesktopSourceMaps } from './desktop-sourcemaps.mjs';
 import {
   desktopManifestFields,
   desktopPackageChannel,
@@ -41,7 +51,7 @@ import {
   excludesBuildDiagnostics,
   resolveRuntimePackages,
   runtimeAsarOptions,
-  stageNativePayloads,
+  stageNativePackageFiles,
   stageRuntimePackages,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
@@ -86,10 +96,22 @@ const {
   release,
   unsigned,
   zip,
+  dmg,
   notarize: shouldNotarize,
 } = parseMacosPackageMode(process.argv.slice(2), desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']));
+if (
+  process.env['TAU_LOCAL_CODESIGN_IDENTITY'] !== undefined &&
+  (release || unsigned || desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']) !== 'staging')
+) {
+  throw new Error('Local signing requires a staging development package, without --release or --unsigned.');
+}
+if (dmg && release && !/^[A-Z0-9]{10}$/u.test(process.env['APPLE_TEAM_ID'] ?? '')) {
+  throw new Error('A release DMG requires APPLE_TEAM_ID for signer verification.');
+}
+// Resolve before removing any previous package output.
+const localIdentity = localSigningIdentity();
 // Local non-ZIP packages remain development-only; every distribution archive is held.
-if (zip) {
+if (zip || dmg) {
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')], {
     stdio: 'inherit',
   });
@@ -99,7 +121,7 @@ const extensions =
   isQuickLookEnabled() && shipsNativeGeometry
     ? (['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const)
     : [];
-const adhocAppEntitlements = [
+const developmentAppEntitlements = [
   'com.apple.security.cs.allow-jit',
   'com.apple.security.cs.disable-library-validation',
   'com.apple.security.device.audio-input',
@@ -262,7 +284,7 @@ await stageRuntimePackages({
   stageRoot,
   packages: runtimePackages,
   stagedDependencies: geospecEngineDependencies,
-  /* Ad-hoc and unsigned packages back the packaged e2e lane, which points
+  /* Development packages back the packaged e2e lane, which points
    * the app at local services; a release ignores those overrides
    * (`packagedOverridesEnabled` in src/main/environment.ts). A staging
    * package defaults to taucad.dev and follows its isolated update feed. */
@@ -271,6 +293,14 @@ await stageRuntimePackages({
     channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
   }),
 });
+
+if (release && process.env['SENTRY_DSN']) {
+  await uploadDesktopSourceMaps(
+    resolve(desktopRoot, 'dist'),
+    resolve(stageRoot, 'dist'),
+    resolve(workspaceRoot, 'scripts/node_modules/.bin/sentry-cli'),
+  );
+}
 
 const packagePaths = await packager({
   dir: stageRoot,
@@ -281,7 +311,7 @@ const packagePaths = await packager({
   platform: 'darwin',
   arch: architecture,
   name: 'Tau',
-  appBundleId: 'com.taucad.tau.desktop',
+  appBundleId: localIdentity ? 'com.taucad.tau.desktop.local' : 'com.taucad.tau.desktop',
   appCategoryType: 'public.app-category.graphics-design',
   appVersion: desktopPackageVersion(metadata.version),
   /* Squirrel.Mac compares bundle versions, so the build version is the release version. */
@@ -311,6 +341,7 @@ await Promise.all([
 ]);
 await Promise.all([
   copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
+  stageNativePackageFiles(resources),
   cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
   cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
   /* The legal pages live on the website; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */
@@ -333,20 +364,6 @@ await Promise.all([
 ]);
 console.log(`Retained ${machArchitecture} slices in ${String(await thinOtherSlices(appPath))} bundled Mach-O files`);
 
-/* The native kernels' sealed closures, in the store's own layout, which the app seeds its payload store from by
- * clonefile on first launch (charter W6 phase 1, D10, D24, ruling X30). Staged after thinning and excluded from
- * signing below: they ship byte for byte as their receipts record them, so nothing rewrites a digest after signing. */
-const nativeClosures = await stageNativePayloads({
-  target,
-  payloadsRoot: resolve(resources, 'payloads'),
-  workRoot: resolve(outputRoot, 'native-payloads'),
-});
-for (const closure of nativeClosures) {
-  console.log(
-    `Staged ${closure.package} ${closure.dependency}: ${closure.closureIntegrity}, tree ${closure.treeIntegrity}, ${String(closure.fileCount)} files`,
-  );
-}
-
 /* Before the first signature: flipping rewrites the Electron Framework binary.
  * An unsigned arm64 binary must keep a valid ad-hoc signature to launch at all. */
 await flipFuses(appPath, {
@@ -355,24 +372,22 @@ await flipFuses(appPath, {
   ...macosPackageFuses({ release }),
 });
 
-const identity = release ? developerIdentity() : '-';
+const identity = release ? developerIdentity() : (localIdentity ?? '-');
 if (!unsigned) {
   await sign({
     app: appPath,
     platform: 'darwin',
     identity,
-    identityValidation: release,
+    identityValidation: release || localIdentity !== undefined,
     preAutoEntitlements: false,
     preEmbedProvisioningProfile: false,
     strictVerify: true,
     batchCodesignCalls: true,
-    /* Sealed native closures are verified by digest, never signed (I3); the git payload's code is signed. */
-    ignore: (path) =>
-      path.includes('/Contents/Resources/payloads/') ||
-      (path.includes('/Contents/Resources/git/') && !isMachObject(path)),
+    /* The git payload's code is signed, its other files are not. */
+    ignore: (path) => path.includes('/Contents/Resources/git/') && !isMachObject(path),
     optionsForFile: (path) => ({
       ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))
-        ? { entitlements: adhocAppEntitlements }
+        ? { entitlements: developmentAppEntitlements }
         : {}),
       ...(release && path.endsWith('/Tau Helper (Plugin).app')
         ? {
@@ -411,8 +426,32 @@ const zipPath = resolve(outputRoot, `Tau-macos-${architecture}.zip`);
 if (zip) {
   execFileSync('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', appPath, zipPath], { stdio: 'inherit' });
 }
+if (dmg) {
+  const dmgPath = resolve(
+    outputRoot,
+    desktopArtifactName({
+      kind: 'macos-dmg',
+      channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
+      version: desktopPackageVersion(metadata.version),
+      arch: architecture,
+    }),
+  );
+  await createMacosDmg({
+    appPath,
+    dmgPath,
+    trust: {
+      signed: release || localIdentity !== undefined,
+      notarized: shouldNotarize,
+      developerId: release,
+      team: release ? process.env['APPLE_TEAM_ID'] : undefined,
+    },
+    identity,
+    keychainProfile: process.env['TAU_NOTARYTOOL_PROFILE'] ?? 'tau-notary',
+  });
+  console.log(`Verified install container: ${dmgPath}`);
+}
 await rm(stageRoot, { recursive: true, force: true });
 console.log(
-  `${shouldNotarize ? 'Signed and notarized' : release ? 'Developer ID signed' : unsigned ? 'Unsigned' : 'Ad-hoc signed'} Tau: ${appPath}`,
+  `${shouldNotarize ? 'Signed and notarized' : release ? 'Developer ID signed' : unsigned ? 'Unsigned' : localIdentity ? 'Apple Development signed' : 'Ad-hoc signed'} Tau: ${appPath}`,
 );
 console.log(zip ? `Distribution archive: ${zipPath}` : 'No distribution archive; pass --zip to write one.');

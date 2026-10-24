@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  parseAdoptableProjectManifestBytes,
+  convertLegacyProjectManifestBytes,
   parseProjectManifestBytes,
   projectManifestMaxBytes,
   projectManifestSchemaUrl,
@@ -10,7 +10,6 @@ import {
 import type { ProjectManifest } from '@taucad/project-core';
 
 const manifest: ProjectManifest = projectToManifest({
-  id: 'proj_0123456789ABCDEFGHIJK',
   name: 'Example',
   description: '',
   tags: [],
@@ -46,25 +45,34 @@ describe('project manifest schema', () => {
     },
   );
 
-  it('rejects a malformed project id', () => {
+  it('rejects an authored project id', () => {
     expect(parseProjectManifestBytes(encode({ ...manifest, id: 'copied-folder' }))).toMatchObject({
       success: false,
       issue: { code: 'manifest-invalid' },
     });
   });
 
-  it('relaxes only id through the explicit adoption parser', () => {
-    const { id: _id, ...withoutId } = manifest;
-    expect(parseProjectManifestBytes(encode(withoutId))).toMatchObject({ success: false });
-    expect(parseAdoptableProjectManifestBytes(encode(withoutId))).toEqual({ success: true, data: withoutId });
-    expect(parseAdoptableProjectManifestBytes(encode({ ...withoutId, id: 'copied-folder' }))).toEqual({
-      success: true,
-      data: withoutId,
-    });
-    expect(parseAdoptableProjectManifestBytes(encode({ ...withoutId, author: {} }))).toMatchObject({
+  it('accepts a hand-authored declaration without identity', () => {
+    expect(parseProjectManifestBytes(encode(manifest))).toEqual({ success: true, data: manifest });
+    expect(parseProjectManifestBytes(encode({ ...manifest, id: 'proj_0123456789ABCDEFGHIJK' }))).toMatchObject({
       success: false,
-      issue: { code: 'manifest-invalid' },
     });
+  });
+
+  it('converts only the exact previous prerelease contract and preserves its identity', () => {
+    const legacy = {
+      ...manifest,
+      $schema: 'https://tau.new/schemas/tau-schema-v1.json',
+      id: 'proj_0123456789ABCDEFGHIJK',
+    };
+    expect(parseProjectManifestBytes(encode(legacy))).toMatchObject({ success: false });
+    expect(convertLegacyProjectManifestBytes(encode(legacy))).toEqual({
+      success: true,
+      data: { projectId: legacy.id, manifest },
+    });
+    expect(convertLegacyProjectManifestBytes(encode({ ...legacy, id: 'invented' }))).toMatchObject({ success: false });
+    expect(convertLegacyProjectManifestBytes(encode({ ...legacy, extra: true }))).toMatchObject({ success: false });
+    expect(convertLegacyProjectManifestBytes(encode(manifest))).toMatchObject({ success: false });
   });
 
   it('reports an unsupported schema URL distinctly', () => {
@@ -76,7 +84,8 @@ describe('project manifest schema', () => {
   });
 
   it('serializes only explicit manifest fields', () => {
-    const localView = { ...manifest, deletedAt: 1, revisionState: { dirty: true } };
+    const localView = { ...manifest, id: 'proj_0123456789ABCDEFGHIJK', deletedAt: 1, revisionState: { dirty: true } };
+    expect(new TextDecoder().decode(serializeProjectManifest(projectToManifest(localView)))).not.toContain('id');
     expect(new TextDecoder().decode(serializeProjectManifest(projectToManifest(localView)))).not.toContain('deletedAt');
     expect(new TextDecoder().decode(serializeProjectManifest(projectToManifest(localView)))).not.toContain(
       'revisionState',

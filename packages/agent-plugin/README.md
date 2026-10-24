@@ -5,14 +5,14 @@
 [![license](https://img.shields.io/npm/l/@taucad/agent-plugin.svg)](./LICENSE)
 [![provenance](https://img.shields.io/badge/provenance-npm-blue.svg)](https://docs.npmjs.com/generating-provenance-statements)
 
-Tau CAD plugin for Codex and Claude Code: skills and the tau mcp launcher
+Tau code-CAD plugin for Claude Code and Codex: the tau MCP server launcher and kernel skills (replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy, PicoGK).
 
 ## Why this package?
 
 - **One plugin for both hosts.** This package's folder is a Codex plugin and a Claude Code plugin; each host reads its own manifest and MCP server config.
-- **The agent sees the part it builds.** Ten Tau tools evaluate a model, run its GeoSpec tests, return screenshots as images, export STEP, STL, 3MF or glTF, read and edit its parameters, arrange the Tau workbench, show it in the Tau viewer and prepare native kernels; see [Tools](#tools).
+- **The agent sees the part it builds.** Eleven Tau tools evaluate a model, run its GeoSpec tests, return screenshots as images, export STEP, STL, 3MF or glTF, read and edit its parameters, arrange the Tau workbench, show it in the Tau viewer, drive its mechanism and prepare native kernels; see [Tools](#tools).
 - **You see it too.** `show_model` opens the Tau viewer: inside Codex desktop and Claude Desktop as an MCP App, and as a local browser link in the CLIs.
-- **Kernel knowledge when a task needs it.** An onboarding skill, `tau`, plus API skills for replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, tscircuit, GeoSpec and the workbench.
+- **Kernel knowledge when a task needs it.** An onboarding skill, `tau`, plus API skills for replicad, OpenSCAD, JSCAD, Manifold, PicoVoxel, SMLib, tscircuit, build123d, SMLibPy, PicoGK, GeoSpec and the workbench.
 - **Nothing to install inside the plugin.** It has no dependencies: a small launcher finds your Tau CLI, or fetches the matching release with `npx`.
 - **Your project stays clean.** Screenshots and large test reports live in a per-session temporary folder; only exports and workbench records land under the project's `.tau/`.
 
@@ -46,10 +46,11 @@ Start a new thread after installing. Codex offers the `tau` skill as the plugin'
 
 ### Check
 
-- Claude Code: `claude plugin list` shows `tau@taucad` enabled; `claude mcp list` shows `plugin:tau:tau … ✔ Connected`.
-- Codex: `codex plugin list` shows `tau@taucad  installed, enabled`.
+- Claude Code: `claude plugin list` shows `tau@taucad` enabled.
+- Codex: `codex plugin list --marketplace taucad` shows `tau@taucad  installed, enabled`.
+- From the project folder, `node <plugin folder>/dist/doctor.mjs` checks Node.js, npm and its cache, the CLI the launcher runs and its version, a live `initialize` and the skills; see [Which Tau CLI runs](#which-tau-cli-runs).
 
-`tau --version` prints the same version as the plugin. Troubleshooting, kernel choice and what to tell the user are in the agent guide, <https://taucad.dev/llms.txt>.
+The doctor, like any shell handshake, proves the launcher and CLI start, not that the host loads the tools: they appear in a new session or thread. A handshake run outside the project folder reports that folder as the project. `tau --version` prints the same version as the plugin; the two `beta` installs can differ, and then `npm install -g @taucad/cli@<plugin version>` fixes it. Troubleshooting, kernel choice and what to tell the user are in the agent guide, <https://taucad.dev/llms.txt>.
 
 ### npm
 
@@ -87,8 +88,9 @@ The same prompt works in `codex` after the Codex install. The agent writes `main
 | `arrange_workbench`         | Opens views and panes for a person who has the project open in the Tau app                    | `.tau/workbench/` in the project              |
 | `get_parameters`            | Reads a model's parameters: their schema, defaults and the values in effect                   | Nothing                                       |
 | `apply_parameter_operation` | Edits a model's parameters through a checked write; Tau shows the same values                 | `.tau/parameters/` in the project             |
-| `show_model`                | Shows a model in the Tau viewer; a CAD source or STEP/STL/3MF/OBJ becomes GLB first           | The GLB, under `.tau/artifacts/`              |
-| `view_state`                | Reports what the viewer shows: model, selection, visibility, camera; with `capture`, an image | Nothing                                       |
+| `show_model`                | Shows a model in the Tau viewer; a CAD source or STEP/STL/3MF/OBJ becomes GLB first           | Nothing: a rendered source stays in memory    |
+| `view_state`                | Reports the viewer's model, selected, added and hidden parts, camera; `capture` adds an image | Nothing                                       |
+| `pose_model`                | Plays, pauses, seeks or resets an animation, or sets joints, of the shown model's mechanism   | The GLB, when it shows a source first         |
 | `prepare_kernel`            | Downloads the native runtime a `.py` or `.cs` model needs, once per computer                  | The shared payload store, outside the project |
 
 The tools load with the session in both hosts rather than waiting behind tool search. `test_model` is listed only when the server can resolve the GeoSpec engine, which `@taucad/cli` installs with itself; a server without it does not register the tool, so a client calling it anyway gets the MCP unknown-tool error.
@@ -99,7 +101,7 @@ With `TAU_HOST_MACHINES=true` in the server's environment (the Codex manifest pa
 
 ### Native kernels
 
-`.py` (Build123d) and `.cs` (PicoGK) files run on a native runtime, an interpreter and wheels or a .NET runtime, that is downloaded once into a payload store every Tau app on the computer shares. No CAD tool downloads: until the runtime is prepared, every tool answers a `.py` or `.cs` file with `KERNEL_NOT_PREPARED`, naming the kernel, the bytes preparing downloads and the call that prepares it. That call is `prepare_kernel` with `{ "kernel": "build123d" }` or `{ "kernel": "picogk" }`; it reports progress, keeps every verified file when it is cancelled, and is the one tool that reaches the network, so approving it is the consent to download. A runtime prepared elsewhere, by `tau prepare` or the Tau app, is used on the next call with no `prepare_kernel`.
+`.py` (Build123d, or SMLibPy when the file imports `smlibpy`) and `.cs` (PicoGK) files run on a native runtime, an interpreter and wheels or a .NET runtime, that is downloaded once into a payload store every Tau app on the computer shares. No CAD tool downloads: until the runtime is prepared, every tool answers a `.py` or `.cs` file with `KERNEL_NOT_PREPARED`, naming the kernel, the bytes preparing downloads and the call that prepares it. That call is `prepare_kernel` with `{ "kernel": "build123d" }`, `{ "kernel": "smlibpy" }` or `{ "kernel": "picogk" }`; it reports progress, keeps every verified file when it is cancelled, and is the one tool that reaches the network, so approving it is the consent to download. A runtime prepared elsewhere, by `tau prepare` or the Tau app, is used on the next call with no `prepare_kernel`.
 
 The server does not pass its environment on: the threads that run models get the platform's own variables, the proxy and CA variables, and Tau's `TAU_*` acquisition profile (`TAU_PAYLOAD_MIRROR`, `TAU_PAYLOAD_MIRROR_NO_FALLBACK`, `TAU_PAYLOAD_DIR`, `TAU_CONFIG_DIR`, `TAU_ACQUISITION`, `TAU_PAYLOAD_TARGET`, `TAU_PAYLOAD_EMULATION`), and nothing else. The Codex manifest forwards those names to the server, and with a proxy set the launcher sets `NODE_USE_ENV_PROXY=1` so downloads use it.
 
@@ -107,17 +109,19 @@ The server does not pass its environment on: the threads that run models get the
 
 `show_model` puts the model in front of you. How depends on what the host declares when it connects:
 
-| Host                   | What you get                                                                                                                                                     |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Codex desktop          | A Tau tab in the thread, Tau in the sidebar (`browse_models`) and Open with Tau for `.glb`, `.svg`, `.step`, `.stl`, `.3mf` and `.obj` files (`open_model_file`) |
-| Claude Desktop         | An inline card in the conversation, with Add to chat and Open full view                                                                                          |
-| Claude Code, Codex CLI | A `http://127.0.0.1` link to the same page, served by `tau mcp` for its session; screenshots still come back inline                                              |
+| Host                   | What you get                                                                                                                                                  |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex desktop          | A Tau tab in the thread, Tau in the sidebar (`show_model`) and Open with Tau for `.glb`, `.svg`, `.step`, `.stl`, `.3mf` and `.obj` files (`open_model_file`) |
+| Claude Desktop         | An inline card in the conversation, with Add to chat and Open full view                                                                                       |
+| Claude Code, Codex CLI | A `http://127.0.0.1` link to the same page, served by `tau mcp` for its session; screenshots still come back inline                                           |
 
-The card shows the canvas and two actions. The tab, fullscreen and the browser page add a header with the file, Share, Export and the workbench toggle, and the control bar: grid, section, measure and fit. Add to chat, on the card or in a part's right-click menu, hands the model or that part to the host as context: the part's name and its `@cad[<file>#<component>]` token as text, and the same structured reference Tau's own chat chip carries as `structuredContent`. A host that takes only messages gets Send to chat, with the text; where a host takes neither (the browser page) the page copies it to the clipboard instead. Colours and font follow the host.
+The card shows the canvas and two actions. The tab, fullscreen and the browser page add a header with the file, Share, Export and the workbench toggle, and the control bar: grid, section, measure and fit. Add to chat, on the card or in a part's right-click menu, hands the model or that part to the host as context: the parts' names and their `@cad[<file>#<component>]` tokens as text, and the same structured references Tau's own chat chip carries as `structuredContent`. Parts added one after another accumulate for the shown model, and each update carries all of them, because a host keeps only the page's last context. A host that takes only messages gets Send to chat, which sends the part at once; where a host takes neither (the browser page, or a frame host that declares neither) the item reads Copy reference and copies the part's text to the clipboard. On every host `view_state` lists the parts added to chat, so the agent can act on them without a paste. From the keyboard, the same part menu opens with Shift+F10 or the Menu key once the canvas has focus (Tab to it), from the selected part's name in the header, or from a row in the Model pane; the arrow keys move between items and Escape closes the menu. Colours and font follow the host.
 
-The page stays live with the agent. It long-polls `app_sync`, a tool only the page can call, to report its view and to hear of the next model: a tab, fullscreen or browser page switches to each model `show_model` shows, while an inline card keeps its own. `show_model` with `select` selects components by id once the model is drawn. `view_state` reads the page the person used last; with `capture: true` that page draws its canvas into a PNG of at most 1280 px wide and returns it through `app_capture_reply`. Without a page open, `view_state` answers `NO_VIEWER` and `screenshot` still renders.
+When a model fails to build or renders with warnings, the tab's control bar shows the issues as Tau's editor does: "Build failed" and a count per severity, which opens the list with each issue's message, location and stack trace. On Codex desktop a location opens the file; elsewhere it shows the path. Each issue's Add to chat (Send to chat, or Copy issue, by host) hands the issue to the conversation for the agent to fix. A `.py` or `.cs` model whose kernel is not prepared offers Prepare, which calls `prepare_kernel` and shows the model again once it is ready; clicking it is your consent to the download. A `.kcl` model says that Zoo is not connected yet.
 
-The tab and fullscreen page have a workbench beside the canvas, opened and closed with the toggle at the header's right, where Share and Export open their panes: the component tree, where a click selects a component and the eye hides or shows it; the model's parameters, where an edit is written to the project and the page shows the model rendered with it; the selected part's properties; and switches for the grid, axes, edges and surfaces. When you move the camera or hide a part, `tau mcp` saves that view in the project's `.tau/workbench` records, so Tau opens the project with the same camera and hidden parts.
+The page stays live with the agent. It long-polls `app_sync`, a tool only the page can call, to report its view and to hear of the next model: a tab, fullscreen or browser page switches to each model `show_model` shows, while an inline card keeps its own. A shown source is watched: `tau mcp` keeps one runtime document per source with `watch: true`, as the Tau app does, so an edit to the file or its parameters, from the agent, an editor or the Parameters pane, renders it again and every page showing it switches to the newer model, with "Building" over the canvas meanwhile. The render stays in the server's memory and nothing is written to `.tau/artifacts`; the watch ends with the project's runtime thread when the server releases it after `--idle-release`. `show_model` with `select` selects components by id once the model is drawn. `view_state` reads the page the person used last; with `capture: true` that page draws its canvas into a PNG of at most 1280 px wide and returns it through `app_capture_reply`. Without a page open, `view_state` answers `NO_VIEWER` and `screenshot` still renders. The page's own calls, from its panes or a parameter edit, run in the project of the model it shows, although Codex names the thread's folder only on the agent's calls.
+
+The tab and fullscreen page have a workbench beside the canvas, opened and closed with the toggle at the header's right, where Share and Export open their panes: the component tree, where a click selects a component and the eye hides or shows it; the model's parameters, where an edit is written to the project and the watched source renders it, and a drag previews its values on the model through `app_preview_parameters`, a tool only the page can call, without writing until release; the selected part's properties, with part thumbnails that `tau mcp` renders and a part gallery; the project's files, where a click shows another file in that page alone and a file written on disk appears without a reload (`app_list_files` and `app_open_file`, tools only the page can call); and switches for the grid, axes, edges and surfaces. When you move the camera, hide a part, cut a section, pin a measurement or change the display, grid or field of view, `tau mcp` saves that view in the project's `.tau/workbench` records. The page and Tau both open the project from those records, so a reload keeps your view, and a view `arrange_workbench` set up stays after a reload. The viewer bar's Capture saves the canvas as a PNG under the project's `exports/`, and its render timeout is kept for the shown file in `.tau/workbench/entries.json`, where Tau keeps it, and bounds how long showing that file waits for its render. The page remembers per project, in its own browser storage, whether the workbench is open, its tabs, its width and the Model pane's sections; a host that refuses storage keeps them for the open page only. The page follows the host's high-contrast theme and accent colour when the host shares them.
 
 The page is one HTML file, `dist-app/app.html`, that `tau mcp` serves as the resource `ui://tau/<hash>/app.html`. It makes no network request: model bytes reach it through `app_read`, a tool only the page can call, in ranges of at most 4 MiB. The server reads only the range asked for, gzips a range that shrinks by a tenth or more, and refuses a range once the file has changed, so the page shows the new file instead of a mix of two. A 50 MB GLB streams in thirteen calls. The browser link carries a per-session token and answers only on `127.0.0.1`.
 
@@ -140,7 +144,7 @@ Running `tau mcp` without the plugin serves no viewer unless you pass `--viewer-
 
 | Skill               | Covers                                                                                               |
 | ------------------- | ---------------------------------------------------------------------------------------------------- |
-| `tau`               | Project layout, `tau.json`, which kernel a file uses, the evaluate → test → screenshot → export loop |
+| `tau`               | Project layout, `tau.json`, which kernel to use when, the evaluate → test → screenshot → export loop |
 | `cad-replicad`      | replicad: BRep solids, the default for parts                                                         |
 | `cad-openscad`      | OpenSCAD (`.scad`)                                                                                   |
 | `cad-jscad`         | JSCAD (`@jscad/modeling`)                                                                            |
@@ -148,10 +152,13 @@ Running `tau mcp` without the plugin serves no viewer unless you pass `--viewer-
 | `cad-picovoxel`     | PicoVoxel voxels, signed distance fields and lattices                                                |
 | `cad-smlib`         | SMLib NURBS BRep solids (`@classcad/smlibwasm`)                                                      |
 | `cad-tscircuit`     | tscircuit circuit boards                                                                             |
+| `cad-build123d`     | build123d Python BRep (`main.py`), after `prepare_kernel`                                            |
+| `cad-smlibpy`       | SMLibPy Python NURBS BRep (`main.py` importing `smlibpy`), after `prepare_kernel`                    |
+| `cad-picogk`        | PicoGK C# voxel engineering (`main.cs`), after `prepare_kernel`                                      |
 | `geospec-authoring` | Writing `*.geospec.ts` geometry tests                                                                |
 | `workbench`         | The Tau app's workbench views and panes                                                              |
 
-The kernel skills are copied at build time from the packages that own each API. `cad-opencascadejs` (16 MB) is left out: `cad-replicad` covers BRep authoring on the same kernel.
+Which kernel when: the `tau` skill. The kernel skills are copied at build time from the packages that own each API. `cad-opencascadejs` (16 MB) is left out: `cad-replicad` covers BRep authoring on the same kernel. `cad-zoo` is not shipped because KCL is not available from the plugin.
 
 ## How it works
 
@@ -183,6 +190,8 @@ Before `npx`, the launcher checks what `npx` needs. When a check fails it starts
 | 4         | npm was not found on `PATH` or does not run, or is older than 11                                      |
 
 When the CLI cannot be started, the launcher exits 1. A host shows only that the server failed to start; run `node <plugin folder>/dist/launch.mjs </dev/null` to read the line.
+
+To find out why a host has no Tau tools, run the doctor from the installed plugin folder, such as `node ~/.claude/plugins/cache/taucad/tau/<version>/dist/doctor.mjs` or `node ~/.codex/plugins/cache/taucad/tau/<version>/dist/doctor.mjs`. It prints one `ok`, `warn` or `fail` line per check (Node.js, npm and its cache, each host and the plugin's state there, the CLI the launcher would run, the npm registry, a live `initialize`, the skills), then `next` lines with the commands to run; `--json` prints the same as one object. It exits with the first failure's code: 2 Node.js, 3 npm's cache, 4 npm, 5 the server, 6 the plugin is disabled in a host.
 
 The launcher hands the CLI `TAU_LAUNCH`, a JSON object: `source` (`explicit`, `workspace`, `installed` or `npx`), `path` (the `TAU_CLI` or installed `tau` it ran), `cli` (that CLI's version), `plugin` (this package's version), `node` (the Node.js version running the launcher) and `skipped` (each installed `tau` passed over, with the version it printed if it answered within 2 seconds and 128 bytes). `tau mcp` names it in the last sentence of its `initialize` instructions, which the agent reads at session start.
 

@@ -5,6 +5,7 @@ import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { Profiler, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { setLiveViewOptions } from '#workbench-records/live-view-options.js';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -308,6 +309,13 @@ const mockGraphicsActor = {
       cameraFovAngle: 45,
       measurements: [],
       units: undefined,
+      // The shared part menu reads the presented unit and its interaction state from the actor itself.
+      modelInteractionUnitId: helperUnitId,
+      modelInteractionRef: {
+        getSnapshot: () => ({ context: createModelInteractionContext() }),
+        subscribe: () => ({ unsubscribe: () => undefined }),
+      },
+      artifactKey: mockGraphicsProjection.artifactKey,
     },
   })),
   send: mockGraphicsSend,
@@ -490,23 +498,26 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
     captureRendering,
     leading,
     aboveControls,
+    mobileAction,
   }: {
     captureRendering: () => Promise<Rendering>;
     leading?: React.ReactNode;
     aboveControls?: React.ReactNode;
+    mobileAction?: React.ReactNode;
   }) => {
     mockCaptureRendering = captureRendering;
     return (
       <div role='group' aria-label='Viewer controls'>
         {aboveControls}
         {leading}
+        {mobileAction}
       </div>
     );
   },
 }));
 
 vi.mock('#components/cad/ar-button.js', () => ({
-  ArButton: () => <button type='button' aria-label='View in AR' />,
+  ArButton: () => <button type='button' aria-label='View in your space' />,
 }));
 
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
@@ -557,7 +568,9 @@ const renderViewer = (ui: React.ReactElement): ReturnType<typeof render> =>
   render(ui, {
     wrapper: ({ children }) => (
       <MemoryRouter>
-        <TooltipProvider>{children}</TooltipProvider>
+        <KeyboardProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </KeyboardProvider>
       </MemoryRouter>
     ),
   });
@@ -1298,15 +1311,14 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(strip.lastElementChild).toBe(bar);
   });
 
-  it('should keep the AR button on the line above the bar and the issues inside the bar', () => {
+  it('should hand AR to the bar as its mobile action, with no line above it, and keep the issues inside the bar', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    const line = screen.getByRole('button', { name: 'View in AR' }).parentElement!;
     const bar = screen.getByRole('group', { name: 'Viewer controls' });
-    expect(line).toHaveClass('[&>*]:pointer-events-auto');
-    expect(line.nextElementSibling).toBe(bar);
+    expect(screen.getAllByRole('button', { name: 'View in your space' })).toHaveLength(1);
+    expect(bar).toContainElement(screen.getByRole('button', { name: 'View in your space' }));
     expect(bar).toContainElement(screen.getByTestId('chat-stack-trace'));
   });
 
@@ -1393,9 +1405,11 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits.set(helperEntryPath, cadActor);
 
     render(
-      <Profiler id='viewer' onRender={onRender}>
-        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />
-      </Profiler>,
+      <KeyboardProvider>
+        <Profiler id='viewer' onRender={onRender}>
+          <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />
+        </Profiler>
+      </KeyboardProvider>,
     );
 
     const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
@@ -1507,13 +1521,13 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(await screen.findByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
     expect(screen.getByText('Add to chat')).toBeInTheDocument();
-    expect(screen.getByText('Reveal in Explorer')).toBeInTheDocument();
+    expect(screen.getByText('Reveal in model tree')).toBeInTheDocument();
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: 'Opacity' })).toHaveValue('100');
 
-    fireEvent.click(screen.getByText('Reveal in Explorer'));
+    fireEvent.click(screen.getByText('Reveal in model tree'));
 
     expect(mockGraphicsSend).toHaveBeenCalledWith({
       type: 'selectModelComponent',
@@ -1589,7 +1603,9 @@ describe('ChatViewer reopen-renderer overlay', () => {
     } as unknown as PartThumbnailService;
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
     const tree = (profile: 'editor' | 'shared' = 'editor') => (
-      <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile={profile} />
+      <KeyboardProvider>
+        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile={profile} />
+      </KeyboardProvider>
     );
     const view = render(tree());
     const openMenu = (): void => {

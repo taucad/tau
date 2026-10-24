@@ -14,8 +14,8 @@
  * A subset only works when it is closed under workspace dependencies; omitting a sibling makes npm
  * fall back to the registry and 404. Requesting `packages/runtime` also packs the packages its
  * README quick start imports and their publishable closure, computed from the graph. Requesting
- * `packages/cli` packs the CLI's publishable closure, which includes `@taucad/geospec-engine` and
- * `geospec` so that `@taucad/host`'s optional GeoSpec peers resolve (audit H-01), and then runs the
+ * `packages/cli` packs the CLI's publishable closure, which includes `geospec` so that `@taucad/host`'s
+ * optional GeoSpec peers resolve (audit H-01), and then runs the
  * installed `tau` from a project folder outside the app with an empty config directory: `export` to
  * a GLB, `check`, `mcp` listing and passing `test_model`, and the typed not-prepared refusal for a
  * `.py` model.
@@ -962,7 +962,7 @@ import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-import { quantity } from '@taucad/runtime/configuration/zod';
+import { quantity } from '@taucad/runtime/schema/zod';
 import { z } from 'zod';
 const requireFromRuntime = createRequire(import.meta.resolve('@taucad/runtime'));
 const requireFromConsumer = createRequire(import.meta.url);

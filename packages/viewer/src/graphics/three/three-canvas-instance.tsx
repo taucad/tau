@@ -47,7 +47,9 @@ export type ThreeCanvasInstanceProps = ThreeContextProperties & {
 /** Reports the canvas's surface size from inside the R3F root, on mount and whenever it changes. */
 function SurfaceSizeReporter({
   onSurfaceResize,
-}: Readonly<{ onSurfaceResize: (cssPixels: number, pixelRatio: number) => void }>): undefined {
+}: Readonly<{
+  onSurfaceResize: (cssPixels: number, pixelRatio: number) => void;
+}>): undefined {
   const cssPixels = useThree((state) => state.size.width * state.size.height);
   const pixelRatio = useThree((state) => state.viewport.dpr);
   useEffect(() => {
@@ -186,7 +188,10 @@ export function ThreeCanvasInstance({
     if (!initializedRenderer || initializedRenderer.factory !== glProperty || isContextLost || glProperty.isRetired()) {
       return;
     }
-    graphicsRef.send({ type: 'rendererInitialized', payload: { canvasId, backend: initializedRenderer.backend } });
+    graphicsRef.send({
+      type: 'rendererInitialized',
+      payload: { canvasId, backend: initializedRenderer.backend },
+    });
     return () => {
       graphicsRef.send({ type: 'rendererRemoved', canvasId });
     };
@@ -280,7 +285,8 @@ export function ThreeCanvasInstance({
       onCreated={onCanvasCreated}
     >
       <CanvasRendererLifetime factory={glProperty} />
-      <ThreeGraphicsBackendProvider value={graphicsBackend}>
+      {/* Both execution backends consume node materials. Effective API is reported above after init. */}
+      <ThreeGraphicsBackendProvider value='webgpu'>
         <OverlayDepthProvider>
           <Scene
             enableGizmo={enableGizmo}

@@ -65,10 +65,10 @@ if [ ! -d "$project_root/.git" ]; then
   mv "$staging" "$project_root"
 fi
 
-# `tau serve` backs its project up with `TAU_API_TOKEN` (C67). Here that is the
+# `tau serve` backs its project up with `TAU_AUTH_TOKEN` (C67). Here that is the
 # push credential, which the API accepts on this project's git routes and
 # refuses everywhere else (I10); the device credential stays the relay's.
-export TAU_API_TOKEN="$TAU_HOST_GIT_CREDENTIAL"
+export TAU_AUTH_TOKEN="$TAU_HOST_GIT_CREDENTIAL"
 
 # `pnpm deploy` materialises @taucad/cli itself at /app, so its bin is /app/dist.
 #

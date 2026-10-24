@@ -7,7 +7,7 @@
  * does not — no second manifest, no second upload path, no second failure copy.
  *
  * Two things only a terminal has to be told: which API to publish to
- * (`TAU_API_URL`) and the session token (`TAU_API_TOKEN`). The token authorizes
+ * (`TAU_API_URL`) and the session token (`TAU_AUTH_TOKEN`). The token authorizes
  * both halves — the publication row's request, and the push itself, which
  * carries it as a per-spawn `http.extraHeader` to Tau's own origin and to no
  * other remote (P40). Nothing is written under the project: not into
@@ -22,6 +22,7 @@ import { openProjectRevisions } from '@taucad/host';
 import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
 
+import { authApiOrigin, resolveAuthToken } from '#auth.js';
 import { cliError, emit, exitCodes, writeStdout } from '#output.js';
 import { requireGitToolchain } from '#commands/revisions.js';
 
@@ -60,22 +61,11 @@ const readEntryPath = async (workspaceRoot: string): Promise<string> => {
  * @throws CliError When either is unset.
  * @internal
  */
-export const requireApi = (): Readonly<{ apiBaseUrl: string; apiToken: string }> => {
-  const apiBaseUrl = process.env['TAU_API_URL'];
-  const apiToken = process.env['TAU_API_TOKEN'];
-  if (apiBaseUrl === undefined || apiBaseUrl === '') {
-    throw cliError(
-      'NO_API_URL',
-      'Set TAU_API_URL to the Tau Cloud API this project publishes to (for example https://api.tau.new).',
-      exitCodes.refused,
-    );
-  }
-  if (apiToken === undefined || apiToken === '') {
-    throw cliError(
-      'NO_API_TOKEN',
-      'Set TAU_API_TOKEN to a Tau session token. Tau never asks for a password and stores nothing.',
-      exitCodes.refused,
-    );
+export const requireApi = async (): Promise<Readonly<{ apiBaseUrl: string; apiToken: string }>> => {
+  const apiBaseUrl = authApiOrigin();
+  const apiToken = await resolveAuthToken(apiBaseUrl);
+  if (!apiToken) {
+    throw cliError('NO_AUTH_TOKEN', 'Run tau auth login, or set TAU_AUTH_TOKEN for automation.', exitCodes.refused);
   }
   return { apiBaseUrl, apiToken };
 };
@@ -129,7 +119,7 @@ export const publishCommand = defineCommand({
     },
   },
   async run({ args }) {
-    const { apiBaseUrl, apiToken } = requireApi();
+    const { apiBaseUrl, apiToken } = await requireApi();
     const workspaceRoot = resolve(args.project ?? process.cwd());
     await requireGitToolchain();
     if (!existsSync(workspaceRoot)) {
@@ -137,7 +127,7 @@ export const publishCommand = defineCommand({
     }
     const entryPath = args.entry === undefined || args.entry === '' ? await readEntryPath(workspaceRoot) : args.entry;
     const projectName = basename(workspaceRoot);
-    const revisions: ProjectRevisionVerbs = openProjectRevisions({ workspaceRoot, apiBaseUrl, apiToken });
+    const revisions: ProjectRevisionVerbs = await openProjectRevisions({ workspaceRoot, apiBaseUrl, apiToken });
     try {
       const outcome = await revisions.publish({
         tag: args.version,

@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto';
 
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { defineMachine } from '@taucad/runtime/machine';
 import type { MachineNetworkStream } from '@taucad/runtime/machine';
 import { z } from 'zod';

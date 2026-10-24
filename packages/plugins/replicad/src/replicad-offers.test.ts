@@ -34,8 +34,16 @@ describe('Replicad view offers', () => {
     const offers = offersFor({ shapes: normalizeRenderShapes({ shape: drawing, name: 'Front' }) });
     expect(offers.views).toEqual(['drawing']);
     expect(offers.views[0]).toBe('drawing');
-    expect(offers.exports).toEqual([]);
+    expect(offers.exports).toEqual(['step']);
     expect(offers.instances?.drawing).toEqual([{ id: 'Front', title: 'Front' }]);
+  });
+
+  it('offers no export for a drawing-only model with an open profile', async () => {
+    const { draw } = await import('replicad');
+    const closed = { shape: draw().hLine(5).vLine(5).close(), name: 'Closed' };
+    const open = { shape: draw().hLine(5).vLine(5).done(), name: 'Open' };
+    expect(offersFor({ shapes: normalizeRenderShapes(open) }).exports).toEqual([]);
+    expect(offersFor({ shapes: normalizeRenderShapes([closed, open]) }).exports).toEqual([]);
   });
 
   it('offers instances only when a drawing view exists', async () => {

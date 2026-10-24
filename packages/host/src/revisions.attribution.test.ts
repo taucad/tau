@@ -263,6 +263,7 @@ describe('the Node host observes its own workspace', () => {
     const raised: Array<readonly string[]> = [];
     const revisions = createProjectRevisions({
       workspaceRoot,
+      projectId: 'project-watch',
       port: createNativeGitRevisionPort({
         repositoryPath: workspaceRoot,
         checkouts: { projectId: 'project-watch', directory: join(workspaceRoot, '..', 'checkouts') },

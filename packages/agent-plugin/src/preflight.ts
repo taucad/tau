@@ -116,26 +116,31 @@ export type PreflightInput = {
 };
 
 /**
- * Check, in order, that Node.js is 24 or later, that npm runs and is 11 or later, and that a file can
- * be created in npm's cache, where `npx` writes first.
+ * The Node.js check: the Tau CLI needs Node.js 24 or later.
+ *
+ * @internal
+ * @param nodeVersion - The version to check, as `process.versions.node` gives it.
+ * @returns The exit-2 failure, or `undefined` when the version is 24 or later.
+ */
+export const nodeFailure = (nodeVersion = process.versions.node): PreflightFailure | undefined =>
+  Number.parseInt(nodeVersion, 10) < 24
+    ? { code: 2, message: `tau: Node.js ${nodeVersion} started this plugin; install Node.js 24 or later\n` }
+    : undefined;
+
+/**
+ * The npm checks: npm runs and is 11 or later, and a file can be created in npm's cache, where `npx` writes first.
  *
  * Stops at the first failure. npm runs twice, for `--version` and `config get cache`, about 0.1 s each.
  * The cache check is skipped when npm will not name its cache: it refuses to print a value that looks
  * like a secret, such as a path holding a UUID, and `npx` may still work there.
  *
  * @internal
- * @param input - The Node.js version and npm runner, for tests; the running process's by default.
+ * @param npm - Runs npm, for tests; the `npm` on `PATH` by default.
  * @returns The first failure, or npm's version and cache folder.
  */
-export const preflight = ({
-  nodeVersion = process.versions.node,
-  npm = (args) => run(windows ? 'npm.cmd' : 'npm', args),
-}: PreflightInput = {}): PreflightReport => {
-  if (Number.parseInt(nodeVersion, 10) < 24) {
-    return {
-      failure: { code: 2, message: `tau: Node.js ${nodeVersion} started this plugin; install Node.js 24 or later\n` },
-    };
-  }
+export const npmPreflight = (
+  npm: NonNullable<PreflightInput['npm']> = (args) => run(windows ? 'npm.cmd' : 'npm', args),
+): PreflightReport => {
   let version: string;
   try {
     version = npm(['--version']);
@@ -171,4 +176,17 @@ export const preflight = ({
     }
   }
   return { npm: version, cache };
+};
+
+/**
+ * Check, in order, that Node.js is 24 or later ({@link nodeFailure}) and that npm and its cache will serve `npx`
+ * ({@link npmPreflight}).
+ *
+ * @internal
+ * @param input - The Node.js version and npm runner, for tests; the running process's by default.
+ * @returns The first failure, or npm's version and cache folder.
+ */
+export const preflight = ({ nodeVersion, npm }: PreflightInput = {}): PreflightReport => {
+  const failure = nodeFailure(nodeVersion);
+  return failure ? { failure } : npmPreflight(npm);
 };

@@ -28,10 +28,9 @@ export const createBillableModelInputCounters = (input: {
   enabled: boolean;
   environment: BillingEnvironment;
   apiKey: unknown;
-  credentialAccount: string | undefined;
 }): ReadonlyMap<string, InputCountCapability> => {
-  const { apiKey, credentialAccount } = input;
-  if (!input.enabled || typeof apiKey !== 'string' || apiKey.length === 0 || credentialAccount === undefined) {
+  const { apiKey } = input;
+  if (!input.enabled || typeof apiKey !== 'string' || apiKey.length === 0) {
     return new Map();
   }
   return new Map(
@@ -42,7 +41,7 @@ export const createBillableModelInputCounters = (input: {
         {
           qualification: 'openai-input-tokens-v1',
           environment: input.environment,
-          credentialAccount,
+
           sourceRevision: inputCountRevision,
           url: 'https://api.openai.com/v1/responses/input_tokens',
           apiKey,

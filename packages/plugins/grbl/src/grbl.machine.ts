@@ -1,4 +1,4 @@
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { defineMachine, machineManifestOf } from '@taucad/runtime/machine';
 import type {
   MachineDiscoveryEvent,

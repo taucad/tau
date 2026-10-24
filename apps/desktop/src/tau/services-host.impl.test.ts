@@ -16,7 +16,7 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import type * as AgentHost from '@taucad/agent-host';
 import type * as AgentLauncher from '@taucad/agent-host/launcher';
-import { requireRevisionToolchain } from '@taucad/host';
+import { acpModelProbeTimeout, requireRevisionToolchain } from '@taucad/host';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
@@ -2077,23 +2077,61 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     expect(port.close).toHaveBeenCalled();
   });
 
-  it('should serve an agent host requested before its config arrives', async () => {
-    /* Main does not await its external-agent discovery (D17), so the window
+  it.each([0, acpModelProbeTimeout])(
+    'should serve an agent host when its config arrives after %i ms',
+    async (configDelay) => {
+      /* Main does not await its external-agent discovery (D17), so the window
        boots beside it and asks for this port first. Refusing the early request
        closed the renderer's channel, and the page read that as a dead host. */
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
+      const authorityDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-authority-'));
+      workspaces.push(workspaceRoot, authorityDirectory);
+      const harness = hostHarness({ authorityDirectory, serve: serveNodeFsProvider });
+      hosts.push(harness.host);
+      harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
+      vi.useFakeTimers();
+      const client = connect(harness.host, workspaceRoot);
+      try {
+        await vi.advanceTimersByTimeAsync(configDelay);
+        harness.host.handleMessage(frame({ type: 'agentHost', config }));
+      } finally {
+        vi.useRealTimers();
+      }
+
+      await expect(attachUnwritten(client, 'chat-early')).resolves.toMatchObject(unwrittenAttach);
+      expect(harness.log).not.toHaveBeenCalledWith('agent-host.not-configured', expect.anything());
+    },
+    20_000,
+  );
+
+  it('keeps an early history connection until the model discovery budget has elapsed', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
-    const authorityDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-authority-'));
-    workspaces.push(workspaceRoot, authorityDirectory);
-    const harness = hostHarness({ authorityDirectory, serve: serveNodeFsProvider });
-    hosts.push(harness.host);
-    harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
-    const client = connect(harness.host, workspaceRoot);
-
-    harness.host.handleMessage(frame({ type: 'agentHost', config }));
-
-    await expect(attachUnwritten(client, 'chat-early')).resolves.toMatchObject(unwrittenAttach);
-    expect(harness.log).not.toHaveBeenCalledWith('agent-host.not-configured', expect.anything());
-  }, 20_000);
+    workspaces.push(workspaceRoot);
+    const { host, log } = hostHarness();
+    hosts.push(host);
+    host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
+    const port = stubPort();
+    vi.useFakeTimers();
+    try {
+      host.handleMessage(
+        frame(
+          {
+            type: 'concern',
+            concern: 'agentHost',
+            context: { workspaceRoot, projectId: 'proj_test' },
+          },
+          [port],
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(acpModelProbeTimeout);
+      expect(port.close).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalledWith('agent-host.not-configured', expect.anything());
+    } finally {
+      // Drain the bounded wait so this fixture leaves no parked connection.
+      await vi.advanceTimersByTimeAsync(6000);
+      vi.useRealTimers();
+    }
+  });
 
   it('should refuse an agent host whose config never arrives', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
@@ -2116,7 +2154,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       );
 
       // Still parked: main's CLI and model probes take seconds, not instants.
-      await vi.advanceTimersByTimeAsync(9000);
+      await vi.advanceTimersByTimeAsync(acpModelProbeTimeout + 4000);
       expect(port.close).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(2000);

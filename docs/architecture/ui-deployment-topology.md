@@ -67,7 +67,7 @@ Better Auth uses `sameSite: 'lax'`. Staging shares `taucad.dev` across the UI an
 
 ## Cross-Origin Headers
 
-Netlify sends `Cross-Origin-Embedder-Policy: require-corp` from [`apps/ui/netlify.toml`](../../apps/ui/netlify.toml). The Fly API sets `Cross-Origin-Resource-Policy: cross-origin` so API calls succeed under COEP. The API's CORS allow-list is per environment; do not broaden the deploy-preview glob, because a wider pattern admits unintended Netlify host classes.
+Netlify sends static-file `Cross-Origin-Embedder-Policy: require-corp` from [`apps/ui/netlify.toml`](../../apps/ui/netlify.toml). SSR documents set isolation headers and the matching report-only CSP in [`apps/ui/app/entry.server.tsx`](../../apps/ui/app/entry.server.tsx); Netlify custom headers do not apply to function responses. The entry regression test checks CSP parity with the static configuration. Marketing responses retain their separate policy at the marketing origin. The Fly API sets `Cross-Origin-Resource-Policy: cross-origin` so API calls succeed under COEP. The API's CORS allow-list is per environment; do not broaden the deploy-preview glob, because a wider pattern admits unintended Netlify host classes.
 
 ---
 

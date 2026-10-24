@@ -112,6 +112,8 @@ describe('ChatTitleBar', () => {
       const options = screen.getByRole('button', { name: 'Chat options' });
       expect(name.parentElement?.parentElement).toContainElement(options);
       expect(options.parentElement?.parentElement).toHaveClass('md:absolute', 'md:right-0');
+      // A touch tablet keeps this desktop row, and has no hover to reveal the menu (I2, D12).
+      expect(options.parentElement?.parentElement).toHaveClass('pointer-coarse:opacity-100');
       expect(screen.queryByText(/search chats/i)).not.toBeInTheDocument();
     });
 

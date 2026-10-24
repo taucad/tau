@@ -23,7 +23,7 @@ export function MachineProjectLink({
     enabled: !isLoading,
     staleTime: 3000,
   });
-  const project = listing.data?.projects.find((candidate) => candidate.manifest.id === job.artifact.projectId);
+  const project = listing.data?.projects.find((candidate) => candidate.projectId === job.artifact.projectId);
   if (listing.isPending) {
     return (
       <span role='status' className='text-xs text-muted-foreground'>

@@ -207,7 +207,7 @@ describe('plugin generator', () => {
     expect(instructions).not.toContain('.agents/skills/create-kernel/SKILL.md');
     expect(instructions).toContain('../../../docs/policy/runtime-architecture-policy.md');
     expect(instructions).not.toMatch(/<%|__tmpl__/);
-    expect(readText(tree, 'packages/plugins/image-fixture/CLAUDE.md')).toBe('@AGENTS.md\n');
+    expect(tree.exists('packages/plugins/image-fixture/CLAUDE.md')).toBe(false);
   });
 
   it('keeps the emitted scaffold file set aligned with the image reference package', async () => {
@@ -220,7 +220,7 @@ describe('plugin generator', () => {
       .map(({ path }) => path.replace(/^\//, ''))
       .filter((path) => path.startsWith(prefix))
       .map((path) => path.slice(prefix.length))
-      .filter((path) => path !== 'AGENTS.md' && path !== 'CLAUDE.md')
+      .filter((path) => path !== 'AGENTS.md')
       .map((path) => path.replaceAll('image-fixture', 'image'))
       .sort();
     const referenceRoot = resolve(repositoryRoot, 'packages/plugins/image');
@@ -333,14 +333,14 @@ describe('plugin generator', () => {
     expect(source).toContain('default: manufacturingFixtureMachine');
 
     const job = readText(tree, `${root}/src/manufacturing-fixture.job.ts`);
-    expect(job).toContain("from '@taucad/runtime/configuration'");
+    expect(job).toContain("from '@taucad/runtime/schema'");
     expect(job).toContain("from '@taucad/runtime/job'");
     expect(job).toContain("from 'zod'");
     expect(job).toContain('input.configuration.enabled');
     expect(job).toContain('TODO: implement manufacturing-fixture job execution');
 
     const machine = readText(tree, `${root}/src/manufacturing-fixture.machine.ts`);
-    expect(machine).toContain("from '@taucad/runtime/configuration'");
+    expect(machine).toContain("from '@taucad/runtime/schema'");
     expect(machine).toContain("from '@taucad/runtime/machine'");
     expect(machine).toContain("from 'zod'");
     expect(machine).toContain('schema: z.object({}),');

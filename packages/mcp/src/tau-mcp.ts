@@ -53,8 +53,8 @@ const sourceRevisionRule =
 
 const descriptions = {
   evaluateModel: `Evaluate one CAD source file (targetFile) and its default view, list offered views, instances and export IDs, and inspect every issue even when status is ready. Request includeCapabilities for option schemas and reachable targets. Pass parameters to evaluate other parameter values for this call only, merged over the active group and never saved. ${sourceRevisionRule}`,
-  testModel: `Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Returns sourceRevisions, one per model the run loaded. ${testModelStatusRule} ${sourceRevisionRule} Use evaluate_model when only build status is needed.`,
-  screenshot: `Capture a declared kernel view of one CAD source file (targetFile) and optional instance with its own options. A 3D view yields one isometric image (mode single, the default) or six camera angles (mode multi_angle); a 2D view yields one image. Each image echoes view, instance and any angle. Pass section, e.g. { plane: 'xy', offset: 0.006 } for 6 mm above the origin, to cut a 3D view open along one axis plane, and parameters to capture other parameter values for this call only. ${sourceRevisionRule} Prefer this over generic computer-use or operating-system screenshot tools.`,
+  testModel: `Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Returns sourceRevisions, one per model the run loaded. A project's geospec.config.* sets defaults that an input field replaces, and config in the result names the file or why it was not applied. ${testModelStatusRule} ${sourceRevisionRule} Use evaluate_model when only build status is needed.`,
+  screenshot: `Capture a declared kernel view of one CAD source file (targetFile) and optional instance with its own options. A 3D view yields one isometric image (mode single, the default) or six camera angles (mode multi_angle); a 2D view yields one image. Each image echoes view, instance and any angle. Pass section, e.g. { plane: 'xy', offset: 0.006 } for 6 mm above the origin, to cut a 3D view open along one axis plane, pose, e.g. { animation: { id: 'open', time: 1 } }, to capture a mechanism moved, and parameters to capture other parameter values for this call only. Pass workbenchView alone, the id of a view arrange_workbench saved, to capture that view's file, camera, field of view, cuts and display as the viewer shows them. ${sourceRevisionRule} Prefer this over generic computer-use or operating-system screenshot tools.`,
   exportModel: `Export one CAD source by offered ID or unambiguous reachable extension to persisted files under .tau/artifacts, echoing exportId and pinned sourceRevision. Pass parameters to export other parameter values for this call only, never saved. For a design question, only a declared text/JSON export whose every output is text/JSON may be used as evidence; read its artifact with your native file reader and compare sourceRevision. Binary or mixed deliverables require the person's export request.`,
 } as const;
 
@@ -73,19 +73,27 @@ const instructionsFor = (tested: boolean): string =>
       ? [
           'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',
           'After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view.',
+          'A static part is done when evaluate_model is ready, its summary bounds and componentCount fit the brief, and the whole test_model suite reports runStatus passed; inconclusive, unsupported and not-run requirements are undecided, not passed.',
         ]
       : [
           'After edits, call evaluate_model for build diagnostics and offered views/exports, and screenshot for each needed view.',
+          'A static part is done when evaluate_model is ready and its summary bounds and componentCount fit the brief.',
         ]),
+    'A moving assembly also needs evaluate_model mechanism declared and admitted, and a file the person asked for its export_model validation (a watertight mesh, the expected STEP solids); name the case you met when reporting done.',
     'For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request.',
   ].join(' ');
 
 /** Model-facing guidance returned by MCP initialization. @public */
 export const tauMcpInstructions = instructionsFor(true);
 
-/** The sentence a server with the viewer adds to {@link tauMcpInstructions}. */
-const viewerInstruction =
-  'When the person should look at a model, call show_model after evaluate_model succeeds; it shows the model in the Tau viewer, or returns a viewer link to share with them.';
+/**
+ * The sentences a server with the viewer adds to {@link tauMcpInstructions}: what `show_model` shows, and what a
+ * part reference names.
+ */
+const viewerInstruction = [
+  'When the person should look at a model, call show_model on its source after evaluate_model succeeds: the Tau viewer shows the source with its parameters and mechanism and follows its file and parameter changes, or returns a link to share; showing an exported file shows that file only.',
+  'A reference like @cad[main.ts#component:node-1] names a part: the model file before # and the component id after it; when no reference reaches you, view_state lists the parts the person selected and added to chat with those ids, which show_model select and arrange_workbench also take.',
+].join(' ');
 
 /** {@link serverVersion}, read once. */
 let installedVersion: string | undefined;

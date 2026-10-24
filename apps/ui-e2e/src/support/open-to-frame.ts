@@ -237,12 +237,12 @@ const seedProject = async (
   const source = await readFile(join(repoRoot, 'libs/tau-examples/src/kernels', example, entry));
   await mkdir(join(directory, '.tau', 'parameters'), { recursive: true });
   await copyFile(join(repoRoot, 'libs/tau-examples/src/kernels', example, entry), join(directory, entry));
+  await writeFile(join(directory, '.tau', 'project.json'), JSON.stringify({ version: 1, projectId: id }));
   await writeFile(
     join(directory, 'tau.json'),
     JSON.stringify(
       {
-        $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-        id,
+        $schema: 'https://tau.new/schemas/tau-v1.json',
         name: slug,
         description: '',
         tags: [],

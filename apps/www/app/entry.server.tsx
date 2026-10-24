@@ -27,7 +27,7 @@ export default async function handleRequest(
   headers.set('Content-Type', 'text/html; charset=utf-8');
   headers.set(
     'Content-Security-Policy',
-    `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.taucad.dev https://api.tau.new; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
+    `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://api.taucad.dev https://api.tau.new${rootData && typeof rootData === 'object' && 'installerCatalog' in rootData && rootData.installerCatalog === true ? ' https://downloads.tau.new https://downloads.taucad.dev' : ''}; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
   );
   if (!(rootData && typeof rootData === 'object' && 'launch' in rootData && rootData.launch === true)) {
     headers.set('X-Robots-Tag', 'noindex, nofollow');

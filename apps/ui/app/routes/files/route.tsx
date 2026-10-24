@@ -1,3 +1,4 @@
+import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
@@ -840,6 +841,7 @@ export default function FilesRoute(): React.JSX.Element {
   return (
     <PageContent className='flex h-full flex-col gap-4'>
       <PageHeader title='Files' />
+      {isDesktopTarget() ? <WorkspaceConnections /> : undefined}
 
       <div className='grid min-h-0 flex-1 auto-rows-fr grid-cols-1 gap-4 overflow-x-auto md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]'>
         <ColumnShell
@@ -858,7 +860,7 @@ export default function FilesRoute(): React.JSX.Element {
           }}
         />
 
-        {isFileSystemAccessSupported ? (
+        {!isDesktopTarget() && isFileSystemAccessSupported ? (
           isLoadingWorkspaces ? (
             <div className='flex items-center justify-center rounded-lg border bg-card p-4'>
               <Loader className='size-5' />

@@ -9,6 +9,7 @@
  */
 import type { RevisionChangeOutput, RevisionRowOutput } from '#schemas/tools/revisions.tool.schema.js';
 import type { SourceRevisionOutput } from '#schemas/tools/source-revision.schema.js';
+import type { ExportValidation } from '#schemas/tools/export-model.tool.schema.js';
 import type { DeterministicEditFileInput } from '#schemas/tools/edit-file.tool.schema.js';
 import type {
   CaptureImagesRpcResult,
@@ -35,6 +36,7 @@ import type {
   FileProvenance,
 } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
+import type { WorkbenchView } from '@taucad/workbench';
 
 /** Local execution metadata that never enters an RPC payload or durable record. @public */
 export type RpcInvocationContext = Readonly<{
@@ -188,6 +190,8 @@ export type RpcGraphicsExportModelResult =
       exportId: string;
       files: ExportFile[];
       sourceRevision?: SourceRevisionOutput;
+      /** What the exported files say about themselves, read from their bytes. */
+      validation?: ExportValidation;
       /** The non-fatal issues the runtime returned with the files; the handler hands the warnings to the agent. */
       issues?: KernelIssue[];
     }
@@ -215,9 +219,26 @@ export type RpcGraphicsClient = {
   ): Promise<RpcGraphicsExportModelResult>;
 };
 
+/**
+ * A saved workbench view as a capture draws it: its camera (the selected kernel view's own, when it saved one), field
+ * of view, up direction, display toggles and section cuts, in metres in `tau:root`. @public
+ */
+export type CaptureWorkbenchView = Readonly<
+  { id: string } & Pick<WorkbenchView, 'camera' | 'fieldOfView' | 'upDirection' | 'display' | 'section'>
+>;
+
+/**
+ * What an image client captures: the screenshot input with `workbenchView` resolved against its record, so the
+ * target file, kernel view, instance and options are the view's own. @public
+ */
+export type CaptureImagesClientInput = Omit<CaptureImagesRpcInput, 'targetFile' | 'workbenchView'> & {
+  targetFile: string;
+  workbenchView?: CaptureWorkbenchView | undefined;
+};
+
 /** Browser/headless image capture client independent of a mounted viewport. @public */
 export type RpcImageClient = {
-  captureImages(args: CaptureImagesRpcInput, context?: RpcInvocationContext): Promise<CaptureImagesRpcResult>;
+  captureImages(args: CaptureImagesClientInput, context?: RpcInvocationContext): Promise<CaptureImagesRpcResult>;
 };
 
 /**

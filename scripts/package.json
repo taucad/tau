@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@inkjs/ui": "catalog:",
-    "playwright": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/esbuild": "workspace:*",
@@ -28,6 +27,7 @@
     "js-yaml": "catalog:",
     "jsdom": "catalog:",
     "pdf-parse": "catalog:",
+    "playwright": "catalog:",
     "react": "catalog:",
     "remark-gfm": "catalog:",
     "remark-parse": "catalog:",
@@ -35,6 +35,7 @@
     "unified": "catalog:"
   },
   "devDependencies": {
+    "@sentry/cli": "catalog:",
     "@taucad/nx": "workspace:*",
     "@types/js-yaml": "catalog:",
     "@types/jsdom": "catalog:",

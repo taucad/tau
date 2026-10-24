@@ -483,7 +483,7 @@ function ModelPaneviewHeaderSurface({
   return (
     <PaneviewHeader api={api} title={entryPath}>
       <PaneviewHeaderControls>
-        <span className='shrink-0 text-xs text-muted-foreground/60'>({count})</span>
+        <span className='shrink-0 text-xs text-muted-foreground'>({count})</span>
         {hiddenComponentCount > 0 ? (
           <PaneviewHeaderAction
             aria-label={`Show hidden components in ${entryPath}`}

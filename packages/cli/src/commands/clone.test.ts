@@ -62,7 +62,7 @@ describe('cloneCommand', () => {
       vi.fn(async () => ({ ok: true, status: 200, json: async () => cloudProjects })),
     );
     vi.stubEnv('TAU_API_URL', 'https://api.tau.new');
-    vi.stubEnv('TAU_API_TOKEN', 'session-token');
+    vi.stubEnv('TAU_AUTH_TOKEN', 'session-token');
   });
 
   afterEach(async () => {
@@ -116,10 +116,10 @@ describe('cloneCommand', () => {
   });
 
   it('refuses without an API to open from, before listing anything', async () => {
-    vi.stubEnv('TAU_API_TOKEN', '');
+    vi.stubEnv('TAU_AUTH_TOKEN', '');
 
     await expect(runCommand(cloneCommand, { rawArgs: [] })).rejects.toMatchObject({
-      code: 'NO_API_TOKEN',
+      code: 'NO_AUTH_TOKEN',
       exit: exitCodes.refused,
     });
     expect(globalThis.fetch).not.toHaveBeenCalled();

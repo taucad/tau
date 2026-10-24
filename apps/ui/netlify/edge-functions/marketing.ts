@@ -90,13 +90,29 @@ export function rewriteLocation(location: string, upstream: URL, requestUrl: URL
   return new URL(`${target.pathname}${target.search}${target.hash}`, requestUrl.origin).toString();
 }
 
+/**
+ * The URL the visitor requested. Staging serves its custom domain through a router deploy that proxies every
+ * request to the `staging--<site>.netlify.app` alias (`.github/actions/netlify-staging-router`), so this function
+ * sees the alias hostname there; the router names the visitor's domain in `X-Tau-Public-Host`. The header is
+ * honoured only on a `netlify.app` hostname, which is how the router reaches the alias, never on a custom domain.
+ */
+export function publicRequestUrl(request: Request): URL {
+  const url = new URL(request.url);
+  const publicHost = request.headers.get('x-tau-public-host');
+  if (publicHost && url.hostname.endsWith('.netlify.app') && /^[a-z\d.-]+$/u.test(publicHost)) {
+    url.protocol = 'https:';
+    url.host = publicHost;
+  }
+  return url;
+}
+
 function readSiteVariable(name: string): string | undefined {
   const runtime = Reflect.get(globalThis, 'Netlify') as NetlifyRuntime | undefined;
   return runtime?.env.get(name);
 }
 
 export default async function marketing(request: Request, context: EdgeContext): Promise<Response> {
-  const requestUrl = new URL(request.url);
+  const requestUrl = publicRequestUrl(request);
   const origin = readSiteVariable('MARKETING_ORIGIN');
   // Keep app crawl exclusions authoritative; advertise marketing only when routing is enabled.
   if (requestUrl.pathname === '/robots.txt') {
@@ -136,7 +152,7 @@ export default async function marketing(request: Request, context: EdgeContext):
   });
   const location = response.headers.get('location');
   if (!location) {
-    const document = await stagingDownloadLinks(response, requestUrl);
+    const document = await stagingLinks(response, requestUrl);
     return requestUrl.pathname === '/' ? privateDocument(document) : document;
   }
 
@@ -150,8 +166,11 @@ export default async function marketing(request: Request, context: EdgeContext):
   return requestUrl.pathname === '/' ? privateDocument(rewritten) : rewritten;
 }
 
-/** Select staging downloads in the shared static HTML before client scripts run. */
-async function stagingDownloadLinks(response: Response, requestUrl: URL): Promise<Response> {
+/**
+ * Select staging downloads and name staging's own agent page in the shared static HTML, so a visitor and an agent
+ * reading the raw HTML both get staging's links before any client script runs.
+ */
+async function stagingLinks(response: Response, requestUrl: URL): Promise<Response> {
   if (
     requestUrl.hostname !== 'taucad.dev' ||
     response.body === null ||
@@ -161,11 +180,16 @@ async function stagingDownloadLinks(response: Response, requestUrl: URL): Promis
   }
 
   const html = await response.clone().text();
-  // Match our emitted anchors; keep complete script blocks byte-identical for CSP hashes.
+  // Match our emitted anchors and the hero's agent prompt; keep complete script blocks byte-identical for CSP hashes.
   const rewritten = html.replaceAll(
-    /<script\b[^>]*>[\s\S]*?<\/script\s*>|(<a\b[^>]*\shref=")https:\/\/downloads\.tau\.new(\/latest\/[^"]*")/giu,
-    (match: string, anchor: string | undefined, path: string | undefined) =>
-      anchor === undefined ? match : `${anchor}https://downloads.taucad.dev${path}`,
+    /<script\b[^>]*>[\s\S]*?<\/script\s*>|(<a\b[^>]*\shref=")https:\/\/downloads\.tau\.new(\/latest\/[^"]*")|(<code id="agent-prompt-text">Install the Tau plugin from )https:\/\/tau\.new(\/llms\.txt<\/code>)/giu,
+    (match: string, ...groups: Array<string | undefined>) => {
+      const [anchor, path, prompt, page] = groups;
+      if (anchor !== undefined) {
+        return `${anchor}https://downloads.taucad.dev${path}`;
+      }
+      return prompt === undefined ? match : `${prompt}https://taucad.dev${page}`;
+    },
   );
   if (rewritten === html) {
     return response;

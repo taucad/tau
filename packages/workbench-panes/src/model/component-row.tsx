@@ -221,7 +221,7 @@ export const ComponentRow = memo(function ComponentRow({
         !isSelected && !isFocused && isIsolated ? 'text-primary' : undefined,
         !isSelected && !isFocused ? 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground' : undefined,
         isHovered && !isSelected ? 'text-foreground' : undefined,
-        isHidden ? 'opacity-45' : undefined,
+        isHidden ? 'text-muted-foreground' : undefined,
       )}
       style={{ paddingLeft: `${getComponentRowPaddingLeft({ depth: node.depth, rootDepth })}px` }}
       onMouseEnter={() => {

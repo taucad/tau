@@ -1,13 +1,14 @@
 /**
- * The tab's workbench panes (viewer parity R1, R3): the Tau app's own Parameters, Model, Kinematics, Export and Share
- * panes from `@taucad/workbench-panes`, in a lane beside the canvas, each fed by a page source over the host bridge.
+ * The tab's workbench panes (viewer parity R1, R3, PAR-9): the Tau app's own Parameters, Model, Kinematics, Export,
+ * Share and Files panes from `@taucad/workbench-panes`, in a lane beside the canvas, each fed by a page source over the
+ * host bridge.
  */
 import { useEffect, useMemo, useRef } from 'react';
-import type { TauViewerModel } from '@taucad/mcp/viewer-protocol';
-import type { GeometryComponentReference } from '@taucad/types';
+import type { TauViewerEntryStatus, TauViewerModel } from '@taucad/mcp/viewer-protocol';
 import { WorkbenchPanesHostProvider } from '@taucad/workbench-panes/host/workbench-host';
 import type { GraphicsRef, WorkbenchPanesHost, WorkbenchUnit } from '@taucad/workbench-panes/host/workbench-host';
 import { ExportPane } from '@taucad/workbench-panes/export/export-pane';
+import { FilesPane } from '@taucad/workbench-panes/files/files-pane';
 import { KinematicsPane } from '@taucad/workbench-panes/kinematics/kinematics-pane';
 import { PaneLane } from '@taucad/workbench-panes/lane/pane-lane';
 import { ModelPane } from '@taucad/workbench-panes/model/model-pane';
@@ -15,16 +16,31 @@ import { ParametersPane } from '@taucad/workbench-panes/parameters/parameters-pa
 import type { ModelSource } from '@taucad/workbench-panes/model/model-source';
 import type { WorkbenchPaneId } from '@taucad/workbench-panes/registry/pane-registry';
 import { SharePane } from '@taucad/workbench-panes/share/share-pane';
+import type { ExportNotices } from '@taucad/workbench-panes/export/export-source';
+import { Toaster, toast } from '@taucad/ui/components/sonner';
 import type { HostBridge } from '#app/host-bridge.js';
+import type { LaneStore } from '#app/lane-store.js';
+import type { PartThumbnails } from '#app/part-previews.jsx';
 import type { ComponentReveal } from '#app/sources/component-menu.jsx';
 import { createExportSource } from '#app/sources/export-source.js';
+import type { PageFilesSource } from '#app/sources/files-source.js';
 import { createKinematicsSource } from '#app/sources/kinematics-source.js';
 import { createModelSource } from '#app/sources/model-source.js';
 import { createParametersSource } from '#app/sources/parameters-source.js';
 import { createShareSource } from '#app/sources/share-source.js';
 
-/** The panes the page offers; Details, Files and Revisions belong to the agent's host (R3). */
-const offeredPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics', 'export', 'share'];
+/** The Export pane's outcomes, as the Tau app reports them: in a toast. */
+const exportNotices: ExportNotices = {
+  success: (message) => {
+    toast.success(message);
+  },
+  error: (message) => {
+    toast.error(message);
+  },
+};
+
+/** The panes the page offers; Details and Revisions belong to the agent's host (R3). */
+const offeredPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics', 'export', 'share', 'files'];
 
 /** The tabs the lane opens with, as the workbench opens a project. */
 const openingPanes: readonly WorkbenchPaneId[] = ['parameters', 'model', 'kinematics'];
@@ -33,17 +49,25 @@ type WorkbenchLaneProps = Readonly<{
   bridge: HostBridge;
   /** The shown model; the panes show nothing until there is one. */
   model: TauViewerModel | undefined;
+  /** The server's live state of the shown sources, by project-relative path: their build and issues. */
+  status: Readonly<Record<string, TauViewerEntryStatus>> | undefined;
   graphicsRef: GraphicsRef;
-  /** The component selected in the Model pane, or `undefined` when cleared. */
-  onSelect: (reference: GeometryComponentReference | undefined) => void;
-  /** Show the model again after a parameter edit is written. */
-  onParametersWritten: () => void;
+  /** The Files pane's source: the shown model's project, and how this page opens another of its files. */
+  files: PageFilesSource;
+  /** The project's lane store: the lane's tabs and width and the Model pane's sections. */
+  store: LaneStore;
+  /** The shown model's part previews. */
+  thumbnails: PartThumbnails | undefined;
+  /** Opens the page's part gallery. */
+  openPartGallery: NonNullable<ModelSource['openPartGallery']>;
   /** Where the part menu's reveal requests reach the Model and Kinematics panes. */
   reveal: ComponentReveal;
   /** The part menu on the Model pane's rows. */
   componentActions: ModelSource['componentActions'];
   /** Opens a pane when the part menu asks for one. */
   openPaneRequest: Readonly<{ pane: WorkbenchPaneId; requestId: number }> | undefined;
+  /** The page's workbench toggle, at the end of the lane's tabs in the page's one top row. */
+  headerEnd: React.ReactNode;
 }>;
 
 /**
@@ -55,12 +79,16 @@ type WorkbenchLaneProps = Readonly<{
 export function WorkbenchLane({
   bridge,
   model,
+  status,
   graphicsRef,
-  onSelect,
-  onParametersWritten,
+  files,
+  store,
+  thumbnails,
+  openPartGallery,
   reveal,
   componentActions,
   openPaneRequest,
+  headerEnd,
 }: WorkbenchLaneProps): React.JSX.Element {
   /* The page shows one model: its one unit is the source when it has one, else the drawn file. */
   const entryPath = model === undefined ? undefined : (model.sourceFile ?? model.path);
@@ -68,44 +96,69 @@ export function WorkbenchLane({
     (): readonly WorkbenchUnit[] => (entryPath === undefined ? [] : [{ entryPath, graphicsRef }]),
     [entryPath, graphicsRef],
   );
-  /* One parameters source per bridge: it keeps each entry's last read, so a re-render does not read again. */
-  const onWritten = useRef(onParametersWritten);
-  onWritten.current = onParametersWritten;
-  const parameters = useMemo(
-    () =>
-      createParametersSource(bridge, {
-        onCommitted: () => {
-          onWritten.current();
-        },
-      }),
-    [bridge],
-  );
-  /* A model shown for another reason (the agent changed the source) may carry other parameters. */
-  const modelSha = model?.sha256;
+  /* A drag previews on the source's newest render; the source keeps one parameters controller per bridge. */
+  const modelIdRef = useRef<string | undefined>(undefined);
+  const modelId = model?.id;
   useEffect(() => {
-    if (modelSha !== undefined && entryPath !== undefined) {
+    modelIdRef.current = modelId;
+  }, [modelId]);
+  /* One parameters source per bridge: it keeps each entry's last read, so a re-render does not read again. A written
+   * edit is a sidecar change the server's watched document renders, and the newer model reaches the page unasked;
+   * the pane's own alert shows a refused operation. */
+  const parameters = useMemo(() => createParametersSource(bridge, { modelId: () => modelIdRef.current }), [bridge]);
+  useEffect(
+    () => () => {
+      parameters.dispose();
+    },
+    [parameters],
+  );
+  /* One kinematics source per bridge, reading the newest status the page holds. */
+  const kinematics = useMemo(() => createKinematicsSource(), []);
+  useEffect(() => {
+    kinematics.setStatus(status);
+  }, [kinematics, status]);
+  useEffect(() => {
+    files.setShownFile(entryPath);
+  }, [entryPath, files]);
+  /* A render of changed files (the agent's edit, or a parameter write) may carry other parameters; a drag's previews
+   * render the same files, so they read nothing again. A drawn file has no revision: its bytes name it. */
+  const revisionKey = model === undefined ? undefined : JSON.stringify(model.sourceRevision?.files ?? model.sha256);
+  useEffect(() => {
+    if (revisionKey !== undefined && entryPath !== undefined) {
       parameters.refresh(entryPath);
     }
-  }, [entryPath, modelSha, parameters]);
+  }, [entryPath, revisionKey, parameters]);
   const host = useMemo(
     (): WorkbenchPanesHost => ({
       useUnits: () => units,
       parameters,
-      kinematics: { ...createKinematicsSource(bridge), subscribeReveal: reveal.subscribeKinematics },
-      model: createModelSource(bridge, { onSelect, componentActions, reveal: reveal.model }),
+      kinematics: { useUnitStatus: kinematics.useUnitStatus, subscribeReveal: reveal.subscribeKinematics },
+      model: createModelSource({ store, thumbnails, openPartGallery, componentActions, reveal: reveal.model }),
+      files,
       ...(model === undefined
         ? {}
-        : { export: createExportSource(bridge, model), share: createShareSource(bridge, model) }),
+        : {
+            export: createExportSource(bridge, model, {
+              notices: exportNotices,
+              storage: store,
+            }),
+            share: createShareSource(bridge, model),
+          }),
     }),
-    [bridge, componentActions, model, onSelect, parameters, reveal, units],
+    [bridge, componentActions, files, kinematics, model, openPartGallery, parameters, reveal, store, thumbnails, units],
   );
+  /* Read once per store: the lane restores what it last showed in this project. */
+  const initialLayout = useMemo(() => store.readLane(), [store]);
 
   return (
     <WorkbenchPanesHostProvider value={host}>
       <PaneLane
         panes={offeredPanes}
         initialOpen={openingPanes}
+        initialLayout={initialLayout}
+        onLayoutChange={store.writeLaneLayout}
         openRequest={openPaneRequest}
+        headerEnd={headerEnd}
         renderPane={(pane) => {
           switch (pane) {
             case 'parameters': {
@@ -123,9 +176,13 @@ export function WorkbenchLane({
             case 'share': {
               return <SharePane />;
             }
+            case 'files': {
+              return <FilesPane />;
+            }
           }
         }}
       />
+      <Toaster />
     </WorkbenchPanesHostProvider>
   );
 }

@@ -34,6 +34,8 @@ export type WorkspaceDirectoryPanelProps = {
   readonly workspaceId?: string;
   /** Display label (typically the folder name). */
   readonly workspaceName?: string;
+  /** Optional folder path or supporting detail. */
+  readonly description?: string;
   /** Current status — drives copy, badge colour, and CTA visibility. */
   readonly status: WorkspaceDirectoryStatus;
   /** Show a spinner / disable buttons while a picker or permission flow runs. */
@@ -57,6 +59,7 @@ export function WorkspaceDirectoryPanel({
   variant,
   workspaceName,
   status,
+  description,
   isBusy = false,
   onConnect,
   onGrantAccess,
@@ -122,11 +125,12 @@ export function WorkspaceDirectoryPanel({
 
   if (variant === 'row') {
     return (
-      <div className='flex items-center justify-between gap-4 rounded-md border border-border bg-card px-3 py-2'>
+      <div className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-card px-3 py-2'>
         <div className='flex min-w-0 items-center gap-3'>
           {indicator}
           <div className='flex min-w-0 flex-col'>
             <span className='truncate font-medium'>{workspaceName ?? copy.title}</span>
+            {description ? <span className='text-xs break-all text-muted-foreground'>{description}</span> : undefined}
             {status === 'connected' ? undefined : (
               <span className='truncate text-xs text-muted-foreground'>{copy.description}</span>
             )}
@@ -147,12 +151,14 @@ export function WorkspaceDirectoryPanel({
           {showDisconnect ? (
             <Button
               size='sm'
-              variant='ghost'
+              variant='outline'
               disabled={isBusy}
+              aria-busy={isBusy}
               onClick={onDisconnect}
               aria-label={workspaceDirectoryActions.disconnect}
             >
-              <Unplug className='size-4' aria-hidden />
+              <Unplug aria-hidden />
+              Disconnect
             </Button>
           ) : undefined}
         </div>

@@ -8,9 +8,13 @@ import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
-import { purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
+import { purgeTombstonedTenants as streamTombstonedTenants } from '#api/git/maintenance/purge.js';
+
 import { restoreRepository } from '#api/git/maintenance/restore.js';
 import { assertSingletonProcessGroup, maintenanceProcessGroup } from '#api/git/maintenance/singleton.js';
+
+const purgeTombstonedTenants = async (...args: Parameters<typeof streamTombstonedTenants>) =>
+  Array.fromAsync(streamTombstonedTenants(...args));
 
 /**
  * D21: purge, blob collection and restore run once, in the
@@ -60,6 +64,7 @@ describe('singleton maintenance group', () => {
     await expect(collectZeroCountBlobs({ database, driver })).rejects.toThrow(/revisions-maintenance/u);
     await expect(
       restoreRepository({
+        database,
         source: store,
         primary: store,
         locator: repositoryLocator({ ownerId: 'owner', projectId: 'project' }),
@@ -81,7 +86,13 @@ describe('singleton maintenance group', () => {
     );
     const importers = listed
       .split('\n')
-      .filter((file) => file.endsWith('.ts') && !file.startsWith(maintenanceDirectory))
+      .filter(
+        (file) =>
+          file.endsWith('.ts') &&
+          !file.endsWith('.test.ts') &&
+          !file.endsWith('.spec.ts') &&
+          !file.startsWith(maintenanceDirectory),
+      )
       .map((file) => path.relative(applicationRoot, file))
       .sort();
 

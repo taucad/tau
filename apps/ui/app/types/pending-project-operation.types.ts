@@ -29,6 +29,7 @@ export type PendingProjectStorage =
 export type PendingCreateProjectOperation = PendingProjectStorage & {
   readonly operationId: string;
   readonly kind: 'create';
+  readonly projectId: string;
   readonly manifest: ProjectManifest;
   readonly library: ProjectLibraryState;
   readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>;
@@ -47,6 +48,7 @@ export type PendingDuplicateProjectOperation = PendingProjectStorage & {
   readonly operationId: string;
   readonly kind: 'duplicate';
   readonly sourceProjectId: string;
+  readonly projectId: string;
   readonly manifest: ProjectManifest;
   readonly library: ProjectLibraryState;
   /** Stable source snapshot captured before the durable operation is created. */

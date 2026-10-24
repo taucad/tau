@@ -144,7 +144,7 @@ export const checkCommand = defineCommand({
       throw cliError('INPUT_OUTSIDE_PROJECT', `${inputPath} is outside the project ${projectRoot}.`, exitCodes.usage);
     }
 
-    authorizeCliZooProxy(process.env);
+    await authorizeCliZooProxy(process.env);
     const runtime = await loadCliRuntime({
       projectRoot: process.cwd(),
       plugin: args.plugin,

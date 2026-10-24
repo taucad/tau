@@ -1,0 +1,123 @@
+name: Desktop packaging assembly
+
+on:
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'libs/types/src/desktop-updates.ts'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/desktop-packaging.yml'
+      - '.github/actions/setup-nx/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: desktop-packaging-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  pnpm_config_verify_deps_before_run: error
+  NX_NO_CLOUD: 'true'
+
+jobs:
+  assembly:
+    name: Native assembly (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - name: Preserve source bytes on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Observe free hosted Linux virtualization capability (not qualification)
+        if: runner.os == 'Linux'
+        run: |
+          python3 - <<'PYTHON'
+          import fcntl, json, os, platform
+          result = {'architecture': platform.machine(), 'kvmDevice': os.path.exists('/dev/kvm'), 'vmCreated': False}
+          try:
+              with open('/dev/kvm', 'rb') as device:
+                  result['kvmApi'] = fcntl.ioctl(device, 0xAE00, 0)
+                  vm = fcntl.ioctl(device, 0xAE01, 0)
+                  os.close(vm)
+                  result['vmCreated'] = True
+          except OSError as error:
+              result['error'] = str(error)
+          print(json.dumps(result))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Hosted KVM capability only; no stock guest or signed app tested.\n```json\n' + json.dumps(result) + '\n```\n')
+          PYTHON
+      - uses: ./.github/actions/setup-nx
+      - name: Actual sandboxed preload bridges
+        if: runner.os != 'Linux'
+        run: pnpm nx run desktop:test-preload-sandbox
+      - name: Windows NSIS artifact identity and per-user structure
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          export PATH="/c/Program Files/7-Zip:$PATH"
+          TAU_WINDOWS_DISPOSABLE_HOST=1 pnpm nx run desktop:test-windows-package
+      - name: Mac DMG exact app contents and trust refusal
+        if: runner.os == 'macOS'
+        run: pnpm nx run desktop:test-macos-dmg
+      - name: Native AppImage maker and sandbox-preserving launcher
+        if: runner.os == 'Linux'
+        run: pnpm nx run desktop:test-appimage-package
+      - name: Linux transaction fixtures with real filesystem failures
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          pnpm exec esbuild apps/desktop/scripts/appimage-transaction.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/appimage-test.mjs
+          pnpm exec esbuild apps/desktop/scripts/linux-apt-package.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/apt-test.mjs
+          docker run --rm --user 1000:1000 --tmpfs /limited:size=1m,mode=1777 --mount type=bind,source="$PWD/out/research/desktop-packaging-ci/appimage-test.mjs",target=/test.mjs,readonly node:24.20.0-bookworm-slim node /test.mjs
+          docker run --rm --tmpfs /opt/tau-staging:size=1m,exec -e TAU_APT_DISPOSABLE_CONTAINER=1 --mount type=bind,source="$PWD/out/research/desktop-packaging-ci/apt-test.mjs",target=/test.mjs,readonly node:24.20.0-bookworm-slim node /test.mjs
+      - name: Linux repository enrollment refusals and scoped policy
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          docker run --rm -e TAU_APT_DISPOSABLE_CONTAINER=1 -e TAU_APT_ENROLLMENT_SCRIPT=/configure-linux-apt.sh --mount type=bind,source="$PWD/apps/desktop/scripts/configure-linux-apt.test.mts",target=/test.mts,readonly --mount type=bind,source="$PWD/apps/desktop/scripts/configure-linux-apt.sh",target=/configure-linux-apt.sh,readonly node:24.20.0-bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq gnupg && node /test.mts'
+      - name: Route contracts, protected publication and first-download verification
+        if: runner.os == 'Linux'
+        run: pnpm nx run-many -p desktop -t test-route-publication test-route-transport test-publication-authority test-receipt-provenance test-first-download test-installer-candidate
+      - name: Signed APT publication, interruption and metadata renewal
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          pnpm exec esbuild apps/desktop/scripts/linux-apt-repository.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/linux-apt-repository.mjs
+          pnpm exec esbuild apps/desktop/scripts/desktop-apt-publication.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/desktop-apt-publication.mjs
+          pnpm exec esbuild apps/desktop/scripts/renew-desktop-apt.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/renew-desktop-apt.mjs
+          docker run --rm -e TAU_APT_DISPOSABLE_CONTAINER=1 --mount type=bind,source="$PWD/out/research/desktop-packaging-ci",target=/fixtures,readonly node:24.20.0-bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq gnupg && node /fixtures/linux-apt-repository.mjs && node /fixtures/desktop-apt-publication.mjs && node /fixtures/renew-desktop-apt.mjs'
+      - name: Qualification evidence refuses incomplete and synthetic acceptance
+        run: pnpm nx run-many -p desktop -t test-qualification-evidence test-qualification-metadata
+      - name: Real probe processes and isolated HTTPS transport
+        run: pnpm nx run-many -p desktop -t test-qualification-probe-process test-qualification-mirror test-qualification-tls test-collect-qualification-rows
+      - name: Native quit refuses foreign processes and stale sessions
+        run: pnpm nx run desktop-e2e:test:qualification-quit
+      - name: Windows qualification artifact admission
+        if: runner.os == 'Windows'
+        run: pnpm nx run desktop:test-qualification-windows
+      - name: Mac qualification artifact admission
+        if: runner.os == 'macOS'
+        run: pnpm nx run desktop:test-qualification-macos
+      - name: Linux qualification drivers and public-only signed snapshot preparation
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          pnpm exec esbuild apps/desktop/scripts/qualification-linux.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/qualification-linux.mjs
+          pnpm exec esbuild apps/desktop/scripts/qualification-apt-mirror.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/qualification-apt-mirror.mjs
+          pnpm exec esbuild apps/desktop/scripts/qualification-apt-snapshot.test.mts --bundle --platform=node --format=esm --outfile=out/research/desktop-packaging-ci/qualification-apt-snapshot.mjs
+          docker run --rm -e TAU_APT_DISPOSABLE_CONTAINER=1 --mount type=bind,source="$PWD/out/research/desktop-packaging-ci",target=/fixtures,readonly node:24.20.0-bookworm-slim bash -c 'apt-get update -qq && apt-get install -y -qq gnupg python3 openssl && node /fixtures/qualification-linux.mjs && node /fixtures/qualification-apt-snapshot.mjs && node /fixtures/qualification-apt-mirror.mjs'
+      - name: Keep assembly distinct from installed qualification
+        shell: bash
+        run: |
+          echo 'Assembly checks do not produce release-trust, installed A-to-B, VM or public-promotion receipts.' >> "$GITHUB_STEP_SUMMARY"

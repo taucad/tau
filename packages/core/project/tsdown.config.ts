@@ -4,6 +4,7 @@ import type { UserConfig } from 'tsdown';
 const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
+    'src/identity.ts',
     'src/revision-id.ts',
     'src/share-artifact.ts',
     'src/share-direct.ts',
@@ -17,7 +18,7 @@ const baseConfig: UserConfig = {
   minify: true,
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
-  external: ['zod', 'jose', 'jszip'],
+  external: ['zod', 'jose', 'jszip', 'xstate'],
 };
 
 const packageConfig: UserConfig = {

@@ -14,4 +14,9 @@
     <ProjectReference Include="$(PicoGKProject)" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
   </ItemGroup>
+  <!-- SkiaSharp names native assets for macOS and Windows only. On Linux, its build that links no system library
+       beyond glibc and loads no system font. -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' Or '$(RuntimeIdentifiers)' == 'linux-x64'">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="3.119.0" />
+  </ItemGroup>
 </Project>

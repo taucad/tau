@@ -1,6 +1,6 @@
 import { createAuthClient } from 'better-auth/react';
 import { apiKeyClient } from '@better-auth/api-key/client';
-import { magicLinkClient } from 'better-auth/client/plugins';
+import { magicLinkClient, deviceAuthorizationClient } from 'better-auth/client/plugins';
 import { requireClientEnvironment } from '#environment.config.js';
 
 const runtimeAuthFetch: typeof globalThis.fetch = async (input, init) => {
@@ -16,7 +16,7 @@ export const authClient = createAuthClient({
   // every real request to runtimeAuthFetch where the injected host is resolved.
   baseURL: 'https://window-env.invalid/v1/auth',
   fetchOptions: { customFetchImpl: runtimeAuthFetch },
-  plugins: [magicLinkClient(), apiKeyClient()],
+  plugins: [magicLinkClient(), apiKeyClient(), deviceAuthorizationClient()],
   emailAndPassword: {
     enabled: true,
     autoSignIn: true,

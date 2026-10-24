@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_KNvDRxoN4twslXk6gZJqN",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Slotted threaded stud",
   "description": "Slotted threaded stud with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

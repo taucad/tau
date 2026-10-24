@@ -44,6 +44,7 @@ describe('PrometheusNames', () => {
   it('should produce expected names for renamed metrics', () => {
     expect(PrometheusNames.wsDisconnections).toBe('ws_disconnections_total');
     expect(PrometheusNames.kernelExecutions).toBe('kernel_executions_total');
+    expect(PrometheusNames.healthReadinessFailures).toBe('health_readiness_failures_total');
     expect(PrometheusNames.publicationViewsTotal).toBe('publication_views_total');
     expect(PrometheusNames.publicationViewsRejectedTotal).toBe('publication_views_rejections_total');
     expect(PrometheusNames.publicationInviteEmailsTotal).toBe('publication_invite_emails_total');

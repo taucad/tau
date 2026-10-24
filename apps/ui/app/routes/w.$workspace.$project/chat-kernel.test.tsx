@@ -101,7 +101,11 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelContentHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeaderActions: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  FloatingPanelClose: () => <button type='button'>Close</button>,
+  FloatingPanelClose: ({ label }: { readonly label?: string }) => (
+    <button type='button' aria-label={label}>
+      Close
+    </button>
+  ),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-kernel-timing.js', async () => {
@@ -137,6 +141,13 @@ describe('ChatKernel', () => {
   beforeEach(() => {
     mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
     paneviewMountCount = 0;
+  });
+
+  it('names its Close after the panel, as its tooltip does (I6)', async () => {
+    const { ChatKernel } = await import('./chat-kernel.js');
+    render(<ChatKernel isExpanded setIsExpanded={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Close Telemetry' })).toBeInTheDocument();
   });
 
   it('keeps one permanent telemetry filter above the empty state', async () => {

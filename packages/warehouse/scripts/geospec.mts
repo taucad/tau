@@ -27,7 +27,7 @@ for (const { part } of await readDefinitions()) {
       '--experimental-vm-modules',
       '--import',
       'tsx',
-      join(packageRoot, '../geospec-engine/src/cli/main.ts'),
+      join(packageRoot, '../cli/scripts/geospec.mts'),
       'run',
       join(packageRoot, 'parts', part.id),
       ...forwarded,

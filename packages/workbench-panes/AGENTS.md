@@ -50,3 +50,5 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 ## Project notes
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
+
+- `pnpm nx run workbench-panes:validate-shell-parity` (`scripts/src/check-viewer-shell-parity.ts`, in the `scripts:validate` fan-in) fails when a viewer host stops importing `ViewerStage`, `useViewerPartMenu`, `ViewerHeaderActions`, `WorkbenchTab` or `PaneLane`, or carries a copy of them; move its file list with a host file.

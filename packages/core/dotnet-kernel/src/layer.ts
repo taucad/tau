@@ -96,11 +96,14 @@ export type DotnetLayerRule = {
    */
   readonly payload: (record: DotnetLayerRecord) => Readonly<LayerJson>;
   /**
-   * Replace the `worker` payload of the record's `runtime` variant and keep every other byte of the manifest.
+   * Replace the `worker` payload of the record's `runtime` variant and keep every other byte of the manifest. When the
+   * manifest has no variant for the record's target and `staged` holds one under that target (its `target` and its
+   * `payloads` without the worker), that variant is appended with the record's worker pin.
    * @returns The new manifest.
-   * @throws When the manifest has no `runtime` variant for the record's target with a `worker` payload.
+   * @throws When the manifest has no `runtime` variant for the record's target with a `worker` payload and `staged`
+   *   stages none.
    */
-  readonly composeManifest: (manifest: LayerJson, record: DotnetLayerRecord) => LayerJson;
+  readonly composeManifest: (manifest: LayerJson, record: DotnetLayerRecord, staged?: LayerJson) => LayerJson;
   /**
    * The CycloneDX 1.6 SBOM of the closure a manifest pins (charter D26): one component per payload and target, with
    * its purl, its pinned hash, its licence where the publisher states one, and a `distribution` reference to each URL.
@@ -207,12 +210,24 @@ export const createDotnetLayer = (layer: DotnetLayer): DotnetLayerRule => {
     unpackedByteLength: record.unpackedByteLength,
   });
 
-  const composeManifest = (manifest: LayerJson, record: DotnetLayerRecord): LayerJson => {
+  const composeManifest = (manifest: LayerJson, record: DotnetLayerRecord, staged?: LayerJson): LayerJson => {
     const next = structuredClone(manifest);
     const variants = (next['dependencies'] as LayerJson | undefined)?.['runtime'];
-    const variant = (Array.isArray(variants) ? (variants as LayerJson[]) : []).find(
+    let variant = (Array.isArray(variants) ? (variants as LayerJson[]) : []).find(
       (candidate) => targetOf(candidate) === record.target,
     );
+    const stagedVariant = staged?.[record.target] as LayerJson | undefined;
+    if (variant === undefined && Array.isArray(variants) && stagedVariant !== undefined) {
+      const stagedPayloads = stagedVariant['payloads'];
+      if (targetOf(stagedVariant) !== record.target || !Array.isArray(stagedPayloads)) {
+        throw new Error(`The staged ${record.target} variant names another target or no payloads.`);
+      }
+      variant = {
+        target: structuredClone(stagedVariant['target']),
+        payloads: [...structuredClone(stagedPayloads as LayerJson[]), { name: 'worker' }],
+      };
+      (variants as LayerJson[]).push(variant);
+    }
     const payloads = variant?.['payloads'];
     const index = Array.isArray(payloads) ? (payloads as LayerJson[]).findIndex(({ name }) => name === 'worker') : -1;
     if (index === -1) {
@@ -300,6 +315,11 @@ export type ComposeTauPluginInput = {
   readonly layer: DotnetLayer;
   /** Absolute path of the kernel's checked-in `tau-plugin.json`; its SBOM is `tau-plugin.cdx.json` beside it. */
   readonly manifestPath: string;
+  /**
+   * Absolute path of the kernel's staged variants (`tau-plugin.variants.json`), keyed by layer target: the variant the
+   * compose adds for a record whose target the manifest does not pin yet. Optional.
+   */
+  readonly stagedVariantsPath?: string;
   /** The script's arguments, without the executable and script path. */
   readonly args: readonly string[];
 };
@@ -351,7 +371,11 @@ export const runComposeTauPlugin = async (input: ComposeTauPluginInput): Promise
       }
     }
     const current = JSON.parse(await readFile(input.manifestPath, 'utf8')) as LayerJson;
-    const composed = rule.composeManifest(current, record);
+    const staged =
+      input.stagedVariantsPath === undefined
+        ? undefined
+        : (JSON.parse(await readFile(input.stagedVariantsPath, 'utf8')) as LayerJson);
+    const composed = rule.composeManifest(current, record, staged);
     const sbom = rule.composeSbom(composed);
     if (values.check) {
       // Compared as data: the checked-in file is formatted by the repository's formatter, not by this script.

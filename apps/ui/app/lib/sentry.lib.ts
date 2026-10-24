@@ -1,33 +1,72 @@
 import * as Sentry from '@sentry/react';
-import type { Breadcrumb, ErrorEvent } from '@sentry/react';
+import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
+import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
-import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import { readBuildId } from '#lib/build-identity.js';
+import {
+  decorateForStaleBuild,
+  scrubSentryEvent,
+  scrubUrl,
+  sentryEnvironment,
+  sentryRelease,
+} from '#lib/sentry-event.lib.js';
+import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
+import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
+
+/** The mechanism the SDK's global handlers stamp on an unhandled promise rejection. */
+const unhandledRejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
 
 /**
- * Remove the query string and fragment, then any invitation token, from a URL.
- *
- * @param url - A URL an event or breadcrumb carries.
- * @returns The URL without credentials.
- */
-const scrubUrl = (url: string): string => redactInvitationTokens(url.split(/[?#]/u, 1)[0] ?? '');
-
-/**
- * Scrub an error event before it leaves the browser: no query strings, no invitation tokens, no headers, cookies
- * or user. Invitation tokens and verification codes are bearer credentials that live in URLs.
+ * Whether an event reports a cancellation nobody awaited: an unhandled promise rejection whose reason is an
+ * `AbortError`. Aborting on unmount, navigation or supersession is expected control flow, not an error (TAU-UI-4).
+ * Only the rejected value decides, never the event's text, so an error that merely mentions an abort still reports.
  *
  * @param event - The event the SDK is about to send.
- * @returns The scrubbed event.
+ * @param hint - The SDK's hint, carrying the rejected value as `originalException`.
+ * @returns `true` when the event should be dropped.
  * @public
  */
-export const scrubSentryEvent = (event: ErrorEvent): ErrorEvent => {
-  if (event.request) {
-    const { url } = event.request;
-    event.request = url === undefined ? {} : { url: scrubUrl(url) };
-  }
-  delete event.user;
-  // Stack frames and messages can quote the page URL too.
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON round trip of the same event.
-  return JSON.parse(redactInvitationTokens(JSON.stringify(event))) as ErrorEvent;
+export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | undefined): boolean =>
+  isAbortError(hint?.originalException) &&
+  (event.exception?.values?.some((value) => value.mechanism?.type === unhandledRejectionMechanism) ?? false);
+
+/**
+ * The `beforeSend` hook: drop an unhandled abort rejection, scrub everything else.
+ *
+ * @param event - The event the SDK is about to send.
+ * @param hint - The SDK's hint for the event.
+ * @returns The scrubbed event, or `null` to drop it.
+ * @public
+ */
+// oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
+export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
+  isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
+
+/**
+ * The `beforeSend` hook with version-skew tagging (TAU-UI-6).
+ *
+ * The stale-build recovery owns module load failures (`installStaleBuildRecovery` and the route
+ * error page); this hook never acts on one and never drops one: Sentry marks an error captured
+ * before `beforeSend` runs, so a dropped event could never be sent again. It holds the event until
+ * the failure's decision settles (bounded by `staleBuildTagWait`), then tags it with that decision
+ * (`stale_build` = `superseded` | `current` | `unknown`); one a deploy explains is grouped apart (its
+ * own fingerprint) at level `info`, for operators to filter.
+ *
+ * @param describe - The failure's tag once its decision settles, bounded, asking nothing (`classifyStaleBuildFailure`).
+ * @returns The hook to pass to `Sentry.init`.
+ * @public
+ */
+export const createBeforeSend = (describe: (failure: unknown) => Promise<StaleBuildTag>) => {
+  // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
+  const tagged = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> => {
+    // Held until the failure's decision settles (bounded): the tracker hears a failure before it is decided.
+    const tag = await describe(hint?.originalException);
+    const annotated = decorateForStaleBuild(event, tag);
+    return beforeSendSentryEvent(annotated, hint);
+  };
+  // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
+  return (event: ErrorEvent, hint?: EventHint): ErrorEvent | null | Promise<ErrorEvent | null> =>
+    isStaleModuleError(hint?.originalException) ? tagged(event, hint) : beforeSendSentryEvent(event, hint);
 };
 
 /**
@@ -112,10 +151,11 @@ export const initSentry = (): void => {
   }
   Sentry.init({
     dsn,
-    environment: ENV.SENTRY_ENVIRONMENT ?? ENV.NODE_ENV,
+    environment: sentryEnvironment(),
+    release: sentryRelease(readBuildId()),
     sendDefaultPii: false,
     integrations: (defaults) => defaults.filter((integration) => integration.name !== 'BrowserSession'),
-    beforeSend: scrubSentryEvent,
+    beforeSend: createBeforeSend(classifyStaleBuildFailure),
     beforeBreadcrumb: scrubSentryBreadcrumb,
   });
 };
@@ -130,4 +170,24 @@ export const captureUiError = (error: unknown): void => {
   if (Sentry.isInitialized()) {
     Sentry.captureException(error);
   }
+};
+
+/**
+ * Turn the SDK off for the page after `initSentry` threw part-way: the client may already be bound,
+ * with some integrations (the global handlers) installed, and would otherwise capture (or mark as
+ * captured) what the page then reports without it. Disabled and unbound at once, so those handlers
+ * return early; the client's own close settles on its own.
+ *
+ * @public
+ */
+export const stopSentry = (): void => {
+  const client = Sentry.getClient();
+  if (client === undefined) {
+    return;
+  }
+  client.getOptions().enabled = false;
+  // Unbound, so the installed handlers return before capturing (and marking) anything.
+  Sentry.getCurrentScope().setClient(undefined);
+  // async-iife: bootstrap -- disabling is immediate; the close only flushes, and settles on its own.
+  void client.close(0);
 };

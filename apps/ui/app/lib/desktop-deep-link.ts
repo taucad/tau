@@ -12,6 +12,26 @@
  * `apps/desktop`, and the table test below is the whole of the contract.
  */
 
+/** Hosted non-Mac staging installs register a distinct protocol; Mac keeps its existing scheme. */
+export type DesktopScheme = 'tau' | 'tau-staging';
+
+/** Select only the known staging origin and desktop platforms; previews and unknown hosts retain the default. */
+export const selectDesktopScheme = (context: {
+  frontendUrl: string;
+  platform: string;
+  userAgent?: string;
+}): DesktopScheme => {
+  const hints = `${context.platform} ${context.userAgent ?? ''}`;
+  if (/Mac|iPhone|iPad|iPod|Android|CrOS|Mobile/iu.test(hints) || !/Win|Linux/iu.test(context.platform)) {
+    return 'tau';
+  }
+  try {
+    return new URL(context.frontendUrl).origin === 'https://taucad.dev' ? 'tau-staging' : 'tau';
+  } catch {
+    return 'tau';
+  }
+};
+
 /** Longest fragment a `tau://s/<slug>` link may carry (`shareArtifactLimits.maxDirectUrlCharacters`). */
 const fragmentMaxCharacters = 524_288;
 
@@ -44,7 +64,7 @@ const splitPath = (path: string): { segments: readonly string[]; search: string;
   return { segments: pathname.split('/').filter((segment) => segment !== ''), search, hash };
 };
 
-const shareLink = (segments: readonly string[], hash: string): string | undefined => {
+const shareLink = (segments: readonly string[], hash: string, scheme: DesktopScheme): string | undefined => {
   if (segments.length !== 1 || !isIdentifier(segments[0]!)) {
     return undefined;
   }
@@ -57,10 +77,10 @@ const shareLink = (segments: readonly string[], hash: string): string | undefine
   if (payload !== '' && !fragmentPattern.test(payload)) {
     return undefined;
   }
-  return `tau://s/${segments[0]!}${hash}`;
+  return `${scheme}://s/${segments[0]!}${hash}`;
 };
 
-const importLink = (segments: readonly string[]): string | undefined => {
+const importLink = (segments: readonly string[], scheme: DesktopScheme): string | undefined => {
   const repository = segments.join('/');
   if (
     segments.length === 0 ||
@@ -69,7 +89,7 @@ const importLink = (segments: readonly string[]): string | undefined => {
   ) {
     return undefined;
   }
-  return `tau://i/${repository}`;
+  return `${scheme}://i/${repository}`;
 };
 
 /**
@@ -80,11 +100,12 @@ const importLink = (segments: readonly string[]): string | undefined => {
  * actually lands on is the one that offers the app.
  *
  * @param path - The page's `pathname`, with its `search` and `hash` attached.
+ * @param scheme - The installed channel's scheme, defaulting to the existing production/Mac route.
  * @returns The link to hand the browser, or `undefined` when the shell's
  *   parser would refuse it — an import link that needs its `?ref=`, a slug
  *   longer than 256 characters, a repository path carrying a URL scheme.
  */
-export const desktopDeepLink = (path: string): string | undefined => {
+export const desktopDeepLink = (path: string, scheme: DesktopScheme = 'tau'): string | undefined => {
   const { segments, search, hash } = splitPath(path);
   /* Every content link the shell admits carries no query at all, so a page
    * whose query is load-bearing cannot be represented. */
@@ -94,14 +115,16 @@ export const desktopDeepLink = (path: string): string | undefined => {
   const rest = segments.slice(1);
   switch (segments[0]) {
     case 'invitations': {
-      return rest.length === 1 && isIdentifier(rest[0]!) && hash === '' ? `tau://invitations/${rest[0]!}` : undefined;
+      return rest.length === 1 && isIdentifier(rest[0]!) && hash === ''
+        ? `${scheme}://invitations/${rest[0]!}`
+        : undefined;
     }
     case 's': {
-      return shareLink(rest, hash);
+      return shareLink(rest, hash, scheme);
     }
     case 'i':
     case 'import': {
-      return hash === '' ? importLink(rest) : undefined;
+      return hash === '' ? importLink(rest, scheme) : undefined;
     }
     default: {
       return undefined;

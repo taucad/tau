@@ -2,7 +2,6 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
-  isMobile: true,
   activeTab: 'viewer',
   ready: true,
 }));
@@ -28,15 +27,12 @@ vi.mock('@xstate/react', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef: { send } }),
 }));
-vi.mock('@taucad/ui/hooks/use-mobile', () => ({
-  useIsMobile: () => state.isMobile,
-}));
 
 const { useChatInterfaceState } = await import('./use-chat-interface-state.js');
+const { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } = await import('#constants/editor.constants.js');
 
 describe('useChatInterfaceState mobile drawer', () => {
   beforeEach(() => {
-    state.isMobile = true;
     state.activeTab = 'viewer';
     state.ready = true;
     send.mockClear();
@@ -60,12 +56,13 @@ describe('useChatInterfaceState mobile drawer', () => {
 
   it('persists tab changes and closes the drawer for the Viewer', () => {
     state.activeTab = 'chat';
-    const { result } = renderHook(() => useChatInterfaceState());
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
     expect(result.current.drawerOpen).toBe(true);
 
     act(() => {
       result.current.handleTabChange('viewer');
     });
+    rerender();
 
     expect(send).toHaveBeenCalledExactlyOnceWith({
       type: 'setPanelState',
@@ -76,11 +73,12 @@ describe('useChatInterfaceState mobile drawer', () => {
 
   it('returns to the Viewer when the drawer is dismissed', () => {
     state.activeTab = 'parameters';
-    const { result } = renderHook(() => useChatInterfaceState());
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
 
     act(() => {
       result.current.handleDrawerChange(false);
     });
+    rerender();
 
     expect(send).toHaveBeenCalledWith({
       type: 'setPanelState',
@@ -89,7 +87,82 @@ describe('useChatInterfaceState mobile drawer', () => {
     expect(result.current.drawerOpen).toBe(false);
   });
 
+  it('closes the drawer when the persisted Viewer surface arrives after mounting on another tab', () => {
+    // The route can mount on the default surface before the saved one is hydrated.
+    state.activeTab = 'chat';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+    expect(result.current.drawerOpen).toBe(true);
+
+    state.activeTab = 'viewer';
+    rerender();
+
+    expect(result.current.activeTab).toBe('viewer');
+    expect(result.current.drawerOpen).toBe(false);
+  });
+
+  it('closes the drawer when an external action returns to the Viewer', () => {
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    state.activeTab = 'viewer';
+    rerender();
+
+    expect(result.current.drawerOpen).toBe(false);
+  });
+
+  it('reopens the drawer at half height, not the peek, after the Model tab collapses it', () => {
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleSnapChange(result.current.snapPoints.at(-1)!);
+    });
+    act(() => {
+      result.current.handleTabChange('viewer');
+    });
+    rerender();
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+
+    expect(result.current.drawerOpen).toBe(true);
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('reopens the drawer at half height, not the peek, after an external action returns to the Viewer', () => {
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleSnapChange(result.current.snapPoints.at(-1)!);
+    });
+    state.activeTab = 'viewer';
+    rerender();
+    state.activeTab = 'converter';
+    rerender();
+
+    expect(result.current.drawerOpen).toBe(true);
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
+  it('reopens the drawer at half height, not the peek, after it is dismissed', () => {
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleSnapChange(result.current.snapPoints.at(-1)!);
+    });
+    act(() => {
+      result.current.handleDrawerChange(false);
+    });
+    rerender();
+
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+  });
+
   it('retains drawer snap-point and editor readiness state', () => {
+    state.activeTab = 'parameters';
     const { result, rerender } = renderHook(() => useChatInterfaceState());
     expect(result.current.isEditorReady).toBe(true);
     expect(result.current.snapPoints.length).toBeGreaterThan(1);
@@ -102,5 +175,141 @@ describe('useChatInterfaceState mobile drawer', () => {
     state.ready = false;
     rerender();
     expect(result.current.isEditorReady).toBe(false);
+  });
+
+  it('offers peek, half and full detents, in that order', () => {
+    const { result } = renderHook(() => useChatInterfaceState());
+    expect(result.current.snapPoints).toEqual([mobileDrawerPeekSnapPoint, mobileDrawerOpenSnapPoint, 1]);
+  });
+
+  it('opens a file at full height and keeps the chosen height when switching between surfaces', () => {
+    state.activeTab = 'chat';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    state.activeTab = 'editor';
+    rerender();
+    expect(result.current.activeSnapPoint).toBe(1);
+
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    state.activeTab = 'parameters';
+    rerender();
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+  });
+
+  it('falls back to the model when the persisted surface is unknown to this build', () => {
+    state.activeTab = 'retired-surface';
+    const { result } = renderHook(() => useChatInterfaceState());
+    expect(result.current.activeTab).toBe('viewer');
+    expect(result.current.drawerOpen).toBe(false);
+  });
+
+  it.each(['jobs', 'browser'])('falls back to the model when the persisted %s surface is not shipped here', (tab) => {
+    state.activeTab = tab;
+    const { result } = renderHook(() => useChatInterfaceState());
+    expect(result.current.activeTab).toBe('viewer');
+    expect(result.current.drawerOpen).toBe(false);
+  });
+
+  it('drops the snap reset vaul sends after a close it made, so a quick reopen keeps half height', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleDrawerChange(false);
+    });
+    rerender();
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+    now.mockReturnValue(1300);
+    // Reopened within vaul's transition: its reset to the first detent still arrives, and is ignored.
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    // The guard is one-shot: the person's own move to the peek, still inside that window, is honoured.
+    now.mockReturnValue(1400);
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
+  });
+
+  it('spends the close guard on a reset that lands while closed, so a quick reopen honours the peek', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleDrawerChange(false);
+    });
+    rerender();
+    now.mockReturnValue(1500);
+    // Closed: vaul's late reset has nothing to move, and spends the guard.
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+    now.mockReturnValue(1600);
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
+  });
+
+  it('lets the close guard lapse when vaul sends no reset', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleDrawerChange(false);
+    });
+    rerender();
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+    now.mockReturnValue(5000);
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
+  });
+
+  it('arms no guard for an app-driven close, which vaul sends no reset for', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    // The Model destination closes the sheet through vaul's controlled `open`.
+    act(() => {
+      result.current.handleTabChange('viewer');
+    });
+    rerender();
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+    now.mockReturnValue(1200);
+    // The person's first move to the peek right after the reopen is theirs, and is honoured.
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
   });
 });

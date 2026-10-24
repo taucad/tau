@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import type { StreamingMachine, MachineQuitDecision } from '#shared/machine-shutdown.js';
 /* eslint-disable @typescript-eslint/naming-convention -- mocked Electron exports and environment keys retain production names */
-import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Worker as NodeWorker } from 'node:worker_threads';
@@ -10,14 +10,17 @@ import type * as WorkerThreads from 'node:worker_threads';
 
 import type * as Host from '@taucad/host';
 import { machineStartWaitMilliseconds } from '@taucad/runtime/machine';
+import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdaterOptions } from '#main/updater.js';
 import type { TauHeaderInjectionOptions } from '#main/header-injection.js';
+import { desktopAgentSystemPrompt } from '#main/environment.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   agentHostSessionChannels,
   computeControlChannels,
+  directoryGrantChannels,
   openDirectoryChannel,
   revealPathChannel,
   machinesChannels,
@@ -34,6 +37,7 @@ const originalUncaught = new Set(process.listeners('uncaughtException'));
 const originalUnhandled = new Set(process.listeners('unhandledRejection'));
 
 const state = vi.hoisted(() => ({
+  initializeErrorReporting: vi.fn(),
   appListeners: new Map<string, Array<(...args: unknown[]) => void>>(),
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
   /* Held open by the deep-link cases so a link can arrive before `ready`. */
@@ -58,6 +62,7 @@ const state = vi.hoisted(() => ({
   kernelUtilityEntry: undefined as string | undefined,
   servicesUtilityEntry: undefined as string | undefined,
   userData: '',
+  servicesHasActiveDirectory: vi.fn(() => false),
   servicesDispose: vi.fn(async () => undefined),
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
@@ -105,6 +110,7 @@ const state = vi.hoisted(() => ({
   autoQuiesce: true,
   autoForced: false,
   prepareToRestart: undefined as undefined | (() => Promise<boolean>),
+  prepareToInstall: undefined as DesktopUpdaterOptions['prepareToInstall'],
   /* Lets a case hold ACP discovery open while the window boots (D17). */
   acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
   bambuStudioStatus: vi.fn(async () => ({ available: false, reason: 'not installed' })),
@@ -114,7 +120,20 @@ const state = vi.hoisted(() => ({
   updaterCheck: vi.fn(async () => undefined),
   updaterInstall: vi.fn(async () => undefined),
   nativeStoreOptions: undefined as unknown,
+  nativePreparerOptions: undefined as unknown,
+  nativePrepare: vi.fn(async (kernel: string) => ({ status: 'ready', kernel, byteLength: 1 })),
+  nativeCancel: vi.fn(),
   runtimePost: vi.fn(),
+  servicesPost: vi.fn(),
+}));
+
+vi.mock('#main/error-reporting.js', () => ({ initializeDesktopErrorReporting: state.initializeErrorReporting }));
+
+vi.mock('#tau/native-preparation.js', () => ({
+  createDesktopKernelPreparer: (options: unknown) => {
+    state.nativePreparerOptions = options;
+    return { prepare: state.nativePrepare, cancel: state.nativeCancel, dispose: async () => undefined };
+  },
 }));
 
 vi.mock('#tau/native-store.js', () => ({
@@ -128,6 +147,7 @@ vi.mock('#tau/native-store.js', () => ({
 vi.mock('#main/updater.js', () => ({
   startDesktopUpdater: (options: DesktopUpdaterOptions) => {
     state.prepareToRestart = options.prepareToRestart;
+    state.prepareToInstall = options.prepareToInstall;
     return {
       check: state.updaterCheck,
       install: state.updaterInstall,
@@ -153,6 +173,8 @@ vi.mock('node:worker_threads', async (importOriginal) => {
 
 const app = {
   isPackaged: false,
+  commandLine: { hasSwitch: vi.fn(() => false) },
+  setPath: vi.fn((_name: string, _path: string) => undefined),
   dock: { setIcon: vi.fn() },
   requestSingleInstanceLock: vi.fn(() => true),
   whenReady: vi.fn(async () => state.ready),
@@ -372,7 +394,7 @@ vi.mock('#main/services-broker.js', () => ({
   createServicesBroker: vi.fn((options: { utilityEntry: string }) => {
     state.servicesUtilityEntry = options.utilityEntry;
     return {
-      post: vi.fn(),
+      post: state.servicesPost,
       connect: state.servicesConnect,
       completeMachineBinding: state.servicesCompleteBinding,
       streamingMachines: state.servicesStreaming,
@@ -381,6 +403,7 @@ vi.mock('#main/services-broker.js', () => ({
       recover: state.servicesRecover,
       quiesce: state.servicesQuiesce,
       dispose: state.servicesDispose,
+      hasActiveDirectory: state.servicesHasActiveDirectory,
       retainAgentHost: state.servicesRetainAgentHost,
       releaseAgentHost: state.servicesReleaseAgentHost,
       computeProjectRoot: (root: string) =>
@@ -447,6 +470,7 @@ afterEach(async () => {
   state.autoQuiesce = true;
   state.autoForced = false;
   state.prepareToRestart = undefined;
+  state.prepareToInstall = undefined;
   state.updateMenuItems = [{ label: 'About Tau' }];
   state.installedUpdateMenuItems = [];
   getWindows.mockReturnValue([fakeWindow]);
@@ -457,6 +481,7 @@ afterEach(async () => {
   state.authToken = undefined;
   state.headerOptions = undefined;
   app.isPackaged = false;
+  app.commandLine.hasSwitch.mockReturnValue(false);
   state.protocolClient.length = 0;
   state.authHandleCallback.mockClear();
   state.resolveFork = undefined;
@@ -489,6 +514,7 @@ afterEach(async () => {
   } else {
     Reflect.deleteProperty(process, 'resourcesPath');
   }
+  state.servicesHasActiveDirectory.mockReturnValue(false);
   vi.clearAllMocks();
   fakeWindow.isFullScreen.mockReturnValue(false);
 });
@@ -505,9 +531,25 @@ describe('desktop main compute owner', () => {
     await vi.waitFor(() => {
       expect(state.resolveFork).toBeDefined();
       expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      expect(state.initializeErrorReporting).toHaveBeenCalledOnce();
+      expect(state.initializeErrorReporting.mock.invocationCallOrder[0]).toBeLessThan(
+        fakeWindow.loadURL.mock.invocationCallOrder[0] ?? 0,
+      );
     });
     return resolve(join(state.userData, 'home', 'project'));
   };
+
+  it(
+    'should register app privileges after Sentry installs its protocol wrapper',
+    async () => {
+      await bootstrap();
+      const { protocol } = await import('electron');
+      expect(state.initializeErrorReporting.mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(protocol.registerSchemesAsPrivileged).mock.invocationCallOrder[0] ?? 0,
+      );
+    },
+    bootMilliseconds,
+  );
 
   it(
     'should open the update surface from the native menu without a modal or restart',
@@ -550,6 +592,30 @@ describe('desktop main compute owner', () => {
   );
 
   it(
+    'should prepare and cancel a native kernel for a trusted document only',
+    async () => {
+      await bootstrap();
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      const prepare = state.handlers.get(desktopNativeKernelChannels.prepare)!;
+      const cancel = state.handlers.get(desktopNativeKernelChannels.cancel)!;
+
+      await expect(prepare({ senderFrame: {} }, 'build123d')).resolves.toEqual({
+        status: 'ready',
+        kernel: 'build123d',
+        byteLength: 1,
+      });
+      await cancel({ senderFrame: {} }, 'build123d');
+      expect(state.nativeCancel).toHaveBeenCalledWith('build123d');
+
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      await expect(prepare({ senderFrame: {} }, 'build123d')).rejects.toThrow('Untrusted kernel preparation request');
+      await expect(prepare({ senderFrame: {} }, 42)).rejects.toThrow('Untrusted kernel preparation request');
+      expect(state.nativePrepare).toHaveBeenCalledTimes(1);
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'settles restart without normal quit stealing the updater finalizer',
     async () => {
       await bootstrap();
@@ -559,6 +625,43 @@ describe('desktop main compute owner', () => {
       state.appListeners.get('before-quit')!.at(-1)!({ preventDefault: vi.fn() });
       assessment.resolve([]);
       await expect(restart).resolves.toBe(true);
+      expect(state.servicesDispose).toHaveBeenCalledOnce();
+      expect(app.quit).not.toHaveBeenCalled();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'installer failure restores services before permitting another install',
+    async () => {
+      await bootstrap();
+      const commit = vi.fn(async () => {
+        throw new Error('spawn refused');
+      });
+      await expect(state.prepareToInstall!(commit)).resolves.toBe(false);
+      expect(commit).toHaveBeenCalledOnce();
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+      expect(state.geometryDispose).not.toHaveBeenCalled();
+      expect(state.servicesRecover).toHaveBeenCalledOnce();
+      expect(app.quit).not.toHaveBeenCalled();
+      const retry = vi.fn();
+      await expect(state.prepareToInstall!(retry)).resolves.toBe(true);
+      expect(retry).toHaveBeenCalledOnce();
+      expect(state.servicesDispose).toHaveBeenCalledOnce();
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'installer commits before destructive service teardown',
+    async () => {
+      await bootstrap();
+      const commit = vi.fn(() => {
+        expect(state.servicesDispose).not.toHaveBeenCalled();
+        expect(state.geometryDispose).not.toHaveBeenCalled();
+      });
+      await expect(state.prepareToInstall!(commit)).resolves.toBe(true);
+      expect(commit).toHaveBeenCalledOnce();
       expect(state.servicesDispose).toHaveBeenCalledOnce();
       expect(app.quit).not.toHaveBeenCalled();
     },
@@ -580,6 +683,48 @@ describe('desktop main compute owner', () => {
     },
     bootMilliseconds,
   );
+  it(
+    'revokes an unused saved grant, notifies windows, and preserves its files',
+    async () => {
+      await bootstrap();
+      const directory = join(state.userData, 'Downloads');
+      await mkdir(directory);
+      await writeFile(join(directory, 'model.step'), 'preserve me');
+      dialog.showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: [directory] });
+      await state.handlers.get('tau:select-directory')!({ senderFrame: {} });
+      const list = state.handlers.get(directoryGrantChannels.list)!;
+      const disconnect = state.handlers.get(directoryGrantChannels.disconnect)!;
+      expect(list({ senderFrame: {} })).toEqual([directory]);
+      state.servicesHasActiveDirectory.mockReturnValueOnce(true);
+      expect(disconnect({ senderFrame: {} }, directory)).toContain('Close projects');
+      expect(list({ senderFrame: {} })).toEqual([directory]);
+      disconnect({ senderFrame: {} }, directory);
+      expect(list({ senderFrame: {} })).toEqual([]);
+      expect(JSON.parse(await readFile(join(state.userData, 'granted-roots.json'), 'utf8'))).not.toContain(directory);
+      expect(await readFile(join(directory, 'model.step'), 'utf8')).toBe('preserve me');
+      expect(fakeWindow.webContents.send).toHaveBeenCalledWith(directoryGrantChannels.changed);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'refuses Home, relative paths, and untrusted grant requests',
+    async () => {
+      await bootstrap();
+      const disconnect = state.handlers.get(directoryGrantChannels.disconnect)!;
+      expect(() => disconnect({ senderFrame: {} }, join(state.userData, 'home'))).toThrow('Home cannot');
+      expect(() => disconnect({ senderFrame: {} }, 'Downloads')).toThrow('invalid directory');
+      const { isTrustedSender } = await import('#main/navigation-policy.js');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      expect(() => disconnect({ senderFrame: {} }, '/Downloads')).toThrow('invalid directory');
+      vi.mocked(isTrustedSender).mockReturnValueOnce(false);
+      expect(() => state.handlers.get(directoryGrantChannels.list)!({ senderFrame: {} })).toThrow(
+        'untrusted directory',
+      );
+    },
+    bootMilliseconds,
+  );
+
   it('should open only granted directories and propagate file manager failures', async () => {
     const directory = await bootstrap();
     await mkdir(directory, { recursive: true });
@@ -653,6 +798,28 @@ describe('desktop main compute owner', () => {
       const answer = state.handlers.get('tau:external-agents')!({ senderFrame: {} });
       discovery.resolve({ agents: [], refused: [] });
       await expect(answer).resolves.toEqual([]);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'configures project history even when external agent discovery rejects',
+    async () => {
+      const discovery = Promise.withResolvers<{ agents: never[]; refused: never[] }>();
+      state.acpDiscovery = discovery.promise;
+      await bootstrap();
+      const answer = state.handlers.get('tau:external-agents')!({ senderFrame: {} });
+      discovery.reject(new Error('The external agent could not be discovered.'));
+      await expect(answer).resolves.toEqual([]);
+      expect(state.servicesPost).toHaveBeenCalledWith({
+        type: 'agentHost',
+        config: {
+          gatewayBaseUrl: 'http://127.0.0.1:1',
+          systemPrompt: desktopAgentSystemPrompt,
+          tauApiUrl: 'http://127.0.0.1:1',
+          tauWebSocketUrl: 'ws://127.0.0.1:1',
+        },
+      });
     },
     bootMilliseconds,
   );
@@ -1100,6 +1267,35 @@ describe('desktop main compute owner', () => {
 
 describe('desktop main admission gates', () => {
   const bootMilliseconds = 30_000;
+
+  it.each([
+    { overrides: true, explicitProfile: true, usesChannelProfile: false },
+    { overrides: true, explicitProfile: false, usesChannelProfile: true },
+    { overrides: false, explicitProfile: true, usesChannelProfile: true },
+    { overrides: false, explicitProfile: false, usesChannelProfile: true },
+  ])(
+    'should isolate a staging profile according to $overrides/$explicitProfile',
+    async (options) => {
+      state.userData = await mkdtemp(join(tmpdir(), 'tau-staging-profile-'));
+      state.ready = Promise.withResolvers<void>().promise;
+      app.isPackaged = true;
+      Object.defineProperty(process, 'resourcesPath', { configurable: true, value: state.userData });
+      app.commandLine.hasSwitch.mockReturnValue(options.explicitProfile);
+      await writeFile(
+        join(state.userData, 'package.json'),
+        JSON.stringify({ tauDesktop: { channel: 'staging', environmentOverrides: options.overrides } }),
+      );
+      await import('#main/main.js');
+      const profileCall = app.setPath.mock.calls.find(([name]) => name === 'userData');
+      if (options.usesChannelProfile) {
+        expect(profileCall).toEqual(['userData', join(state.userData, 'appData', 'Tau Staging')]);
+      } else {
+        expect(profileCall).toBeUndefined();
+      }
+      expect(app.setPath).toHaveBeenCalledWith('sessionData', state.userData);
+    },
+    bootMilliseconds,
+  );
 
   const boot = async (): Promise<void> => {
     vi.stubGlobal('tauCloudBuildEnabled', false);
@@ -1659,7 +1855,7 @@ describe('desktop main machine store', () => {
   );
 
   it(
-    'seeds the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
+    'reads the shared payload store and posts its native composition to the kernel utilities, with no resource roots',
     async () => {
       await boot();
       await vi.waitFor(() => {
@@ -1667,12 +1863,13 @@ describe('desktop main machine store', () => {
       });
       const options = state.nativeStoreOptions as {
         readonly store: string;
-        readonly bundle: string | undefined;
         readonly hostPath: string;
         readonly post: (frame: unknown) => void;
       };
-      // Unpackaged there is no bundle to seed from; the store is the one every Tau host on the machine shares.
-      expect(options).toMatchObject({ store: join(state.userData, 'store'), bundle: undefined });
+      // The store is the one every Tau host on the machine shares, and the one main prepares kernels into.
+      expect(options).toMatchObject({ store: join(state.userData, 'store') });
+      expect(options).not.toHaveProperty('bundle');
+      expect(state.nativePreparerOptions).toMatchObject({ store: join(state.userData, 'store') });
       expect(options.hostPath).toBe(join(state.userData, 'exe'));
       const frame = { type: 'tau:native-kernels', kernels: [] };
       options.post(frame);

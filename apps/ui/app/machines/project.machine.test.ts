@@ -1,9 +1,9 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
-import { projectToManifest } from '@taucad/types';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
-import type { GeometryComponentManifest, ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
+import type { GeometryComponentManifest, Project, ProjectManifestParseIssue } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '@taucad/viewer/graphics/graphics-settings';
 import {
@@ -30,7 +30,7 @@ const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => (
 // Stubs
 // ---------------------------------------------------------------------------
 
-const stubProject: ProjectManifest = projectToManifest({
+const stubProject: Project = createProjectFixture({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
   name: 'Test Project',
   description: 'A test project',
@@ -45,10 +45,10 @@ const stubProjectWithMechanical = stubProject;
 // ---------------------------------------------------------------------------
 
 function createTestActor(options?: {
-  loadResult?: ProjectManifest | (() => Promise<ProjectManifest>);
+  loadResult?: Project | (() => Promise<Project>);
   /** Loads the project as the normalized view of a degraded manifest. */
   loadIssue?: ProjectManifestParseIssue;
-  writeResult?: (input: { project: ProjectManifest; repair?: boolean }) => Promise<void>;
+  writeResult?: (input: { project: Project; repair?: boolean }) => Promise<void>;
   shouldAutoLoad?: boolean;
   shouldLoadModelOnStart?: boolean;
   projectId?: string;
@@ -72,11 +72,9 @@ function createTestActor(options?: {
         ? { loadProjectActor }
         : {
             loadProjectActor,
-            writeProjectActor: fromSafeAsync<void, { project: ProjectManifest; repair?: boolean }>(
-              async ({ input }) => {
-                await writeResult(input);
-              },
-            ),
+            writeProjectActor: fromSafeAsync<void, { project: Project; repair?: boolean }>(async ({ input }) => {
+              await writeResult(input);
+            }),
           },
     guards: {
       isNotBrowser: () => false,
@@ -488,10 +486,10 @@ describe('projectMachine', () => {
     });
 
     it('should accept view graphics events during loading', async () => {
-      let resolveLoad!: (value: ProjectManifest) => void;
+      let resolveLoad!: (value: Project) => void;
       const actor = createTestActor({
         loadResult: async () =>
-          new Promise<ProjectManifest>((resolve) => {
+          new Promise<Project>((resolve) => {
             resolveLoad = resolve;
           }),
       });
@@ -617,7 +615,7 @@ describe('projectMachine', () => {
     const unknownAssetKey: ProjectManifestParseIssue = { code: 'manifest-invalid', issues: [] };
 
     const startDegraded = async (loadIssue: ProjectManifestParseIssue = unknownAssetKey) => {
-      const writes: Array<{ project: ProjectManifest; repair?: boolean }> = [];
+      const writes: Array<{ project: Project; repair?: boolean }> = [];
       const actor = await startAndLoad({
         loadIssue,
         writeResult: async (input) => {

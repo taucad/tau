@@ -10,8 +10,13 @@ import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { desktopProjectRoot } from '#constants/desktop-kernel-options.js';
 
 const modes: ReadonlyArray<{ value: ComputeReuseMode; label: string; description: string }> = [
-  { value: 'durable', label: 'Durable', description: 'Reuse results across sessions.' },
-  { value: 'memory', label: 'Memory', description: 'Reuse results until this runtime closes.' },
+  { value: 'durable', label: 'Saved on this device', description: 'Reuse results across sessions and restarts.' },
+  // Memory reuse lives in the kernel worker, which a heap recycle or a mode change also restarts.
+  {
+    value: 'memory',
+    label: 'This session only',
+    description: 'Reuse results until the project closes or its kernel restarts.',
+  },
   { value: 'off', label: 'Off', description: 'Do not reuse computed results.' },
 ];
 

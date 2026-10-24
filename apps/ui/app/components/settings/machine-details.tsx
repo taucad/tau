@@ -23,7 +23,7 @@ import { Ban, ShieldCheck, ShieldQuestion, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { compileParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest } from '@taucad/parameters';
-import type { ConfigurationManifestV1 } from '@taucad/runtime/configuration';
+import type { ConfigurationManifestV1 } from '@taucad/runtime/schema';
 import { fffProcessOf, isSimulatedMachine, millingProcessOf } from '@taucad/runtime/machine';
 import type {
   MachineActionDescriptor,

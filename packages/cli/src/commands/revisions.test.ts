@@ -35,6 +35,7 @@ const gitToolchainOnPath = await requireRevisionToolchain().then(
 
 describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
   let project: string;
+  let config: string;
   let stdout: string[];
 
   const captureStdout = (): void => {
@@ -54,13 +55,16 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
     project = await mkdtemp(join(tmpdir(), 'tau-cli-revisions-'));
+    config = await mkdtemp(join(tmpdir(), 'tau-cli-revisions-config-'));
+    process.env['TAU_CONFIG_DIR'] = config;
     stdout = [];
     captureStdout();
   });
 
   afterEach(async () => {
     vi.restoreAllMocks();
-    await rm(project, { recursive: true, force: true });
+    delete process.env['TAU_CONFIG_DIR'];
+    await Promise.all([rm(project, { recursive: true, force: true }), rm(config, { recursive: true, force: true })]);
   });
 
   /**
@@ -111,7 +115,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     expect(printed).toContain('main');
     expect(printed).toContain('Revision 1');
 
-    const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
+    const revisions = await openProjectRevisions({ workspaceRoot: project });
     try {
       const rows = await revisions.log();
       expect(printed.trim().split('\n')).toHaveLength(rows.length);
@@ -147,7 +151,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
    * carries the date git shows. */
   it('dates a revision it did not write by the revision itself, not the epoch', async () => {
     await seed();
-    const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
+    const revisions = await openProjectRevisions({ workspaceRoot: project });
     try {
       const rows = await revisions.log();
       expect(rows[0]?.createdAt).toBeGreaterThan(Date.UTC(2020, 0, 1));
@@ -158,7 +162,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
 
   it('names the files one revision changed', async () => {
     await seed();
-    const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
+    const revisions = await openProjectRevisions({ workspaceRoot: project });
     const rows = await revisions.log();
     await revisions.close();
     await runCommand(await importCommand(), {
@@ -172,7 +176,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     await writeFile(join(project, 'bracket.ts'), 'export const bracket = 3;\n');
     await runCommand(await importCommand(), { rawArgs: ['save', '--project', project] });
 
-    const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
+    const revisions = await openProjectRevisions({ workspaceRoot: project });
     try {
       const [latest] = await revisions.log();
       expect(latest?.revisionNumber).toBe(3);
@@ -209,8 +213,8 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
       const host = await importOriginal<typeof HostModule>();
       return {
         ...host,
-        openProjectRevisions: (options: Parameters<typeof host.openProjectRevisions>[0]) => ({
-          ...host.openProjectRevisions(options),
+        openProjectRevisions: async (options: Parameters<typeof host.openProjectRevisions>[0]) => ({
+          ...(await host.openProjectRevisions(options)),
           save: async () => ({ status: 'refused', reason }) as const,
         }),
       };
@@ -232,7 +236,7 @@ describe.runIf(gitToolchainOnPath)('revisionsCommand', () => {
     const command = await importCommand();
 
     await runCommand(command, { rawArgs: ['tag', 'v1', '--project', project] });
-    const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
+    const revisions = await openProjectRevisions({ workspaceRoot: project });
     try {
       const rows = await revisions.log();
       expect(rows[0]?.tags).toContain('v1');

@@ -1,7 +1,0 @@
-[
-  {
-    "name": "total (ESM JS) — measured 11.76 kB brotli on 2026-10-08",
-    "path": "dist/**/*.mjs",
-    "limit": "14 kB"
-  }
-]

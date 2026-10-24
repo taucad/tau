@@ -852,7 +852,7 @@ describe('tau mcp viewer presentation', () => {
         const { tools, client, served } = await offered(shape);
         expect(tools.get('show_model')?._meta).toEqual({ 'anthropic/alwaysLoad': true });
         expect([...tools.keys()]).not.toEqual(expect.arrayContaining(['app_read']));
-        expect(tools.has('open_model_file') || tools.has('browse_models')).toBe(false);
+        expect(tools.has('open_model_file') || tools.has('app_list_files')).toBe(false);
         // oxlint-disable-next-line no-await-in-loop -- ditto.
         expect(await served.kernelModules()).toEqual([]);
         // oxlint-disable-next-line no-await-in-loop -- ditto.
@@ -870,7 +870,8 @@ describe('tau mcp viewer presentation', () => {
       expect(ui?.resourceUri).toMatch(/^ui:\/\/tau\/[\da-f]{16}\/app\.html$/u);
       expect(tools.get('show_model')?._meta).not.toHaveProperty(['openai/ui']);
       expect(tools.get('app_read')?._meta?.['ui']).toEqual({ resourceUri: ui?.resourceUri, visibility: ['app'] });
-      expect(tools.has('open_model_file') || tools.has('browse_models')).toBe(false);
+      expect(tools.has('open_model_file')).toBe(false);
+      expect(tools.get('app_list_files')?._meta?.['ui']).toEqual({ resourceUri: ui?.resourceUri, visibility: ['app'] });
 
       const resource = resources.find(({ uri }) => uri === ui?.resourceUri);
       expect(resource?.mimeType).toBe('text/html;profile=mcp-app');
@@ -891,9 +892,8 @@ describe('tau mcp viewer presentation', () => {
 
       expect(meta('show_model')).toMatchObject({
         'openai/outputTemplate': resourceUri,
-        'openai/ui': { entrypoints: [{ type: 'thread' }] },
+        'openai/ui': { entrypoints: [{ type: 'thread' }, { type: 'global' }] },
       });
-      expect(meta('browse_models')).toMatchObject({ 'openai/ui': { entrypoints: [{ type: 'global' }] } });
       expect(meta('open_model_file')).toMatchObject({
         'openai/ui': { entrypoints: [{ type: 'file', extensions: expect.arrayContaining(['glb']) as unknown }] },
       });
@@ -944,7 +944,18 @@ describe("tau mcp with this computer's printers (blueprint W11)", () => {
   const printProject = async (name: string): Promise<string> => {
     const folder = join(scratch, name);
     await mkdir(folder, { recursive: true });
-    await writeFile(join(folder, 'tau.json'), JSON.stringify({ id: projectId }));
+    await mkdir(join(folder, '.tau'), { recursive: true });
+    await writeFile(join(folder, '.tau/project.json'), JSON.stringify({ version: 1, projectId }));
+    await writeFile(
+      join(folder, 'tau.json'),
+      JSON.stringify({
+        $schema: 'https://tau.new/schemas/tau-v1.json',
+        name: 'Print',
+        description: '',
+        tags: [],
+        assets: { main: { entryPath: 'plate.ts' } },
+      }),
+    );
     await writeFile(join(folder, 'plate.ts'), files.plate['plate.ts']);
     return folder;
   };

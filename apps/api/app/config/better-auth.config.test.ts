@@ -14,7 +14,10 @@ import type { EmailService } from '#email/email.service.js';
 /** Every row `beforeDelete` wrote, and when, so ordering against the closure is observable. */
 type RecordedWrite = { readonly table: unknown; readonly values: Record<string, unknown> };
 
-const createConfig = (authUrl = 'http://localhost:4000') => {
+const createConfig = (
+  authUrl = 'http://localhost:4000',
+  allowlist: { readonly domains?: readonly string[]; readonly users?: Record<string, string> } = {},
+) => {
   const writes: RecordedWrite[] = [];
   const order: string[] = [];
   const emailService = {
@@ -24,6 +27,15 @@ const createConfig = (authUrl = 'http://localhost:4000') => {
   } satisfies Pick<EmailService, 'sendMagicLink' | 'sendResetPassword' | 'sendVerification'>;
   const databaseService = {
     database: {
+      query: {
+        user: {
+          // The session gate's lookup; the drizzle `where` is opaque here, so the stub answers the one user it names.
+          findFirst: vi.fn(async () => {
+            const [email] = Object.values(allowlist.users ?? {});
+            return email === undefined ? undefined : { email };
+          }),
+        },
+      },
       insert: (table: unknown) => ({
         values: (values: Record<string, unknown>) => ({
           onConflictDoNothing: async (): Promise<void> => {
@@ -36,7 +48,8 @@ const createConfig = (authUrl = 'http://localhost:4000') => {
   } as unknown as DatabaseService;
   const configService = {
     get: vi.fn((key: string) => {
-      const values = new Map([
+      const values = new Map<string, unknown>([
+        ['TAU_AUTH_ALLOWED_EMAIL_DOMAINS', allowlist.domains ?? []],
         ['AUTH_SECRET', 'test-secret'],
         ['AUTH_URL', authUrl],
         ['TAU_FRONTEND_URL', 'http://localhost:3000'],
@@ -387,7 +400,7 @@ describe('getBetterAuthConfig abuse gates', () => {
   it('pins the same plugin order in both lockstep plugin lists', async () => {
     const { config } = createConfig();
     const { staticAuthConfig } = await import('#config/auth.js');
-    const expected = ['api-key', 'magic-link', 'one-time-token', 'bearer'];
+    const expected = ['api-key', 'magic-link', 'one-time-token', 'device-authorization', 'bearer'];
 
     expect(config.plugins?.map((plugin) => plugin.id)).toEqual(expected);
     expect(staticAuthConfig.plugins.map((plugin) => plugin.id)).toEqual(expected);
@@ -621,5 +634,134 @@ describe('getBetterAuthConfig runtime bearer composition', () => {
 
     expect(verified.status).toBe(200);
     expect(verified.headers.get('set-auth-token')).toEqual(expect.any(String));
+  });
+});
+
+describe('getBetterAuthConfig email-domain allowlist', () => {
+  const password = 'correct horse battery staple';
+  let clients = 0;
+
+  const createAllowlistedAuth = (users: Record<string, string> = {}) => {
+    const store: Record<string, Array<Record<string, unknown>>> = {
+      user: [],
+      session: [],
+      account: [],
+      verification: [],
+      apikey: [],
+      subscription: [],
+    };
+    const { config, emailService } = createConfig('http://localhost:4000', {
+      domains: ['tau.new', 'fontein.co'],
+      users,
+    });
+    return { config, store, emailService, auth: betterAuth({ ...config, database: memoryAdapter(store) }) };
+  };
+
+  const post = async (
+    auth: { handler: (input: Request) => Promise<Response> },
+    path: string,
+    body: Record<string, unknown>,
+  ) => {
+    // Better Auth's limiter is process-wide; each call gets its own documentation address.
+    clients += 1;
+    return auth.handler(
+      new Request(`http://localhost:4000/v1/auth/${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': `198.51.100.${clients}` },
+        body: JSON.stringify(body),
+      }),
+    );
+  };
+
+  /*
+   * Email sign-up answers a hook's 403 with the same generic "check your email" body as a duplicate address
+   * (requireEmailVerification's enumeration guard), so the refusal shows as no user, no session and no email.
+   */
+  it('creates no user, session or verification email for an address outside the allowed domains', async () => {
+    const { auth, store, emailService } = createAllowlistedAuth();
+
+    const response = await post(auth, 'sign-up/email', { email: 'someone@example.test', name: 'Outsider', password });
+
+    expect(await response.json()).toMatchObject({ token: null });
+    expect(emailService.sendVerification).not.toHaveBeenCalled();
+    expect(store['user']).toHaveLength(0);
+    expect(store['session']).toHaveLength(0);
+  });
+
+  it('creates no user for a subdomain of an allowed domain', async () => {
+    const { auth, store } = createAllowlistedAuth();
+
+    await post(auth, 'sign-up/email', { email: 'someone@x.tau.new', name: 'Sub', password });
+
+    expect(store['user']).toHaveLength(0);
+  });
+
+  it('answers the refusal as a 403 with its code from the account-creation hook itself', async () => {
+    const { config } = createAllowlistedAuth();
+
+    await expect(
+      config.databaseHooks?.user?.create?.before?.(
+        {
+          id: 'u',
+          email: 'someone@example.test',
+          emailVerified: false,
+          name: 'A',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        null,
+      ),
+    ).rejects.toMatchObject({ statusCode: 403, body: { code: 'EMAIL_DOMAIN_NOT_ALLOWED' } });
+  });
+
+  it('admits an allowed domain regardless of case, through sign-up and a verified sign-in', async () => {
+    const { auth, store } = createAllowlistedAuth({ member: 'member@tau.new' });
+
+    const signUp = await post(auth, 'sign-up/email', { email: 'Member@TAU.new', name: 'Member', password });
+    expect(signUp.status).toBe(200);
+    for (const user of store['user'] ?? []) {
+      user['emailVerified'] = true;
+    }
+    const signIn = await post(auth, 'sign-in/email', { email: 'member@tau.new', password });
+
+    expect(signIn.status).toBe(200);
+    expect(store['session']).toHaveLength(1);
+  });
+
+  it('refuses a new session for an account created before the allowlist', async () => {
+    const { config } = createAllowlistedAuth({ legacy: 'legacy@example.test' });
+    const before = config.databaseHooks?.session?.create?.before;
+
+    await expect(
+      before?.(
+        {
+          id: 'session_1',
+          userId: 'user_legacy',
+          token: 't',
+          expiresAt: new Date(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        null,
+      ),
+    ).rejects.toMatchObject({ body: { code: 'EMAIL_DOMAIN_NOT_ALLOWED' } });
+  });
+
+  it('allows every domain when the list is empty', async () => {
+    const { config } = createConfig();
+
+    await expect(
+      config.databaseHooks?.user?.create?.before?.(
+        {
+          id: 'u',
+          email: 'anyone@example.test',
+          emailVerified: false,
+          name: 'A',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        null,
+      ),
+    ).resolves.toBeUndefined();
   });
 });

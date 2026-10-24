@@ -9,7 +9,11 @@
 import { createDiagnosticsLog } from '#main/diagnostics.js';
 import { randomUUID } from 'node:crypto';
 
+import type { HostPrepareKernel } from '@taucad/host';
+import { preparableKernels } from '@taucad/native-process-core/store';
+
 import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
+import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
 import type { UtilityMessage } from '#tau/services-host.impl.js';
 
 type ParentPort = {
@@ -111,6 +115,36 @@ const requestRuntimePort = async (
   }
   return port;
 };
+/* The agent's `prepare_kernel`: main prepares the kernel, joining a download the viewer may already have started, and
+ * reports progress against this request. An agent that stops waiting leaves the download running for the viewer. */
+const pendingKernelPreparations = new Map<
+  string,
+  {
+    readonly resolve: (outcome: Awaited<ReturnType<HostPrepareKernel>>) => void;
+    readonly onProgress: Parameters<HostPrepareKernel>[1]['onProgress'];
+  }
+>();
+const prepareNativeKernel: HostPrepareKernel = async ({ kernel }, { signal, onProgress }) => {
+  const requestId = randomUUID();
+  const answer = Promise.withResolvers<Awaited<ReturnType<HostPrepareKernel>>>();
+  const stop = (): void => {
+    answer.resolve({
+      status: 'cancelled',
+      kernel,
+      message: `Stopped waiting for ${kernel}; Tau keeps downloading it, and the model renders once it is ready.`,
+    });
+  };
+  pendingKernelPreparations.set(requestId, { resolve: answer.resolve, onProgress });
+  signal.addEventListener('abort', stop, { once: true });
+  try {
+    parentPort.postMessage({ type: 'native-kernel-prepare', requestId, kernel });
+    return await answer.promise;
+  } finally {
+    signal.removeEventListener('abort', stop);
+    pendingKernelPreparations.delete(requestId);
+  }
+};
+
 /* The `git` main resolved from the bundle, when this build ships one (OQ3);
  * absent, the toolchain comes from `PATH` and says so once if it is not there. */
 const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
@@ -121,6 +155,7 @@ const host = createServicesHost({
   ...(legacyMachinesDirectory === undefined || legacyMachinesDirectory === '' ? {} : { legacyMachinesDirectory }),
   requestRuntimePort,
   requestGeometryPort,
+  nativeKernels: { prepare: prepareNativeKernel, preparable: preparableKernels(desktopNativeDeployments) },
   ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
@@ -165,12 +200,33 @@ process.once('exit', () => {
     pending.reject(new Error('The services utility exited before main supplied a geometry-runner port.'));
   }
   pendingGeometryPorts.clear();
+  for (const pending of pendingKernelPreparations.values()) {
+    pending.resolve({
+      status: 'failed',
+      kernel: '',
+      code: 'PREPARE_KERNEL_FAILED',
+      message: 'The services utility exited before main prepared the kernel.',
+    });
+  }
   host.dispose();
 });
 parentPort.on('message', (message) => {
   const frame = message.data;
   if (frame && typeof frame === 'object') {
     const { message: refusal, requestId, type } = frame as Record<string, unknown>;
+    if (typeof requestId === 'string' && (type === 'native-kernel-progress' || type === 'native-kernel-prepared')) {
+      const pending = pendingKernelPreparations.get(requestId);
+      const { outcome, progress } = frame as Record<string, unknown>;
+      if (type === 'native-kernel-progress' && typeof progress === 'object' && progress !== null) {
+        const { progress: done, total, message: text } = progress as Record<string, unknown>;
+        if (typeof done === 'number' && typeof total === 'number') {
+          pending?.onProgress({ progress: done, total, message: typeof text === 'string' ? text : '' });
+        }
+      } else if (type === 'native-kernel-prepared' && typeof outcome === 'object' && outcome !== null) {
+        pending?.resolve(outcome as Awaited<ReturnType<HostPrepareKernel>>);
+      }
+      return;
+    }
     if (typeof requestId === 'string' && (type === 'geometry-port' || type === 'geometry-port-refused')) {
       const pending = pendingGeometryPorts.get(requestId);
       if (pending) {

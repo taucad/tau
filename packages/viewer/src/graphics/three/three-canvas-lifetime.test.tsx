@@ -21,7 +21,10 @@ const cameraRig = {
   setClipPlanes: vi.fn(),
 };
 const graphicsRef = { send: vi.fn<(event: GraphicsEvent) => void>() };
-vi.mock('#hooks/use-graphics.jsx', () => ({ useCameraRig: () => cameraRig, useGraphics: () => graphicsRef }));
+vi.mock('#hooks/use-graphics.jsx', () => ({
+  useCameraRig: () => cameraRig,
+  useGraphics: () => graphicsRef,
+}));
 vi.mock('#graphics/three/scene.jsx', () => ({
   Scene: ({ children }: { readonly children: ReactNode }): ReactNode => children,
 }));
@@ -127,7 +130,8 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     width = 475;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, width, 864));
     allocation.createRenderer.mockImplementation(
-      async (_preset: string, _backend: string, canvas: HTMLCanvasElement) => {
+      async (_preset: string, _backend: string, surface: HTMLCanvasElement | { canvas: HTMLCanvasElement }) => {
+        const canvas = surface instanceof HTMLCanvasElement ? surface : surface.canvas;
         const renderer = new WebGPURenderer({
           canvas,
           reversedDepthBuffer: true,
@@ -141,7 +145,10 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
           }
         });
         // Installed Three has these methods; its published Backend declaration omits them.
-        const backend = renderer.backend as typeof renderer.backend & { updateSize: () => void; dispose: () => void };
+        const backend = renderer.backend as typeof renderer.backend & {
+          updateSize: () => void;
+          dispose: () => void;
+        };
         vi.spyOn(backend, 'updateSize').mockImplementation(() => undefined);
         vi.spyOn(backend, 'dispose').mockImplementation(() => undefined);
         vi.spyOn(renderer, 'render').mockImplementation(() => undefined);

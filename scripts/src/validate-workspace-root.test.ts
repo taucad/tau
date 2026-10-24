@@ -16,15 +16,12 @@ describe('workspace-root validation', () => {
 const approvedPaths = [
   '.agents/skills/create-script/SKILL.md',
   '.claude/settings.json',
-  '.codex/config.toml',
   '.github/workflows/ci.yml',
   '.gitignore',
   '.nx/version-plans/.gitkeep',
   '.oxfmtrc.json',
   '.oxlintrc.json',
-  '.vscode/settings.json',
   'AGENTS.md',
-  'CLAUDE.md',
   'NOTICE',
   'apps/ui/package.json',
   'docs/policy/tool-output-location-policy.md',
@@ -47,8 +44,8 @@ const approvedPaths = [
 const approvedEntries = approvedPaths.map((path) => path.split('/')[0] ?? '');
 
 describe('authored workspace-root budget', () => {
-  it('should accept the approved 28 roots and documented local output boundaries', () => {
-    expect(approvedEntries).toHaveLength(28);
+  it('should accept the approved 25 roots and documented local output boundaries', () => {
+    expect(approvedEntries).toHaveLength(25);
     expect(
       workspaceRootInventoryErrors({
         trackedPaths: [...approvedPaths, 'apps/api/package.json'],
@@ -71,7 +68,7 @@ describe('authored workspace-root budget', () => {
     ).toEqual([]);
   });
 
-  it.each(['scratch.json', '.dockerignore', '.nxignore'])(
+  it.each(['scratch.json', '.dockerignore', '.nxignore', 'CLAUDE.md', '.codex', '.vscode'])(
     'should reject an unapproved root even when Git tracks it: %s',
     (rootEntry) => {
       expect(

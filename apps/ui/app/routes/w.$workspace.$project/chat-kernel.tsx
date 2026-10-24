@@ -202,6 +202,7 @@ export const ChatKernel = memo(
           <FloatingPanelContentTitle>Telemetry</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Telemetry'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>{isOpen ? 'Close' : 'Open'} Telemetry</div>

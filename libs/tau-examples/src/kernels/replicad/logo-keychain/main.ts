@@ -4,6 +4,7 @@ import {
   drawCircle,
   drawRoundedRectangle,
   drawText,
+  loadFont,
   makeCompound,
   type Drawing,
   type ShapeConfig,
@@ -12,6 +13,7 @@ import {
 } from 'replicad';
 import { defaultParams } from './params.js';
 import logoSvg from './assets/logo.svg' with { type: 'text' };
+import boldFont from './assets/Geist-Bold.ttf?binary';
 
 export { defaultParams };
 
@@ -219,7 +221,10 @@ function createBackText(p = defaultParams): Shape3D {
   const linePitch = p.backTextFontSize + p.backTextLineGap;
   const firstLineOffset = ((lines.length - 1) * linePitch) / 2;
   const lineDrawings = lines.map((line) =>
-    drawText(line, { fontSize: p.backTextFontSize }),
+    drawText(line, {
+      fontSize: p.backTextFontSize,
+      fontFamily: 'keyring-bold',
+    }),
   );
   const maxLineWidth = Math.max(
     ...lineDrawings.map((lineDrawing) => lineDrawing.boundingBox.width),
@@ -239,7 +244,8 @@ function createBackText(p = defaultParams): Shape3D {
   return compoundShape3D(lineSolids, 'Back URL');
 }
 
-export default function main(p = defaultParams): ShapeConfig[] {
+export default async function main(p = defaultParams): Promise<ShapeConfig[]> {
+  await loadFont(boldFont.buffer, 'keyring-bold');
   const pathData = /<path[^>]*\sd=(?:"([^"]+)"|'([^']+)')/
     .exec(logoSvg)
     ?.slice(1)
@@ -295,20 +301,47 @@ export default function main(p = defaultParams): ShapeConfig[] {
     throw new Error('Unsupported SVG: expected at least one drawable subpath.');
   }
 
-  const logoSolids = [firstLogoSubpath, ...logoSubpaths.slice(1)].map(
-    (subpath) =>
-      drawingFromPath(subpath)
-        .sketchOnPlane('XY', p.tabletHeight)
-        .extrude(p.logoHeight),
-  );
-  const logoBase = compoundShape3D(logoSolids, 'Logo');
+  // SVG contours are right stem, crown, left stem; omit edges facing the gaps.
+  const outerSegments = [
+    [4, 5, 6, 7, 8],
+    [0, 1, 2, 3, 7, 8, 9],
+    [4, 5, 6, 7, 8],
+  ];
   const logoTopZ = p.tabletHeight + p.logoHeight;
-  const logo =
-    p.logoChamferSize > 0
-      ? logoBase.chamfer(p.logoChamferSize, (edge) =>
-          edge.inPlane('XY', logoTopZ),
-        )
-      : logoBase;
+  const logoSolids = [firstLogoSubpath, ...logoSubpaths.slice(1)].map(
+    (subpath, index) => {
+      const solid = drawingFromPath(subpath)
+        .sketchOnPlane('XY', p.tabletHeight)
+        .extrude(p.logoHeight);
+      if (p.logoChamferSize === 0) {
+        return solid;
+      }
+      const points = subpath.segments.flatMap((segment, segmentIndex) => {
+        if (!outerSegments[index]?.includes(segmentIndex)) {
+          return [];
+        }
+        const start = subpath.segments[segmentIndex - 1]?.end ?? subpath.start;
+        const midpoint: P2 =
+          segment.type === 'arc'
+            ? segment.midpoint
+            : [
+                (start[0] + segment.end[0]) / 2,
+                (start[1] + segment.end[1]) / 2,
+              ];
+        return [midpoint];
+      });
+      return solid.chamfer(p.logoChamferSize, (edge) =>
+        edge.inPlane('XY', logoTopZ).either(
+          points.map(
+            ([x, y]) =>
+              (finder) =>
+                finder.containsPoint([x, y, logoTopZ]),
+          ),
+        ),
+      );
+    },
+  );
+  const logo = compoundShape3D(logoSolids, 'Logo');
 
   const tabletOuterSketch = drawRoundedRectangle(
     p.tabletSize,

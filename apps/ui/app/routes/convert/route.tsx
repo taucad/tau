@@ -581,13 +581,15 @@ function ConverterContentInner(): React.JSX.Element {
 
 export default function ConverterRoute(): React.JSX.Element {
   // Provide a minimal project context so downstream components can use graphics/cad state
-  const converterProject = projectToManifest({
+  const converterProject = {
+    ...projectToManifest({
+      name: 'Converter',
+      description: 'Transient project context for the converter page',
+      tags: [],
+      assets: { main: { entryPath: 'converter.glb' } },
+    }),
     id: 'converter',
-    name: 'Converter',
-    description: 'Transient project context for the converter page',
-    tags: [],
-    assets: { main: { entryPath: 'converter.glb' } },
-  });
+  };
 
   return (
     <ProjectProvider

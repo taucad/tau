@@ -1,9 +1,9 @@
+import { createProjectFixture } from '#lib/project.fixture.js';
 import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { RevisionStatusProjection, RemoteFacet, SyncFacet } from '@taucad/revisions';
-import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { tauCloudIntent } from '#hooks/use-cloud-projects.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
@@ -345,7 +345,7 @@ const routeModule = await import('./project-route.js');
 const sessionsModule = await import('./project-live-sessions.js');
 
 const project = (id: string) =>
-  projectToManifest({
+  createProjectFixture({
     id,
     name: id,
     description: '',
@@ -758,12 +758,32 @@ describe('project route session identity', () => {
         line: { kind: 'unknown' },
       }),
     );
-    tauCloudIntent.set(projectA, 'open');
-    renderRouteProvider();
+    const lifecycle = deferred<Response>();
+    const fetchProjects = vi.spyOn(globalThis, 'fetch').mockReturnValue(lifecycle.promise);
+    try {
+      tauCloudIntent.set(projectA, 'open');
+      renderRouteProvider();
 
-    await waitFor(() => {
-      expect(connectRemote).toHaveBeenCalledWith('tau');
-    });
+      await waitFor(() => {
+        expect(fetchProjects).toHaveBeenCalledWith(
+          expect.stringMatching(/\/v1\/projects$/u),
+          expect.objectContaining({ credentials: 'include' }),
+        );
+      });
+      expect(connectRemote).not.toHaveBeenCalled();
+      await act(async () => {
+        lifecycle.resolve(
+          Response.json([
+            { id: projectA, name: 'Project A', role: 'owner', cloudState: 'active', canDeleteCloud: false },
+          ]),
+        );
+      });
+      await waitFor(() => {
+        expect(connectRemote).toHaveBeenCalledWith('tau');
+      });
+    } finally {
+      fetchProjects.mockRestore();
+    }
   });
 
   it('forwards a trusted created chat to the active project session', async () => {

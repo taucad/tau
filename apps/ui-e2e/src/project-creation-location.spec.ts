@@ -86,8 +86,10 @@ const expectManifest = (
   expected: { readonly id: string; readonly name: string },
 ): void => {
   expect(evidence).toBeDefined();
-  const manifest = JSON.parse(evidence!.manifestText) as { id: string; name: string };
-  expect({ id: manifest.id, name: manifest.name }).toEqual(expected);
+  const manifest = JSON.parse(evidence!.manifestText) as { name: string };
+  const identity = JSON.parse(evidence!.identityText) as { projectId: string };
+  expect(manifest).not.toHaveProperty('id');
+  expect({ id: identity.projectId, name: manifest.name }).toEqual(expected);
 };
 
 describe('project creation locations', () => {

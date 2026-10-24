@@ -69,7 +69,7 @@ const outcomeForCode = (code: unknown): AcceptOutcome => {
  * @param props - The heading, the explanation and the action.
  * @returns The panel.
  */
-function InvitationNotice({
+export function InvitationNotice({
   title,
   detail,
   action,

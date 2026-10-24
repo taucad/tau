@@ -90,7 +90,11 @@ type Harness = Readonly<{
   unmount: () => void;
 }>;
 
-const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]): Promise<Harness> => {
+const mountFills = async (
+  cutSet: SectionCutSet,
+  meshes: readonly THREE.Mesh[],
+  snapshotStore = createSectionViewSafeSnapshotStore(),
+): Promise<Harness> => {
   const canvas = document.createElement('canvas');
   document.body.append(canvas);
   const root = createRoot(canvas);
@@ -109,7 +113,6 @@ const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]):
   const inner = new THREE.Group();
   inner.add(...meshes);
   inner.updateMatrixWorld(true);
-  const snapshotStore = createSectionViewSafeSnapshotStore();
   const commits: Array<readonly SectionCut[]> = [];
   let scene: THREE.Scene | undefined;
   const render = async (next: SectionCutSet): Promise<void> => {
@@ -122,7 +125,6 @@ const mountFills = async (cutSet: SectionCutSet, meshes: readonly THREE.Mesh[]):
             innerRef={{ current: inner }}
             snapshotRef={{ current: snapshotStore }}
             stripeFrequency={2}
-            stripeWidth={0.25}
             onCommit={(cuts) => commits.push(cuts)}
           />
         </ThreeGraphicsBackendProvider>,
@@ -441,6 +443,23 @@ describe('SectionContourFills', () => {
       const [after] = openChainDraws();
       expect(after!.matrixWorld.elements[14]).toBeCloseTo(0.5);
     });
+  });
+
+  it('should cap the same cut again when the section view turns off and back on', async () => {
+    // The stage owns the snapshot store and outlives the caps, which unmount while the section view is off.
+    const cutSet = cutSetOf(planeCut(0.1));
+    const box = ownedBox();
+    harness = await mountFills(cutSet, [box]);
+    harness.frame();
+    expect(harness.drawn().get('TauSectionCap')).toHaveLength(1);
+    const { snapshotStore } = harness;
+    harness.unmount();
+
+    harness = await mountFills(cutSet, [box], snapshotStore);
+    harness.frame();
+    expect(harness.gl.render).toHaveBeenCalledTimes(1);
+    expect(harness.drawn().get('TauSectionCap')).toHaveLength(1);
+    expect(harness.drawn().get('TauSectionCapOutline')).toHaveLength(1);
   });
 
   it('should draw nothing with no cut', async () => {

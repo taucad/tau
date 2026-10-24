@@ -6,6 +6,7 @@
 
 import type { AttachmentReader } from '#harness/session-record.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
+import { EventLogError } from '#log/event-log-error.js';
 import type { StorageDurabilityClass } from '#log/event-types.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
@@ -98,9 +99,96 @@ export type ChatStoreBinding = Readonly<{
   /** A write open: the binding's lock, then a read of the log whose tail is the fence register (W3). */
   openWriter: (chatId: string) => Promise<EventLogAppender>;
   leadership: (host: LeadershipHost) => LeadershipPort;
+  /**
+   * Whether the chat's record (`chat.json`) carries a permanent delete's tombstone, `purgedAt` (OQ2). A purged chat's
+   * writer never opens, appends or writes an attachment, so nothing its purge removed is written back.
+   */
+  purged?: ((chatId: string) => Promise<boolean>) | undefined;
 }>;
 
 const bindingKey = Symbol('tau.chatStore');
+
+/** The chat record's name beside the log, restated: `@taucad/revisions` owns it and this package does not import it. @internal */
+export const chatRecordFileName = 'chat.json';
+
+/**
+ * Whether a chat record's text carries a permanent delete's tombstone.
+ *
+ * @param text - `chat.json`'s text, or `undefined` when the chat has no record.
+ * @returns `true` for a record whose `purgedAt` is a number; an unreadable record is not a tombstone.
+ * @internal
+ */
+export const isPurgedChatRecord = (text: string | undefined): boolean => {
+  if (text === undefined) {
+    return false;
+  }
+  try {
+    const record: unknown = JSON.parse(text);
+    return (
+      typeof record === 'object' && record !== null && typeof (record as { purgedAt?: unknown }).purgedAt === 'number'
+    );
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The refusal every write into a purged chat answers.
+ *
+ * @param chatId - The purged chat.
+ * @returns A `LOG_FENCED` error naming it.
+ * @internal
+ */
+export const purgedChatError = (chatId: string): EventLogError =>
+  new EventLogError(
+    'LOG_FENCED',
+    `Chat "${chatId}" was deleted permanently; its log and attachments are not written again.`,
+  );
+
+/**
+ * Fence a binding's writes by the chat's tombstone (OQ2): a purged chat's writer is refused `LOG_FENCED` at open, at
+ * each append and at each attachment write, so a run that outlives the purge stops at its next row and writes nothing
+ * back. The check reads the record each time; the append it guards costs a sync already.
+ *
+ * @param binding - A platform's half.
+ * @returns The same binding with its writes fenced, or unchanged when it cannot read a record.
+ */
+const fencePurged = (binding: ChatStoreBinding): ChatStoreBinding => {
+  const { purged, attachments } = binding;
+  if (purged === undefined) {
+    return binding;
+  }
+  const refuse = async (chatId: string): Promise<void> => {
+    if (await purged(chatId)) {
+      throw purgedChatError(chatId);
+    }
+  };
+  const write = attachments.write?.bind(attachments);
+  return {
+    ...binding,
+    attachments:
+      write === undefined
+        ? attachments
+        : {
+            read: attachments.read.bind(attachments),
+            write: async (chatId, path, bytes) => {
+              await refuse(chatId);
+              await write(chatId, path, bytes);
+            },
+          },
+    openWriter: async (chatId) => {
+      await refuse(chatId);
+      const log = await binding.openWriter(chatId);
+      return {
+        ...log,
+        append: async (event) => {
+          await refuse(chatId);
+          return log.append(event);
+        },
+      };
+    },
+  };
+};
 
 /**
  * Wrap a platform binding as an opaque store.
@@ -111,7 +199,7 @@ const bindingKey = Symbol('tau.chatStore');
  */
 export const createChatStore = (binding: ChatStoreBinding): ChatStore =>
   // ponytail: one documented cast brands the object; the brand symbol is never exported, so no caller can forge one.
-  ({ [bindingKey]: binding }) as unknown as ChatStore;
+  ({ [bindingKey]: fencePurged(binding) }) as unknown as ChatStore;
 
 /**
  * Read a store's platform binding.

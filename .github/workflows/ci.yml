@@ -402,7 +402,7 @@ jobs:
         if: matrix.ecosystem != 'kcl'
         env:
           ZOO_TOKEN: ${{ secrets.ZOO_TOKEN }}
-          TAU_API_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
+          TAU_AUTH_TOKEN: ${{ secrets.TAU_STANDALONE_API_TOKEN }}
         run: node scripts/src/check-standalone-project.ts --ecosystem "${{ matrix.ecosystem }}" --work "$RUNNER_TEMP/standalone"
 
       # The lock-parity oracle of the JavaScript row (blueprint I5): the lock Tau writes passes `npm ci`
@@ -760,7 +760,7 @@ jobs:
   # storage substrate landed, that is the whole of `test` for `tag:scope:api` —
   # the `affected` lane above excludes the tag rather than trying to guess which
   # files reach a service — plus the service-backed targets (`test:models`,
-  # `test:server-modes`, `test:git`, the billing foundation). Always runs on `main`
+  # `test:server-modes`, `test:git`). Billing contracts have their own job. Always runs on `main`
   # pushes so the deploy gate is never green off a stale service check.
   api:
     name: API tests (Postgres + MinIO)
@@ -844,91 +844,28 @@ jobs:
       - name: Run the git end-to-end tier (two API processes, one object store)
         run: pnpm nx run-many -t test:git
 
-      # The L2 fixture starts its own PostgreSQL with pull_policy "never", so
-      # the image must already be on the runner.
-      - name: Pull the billing foundation PostgreSQL image
-        run: docker pull postgres:17-alpine
-
-      # L2 billing lane (every PR, zero Stripe credentials): the complete local
-      # PostgreSQL/Redis foundation, including signed webhook settlement.
-      - name: Run billing foundation (L2)
-        run: pnpm nx run-many -t test:billing-foundation
-
-  # L3 billing e2e: real Stripe test-mode objects + `stripe listen` forwarding
-  # the live event stream into the app under test. External forks do not run
-  # this job. Until the payments work adds the isolated restricted credentials,
-  # the lane skips with a notice when none is set (operator ruling, 2026-10-02);
-  # a partial set still fails, because that is a misconfiguration.
+  # Credential-free database and Stripe adapter contracts, including fork PRs.
+  # Keep the job id stable and gate API deployment on its actual result.
   billing-e2e:
-    name: Billing e2e (Stripe test mode)
+    name: Billing contracts (no Stripe credentials)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [plan]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      ((github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.api == 'true'))
-    concurrency:
-      group: stripe-test-account
-      cancel-in-progress: false
-    env:
-      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_CREATE_RESTRICTED_KEY }}
-      STRIPE_READ_SECRET_KEY: ${{ secrets.STRIPE_TEST_READ_RESTRICTED_KEY }}
-      STRIPE_REFUND_SECRET_KEY: ${{ secrets.STRIPE_TEST_REFUND_RESTRICTED_KEY }}
-      STRIPE_ACCOUNT_ID: ${{ secrets.STRIPE_TEST_ACCOUNT_ID }}
-      # The test account's own catalog. The lane copies `.env.example` into `.env`, whose placeholders
-      # name no real Stripe object; exported values win over `.env` for Nx and for dotenv in vitest.
-      STRIPE_PRICE_ID_PRO_MONTHLY: ${{ secrets.STRIPE_TEST_PRICE_ID_PRO_MONTHLY }}
-      STRIPE_PRODUCT_ID_CREDIT_PACK: ${{ secrets.STRIPE_TEST_PRODUCT_ID_CREDIT_PACK }}
+      (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Skip without isolated Stripe acceptance credentials
-        id: gate
-        run: |
-          set=0
-          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID" \
-            "$STRIPE_PRICE_ID_PRO_MONTHLY" "$STRIPE_PRODUCT_ID_CREDIT_PACK"; do
-            if [ -n "$value" ]; then set=$((set + 1)); fi
-          done
-          if [ "$set" -eq 0 ]; then
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Billing e2e skipped::No STRIPE_TEST_* secret is configured; the real Stripe lane runs once the payments work adds them."
-          elif [ "$set" -eq 6 ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Only $set of the six STRIPE_TEST_* secrets are set; set all six or none."
-            exit 1
-          fi
-
       - name: Setup Nx Environment
-        if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
 
-      - name: Install Stripe CLI
-        if: steps.gate.outputs.enabled == 'true'
-        run: |
-          curl -fsSL https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg >/dev/null
-          echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
-          sudo apt-get update -qq && sudo apt-get install -y stripe
+      - name: Pull the billing foundation PostgreSQL image
+        run: docker pull postgres:17-alpine
 
-      - name: Prepare API env file
-        if: steps.gate.outputs.enabled == 'true'
-        run: cp apps/api/.env.example apps/api/.env
-
-      - name: Start Postgres + Redis + MinIO
-        if: steps.gate.outputs.enabled == 'true'
-        run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
-
-      # `api:db-migrate` is the release migration job: DDL, the billing protections and
-      # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in
-      # `.env.example`, so these lanes get schema and protections only, as Fly does).
-      - name: Apply the protected migration job
-        if: steps.gate.outputs.enabled == 'true'
-        run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
-
-      - name: Run real Stripe billing acceptance (L3)
-        if: steps.gate.outputs.enabled == 'true'
-        run: pnpm nx run-many -t test:billing-stripe
+      - name: Run billing database and Stripe adapter contracts
+        run: pnpm nx run-many -t test:billing-foundation
 
   # Staging deployments — deploy after builds pass so the Nx Cloud cache is populated.
   # The API ships to Fly here (`tau-api-staging`); the UI is built here and published
@@ -953,12 +890,12 @@ jobs:
   # Both staging deploys wait for `affected-lane` directly.
   deploy-api-staging:
     name: Deploy API (Staging)
-    needs: [workspace, affected-lane, plan, api]
+    needs: [workspace, affected-lane, plan, api, billing-e2e]
     if: >-
       !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
       needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'api') &&
       needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
-      needs.api.result == 'success'
+      needs.api.result == 'success' && needs.billing-e2e.result == 'success'
     # `actions: read` lets the deploy see whether a newer run already deployed.
     permissions:
       contents: read
@@ -967,6 +904,57 @@ jobs:
     with:
       environment: staging
       app: api
+    secrets: inherit
+
+  # The private B2 copier (`tau-mirror-staging`, W13 DM1): the `mirror` project,
+  # whose code is `api`'s mirror command (implicit dependency), so the plan lists it
+  # whenever `api` or its Fly configs change. It waits for the API deploy when that
+  # runs: the API's release command owns migrations and the `tau_mirror` role, and
+  # the copier refuses to start against a schema it was not built for.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-mirror-staging:
+    name: Deploy mirror (Staging)
+    needs: [workspace, affected-lane, plan, api, deploy-api-staging]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
+      needs.api.result == 'success' &&
+      (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: mirror
+    secrets: inherit
+
+  # The private maintenance app (`tau-maintenance-staging`, north star DC4): the
+  # `maintenance` project, whose code is `api`'s maintenance command (implicit
+  # dependency), so the plan lists it whenever `api` or its Fly configs change. It
+  # waits for the API deploy when that runs: the API's release command owns
+  # migrations and the `tau_maintenance` role, and the maintenance image must not
+  # run ahead of the schema. Until the DC4 cutover it holds in standby
+  # (`TAU_MAINTENANCE_STANDBY`), so the API's own `revisions-maintenance` group
+  # stays the one worker.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-maintenance-staging:
+    name: Deploy maintenance (Staging)
+    needs: [workspace, affected-lane, plan, api, deploy-api-staging]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'maintenance') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
+      needs.api.result == 'success' &&
+      (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: maintenance
     secrets: inherit
 
   # The staging UI: built in Actions and published by the Netlify CLI. It waits for

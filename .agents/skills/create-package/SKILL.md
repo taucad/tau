@@ -74,12 +74,11 @@ All files are created in a single command with zero cleanup needed:
 | `src/index.ts`        | Empty barrel export                                                                         |
 | `README.md`           | Package name and description                                                                |
 | `AGENTS.md`           | Project identity, selected modes, entrypoints, available Nx commands and owner links        |
-| `CLAUDE.md`           | Exact native import of the adjacent `AGENTS.md`                                             |
 
-The instruction pair is created by the shared KeepExisting writer. A full
+The AGENTS starter is created by the shared KeepExisting writer. A full
 project-generator collision fails before mutation. Subsequent instruction
 maintenance edits `AGENTS.md` as ordinary authored content; rerunning the
-instruction writer preserves both files and creates only a missing pair member.
+instruction writer preserves authored bytes and creates only a missing `AGENTS.md`.
 
 ## How it works
 

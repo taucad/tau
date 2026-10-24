@@ -191,6 +191,7 @@ export type PermanentDeleteProjectDirectoryResult =
 
 /** Exact scoped request for committing one journal-backed project directory. @public */
 export type CommitPendingProjectDirectoryInput = {
+  readonly projectId: string;
   readonly providerBasePath: string;
   readonly scope: StorageRootConfig;
   readonly files: Readonly<

@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_Dn_if4M_tHPoFT_dUrxDD",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Enclosure lid",
   "description": "Uniform-wall open electronics enclosure lid; external dimensions and wall are editable.",
   "tags": [

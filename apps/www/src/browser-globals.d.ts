@@ -5,6 +5,7 @@ declare global {
   // oxlint-disable-next-line typescript/consistent-type-definitions -- Vite requires interface merging for typed public build settings.
   interface ImportMetaEnv {
     readonly WWW_LAUNCH?: string;
+    readonly WWW_INSTALLER_CATALOG?: string;
     readonly WWW_ORIGIN?: string;
     readonly WWW_ANALYTICS_ENDPOINT?: string;
     /** The `@taucad/agent-plugin` version in the workspace at build time. */

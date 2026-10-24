@@ -40,7 +40,6 @@ const qualification = (): QualifiedBillableInvocation => ({
   replica: { schemaVersion: 1, meterContractIds: ['meter'] },
   invocation: {
     contractVersion: 'v1',
-    credentialAccount: 'account',
     supplierRatesValidUntil: null,
     supplierRates: [{ dimension: 'uncached_input', tier: null, numeratorPicoUsd: '1', denominatorUnits: '1' }],
     executionTimeout: 30_000,
@@ -169,9 +168,6 @@ describe('BillableModelInvocationService', () => {
       });
       const resolver = new CodeOwnedBillableModelQualificationResolver({
         adapters,
-        credentialAccounts: new Map(
-          ['openai', 'anthropic', 'vertexai'].map((provider) => [provider, 'fixture-account']),
-        ),
         executionTimeout: 30_000,
       });
       const routes = [
@@ -258,12 +254,6 @@ describe('BillableModelInvocationService', () => {
     expect([...adapters.keys()].sort()).toEqual([...billableModelRouteIds].sort());
     const resolver = new CodeOwnedBillableModelQualificationResolver({
       adapters,
-      credentialAccounts: new Map(
-        ['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai'].map((provider) => [
-          provider,
-          `${provider}-fixture-account`,
-        ]),
-      ),
       executionTimeout: 30_000,
     });
     for (const routeCase of routeCases) {
@@ -298,7 +288,6 @@ describe('BillableModelInvocationService', () => {
     );
     const resolver = new CodeOwnedBillableModelQualificationResolver({
       adapters,
-      credentialAccounts: new Map([['xai', 'xai-fixture-account']]),
       executionTimeout: 30_000,
     });
     const qualified = resolver.resolve({
@@ -359,7 +348,6 @@ describe('BillableModelInvocationService', () => {
     );
     const resolver = new CodeOwnedBillableModelQualificationResolver({
       adapters,
-      credentialAccounts: new Map([['vertexai', 'vertex-fixture-account']]),
       executionTimeout: 30_000,
     });
     const qualified = resolver.resolve({

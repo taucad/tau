@@ -1,12 +1,12 @@
 /**
- * What the kernel utility binds its native kernels through (charter W6 phase 1, D8).
+ * What the kernel utility binds its native kernels through (charter W6, D8).
  *
- * Main seeds the payload store and reads each sealed closure's launch index, then posts one control frame naming the
- * closure every native kernel runs from, or why it has none. The broker replays the frame to every utility right after
- * its boot frame, and the desktop runtime awaits it before it composes, so a utility forked while main is still
- * seeding waits for the closures instead of composing without them. The runtime lists the native kernels' plugins
- * like any other; each kernel asks the closure resolver installed here for its closure when it initializes, and
- * refuses with main's reason when it has none. The utility never reads the store's receipts itself; it re-verifies a
+ * Main reads each sealed closure's launch index from the payload store at startup, then posts one control frame naming
+ * the closure every prepared native kernel runs from. The broker replays the frame to every utility right after its
+ * boot frame, and the desktop runtime awaits it before it composes. The runtime lists the native kernels' plugins like
+ * any other; each kernel asks the closure resolver installed here for its closure when it initializes. A kernel the
+ * frame does not name is read from the store on every bind, so a kernel main prepares after launch (first-use
+ * download) binds on its next operation, and until then refuses with `KERNEL_NOT_PREPARED`. The utility never reads the store's receipts itself; it re-verifies a
  * closure only when a worker exits before its handshake, so the refusal names the damage.
  *
  * @module
@@ -80,8 +80,8 @@ export const verifyDesktopClosure = verifyStoreClosure(
 
 /**
  * The closure resolver over main's frame: a kernel the frame gives a sealed closure binds to it; a kernel the frame
- * refuses answers with main's reason; a kernel the frame does not name (main leaves out those no variant fits this
- * host) is read from the store main seeded, which also says why it cannot run here.
+ * refuses (main could not open the store) answers with main's reason; a kernel the frame does not name (not prepared
+ * at launch, or no variant fits this host) is read from the store, which also says why it cannot run yet.
  * @param frame - What main posted.
  * @param fallback - Where a kernel the frame does not name is looked up; default the frame's store.
  * @returns The resolver.

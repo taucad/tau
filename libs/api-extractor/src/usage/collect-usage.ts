@@ -10,6 +10,8 @@
  *
  * Run: `pnpm nx run api-extractor:collect-usage` (roots overridable with
  * repeated `--workspace=<dir>` or `TAU_USAGE_WORKSPACES`, path-delimiter separated).
+ * After an API is removed or renamed, `collect-usage --prune` drops only the
+ * symbols the corpora no longer declare and needs no workspace.
  *
  * @module
  */
@@ -24,6 +26,7 @@ import { parseArgs } from 'node:util';
 
 import type { BundleOwner } from '#bundle/generate.js';
 import type { ApiCorpus, ApiEntry, ApiEntryKind } from '#model/api-corpus.types.js';
+import { addressableEntries } from '#render/shard-plan.js';
 
 /** One owner's corpus sources, as the bundle owner table declares them. @internal */
 export type UsageOwner = Pick<BundleOwner, 'slug' | 'corpus' | 'supplementalApi'>;
@@ -656,6 +659,24 @@ export const collectUsage = (options: {
   });
 };
 
+/**
+ * Drop ranked symbols the owners' corpora no longer declare, keeping every
+ * other count as collected. For a removed or renamed API between collections:
+ * it needs no workspace roots, so it never replaces committed counts.
+ *
+ * @internal
+ * @param reports - Committed reports.
+ * @param owners - The owners whose corpora decide what is still declared.
+ * @returns The reports without undeclared symbols.
+ */
+export const pruneUsageReports = (reports: readonly UsageReport[], owners: readonly UsageOwner[]): UsageReport[] =>
+  reports.map((report) => {
+    const owner = owners.find(({ slug }) => slug === report.slug);
+    const corpora = [owner?.corpus?.(), owner?.supplementalApi?.corpus()].filter((corpus) => corpus !== undefined);
+    const declared = new Set(corpora.flatMap((corpus) => addressableEntries(corpus).map(({ id }) => id)));
+    return { ...report, symbols: report.symbols.filter(({ id }) => declared.has(id)) };
+  });
+
 /** Write one `<slug>.json` per report: 2-space JSON and a trailing newline. @internal */
 export const writeUsageReports = (reports: readonly UsageReport[], outDirectory: string): void => {
   mkdirSync(outDirectory, { recursive: true });
@@ -664,14 +685,23 @@ export const writeUsageReports = (reports: readonly UsageReport[], outDirectory:
   }
 };
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { values } = parseArgs({
-    options: {
-      workspace: { type: 'string', multiple: true },
-      out: { type: 'string', default: 'src/generated/usage' },
-    },
+const pruneCommittedReports = async (outDirectory: string): Promise<void> => {
+  const { bundleOwners } = await import('#bundle/generate.js');
+  const committed = bundleOwners.flatMap(({ slug }) => {
+    const path = join(outDirectory, `${slug}.json`);
+    return existsSync(path) ? [JSON.parse(readFileSync(path, 'utf8')) as UsageReport] : [];
   });
-  const workspaceRoots = values.workspace ??
+  const pruned = pruneUsageReports(committed, bundleOwners);
+  writeUsageReports(pruned, outDirectory);
+  for (const [index, report] of pruned.entries()) {
+    console.log(
+      `${report.slug}: pruned ${String(committed[index]!.symbols.length - report.symbols.length)} undeclared symbols`,
+    );
+  }
+};
+
+const collectAndWrite = async (options: { workspace?: string[]; out: string }): Promise<void> => {
+  const workspaceRoots = options.workspace ??
     process.env['TAU_USAGE_WORKSPACES']?.split(delimiter).filter(Boolean) ?? [
       join(homedir(), 'Documents/tau-workspace'),
       join(homedir(), 'Library/Application Support/Tau/home'),
@@ -687,11 +717,30 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
     workspaceRoots,
     owners: bundleOwners,
   });
-  writeUsageReports(reports, values.out);
+  writeUsageReports(reports, options.out);
   for (const report of reports) {
     const { workspaceFiles, exampleFiles, transcriptRuns } = report.sources;
     console.log(
       `${report.slug}: ${String(workspaceFiles)} workspace files, ${String(exampleFiles)} example files, ${String(transcriptRuns)} runs, ${String(report.symbols.length)} symbols`,
     );
+  }
+};
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const { values } = parseArgs({
+    options: {
+      workspace: { type: 'string', multiple: true },
+      out: { type: 'string', default: 'src/generated/usage' },
+      // Only drop symbols the corpora no longer declare; reads no workspace.
+      prune: { type: 'boolean', default: false },
+    },
+  });
+  if (values.prune) {
+    await pruneCommittedReports(values.out);
+  } else {
+    await collectAndWrite({
+      out: values.out,
+      ...(values.workspace === undefined ? {} : { workspace: values.workspace }),
+    });
   }
 }

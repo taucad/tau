@@ -1,6 +1,6 @@
 ---
 name: cad-picogk
-description: Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK modeling, appearance or moving-part requests in Tau Desktop.
+description: Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK in Tau Desktop, or in the Tau plugin after prepare_kernel.
 ---
 
 # PicoGK C# authoring

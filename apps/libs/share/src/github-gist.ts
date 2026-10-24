@@ -122,14 +122,6 @@ const readManifestEntry = (content: Uint8Array<ArrayBuffer>): string | undefined
   }
 };
 
-const projectIdForGist = async (gistId: string): Promise<string> => {
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(gistId)));
-  return `proj_${[...digest]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 21)}`;
-};
-
 const openOrdinaryGist = async (options: {
   readonly gistId: string;
   readonly body: Record<string, unknown>;
@@ -165,8 +157,7 @@ const openOrdinaryGist = async (options: {
       content: encoder.encode(
         `${JSON.stringify(
           {
-            $schema: 'https://tau.new/schemas/tau-schema-v1.json',
-            id: await projectIdForGist(options.gistId),
+            $schema: 'https://tau.new/schemas/tau-v1.json',
             name: (description ?? `GitHub Gist ${options.gistId}`).slice(0, 200),
             description: '',
             tags: [],

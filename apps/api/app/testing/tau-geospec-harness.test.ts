@@ -102,7 +102,7 @@ const createGeometrySource = async (sizeX: number, sizeY = 1, sizeZ = 1): Promis
 
 const brepFixture = resolve(
   import.meta.dirname,
-  '../../../../packages/geospec-engine/fixtures/contact/valve-seat-cone-positive/model.step',
+  '../../../../packages/geospec/fixtures/contact/valve-seat-cone-positive/model.step',
 );
 
 describe('runTauGeoSpecTests', () => {

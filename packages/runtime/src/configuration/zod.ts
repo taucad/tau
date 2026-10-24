@@ -25,7 +25,7 @@ export type QuantitySchemaOptions = Readonly<{
  * @public
  * @example <caption>Constrain a canonical length in metres</caption>
  * ```typescript
- * import { quantity } from '@taucad/runtime/configuration/zod';
+ * import { quantity } from '@taucad/runtime/schema/zod';
  *
  * const layerHeight = quantity({
  *   unit: 'm',

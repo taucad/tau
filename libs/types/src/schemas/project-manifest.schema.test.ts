@@ -18,7 +18,6 @@ import {
 import type { ProjectManifest } from '#schemas/project-manifest.schema.js';
 
 const manifest: ProjectManifest = projectToManifest({
-  id: 'proj_0123456789ABCDEFGHIJK',
   name: 'Example',
   description: '',
   tags: [],
@@ -28,7 +27,7 @@ const manifest: ProjectManifest = projectToManifest({
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
 
 /** The file `projectManifestSchemaUrl` is served from, relative to this test. */
-const publishedSchemaPath = '../../../../apps/ui/public/schemas/tau-schema-v1.json';
+const publishedSchemaPath = '../../../../apps/ui/public/schemas/tau-v1.json';
 
 const publishedSchemaShape = z.object({ properties: z.record(z.string(), z.record(z.string(), z.unknown())) });
 
@@ -88,7 +87,7 @@ describe('project manifest schema', () => {
     },
   );
 
-  it('rejects a malformed project id', () => {
+  it('rejects an authored project id', () => {
     expect(parseProjectManifestBytes(encode({ ...manifest, id: 'copied-folder' }))).toMatchObject({
       success: false,
       issue: { code: 'manifest-invalid' },
@@ -132,7 +131,7 @@ describe('project manifest schema', () => {
 
 describe('project manifest forwarding', () => {
   it('forwards the exact public project manifest authority', () => {
-    expect(privateManifest.parseAdoptableProjectManifestBytes).toBe(publicManifest.parseAdoptableProjectManifestBytes);
+    expect(privateManifest.convertLegacyProjectManifestBytes).toBe(publicManifest.convertLegacyProjectManifestBytes);
     expect(privateManifest.parseProjectManifestBytes).toBe(publicManifest.parseProjectManifestBytes);
     expect(privateManifest.projectIdSchema).toBe(publicManifest.projectIdSchema);
     expect(privateManifest.projectManifestMaxBytes).toBe(publicManifest.projectManifestMaxBytes);
@@ -145,7 +144,6 @@ describe('project manifest forwarding', () => {
 
   it('round-trips through public and private entrypoints', () => {
     const manifest = publicManifest.projectToManifest({
-      id: 'proj_0123456789ABCDEFGHIJK',
       name: 'Example',
       description: '',
       tags: [],
@@ -164,7 +162,7 @@ describe('project manifest forwarding', () => {
 });
 
 describe('readProjectManifestBytes', () => {
-  const { id: _id, ...withoutId } = manifest;
+  const withoutId = manifest;
   const text = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(value);
 
   it('returns a strictly valid manifest untouched', () => {
@@ -205,7 +203,6 @@ describe('readProjectManifestBytes', () => {
     );
     const expected: ProjectManifest = {
       ...withoutId,
-      id: manifest.id,
       name: '',
       description: 'd'.repeat(10_000),
       tags: ['kept', 't'.repeat(100)],
@@ -229,13 +226,12 @@ describe('readProjectManifestBytes', () => {
     },
   );
 
-  it('recovers the identity, name and entry from text that is not JSON', () => {
+  it('recovers the name and entry from text that is not JSON', () => {
     const trailingComma = JSON.stringify(manifest, undefined, 2).replace(/\n}$/, ',\n}');
     expect(readProjectManifestBytes(text(trailingComma))).toEqual({
       success: true,
       data: projectToManifest({
         ...withoutId,
-        id: manifest.id,
         description: '',
         tags: [],
         assets: { main: { entryPath: 'main.ts' } },
@@ -245,38 +241,18 @@ describe('readProjectManifestBytes', () => {
     });
   });
 
-  it('leaves two conflicting identities in broken text unidentified', () => {
-    const conflict = `<<<<<<< ours\n{ "id": "${manifest.id}" }\n=======\n{ "id": "proj_zzzzzzzzzzzzzzzzzzzzz" }\n>>>>>>> theirs\n`;
-    expect(readProjectManifestBytes(text(conflict))).toMatchObject({
-      success: false,
-      issue: { code: 'manifest-invalid-json' },
-      adoptable: { name: '', assets: { main: { entryPath: 'main.ts' } } },
-    });
+  it('does not derive identity from broken declaration text', () => {
+    const conflict = '<<<<<<< ours\n{ "id": "one" }\n=======\n{ "id": "two" }\n>>>>>>> theirs';
+    const read = readProjectManifestBytes(text(conflict));
+    expect(read).toMatchObject({ success: true, issue: { code: 'manifest-invalid-json' } });
+    expect(read.success && 'id' in read.data).toBe(false);
   });
 
-  it('offers the salvaged declaration for explicit adoption when only the identity is missing', () => {
-    expect(readProjectManifestBytes(encode(withoutId))).toEqual({
-      success: false,
-      /* oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- vitest types asymmetric matchers as `any`. */
-      issue: expect.objectContaining({ code: 'manifest-invalid' }),
-      adoptable: withoutId,
-    });
-    expect(readProjectManifestBytes(encode({ ...withoutId, id: 'copied-folder', author: {} }))).toMatchObject({
-      success: false,
-      adoptable: withoutId,
-    });
-  });
-
-  it('lets a mounted route supply the identity its bytes lost, never replace a present one', () => {
-    const routeId = 'proj_zzzzzzzzzzzzzzzzzzzzz';
-    expect(readProjectManifestBytes(encode(withoutId), { id: manifest.id })).toMatchObject({
+  it('reports and drops an authored identity without changing runtime identity', () => {
+    expect(readProjectManifestBytes(encode({ ...manifest, id: 'invented' }))).toMatchObject({
       success: true,
       data: manifest,
       issue: { code: 'manifest-invalid' },
-    });
-    expect(readProjectManifestBytes(serializeProjectManifest(manifest), { id: routeId })).toEqual({
-      success: true,
-      data: manifest,
     });
   });
 
@@ -292,7 +268,9 @@ describe('readProjectManifestBytes', () => {
       success: false,
       issue: { code: 'manifest-unknown-schema', found, supported: projectManifestSchemaUrl },
     });
-    expect(readProjectManifestBytes(text(`{ "$schema": "${found}", "id": "${manifest.id}",`))).toMatchObject({
+    expect(
+      readProjectManifestBytes(text(`{ "$schema": "${found}", "id": "proj_0123456789ABCDEFGHIJK",`)),
+    ).toMatchObject({
       success: false,
       issue: { code: 'manifest-unknown-schema', found },
     });
@@ -304,30 +282,21 @@ describe('readProjectManifestBytes', () => {
 });
 
 describe('checkProjectManifestReplacement', () => {
-  const current = serializeProjectManifest(manifest);
-
-  it('accepts a valid edit that keeps the identity', () => {
-    expect(checkProjectManifestReplacement(encode({ ...manifest, name: 'Renamed' }), current)).toBeUndefined();
+  it('accepts a valid authored edit without identity', () => {
+    expect(checkProjectManifestReplacement(encode({ ...manifest, name: 'Renamed' }))).toBeUndefined();
   });
 
   it('names every defect of an invalid replacement', () => {
     const message = checkProjectManifestReplacement(
       encode({ ...manifest, assets: { ...manifest.assets, second: { entryPath: 'second.cs' } } }),
-      current,
     );
     expect(message).toContain('assets: Unrecognized key: "second"');
     expect(message).toContain('Other source files need no manifest entry.');
   });
 
-  it('refuses a replacement that changes the identity', () => {
-    expect(checkProjectManifestReplacement(encode({ ...manifest, id: 'proj_zzzzzzzzzzzzzzzzzzzzz' }), current)).toBe(
-      `tau.json must keep the project id ${manifest.id}.`,
+  it('refuses an authored identity even when its shape is valid', () => {
+    expect(checkProjectManifestReplacement(encode({ ...manifest, id: 'proj_zzzzzzzzzzzzzzzzzzzzz' }))).toContain(
+      'Unrecognized key: "id"',
     );
-  });
-
-  it('lets a valid replacement repair a degraded or missing manifest', () => {
-    const degraded = encode({ ...manifest, extra: true });
-    expect(checkProjectManifestReplacement(serializeProjectManifest(manifest), degraded)).toBeUndefined();
-    expect(checkProjectManifestReplacement(serializeProjectManifest(manifest), undefined)).toBeUndefined();
   });
 });

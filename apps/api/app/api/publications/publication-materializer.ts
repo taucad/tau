@@ -36,6 +36,7 @@ import {
 import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
 import * as schema from '#database/schema.js';
+import { assertProjectActive } from '#database/project-lifecycle.js';
 import { detectKernelIdsFromRelativePaths, resolveRuntimePin } from '#api/publications/publication-runtime.utils.js';
 import type { StoredPublicationManifest } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
@@ -189,6 +190,8 @@ export type MaterializerDependencies = Readonly<{
 /** One publication to materialize, and where its bytes come from. */
 export type MaterializeInput = Readonly<{
   publicationId: string;
+  /** Manifest whose references this row already holds under the caller's project lock. */
+  heldManifestKey?: string;
   projectId: string;
   /** Whose storage holds this project's LFS objects (D24). */
   ownerId: string;
@@ -526,6 +529,7 @@ export const materializePublication = async (
     });
   });
   const revision = new TextDecoder().decode(head).trim();
+  const manifestKey = `publications/${input.publicationId}/${revision}.json`;
   const files = await readPublishedTree(dependencies, input);
   const tier: StorageTier = input.visibility === 'private' ? 'private' : 'public';
 
@@ -571,7 +575,10 @@ export const materializePublication = async (
      two publishes sharing blobs in different tree order would otherwise take
      the same rows in opposite orders and deadlock (review F3). */
   const blobReferences = [...increments.values()].sort((left, right) => (left.sha256 < right.sha256 ? -1 : 1));
-  await applyBlobReferences(writer, blobReferences);
+  // Re-publishing identical content retains the row's existing references.
+  // Taking them again without moving the manifest would leak counts on deletion.
+  const newReferences = input.heldManifestKey === manifestKey ? [] : blobReferences;
+  await applyBlobReferences(writer, newReferences);
 
   await Promise.all(
     uploads.map(async ({ bytes, sha, contentType }) => {
@@ -599,7 +606,6 @@ export const materializePublication = async (
 
   /* Keyed by the revision, so a re-publish writes a new immutable object
    * rather than overwriting the one a viewer may be reading. */
-  const manifestKey = `publications/${input.publicationId}/${revision}.json`;
   const manifest: StoredPublicationManifest = storedPublicationManifestSchema.parse({
     version: 1,
     projectId: input.projectId,
@@ -633,7 +639,7 @@ export const materializePublication = async (
     kernels,
     runtimePin,
     fileCount: uploads.length,
-    blobRefs: blobReferences,
+    blobRefs: newReferences,
   };
 };
 
@@ -834,15 +840,16 @@ export const materializePublishedTags = async (
            the project rather than the owner, so a repair never waits on the
            quota lock `withOwnerLock` takes. */
         await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.projectId}, 0))`);
+        await assertProjectActive(transaction, input.projectId);
         /* Re-read under the lock: whoever waited here may be looking at work
            the holder just did, and materializing it again would take a second
            reference for one manifest. */
         const [fresh] = await transaction
-          .select({ manifestKey: schema.publication.manifestKey })
+          .select({ manifestKey: schema.publication.manifestKey, unpublishedAt: schema.publication.unpublishedAt })
           .from(schema.publication)
           .where(eq(schema.publication.id, row.id))
           .limit(1);
-        if (fresh === undefined || fresh.manifestKey !== superseded) {
+        if (fresh === undefined || fresh.unpublishedAt !== null || fresh.manifestKey !== superseded) {
           return undefined;
         }
         /* Inside the transaction, and first, so the reference counts are taken

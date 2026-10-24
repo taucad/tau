@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { mock } from 'vitest-mock-extended';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
+import { ForbiddenException, GoneException, NotFoundException } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
-import { projectInvitation, user } from '#database/schema.js';
+import type { OwnerLockTransaction } from '#database/owner-lock.js';
+import { projectCollaborator, projectDeletion, projectInvitation, user } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 
 /**
@@ -25,49 +30,80 @@ describe('ProjectAccessService', () => {
   let collaboratorWrites: Array<Record<string, unknown>>;
   let invitationUpdates: Array<Record<string, unknown>>;
   let service: ProjectAccessService;
+  let deletionRow: { projectId: string; ownerId: string } | undefined;
+  let beforeProjectLock: () => Promise<void>;
+  let projectLockHeld: boolean;
+  let invitationWrites: Array<Record<string, unknown>>;
+  let collaboratorUpdates: Array<Record<string, unknown>>;
+  let collaboratorDeletes: number;
+  const dialect = new PgDialect();
 
   const databaseStub = (): DatabaseService => {
-    const transaction = {
-      insert: () => ({
+    const select = vi.fn().mockImplementation(() => ({
+      from: (table: unknown) => ({
+        leftJoin: () => ({
+          where: () => ({ limit: async (): Promise<unknown[]> => (projectRow ? [{ ...projectRow }] : []) }),
+        }),
+        where: (condition: SQL) => ({
+          limit: async (): Promise<unknown[]> => {
+            if (table === projectDeletion) {
+              return deletionRow ? [{ ...deletionRow }] : [];
+            }
+            if (table === projectInvitation) {
+              const query = dialect.sqlToQuery(condition);
+              const matchesToken =
+                !query.sql.includes('"token_hash"') || query.params.includes(invitationRow?.['tokenHash']);
+              return invitationRow && matchesToken ? [{ ...invitationRow }] : [];
+            }
+            if (table === user) {
+              return viewerRow ? [{ ...viewerRow }] : [];
+            }
+            return [];
+          },
+        }),
+      }),
+    }));
+    const transaction = mock<OwnerLockTransaction>({
+      select,
+      execute: vi.fn().mockImplementation(async () => {
+        await beforeProjectLock();
+        projectLockHeld = true;
+        return [];
+      }),
+      insert: vi.fn().mockImplementation((table: unknown) => ({
         values: (values: Record<string, unknown>) => ({
           onConflictDoUpdate: async (): Promise<void> => {
-            collaboratorWrites.push(values);
+            expect(projectLockHeld).toBe(true);
+            (table === projectInvitation ? invitationWrites : collaboratorWrites).push(values);
           },
         }),
-      }),
-      update: () => ({
+      })),
+      update: vi.fn().mockImplementation((table: unknown) => ({
         set: (values: Record<string, unknown>) => ({
           where: async (): Promise<void> => {
-            invitationUpdates.push(values);
+            expect(projectLockHeld).toBe(true);
+            (table === projectCollaborator ? collaboratorUpdates : invitationUpdates).push(values);
           },
         }),
+      })),
+      delete: vi.fn().mockImplementation(() => ({
+        where: async (): Promise<void> => {
+          expect(projectLockHeld).toBe(true);
+          collaboratorDeletes += 1;
+        },
+      })),
+    });
+    const database = mock<DatabaseService['database']>({
+      select,
+      transaction: vi.fn().mockImplementation(async (run: (tx: OwnerLockTransaction) => Promise<unknown>) => {
+        try {
+          return await run(transaction);
+        } finally {
+          projectLockHeld = false;
+        }
       }),
-      delete: () => ({ where: async (): Promise<void> => undefined }),
-    };
-    return {
-      database: {
-        select: () => ({
-          from: (table: unknown) => ({
-            /* Only `authorize` joins; the projection is the project row. */
-            leftJoin: () => ({
-              where: () => ({ limit: async (): Promise<unknown[]> => (projectRow ? [projectRow] : []) }),
-            }),
-            where: () => ({
-              limit: async (): Promise<unknown[]> => {
-                if (table === projectInvitation) {
-                  return invitationRow ? [invitationRow] : [];
-                }
-                if (table === user) {
-                  return viewerRow ? [viewerRow] : [];
-                }
-                return [];
-              },
-            }),
-          }),
-        }),
-        transaction: async (run: (tx: unknown) => Promise<unknown>): Promise<unknown> => run(transaction),
-      },
-    } as unknown as DatabaseService;
+    });
+    return Object.assign(mock<DatabaseService>(), { database });
   };
 
   beforeEach(() => {
@@ -77,6 +113,12 @@ describe('ProjectAccessService', () => {
     viewerRow = undefined;
     collaboratorWrites = [];
     invitationUpdates = [];
+    invitationWrites = [];
+    collaboratorUpdates = [];
+    collaboratorDeletes = 0;
+    deletionRow = undefined;
+    projectLockHeld = false;
+    beforeProjectLock = async () => undefined;
     service = new ProjectAccessService(databaseStub());
   });
 
@@ -172,6 +214,7 @@ describe('ProjectAccessService', () => {
   const invitation = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
     projectId,
     email: 'invitee@example.test',
+    tokenHash: createHash('sha256').update('raw-token').digest('hex'),
     role: 'write',
     acceptedAt: null,
     revokedAt: null,
@@ -241,4 +284,120 @@ describe('ProjectAccessService', () => {
     invitationRow = undefined;
     await expect(service.accept('raw-token', collaboratorId)).rejects.toThrow(NotFoundException);
   });
+
+  it.each([
+    { label: 'owner', userId: ownerId, error: GoneException, message: 'deleted from Tau Cloud' },
+    { label: 'collaborator', userId: collaboratorId, error: NotFoundException, message: 'Project not found' },
+  ])(
+    'should fence a cached $label on another replica as soon as deletion intent exists',
+    async ({ userId, error, message }) => {
+      projectRow = { ownerId, role: 'write' };
+      await service.authorize(projectId, userId, 'read');
+      // Another replica admits deletion without invalidating this service's cache.
+      deletionRow = { projectId, ownerId };
+      const refusal = service.authorize(projectId, userId, 'read');
+      await expect(refusal).rejects.toThrow(error);
+      await expect(refusal).rejects.toThrow(message);
+    },
+  );
+
+  it('should hide a deleted project from a stranger even if its project row remains', async () => {
+    deletionRow = { projectId, ownerId };
+    const refusal = service.authorize(projectId, strangerId, 'read');
+    await expect(refusal).rejects.toThrow(NotFoundException);
+    await expect(refusal).rejects.toThrow('Project not found');
+  });
+
+  it('should refuse acceptance when deletion wins while the project lock is pending', async () => {
+    invitationRow = invitation();
+    viewerRow = { id: collaboratorId, email: 'invitee@example.test', emailVerified: true };
+    const reachedLock = Promise.withResolvers<void>();
+    const releaseLock = Promise.withResolvers<void>();
+    beforeProjectLock = async () => {
+      reachedLock.resolve();
+      await releaseLock.promise;
+    };
+    const acceptance = service.accept('raw-token', collaboratorId);
+    const refusal = expect(acceptance).rejects.toThrow(NotFoundException);
+    try {
+      await reachedLock.promise;
+      deletionRow = { projectId, ownerId };
+    } finally {
+      releaseLock.resolve();
+    }
+    await refusal;
+    await expect(acceptance).rejects.toThrow('Project not found');
+    expect(collaboratorWrites).toStrictEqual([]);
+    expect(invitationUpdates).toStrictEqual([]);
+  });
+
+  it.each([
+    {
+      label: 'revoked',
+      change: (): void => {
+        invitationRow = invitation({ revokedAt: new Date() });
+      },
+    },
+    {
+      label: 'expired',
+      change: (): void => {
+        invitationRow = invitation({ expiresAt: new Date(0) });
+      },
+    },
+    {
+      label: 'reissued',
+      change: (): void => {
+        invitationRow = invitation({ tokenHash: createHash('sha256').update('replacement-token').digest('hex') });
+      },
+    },
+    {
+      label: 'removed',
+      change: (): void => {
+        invitationRow = undefined;
+      },
+    },
+  ])('should refuse an invitation $label after token lookup but before lock acquisition', async ({ change }) => {
+    invitationRow = invitation();
+    viewerRow = { id: collaboratorId, email: 'invitee@example.test', emailVerified: true };
+    beforeProjectLock = async () => {
+      change();
+    };
+    const acceptance = service.accept('raw-token', collaboratorId);
+    await expect(acceptance).rejects.toThrow(NotFoundException);
+    await expect(acceptance).rejects.toThrow('This invitation is no longer valid');
+    expect(collaboratorWrites).toStrictEqual([]);
+    expect(invitationUpdates).toStrictEqual([]);
+  });
+
+  it('should accept the current reduced role after a concurrent owner role change', async () => {
+    invitationRow = invitation();
+    viewerRow = { id: collaboratorId, email: 'invitee@example.test', emailVerified: true };
+    beforeProjectLock = async () => {
+      invitationRow = invitation({ role: 'read' });
+    };
+    await expect(service.accept('raw-token', collaboratorId)).resolves.toStrictEqual({ projectId, role: 'read' });
+    expect(collaboratorWrites).toStrictEqual([{ projectId, userId: collaboratorId, role: 'read' }]);
+    expect(invitationUpdates[0]).toMatchObject({ acceptedBy: collaboratorId });
+  });
+
+  it.each(['invite', 'setRole', 'revoke'] as const)(
+    'should refuse %s when deletion commits after owner authorization and before its lock',
+    async (operation) => {
+      invitationRow = invitation();
+      viewerRow = { id: collaboratorId, email: 'invitee@example.test', emailVerified: true };
+      await service.authorize(projectId, ownerId, 'owner');
+      beforeProjectLock = async () => {
+        deletionRow = { projectId, ownerId };
+      };
+      const args = { projectId, ownerId, email: 'invitee@example.test', role: 'read' } as const;
+      const mutation = service[operation](args);
+      await expect(mutation).rejects.toThrow(GoneException);
+      await expect(mutation).rejects.toThrow('deleted from Tau Cloud');
+      expect(invitationWrites).toStrictEqual([]);
+      expect(invitationUpdates).toStrictEqual([]);
+      expect(collaboratorWrites).toStrictEqual([]);
+      expect(collaboratorUpdates).toStrictEqual([]);
+      expect(collaboratorDeletes).toBe(0);
+    },
+  );
 });

@@ -186,7 +186,7 @@ test('keeps the Share pane in sync with Gist use without publishing or exposing 
   await target.expectVisible(selectors.getByRole('button', { name: 'Enable Gist sharing', exact: true }));
   await target.click(selectors.getByRole('button', { name: 'Enable Gist sharing', exact: true }));
   await target.expectVisible(selectors.getByRole('button', { name: 'Turn off Gist sharing', exact: true }));
-  await target.click(selectors.getByRole('button', { name: 'Back to app', exact: true }));
+  await target.click(selectors.getByRole('button', { name: 'Close settings', exact: true }));
   await target.expectVisible(share.getByRole('button', { name: 'Create Gist and copy link', exact: true }));
   await target.screenshot(undefined, 'github-share-ready.png');
   const state = await target.commands.uiReadLinkedGithubFixture();

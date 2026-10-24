@@ -11,19 +11,31 @@
  */
 
 import type { ScreenshotSection } from '@taucad/chat/schemas/tools/screenshot';
+import { cameraPresetOrientations } from '@taucad/workbench';
+import type { cameraPresets } from '@taucad/workbench';
+
+import type { WorkbenchCaptureCamera, WorkbenchCapturePlane } from '#capture/capture-workbench-view.js';
+
+type OrthographicPreset = Exclude<(typeof cameraPresets)[number], 'isometric'>;
+
+const captureView = <Id extends OrthographicPreset>(id: Id, label: string) => {
+  const { direction, up } = cameraPresetOrientations[id];
+  return { id, label, direction, up: up ?? ([0, 0, 1] as const) } as const;
+};
 
 /**
- * The six canonical orthographic views a multi-angle capture returns.
+ * The six canonical orthographic views a multi-angle capture returns, oriented by the workbench presets
+ * (`cameraPresetOrientations`), so a capture and a view record's preset look from the same side.
  *
  * @public
  */
 export const canonicalCaptureViews = [
-  { id: 'front', label: 'Front — View From −Y', direction: [0, -1, 0], up: [0, 0, 1] },
-  { id: 'back', label: 'Back — View From +Y', direction: [0, 1, 0], up: [0, 0, 1] },
-  { id: 'right', label: 'Right — View From +X', direction: [1, 0, 0], up: [0, 0, 1] },
-  { id: 'left', label: 'Left — View From −X', direction: [-1, 0, 0], up: [0, 0, 1] },
-  { id: 'top', label: 'Top — View From +Z', direction: [0, 0, 1], up: [0, 1, 0] },
-  { id: 'bottom', label: 'Bottom — View From −Z', direction: [0, 0, -1], up: [0, 1, 0] },
+  captureView('front', 'Front — View From −Y'),
+  captureView('back', 'Back — View From +Y'),
+  captureView('right', 'Right — View From +X'),
+  captureView('left', 'Left — View From −X'),
+  captureView('top', 'Top — View From +Z'),
+  captureView('bottom', 'Bottom — View From −Z'),
 ] as const;
 
 /** Inputs the agent `screenshot` tool varies. @public */
@@ -36,6 +48,17 @@ export type CaptureExportOptionsInput = {
   readonly size: number;
   /** One axis-aligned cut, in metres in `tau:root` (Z-up), the capture's own world. */
   readonly section?: ScreenshotSection | undefined;
+  /**
+   * A saved workbench view, resolved by `workbenchViewCamera` and `workbenchViewSections`: one image from its camera,
+   * with its cuts and display. `section` and `multi_angle` do not combine with it.
+   */
+  readonly workbench?:
+    | Readonly<{
+        camera: WorkbenchCaptureCamera;
+        planes: readonly WorkbenchCapturePlane[];
+        display: Readonly<{ surfaces: boolean; lines: boolean; gizmo: boolean }>;
+      }>
+    | undefined;
 };
 
 /** Camera direction of the single isometric capture, from the subject toward the camera. */
@@ -79,6 +102,34 @@ const sectionPlanes = (section: ScreenshotSection) => {
 };
 
 const buildOptions = (options: CaptureExportOptionsInput) => {
+  const { workbench } = options;
+  if (workbench !== undefined) {
+    const lines = options.includeEdges ?? workbench.display.lines;
+    return {
+      width: options.size,
+      height: options.size,
+      lineWidth: 3,
+      background: '#242424',
+      ...(workbench.display.surfaces ? {} : { surfaces: false }),
+      ...(lines ? {} : { lines: false }),
+      world: { up: '+z', forward: '-y', unit: 'meter' },
+      axes: workbench.display.gizmo,
+      scaleBar: true,
+      ...(workbench.planes.length === 0
+        ? {}
+        : {
+            sections: {
+              planes: workbench.planes.map(({ point, normal }) => ({
+                point: [point[0], point[1], point[2]] as [number, number, number],
+                normal: [normal[0], normal[1], normal[2]] as [number, number, number],
+              })),
+            },
+          }),
+      mode: 'single',
+      camera: workbench.camera,
+      quality: 1,
+    } as const;
+  }
   const common = {
     width: options.size,
     height: options.size,

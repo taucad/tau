@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_0B5ur5RSEFQToOVU6mN2G",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "ARQ-5 Racing Quadcopter",
   "description": "A 220 mm racing quadcopter written in OpenSCAD: NACA-lofted keel, canopy and arms, brushless motors, propellers with spinners, a two-axis camera gimbal and an avionics stack, built from more than 30 part modules that each have their own GeoSpec check. Show the whole vehicle or any sub-assembly.",
   "tags": ["aerospace", "drone", "assembly", "naca", "openscad"],

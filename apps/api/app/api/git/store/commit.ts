@@ -1,7 +1,8 @@
 /* oxlint-disable new-cap -- NestJS's Logger is a class the module instantiates once */
 import { createHash, randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CommitToken, ManifestBytes, RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
@@ -110,7 +111,12 @@ const resolveBounds = (
   deadlineAt: args.deadlineAt ?? Date.now() + commitDeadlineMilliseconds,
 });
 
-/** Attempts at a rate-limited manifest write: the first, then two retries at 200 ms and 600 ms. */
+/**
+ * Attempts at a rate-limited manifest write: the first, then two retries at
+ * 200 ms and 600 ms. These are the only attempts: the adapter sends each one
+ * as a single request with the AWS SDK's own retries off, so a contended key
+ * sees three requests per push rather than up to nine (review FR21).
+ */
 const manifestWriteAttempts = 3;
 
 /**
@@ -421,21 +427,54 @@ const uploadPack = async (
   return { key, bytes: upload.bytes, indexStored: true };
 };
 
+/** Read size for hashing a lease file: one buffer, reused for every read. */
+const hashReadBytes = 1024 * 1024;
+
+/**
+ * The base64 SHA-256 of a file, read through one reused buffer: the file is
+ * never in memory whole, and the pass leaves no chunk garbage behind for the
+ * upload pass to pile onto.
+ */
+const sha256OfFile = async (file: string): Promise<string> => {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(hashReadBytes);
+  const handle = await open(file, 'r');
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- one buffer, so reads are sequential by construction
+      const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, null);
+      if (bytesRead === 0) {
+        return hash.digest('base64');
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    await handle.close();
+  }
+};
+
+/**
+ * Uploads one lease file in two streamed passes (DA4): hash it, then send it
+ * with that digest. Memory is a read chunk, not the file: a pack at the D20
+ * ceiling is a gigabyte, and the 1 GB API VM cannot hold one beside the push
+ * that produced it.
+ *
+ * The digest still guards the bytes. The adapter sends it as
+ * `x-amz-checksum-sha256` and the backend refuses a body that does not match
+ * it, so a file that changed between the passes is never stored under a
+ * digest it does not have; above the single-part ceiling the adapter checks
+ * the same digest itself before it completes the upload.
+ */
 const putFile = async (args: {
   store: RepositoryStore;
   locator: RepositoryLocator;
   key: string;
   file: string;
 }): Promise<void> => {
-  const { store, locator, key } = args;
-  const contents = await readFile(args.file);
-  // A view over the read buffer rather than a copy of it: a pack at the D20
-  // ceiling is a gigabyte, and it is already in memory once.
-  const body = new Uint8Array(contents.buffer, contents.byteOffset, contents.length) as Uint8Array<ArrayBuffer>;
-  await store.putObject(locator, key, body, {
-    contentLength: body.byteLength,
-    sha256: createHash('sha256').update(body).digest('base64'),
-  });
+  const { store, locator, key, file } = args;
+  const { size } = await stat(file);
+  const sha256 = await sha256OfFile(file);
+  await store.putObject(locator, key, async () => createReadStream(file), { contentLength: size, sha256 });
 };
 
 /**
@@ -448,16 +487,24 @@ export const writeSpilledPushLog = async (args: {
   locator: RepositoryLocator;
   base: Manifest | undefined;
   next: Manifest;
+  signal?: AbortSignal;
 }): Promise<void> => {
   const { store, locator } = args;
+  args.signal?.throwIfAborted();
   const segment = spilledPushLog(args.base, args.next);
   if (segment === undefined) {
     return;
   }
-  await store.putObject(locator, segment.key, segment.bytes, {
-    contentLength: segment.bytes.byteLength,
-    sha256: createHash('sha256').update(segment.bytes).digest('base64'),
-  });
+  await store.putObject(
+    locator,
+    segment.key,
+    segment.bytes,
+    {
+      contentLength: segment.bytes.byteLength,
+      sha256: createHash('sha256').update(segment.bytes).digest('base64'),
+    },
+    args.signal,
+  );
 };
 
 /** The file name a manifest key has inside a lease. */
@@ -467,9 +514,11 @@ const leasePackFile = (key: string): string => path.posix.basename(key);
  * The conditional write, plus the two things the W1 hand-off says a caller
  * must do about `lost`.
  *
- * `lost` means "did not certainly win", not "certainly did not write": the AWS
- * SDK retries a PUT on a transport error, so a first attempt that landed and a
- * retry that then fails its own precondition both report `lost`. Before
+ * `lost` means "did not certainly win", not "certainly did not write": a
+ * first attempt that landed while its response was lost, and the retry of it
+ * that then fails its own precondition, both report `lost`. The adapter no
+ * longer lets the AWS SDK make such retries (FR21), but this loop still does,
+ * and a throw can still be a write that reached the backend. Before
  * answering 503 the committer re-reads and compares bytes; if the store holds
  * what it sent, it won. If the store holds a *different* incarnation, the
  * repository was purged and re-registered under the lease, which is not a
@@ -532,6 +581,9 @@ const reconcile = async (args: {
   if (current !== undefined && Buffer.from(current.manifest).equals(Buffer.from(bytes))) {
     return current.token;
   }
+  if (current !== undefined && isTombstoned(decodeManifest(current.manifest))) {
+    throw new RepositoryStoreError('tombstoned', 'This project has been deleted.');
+  }
   if (current !== undefined && hydrated !== undefined) {
     try {
       assertSameIncarnation(hydrated, decodeManifest(current.manifest));
@@ -556,15 +608,19 @@ const reconcile = async (args: {
  * cannot be deleted and re-registered onto the bytes that are about to be
  * purged. Only after this does W6's purge job touch a byte.
  */
-export const commitTombstone = async (args: {
-  store: RepositoryStore;
-  locator: RepositoryLocator;
-  committedBy: string;
-  erasureVerified?: boolean;
-  at?: Date;
-}): Promise<{ manifest: Manifest; token: CommitToken }> => {
+export const commitTombstone = async (
+  args: {
+    store: RepositoryStore;
+    locator: RepositoryLocator;
+    committedBy: string;
+    erasureVerified?: boolean;
+    at?: Date;
+  },
+  signal?: AbortSignal,
+): Promise<{ manifest: Manifest; token: CommitToken }> => {
+  signal?.throwIfAborted();
   const at = args.at ?? new Date();
-  const read = await args.store.readManifest(args.locator);
+  const read = await args.store.readManifest(args.locator, signal);
   const current = read === undefined ? undefined : decodeManifest(read.manifest);
 
   if (current !== undefined && isTombstoned(current)) {
@@ -594,8 +650,15 @@ export const commitTombstone = async (args: {
           ...(args.erasureVerified === undefined ? {} : { erasureVerified: args.erasureVerified }),
         });
 
-  await writeSpilledPushLog({ store: args.store, locator: args.locator, base: current, next });
-  const token = await args.store.commitManifest(args.locator, encodeManifest(next), read?.token ?? 'absent');
+  await writeSpilledPushLog({
+    store: args.store,
+    locator: args.locator,
+    base: current,
+    next,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  signal?.throwIfAborted();
+  const token = await args.store.commitManifest(args.locator, encodeManifest(next), read?.token ?? 'absent', signal);
   if (token === 'lost') {
     throw new RepositoryStoreError('lost', `another writer changed ${args.locator.projectId} before the tombstone`);
   }

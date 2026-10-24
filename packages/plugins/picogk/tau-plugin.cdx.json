@@ -12,34 +12,103 @@
   },
   "components": [
     {
-      "bom-ref": "cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1",
+      "bom-ref": "102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df",
       "type": "library",
       "supplier": {
         "name": "Tau"
       },
       "name": "tau-picogk-layer",
-      "version": "picogk-layer-cd5fdf6669b8ee08",
-      "purl": "pkg:github/taucad/tau@picogk-layer-cd5fdf6669b8ee08?file_name=tau-picogk-layer-darwin-arm64.tar.gz",
+      "version": "picogk-layer-102348acf0348d1d",
+      "purl": "pkg:github/taucad/tau@picogk-layer-102348acf0348d1d?file_name=tau-picogk-layer-darwin-arm64.tar.gz",
       "hashes": [
         {
           "alg": "SHA-256",
-          "content": "cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1"
+          "content": "102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df"
         }
       ],
       "externalReferences": [
         {
           "type": "distribution",
-          "url": "https://cdn.tau.new/blobs/sha256/cd5fdf6669b8ee085e4091390d22378695bcc05fd8a21b4de492d21a3cfcf6f1"
+          "url": "https://cdn.tau.new/blobs/sha256/102348acf0348d1d21498688e620c9cbadb11cb1b804dd8c5fac25afc1a738df"
         },
         {
           "type": "distribution",
-          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-cd5fdf6669b8ee08/tau-picogk-layer-darwin-arm64.tar.gz"
+          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-102348acf0348d1d/tau-picogk-layer-darwin-arm64.tar.gz"
         }
       ],
       "properties": [
         {
           "name": "taucad:target",
           "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:sbom",
+          "value": "tau-worker/tau-picogk-sbom.cdx.json"
+        }
+      ]
+    },
+    {
+      "bom-ref": "64c77a5f98d6dfc63393ed5d2fed47c2855c7cdd4322008b3b13e1d0b710aefc1fba7e56612f25f7e8a2b1b6cef5cf77cb3a834ff3685e723ad286703c3396d8",
+      "type": "platform",
+      "supplier": {
+        "name": "Microsoft"
+      },
+      "name": "dotnet-runtime",
+      "version": "10.0.11",
+      "purl": "pkg:generic/microsoft/dotnet-runtime@10.0.11?download_url=https%3A%2F%2Fbuilds.dotnet.microsoft.com%2Fdotnet%2FRuntime%2F10.0.11%2Fdotnet-runtime-10.0.11-linux-x64.tar.gz",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "hashes": [
+        {
+          "alg": "SHA-512",
+          "content": "64c77a5f98d6dfc63393ed5d2fed47c2855c7cdd4322008b3b13e1d0b710aefc1fba7e56612f25f7e8a2b1b6cef5cf77cb3a834ff3685e723ad286703c3396d8"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.11/dotnet-runtime-10.0.11-linux-x64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64"
+        }
+      ]
+    },
+    {
+      "bom-ref": "8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd",
+      "type": "library",
+      "supplier": {
+        "name": "Tau"
+      },
+      "name": "tau-picogk-layer",
+      "version": "picogk-layer-8ff3218955898790",
+      "purl": "pkg:github/taucad/tau@picogk-layer-8ff3218955898790?file_name=tau-picogk-layer-linux-x64.tar.gz",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd"
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://cdn.tau.new/blobs/sha256/8ff3218955898790660758a63884a38d4b056ef8504667ea49748784c2094ddd"
+        },
+        {
+          "type": "distribution",
+          "url": "https://github.com/taucad/tau/releases/download/picogk-layer-8ff3218955898790/tau-picogk-layer-linux-x64.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "linux-x64"
         },
         {
           "name": "taucad:sbom",

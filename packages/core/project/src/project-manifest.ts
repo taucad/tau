@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** Canonical JSON Schema URL embedded in every `tau.json`. @public */
-export const projectManifestSchemaUrl = 'https://tau.new/schemas/tau-schema-v1.json';
+export const projectManifestSchemaUrl = 'https://tau.new/schemas/tau-v1.json';
 /** Maximum accepted encoded manifest size in bytes. @public */
 export const projectManifestMaxBytes = 256 * 1024;
 
@@ -30,7 +30,6 @@ const projectAssetSchema = z
 export const projectManifestSchema = z
   .object({
     $schema: z.literal(projectManifestSchemaUrl),
-    id: projectIdSchema,
     name: z.string().max(200),
     description: z.string().max(10_000),
     tags: z.array(z.string().max(100)).max(64),
@@ -62,9 +61,6 @@ export const projectManifestSchema = z
 /** Validated project manifest stored as `tau.json`. @public */
 export type ProjectManifest = z.infer<typeof projectManifestSchema>;
 
-/** Manifest fields accepted before assigning an identity during explicit adoption. @public */
-export type AdoptableProjectManifest = Omit<ProjectManifest, 'id'>;
-
 /**
  * Fatal reason a manifest could not be read or parsed safely.
  *
@@ -85,18 +81,14 @@ export type ProjectManifestParseIssue =
     }
   | { readonly code: 'manifest-invalid'; readonly issues: readonly z.core.$ZodIssue[] };
 
-/** Result of parsing a fully identified manifest. @public */
+/** Result of parsing an authored manifest. @public */
 export type ProjectManifestParseResult =
   | { readonly success: true; readonly data: ProjectManifest }
   | { readonly success: false; readonly issue: ProjectManifestParseIssue };
 
-/** Result of parsing a manifest for explicit adoption. @public */
-export type AdoptableProjectManifestParseResult =
-  | { readonly success: true; readonly data: AdoptableProjectManifest }
-  | { readonly success: false; readonly issue: ProjectManifestParseIssue };
-
 const decodeProjectManifestBytes = (
   bytes: Uint8Array<ArrayBuffer>,
+  schemaUrl: string = projectManifestSchemaUrl,
 ):
   | { readonly success: true; readonly input: unknown }
   | { readonly success: false; readonly issue: ProjectManifestParseIssue } => {
@@ -118,7 +110,7 @@ const decodeProjectManifestBytes = (
     typeof input === 'object' && input !== null && !Array.isArray(input)
       ? (input as Record<string, unknown>)['$schema']
       : undefined;
-  if (foundSchema !== projectManifestSchemaUrl) {
+  if (foundSchema !== schemaUrl) {
     return {
       success: false,
       issue: {
@@ -132,7 +124,12 @@ const decodeProjectManifestBytes = (
   return { success: true, input };
 };
 
-/** Parse and validate encoded `tau.json` bytes. @public */
+/**
+ * Parse and validate encoded `tau.json` bytes.
+ * @param bytes - Encoded authored manifest.
+ * @returns A strict declaration or a structured validation issue.
+ * @public
+ */
 export const parseProjectManifestBytes = (bytes: Uint8Array<ArrayBuffer>): ProjectManifestParseResult => {
   const decoded = decodeProjectManifestBytes(bytes);
   if (!decoded.success) {
@@ -145,36 +142,16 @@ export const parseProjectManifestBytes = (bytes: Uint8Array<ArrayBuffer>): Proje
 };
 
 /**
- * Parse every manifest field except the identity used for an explicit Adopt
- * action. Only `id` is relaxed; every other field remains strict.
- * @public
- */
-export const parseAdoptableProjectManifestBytes = (
-  bytes: Uint8Array<ArrayBuffer>,
-): AdoptableProjectManifestParseResult => {
-  const decoded = decodeProjectManifestBytes(bytes);
-  if (!decoded.success) {
-    return decoded;
-  }
-  if (typeof decoded.input !== 'object' || decoded.input === null || Array.isArray(decoded.input)) {
-    return { success: false, issue: { code: 'manifest-invalid', issues: [] } };
-  }
-
-  const { id: _ignoredId, ...input } = decoded.input as Record<string, unknown>;
-  const parsed = projectManifestSchema.omit({ id: true }).safeParse(input);
-  return parsed.success
-    ? { success: true, data: parsed.data }
-    : { success: false, issue: { code: 'manifest-invalid', issues: parsed.error.issues } };
-};
-
-/**
  * Build the durable manifest from an app-owned project view. Extra local state
  * is deliberately ignored instead of leaking into `tau.json`.
+ * @param project - Runtime project view or authored declaration.
+ * @returns Only the authored manifest fields.
  * @public
  */
-export const projectToManifest = (project: Omit<ProjectManifest, '$schema'> | ProjectManifest): ProjectManifest => ({
+export const projectToManifest = <Project extends Omit<ProjectManifest, '$schema'>>(
+  project: Project,
+): ProjectManifest => ({
   $schema: projectManifestSchemaUrl,
-  id: project.id,
   name: project.name,
   description: project.description,
   tags: [...project.tags],
@@ -188,8 +165,55 @@ export const projectToManifest = (project: Omit<ProjectManifest, '$schema'> | Pr
   ...(project.syncLargeExports === undefined ? {} : { syncLargeExports: project.syncLargeExports }),
 });
 
-/** Validate and deterministically encode a project manifest. @public */
+/**
+ * Validate and deterministically encode a project manifest.
+ * @param manifest - Strict authored declaration.
+ * @returns Encoded manifest bytes with a trailing newline.
+ * @public
+ */
 export const serializeProjectManifest = (manifest: ProjectManifest): Uint8Array<ArrayBuffer> => {
   const parsed = projectManifestSchema.parse(manifest);
   return new TextEncoder().encode(`${JSON.stringify(parsed, null, 2)}\n`);
+};
+
+/** Result of explicitly converting the previous prerelease manifest contract. @public */
+export type LegacyProjectManifestConversionResult =
+  | { readonly success: true; readonly data: { readonly projectId: string; readonly manifest: ProjectManifest } }
+  | { readonly success: false; readonly issue: ProjectManifestParseIssue };
+
+const legacyManifestSchemaUrl = 'https://tau.new/schemas/tau-schema-v1.json';
+const legacyManifestSchema = projectManifestSchema.extend({
+  $schema: z.literal(legacyManifestSchemaUrl),
+  id: projectIdSchema,
+});
+
+/**
+ * Convert only the previous strict prerelease contract. The host must persist
+ * the returned identity before conditionally replacing the original bytes.
+ * This does not rewrite historical Git objects or relax normal parsing.
+ * @param bytes - Unmodified previous-contract manifest bytes.
+ * @returns Preserved identity and converted declaration, or a validation issue.
+ * @public
+ */
+export const convertLegacyProjectManifestBytes = (
+  bytes: Uint8Array<ArrayBuffer>,
+): LegacyProjectManifestConversionResult => {
+  const decoded = decodeProjectManifestBytes(bytes, legacyManifestSchemaUrl);
+  if (!decoded.success) {
+    return decoded;
+  }
+  const parsed = legacyManifestSchema.safeParse(decoded.input);
+  if (!parsed.success) {
+    return { success: false, issue: { code: 'manifest-invalid', issues: parsed.error.issues } };
+  }
+  return {
+    success: true,
+    data: {
+      projectId: parsed.data.id,
+      manifest: projectToManifest({
+        ...parsed.data,
+        $schema: projectManifestSchemaUrl,
+      }),
+    },
+  };
 };

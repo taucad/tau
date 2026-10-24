@@ -10,17 +10,18 @@ import { execFile } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { createNodeVmFileSystem } from '@taucad/geospec-engine/node-filesystem';
+import { createNodeVmFileSystem } from 'geospec/runner/node';
 import { Engine } from 'geospec-engine/node';
-import { createExampleRuntimeClient, exampleKernelIds } from '@taucad/tau-examples/runtime';
-import type { GeoSpecRuntimeClient } from 'geospec/model';
+import { tauClientExporter } from '@taucad/agent-tools/geospec';
+import { createExampleRuntimeClient, exampleKernelExtensions, exampleKernelIds } from '@taucad/tau-examples/runtime';
 import { createNativeGeoSpecRunner } from 'geospec/runner/native';
 import { describe, it, expect } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const nodeBin = process.execPath;
-const geospecCli = resolve(repoRoot, 'packages/geospec-engine/src/cli/main.ts');
+// `geospec run` with Tau's exporter, the composition `tau test` runs (packages/cli/scripts/geospec.mts).
+const geospecCli = resolve(repoRoot, 'packages/cli/scripts/geospec.mts');
 
 type GeoSpecReportFile = {
   file: string;
@@ -124,7 +125,12 @@ describe('geospec example suites (regression backbone)', () => {
         nativeAssertions: { engine },
         model: {
           projectPath,
-          runtime: async () => createExampleRuntimeClient(projectPath) as unknown as GeoSpecRuntimeClient,
+          exporters: [
+            await tauClientExporter({
+              client: async () => createExampleRuntimeClient(projectPath),
+              extensions: exampleKernelExtensions,
+            }),
+          ],
         },
       });
       try {

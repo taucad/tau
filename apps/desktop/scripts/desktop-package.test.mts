@@ -9,8 +9,9 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createPackageWithOptions, statFile } from '@electron/asar';
@@ -25,8 +26,10 @@ import {
 import {
   desktopManifestFields,
   desktopPackageChannel,
+  packagePathPayloads,
   runtimeAsarOptions,
   runtimePlatformPackages,
+  stageNativePackageFiles,
 } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
@@ -125,12 +128,12 @@ try {
 }
 console.log('✓ native binaries and spawned adapters stay unpacked beneath hidden checkout directories');
 
-/* Omissions: GeoSpec native and PicoGK are always named; git only when it is absent. */
+/* Omissions: GeoSpec native is always named; git only when it is absent; no kernel closure ships anywhere. */
 const linux = desktopPackagePlans['linux-x64'];
 const windows = desktopPackagePlans['win32-x64'];
 const withGit = desktopPackageOmissions(linux, { git: true, gitResourceRoot: '/r/git/linux-x64' });
 assert.ok(withGit.some((line) => line.startsWith('GeoSpec native engine')));
-assert.ok(withGit.some((line) => line.startsWith('PicoGK C# worker')));
+assert.ok(!withGit.some((line) => line.includes('PicoGK')));
 assert.ok(!withGit.some((line) => line.startsWith('git payload')));
 assert.ok(
   desktopPackageOmissions(linux, { git: false, gitResourceRoot: '/r/git/linux-x64' }).includes(
@@ -243,3 +246,29 @@ assert.deepEqual(desktopManifestFields({ environmentOverrides: false, channel: '
   tauDesktop: { channel: 'staging' },
 });
 console.log('✓ a staging package records its channel and a production release records nothing');
+
+/* Main prepares a kernel on first use from the package files the app ships, so every one must be staged. */
+const workspaceRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..');
+const nativeResources = await mkdtemp(join(tmpdir(), 'tau-native-packages-'));
+try {
+  await stageNativePackageFiles(nativeResources);
+  for (const name of ['build123d', 'smlibpy', 'picogk']) {
+    const manifest: unknown = JSON.parse(
+      readFileSync(join(workspaceRoot, `packages/plugins/${name}/tau-plugin.json`), 'utf8'),
+    );
+    for (const path of packagePathPayloads(manifest)) {
+      assert.ok(
+        statSync(join(nativeResources, 'native-packages', `@taucad/${name}`, path)).isFile(),
+        `@taucad/${name} ${path} is staged`,
+      );
+    }
+  }
+  assert.ok(
+    packagePathPayloads(
+      JSON.parse(readFileSync(join(workspaceRoot, 'packages/plugins/build123d/tau-plugin.json'), 'utf8')),
+    ).includes('python/worker.py'),
+  );
+} finally {
+  await rm(nativeResources, { recursive: true, force: true });
+}
+console.log("✓ the app ships each native package's own payload files for first-use preparation");

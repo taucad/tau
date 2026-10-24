@@ -50,9 +50,8 @@ This creates the package baseline; the kernel stub is intentionally non-function
 | `src/<name>.plugin.test.ts`                                                                                                          | Alias-identity test, capability-id assertions, and (for `hostTarget: browser`) the payload guard  |
 | `src/<name>.plugin.test-d.ts`                                                                                                        | Type-level alias identity                                                                         |
 | `AGENTS.md`                                                                                                                          | Plugin identity, `kernel` capability, selected host, entrypoints, Nx commands and owner links     |
-| `CLAUDE.md`                                                                                                                          | Exact `@AGENTS.md` import                                                                         |
 
-The plugin creator's shared KeepExisting writer owns this starter pair. A
+The plugin creator's shared KeepExisting writer owns this AGENTS starter. A
 kernel package has no separate generator or instruction template. Maintain the
 generated AGENTS in place after creation; do not rerun the full creator over an
 existing package.
@@ -227,17 +226,16 @@ defineRuntime({ plugins: [<alias>()] });
 
 ### 3.2 Review every host runtime
 
-The seven host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `smlibpy()`, `build123d()` or `picogk()` is the whole integration (section 3.8).
+The six host runtime definitions are intentional and ordered; do not add a kernel mechanically. For each applicable host, add the package dependency and package-named factory once. Record why a credentialed, native-only, converter-only, or otherwise incompatible kernel is omitted. Native kernels are ordinary entries: listing `smlibpy()`, `build123d()` or `picogk()` is the whole integration (section 3.8).
 
-| Host                          | Runtime definition                                     | Coverage test                                   | Dependency manifest                    |
-| ----------------------------- | ------------------------------------------------------ | ----------------------------------------------- | -------------------------------------- |
-| UI editor                     | `apps/ui/app/runtime/ui-runtime.definition.ts`         | `apps/ui/app/runtime/ui-runtime.config.test.ts` | `apps/ui/package.json`                 |
-| Desktop utility               | `apps/desktop/src/tau/desktop-runtime.factory.ts`      | `desktop-runtime.factory.test.ts`               | `apps/desktop/package.json`            |
-| CLI built-ins                 | `packages/cli/src/cli-runtime.ts`                      | `cli-runtime.test.ts`                           | `packages/cli/package.json`            |
-| GeoSpec default model runtime | `packages/geospec-engine/src/model/default-runtime.ts` | `default-runtime.test.ts`                       | `packages/geospec-engine/package.json` |
-| Runtime integration fixtures  | `apps/runtime-e2e/src/runtime.definition.ts`           | `runtime.definition.test.ts`                    | `apps/runtime-e2e/package.json`        |
-| Checked-in example rendering  | `libs/tau-examples/scripts/runtime.ts`                 | `libs/tau-examples/scripts/generation.test.ts`  | `libs/tau-examples/package.json`       |
-| Import/export converter       | `apps/libs/converter/src/runtime.ts`                   | `apps/libs/converter/src/runtime.test.ts`       | `apps/libs/converter/package.json`     |
+| Host                                    | Runtime definition                                | Coverage test                                   | Dependency manifest                |
+| --------------------------------------- | ------------------------------------------------- | ----------------------------------------------- | ---------------------------------- |
+| UI editor                               | `apps/ui/app/runtime/ui-runtime.definition.ts`    | `apps/ui/app/runtime/ui-runtime.config.test.ts` | `apps/ui/package.json`             |
+| Desktop utility                         | `apps/desktop/src/tau/desktop-runtime.factory.ts` | `desktop-runtime.factory.test.ts`               | `apps/desktop/package.json`        |
+| CLI built-ins and GeoSpec `tauExporter` | `packages/cli/src/cli-runtime.ts`                 | `cli-runtime.test.ts`                           | `packages/cli/package.json`        |
+| Runtime integration fixtures            | `apps/runtime-e2e/src/runtime.definition.ts`      | `runtime.definition.test.ts`                    | `apps/runtime-e2e/package.json`    |
+| Checked-in example rendering            | `libs/tau-examples/scripts/runtime.ts`            | `libs/tau-examples/scripts/generation.test.ts`  | `libs/tau-examples/package.json`   |
+| Import/export converter                 | `apps/libs/converter/src/runtime.ts`              | `apps/libs/converter/src/runtime.test.ts`       | `apps/libs/converter/package.json` |
 
 Array order is kernel-selection precedence. Preserve it deliberately; each host's existing order assertions pin it. Every coverage test calls `assertKernelRosterCoverage` from `@taucad/runtime-testing/roster` against `kernelConfigurations`: a new catalog row fails each one until that host lists the kernel or adds an `omitted` reason. The desktop also keeps `apps/desktop/src/tau/desktop-native-deployments.ts`, the native packages it bundles closures for; a parity test holds it equal to the deployments its runtime lists. Review `apps/ui/vite.config.ts` `ssr.external` only when the package emits sibling SSR chunks; most kernel packages do not belong there.
 
@@ -323,7 +321,7 @@ If `apps/api` changed: `NX_DAEMON=false ./node_modules/.bin/nx run-many -t lint 
 
 1. Scaffold (section 0)
 2. Implement kernel + tests
-3. Review all seven host runtimes; list only applicable consumers
+3. Review all six host runtimes; list only applicable consumers
 4. Verify geometry-naming compliance for render, export, native handles, converter boundaries
 5. Complete catalog, skill bundle and product rows, editor types/language/icon, docs, and npm-name handoff
 6. Run the Nx checks and fix every regression

@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { PageHeader } from '#components/layout/page-header.js';
+import { PageHeader, PhoneTopBarContext } from '#components/layout/page-header.js';
+
+const titleInPhoneBar = { hasTitle: true, hasAction: false } as const;
 
 describe('PageHeader', () => {
   it('should render one level-one heading at the policy step with the count outside its name', () => {
@@ -32,5 +34,28 @@ describe('PageHeader', () => {
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).toBeInTheDocument();
+  });
+
+  it('should hide only the heading below md while the phone bar shows it, keeping the h1 and count', () => {
+    render(
+      <PhoneTopBarContext.Provider value={titleInPhoneBar}>
+        <PageHeader title='Community' count={20} />
+      </PhoneTopBarContext.Provider>,
+    );
+
+    const heading = screen.getByRole('heading', { level: 1, name: 'Community' });
+    expect(heading).toHaveClass('max-md:sr-only');
+    // The count stays on screen at every width (I1); only the repeated title hides.
+    expect(screen.getByText('20').closest('[class*="sr-only"]')).toBeNull();
+  });
+
+  it('should keep an embedded section heading visible under the phone bar', () => {
+    render(
+      <PhoneTopBarContext.Provider value={titleInPhoneBar}>
+        <PageHeader headingLevel={2} title='Projects' />
+      </PhoneTopBarContext.Provider>,
+    );
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).not.toHaveClass('max-md:sr-only');
   });
 });

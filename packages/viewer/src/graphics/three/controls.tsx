@@ -1,7 +1,7 @@
+import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import React, { useLayoutEffect, useMemo, useState } from 'react';
 import { selectCameraProjection } from '@taucad/camera/machine';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
-import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
 import { createSectionPlanePicker } from '#graphics/three/controls/section-plane-picker.js';
 import { resolveCameraControlProps, TauCameraControls } from '#graphics/three/controls/tau-camera-controls.jsx';
 import { ViewportGizmoCube } from '#graphics/three/controls/viewport-gizmo-cube.jsx';
@@ -89,7 +89,14 @@ export const Controls = React.memo(function ({
     return [point.x, point.y, point.z];
   }, [cameraRig, renderFrame]);
   const controlProps = useMemo(
-    () => resolveCameraControlProps({ enablePan, enableZoom, secondaryMouseButtonMode, projectionKind, zoomSpeed }),
+    () =>
+      resolveCameraControlProps({
+        enablePan,
+        enableZoom,
+        secondaryMouseButtonMode,
+        projectionKind,
+        zoomSpeed,
+      }),
     [enablePan, enableZoom, projectionKind, secondaryMouseButtonMode, zoomSpeed],
   );
 

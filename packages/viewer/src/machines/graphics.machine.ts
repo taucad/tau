@@ -786,7 +786,7 @@ const graphicsMachineDefinition = setup({
   ],
 
   context: ({ input, spawn, actors }) => {
-    const preference = input.graphicsBackend ?? 'webgl';
+    const preference = input.graphicsBackend ?? 'webgpu';
     const ownsModelInteractionRef = input.modelInteractionRef === undefined;
     const modelInteractionRef =
       input.modelInteractionRef ??
@@ -825,7 +825,7 @@ const graphicsMachineDefinition = setup({
       enableGrid: input.enableGrid ?? true,
       enableAxes: input.enableAxes ?? true,
       enableMatcap: input.enableMatcap ?? false,
-      enablePostProcessing: input.enablePostProcessing ?? false,
+      enablePostProcessing: input.enablePostProcessing ?? true,
       upDirection: input.upDirection ?? 'z',
       graphicsBackendPreference: preference,
       webGpuAvailable: false,

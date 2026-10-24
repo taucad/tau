@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Purpose: Rewrite the `worker` pin of `packages/plugins/picogk/tau-plugin.json` from a layer record the macOS
- *   release job produced, or check, verify and describe that record for the release job's upload steps.
+ * Purpose: Rewrite the `worker` pin of `packages/plugins/picogk/tau-plugin.json` from a layer record a release job
+ *   produced (macOS for darwin-arm64, Linux for linux-x64), or check, verify and describe that record for the release
+ *   job's upload steps. A target the manifest does not pin yet gets its variant from `tau-plugin.variants.json`.
  * Why: the Tau PicoGK layer is built, signed and digested in CI; its pin reaches the manifest only through this
  *   reviewed rewrite (I13), never by hand. The rule is the .NET layer rule of `@taucad/dotnet-kernel-core/layer`.
  * Environment: Node 24+.
@@ -22,5 +23,6 @@ import { picogkLayer } from '#picogk-layer.js';
 process.exitCode = await runComposeTauPlugin({
   layer: picogkLayer,
   manifestPath: resolve(import.meta.dirname, '../tau-plugin.json'),
+  stagedVariantsPath: resolve(import.meta.dirname, '../tau-plugin.variants.json'),
   args: process.argv.slice(2),
 });

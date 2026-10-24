@@ -1,4 +1,4 @@
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { defineJobProvider } from '@taucad/runtime/job';
 import { z } from 'zod';
 

@@ -29,8 +29,6 @@ export type GeoSpecPoolHostMessage =
       shard: GeoSpecPoolShard;
       testNamePattern?: string;
       testTimeout?: number;
-      matcherWallBackstop?: number;
-      forensic?: boolean;
     }
   | {
       /** List-only collection pass: register tests, run no bodies (R3 splitting). */
@@ -38,8 +36,6 @@ export type GeoSpecPoolHostMessage =
       shardId: number;
       file: string;
       testTimeout?: number;
-      matcherWallBackstop?: number;
-      forensic?: boolean;
     }
   | { type: 'shutdown' };
 
@@ -48,15 +44,13 @@ export type GeoSpecPoolHostMessage =
 export type GeoSpecPoolWorkerMessage =
   | { type: 'ready' }
   | { type: 'initialized' }
-  | { type: 'initialization-error'; message: string }
-  | { type: 'file-start'; shardId: number; file: string }
   | {
-      type: 'forensic';
-      shardId: number;
-      name: string;
-      value: number;
-      unit: 'milliseconds' | 'count';
+      type: 'initialization-error';
+      message: string;
+      /** The failure's error code, such as `ERR_MODULE_NOT_FOUND` for an absent engine. */
+      code?: string;
     }
+  | { type: 'file-start'; shardId: number; file: string }
   | { type: 'tests-listed'; shardId: number; file: string; names: string[] }
   | { type: 'list-error'; shardId: number; file: string; message: string }
   | {

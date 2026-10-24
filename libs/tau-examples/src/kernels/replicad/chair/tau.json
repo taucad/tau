@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_NyDjQAlOxiy2qXNI6ZyXL",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Chair",
   "description": "A clean, approachable chair design with balanced proportions and thoughtful ergonomics. Features a solid seat, sturdy square legs, and an adjustable backrest angle for comfort. Optional edge fillets add refinement while maintaining the simple, modern aesthetic. Customize dimensions to fit any space or user preference.",
   "tags": ["3d-printing", "parametric", "replicad"],

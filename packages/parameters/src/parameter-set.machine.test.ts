@@ -838,6 +838,64 @@ it('should fail a parameter actor with WATCH_CLOSED when its watch closes', asyn
   actor.send({ type: 'close' });
 });
 
+/** Files whose sidecar watch rejects `closed` with an abort on unsubscribe, as the fs-bridge watch does. */
+const abortingWatchFiles = (): Readonly<{ files: ParameterFiles; fail(error: Error): void }> => {
+  const closed = Promise.withResolvers<void>();
+  return {
+    files: {
+      watchReady: () => ({
+        ready: Promise.resolve(),
+        closed: closed.promise,
+        unsubscribe: () => {
+          closed.reject(new DOMException('The operation was aborted.', 'AbortError'));
+        },
+      }),
+      exists: async () => false,
+      readFile: async () => new Uint8Array(),
+      writeFileChecked: async () => {
+        throw new Error('No write expected.');
+      },
+    },
+    fail: (error) => {
+      closed.reject(error);
+    },
+  };
+};
+
+/* TAU-UI-4: closing a project page aborted the sidecar watch, and the abort escaped as an unhandled rejection. */
+it('should not leave an unhandled rejection when a closed actor aborts its watch', async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const actor = await readyFactoryActor(abortingWatchFiles().files);
+    actor.send({ type: 'close' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 10);
+    });
+    expect(unhandled).toEqual([]);
+    expect(actor.getSnapshot().context.diagnostic).toBeUndefined();
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
+});
+
+it('should fail a parameter actor with WATCH_CLOSED when its watch fails', async () => {
+  const watch = abortingWatchFiles();
+  const actor = await readyFactoryActor(watch.files);
+  watch.fail(new Error('Bridge proxy closed'));
+  await vi.waitFor(() => {
+    expect(actor.getSnapshot().context.diagnostic).toEqual({
+      code: 'WATCH_CLOSED',
+      message: 'Parameter watch closed.',
+    });
+  });
+  expect(actor.getSnapshot().matches({ open: 'disconnected' })).toBe(true);
+  actor.send({ type: 'close' });
+});
+
 it('should re-arm and reload a parameter actor when its watch resets', async () => {
   const watch = watchedFiles();
   const actor = await readyFactoryActor(watch.files);

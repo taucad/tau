@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.lib.json",
-  "compilerOptions": {
-    "composite": false,
-    "declarationMap": false
-  },
-  "references": []
-}

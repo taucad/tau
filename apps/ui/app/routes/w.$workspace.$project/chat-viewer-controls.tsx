@@ -11,6 +11,7 @@ import { defaultOperationTimeout } from '#constants/editor.constants.js';
 type ChatViewerControlsProps = Readonly<{
   /** Capture writes to the active chat draft and is unavailable in read-only shared sessions. */
   shouldEnableCapture?: boolean;
+  mobileAction?: React.ReactNode;
   captureRendering?: () => Promise<Rendering>;
   /** The pane's kernel settings, shown in Viewer settings. */
   kernelSettings?: React.ReactNode;
@@ -27,6 +28,7 @@ type ChatViewerControlsProps = Readonly<{
 export function ChatViewerControls({
   shouldEnableCapture = true,
   captureRendering,
+  mobileAction,
   kernelSettings,
   leading,
   aboveControls,
@@ -41,6 +43,7 @@ export function ChatViewerControls({
   );
   return (
     <ViewerControls
+      mobileAction={mobileAction}
       capture={shouldEnableCapture ? <AvailableCaptureViewControl captureRendering={captureRendering} /> : undefined}
       kernelSettings={kernelSettings}
       operationTimeout={{

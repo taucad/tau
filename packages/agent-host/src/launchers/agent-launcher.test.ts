@@ -4,7 +4,7 @@
  * approval survives as a durable event, and a reconnect reads from a cursor.
  */
 
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { MessageChannel } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -595,6 +595,52 @@ describe('createAgentLauncher', () => {
 
     const replayed = await host.execute(command);
     expect(replayed).toEqual({ ...first, status: 'replayed' });
+  });
+
+  /*
+   * OQ2: a permanent delete keeps only the record. A start on a purged chat is
+   * refused before anything is written, and a run that was live when the chat
+   * was purged stops at its next row without bringing the log back.
+   */
+  it('refuses to run a purged chat and writes nothing beside its record', async () => {
+    const host = await makeLauncher(scriptedGateway());
+    const directory = join(currentRoot(), '.tau', 'chats', 'chat-purged');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'chat.json'), JSON.stringify({ id: 'chat-purged', deletedAt: 1, purgedAt: 2 }));
+
+    const answer = await start(host, {
+      chatId: 'chat-purged',
+      runId: 'run-purged',
+    });
+
+    expect(answer).toMatchObject({ status: 'refused', effect: 'not-applied' });
+    expect(await readdir(directory)).toEqual(['chat.json']);
+  });
+
+  it('stops a run that was live when its chat was purged, and never recreates the log', async () => {
+    const gateway: { abort?: () => void } = {};
+    const host = await makeLauncher(stalledGateway(gateway));
+    const directory = join(currentRoot(), '.tau', 'chats', 'chat-live');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'chat.json'), JSON.stringify({ id: 'chat-live', deletedAt: 1 }));
+    await expect(start(host, { chatId: 'chat-live', runId: 'run-live' })).resolves.toMatchObject({
+      status: 'applied',
+    });
+
+    /* What the store's purge does: the tombstone, then every other entry goes. */
+    await writeFile(join(directory, 'chat.json'), JSON.stringify({ id: 'chat-live', deletedAt: 1, purgedAt: 2 }));
+    const names = await readdir(directory);
+    await Promise.all(
+      names
+        .filter((name) => name !== 'chat.json')
+        .map(async (name) => rm(join(directory, name), { recursive: true, force: true })),
+    );
+    /* Its next row is fenced (the stalled model call may not have started); either way the run ends here. */
+    gateway.abort?.();
+    await host.close();
+    launcher = undefined;
+
+    expect(await readdir(directory)).toEqual(['chat.json']);
   });
 
   it('refuses a chat id that is not one storage path segment', async () => {

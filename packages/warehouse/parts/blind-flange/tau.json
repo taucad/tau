@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_lHYmOQOcvwRwMm6lomfrA",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Blind pipe flange",
   "description": "Generic fitting with a deliberately modeled flow passage, wall and end interfaces; plugs and blind flanges intentionally close the passage.",
   "tags": [

@@ -2,7 +2,7 @@
 import { useThree } from '@react-three/fiber';
 import type { GizmoOptions } from 'three-viewport-gizmo';
 import { ViewportGizmo } from 'three-viewport-gizmo';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Object3D, Camera } from 'three';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
@@ -13,6 +13,7 @@ import type { ViewportGizmoControlsBinding } from '#graphics/three/controls/view
 import { useViewportGizmoInteractionLock } from '#graphics/three/controls/viewport-gizmo-interaction-lock.jsx';
 import {
   bindViewportGizmoInvalidationEvents,
+  SectionPlanePickerContext,
   useViewportGizmoRenderLoop,
 } from '#graphics/three/controls/viewport-gizmo-render-loop.jsx';
 import { useCameraRetarget, useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
@@ -254,6 +255,23 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     upDirection,
     loadedFont,
   ]);
+
+  // The section plane picker beside the cube is printed in the cube's colours and font, so it follows the cube's
+  // style: the theme, the accent and the web font arriving.
+  const planePicker = useContext(SectionPlanePickerContext);
+  useEffect(() => {
+    if (!planePicker || !gl) {
+      return;
+    }
+    const containerToUse = resolveGizmoContainer(container, gl.domElement);
+    if (!containerToUse) {
+      return;
+    }
+    planePicker.setStyle(
+      readViewportGizmoStyle({ container: containerToUse, colorScheme, isHighContrast, accentColor }),
+    );
+    invalidate();
+  }, [planePicker, gl, container, colorScheme, isHighContrast, accentColor, loadedFont, invalidate]);
 
   useGizmoResizeSync(gizmoRef);
 

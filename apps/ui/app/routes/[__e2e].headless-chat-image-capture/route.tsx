@@ -87,7 +87,7 @@ const seedFiles = (kind: FixtureKind): Record<string, { content: Uint8Array<Arra
   ...(kind === 'gltf' && { 'src/secondary.ts': { content: encode(secondaryModel3d) } }),
 });
 
-const seedProject = (kind: FixtureKind): Omit<ProjectManifest, '$schema' | 'id'> => ({
+const seedProject = (kind: FixtureKind): Omit<ProjectManifest, '$schema'> => ({
   name:
     kind === 'svg'
       ? 'Headless SVG Capture E2E'

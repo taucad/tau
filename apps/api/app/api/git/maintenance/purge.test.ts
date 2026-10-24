@@ -8,7 +8,7 @@ import type { TestingModule } from '@nestjs/testing';
 import { eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { getEnvironment } from '#config/environment.config.js';
 import { storageTombstone, user } from '#database/schema.js';
 import * as schema from '#database/schema.js';
@@ -19,8 +19,15 @@ import { repositoryLocator } from '#api/git/store/locator.js';
 import { encodeManifest, succeedManifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
-import { maxPurgeObjectsWithoutConfirmation, purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
+import {
+  maxPurgeObjectsWithoutConfirmation,
+  purgeTombstonedTenants as streamTombstonedTenants,
+} from '#api/git/maintenance/purge.js';
+
 import { databaseReachable } from '#testing/database-reachable.js';
+
+const purgeTombstonedTenants = async (...args: Parameters<typeof streamTombstonedTenants>) =>
+  Array.fromAsync(streamTombstonedTenants(...args));
 
 /**
  * S5 and S10 on MinIO and PostgreSQL: a tombstoned tenant's prefixes are
@@ -282,11 +289,108 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
     expect(await objectsUnder(ownerId)).toHaveLength(1);
   }, 120_000);
 
+  it('should cap an oversized plan without losing totals and fence all repositories when explicitly confirmed', async () => {
+    const { locator } = await seedTenant();
+    const second = 'proj-second';
+    await driver.putBlob({
+      namespace: 'tenants',
+      key: `${locator.ownerId}/repos/${second}/packs/fixture`,
+      body: Uint8Array.of(1, 2, 3),
+      contentType: 'application/octet-stream',
+      tier: 'private',
+    });
+    await seedTombstone(locator.ownerId, { purgeAfter: new Date(0) });
+    const before = await objectsWithBytes(locator.ownerId);
+    const commit = vi.spyOn(store, 'commitManifest');
+    const remove = vi.spyOn(driver, 'deleteBlobs');
+    try {
+      const refused = await purgeTombstonedTenants({
+        database,
+        driver,
+        store,
+        ownerIds: [locator.ownerId],
+        objectBound: 1,
+      });
+      expect(refused[0]?.status).toBe('refused');
+      expect(refused[0]?.plan?.projectIds).toHaveLength(1);
+      expect(refused[0]?.plan?.projectIdsTruncated).toBe(true);
+      expect(refused[0]?.plan?.objects).toBe(before.length);
+      expect(refused[0]?.plan?.bytes).toBe(before.reduce((sum, object) => sum + object.bytes, 0));
+      expect(commit).not.toHaveBeenCalled();
+      expect(remove).not.toHaveBeenCalled();
+      const confirmed = await purgeTombstonedTenants({
+        database,
+        driver,
+        store,
+        ownerIds: [locator.ownerId],
+        objectBound: 1,
+        confirmOwnerId: locator.ownerId,
+      });
+      expect(confirmed[0]?.status).toBe('purged');
+      expect(confirmed[0]?.plan?.projectIdsTruncated).toBe(false);
+      expect(commit.mock.calls.map(([target]) => target.projectId).sort()).toEqual([locator.projectId, second].sort());
+      expect(Math.max(...commit.mock.invocationCallOrder)).toBeLessThan(Math.min(...remove.mock.invocationCallOrder));
+      expect(await objectsUnder(locator.ownerId)).toEqual([]);
+    } finally {
+      commit.mockRestore();
+      remove.mockRestore();
+    }
+  }, 120_000);
+
+  it('should page more than the SQL parameter limit of live tombstones and reach a later eligible owner', async () => {
+    const prefix = `backlog-${randomBytes(6).toString('hex')}`;
+    const ids = Array.from({ length: 70_000 }, (_, index) => `${prefix}-${String(index).padStart(5, '0')}`);
+    const eligible = `${prefix}-z`;
+    const selected = [...ids, eligible];
+    try {
+      for (let offset = 0; offset < ids.length; offset += 500) {
+        // oxlint-disable-next-line no-await-in-loop -- bounded fixture inserts
+        await database
+          .insert(user)
+          .values(
+            ids
+              .slice(offset, offset + 500)
+              .map((id) => ({ id, name: 'Backlog control', email: `${id}@example.invalid` })),
+          );
+      }
+      for (let offset = 0; offset < selected.length; offset += 500) {
+        // oxlint-disable-next-line no-await-in-loop -- bounded fixture inserts
+        await database
+          .insert(storageTombstone)
+          .values(selected.slice(offset, offset + 500).map((ownerId) => ({ ownerId, purgeAfter: new Date(0) })));
+      }
+      let live = 0;
+      let purged = 0;
+      for await (const outcome of streamTombstonedTenants({ database, driver, store, ownerIds: selected })) {
+        if (outcome.status === 'live-owner') {
+          live += 1;
+        }
+        if (outcome.ownerId === eligible && outcome.status === 'purged') {
+          purged += 1;
+        }
+      }
+      expect(live).toBe(70_000);
+      expect(purged).toBe(1);
+      const purgedRow = await tombstoneRow(eligible);
+      const liveRow = await tombstoneRow(ids[0]!);
+      expect(purgedRow?.purgedAt).toBeInstanceOf(Date);
+      expect(liveRow?.purgedAt).toBeNull();
+    } finally {
+      for (let offset = 0; offset < selected.length; offset += 500) {
+        const page = selected.slice(offset, offset + 500);
+        // oxlint-disable-next-line no-await-in-loop -- bounded fixture cleanup
+        await database.delete(storageTombstone).where(inArray(storageTombstone.ownerId, page));
+        // oxlint-disable-next-line no-await-in-loop -- bounded fixture cleanup
+        await database.delete(user).where(inArray(user.id, page));
+      }
+    }
+  }, 120_000);
+
   it('should bound the default plan at the charter constant', () => {
     expect(maxPurgeObjectsWithoutConfirmation).toBe(10_000);
   });
 
-  it('should keep the prefix delete reachable from the purge job alone', () => {
+  it('should keep prefix deletion unreachable from application callers', () => {
     // D31: exactly one caller outside the driver that defines it. Test files are
     // excluded because D32 confines them to disposable buckets by the guard.
     const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -297,6 +401,6 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
       .map((file) => path.relative(apiRoot, file))
       .sort();
 
-    expect(callers).toStrictEqual(['api/git/maintenance/purge.ts', 'storage/object-storage.service.ts']);
+    expect(callers).toStrictEqual(['storage/object-storage.service.ts']);
   });
 });

@@ -1,14 +1,14 @@
 /**
  * The host half of the viewer `tau mcp` serves (agent plugin UI blueprint W4).
  *
- * `@taucad/mcp` registers the page and its tools; this module renders the
- * model a tool names into a GLB under `.tau/artifacts` (the runtime already
- * owns that path through `export_model`), hands out opaque handles the page
+ * `@taucad/mcp` registers the page and its tools; this module shows the model a tool names: a GLB or SVG as it is,
+ * and a CAD source through one watched runtime document (`mcp-entry-sessions.ts`), whose renders stay in memory and
+ * reach every page showing the source whenever its files or parameters change. It hands out opaque handles the page
  * reads in ranges, and runs the loopback server a text host links to.
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -24,10 +24,15 @@ import type {
 } from '@taucad/mcp';
 import { tauViewerReadLimit, tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 
-import { readModelRange, snapshotModelFile } from '#mcp-viewer-read.js';
+import { createMcpEntrySessions } from '#mcp-entry-sessions.js';
+import type { EntryRender, EntrySession, EntrySessionRuntime } from '#mcp-entry-sessions.js';
+import { readBytesRange, readModelRange, snapshotModelFile } from '#mcp-viewer-read.js';
 import type { ModelFileIdentity } from '#mcp-viewer-read.js';
 import { createMcpViewerSessions } from '#mcp-viewer-sessions.js';
-import { createDirectShare, createOpenInTauLink } from '#mcp-viewer-share.js';
+import { createMcpViewerPoser } from '#mcp-viewer-pose.js';
+import { createDirectShare } from '#mcp-viewer-share.js';
+import { createMcpViewerFiles, drawnFormats, isOpenablePath, isSourcePath } from '#mcp-viewer-files.js';
+import type { McpViewerFilesOptions } from '#mcp-viewer-files.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import {
   viewerExportFormatsInputSchema,
@@ -37,51 +42,38 @@ import {
 } from '#mcp-viewer-export.js';
 import type { McpViewerExport } from '#mcp-viewer-export.js';
 import type { McpViewerSessionsOptions } from '#mcp-viewer-sessions.js';
+import { viewerPartThumbnailsInputSchema, viewerPartThumbnailsToolName } from '#mcp-viewer-thumbnails.js';
+import type { McpViewerPartThumbnails } from '#mcp-viewer-thumbnails.js';
+import {
+  readRenderTimeout,
+  saveCapture,
+  viewerChromeToolName,
+  viewerSaveCaptureInputSchema,
+  viewerSettings,
+  viewerSettingsInputSchema,
+} from '#mcp-viewer-chrome.js';
 import { createMcpViewerWorkbench } from '#mcp-viewer-workbench.js';
 import type { McpViewerWorkbenchOptions } from '#mcp-viewer-workbench.js';
 import type {
-  TauViewerFile,
   TauViewerMechanism,
-  TauViewerMimeType,
   TauViewerModel,
+  TauViewerPreviewParametersInput,
   TauViewerShowResult,
 } from '@taucad/mcp/viewer-protocol';
 import { readGlbMechanism } from '@taucad/agent-tools/runtime';
-
-/** The page's own formats by extension; every other file is a CAD source the runtime renders (blueprint D3). */
-const drawnFormats: Readonly<Record<string, TauViewerMimeType>> = {
-  '.glb': 'model/gltf-binary',
-  '.svg': 'image/svg+xml',
-};
+import { slugifyTargetFile } from '@taucad/chat/rpc';
 
 /**
- * Extensions `browse_models` lists as CAD sources, and the exchange formats the runtime converts to GLB like a
- * source (W7: the BRep kernel imports STEP, the mesh importer STL, 3MF and OBJ).
+ * The opaque per-project key a shown model carries: the first 16 hex digits of the SHA-256 of the project folder.
+ *
+ * @param root - The project folder.
+ * @returns The key.
  */
-const sourceExtensions = new Set([
-  '.ts',
-  '.js',
-  '.mjs',
-  '.jsx',
-  '.tsx',
-  '.scad',
-  '.py',
-  '.kcl',
-  '.step',
-  '.stp',
-  '.stl',
-  '.3mf',
-  '.obj',
-]);
+const projectKeyOf = (root: string): string =>
+  createHash('sha256').update(resolvePath(root)).digest('hex').slice(0, 16);
 
-/** Folders `browse_models` never enters. */
-const skippedFolders = new Set(['node_modules', '.git', '.tau', 'dist', 'build', 'out', '.venv', '__pycache__']);
-
-/** Files `browse_models` lists at most, so a large checkout answers quickly. */
-const browseLimit = 200;
-
-/** Folders deep `browse_models` looks. */
-const browseDepth = 6;
+/** The render timeout `tau mcp` uses by default (its `--operation-timeout`). Milliseconds. */
+const defaultRenderTimeout = 600_000;
 
 /** Tool calls whose conversation the server remembers for the pages they open. */
 const rememberedCalls = 1024;
@@ -105,30 +97,37 @@ export type LocalMcpViewerOptions = Readonly<{
   sessions?: McpViewerSessionsOptions;
   /** How the pages' camera and component display are kept in `.tau/workbench`; tests shorten it. */
   workbench?: McpViewerWorkbenchOptions;
-  /**
-   * The runtime's source closure of an entry, for the Share pane's direct link; without it the link packs every
-   * project file git does not ignore.
-   */
+  /** How long the Files pane's change notice waits for the next change; tests shorten it. */
+  files?: McpViewerFilesOptions;
+  /** The runtime's source closure of an entry, for the Share pane's direct link; without it the page offers none. */
   snapshotSource?: SourceSnapshotter | undefined;
   /** The Export pane's handlers; without them the page offers no Export pane tools. */
   export?: McpViewerExport | undefined;
-  /** The project folder one call works in. */
-  rootOf(meta: Readonly<Record<string, unknown>> | undefined): string;
+  /** Renders the Model pane's part thumbnails; without it the page's part rows show no preview. */
+  partThumbnails?: McpViewerPartThumbnails | undefined;
+  /** The render timeout an entry takes when its record names none, as Viewer settings shows it. Milliseconds. */
+  defaultRenderTimeout?: number | undefined;
+  /** The folder a call works in when it names none and its conversation has shown no model: the server's start folder. */
+  workspaceRoot: string;
   /**
-   * Render one CAD source to GLB under `.tau/artifacts` through the registry's `export_model`, with its CAD topology
-   * wherever the route carries it, so the page can show the components and the mechanism.
-   *
-   * @returns The project-relative artifact path, or a failure.
+   * The project runtime a shown CAD source is watched in: one document per source, rendered with its CAD topology,
+   * kept in memory. Without it, `show_model` draws GLB and SVG files only.
    */
-  renderGlb(
-    input: Readonly<{ root: string; targetFile: string; toolCallId: string; signal?: AbortSignal | undefined }>,
-  ): Promise<string | TauMcpViewerFailure>;
+  liveRuntime?: ((root: string) => Promise<EntrySessionRuntime>) | undefined;
+  /**
+   * The project folder one call names, if any: Codex's thread folder on the agent's own calls, or the launcher's pin.
+   */
+  namedRoot(meta: Readonly<Record<string, unknown>> | undefined): string | undefined;
   /**
    * Run one of the host tools the loopback page may call ({@link loopbackHostTools}) in a project, answering what
    * `tools/call` would put in `structuredContent`. Without it the loopback page has no workbench panes that need one.
    */
   hostCall?(
-    input: Readonly<{ root: string; call: TauMcpHostCall; signal: AbortSignal }>,
+    input: Readonly<{
+      root: string;
+      call: TauMcpHostCall;
+      signal: AbortSignal;
+    }>,
   ): Promise<Readonly<Record<string, unknown>> | TauMcpViewerFailure>;
 }>;
 
@@ -144,7 +143,14 @@ export const loopbackHostTools: ReadonlySet<string> = new Set([
 
 /** A viewer port plus the loopback server it may have started. */
 export type LocalMcpViewer = TauMcpViewer &
+  Required<Pick<TauMcpViewer, 'listFiles' | 'openFile'>> &
   Readonly<{
+    /**
+     * The project folder one call works in: the folder it names, else the project of the model its conversation
+     * showed last, else the server's start folder. Codex names the folder only on the agent's own calls; a call the
+     * viewer page makes through the host carries the conversation alone.
+     */
+    rootOf(meta: Readonly<Record<string, unknown>> | undefined): string;
     /** Stop the loopback server, if one runs. */
     close(): Promise<void>;
   }>;
@@ -153,10 +159,19 @@ export type LocalMcpViewer = TauMcpViewer &
  * One model a tool showed, under the id its link and its reads name. The
  * entry is the single record of what was shown and for which project: the
  * loopback page asks for it by id and never resolves a folder of its own.
+ * A drawn file is read from the project; a watched source's render from its session's memory.
  */
-type Shown = Readonly<{ model: TauViewerModel; absolutePath: string; root: string; identity: ModelFileIdentity }>;
+type Shown = Readonly<
+  { model: TauViewerModel; root: string } & (
+    | { kind: 'file'; absolutePath: string; identity: ModelFileIdentity }
+    | { kind: 'render'; session: EntrySession }
+  )
+>;
 
-const failure = (errorCode: string, message: string): TauMcpViewerFailure => ({ errorCode, message });
+const failure = (errorCode: string, message: string): TauMcpViewerFailure => ({
+  errorCode,
+  message,
+});
 
 const isFailure = (value: unknown): value is TauMcpViewerFailure =>
   typeof value === 'object' && value !== null && 'errorCode' in value;
@@ -188,8 +203,11 @@ const mainEntry = async (root: string): Promise<string | undefined> => {
     const manifest: unknown = JSON.parse(await readFile(join(root, 'tau.json'), 'utf8'));
     const entryPath =
       typeof manifest === 'object' && manifest !== null && 'assets' in manifest
-        ? (manifest as Readonly<{ assets?: Readonly<{ main?: Readonly<{ entryPath?: unknown }> }> }>).assets?.main
-            ?.entryPath
+        ? (
+            manifest as Readonly<{
+              assets?: Readonly<{ main?: Readonly<{ entryPath?: unknown }> }>;
+            }>
+          ).assets?.main?.entryPath
         : undefined;
     return typeof entryPath === 'string' && entryPath !== '' ? entryPath : undefined;
   } catch {
@@ -197,71 +215,59 @@ const mainEntry = async (root: string): Promise<string | undefined> => {
   }
 };
 
-/**
- * List renderable files under `root`, shallowest first.
- *
- * @param root - The project folder.
- * @returns Up to {@link browseLimit} project-relative paths.
- */
-const renderableFiles = async (root: string): Promise<string[]> => {
-  const found: string[] = [];
-  let level = [root];
-  for (let depth = 0; depth < browseDepth && level.length > 0 && found.length < browseLimit; depth += 1) {
-    const next: string[] = [];
-    for (const folder of level) {
-      // ponytail: an unreadable folder lists nothing rather than failing the whole list.
-      // oxlint-disable-next-line no-await-in-loop -- breadth-first and bounded: a level is read before the next.
-      const entries = await readdir(folder, { withFileTypes: true }).catch(() => []);
-      for (const entry of entries.toSorted((a, b) => a.name.localeCompare(b.name))) {
-        const path = join(folder, entry.name);
-        if (entry.isDirectory()) {
-          if (!skippedFolders.has(entry.name) && !entry.name.startsWith('.')) {
-            next.push(path);
-          }
-          continue;
-        }
-        const extension = extname(entry.name).toLowerCase();
-        const isSource =
-          sourceExtensions.has(extension) && !/\.(?:test|spec|d|config|geospec)\.[a-z]+$/u.test(entry.name);
-        if (entry.isFile() && (isSource || extension in drawnFormats)) {
-          found.push(posix(relative(root, path)));
-          if (found.length >= browseLimit) {
-            return found;
-          }
-        }
-      }
-    }
-    level = next;
-  }
-  return found;
-};
-
-/** Where `export_model` writes a source's GLB: `.tau/artifacts/<toolCallId>__<stem>.glb`. */
+/** Where `export_model` writes each export: `.tau/artifacts/<toolCallId>__<slugged targetFile>-<format>/<file>`. */
 const artifactsFolder = '.tau/artifacts/';
 
 /**
- * The source a GLB was exported from, when the project says so plainly: a source beside it with the same name, or,
- * for an export under `.tau/artifacts`, the one renderable source in the project with that name. A GLB that matches
- * no source, or several, has none: it is shown as itself, without parameters.
+ * Whether an export folder under `.tau/artifacts` was written for a source, by the name `writeArtifactSet` gave it.
  *
- * @param root - The project folder.
- * @param glbPath - The GLB's project-relative path.
+ * @param folder - The export's folder name.
+ * @param source - A project-relative source path.
+ * @returns `true` when the folder ends with that source's slug and a format.
+ */
+const isExportFolderOf = (folder: string, source: string): boolean => {
+  const marker = `__${slugifyTargetFile(source)}-`;
+  const at = folder.lastIndexOf(marker);
+  return at > 0 && /^[^_]+$/u.test(folder.slice(at + marker.length));
+};
+
+/**
+ * The source a shown file was exported from, when the project says so plainly: for an export under
+ * `.tau/artifacts`, the one CAD source its folder was named for; otherwise, for a GLB, a source beside it with the
+ * same name. A file that matches no source, or several, has none.
+ *
+ * @param listed - Every project-relative path the project's listing names.
+ * @param path - The shown file's project-relative path.
  * @returns The source's project-relative path.
  */
-const exportedSourceOf = async (root: string, glbPath: string): Promise<string | undefined> => {
-  const stem = basename(glbPath, extname(glbPath));
-  const isExport = glbPath.startsWith(artifactsFolder);
-  const wanted = isExport ? stem.replace(/^.*__/u, '') : stem;
-  const folder = isExport ? undefined : posix(join(glbPath, '..'));
-  const files = await renderableFiles(root);
-  const candidates = files.filter(
-    (path) =>
-      sourceExtensions.has(extname(path).toLowerCase()) &&
-      basename(path, extname(path)) === wanted &&
-      (folder === undefined || posix(join(path, '..')) === folder),
+const exportedSourceOf = (listed: readonly string[], path: string): string | undefined => {
+  const isExport = path.startsWith(artifactsFolder);
+  if (!isExport && extname(path).toLowerCase() !== '.glb') {
+    return undefined;
+  }
+  const folder = isExport ? path.slice(artifactsFolder.length).split('/')[0]! : posix(join(path, '..'));
+  const stem = basename(path, extname(path));
+  const candidates = listed.filter(
+    (source) =>
+      isSourcePath(source) &&
+      source !== path &&
+      (isExport
+        ? isExportFolderOf(folder, source)
+        : basename(source, extname(source)) === stem && posix(join(source, '..')) === folder),
   );
   return candidates.length === 1 ? candidates[0] : undefined;
 };
+
+/**
+ * What `show_model` tells the agent about a shown export: the viewer draws that file only, and its source is what
+ * carries the current parameters and mechanism (LRP-10, D6).
+ *
+ * @param path - The shown file's project-relative path.
+ * @param source - The source it was exported from.
+ * @returns One sentence.
+ */
+const exportHint = (path: string, source: string): string =>
+  `${path} is an export of ${source}, drawn as exported. Call show_model with targetFile ${source} to show the source with its parameters and mechanism.`;
 
 /** The title a file shows under: its name without the extension. */
 const titleOf = (path: string): string => basename(path, extname(path));
@@ -343,17 +349,36 @@ const mechanismOf = (bytes: Uint8Array<ArrayBuffer>): TauViewerMechanism => {
  */
 export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpViewer => {
   const shown = new Map<string, Shown>();
-  /** The source of each GLB this server rendered, by the GLB's absolute path. */
-  const renderedFrom = new Map<string, string>();
   /** The model shown last per project folder and conversation. */
   const lastShown = new Map<string, string>();
   const lastShownKey = (root: string, scope: string | undefined): string =>
     scope === undefined ? root : `${root}\0${scope}`;
   /** The conversation of each show call, for a page that names the call it was opened with. */
   const conversationByCall = new Map<string, string>();
+  /** The project of the model each conversation showed last, for the calls its pages make. */
+  const conversationRoot = new Map<string, string>();
+  const rootOf = (meta: Readonly<Record<string, unknown>> | undefined): string => {
+    const scope = conversationOf(meta);
+    return (
+      options.namedRoot(meta) ??
+      (scope === undefined ? undefined : conversationRoot.get(scope)) ??
+      options.workspaceRoot
+    );
+  };
+  /** The shown model a page's call names by `modelId`; its project is where the call runs. */
+  const linkedModel = (args: unknown): Shown | undefined => {
+    const modelId = typeof args === 'object' && args !== null ? (args as { modelId?: unknown }).modelId : undefined;
+    return typeof modelId === 'string' ? shown.get(modelId) : undefined;
+  };
   const token = randomBytes(24).toString('base64url');
   const sessions = createMcpViewerSessions(options.sessions);
+  const poser = createMcpViewerPoser(sessions);
+  /** The id of the model shown last per project folder and conversation, which `pose_model` drives by default. */
+  const lastShownId = new Map<string, string>();
   const workbench = createMcpViewerWorkbench(options.workbench);
+  const files = createMcpViewerFiles(options.files);
+  /** The `filesVersion` each page heard last, so a change between two syncs answers the next at once. */
+  const filesHeard = new Map<string, number>();
   let loopback: Promise<{ server: Server; origin: string }> | undefined;
 
   const describe = async (
@@ -384,9 +409,60 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       mimeType,
       byteLength: bytes.length,
       sha256,
+      projectKey: projectKeyOf(root),
     };
-    shown.set(id, { model, absolutePath, root, identity });
+    shown.set(id, { kind: 'file', model, absolutePath, root, identity });
     return mimeType === 'model/gltf-binary' ? { model, mechanism: mechanismOf(bytes) } : { model };
+  };
+
+  /** A watched source's render as the page shows it: the source's path, the render's bytes, kept in memory. */
+  const describeRender = (
+    session: EntrySession,
+    render: EntryRender,
+  ): Pick<TauViewerShowResult, 'model' | 'mechanism'> => {
+    const model: TauViewerModel = {
+      id: render.id,
+      title: titleOf(session.entryPath),
+      path: session.entryPath,
+      sourceFile: session.entryPath,
+      mimeType: render.mimeType,
+      byteLength: render.bytes.length,
+      sha256: render.sha256,
+      projectKey: projectKeyOf(session.root),
+      ...(render.sourceRevision === undefined ? {} : { sourceRevision: render.sourceRevision }),
+      ...(render.issues.length === 0 ? {} : { issues: render.issues }),
+    };
+    shown.set(model.id, { kind: 'render', model, root: session.root, session });
+    return render.mimeType === 'model/gltf-binary' ? { model, mechanism: mechanismOf(render.bytes) } : { model };
+  };
+
+  /* A watched source rendered again or changed status: the pages showing it hear of it through `app_sync`. */
+  const entrySessions =
+    options.liveRuntime === undefined
+      ? undefined
+      : createMcpEntrySessions({
+          runtimeFor: options.liveRuntime,
+          onEvent: (session, event) => {
+            if (event.type === 'status') {
+              sessions.status(session.key, session.entryPath, event.status);
+              return;
+            }
+            sessions.rendered(session.key, describeRender(session, event.render));
+          },
+        });
+
+  /**
+   * Watch a source again. A source that cannot open leaves the page on its last render.
+   *
+   * @param root - The project folder.
+   * @param entryPath - The source.
+   */
+  const reopen = async (root: string, entryPath: string): Promise<void> => {
+    try {
+      await entrySessions?.acquire({ root, entryPath });
+    } catch {
+      /* The next show reports why. */
+    }
   };
 
   const startLoopback = async (): Promise<{ server: Server; origin: string }> => {
@@ -424,24 +500,38 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     }
   };
 
-  const showPath = async (
+  /**
+   * Render or locate one project file and describe it, touching nothing a page or the agent sees: what a show and a
+   * page's own open share. A CAD source is rendered by its watched session, so every page showing it follows its edits.
+   *
+   * @param root - The project folder.
+   * @param path - Project-relative or absolute path of the file.
+   * @param callOptions - The call that asked; its signal stops the wait for the render.
+   * @returns The described model, its mechanism, the source it was exported from and the watched session's key, or a
+   *   failure.
+   */
+  const renderEntry = async (
     root: string,
-    { path, select }: Readonly<{ path: string; select?: readonly string[] | undefined }>,
-    callOptions: TauMcpViewerCallOptions,
-  ): Promise<TauViewerShowResult | TauMcpViewerFailure> => {
+    path: string,
+    callOptions: Pick<TauMcpViewerCallOptions, 'signal'>,
+  ): Promise<
+    | (Pick<TauViewerShowResult, 'model' | 'mechanism'> &
+        Readonly<{ relativePath: string; exportedFrom?: string; entry?: string }>)
+    | TauMcpViewerFailure
+  > => {
     const absolute = inside(root, path);
     if (absolute === undefined) {
       return failure('PATH_OUTSIDE_PROJECT', `${path} is outside the project ${root}.`);
     }
     const relativePath = posix(relative(root, absolute));
     const isDrawn = extname(absolute).toLowerCase() in drawnFormats;
+    /* An export names its source, so the agent hears that the page draws the file as exported (LRP-10). */
+    const exportedFrom = exportedSourceOf(await files.paths(root), relativePath);
     let described: Pick<TauViewerShowResult, 'model' | 'mechanism'> | TauMcpViewerFailure;
+    let entry: string | undefined;
     if (isDrawn) {
       /* A GLB the agent exported still has its source's parameters, kinematics and exports (viewer parity V8). */
-      const sourceFile =
-        extname(absolute).toLowerCase() === '.glb'
-          ? (renderedFrom.get(absolute) ?? (await exportedSourceOf(root, relativePath)))
-          : undefined;
+      const sourceFile = extname(absolute).toLowerCase() === '.glb' ? exportedFrom : undefined;
       described = await describe(root, absolute, sourceFile);
     } else {
       const exists = await stat(absolute).then(
@@ -451,31 +541,127 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       if (!exists) {
         return failure('NOT_FOUND', `${relativePath} does not exist in ${root}.`);
       }
-      const artifact = await options.renderGlb({
-        root,
-        targetFile: relativePath,
-        toolCallId: callOptions.toolCallId,
-        signal: callOptions.signal,
-      });
-      if (isFailure(artifact)) {
-        return artifact;
+      if (entrySessions === undefined) {
+        return failure('RENDER_UNAVAILABLE', `This server has no runtime to render ${relativePath}.`);
       }
-      const artifactPath = inside(root, artifact);
-      if (artifactPath !== undefined) {
-        renderedFrom.set(artifactPath, relativePath);
+      /* One watched document per source: a second show of an unchanged source answers its newest render. */
+      const session = await entrySessions.acquire({ root, entryPath: relativePath });
+      /* The entry's own render timeout (Viewer settings, or Tau's) bounds the wait for its render; 0 or none leaves
+       * the call's. The watched document keeps building, and a later render still reaches the pages showing it. */
+      const renderTimeout = await readRenderTimeout(root, relativePath);
+      const deadline =
+        renderTimeout === undefined || renderTimeout === 0 ? undefined : AbortSignal.timeout(renderTimeout);
+      const callSignal = callOptions.signal;
+      const signal =
+        deadline === undefined
+          ? callSignal
+          : callSignal === undefined
+            ? deadline
+            : AbortSignal.any([callSignal, deadline]);
+      const timedOut = (): TauMcpViewerFailure =>
+        failure(
+          'RENDER_TIMEOUT',
+          `${relativePath} did not render within its ${String(renderTimeout)} ms render timeout (Viewer settings).`,
+        );
+      let render: Awaited<ReturnType<typeof session.settled>>;
+      try {
+        render = await session.settled(signal);
+      } catch (error) {
+        if (deadline?.aborted === true && callSignal?.aborted !== true) {
+          render = timedOut();
+        } else {
+          throw error;
+        }
       }
-      described =
-        artifactPath === undefined
-          ? failure('RENDER_FAILED', `The rendered model for ${relativePath} landed outside the project.`)
-          : await describe(root, artifactPath, relativePath);
+      if (deadline?.aborted === true && callSignal?.aborted !== true && isFailure(render)) {
+        render = timedOut();
+      }
+      entry = session.key;
+      described = isFailure(render) ? render : describeRender(session, render);
     }
     if (isFailure(described)) {
       return described;
     }
-    const { model } = described;
+    return {
+      ...described,
+      relativePath,
+      ...(exportedFrom === undefined ? {} : { exportedFrom }),
+      ...(entry === undefined ? {} : { entry }),
+    };
+  };
+
+  /** What a show result says about a rendered entry. */
+  const resultOf = (
+    rendered: Exclude<Awaited<ReturnType<typeof renderEntry>>, TauMcpViewerFailure>,
+  ): TauViewerShowResult => ({
+    model: rendered.model,
+    ...(rendered.mechanism === undefined ? {} : { mechanism: rendered.mechanism }),
+    ...(rendered.exportedFrom === undefined ? {} : { hint: exportHint(rendered.relativePath, rendered.exportedFrom) }),
+  });
+
+  /**
+   * A page's `app_sync`, answered early when the files of the page's project change once its Files pane listed them,
+   * and carrying their `filesVersion`.
+   *
+   * @param root - The project of the model the page reports, when this server showed it.
+   * @param input - The page's sync.
+   * @param context - The page's conversation and the call's cancellation.
+   * @returns The sync's answer, with `filesVersion` once the project was listed.
+   */
+  const syncWithFiles = async (
+    root: string | undefined,
+    input: Parameters<typeof sessions.sync>[0],
+    context: NonNullable<Parameters<typeof sessions.sync>[1]>,
+  ): Promise<Awaited<ReturnType<typeof sessions.sync>>> => {
+    const listed = root === undefined ? undefined : files.listed(root);
+    if (root === undefined || listed === undefined) {
+      return sessions.sync(input, context);
+    }
+    const missed = filesHeard.has(input.pageId) && filesHeard.get(input.pageId) !== listed.version;
+    const held = new AbortController();
+    const release = (): void => {
+      held.abort();
+    };
+    context.signal?.addEventListener('abort', release, { once: true });
+    const releaseOnChange = async (): Promise<void> => {
+      await listed.changed;
+      release();
+    };
+    // async-iife: bootstrap — the next change releases the held sync; the promise settles at that change or at close.
+    void releaseOnChange();
+    try {
+      const result = await sessions.sync(missed ? { ...input, wait: false } : input, {
+        ...context,
+        signal: held.signal,
+      });
+      const filesVersion = files.listed(root)?.version ?? listed.version;
+      filesHeard.delete(input.pageId);
+      filesHeard.set(input.pageId, filesVersion);
+      if (filesHeard.size > rememberedCalls) {
+        filesHeard.delete(filesHeard.keys().next().value!);
+      }
+      return { ...result, filesVersion };
+    } finally {
+      context.signal?.removeEventListener('abort', release);
+      held.abort();
+    }
+  };
+
+  const showPath = async (
+    root: string,
+    { path, select }: Readonly<{ path: string; select?: readonly string[] | undefined }>,
+    callOptions: TauMcpViewerCallOptions,
+  ): Promise<TauViewerShowResult | TauMcpViewerFailure> => {
+    const rendered = await renderEntry(root, path, callOptions);
+    if (isFailure(rendered)) {
+      return rendered;
+    }
+    const { model } = rendered;
     const scope = conversationOf(callOptions.meta);
     lastShown.set(lastShownKey(root, scope), model.sourceFile ?? model.path);
+    lastShownId.set(lastShownKey(root, scope), model.id);
     if (scope !== undefined) {
+      conversationRoot.set(scope, root);
       conversationByCall.set(callOptions.toolCallId, scope);
       for (const call of conversationByCall.keys()) {
         if (conversationByCall.size <= rememberedCalls) {
@@ -486,21 +672,35 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
     }
     const url = await viewerUrl(model, callOptions.presentation);
     const result: TauViewerShowResult = {
-      model,
-      ...(described.mechanism === undefined ? {} : { mechanism: described.mechanism }),
+      ...resultOf(rendered),
       ...(url === undefined ? {} : { viewerUrl: url }),
       ...(select === undefined || select.length === 0 ? {} : { select }),
     };
-    sessions.shown(result, scope);
+    sessions.shown(result, scope, rendered.entry);
     return result;
   };
 
-  const browseIn = async (root: string): Promise<{ files: TauViewerFile[] }> => {
-    const main = await mainEntry(root);
-    const paths = await renderableFiles(root);
-    const ordered =
-      main !== undefined && paths.includes(main) ? [main, ...paths.filter((path) => path !== main)] : paths;
-    return { files: ordered.map((path) => ({ path, title: titleOf(path) })) };
+  /**
+   * A page's own open (`app_open_file`): the file is shown to that page alone, so neither the model the agent showed
+   * last nor any other page moves. A CAD source opens its watched session, which the page then follows through
+   * `app_sync` as it follows a model the agent showed.
+   *
+   * @param root - The project folder.
+   * @param input - The page and the file.
+   * @param callOptions - The page's call.
+   * @returns What the page shows, or a failure.
+   */
+  const openForPage = async (
+    root: string,
+    input: Readonly<{ pageId: string; path: string }>,
+    callOptions: Pick<TauMcpViewerCallOptions, 'signal'>,
+  ): Promise<TauViewerShowResult | TauMcpViewerFailure> => {
+    const absolute = inside(root, input.path);
+    if (absolute !== undefined && !isOpenablePath(posix(relative(root, absolute)))) {
+      return failure('NOT_RENDERABLE', `The Tau viewer cannot show ${input.path}.`);
+    }
+    const rendered = await renderEntry(root, input.path, callOptions);
+    return isFailure(rendered) ? rendered : resultOf(rendered);
   };
 
   /** The Export pane's tools, each run in the project folder its call resolves to. */
@@ -534,7 +734,7 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
         description,
         inputSchema,
         call: async (args: Readonly<Record<string, unknown>>, callOptions: TauMcpViewerCallOptions) =>
-          (await inRoot(options.rootOf(callOptions.meta), args, callOptions.signal)) as
+          (await inRoot(linkedModel(args)?.root ?? rootOf(callOptions.meta), args, callOptions.signal)) as
             | Readonly<Record<string, unknown>>
             | TauMcpViewerFailure,
       },
@@ -563,13 +763,129 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       }),
     ];
   };
-  const pageTools = options.export === undefined ? [] : exportTools(options.export);
+  /** The Model pane's part thumbnails, rendered from the shown model the call names. */
+  const thumbnailTools = (
+    render: McpViewerPartThumbnails,
+  ): Array<
+    Readonly<{
+      tool: TauMcpViewerPageTool;
+      inRoot: (root: string, args: unknown, signal?: AbortSignal) => Promise<unknown>;
+    }>
+  > => {
+    const inRoot = async (_root: string, args: unknown, signal?: AbortSignal): Promise<unknown> => {
+      const request = viewerPartThumbnailsInputSchema.parse(args);
+      const entry = shown.get(request.modelId);
+      if (entry === undefined) {
+        return failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
+      }
+      if (entry.kind === 'file') {
+        return render({ root: entry.root, source: { absolutePath: entry.absolutePath }, request, signal });
+      }
+      /* A watched source's render is in memory; one that gave way to a newer render is not drawn from. */
+      const shownRender = entry.session.bytesOf(request.modelId);
+      return shownRender === undefined
+        ? failure('MODEL_CHANGED', `${entry.model.path} changed since it was shown; the newer model is on its way.`)
+        : render({
+            root: entry.root,
+            source: { bytes: shownRender.bytes, mimeType: shownRender.mimeType },
+            request,
+            signal,
+          });
+    };
+    return [
+      {
+        inRoot,
+        tool: {
+          name: viewerPartThumbnailsToolName,
+          description:
+            "Render part thumbnails of the shown model for the Tau viewer page's Model pane. Only the viewer page calls this.",
+          inputSchema: viewerPartThumbnailsInputSchema,
+          call: async (args, callOptions) =>
+            (await inRoot(rootOf(callOptions.meta), args, callOptions.signal)) as
+              | Readonly<Record<string, unknown>>
+              | TauMcpViewerFailure,
+        },
+      },
+    ];
+  };
+  /** The viewer bar's render timeout and Capture, for the shown model the call names. */
+  const chromeTools = (): Array<
+    Readonly<{
+      tool: TauMcpViewerPageTool;
+      inRoot: (root: string, args: unknown, signal?: AbortSignal) => Promise<unknown>;
+    }>
+  > => {
+    const shownEntry = (args: unknown): Shown | TauMcpViewerFailure =>
+      linkedModel(args) ?? failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
+    const settings = async (_root: string, args: unknown): Promise<unknown> => {
+      const request = viewerSettingsInputSchema.parse(args);
+      const entry = shownEntry(request);
+      return isFailure(entry)
+        ? entry
+        : viewerSettings({
+            root: entry.root,
+            entryPath: entry.model.sourceFile ?? entry.model.path,
+            defaultRenderTimeout: options.defaultRenderTimeout ?? defaultRenderTimeout,
+            request,
+          });
+    };
+    const capture = async (_root: string, args: unknown): Promise<unknown> => {
+      const request = viewerSaveCaptureInputSchema.parse(args);
+      const entry = shownEntry(request);
+      return isFailure(entry)
+        ? entry
+        : saveCapture({ root: entry.root, entryPath: entry.model.sourceFile ?? entry.model.path, request });
+    };
+    const tool = ({
+      name,
+      description,
+      inputSchema,
+      inRoot,
+    }: Readonly<{
+      name: string;
+      description: string;
+      inputSchema: TauMcpViewerPageTool['inputSchema'];
+      inRoot: (root: string, args: unknown) => Promise<unknown>;
+    }>) => ({
+      inRoot,
+      tool: {
+        name,
+        description,
+        inputSchema,
+        call: async (args: Readonly<Record<string, unknown>>, callOptions: TauMcpViewerCallOptions) =>
+          (await inRoot(rootOf(callOptions.meta), args)) as Readonly<Record<string, unknown>> | TauMcpViewerFailure,
+      },
+    });
+    return [
+      tool({
+        name: viewerChromeToolName.settings,
+        description:
+          "Read or set the shown entry's render timeout, kept in .tau/workbench/entries.json, for the Tau viewer page's Viewer settings. Only the viewer page calls this.",
+        inputSchema: viewerSettingsInputSchema,
+        inRoot: settings,
+      }),
+      tool({
+        name: viewerChromeToolName.saveCapture,
+        description:
+          "Save the Tau viewer page's captured view as a PNG under the project's exports folder. Only the viewer page calls this.",
+        inputSchema: viewerSaveCaptureInputSchema,
+        inRoot: capture,
+      }),
+    ];
+  };
+  const pageTools = [
+    ...chromeTools(),
+    ...(options.export === undefined ? [] : exportTools(options.export)),
+    ...(options.partThumbnails === undefined ? [] : thumbnailTools(options.partThumbnails)),
+  ];
+  const { snapshotSource } = options;
 
   const port: LocalMcpViewer = {
     page: options.page,
     pageTools: pageTools.map(({ tool }) => tool),
+    rootOf,
     async show(input, callOptions) {
-      const root = options.rootOf(callOptions.meta);
+      const root = rootOf(callOptions.meta);
       const target =
         input.targetFile ??
         lastShown.get(lastShownKey(root, conversationOf(callOptions.meta))) ??
@@ -583,21 +899,33 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       return showPath(root, { path: target, select: input.select }, callOptions);
     },
     async open(input, callOptions) {
-      return showPath(options.rootOf(callOptions.meta), { path: input.path }, callOptions);
+      return showPath(rootOf(callOptions.meta), { path: input.path }, callOptions);
     },
-    async browse(callOptions) {
-      return browseIn(options.rootOf(callOptions.meta));
+    /* A page names the model it shows; that model's project is the one it lists and opens files in. */
+    async listFiles(input, callOptions) {
+      return files.list(linkedModel(input)?.root ?? rootOf(callOptions.meta), input);
+    },
+    async openFile(input, callOptions) {
+      return openForPage(linkedModel(input)?.root ?? rootOf(callOptions.meta), input, callOptions);
     },
     async read(input) {
       const entry = shown.get(input.modelId);
       if (entry === undefined) {
         return failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
       }
+      const length = Math.min(input.length, tauViewerReadLimit);
+      if (entry.kind === 'render') {
+        /* The session keeps its newest renders; an older one gave way to a newer render the page is told of. */
+        const render = entry.session.bytesOf(input.modelId);
+        return render === undefined
+          ? failure('MODEL_CHANGED', `${entry.model.path} changed since it was shown; the newer model is on its way.`)
+          : readBytesRange({ bytes: render.bytes, offset: input.offset, length, encodings: input.encodings });
+      }
       const result = await readModelRange({
         absolutePath: entry.absolutePath,
         identity: entry.identity,
         offset: input.offset,
-        length: Math.min(input.length, tauViewerReadLimit),
+        length,
         encodings: input.encodings,
       });
       return 'refused' in result
@@ -614,7 +942,12 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
           pageId: input.pageId,
           view: {
             ...input.view,
-            model: { id: model.id, title: model.title, path: model.path, sourceFile: model.sourceFile },
+            model: {
+              id: model.id,
+              title: model.title,
+              path: model.path,
+              sourceFile: model.sourceFile,
+            },
           },
         });
       }
@@ -622,30 +955,106 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       const scope =
         conversationOf(callOptions.meta) ??
         (input.toolCallId === undefined ? undefined : conversationByCall.get(input.toolCallId));
-      return sessions.sync(input, { scope, signal: callOptions.signal });
+      /* The runtime's idle release or the session limit ended the watch: a page still showing the source opens it
+       * again under the same key, so its next render reaches the page. */
+      if (entry?.kind === 'render' && entrySessions?.get(entry.session.key) === undefined) {
+        void reopen(entry.root, entry.session.entryPath);
+      }
+      return syncWithFiles(entry?.root, input, {
+        scope,
+        signal: callOptions.signal,
+        entry: entry?.kind === 'render' ? entry.session.key : undefined,
+      });
     },
     async viewState(input, callOptions) {
-      return sessions.viewState(input, { scope: conversationOf(callOptions.meta), signal: callOptions.signal });
+      return sessions.viewState(input, {
+        scope: conversationOf(callOptions.meta),
+        signal: callOptions.signal,
+      });
     },
     async captureReply(input) {
       return sessions.captureReply(input);
     },
-    async shareLink(input, callOptions) {
+    async pose(input, callOptions) {
+      const root = rootOf(callOptions.meta);
+      const scope = conversationOf(callOptions.meta);
+      let entry = shown.get(lastShownId.get(lastShownKey(root, scope)) ?? '');
+      const { targetFile } = input;
+      const named = targetFile === undefined ? undefined : inside(root, targetFile);
+      if (
+        targetFile !== undefined &&
+        (named === undefined ||
+          (entry?.model.sourceFile !== posix(relative(root, named)) &&
+            (entry?.kind !== 'file' || entry.absolutePath !== named)))
+      ) {
+        /* The pose_model tool drives the model the viewer shows: show the named one first. */
+        const result = await showPath(root, { path: targetFile }, callOptions);
+        if (isFailure(result)) {
+          return result;
+        }
+        entry = shown.get(result.model.id);
+      }
+      if (entry === undefined) {
+        return failure('NO_MODEL', 'No model is shown yet. Call show_model, or pass targetFile.');
+      }
+      if (entry.kind === 'file') {
+        return poser.pose({ model: entry.model, absolutePath: entry.absolutePath }, input, scope);
+      }
+      /* A watched source poses its newest render, the one its pages now draw. */
+      const session = entrySessions?.get(entry.session.key) ?? entry.session;
+      const render = session.current() ?? session.bytesOf(entry.model.id);
+      if (render === undefined) {
+        return failure('NOT_LIVE', `The watch on ${entry.model.path} ended; show it again.`);
+      }
+      const model = shown.get(render.id)?.model ?? describeRender(session, render).model;
+      return poser.pose({ model, bytes: render.bytes }, input, scope);
+    },
+    async workbenchState(input) {
       const entry = shown.get(input.modelId);
       return entry === undefined
         ? failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.')
-        : input.kind === 'github'
-          ? createOpenInTauLink({ root: entry.root, entryPath: entry.model.sourceFile ?? entry.model.path })
-          : createDirectShare({
-              root: entry.root,
-              entryPath: entry.model.sourceFile ?? entry.model.path,
-              snapshotSource: options.snapshotSource,
-              signal: callOptions.signal,
-            });
+        : workbench.state({ root: entry.root, entryPath: entry.model.sourceFile ?? entry.model.path });
     },
+    /* Without the runtime's source closure the page has no direct link to offer. */
+    ...(snapshotSource === undefined
+      ? {}
+      : {
+          async shareLink(input: Readonly<{ modelId: string }>, callOptions: TauMcpViewerCallOptions) {
+            const entry = shown.get(input.modelId);
+            return entry === undefined
+              ? failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.')
+              : createDirectShare({
+                  root: entry.root,
+                  entryPath: entry.model.sourceFile ?? entry.model.path,
+                  snapshotSource,
+                  signal: callOptions.signal,
+                });
+          },
+        }),
+    /* Only a watched source can render a drag's values; a drawn file has none to render. */
+    ...(entrySessions === undefined
+      ? {}
+      : {
+          async previewParameters(input: TauViewerPreviewParametersInput) {
+            const entry = shown.get(input.modelId);
+            if (entry === undefined) {
+              return failure('UNKNOWN_MODEL', 'This model is no longer shown; show it again.');
+            }
+            if (entry.kind !== 'render') {
+              return failure('NOT_LIVE', `${entry.model.path} is a drawn file, not a watched source.`);
+            }
+            /* The page may name an older render of the source: the preview goes to the source's open session. */
+            const session = entrySessions.get(entry.session.key);
+            if (session === undefined) {
+              return failure('NOT_LIVE', `The watch on ${entry.model.path} ended; show it again.`);
+            }
+            return session.preview(input.parameters);
+          },
+        }),
     async close() {
+      entrySessions?.close();
       sessions.close();
-      await workbench.close();
+      await Promise.all([workbench.close(), files.close()]);
       const running = loopback;
       loopback = undefined;
       /* A start that failed left nothing to stop. */
@@ -667,15 +1076,11 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
   /* The loopback API runs the same port functions a host would reach through
    * `tools/call`, for the page served at `/`. The token rides the URL fragment,
    * which the browser never sends, and the page returns it in a header.
-   * `show_model` here answers the model the link names, as it was shown: the
-   * page's call carries no host `_meta`, so it cannot name a project folder
-   * (the server's start folder is not the conversation's project), and the
-   * model was already rendered. */
+   * `show_model` here answers the model the link names, as it was shown, or its
+   * source's newest render: the page's call carries no host `_meta`, so it
+   * cannot name a project folder (the server's start folder is not the
+   * conversation's project), and the model was already rendered. */
   const loopbackCall = { toolCallId: 'loopback', presentation: 'text' } as const;
-  const linkedModel = (args: unknown): Shown | undefined => {
-    const modelId = typeof args === 'object' && args !== null ? (args as { modelId?: unknown }).modelId : undefined;
-    return typeof modelId === 'string' ? shown.get(modelId) : undefined;
-  };
   const unlinked = (): TauMcpViewerFailure =>
     failure('UNKNOWN_MODEL', 'This link names no model this session showed; show it again.');
 
@@ -692,7 +1097,11 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       /* The page names its link's model on the loopback page; the tools themselves take no such argument. */
       const { modelId: _modelId, ...input } =
         typeof args === 'object' && args !== null ? (args as Readonly<Record<string, unknown>>) : {};
-      return options.hostCall({ root: link.root, call: { toolName, args: input }, signal });
+      return options.hostCall({
+        root: link.root,
+        call: { toolName, args: input },
+        signal,
+      });
     };
 
   const loopbackTools: Readonly<Record<string, LoopbackTool>> = {
@@ -704,27 +1113,42 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
       ]),
     ),
     [tauViewerToolName.appRead]: async (args) => port.read(tauViewerPageInputSchemas.appRead.parse(args), loopbackCall),
-    [tauViewerToolName.showModel]: async (args, signal, link) => {
-      /* A pane that wrote a parameter asks for the linked model's source again: render it in the linked project. */
-      const targetFile =
-        typeof args === 'object' && args !== null ? (args as { targetFile?: unknown }).targetFile : undefined;
-      if (typeof targetFile === 'string' && link !== undefined) {
-        return showPath(link.root, { path: targetFile }, { ...loopbackCall, signal });
+    [tauViewerToolName.showModel]: async (args, signal) => {
+      const entry = linkedModel(args);
+      if (entry === undefined) {
+        return unlinked();
       }
-      const entry = linkedModel(args);
-      return entry === undefined ? unlinked() : { model: entry.model };
+      if (entry.kind === 'file') {
+        return { model: entry.model };
+      }
+      /* A watch the server released has no render left: the source is watched again in the linked project. */
+      const render = entry.session.current();
+      return render === undefined
+        ? showPath(entry.root, { path: entry.session.entryPath }, { ...loopbackCall, signal })
+        : describeRender(entry.session, render);
     },
-    /* Files of the project the linked model came from. */
-    [tauViewerToolName.browseModels]: async (args) => {
-      const entry = linkedModel(args);
-      return entry === undefined ? unlinked() : browseIn(entry.root);
+    /* The linked model's project, as every pane tool on this page. */
+    [tauViewerToolName.appListFiles]: async (args, _signal, link) => {
+      const input = tauViewerPageInputSchemas.appListFiles.parse(args);
+      return link === undefined ? unlinked() : files.list(link.root, input);
     },
+    [tauViewerToolName.appOpenFile]: async (args, signal, link) =>
+      link === undefined
+        ? unlinked()
+        : openForPage(link.root, tauViewerPageInputSchemas.appOpenFile.parse(args), { ...loopbackCall, signal }),
     [tauViewerToolName.appSync]: async (args, signal) =>
-      port.sync(tauViewerPageInputSchemas.appSync.parse(args), { ...loopbackCall, signal }),
+      port.sync(tauViewerPageInputSchemas.appSync.parse(args), {
+        ...loopbackCall,
+        signal,
+      }),
     [tauViewerToolName.appCaptureReply]: async (args) =>
       port.captureReply(tauViewerPageInputSchemas.appCaptureReply.parse(args), loopbackCall),
     [tauViewerToolName.appShareLink]: async (args) =>
       port.shareLink?.(tauViewerPageInputSchemas.appShareLink.parse(args), loopbackCall),
+    [tauViewerToolName.appWorkbenchState]: async (args) =>
+      port.workbenchState?.(tauViewerPageInputSchemas.appWorkbenchState.parse(args), loopbackCall),
+    [tauViewerToolName.appPreviewParameters]: async (args) =>
+      port.previewParameters?.(tauViewerPageInputSchemas.appPreviewParameters.parse(args), loopbackCall),
   };
 
   const handleLoopback = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -763,7 +1187,10 @@ export const createLocalMcpViewer = (options: LocalMcpViewerOptions): LocalMcpVi
         const link = typeof linkedId === 'string' ? shown.get(linkedId) : undefined;
         const result = await tool(call.arguments ?? {}, closedByPage.signal, link);
         response
-          .writeHead(isFailure(result) ? 422 : 200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+          .writeHead(isFailure(result) ? 422 : 200, {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+          })
           .end(JSON.stringify(result));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json' }).end(

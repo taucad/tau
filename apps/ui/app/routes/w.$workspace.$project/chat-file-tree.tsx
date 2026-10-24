@@ -79,6 +79,7 @@ export const ChatFileTree = memo(function (props: {
       }}
       closeButton={
         <FloatingPanelClose
+          label='Close Files'
           icon={XIcon}
           tooltipContent={(isOpen) => (
             <div className='flex items-center gap-2'>

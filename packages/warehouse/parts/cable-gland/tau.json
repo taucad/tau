@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_c46zvkYaaVJfeEKApibEt",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Cable gland",
   "description": "Through-bored gland with retaining flanges and wrench flats; sealing performance is unspecified.",
   "tags": [

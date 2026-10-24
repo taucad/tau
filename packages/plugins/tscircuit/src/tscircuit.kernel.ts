@@ -425,6 +425,8 @@ export const tscircuitKernel = defineKernel({
     '@tscircuit/props': propsPackage,
     react: reactPackage,
     'react-dom': { name: 'react-dom', version: reactPackage.version },
+    // The connectivity-map dependency accepts newer Biome releases whose platform binaries may be unpublished.
+    '@biomejs/biome': { name: '@biomejs/biome', version: '2.5.15' },
     // The published core requires wildcard peers. Projects own the same exact versions as the vendored engine.
     '@tscircuit/capacity-autorouter': { name: '@tscircuit/capacity-autorouter', version: '0.0.879' },
     '@tscircuit/checks': { name: '@tscircuit/checks', version: '0.0.183' },

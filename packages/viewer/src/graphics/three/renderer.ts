@@ -68,6 +68,8 @@ export type RendererTarget = ShowcaseRendererTarget &
   Readonly<{
     /** Keep each WebGL frame readable after it is shown (`canvas.toDataURL`); the WebGPU backends ignore it. */
     preserveDrawingBuffer?: boolean;
+    /** Use shared node materials/composition for a viewport, including forced WebGL2 execution. */
+    nodePipeline?: boolean;
   }>;
 
 const isShowcaseTarget = (surface: HTMLCanvasElement | OffscreenCanvas | RendererTarget): surface is RendererTarget =>
@@ -82,7 +84,9 @@ async function initWebGpuIfNeeded(renderer: WebGpuRenderer): Promise<void> {
 const destroyAllocatedDevice = (backend: WebGpuRenderer['backend']): void => {
   if (backend instanceof WebGPUBackend) {
     // Three owns this property; the published Backend declaration omits it.
-    const gpuBackend = backend as WebGPUBackend & { readonly device?: { destroy: () => void } };
+    const gpuBackend = backend as WebGPUBackend & {
+      readonly device?: { destroy: () => void };
+    };
     gpuBackend.device?.destroy();
   }
 };
@@ -151,7 +155,7 @@ export async function createRenderer(
     return renderer;
   }
 
-  if (backend === 'webgpu') {
+  if (backend === 'webgpu' || (useCase === 'viewport' && target.nodePipeline)) {
     const options: ConstructorParameters<typeof ThreeWebGPURenderer>[0] = {
       canvas: backingCanvas,
       alpha: true,
@@ -161,7 +165,9 @@ export async function createRenderer(
       Object.assign(options, {
         antialias: false,
         samples: 0,
-        reversedDepthBuffer: true,
+        reversedDepthBuffer: backend === 'webgpu',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Three constructor option.
+        forceWebGL: backend === 'webgl',
         logarithmicDepthBuffer: false,
         stencil: true,
       } satisfies Partial<ConstructorParameters<typeof ThreeWebGPURenderer>[0]>);
@@ -183,7 +189,7 @@ export async function createRenderer(
       destroyAllocatedDevice(requestedBackend);
       throw new WebGpuInitializationError(error instanceof Error ? error.message : String(error), { cause: error });
     }
-    if (renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {
+    if (backend === 'webgpu' && renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {
       renderer.dispose();
       destroyAllocatedDevice(requestedBackend);
       throw new WebGpuInitializationError('WebGPU initialization did not select a native WebGPU backend');
@@ -202,7 +208,9 @@ export async function createRenderer(
       // upstream `reversePainterSortStable` (`node_modules/three/src/renderers/common/RenderList.js`)
       // assumes "larger clip-z = farther", which is INVERTED under reversed-Z and silently sorts
       // transparent geometry front-to-back. See docs/research/webgpu-reversed-z-transparent-sort-inversion.md.
-      renderer.setTransparentSort(reversedDepthTransparentSort);
+      if (renderer.reversedDepthBuffer) {
+        renderer.setTransparentSort(reversedDepthTransparentSort);
+      }
     }
 
     return renderer;

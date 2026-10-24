@@ -12,12 +12,11 @@ Paths are relative to the repository root unless a command says otherwise. `<ker
 
 - [ ] Directory `libs/tau-examples/src/kernels/<kernel>/<example>/` with a main file (`main.ts`, `main.py`, `main.cs`, `main.scad` or `main.cpp`); no scratch or dot files.
 - [ ] No `example.json` (or `{"kind":"model"}`; add `"geometry":"2d"` for SVG output).
-- [ ] `tau.json` with a fresh id, name, description, lowercase tags including the kernel id, `assets.main.entryPath` — and no `thumbnail` yet:
+- [ ] `tau.json` with name, description, lowercase tags including the kernel id, `assets.main.entryPath` — and no `thumbnail` yet:
 
   ```json
   {
-    "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-    "id": "proj_<21 characters from generatePrefixedId('proj')>",
+    "$schema": "https://tau.new/schemas/tau-v1.json",
     "name": "Rover Wheel",
     "description": "One or two sentences saying what the model shows and what it exercises.",
     "tags": ["mechanism", "picovoxel"],
@@ -29,7 +28,7 @@ Paths are relative to the repository root unless a command says otherwise. `<ker
 - [ ] GeoSpec suite green, if present:
 
   ```bash
-  node --import tsx packages/geospec-engine/src/cli/main.ts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
+  node --import tsx packages/cli/scripts/geospec.mts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
   ```
 
 - [ ] `pnpm nx generate-manifest tau-examples`; the row appears in `src/manifest.json` with the right `kind`, `geometry` and `mainFile`.

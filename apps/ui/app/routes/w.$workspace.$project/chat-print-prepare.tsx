@@ -163,7 +163,7 @@ const artifactFor = ({
   if (selectedMember === undefined) {
     return { refusal: `${provider.name} does not name the program inside a ${accepted.mediaType} file.` };
   }
-  /* The host finds the project by its `tau.json` id and re-verifies the bytes by digest on every use. */
+  /* The host finds the project by its established project ID and re-verifies the bytes by digest on every use. */
   return {
     artifact: {
       projectId,

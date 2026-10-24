@@ -4,7 +4,7 @@ import { PageHeader } from '#components/layout/page-header.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const meta: MetaFunction = () => [{ title: 'Workflows · Tau' }];
-export const handle: Handle = { enableOverflowY: true };
+export const handle: Handle = { title: 'Workflows', enableOverflowY: true };
 
 export default function Workflows(): React.JSX.Element {
   return (

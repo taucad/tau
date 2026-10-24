@@ -215,7 +215,7 @@ describe('unsupported platform refusal', () => {
     try {
       const message = await nextMessage(child);
       expect(message).toHaveProperty('code', 'AUTHORITY_LOCK_UNSUPPORTED');
-      expect(message).toHaveProperty('message', expect.stringContaining('Electron'));
+      expect(message).toHaveProperty('message', expect.stringContaining('win32'));
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         child.kill('SIGKILL');

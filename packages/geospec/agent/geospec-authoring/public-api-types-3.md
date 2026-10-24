@@ -1,6 +1,298 @@
 # geospec — Types (3)
 
-14 top-level symbols. Signatures are verbatim typescript.
+33 top-level symbols. Signatures are verbatim typescript.
+
+// One positive-only ancillary query
+// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports without assertion errors. A query asserts nothing, so it never fails: one whose evidence is missing or cannot decide returns a refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`.
+GeoSpecQueryOptions: {
+    readonly capability: GeoSpecQueryCapability;
+    readonly claimId?: string;
+    readonly payload?: unknown;
+    readonly subject: GeoSpecNativeSubject;
+}
+
+  readonly capability: GeoSpecQueryCapability
+
+  readonly claimId?: string
+
+  readonly payload?: unknown
+
+  readonly subject: GeoSpecNativeSubject
+
+// Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
+MinimumDistanceFact: {
+    readonly source: 'ap242';
+    readonly assurance: 'exact-brep';
+    readonly unit: 'mm';
+    readonly coordinateSystem: 'z-up';
+    readonly subjectHash: string;
+    readonly algorithmProfile: 'geospec-minimum-distance-v1';
+    readonly occurrences: readonly [string, string];
+    readonly distance: number;
+    readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
+}
+
+  readonly source: 'ap242'
+
+  readonly assurance: 'exact-brep'
+
+  readonly unit: 'mm'
+
+  readonly coordinateSystem: 'z-up'
+
+  readonly subjectHash: string
+
+  readonly algorithmProfile: 'geospec-minimum-distance-v1'
+
+  readonly occurrences: readonly [string, string]
+
+  readonly distance: number
+
+  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
+
+// Complete AP242 minimum over two subject-bound occurrence paths
+MinimumDistanceQuery: {
+    readonly capability: 'minimumDistance';
+    readonly subject: GeoSpecNativeSubject;
+    readonly payload: {
+        readonly pair: readonly [{
+            readonly occurrencePath: string;
+        }, {
+            readonly occurrencePath: string;
+        }];
+    };
+}
+
+  readonly capability: 'minimumDistance'
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly payload: {
+          readonly pair: readonly [{
+              readonly occurrencePath: string;
+          }, {
+              readonly occurrencePath: string;
+          }];
+      }
+
+// Geometry refusal and infrastructure interruption never masquerade as facts
+MinimumDistanceResult: {
+    readonly status: 'complete';
+    readonly fact: MinimumDistanceFact;
+} | {
+    readonly status: 'refused';
+    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
+    readonly message: string;
+} | {
+    readonly status: 'interrupted';
+    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
+    readonly message: string;
+}
+
+  readonly status: 'complete'
+
+// Flat native query transport options
+GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
+    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
+    readonly payload?: unknown;
+}
+
+  readonly engine: GeoSpecNativeEngine
+
+  readonly claimId: string
+
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
+
+  readonly subjectSlot: string
+
+  readonly workUnitLimit: number
+
+  // The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`
+  readonly maximumWorkUnitLimit?: number
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
+
+  readonly payload?: unknown
+
+// Existing positive-only ancillary operations owned by the native core
+GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
+
+// Explicit support state for one source-attributed inventory field
+GeoSpecPmiField: {
+    readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
+    readonly value: Value | null;
+    readonly reason: string | null;
+}
+
+  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
+
+  readonly value: Value | null
+
+  readonly reason: string | null
+
+// Original Part21 entity ID and exact source argument tokens
+GeoSpecPmiRawEntity: {
+    readonly sourceId: number;
+    readonly kind: string;
+    readonly arguments: readonly string[];
+}
+
+  readonly sourceId: number
+
+  readonly kind: string
+
+  readonly arguments: readonly string[]
+
+// Source-authored scalar and Rust-normalized reduced rational millimetres
+GeoSpecPmiNumber: {
+    readonly sourceId: number;
+    readonly authoredText: string;
+    readonly unitId: number;
+    readonly unitRecords: readonly GeoSpecPmiRawEntity[];
+    readonly millimetres: string;
+    readonly name: string;
+}
+
+  readonly sourceId: number
+
+  readonly authoredText: string
+
+  readonly unitId: number
+
+  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
+
+  readonly millimetres: string
+
+  readonly name: string
+
+// A uniquely forward-transferred face
+GeoSpecPmiFaceAssociation: {
+    readonly sourceFaceId: number;
+    readonly occurrenceRoute: readonly number[];
+    readonly occurrence: number | null;
+    readonly publicFaceOrdinal: number;
+}
+
+  readonly sourceFaceId: number
+
+  readonly occurrenceRoute: readonly number[]
+
+  readonly occurrence: number | null
+
+  readonly publicFaceOrdinal: number
+
+// One ordered role reference, including incomplete source/transfer evidence
+GeoSpecPmiShapeReference: {
+    readonly sourceAspectId: number | null;
+    readonly sourceUsageIds: readonly number[];
+    readonly sourceItemIds: readonly number[];
+    readonly requestedRoute: GeoSpecPmiField<readonly number[]>;
+    readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>;
+}
+
+  readonly sourceAspectId: number | null
+
+  readonly sourceUsageIds: readonly number[]
+
+  readonly sourceItemIds: readonly number[]
+
+  readonly requestedRoute: GeoSpecPmiField<readonly number[]>
+
+  readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
+
+// Normalized authored limits
+GeoSpecPmiLimits: {
+    readonly lowerMillimetres: string;
+    readonly upperMillimetres: string;
+    readonly basis: 'authored-limits' | 'nominal-plus-minus';
+}
+
+  readonly lowerMillimetres: string
+
+  readonly upperMillimetres: string
+
+  readonly basis: 'authored-limits' | 'nominal-plus-minus'
+
+// Source record preserving semantic/presentation separation and ordered roles
+GeoSpecPmiRecord: {
+    readonly sourceId: number;
+    readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation';
+    readonly channel: 'semantic' | 'presentation';
+    readonly kind: string;
+    readonly name: GeoSpecPmiField<string>;
+    readonly first: readonly GeoSpecPmiShapeReference[];
+    readonly second: readonly GeoSpecPmiShapeReference[];
+    readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>;
+    readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>;
+    readonly interpretation: GeoSpecPmiField<string>;
+    readonly raw: readonly GeoSpecPmiRawEntity[];
+}
+
+  readonly sourceId: number
+
+  readonly family: 'dimension' | 'datum' | 'tolerance' | 'presentation'
+
+  readonly channel: 'semantic' | 'presentation'
+
+  readonly kind: string
+
+  readonly name: GeoSpecPmiField<string>
+
+  readonly first: readonly GeoSpecPmiShapeReference[]
+
+  readonly second: readonly GeoSpecPmiShapeReference[]
+
+  readonly numbers: GeoSpecPmiField<readonly GeoSpecPmiNumber[]>
+
+  readonly limits: GeoSpecPmiField<GeoSpecPmiLimits>
+
+  readonly interpretation: GeoSpecPmiField<string>
+
+  readonly raw: readonly GeoSpecPmiRawEntity[]
+
+// Positive-only inventory value inside the ordinary canonical query report
+GeoSpecPmiInventory: {
+    readonly contract: 'geospec.pmi.inventory/v1';
+    readonly status: 'semantic' | 'graphical-only' | 'empty';
+    readonly fileSchema: string;
+    readonly editionValidation: 'not-validated';
+    readonly records: readonly GeoSpecPmiRecord[];
+}
+
+  readonly contract: 'geospec.pmi.inventory/v1'
+
+  readonly status: 'semantic' | 'graphical-only' | 'empty'
+
+  readonly fileSchema: string
+
+  readonly editionValidation: 'not-validated'
+
+  readonly records: readonly GeoSpecPmiRecord[]
+
+// Strict inventory output limits
+GeoSpecPmiQueryPayload: {
+    readonly maxRecords?: number;
+    readonly maxOutputBytes?: number;
+}
+
+  readonly maxRecords?: number
+
+  readonly maxOutputBytes?: number
+
+// Complete inventory value
+GeoSpecPmiQueryValue: {
+    readonly inventory: GeoSpecPmiInventory;
+    readonly subjectHash: string;
+    readonly provenance: Readonly<Record<string, unknown>>;
+}
+
+  readonly inventory: GeoSpecPmiInventory
+
+  readonly subjectHash: string
+
+  readonly provenance: Readonly<Record<string, unknown>>
 
 // Full native assertion result with the exact core-owned bytes retained
 GeoSpecCanonicalClaimReport: {
@@ -89,6 +381,81 @@ GeoSpecFixedMatcherDescriptor: {
 
   readonly mode: 'sync'
 
+// The platform the CLI runs against
+GeoSpecCliHost: {
+    /** Absolute project root for a relative `projectPath`. */
+    cwd(): string;
+    write(line: string): void;
+    /** Recursive discovery filesystem. */
+    discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
+    /**
+     * Import the project's `geospec.config.*`, or the explicit one, for its data fields.
+     * @throws Error when the config is ambiguous, invalid or fails to import.
+     */
+    loadConfig(options: {
+        projectPath: string;
+        configPath: string | undefined;
+    }): Promise<{
+        readonly configPath?: string;
+        readonly options: GeoSpecConfigData;
+    }>;
+    /** Build the runner the selected files execute on; its workers import the same config for its exporters. */
+    createRunner(options: {
+        projectPath: string;
+        configPath: string | undefined;
+        workers: number | undefined;
+        shardTimeout: number | undefined;
+    }): GeoSpecRunner;
+}
+
+  // Absolute project root for a relative `projectPath`
+  // GeoSpecCliHost.cwd (method)
+  cwd(): string;
+
+  // GeoSpecCliHost.write (method)
+  write(line: string): void;
+
+  // Recursive discovery filesystem
+  // GeoSpecCliHost.discoveryFileSystem (method)
+  discoveryFileSystem(projectPath: string): Parameters<typeof discoverGeoSpecFiles>[0]['filesystem'];
+
+  // Import the project's `geospec.config.*`, or the explicit one, for its data fields
+  // Throws: Error when the config is ambiguous, invalid or fails to import.
+  // GeoSpecCliHost.loadConfig (method)
+  loadConfig(options: {
+          projectPath: string;
+          configPath: string | undefined;
+      }): Promise<{
+          readonly configPath?: string;
+          readonly options: GeoSpecConfigData;
+      }>;
+
+  // Build the runner the selected files execute on
+  // GeoSpecCliHost.createRunner (method)
+  createRunner(options: {
+          projectPath: string;
+          configPath: string | undefined;
+          workers: number | undefined;
+          shardTimeout: number | undefined;
+      }): GeoSpecRunner;
+
+// Options for {@link createNodeGeoSpecCliHost}
+NodeGeoSpecCliHostOptions: {
+    /** Report sink used by embedding hosts and tests; defaults to stdout. */
+    readonly reportStream?: (text: string) => void;
+    /**
+     * URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test`
+     * can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`).
+     */
+    readonly exporterModules?: readonly string[];
+}
+
+  // Report sink used by embedding hosts and tests
+  readonly reportStream?: (text: string) => void
+
+  // URLs of modules each pool worker imports for exporters that precede the config's, so a host such as `tau test` can run a project with no `geospec.config.*` (see `GeoSpecExporterModule` in `geospec/runner/node`)
+  readonly exporterModules?: readonly string[]
+
 // Installed Vitest matcher map and lifecycle settlement hook
 GeoSpecVitestAdapter: {
     readonly matchers: GeoSpecVitestMatcherMap;
@@ -100,112 +467,115 @@ GeoSpecVitestAdapter: {
   // GeoSpecVitestAdapter.flush (method)
   flush(): Promise<void>;
 
-// Input for exporting one validated Tau project descriptor
-ExportTauProjectArtifactOptions: {
-    readonly descriptor: GeoSpecTauProjectDescriptor;
-    /** Called twice so source discovery and export use separate runtime lifetimes. */
-    readonly createRuntime: () => GeoSpecTauProjectRuntime | Promise<GeoSpecTauProjectRuntime>;
-    readonly signal?: AbortSignal;
+// The installed matchers plus the project's model loader
+GeoSpecVitestProject: GeoSpecVitestAdapter & {
+    /** Load a model through the config's exporters; its subjects are released after the file. */
+    readonly loadModel: (options: LoadModelOptions) => Promise<GeoSpecSubject>;
+    /** The config file that was read, when the project has one. */
+    readonly configPath: string | undefined;
+    /** The build the created engine runs on; absent for a caller-owned engine. */
+    readonly binding: GeoSpecEngineBinding | undefined;
 }
 
-  readonly descriptor: GeoSpecTauProjectDescriptor
+  readonly matchers: GeoSpecVitestMatcherMap
 
-  // Called twice so source discovery and export use separate runtime lifetimes
-  readonly createRuntime: () => GeoSpecTauProjectRuntime | Promise<GeoSpecTauProjectRuntime>
+  // GeoSpecVitestProject.flush (method)
+  flush(): Promise<void>;
 
-  readonly signal?: AbortSignal
+  // Load a model through the config's exporters
+  readonly loadModel: (options: LoadModelOptions) => Promise<GeoSpecSubject>
 
-// Finalized geometry bytes and the exact source/export metadata that produced them
-GeoSpecTauProjectArtifact: {
-    readonly format: 'step' | 'glb';
-    readonly name: string;
-    readonly mimeType: string;
-    readonly bytes: Uint8Array<ArrayBuffer>;
-    readonly frame: {
-        readonly coordinateSystem: 'z-up';
-        readonly lengthUnit: 'millimeter';
-        readonly sourceUnit: 'mm';
-    };
-    readonly source: {
-        readonly manifestPath: string;
-        readonly manifestBytes: Uint8Array<ArrayBuffer>;
-        readonly manifest: ProjectManifest;
-        readonly projectEntryPath: string;
-        readonly entryPath: string;
-        readonly kernelId: string;
-        readonly files: readonly RuntimeSourceSnapshotFile[];
-    };
-    readonly export: {
-        readonly options: Readonly<Record<string, unknown>>;
-        readonly route: NonNullable<GeometryExportIntent['route']>;
-    };
+  // The config file that was read, when the project has one
+  readonly configPath: string | undefined
+
+  // The build the created engine runs on
+  readonly binding: GeoSpecEngineBinding | undefined
+
+// Options for {@link setupGeoSpecVitestProject}
+SetupGeoSpecVitestProjectOptions: Omit<GeoSpecAssertionClientOptions, 'engine' | 'maximumWorkUnitLimit'> & {
+    /** Absolute project root: `loadModel({ file })` resolves against it and its `geospec.config.*` is read. */
+    readonly projectPath: string;
+    /** Explicit config file, resolved relative to the project unless absolute. */
+    readonly configPath?: string;
+    /** Fields that replace the config's whole, as a CLI flag does: `exporters` and `testTimeout` apply here. */
+    readonly overrides?: Pick<GeoSpecConfig, 'exporters' | 'testTimeout'>;
+    /**
+     * A caller-owned engine, kept open after the file. Omitted creates this process's engine (the native addon, else
+     * the WASM build) and closes it after the file.
+     */
+    readonly engine?: GeoSpecNativeModelEngine;
 }
 
-  readonly format: 'step' | 'glb'
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
 
-  readonly name: string
+  // Success-evidence profile of every claim and query
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
 
-  readonly mimeType: string
+  readonly subjectSlot?: string
 
-  readonly bytes: Uint8Array<ArrayBuffer>
+  readonly workUnitLimit?: number
 
-  readonly frame: {
-          readonly coordinateSystem: 'z-up';
-          readonly lengthUnit: 'millimeter';
-          readonly sourceUnit: 'mm';
-      }
+  // Absolute project root
+  readonly projectPath: string
 
-  readonly source: {
-          readonly manifestPath: string;
-          readonly manifestBytes: Uint8Array<ArrayBuffer>;
-          readonly manifest: ProjectManifest;
-          readonly projectEntryPath: string;
-          readonly entryPath: string;
-          readonly kernelId: string;
-          readonly files: readonly RuntimeSourceSnapshotFile[];
-      }
+  // Explicit config file, resolved relative to the project unless absolute
+  readonly configPath?: string
 
-  readonly export: {
-          readonly options: Readonly<Record<string, unknown>>;
-          readonly route: NonNullable<GeometryExportIntent['route']>;
-      }
+  // Fields that replace the config's whole, as a CLI flag does
+  readonly overrides?: Pick<GeoSpecConfig, 'exporters' | 'testTimeout'>
 
-// Runtime surface required to snapshot and export one Tau project
-GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdown' | 'snapshotSource'>
+  // A caller-owned engine, kept open after the file
+  readonly engine?: GeoSpecNativeModelEngine
 
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
+// Options for {@link readGeoSpecConfig}
+ReadGeoSpecConfigOptions: {
+    /** The project filesystem; paths are rooted, as the spec VM reads them. */
+    readonly filesystem: VmFileSystem;
+    /** Rooted directory holding the config, in the filesystem's spelling: `''` for its root, else `'sub/dir'`. */
+    readonly projectPath: string;
+}
 
-  // GeoSpecTauProjectRuntime.on (method)
-  on?(event: 'telemetry', handler: (batch: {
-          readonly entries: ReadonlyArray<{
-              name: string;
-              duration: number;
-              startTime: number;
-              workerTimeOrigin: number;
-          }>;
-      }) => void): () => void;
+  // The project filesystem
+  readonly filesystem: VmFileSystem
 
-  // GeoSpecTauProjectRuntime.bestRouteFor (method)
-  bestRouteFor(format: string, options?: {
-          readonly kernelId?: string;
-      }): GeoSpecExportRoute | undefined;
+  // Rooted directory holding the config, in the filesystem's spelling
+  readonly projectPath: string
+
+// Outcome of {@link readGeoSpecConfig}
+ReadGeoSpecConfigResult: {
+    readonly status: 'absent';
+} | {
+    readonly status: 'applied';
+    readonly configPath: string;
+    readonly options: GeoSpecConfigData;
+} | {
+    readonly status: 'not-applied';
+    readonly configPath: string;
+    /**
+     * `unresolved-import`: the config imports a package other than `geospec/config`, which only a
+     * native run can provide. `invalid`: it does not bundle, throws, or is not a valid config.
+     */
+    readonly reason: 'unresolved-import' | 'invalid';
+    readonly message: string;
+}
+
+  readonly status: 'absent'
 
 // Trusted project configuration using existing discovery and runner options
-// Remarks: Omitted values keep their existing owner's defaults. Defined overrides replace whole fields, including empty arrays, false and the subjects map. Existing discovery currently treats an absent or empty include array as its default pattern. Preserving [] here does not change that consumer behavior. This is configuration data, not a canonical engine plan or a geometry result.
+// Remarks: Omitted values keep their existing owner's defaults. Defined overrides replace whole fields, including empty arrays and false. Existing discovery currently treats an absent or empty include array as its default pattern. Preserving [] here does not change that consumer behavior. This is configuration data, not a canonical engine plan or a geometry result.
 GeoSpecConfig: {
     include?: readonly string[];
     exclude?: readonly string[];
     testNamePattern?: string;
     /** Positive finite milliseconds; the runner owns its default. */
     testTimeout?: number;
-    /** Positive finite milliseconds; does not define a geometry verdict. */
-    matcherWallBackstop?: number;
     bail?: boolean;
-    forensic?: boolean;
-    cache?: boolean;
-    /** Requested cache location only; loading configuration creates no store. */
-    cacheDirectory?: string;
-    subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>;
+    /**
+     * Model exporters for `loadModel({ file })`: the first whose `extensions` claims the file exports
+     * it, so order is the override. STEP and GLB sources need none. Only a runner that executes the
+     * config natively reads them; a host that holds its own exporters reads the data fields only.
+     */
+    exporters?: readonly GeoSpecModelExporter[];
 }
 
   include?: readonly string[]
@@ -217,41 +587,24 @@ GeoSpecConfig: {
   // Positive finite milliseconds
   testTimeout?: number
 
-  // Positive finite milliseconds
-  matcherWallBackstop?: number
-
   bail?: boolean
 
-  forensic?: boolean
+  // Model exporters for `loadModel({ file })`
+  exporters?: readonly GeoSpecModelExporter[]
 
-  cache?: boolean
+// The config's data fields
+GeoSpecConfigData: Omit<GeoSpecConfig, 'exporters'>
 
-  // Requested cache location only
-  cacheDirectory?: string
+  include?: readonly string[]
 
-  subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>
+  exclude?: readonly string[]
 
-// Imported Tau project data for later host resolution
-// Remarks: This descriptor does not validate the original manifest bytes or its schema, admit an asset, export geometry, or establish finalized-artifact provenance.
-GeoSpecTauProjectDescriptor: {
-    readonly kind: 'tau-project';
-    /** Normalized project-relative POSIX path identifying the imported manifest. */
-    readonly manifestPath: string;
-    readonly manifest: Readonly<Record<string, JSONValue>>;
-    readonly format: 'step' | 'glb';
-    readonly parameters?: Readonly<Record<string, JSONValue>>;
-}
+  testNamePattern?: string
 
-  readonly kind: 'tau-project'
+  // Positive finite milliseconds
+  testTimeout?: number
 
-  // Normalized project-relative POSIX path identifying the imported manifest
-  readonly manifestPath: string
-
-  readonly manifest: Readonly<Record<string, JSONValue>>
-
-  readonly format: 'step' | 'glb'
-
-  readonly parameters?: Readonly<Record<string, JSONValue>>
+  bail?: boolean
 
 // Resolved file identity and validated configuration data
 LoadedGeoSpecConfig: {

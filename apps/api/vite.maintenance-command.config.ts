@@ -9,6 +9,7 @@ export default defineConfig({
   build: {
     ssr: 'app/maintenance-command.ts',
     outDir: 'dist',
+    sourcemap: 'hidden',
     emptyOutDir: false,
     rollupOptions: { output: { entryFileNames: 'maintenance-command.js' } },
   },

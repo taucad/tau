@@ -5,7 +5,7 @@
  * as minidumps the SDK uploads from main. No tracing, no default PII, and no user or request on any event.
  *
  * Inert unless the release build set `SENTRY_DSN` (baked in as `tauSentryDsn` by `electron.vite.config.ts`, from
- * the `desktop` GitHub environment); local and unsigned builds report nothing.
+ * the `desktop` or `desktop-staging` GitHub environment); local and unsigned builds report nothing.
  */
 import * as Sentry from '@sentry/electron/main';
 import type { ErrorEvent } from '@sentry/electron/main';
@@ -22,11 +22,18 @@ export const scrubDesktopEvent = (event: ErrorEvent): ErrorEvent => {
   return event;
 };
 
-if (tauSentryDsn) {
-  Sentry.init({
-    dsn: tauSentryDsn,
-    environment: 'production',
-    sendDefaultPii: false,
-    beforeSend: scrubDesktopEvent,
-  });
-}
+/**
+ * Start crash reporting after profile selection and pristine qualification admission, before any windows or utilities.
+ *
+ * @param channel - The channel from the packaged application manifest.
+ */
+export const initializeDesktopErrorReporting = (channel: 'staging' | 'production'): void => {
+  if (tauSentryDsn) {
+    Sentry.init({
+      dsn: tauSentryDsn,
+      environment: channel,
+      sendDefaultPii: false,
+      beforeSend: scrubDesktopEvent,
+    });
+  }
+};

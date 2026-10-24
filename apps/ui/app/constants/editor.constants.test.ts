@@ -15,6 +15,14 @@ describe('editor device defaults', () => {
       'details',
       'share',
       'revisions',
+      'model-tree',
+      'kinematics',
+      'print',
+      'browser',
+      'agents',
+      'jobs',
+      'kernel',
+      'console',
     ]);
     expect(defaultPanelState.desktopLayout).toMatchObject({
       chatOpen: true,
@@ -23,6 +31,8 @@ describe('editor device defaults', () => {
       workbenchWidth: 420,
       compactAuxiliary: 'chat',
     });
+    // A phone opens on the model alone, with the drawer collapsed, until the person picks a panel.
+    expect(defaultPanelState.mobileActiveTab).toBe('viewer');
     expect(defaultOperationTimeout).toBe(180_000);
     expect(defaultGraphicsSettings.graphicsBackend).toBe('webgl');
   });

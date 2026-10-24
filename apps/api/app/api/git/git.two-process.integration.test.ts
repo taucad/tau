@@ -20,6 +20,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { getEnvironment } from '#config/environment.config.js';
 import { DatabaseService } from '#database/database.service.js';
+import { project, projectDeletion } from '#database/schema.js';
 import { RedisService } from '#redis/redis.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -140,23 +141,35 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
   /* oxlint-disable typescript/promise-function-async -- a Drizzle builder is
      both awaitable and chainable; an `async` member would return a promise of
      the builder rather than being one. */
+  const joined = {
+    leftJoin: () => joined,
+    where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }),
+  };
+  const select = () => ({
+    from: (table: unknown) => ({
+      leftJoin: () => joined,
+      where: () =>
+        Object.assign(Promise.resolve([] as unknown[]), {
+          limit: async () =>
+            table === projectDeletion ? [] : table === project ? [{ storageAccountId: null }] : rows(),
+        }),
+    }),
+  });
+  const insert = () => ({
+    values: (values: Record<string, unknown>) => ({
+      onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
+        Object.assign(row, values, change.set);
+      },
+    }),
+  });
   const databaseStub = {
     database: {
-      select: () => ({
-        from: () => ({
-          leftJoin: () => ({ where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }) }),
-          where: () => Object.assign(Promise.resolve([] as unknown[]), { limit: async () => rows() }),
-        }),
-      }),
-      insert: () => ({
-        values: (values: Record<string, unknown>) => ({
-          onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
-            Object.assign(row, values, change.set);
-          },
-        }),
-      }),
+      select,
+      insert,
       transaction: async (run: (transaction: unknown) => Promise<unknown>): Promise<unknown> =>
         run({
+          select,
+          insert,
           execute: async (): Promise<void> => undefined,
           update: () => ({ set: () => ({ where: () => ({ returning: async (): Promise<unknown[]> => [] }) }) }),
         }),
@@ -221,9 +234,10 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
   );
   app.enableVersioning({ type: VersioningType.URI });
   await app.init();
-  /* S2 exercises cross-worker store and manifest races, not the production 2.5 GiB disk reservation.
-   * Keep a nonzero admission bound without depending on the test runner's transient free space. */
-  app.get(GitRepositoryService).leaseDiskBytesPerLease = 1024 ** 2;
+  /* S2 exercises cross-worker store and manifest races, not the lease-disk admission (DA3).
+   * A 1 TiB stand-in disk keeps admission real without depending on the test runner's free space,
+   * which a push's quarantine bound (about 1 GiB) would otherwise have to fit in. */
+  app.get(GitRepositoryService).readLeaseDiskFreeBytes = async () => 1024 ** 4;
   await app.getHttpAdapter().getInstance().ready();
   await app.listen(String(port), '127.0.0.1');
 

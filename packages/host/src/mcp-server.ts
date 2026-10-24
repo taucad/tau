@@ -50,8 +50,11 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { JsonObject, JsonValue, ToolRegistry } from '@taucad/agent-host';
 import { saveChatAttachment } from '#acp/media.js';
 import { createLocalMcpViewer } from '#mcp-viewer.js';
-import { createMcpViewerExport, shownModelContent } from '#mcp-viewer-export.js';
+import { createMcpViewerExport } from '#mcp-viewer-export.js';
+import type { EntrySessionRuntime } from '#mcp-entry-sessions.js';
 import type { ViewerExportRuntime } from '#mcp-viewer-export.js';
+import { createMcpViewerPartThumbnails } from '#mcp-viewer-thumbnails.js';
+import type { ViewerThumbnailRuntime } from '#mcp-viewer-thumbnails.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
 
@@ -299,7 +302,12 @@ const present = async (
           if (!match?.[1] || !match[2]) {
             throw new Error('Tau screenshot returned an invalid image data URL.');
           }
-          return { ...echo, ...(await context.save(match[2], match[1])), mimeType: match[1], dataUrl };
+          return {
+            ...echo,
+            ...(await context.save(match[2], match[1])),
+            mimeType: match[1],
+            dataUrl,
+          };
         }),
       );
       return {
@@ -411,7 +419,12 @@ const cadToolsOf = (registry: ToolRegistry): readonly TauMcpToolName[] => {
  */
 const routeCall = (
   call: TauMcpHostCall,
-): { readonly tool: HostMcpAllowedTool; readonly args: Readonly<Record<string, unknown>> } | TauMcpRpcFailure => {
+):
+  | {
+      readonly tool: HostMcpAllowedTool;
+      readonly args: Readonly<Record<string, unknown>>;
+    }
+  | TauMcpRpcFailure => {
   if ('rpcName' in call) {
     // Export RPCs carry call identity in args; the tool registry takes it
     // from invocation metadata and adds it after strict input validation.
@@ -423,7 +436,10 @@ const routeCall = (
   }
   const tool = hostMcpAllowedTools.find((name) => name === call.toolName);
   if (tool === undefined) {
-    return { errorCode: 'TOOL_NOT_ALLOWED', message: `${call.toolName} is not in this capability's grant.` };
+    return {
+      errorCode: 'TOOL_NOT_ALLOWED',
+      message: `${call.toolName} is not in this capability's grant.`,
+    };
   }
   return { tool, args: call.args };
 };
@@ -635,7 +651,11 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
   const authorityKey = (claims: HostMcpCapabilityClaims): string =>
     `sha256:${createHash('sha256')
       .update(
-        JSON.stringify({ chatId: claims.chatId, sessionKey: claims.sessionKey, allowedTools: claims.allowedTools }),
+        JSON.stringify({
+          chatId: claims.chatId,
+          sessionKey: claims.sessionKey,
+          allowedTools: claims.allowedTools,
+        }),
       )
       .digest('hex')}`;
 
@@ -670,10 +690,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
       dispatchOptions: Parameters<TauMcpDispatch>[1],
     ): Promise<TauMcpRpcSuccess | TauMcpRpcFailure> => {
       if (!claims.allowedTools.includes(tool)) {
-        return { errorCode: 'TOOL_NOT_ALLOWED', message: `${tool} is not in this capability's grant.` };
+        return {
+          errorCode: 'TOOL_NOT_ALLOWED',
+          message: `${tool} is not in this capability's grant.`,
+        };
       }
       if (!binding || binding.signal.aborted) {
-        return { errorCode: 'MCP_RUN_INACTIVE', message: 'This ACP session has no active Tau turn.' };
+        return {
+          errorCode: 'MCP_RUN_INACTIVE',
+          message: 'This ACP session has no active Tau turn.',
+        };
       }
       const pending = options.registry.invoke({
         toolCallId: dispatchOptions.toolCallId,
@@ -703,7 +729,12 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         return await present(
           {
             save: async (data, mimeType) =>
-              saveChatAttachment({ workspaceRoot: options.workspaceRoot, chatId: claims.chatId, data, mimeType }),
+              saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data,
+                mimeType,
+              }),
             signals: [signal, binding.signal],
           },
           tool,
@@ -720,9 +751,13 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
   };
 
   const refuse = (response: ServerResponse, status: number, message: string): void => {
-    response
-      .writeHead(status, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32_000, message }, id: null }));
+    response.writeHead(status, { 'content-type': 'application/json' }).end(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        error: { code: -32_000, message },
+        id: null,
+      }),
+    );
   };
 
   return {
@@ -812,7 +847,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
 
 /** Options for {@link serveLocalHostMcp}. @public */
 export type LocalHostMcpOptions = {
-  /** The project a call works in when its client names none. */
+  /** The project a call works in when its client names none and its conversation has shown no model. */
   readonly workspaceRoot: string;
   /**
    * Work in `workspaceRoot` even when a call names its own folder, because the
@@ -833,16 +868,23 @@ export type LocalHostMcpOptions = {
    */
   readonly viewerPage?: Readonly<{ html: string; sha256: string }> | undefined;
   /**
-   * The project runtime `export_model` uses, per project folder. With it, the viewer page's Export pane lists the
-   * entry's formats and their options, and a shown source's GLB carries its topology wherever the route can; without
-   * it, the page offers no Export pane tools and shows the mesh alone.
+   * The project runtime `export_model` uses, per project folder. With it, `show_model` watches a shown source in one
+   * runtime document whose renders refresh every page showing it, and the viewer page's Export pane lists the entry's
+   * formats and their options; without it, the viewer draws GLB and SVG files only and offers no Export pane tools.
    */
-  readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime>) | undefined;
+  readonly runtimeClient?:
+    | ((root: string) => Promise<ViewerExportRuntime & EntrySessionRuntime & ViewerThumbnailRuntime>)
+    | undefined;
   /**
-   * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page's direct
-   * link packs every project file git does not ignore.
+   * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page offers no
+   * direct link.
    */
   readonly snapshotSource?: SourceSnapshotter | undefined;
+  /**
+   * The render timeout the server's runtime applies (`tau mcp --operation-timeout`), which the viewer page's Viewer
+   * settings shows as the default. Milliseconds. 600000 by default.
+   */
+  readonly renderTimeout?: number | undefined;
   /** The serving CLI and how it was started: the `initialize` instructions name it, and every `test_model` answer carries it as `runtime`. */
   readonly runtime?: TauMcpRuntime | undefined;
 };
@@ -925,8 +967,8 @@ export const serveLocalHostMcp = async (
     await writeFile(absolutePath, bytes);
     return { path, absolutePath, byteLength: bytes.length, sha256 };
   };
-  const rootOf = (meta: Readonly<Record<string, unknown>> | undefined): string =>
-    (options.pinned ? undefined : callerRoot(meta)) ?? options.workspaceRoot;
+  const namedRoot = (meta: Readonly<Record<string, unknown>> | undefined): string | undefined =>
+    options.pinned ? options.workspaceRoot : callerRoot(meta);
   const invokeIn = async ({
     workspaceRoot,
     tool,
@@ -966,7 +1008,12 @@ export const serveLocalHostMcp = async (
     if ('errorCode' in route) {
       return route;
     }
-    const result = await invokeIn({ workspaceRoot, tool: route.tool, args: route.args, call: dispatchOptions });
+    const result = await invokeIn({
+      workspaceRoot,
+      tool: route.tool,
+      args: route.args,
+      call: dispatchOptions,
+    });
     const presented = await present({ save, signals: [dispatchOptions.signal] }, route.tool, result).catch(
       (error: unknown) => hostFault(route.tool, error),
     );
@@ -979,48 +1026,32 @@ export const serveLocalHostMcp = async (
       ? undefined
       : createLocalMcpViewer({
           page: options.viewerPage,
-          rootOf,
+          namedRoot,
+          workspaceRoot: options.workspaceRoot,
           /* Stdout carries the protocol; a view the page could not keep is said on stderr, and the page works on. */
           workbench: {
             onError: (error) => {
               process.stderr.write(`tau mcp: the viewer's view was not kept in .tau/workbench: ${String(error)}\n`);
             },
           },
-          renderGlb: async ({ root, targetFile, toolCallId, signal }) => {
-            /* The page's Kinematics pane and component menu read the GLB's topology; without it they have nothing. */
-            const glbContent =
-              options.runtimeClient === undefined
-                ? undefined
-                : await shownModelContent({ runtimeFor: options.runtimeClient, root, targetFile, signal });
-            const result = await invokeIn({
-              workspaceRoot: root,
-              tool: toolName.exportModel,
-              args: { targetFile, to: 'glb', ...(glbContent === undefined ? {} : { content: glbContent }) },
-              call: { toolCallId, signal },
-            });
-            const content: JsonObject = isJsonObject(result.content) ? result.content : {};
-            const { files } = content;
-            const listed: readonly JsonValue[] = Array.isArray(files) ? (files as readonly JsonValue[]) : [];
-            const [first] = listed;
-            const artifactPath = first !== undefined && isJsonObject(first) ? first['artifactPath'] : undefined;
-            if (result.isError || content['success'] === false || typeof artifactPath !== 'string') {
-              return {
-                errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'RENDER_FAILED',
-                message:
-                  typeof content['message'] === 'string'
-                    ? content['message']
-                    : `${targetFile} could not be rendered to GLB.`,
-              };
-            }
-            return artifactPath;
-          },
+          /* A shown source is watched in its project's runtime; its renders stay in memory (PAR-1). */
+          liveRuntime: options.runtimeClient,
+          ...(options.renderTimeout === undefined ? {} : { defaultRenderTimeout: options.renderTimeout }),
           snapshotSource: options.snapshotSource,
           ...(options.runtimeClient === undefined
             ? {}
-            : { export: createMcpViewerExport({ runtimeFor: options.runtimeClient }) }),
+            : {
+                export: createMcpViewerExport({
+                  runtimeFor: options.runtimeClient,
+                }),
+                partThumbnails: createMcpViewerPartThumbnails(options.runtimeClient),
+              }),
           /* The loopback page's panes reach the same host tools an MCP App page reaches through `tools/call`. */
           hostCall: async ({ root, call, signal }) =>
-            dispatchIn(root, call, { toolCallId: `loopback:${randomUUID()}`, signal }),
+            dispatchIn(root, call, {
+              toolCallId: `loopback:${randomUUID()}`,
+              signal,
+            }),
         });
   const cadTools = cadToolsOf(options.registry);
   const server = await serveTauMcpStdio(
@@ -1037,7 +1068,13 @@ export const serveLocalHostMcp = async (
         )
         .map((definition) => hostToolOf(definition)),
       screenshotImages: 'inline',
-      dispatch: async (call, dispatchOptions) => dispatchIn(rootOf(dispatchOptions.meta), call, dispatchOptions),
+      /* A call the viewer page makes names no folder; the viewer knows the project its conversation's model came from. */
+      dispatch: async (call, dispatchOptions) =>
+        dispatchIn(
+          viewer?.rootOf(dispatchOptions.meta) ?? namedRoot(dispatchOptions.meta) ?? options.workspaceRoot,
+          call,
+          dispatchOptions,
+        ),
     },
     streams,
   );

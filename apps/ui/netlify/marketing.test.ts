@@ -234,7 +234,7 @@ it('should retain app robots restrictions and advertise marketing only on the en
   expect(await disabled.text()).toBe(body);
 });
 
-describe('marketing download channel before JavaScript', () => {
+describe('marketing staging links before JavaScript', () => {
   afterEach(() => vi.unstubAllGlobals());
   const files = [
     'Tau-macos-x64.zip',
@@ -245,9 +245,11 @@ describe('marketing download channel before JavaScript', () => {
   ];
   const scripts =
     '<script>const anchor = `<a href="https://downloads.tau.new/latest/Tau-macos-arm64.zip">Download</a>`;</script><script type="application/ld+json">{"url":"https://tau.new/download/"}</script>';
-  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}`;
+  const prompt = (site: string): string =>
+    `<code id="agent-prompt-text">Install the Tau plugin from ${site}/llms.txt</code>`;
+  const html = `<link rel="canonical" href="https://tau.new/download/">${scripts}${prompt('https://tau.new')}${files.map((file) => `<a class="text-link" href="https://downloads.tau.new/latest/${file}" data-event="download">Download</a>`).join('')}`;
 
-  it('should serve every archive link from staging while preserving scripts and document policies', async () => {
+  it('should serve every archive link and the agent prompt from staging while preserving scripts and document policies', async () => {
     vi.stubGlobal('Netlify', { env: { get: () => origin } });
     vi.stubGlobal(
       'fetch',
@@ -272,6 +274,7 @@ describe('marketing download channel before JavaScript', () => {
       files.map((file) => `https://downloads.taucad.dev/latest/${file}`),
     );
     expect(body).toContain(scripts);
+    expect(body).toContain(prompt('https://taucad.dev'));
     expect(body).toContain('<link rel="canonical" href="https://tau.new/download/">');
     expect(response.status).toBe(200);
     expect(response.headers.get('content-security-policy')).toBe("script-src 'self' 'sha256-boot'");
@@ -303,5 +306,33 @@ describe('marketing download channel before JavaScript', () => {
     const response = await marketing(new Request(url, { method }), { next: vi.fn() });
     expect(await response.text()).toBe(method === 'HEAD' ? '' : html);
     expect(response.headers.get('etag')).toBe('"upstream"');
+  });
+});
+
+describe('staging router public host', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const alias = 'https://staging--taucad-staging.netlify.app';
+
+  async function redirectFor(url: string, publicHost?: string): Promise<string | undefined> {
+    vi.stubGlobal('Netlify', { env: { get: () => origin } });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 301, headers: { location: `${origin}/pricing/` } })),
+    );
+    const headers: Record<string, string> = publicHost === undefined ? {} : { 'x-tau-public-host': publicHost };
+    const response = await marketing(new Request(url, { headers }), { next: vi.fn() });
+    return response.headers.get('location') ?? undefined;
+  }
+
+  it('should keep marketing redirects on the domain the router proxied from', async () => {
+    expect(await redirectFor(`${alias}/pricing`, 'taucad.dev')).toBe('https://taucad.dev/pricing/');
+  });
+
+  it.each([
+    ['https://tau.new/pricing', 'evil.example', 'https://tau.new/pricing/'],
+    [`${alias}/pricing`, 'evil.example/path', `${alias}/pricing/`],
+    [`${alias}/pricing`, undefined, `${alias}/pricing/`],
+  ])('should ignore a public host the router did not set: %s with %j', async (url, publicHost, location) => {
+    expect(await redirectFor(url, publicHost)).toBe(location);
   });
 });

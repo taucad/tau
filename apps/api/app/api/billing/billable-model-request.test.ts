@@ -98,7 +98,6 @@ const qualify = (input: {
   };
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map([[routeId, adapter]]),
-    credentialAccounts: new Map([[input.providerKind, 'fixture-account']]),
     executionTimeout: 1,
   });
   return resolver.resolve({

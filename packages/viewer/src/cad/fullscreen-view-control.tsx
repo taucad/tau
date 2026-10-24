@@ -1,3 +1,4 @@
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import { useCallback, useState, useSyncExternalStore } from 'react';
 import { Maximize, Minimize } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
@@ -18,6 +19,7 @@ const readServerFullscreen = (): undefined => undefined;
  * @public
  */
 export function FullscreenViewControl(): React.JSX.Element {
+  const controlSize = useViewerControlSize();
   const [viewer, setViewer] = useState<HTMLElement>();
   const setButton = useCallback<React.RefCallback<HTMLButtonElement>>((button) => {
     setViewer(button?.closest<HTMLElement>('[data-viewer-frame]') ?? undefined);
@@ -55,7 +57,7 @@ export function FullscreenViewControl(): React.JSX.Element {
           <Button
             ref={setButton}
             variant='ghost'
-            size='icon-sm'
+            size={controlSize}
             aria-label={label}
             aria-pressed={isFullscreen}
             aria-busy={isPending}

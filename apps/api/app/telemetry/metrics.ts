@@ -139,6 +139,11 @@ export class MetricsService {
     description: TauMetrics.redisConnectionState.description,
   });
 
+  public readonly healthReadinessFailures = this.apiMeter.createCounter(TauMetrics.healthReadinessFailures.name, {
+    description: TauMetrics.healthReadinessFailures.description,
+    unit: TauMetrics.healthReadinessFailures.unit,
+  });
+
   public readonly publicationViewsTotal = this.apiMeter.createCounter(TauMetrics.publicationViewsTotal.name, {
     description: TauMetrics.publicationViewsTotal.description,
     unit: TauMetrics.publicationViewsTotal.unit,
@@ -470,6 +475,100 @@ export class MetricsService {
     unit: TauMetrics.syncSweeps.unit,
   });
 
+  public readonly syncRefusals = this.apiMeter.createCounter(TauMetrics.syncRefusals.name, {
+    description: TauMetrics.syncRefusals.description,
+    unit: TauMetrics.syncRefusals.unit,
+  });
+
+  // --- Git execution (lease admission, hydrate, manifest commit) ---
+
+  public readonly gitAdmissions = this.apiMeter.createCounter(TauMetrics.gitAdmissions.name, {
+    description: TauMetrics.gitAdmissions.description,
+    unit: TauMetrics.gitAdmissions.unit,
+  });
+
+  public readonly gitLeasesActive = this.apiMeter.createUpDownCounter(TauMetrics.gitLeasesActive.name, {
+    description: TauMetrics.gitLeasesActive.description,
+    unit: TauMetrics.gitLeasesActive.unit,
+  });
+
+  public readonly gitLeaseReservedBytes = this.apiMeter.createGauge(TauMetrics.gitLeaseReservedBytes.name, {
+    description: TauMetrics.gitLeaseReservedBytes.description,
+    unit: TauMetrics.gitLeaseReservedBytes.unit,
+  });
+
+  public readonly gitDiskFreeBytes = this.apiMeter.createGauge(TauMetrics.gitDiskFreeBytes.name, {
+    description: TauMetrics.gitDiskFreeBytes.description,
+    unit: TauMetrics.gitDiskFreeBytes.unit,
+  });
+
+  public readonly gitHydrateBytes = this.apiMeter.createHistogram(TauMetrics.gitHydrateBytes.name, {
+    description: TauMetrics.gitHydrateBytes.description,
+    unit: TauMetrics.gitHydrateBytes.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitHydrateBytes.buckets] },
+  });
+
+  public readonly gitCommitAttempts = this.apiMeter.createCounter(TauMetrics.gitCommitAttempts.name, {
+    description: TauMetrics.gitCommitAttempts.description,
+    unit: TauMetrics.gitCommitAttempts.unit,
+  });
+
+  public readonly gitCommitDuration = this.apiMeter.createHistogram(TauMetrics.gitCommitDuration.name, {
+    description: TauMetrics.gitCommitDuration.description,
+    unit: TauMetrics.gitCommitDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitCommitDuration.buckets] },
+  });
+
+  public readonly gitRepositorySize = this.apiMeter.createHistogram(TauMetrics.gitRepositorySize.name, {
+    description: TauMetrics.gitRepositorySize.description,
+    unit: TauMetrics.gitRepositorySize.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRepositorySize.buckets] },
+  });
+
+  /** Observed at collection from the last full minute, so an idle minute reads 0 rather than a stale rate. */
+  public readonly gitHotProjectCommitRate = this.apiMeter.createObservableGauge(
+    TauMetrics.gitHotProjectCommitRate.name,
+    {
+      description: TauMetrics.gitHotProjectCommitRate.description,
+      unit: TauMetrics.gitHotProjectCommitRate.unit,
+    },
+  );
+
+  public readonly gitHotProjectWriters = this.apiMeter.createObservableGauge(TauMetrics.gitHotProjectWriters.name, {
+    description: TauMetrics.gitHotProjectWriters.description,
+    unit: TauMetrics.gitHotProjectWriters.unit,
+  });
+
+  // --- Git route table and freeze answer (DW1, DW2) ---
+
+  /** Observed at collection from the route table, so a lapsed freeze reads 0 rather than a stale count. */
+  public readonly gitRouteFrozen = this.apiMeter.createObservableGauge(TauMetrics.gitRouteFrozen.name, {
+    description: TauMetrics.gitRouteFrozen.description,
+    unit: TauMetrics.gitRouteFrozen.unit,
+  });
+
+  public readonly gitRouteFrozenOldest = this.apiMeter.createObservableGauge(TauMetrics.gitRouteFrozenOldest.name, {
+    description: TauMetrics.gitRouteFrozenOldest.description,
+    unit: TauMetrics.gitRouteFrozenOldest.unit,
+  });
+
+  public readonly gitRouteHolds = this.apiMeter.createCounter(TauMetrics.gitRouteHolds.name, {
+    description: TauMetrics.gitRouteHolds.description,
+    unit: TauMetrics.gitRouteHolds.unit,
+  });
+
+  public readonly gitRouteHoldDuration = this.apiMeter.createHistogram(TauMetrics.gitRouteHoldDuration.name, {
+    description: TauMetrics.gitRouteHoldDuration.description,
+    unit: TauMetrics.gitRouteHoldDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteHoldDuration.buckets] },
+  });
+
+  public readonly gitRouteLookupDuration = this.apiMeter.createHistogram(TauMetrics.gitRouteLookupDuration.name, {
+    description: TauMetrics.gitRouteLookupDuration.description,
+    unit: TauMetrics.gitRouteLookupDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteLookupDuration.buckets] },
+  });
+
   // Client-reported: Tau Sync
 
   public readonly syncClientAttempts = this.clientMeter.createCounter(TauMetrics.syncClientAttempts.name, {
@@ -508,3 +607,18 @@ export type WsUpgradeRejection = z.infer<typeof TauMetrics.wsUpgradeRejections.a
 
 /** Attributes of one `tau.sync.operations` increment. */
 export type SyncOperationAttributes = z.infer<typeof TauMetrics.syncOperations.attributes>;
+
+/** Attributes of one `tau.sync.refusals` increment. */
+export type SyncRefusalAttributes = z.infer<typeof TauMetrics.syncRefusals.attributes>;
+
+/** `tau.git.operation`: what a lease was admitted for. */
+export type GitOperation = z.infer<typeof TauMetrics.gitAdmissions.attributes>['tau.git.operation'];
+
+/** Attributes of one `tau.git.admissions` increment. */
+export type GitAdmissionAttributes = z.infer<typeof TauMetrics.gitAdmissions.attributes>;
+
+/** Attributes of one `tau.git.commit.attempts` increment. */
+export type GitCommitAttemptAttributes = z.infer<typeof TauMetrics.gitCommitAttempts.attributes>;
+
+/** `rank` on the hot-project gauges. */
+export type HotProjectRank = z.infer<typeof TauMetrics.gitHotProjectCommitRate.attributes>['rank'];

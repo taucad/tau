@@ -47,6 +47,7 @@ export default flatRoutes({
     // an SPA fallback, and nothing else.
     '../../app/routes/api.ph.$/**',
     '../../app/routes/assets.$/**',
+    '../../app/routes/health.build.ts',
     '../../app/routes/health.live.ts',
     '../../app/routes/health.ready.ts',
     '../../app/routes/health.startup.ts',

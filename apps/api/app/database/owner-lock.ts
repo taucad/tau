@@ -1,6 +1,6 @@
-import { sql, eq } from 'drizzle-orm';
+import { sql, eq, and, isNull } from 'drizzle-orm';
 import type { DatabaseService } from '#database/database.service.js';
-import { project, projectGit } from '#database/schema.js';
+import { project, projectGit, projectDeletion } from '#database/schema.js';
 
 /** The Drizzle handle every caller holds. */
 export type Database = DatabaseService['database'];
@@ -64,7 +64,8 @@ export async function readOwnerUsage(
     })
     .from(project)
     .leftJoin(projectGit, eq(projectGit.projectId, project.id))
-    .where(eq(project.ownerId, ownerId));
+    .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
+    .where(and(eq(project.ownerId, ownerId), isNull(projectDeletion.deletedAt)));
   const [row] = rows;
   return { storageBytes: Number(row?.storageBytes ?? 0), lfsBytes: Number(row?.lfsBytes ?? 0) };
 }

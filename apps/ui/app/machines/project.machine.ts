@@ -9,7 +9,7 @@ import type {
   SystemRegistry,
 } from 'xstate';
 import { produce } from 'immer';
-import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
+import type { Project, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
@@ -28,7 +28,7 @@ import type { fileManagerMachine } from '#machines/file-manager.machine.js';
  */
 export type ProjectContext = {
   projectId: string;
-  project: ProjectManifest | undefined;
+  project: Project | undefined;
   /**
    * Why `tau.json` on disk is not the canonical manifest `project` holds (blueprint R4/R5).
    *
@@ -91,7 +91,7 @@ export type ProjectLoadInput = { readonly projectId: string };
 
 export type ProjectRetrievedEvent = {
   readonly type: 'projectRetrieved';
-  readonly project: ProjectManifest;
+  readonly project: Project;
   /** Present when `project` is the normalized view of a degraded manifest. */
   readonly issue?: ProjectManifestParseIssue;
 };
@@ -103,7 +103,7 @@ const loadProjectActor = fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(
   );
 });
 
-const writeProjectActor = fromSafeAsync<void, { project: ProjectManifest; repair?: boolean }>(async () => {
+const writeProjectActor = fromSafeAsync<void, { project: Project; repair?: boolean }>(async () => {
   throw new Error(
     'Not implemented. Please supply the `provide.actors.writeProjectActor` option to the project machine.',
   );
@@ -170,9 +170,9 @@ type ProjectEventInternal =
   | { type: 'reloadProject' }
   | { type: 'closeRuntime' }
   | { type: 'geometryUnit.runtimeClosed'; unit: ActorRefFrom<typeof cadMachine> }
-  /* The change observer: tau.json no longer identifies this project; keep the last good manifest open. */
+  /* The change observer: tau.json is no longer readable under the current declaration contract; keep the last good manifest open. */
   | { type: 'manifestIssueObserved'; issue: ProjectManifestParseIssue }
-  /* The one explicit write over a degraded or unidentifiable tau.json: the manifest this workspace holds. */
+  /* The one explicit write over a degraded tau.json: the manifest this workspace holds. */
   | { type: 'repairManifest' }
   | { type: 'updateName'; name: string }
   | { type: 'updateDescription'; description: string }
@@ -218,7 +218,7 @@ type ProjectEvent = ProjectEventInternal | ProjectRetrievedEvent;
  */
 type ProjectEmitted =
   | { type: 'error'; error: Error }
-  | { type: 'projectUpdated'; project: ProjectManifest }
+  | { type: 'projectUpdated'; project: Project }
   | { type: 'projectActivity' }
   | { type: 'viewerFileRequested'; entryPath: string };
 
@@ -251,7 +251,7 @@ const shouldUpdateProjectName = (context: ProjectContext, event: Extract<Project
   Boolean(isManifestWritable(context) && context.project && context.project.name !== event.name);
 
 /** Rewrite the loaded manifest, or leave context alone when no project is loaded. */
-const withProject = (context: ProjectContext, recipe: (project: ProjectManifest) => void): ProjectPatch =>
+const withProject = (context: ProjectContext, recipe: (project: Project) => void): ProjectPatch =>
   context.project ? { project: produce(context.project, recipe) } : {};
 
 /**

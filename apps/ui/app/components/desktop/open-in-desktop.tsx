@@ -25,6 +25,7 @@ import { Label } from '@taucad/ui/components/label';
 import { Spinner } from '#components/ui/spinner.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { desktopDeepLink } from '#lib/desktop-deep-link.js';
+import { browserDesktopScheme, useDesktopScheme } from '#hooks/use-desktop-scheme.js';
 
 /**
  * Where "Get Tau Desktop" goes.
@@ -98,6 +99,7 @@ export type OpenInDesktopProps = {
  */
 export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.Element | undefined {
   const location = useLocation();
+  const scheme = useDesktopScheme();
   const checkboxId = useId();
   const [stage, setStage] = useState<OfferStage>('offer');
   const [alwaysOpen, setAlwaysOpen] = useState(false);
@@ -107,7 +109,7 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
 
   const deepLink = isDesktopTarget()
     ? undefined
-    : desktopDeepLink(`${location.pathname}${location.search}${location.hash}`);
+    : desktopDeepLink(`${location.pathname}${location.search}${location.hash}`, scheme);
 
   const handOff = useCallback((): void => {
     if (deepLink === undefined) {
@@ -116,8 +118,14 @@ export function OpenInDesktop({ continueLabel }: OpenInDesktopProps): React.JSX.
     setStage('opening');
     /* A top-level navigation, which is how a browser is asked to consult its
        scheme handlers; the page itself stays where it is. */
-    globalThis.location.assign(deepLink);
-  }, [deepLink]);
+    const currentLink = desktopDeepLink(
+      `${location.pathname}${location.search}${location.hash}`,
+      browserDesktopScheme(),
+    );
+    if (currentLink !== undefined) {
+      globalThis.location.assign(currentLink);
+    }
+  }, [deepLink, location.pathname, location.search, location.hash]);
 
   useEffect(() => {
     if (deepLink === undefined || attempted.current || !readAlwaysOpen()) {

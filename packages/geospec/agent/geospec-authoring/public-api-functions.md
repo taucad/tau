@@ -1,6 +1,6 @@
 # geospec — Functions
 
-36 top-level symbols. Signatures are verbatim typescript.
+47 top-level symbols. Signatures are verbatim typescript.
 
 // GeoSpec suite helper used inside VM-executed test modules
 // describe (function)
@@ -67,20 +67,11 @@ export declare function createModelLoader(defaults: CreateModelLoaderOptions): M
 export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(_options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
 //   _options: Source, code, or file model load options
 
-// resolveRuntimeExportIntent (function)
-export declare function resolveRuntimeExportIntent(options: {
-    runtime: GeoSpecRuntimeClient;
-    format: RuntimeBackedModelFormat;
-    meshLinearTolerance?: number;
-    meshAngularToleranceDegrees?: number;
-    /**
-     * The kernel that evaluates this source, when the host knows it. Routes are
-     * then chosen among that kernel's own, so a mesh-only kernel is told its
-     * BRep matchers are unsupported instead of being sent to another kernel's
-     * STEP route.
-     */
-    kernelId?: string;
-}): RuntimeExportIntent | RuntimeExportIntentFailure;
+// Create a model exporter that runs a command speaking GeoSpec subprocess protocol 1
+// Throws: TypeError when the options are incomplete or declare `inlineSources`.
+// commandExporter (function)
+export declare function commandExporter(options: CommandExporterOptions): GeoSpecModelExporter;
+//   options: The exporter's identity, command and declared capabilities
 
 // clearCollectorGlobals (function)
 export declare function clearCollectorGlobals(): void;
@@ -155,11 +146,51 @@ export declare function allocateNativePoolGrants(options: {
 // Create a native model loader that admits actual STEP/GLB bytes and retains generation-checked handles until the owning runner finishes
 // createGeoSpecNativeModelLoader (function)
 export declare function createGeoSpecNativeModelLoader(defaults: CreateGeoSpecNativeModelLoaderOptions): ManagedGeoSpecNativeModelLoader;
-//   defaults: Native engine, Runtime defaults, and optional source reader
+//   defaults: Native engine, exporters, and optional source reader
+
+// Create a Node `VmFileSystem` rooted at `root`
+// createNodeVmFileSystem (function)
+export declare function createNodeVmFileSystem(root: string): VmFileSystem;
+//   root: Absolute project root path
+
+// Resolve one VM path to a real path under the root
+// Throws: Error when the path escapes the root.
+// resolveUnderRoot (function)
+export declare function resolveUnderRoot(root: string, path: string): string;
+//   root: The project root
+//   path: A canonical path rooted by the supplied project capability
+
+// Create a GeoSpec engine for this process
+// Throws: Error when the native addon is installed but cannot load, or the permits are invalid.
+// createNodeGeoSpecEngine (function)
+export declare function createNodeGeoSpecEngine(options?: CreateNodeGeoSpecEngineOptions): Promise<NodeGeoSpecEngine>;
+//   options: CPU permits for the native addon
+
+// Create a pool with one engine and one set of exporters constructed inside each worker
+// Remarks: Workers are threads of this process and share one OCCT library instance and pool width, so inner parallelism is all-or-nothing: either several workers with one permit each, or one worker holding the whole budget. A budget above the worker count with more than one worker is refused before any worker starts rather than silently run serial.
+// Throws: RangeError When the budget is invalid, exceeds the host cap, or gives any of several in-process workers more than one permit.
+// createGeoSpecNodePoolRunner (function)
+export declare function createGeoSpecNodePoolRunner(options: GeoSpecNodePoolOptions): GeoSpecRunner;
+//   options: Project, config, exporter modules, outer workers and caller-inclusive CPU budget
+
+// Adapt a Node worker thread to the pool's host-agnostic handle
+// createNodeWorkerHandle (function)
+export declare function createNodeWorkerHandle(worker: NodeWorkerLike): GeoSpecPoolWorkerHandle;
+//   worker: The spawned worker
 
 // Create a run-level issue when filters select no tests
 // createNoMatchingGeoSpecTestsIssue (function)
 export declare function createNoMatchingGeoSpecTestsIssue(): VmIssue;
+
+// Create the host-agnostic pool runner
+// createGeoSpecPoolRunner (function)
+export declare function createGeoSpecPoolRunner(options: GeoSpecPoolOptions): GeoSpecRunner;
+//   options: Worker factory, worker count, telemetry and event hook
+
+// Serve shards until the host says shutdown
+// startGeoSpecPoolWorkerHost (function)
+export declare function startGeoSpecPoolWorkerHost(options: GeoSpecPoolWorkerHostOptions): void;
+//   options: Worker filesystem, native engine, and message plumbing
 
 // Create a standalone native GeoSpec assertion client
 // createGeoSpecAssertionClient (function)
@@ -176,7 +207,7 @@ export declare function createGeoSpecMatcherMethods<Result>(options: {
 //   options: Subject, polarity and host invocation function
 
 // Submit an ancillary query with positive polarity through the native core
-// Remarks: Queries return full reports even when failed or refused. Protocol errors propagate unchanged. Rust owns defaults, validation and canonical encoding.
+// Remarks: A query asserts nothing, so it never fails: when the evidence it reads is missing or cannot decide it returns a full refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`. Protocol errors propagate unchanged. Rust owns defaults, validation and canonical encoding.
 // evaluateGeoSpecNativeQuery (function)
 export declare function evaluateGeoSpecNativeQuery(options: GeoSpecNativeQueryOptions): GeoSpecCanonicalClaimReport;
 //   options: Query identity, subject and authored payload
@@ -186,6 +217,17 @@ export declare function evaluateGeoSpecNativeQuery(options: GeoSpecNativeQueryOp
 // resolveGeoSpecMaximumWorkUnitLimit (function)
 export declare function resolveGeoSpecMaximumWorkUnitLimit(maximum?: number): number;
 //   maximum: The host's configured maximum, when it sets one
+
+// Run the CLI
+// runGeoSpecCli (function)
+export declare function runGeoSpecCli(argv: readonly string[], host: GeoSpecCliHost): Promise<number>;
+//   argv: Arguments after the executable and script
+//   host: The injected platform
+
+// Build the Node CLI host
+// createNodeGeoSpecCliHost (function)
+export declare function createNodeGeoSpecCliHost(options?: NodeGeoSpecCliHostOptions): GeoSpecCliHost;
+//   options: Report sink and host-supplied exporter modules
 
 // Create Vitest matchers over an existing runner-independent client
 // createGeoSpecVitestAdapter (function)
@@ -202,14 +244,35 @@ export declare function installGeoSpecVitest(client: GeoSpecAssertionClient): Ge
 export declare function setupGeoSpecVitest(options: GeoSpecAssertionClientOptions): GeoSpecVitestAdapter;
 //   options: Flat native assertion-client options
 
-// Export one Tau project from Runtime's coherent source snapshot
-// Remarks: This helper preserves finalized bytes and provenance metadata. It does not certify mathematical geometry or grant the runtime trusted-evaluator authority.
-// exportTauProjectArtifact (function)
-export declare function exportTauProjectArtifact(options: ExportTauProjectArtifactOptions): Promise<KernelResult<GeoSpecTauProjectArtifact>>;
-//   options: Descriptor, fresh-runtime factory, and optional cancellation signal
+// Configure GeoSpec for the active Vitest file from the project's `geospec.config.*`
+// Remarks: Call it at the top level of a test file or a setup file and await it. Subjects are released, and an engine this call created is closed, after the file's tests.
+// setupGeoSpecVitestProject (function)
+export declare function setupGeoSpecVitestProject(options: SetupGeoSpecVitestProjectOptions): Promise<GeoSpecVitestProject>;
+//   options: Project root, config file, overrides and assertion-client options
+// Example (A Vitest file over a project with a geospec.config.ts):
+//   import { expect, it } from 'vitest';
+//   import { setupGeoSpecVitestProject } from 'geospec/vitest/node';
+//   
+//   const geo = await setupGeoSpecVitestProject({ projectPath: import.meta.dirname });
+//   
+//   it('has the intended volume', async () => {
+//   await expect(await geo.loadModel({ file: 'part.step' })).toHaveVolume({ value: 1000, tolerance: 1 });
+//   });
+
+// Type a `geospec.config.*` default export
+// Remarks: An identity at runtime. The parameter is not generic, so an object literal gets the excess-property and contextual checks `satisfies GeoSpecConfig` gives, in `.ts` and `.js` alike.
+// defineConfig (function)
+export declare function defineConfig(config: GeoSpecConfig): GeoSpecConfig;
+//   config: The project configuration
+
+// Read a project's `geospec.config.*` data fields through the spec VM, the same way on every host
+// Remarks: Discovery is `loadGeoSpecConfig`'s: exactly one of `geospec.config.{ts,mts,js,mjs}`. The config may import `geospec/config` (for `defineConfig`) and project files, nothing from `node_modules`: imports are detected first, without a network call, so a config with exporters is `not-applied` rather than fetched. `exporters` are never returned; a host that reads the config holds its own.
+// readGeoSpecConfig (function)
+export declare function readGeoSpecConfig(options: ReadGeoSpecConfigOptions): Promise<ReadGeoSpecConfigResult>;
+//   options: The project filesystem and the rooted project directory
 
 // Load one trusted project config using Node's native module loader
-// Remarks: Explicit selection or exactly one geospec.config.js/.mjs/.ts/.mts is allowed. TypeScript must use erasable syntax; JSON imports use standard attributes. Executable config/imports are trusted developer code, not sandboxed code. Node's same-process module cache is unchanged: load once per run and use a fresh process when fresh executable imports are required. No reload guarantee or transitive-source identity is supplied here.
+// Remarks: Explicit selection or exactly one geospec.config.js/.mjs/.ts/.mts is allowed. A config's `geospec/config` import resolves to this copy when the project has no install of its own. TypeScript must use erasable syntax; JSON imports use standard attributes. Executable config/imports are trusted developer code, not sandboxed code. Node's same-process module cache is unchanged: load once per run and use a fresh process when fresh executable imports are required. No reload guarantee or transitive-source identity is supplied here.
 // loadGeoSpecConfig (function)
 export declare function loadGeoSpecConfig(options: LoadGeoSpecConfigOptions): Promise<LoadedGeoSpecConfig>;
 //   options: Project, optional explicit config and defined option overrides

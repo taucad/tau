@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_kac-DrWlYSJj1NXySvjun",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Round tube",
   "description": "Constant-section stock profile with genuine openings where applicable, adjustable section dimensions and cut length.",
   "tags": [

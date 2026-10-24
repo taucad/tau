@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { WorkbenchLaneNode, WorkbenchLayout } from '@taucad/workbench';
 import type * as KeyboardModule from '@taucad/ui/components/keyboard';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
@@ -573,7 +573,17 @@ describe('ProjectWorkspaceProvider', () => {
     });
   });
 
-  it('does not mutate desktop state for unsupported mobile-only actions', () => {
+  it.each([
+    ['model', 'model-tree'],
+    ['kinematics', 'kinematics'],
+    ['print', 'print'],
+    ['agents', 'agents'],
+    ['kernel', 'kernel'],
+    ['console', 'console'],
+    ['parameters', 'parameters'],
+    ['files', 'files'],
+    ['details', 'details'],
+  ] as const)('opens %s as the %s phone surface without touching the desktop lanes (I1)', (panel, surface) => {
     state.isMobile = true;
     render(
       <ProjectWorkspaceProvider>
@@ -582,12 +592,64 @@ describe('ProjectWorkspaceProvider', () => {
     );
 
     act(() => {
-      workspace.openPanel('model');
-      workspace.openPanel('kernel');
+      workspace.openPanel(panel);
     });
 
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { mobileActiveTab: surface },
+    });
   });
+
+  it('opens browser as the browser phone surface in the desktop app (I1)', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
+    state.isMobile = true;
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+
+    act(() => {
+      workspace.openPanel('browser');
+    });
+
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { mobileActiveTab: 'browser' },
+    });
+  });
+
+  it.each([
+    [undefined, false, 'browser'],
+    [undefined, false, 'jobs'],
+    [undefined, true, 'jobs'],
+    ['desktop', false, 'jobs'],
+    ['desktop', true, 'jobs'],
+  ] as const)(
+    'refuses an unshipped surface on any layout (TAU_TARGET=%s, mobile=%s, %s)',
+    (buildTarget, isMobile, panel) => {
+      vi.stubEnv('TAU_TARGET', buildTarget);
+      onTestFinished(() => {
+        vi.unstubAllEnvs();
+      });
+      state.isMobile = isMobile;
+      render(
+        <ProjectWorkspaceProvider>
+          <Probe />
+        </ProjectWorkspaceProvider>,
+      );
+
+      act(() => {
+        workspace.openPanel(panel);
+      });
+
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
 
   it('selects Workbench only for user-origin file opens on desktop', () => {
     render(

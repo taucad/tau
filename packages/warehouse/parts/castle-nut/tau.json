@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_sVyUMu69LgXtV5wgc3vZq",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Castle nut",
   "description": "Castle nut with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

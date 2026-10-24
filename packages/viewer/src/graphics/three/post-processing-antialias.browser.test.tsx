@@ -319,9 +319,10 @@ it.each(
         },
         { timeout: 45_000 },
       );
-      expect(isViewportWebGpu(state!.gl)).toBe(backend === 'webgpu');
+      // Production viewports use node materials on both execution backends.
+      expect(isViewportWebGpu(state!.gl)).toBe(true);
       if (isViewportWebGpu(state!.gl)) {
-        expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+        expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
       }
       // This discontinuous shader texture is the negative control for surface-AA-off,
       // not a CAD-line coverage test. Preserve its failure as an explicit tradeoff.
@@ -564,9 +565,10 @@ it.each(
     }
     expect(changedPixels, 'Motion must change the rendered image').toBeGreaterThan(10);
     expect(state!.camera.type).toBe(fov === 0 ? 'OrthographicCamera' : 'PerspectiveCamera');
-    expect(isViewportWebGpu(state!.gl)).toBe(backend === 'webgpu');
+    // Production viewports use node materials on both execution backends.
+    expect(isViewportWebGpu(state!.gl)).toBe(true);
     if (isViewportWebGpu(state!.gl)) {
-      expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+      expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
     }
   } finally {
     retired = true;
@@ -706,7 +708,8 @@ it.each((['webgl', 'webgpu'] as const).flatMap((backend) => ['front', 'behind'].
       await pending;
       const { width } = state!.gl.domElement;
       const centre = [...pixels!.subarray((64 * width + 64) * 4, (64 * width + 64) * 4 + 3)];
-      expect(isViewportWebGpu(state!.gl)).toBe(backend === 'webgpu');
+      // Production viewports use node materials on both execution backends.
+      expect(isViewportWebGpu(state!.gl)).toBe(true);
       expect(centre, JSON.stringify({ backend, cap, centre })).toEqual(cap === 'front' ? [255, 0, 0] : [0, 0, 255]);
       const outside = [...pixels!.subarray((64 * width + 8) * 4, (64 * width + 8) * 4 + 3)];
       expect(outside).toEqual(cap === 'front' ? [0, 255, 0] : [0, 0, 255]);
@@ -905,9 +908,10 @@ it.each(
           retired = true;
         }
         expect(state!.camera.type).toBe('OrthographicCamera');
-        expect(isViewportWebGpu(state!.gl)).toBe(backend === 'webgpu');
+        // Production viewports use node materials on both execution backends.
+        expect(isViewportWebGpu(state!.gl)).toBe(true);
         if (isViewportWebGpu(state!.gl)) {
-          expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+          expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
         }
         expect(pixels![2]!).toBeGreaterThan(200);
         const background = linearChannel[pixels![2]!]!;
@@ -1323,7 +1327,7 @@ it.each(
       pixels = await captureRendererOutput(state!.gl);
       expect([state!.gl.domElement.width, state!.gl.domElement.height]).toEqual([width, height]);
       if (isViewportWebGpu(state!.gl)) {
-        expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+        expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
       }
       if (backend === 'webgpu') {
         expect(measuredOutputTransforms, 'one encoding after all cap and overlay draws').toBe(1);
@@ -2021,7 +2025,7 @@ it.each(
       expect(state!.gl.domElement.height).toBe(2880);
       expect(isViewportWebGpu(state!.gl)).toBe(true);
       if (isViewportWebGpu(state!.gl)) {
-        expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+        expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
       }
       expect(pixels).toBeDefined();
       // This 400px run of the front rim is fully visible and two physical pixels wide.
@@ -2130,7 +2134,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       if (!isViewportWebGpu(renderer)) {
         throw new Error('Expected initialized node renderer');
       }
-      expect(renderer.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+      expect(renderer.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
       expect(renderer.domElement.height).toBe((width * 2880) / 5120);
       return captureRendererOutput(renderer);
     };
@@ -2270,7 +2274,7 @@ it.each((['webgpu', 'node-webgl2'] as const).flatMap((execution) => [0, 35].map(
       expect(state!.gl.domElement.height).toBe(2880);
       expect(isViewportWebGpu(state!.gl)).toBe(true);
       if (isViewportWebGpu(state!.gl)) {
-        expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+        expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
       }
       state!.setFrameloop('never');
       const withoutAxes = await capture();
@@ -2384,7 +2388,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       expect(state!.gl.domElement.height).toBe(2880);
       expect(isViewportWebGpu(state!.gl)).toBe(true);
       if (isViewportWebGpu(state!.gl)) {
-        expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+        expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
       }
       const gear = state!.scene.getObjectByName('Internal_Ring_Gear')!;
       const originalRotation = gear.rotation.z;
@@ -2694,7 +2698,7 @@ it.each([
       if (!isViewportWebGpu(state!.gl)) {
         throw new Error('Node renderer required');
       }
-      expect(state!.gl.backend).toBeInstanceOf(execution === 'node-webgl2' ? WebGLBackend : WebGPUBackend);
+      expect(state!.gl.backend).toBeInstanceOf(execution !== 'webgpu' ? WebGLBackend : WebGPUBackend);
       const matrices = [...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements];
       // Match the packaged section picker: remove/add/update allocates new cut IDs.
       // Direct adoption alone omits that material/owner history.

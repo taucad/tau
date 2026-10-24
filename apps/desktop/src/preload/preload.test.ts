@@ -1,3 +1,5 @@
+import { desktopNativeKernelChannels } from '@taucad/types/desktop-native-kernels';
+import type { DesktopNativeKernelBridge } from '@taucad/types/desktop-native-kernels';
 import { desktopUpdateChannels } from '@taucad/types/desktop-updates';
 import type { DesktopUpdateBridge } from '@taucad/types/desktop-updates';
 import type { BrowserBridge, BrowserSnapshot } from '@taucad/types/browser';
@@ -6,6 +8,7 @@ import { mock } from 'vitest-mock-extended';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ipcRenderer } from 'electron';
 import {
+  directoryGrantChannels,
   hostHandOffChannel,
   openDirectoryChannel,
   revealPathChannel,
@@ -292,5 +295,49 @@ describe('desktop update preload bridge', () => {
     }
     unsubscribe();
     expect(state.listeners.get(desktopUpdateChannels.changed)).toEqual([]);
+  });
+});
+
+describe('desktop folder grants', () => {
+  it('should relay listing and disconnect, and unsubscribe from cross-window changes', async () => {
+    const { directories } = state.exposed.get('tau') as {
+      directories: {
+        list(): Promise<readonly string[]>;
+        disconnect(path: string): Promise<void>;
+        onChange(handler: () => void): () => void;
+      };
+    };
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce(['/Downloads']);
+    expect(await directories.list()).toEqual(['/Downloads']);
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith(directoryGrantChannels.list);
+    await directories.disconnect('/Downloads');
+    expect(ipcRenderer.invoke).toHaveBeenLastCalledWith(directoryGrantChannels.disconnect, '/Downloads');
+    vi.mocked(ipcRenderer.invoke).mockResolvedValueOnce('Close projects in this folder.');
+    await expect(directories.disconnect('/Downloads')).rejects.toThrow('Close projects in this folder.');
+    const changed = vi.fn();
+    const unsubscribe = directories.onChange(changed);
+    for (const listener of state.listeners.get(directoryGrantChannels.changed) ?? []) {
+      listener({});
+    }
+    expect(changed).toHaveBeenCalledOnce();
+    unsubscribe();
+    expect(state.listeners.get(directoryGrantChannels.changed)).toEqual([]);
+  });
+});
+
+describe('desktop native kernel preload bridge', () => {
+  it('should name only the kernel to main and remove the progress listener on unsubscribe', async () => {
+    const { nativeKernels } = state.exposed.get('tau') as { readonly nativeKernels: DesktopNativeKernelBridge };
+    const receive = vi.fn();
+    const unsubscribe = nativeKernels.subscribe(receive);
+    const progress = { kernel: 'build123d', progress: 10, total: 100, message: 'download python (1/40)' };
+    state.listeners.get(desktopNativeKernelChannels.progress)?.[0]?.({}, progress);
+    expect(receive).toHaveBeenCalledWith(progress);
+    await nativeKernels.prepare('build123d');
+    await nativeKernels.cancel('build123d');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopNativeKernelChannels.prepare, 'build123d');
+    expect(ipcRenderer.invoke).toHaveBeenCalledWith(desktopNativeKernelChannels.cancel, 'build123d');
+    unsubscribe();
+    expect(state.listeners.get(desktopNativeKernelChannels.progress)).toEqual([]);
   });
 });

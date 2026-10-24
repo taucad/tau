@@ -33,7 +33,7 @@ export default function main() {
 }
 `;
 
-const manifest: Omit<ProjectManifest, '$schema' | 'id'> = {
+const manifest: Omit<ProjectManifest, '$schema'> = {
   name: 'Chat Attachments E2E',
   description: 'Deterministic fixture for composer records and chat attachments.',
   tags: ['e2e', 'chat-attachments'],

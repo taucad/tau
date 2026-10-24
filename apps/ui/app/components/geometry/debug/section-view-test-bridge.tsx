@@ -13,7 +13,7 @@ import type { RenderFrame } from '@taucad/spatial';
 import { fromThreeRenderBounds, fromThreeRenderPoint, toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
-import { graphicsSettingsForView } from '#workbench-records/projection.js';
+import { graphicsSettingsForView } from '@taucad/workbench-panes/records/view-record';
 import type { GraphicsViewSettings } from '@taucad/viewer/graphics/graphics-settings';
 import type { GraphicsContext } from '@taucad/viewer/machines/graphics.machine';
 import { areSectionCutsEqual, resolveSectionPieces } from '@taucad/viewer/graphics/section-cuts';

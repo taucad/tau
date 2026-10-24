@@ -13,6 +13,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { authApiOrigin, resolveAuthToken } from '#auth.js';
 import { openProjectRevisions, requireRevisionToolchain } from '@taucad/host';
 import type { ProjectRevisionVerbs } from '@taucad/host';
 import { defineCommand } from 'citty';
@@ -77,7 +78,7 @@ const open = async (
   if (!existsSync(workspaceRoot)) {
     throw cliError('NO_PROJECT', `${workspaceRoot} does not exist.`, exitCodes.refused);
   }
-  const revisions = openProjectRevisions({ workspaceRoot, ...session });
+  const revisions = await openProjectRevisions({ workspaceRoot, ...session });
   try {
     await revisions.describeEngine();
   } catch {
@@ -322,12 +323,10 @@ const discardCommand = defineCommand({
  *
  * @returns The API origin and token, or nothing when either is unset.
  */
-const optionalSession = (): Readonly<{ apiBaseUrl?: string; apiToken?: string }> => {
-  const apiBaseUrl = process.env['TAU_API_URL'];
-  const apiToken = process.env['TAU_API_TOKEN'];
-  return apiBaseUrl === undefined || apiBaseUrl === '' || apiToken === undefined || apiToken === ''
-    ? {}
-    : { apiBaseUrl, apiToken };
+const optionalSession = async (): Promise<Readonly<{ apiBaseUrl?: string; apiToken?: string }>> => {
+  const apiBaseUrl = authApiOrigin();
+  const apiToken = await resolveAuthToken(apiBaseUrl);
+  return apiToken ? { apiBaseUrl, apiToken } : {};
 };
 
 /** How a save's backup reads, after `Saved main · Rev 3.` */
@@ -340,11 +339,11 @@ const saveCommand = defineCommand({
   meta: {
     name: 'save',
     description:
-      'Record this project’s files as a revision and back it up (set TAU_API_URL and TAU_API_TOKEN to back up to Tau Cloud)',
+      'Record this project’s files as a revision and back it up (set TAU_API_URL and TAU_AUTH_TOKEN to back up to Tau Cloud)',
   },
   args: projectArguments,
   async run({ args }) {
-    const { revisions } = await open(args.project, optionalSession());
+    const { revisions } = await open(args.project, await optionalSession());
     try {
       const outcome = await revisions.save();
       if (args.json) {

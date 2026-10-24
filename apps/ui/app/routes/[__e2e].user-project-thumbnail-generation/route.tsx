@@ -63,7 +63,7 @@ const createSeedFiles = (model: string) =>
     ['src/main.ts', { content: encode(model) }],
   ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
-const createSeedProject = (curved: boolean): Omit<ProjectManifest, '$schema' | 'id'> => ({
+const createSeedProject = (curved: boolean): Omit<ProjectManifest, '$schema'> => ({
   name: curved ? 'Thumbnail Curved Parity E2E' : 'Thumbnail Generation E2E',
   description: 'Deterministic nested-entry fixture for user-project thumbnail generation.',
   tags: ['e2e', 'replicad', 'thumbnail'],

@@ -1,0 +1,424 @@
+name: Desktop installer candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: All platforms, or Linux-only staging qualification (not public promotion)
+        required: true
+        default: all
+        type: choice
+        options: [all, linux]
+      tag:
+        description: Existing desktop release tag built by the trusted archive run
+        required: true
+        type: string
+      release_run_id:
+        description: Exact-tag release-build.yml run; Linux staging verifies its prerequisite jobs
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-installer-candidate-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  TAU_DESKTOP_QUALIFICATION_SCOPE: ${{ inputs.scope }}
+  NX_NO_CLOUD: 'true'
+  pnpm_config_verify_deps_before_run: error
+
+jobs:
+  resolve:
+    if: github.ref == 'refs/heads/main' && vars.DESKTOP_INSTALLER_CANDIDATES_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.identity.outputs.tag }}
+      source: ${{ steps.identity.outputs.source }}
+      channel: ${{ steps.identity.outputs.channel }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - name: Bind source archives to exact trusted run and required successful jobs
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DESKTOP_RELEASE_TAG: ${{ inputs.tag }}
+          DESKTOP_RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: pnpm nx run desktop:installer-candidate --args=resolve
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-metadata
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: out/installer-preflight
+      - name: Require full archive coverage without changing staging defaults
+        env:
+          DESKTOP_RELEASE_TAG: ${{ steps.identity.outputs.tag }}
+          TAU_DESKTOP_SOURCE_SHA: ${{ steps.identity.outputs.source }}
+          DESKTOP_CANDIDATE_ARCHIVES: out/installer-preflight
+        run: pnpm nx run desktop:installer-candidate --args=preflight
+
+  macos:
+    if: inputs.scope != 'linux'
+    needs: resolve
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: desktop-installers-${{ needs.resolve.outputs.channel }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
+    env:
+      DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      TAU_DESKTOP_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+      DESKTOP_CANDIDATE_TARGET: darwin-${{ matrix.arch }}
+      DESKTOP_CANDIDATE_ARCHIVES: ${{ github.workspace }}/out/installer-input
+      DESKTOP_CANDIDATE_STAGE: ${{ github.workspace }}/out/installer-stage
+      TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/installer-output
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      TAU_DESKTOP_NOTARIZE: 'true'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-darwin-${{ matrix.arch }}
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: out/installer-input
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-metadata
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: out/installer-input
+      - name: Verify finalized source identity and notarization before signing setup
+        run: pnpm nx run desktop:installer-candidate --args=stage
+      - name: Import the Developer ID identity and notary credentials
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          ENVIRONMENT: desktop-installers-${{ needs.resolve.outputs.channel }}
+        run: |
+          set -euo pipefail
+          names=(MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID)
+          if [ "$TAU_DESKTOP_NOTARIZE" = true ]; then
+            names+=(APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID)
+          fi
+          for name in "${names[@]}"; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set on the $ENVIRONMENT environment"
+              exit 1
+            fi
+          done
+          keychain="$RUNNER_TEMP/tau-signing.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          api_key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          search_list=("$keychain")
+          while IFS= read -r entry; do
+            entry=${entry//\"/}
+            search_list+=("${entry#"${entry%%[![:space:]]*}"}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${search_list[@]}"
+          security default-keychain -d user -s "$keychain"
+          rm -f "$certificate"
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | sed -nE "s/.*\"(Developer ID Application: .*\($APPLE_TEAM_ID\))\".*/\1/p" | head -1)
+          if [ -z "$identity" ]; then
+            echo "::error::No Developer ID Application identity for team $APPLE_TEAM_ID in the imported certificate"
+            exit 1
+          fi
+          # package-macos.mts notarizes through this keychain profile.
+          if [ "$TAU_DESKTOP_NOTARIZE" = true ]; then
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$api_key"
+          xcrun notarytool store-credentials tau-notary --key "$api_key" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" --keychain "$keychain"
+          rm -f "$api_key"
+          fi
+          {
+            echo "TAU_CODESIGN_IDENTITY=$identity"
+            echo "TAU_NOTARYTOOL_PROFILE=tau-notary"
+            echo "TAU_SIGNING_KEYCHAIN=$keychain"
+          } >> "$GITHUB_ENV"
+
+      - name: Wrap the exact finalized ZIP application in a signed notarized DMG
+        run: pnpm nx run desktop:installer-candidate --args=dmg
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-darwin-${{ matrix.arch }}
+          path: |
+            out/installer-output/*.dmg
+            out/installer-input/Tau-*.zip
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/tau-signing.keychain-db" ]; then security delete-keychain "$RUNNER_TEMP/tau-signing.keychain-db"; fi
+          rm -f "$RUNNER_TEMP/developer-id.p12" "$RUNNER_TEMP/AuthKey.p8"
+
+  windows:
+    if: inputs.scope != 'linux'
+    needs: resolve
+    runs-on: windows-2025
+    timeout-minutes: 90
+    environment: desktop-installers-${{ needs.resolve.outputs.channel }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      TAU_DESKTOP_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+      DESKTOP_CANDIDATE_TARGET: win32-x64
+      DESKTOP_CANDIDATE_ARCHIVES: ${{ github.workspace }}/out/installer-input
+      DESKTOP_CANDIDATE_STAGE: ${{ github.workspace }}/out/installer-stage
+      TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/installer-output
+      TAU_WINDOWS_PUBLISHER: ${{ vars.TAU_WINDOWS_PUBLISHER }}
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-win32-x64
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: out/installer-input
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-metadata
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: out/installer-input
+      - name: Verify and extract the finalized application
+        id: stage
+        run: pnpm nx run desktop:installer-candidate --args=stage
+      - name: Install digest-pinned Microsoft signing tools
+        shell: pwsh
+        env:
+          SIGNING_ENDPOINT: ${{ vars.TAU_WINDOWS_SIGNING_ENDPOINT }}
+          SIGNING_ACCOUNT: ${{ vars.TAU_WINDOWS_SIGNING_ACCOUNT }}
+          SIGNING_PROFILE: ${{ vars.TAU_WINDOWS_SIGNING_PROFILE }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:TAU_WINDOWS_PUBLISHER -or -not $env:SIGNING_ACCOUNT -or -not $env:SIGNING_PROFILE -or $env:SIGNING_ENDPOINT -notmatch '^https://[a-z0-9]+\.codesigning\.azure\.net/?$') { throw 'Missing protected Artifact Signing configuration' }
+          if (-not ((dotnet --list-runtimes) -match '^Microsoft.NETCore.App 8\.')) { throw 'The pinned dlib requires .NET 8 x64 runtime' }
+          if (-not (Test-Path "$env:SystemRoot\System32\vcruntime140.dll")) { throw 'Microsoft Visual C++ runtime is required' }
+          $pins = @(
+            @{ Id='microsoft.artifactsigning.client'; Version='1.0.146'; Sha='7761e5d8f31e54b764da21d33cd8b0a2940e1b05526c7dfcb5e94b0431426f70'; Directory='client' },
+            @{ Id='microsoft.windows.sdk.buildtools'; Version='10.0.26100.3916'; Sha='9cb064e5815cd3f3ae89ee223c82f7091be0caa07507e38b871137e4ea3d5d33'; Directory='sdk' }
+          )
+          foreach ($pin in $pins) {
+            $archive = Join-Path $env:RUNNER_TEMP ($pin.Directory + '.zip')
+            Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/$($pin.Id)/$($pin.Version)/$($pin.Id).$($pin.Version).nupkg" -OutFile $archive
+            if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pin.Sha) { throw 'Signing tool package digest mismatch' }
+            Expand-Archive $archive (Join-Path $env:RUNNER_TEMP $pin.Directory)
+          }
+          $metadata = Join-Path $env:RUNNER_TEMP 'signing-metadata.json'
+          @{ Endpoint=$env:SIGNING_ENDPOINT; CodeSigningAccountName=$env:SIGNING_ACCOUNT; CertificateProfileName=$env:SIGNING_PROFILE; ExcludeCredentials=@('EnvironmentCredential','ManagedIdentityCredential','WorkloadIdentityCredential','SharedTokenCacheCredential','VisualStudioCredential','VisualStudioCodeCredential','AzurePowerShellCredential','AzureDeveloperCliCredential','InteractiveBrowserCredential') } | ConvertTo-Json -Depth 5 | Set-Content $metadata
+          "TAU_WINDOWS_SIGNTOOL=$env:RUNNER_TEMP\sdk\bin\10.0.26100.0\x64\signtool.exe" >> $env:GITHUB_ENV
+          "TAU_WINDOWS_SIGNING_DLIB=$env:RUNNER_TEMP\client\bin\x64\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
+          "TAU_WINDOWS_SIGNING_METADATA=$metadata" >> $env:GITHUB_ENV
+      - name: Authenticate to the approved signing profile using OIDC
+        uses: azure/login@eec3c95657c1536435858eda1f3ff5437fee8474 # v2.3.0
+        with:
+          client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SIGNING_SUBSCRIPTION_ID }}
+      - name: Sign the PE closure and make the verified per-user installer
+        env:
+          TAU_WINDOWS_APP_DIR: ${{ steps.stage.outputs.app }}
+        run: pnpm nx run desktop:make-windows-installer
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-win32-x64
+          path: |
+            out/installer-output/Tau-*.exe
+            out/installer-input/Tau-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  linux:
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: desktop-installers-${{ needs.resolve.outputs.channel }}
+    env:
+      DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      TAU_DESKTOP_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+      DESKTOP_CANDIDATE_TARGET: linux-x64
+      DESKTOP_CANDIDATE_ARCHIVES: ${{ github.workspace }}/out/installer-input
+      DESKTOP_CANDIDATE_STAGE: ${{ github.workspace }}/out/installer-stage
+      TAU_LINUX_MAINTAINER: ${{ vars.TAU_LINUX_MAINTAINER }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: desktop-linux-x64
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: out/installer-input
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-metadata
+          run-id: ${{ inputs.release_run_id }}
+          github-token: ${{ github.token }}
+          path: out/installer-input
+      - name: Configure the independently approved public verification keys
+        env:
+          PUBLIC_KEYS: ${{ vars.TAU_APPIMAGE_PUBLIC_KEYS }}
+        run: |
+          test -n "$PUBLIC_KEYS"
+          printf '%s' "$PUBLIC_KEYS" > "$RUNNER_TEMP/appimage-public-keys.json"
+          echo "TAU_APPIMAGE_PUBLIC_KEYS_FILE=$RUNNER_TEMP/appimage-public-keys.json" >> "$GITHUB_ENV"
+      - name: Verify and extract the finalized application
+        id: stage
+        run: pnpm nx run desktop:installer-candidate --args=stage
+      - name: Make immutable runtime and selector packages
+        env:
+          TAU_LINUX_APP_DIR: ${{ steps.stage.outputs.app }}
+          TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/installer-deb
+        run: pnpm nx run desktop:make-linux-deb
+      - name: Make the portable AppImage with embedded approved public keys
+        env:
+          TAU_APPIMAGE_APP_DIR: ${{ steps.stage.outputs.app }}
+          TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/installer-appimage
+        run: pnpm nx run desktop:make-appimage
+      - name: Wrap the verified AppImage in managed runtime and selector packages
+        env:
+          TAU_LINUX_APP_DIR: ${{ github.workspace }}/out/installer-appimage/verification/squashfs-root
+          TAU_MANAGED_APPIMAGE: ${{ github.workspace }}/out/installer-appimage/Tau-linux-x64.AppImage
+          TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/installer-appimage-deb
+        run: pnpm nx run desktop:make-linux-deb
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: installer-linux-x64
+          path: |
+            out/installer-deb/*.deb
+            out/installer-appimage-deb/*.deb
+            out/installer-appimage/*.AppImage
+            out/installer-input/Tau-*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  candidate:
+    if: >-
+      always() && !cancelled() && needs.resolve.result == 'success' && needs.linux.result == 'success' &&
+      ((inputs.scope == 'linux' && needs.macos.result == 'skipped' && needs.windows.result == 'skipped') ||
+       (inputs.scope != 'linux' && needs.macos.result == 'success' && needs.windows.result == 'success'))
+    needs: [resolve, macos, windows, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: desktop-installers-${{ needs.resolve.outputs.channel }}
+    env:
+      DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      TAU_DESKTOP_SOURCE_SHA: ${{ needs.resolve.outputs.source }}
+      DESKTOP_ASSETS_DIR: ${{ github.workspace }}/out/installer-candidate
+      TAU_APPIMAGE_KEY_ID: ${{ vars.TAU_APPIMAGE_KEY_ID }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: installer-*
+          path: out/installer-parts
+      - name: Flatten canonical artifacts without collisions
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdirSync, mkdirSync, copyFileSync, constants } from 'node:fs';
+          import { join, basename } from 'node:path';
+          mkdirSync(process.env.DESKTOP_ASSETS_DIR, {recursive:true});
+          const visit = (directory) => {
+            for (const entry of readdirSync(directory, {withFileTypes:true})) {
+              const path = join(directory, entry.name);
+              if (entry.isSymbolicLink()) throw new Error('Unexpected candidate artifact link');
+              if (entry.isDirectory()) visit(path);
+              else if (/^(?:Tau-[A-Za-z0-9.-]+|tau(?:-staging)?(?:-appimage)?(?:-runtime-[0-9.]+)?_[0-9.]+_amd64\.deb)$/.test(entry.name)) copyFileSync(path, join(process.env.DESKTOP_ASSETS_DIR, basename(path)), constants.COPYFILE_EXCL);
+              else throw new Error('Unexpected candidate artifact');
+            }
+          };
+          visit('out/installer-parts');
+          NODE
+      - name: Admit the approved descriptor signing key
+        env:
+          TAU_APPIMAGE_PRIVATE_KEY_FILE: ${{ runner.temp }}/appimage-private.pem
+          PRIVATE_KEY: ${{ secrets.TAU_APPIMAGE_PRIVATE_KEY }}
+          PUBLIC_KEYS: ${{ vars.TAU_APPIMAGE_PUBLIC_KEYS }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { createPrivateKey, createPublicKey } from 'node:crypto';
+          import { writeFileSync } from 'node:fs';
+          const privateKey = createPrivateKey(process.env.PRIVATE_KEY ?? '');
+          const keys = JSON.parse(process.env.PUBLIC_KEYS ?? '{}');
+          const expected = createPublicKey(keys[process.env.TAU_APPIMAGE_KEY_ID]);
+          const actual = createPublicKey(privateKey);
+          if (actual.asymmetricKeyType !== 'ed25519' || !actual.export({type:'spki',format:'der'}).equals(expected.export({type:'spki',format:'der'}))) throw new Error('Descriptor signer differs from embedded public key');
+          writeFileSync(process.env.TAU_APPIMAGE_PRIVATE_KEY_FILE, privateKey.export({type:'pkcs8',format:'pem'}), {mode:0o600,flag:'wx'});
+          NODE
+          echo "TAU_APPIMAGE_PRIVATE_KEY_FILE=$RUNNER_TEMP/appimage-private.pem" >> "$GITHUB_ENV"
+      - name: Prepare the exact candidate manifest and original signed descriptors once
+        run: |
+          TAU_UPDATE_ISSUED_AT=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+          export TAU_UPDATE_ISSUED_AT
+          pnpm nx run desktop:publish --args=prepare-routes
+      - name: Prepare the signed qualification APT snapshot
+        env:
+          GNUPGHOME: ${{ runner.temp }}/qualification-apt-keys
+          TAU_APT_PRIMARY_FINGERPRINT: ${{ vars.TAU_APT_PRIMARY_FINGERPRINT }}
+          TAU_APT_SIGNING_FINGERPRINT: ${{ vars.TAU_APT_SIGNING_FINGERPRINT }}
+          APT_PRIVATE_SUBKEY: ${{ secrets.TAU_APT_PRIVATE_KEY_BASE64 }}
+        run: |
+          : "${TAU_APT_PRIMARY_FINGERPRINT:?Configure the approved offline primary public fingerprint}"
+          : "${TAU_APT_SIGNING_FINGERPRINT:?Configure the distinct online signing subkey fingerprint}"
+          : "${APT_PRIVATE_SUBKEY:?Provide only the exported online signing subkey}"
+          install -d -m 700 "$GNUPGHOME"
+          printf '%s' "$APT_PRIVATE_SUBKEY" | base64 --decode | gpg --batch --import
+          pnpm nx run desktop:qualification-apt-snapshot --args=--prepare
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ inputs.scope == 'linux' && 'desktop-linux-installer-candidate' || 'desktop-installer-candidate' }}
+          path: out/installer-candidate/*
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: false
+      - name: Remove temporary signing material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/appimage-private.pem"
+          if test -d "$RUNNER_TEMP/qualification-apt-keys"; then
+            gpgconf --homedir "$RUNNER_TEMP/qualification-apt-keys" --kill all
+            rm -rf "$RUNNER_TEMP/qualification-apt-keys"
+          fi
+      - name: Record qualification boundary
+        run: echo 'Candidate assembly preserves original descriptors. It does not grant CI/VM installed-route qualification or public promotion.' >> "$GITHUB_STEP_SUMMARY"

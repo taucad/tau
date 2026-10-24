@@ -343,6 +343,37 @@ describe('quiet update snapshots', () => {
     expect(autoUpdater.quitAndInstall).not.toHaveBeenCalled();
     expect(onState).toHaveBeenLastCalledWith(updater.snapshot());
   });
+  it('uses the normal latest feed for the second bounded qualification replacement', async () => {
+    const autoUpdater = squirrel();
+    const fetchJson = vi.fn(async () => feed('0.3.0'));
+    const updater = startDesktopUpdater(
+      options({
+        autoUpdater,
+        fetchJson,
+        installForProbe: true,
+        expectedUpdate: { tag: 'desktop@0.3.0', version: '0.3.0', sourceCommit: 'c'.repeat(40) },
+      }),
+    );
+    await updater.check();
+    expect(fetchJson).toHaveBeenCalledWith('https://downloads.tau.new/latest/desktop-update-darwin-arm64.json');
+    autoUpdater.listeners.get('update-downloaded')?.();
+    await vi.waitFor(() => {
+      expect(autoUpdater.quitAndInstall).toHaveBeenCalledOnce();
+    });
+  });
+  it('refuses an unexpected latest qualification release before native download', async () => {
+    const autoUpdater = squirrel();
+    const updater = startDesktopUpdater(
+      options({
+        autoUpdater,
+        installForProbe: true,
+        expectedUpdate: { tag: 'desktop@0.4.0', version: '0.4.0', sourceCommit: 'c'.repeat(40) },
+      }),
+    );
+    await updater.check();
+    expect(updater.snapshot().phase).toBe('error');
+    expect(autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+  });
   it('should preserve automated installation only for a bounded candidate probe', async () => {
     const autoUpdater = squirrel();
     const updater = startDesktopUpdater(options({ autoUpdater, installForProbe: true, candidateTag: 'desktop@0.3.0' }));

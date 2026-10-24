@@ -17,7 +17,6 @@ import type {
   EvaluateModelRpcInput,
   EvaluateModelRpcResult,
   CaptureImagesRpcResult,
-  CaptureImagesRpcInput,
   RunGeoSpecTestsRpcResult,
 } from '@taucad/chat';
 import { rpcClientErrorCode, rpcClientErrorCodeSchema } from '@taucad/chat';
@@ -30,6 +29,7 @@ import type {
   RpcRuntimeClient,
   RpcGraphicsClient,
   RpcImageClient,
+  CaptureImagesClientInput,
   RpcGeoSpecClient,
   RpcGraphicsExportModelResult,
   RpcDirectoryEntry,
@@ -720,7 +720,14 @@ function createBrowserImageClient(
   };
 
   return {
-    async captureImages(input: CaptureImagesRpcInput, context): Promise<CaptureImagesRpcResult> {
+    async captureImages(input: CaptureImagesClientInput, context): Promise<CaptureImagesRpcResult> {
+      if (input.workbenchView !== undefined) {
+        return {
+          success: false,
+          errorCode: rpcClientErrorCode.validationError,
+          message: `This host captures the open viewer, which cannot draw saved view ${input.workbenchView.id}; omit workbenchView and pass targetFile.`,
+        };
+      }
       const resolved = await ensureGeometryUnit(projectRef, input.targetFile, {
         operationTimeoutForFile,
         signal: context?.signal,

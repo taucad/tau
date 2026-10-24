@@ -1595,9 +1595,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        *
        * This runs on the document's last frame — `pagehide`, a route change, a
        * worker being replaced — and stopping the tree cancels whatever the
-       * `hidden` flush started. Waiting here is what makes "the close revision
-       * is pushed, or recorded as unsent" true; after the bound the durable
-       * queue is the guarantee and the next open retries it (D28).
+       * `hidden` flush started. Only a confirmed durable queue write allows
+       * the next open to retry unacknowledged work (D28); a persistence failure
+       * or unfinished local apply keeps this root available for recovery.
        */
       /* Every checkout no turn holds, live and linked (the close ruling, D6).
        * A refused cut still lets the scheduler push what the others minted,
@@ -1616,10 +1616,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       }
       try {
         await awaitSyncSettled(actor);
-      } catch {
-        /* RV-W2b #2: only a refused cut keeps the tree. A failed or unsettled
-         * sync is already in the durable queue, and the Sync region keeps its
-         * refusal (D28). */
+      } catch (error) {
+        refused ??= error instanceof Error ? error : new Error(String(error));
       }
       if (refused !== undefined) {
         throw refused;

@@ -2,7 +2,7 @@
 
 ## Authoring and ownership
 
-`.agents/skills/<name>/SKILL.md` is the sole authored project skill tree. `.claude/skills` is a directory alias; adjacent CLAUDE files import canonical AGENTS bodies. Read [AGENTS policy](../docs/policy/agents-md-policy.md), [Create Skill](skills/create-skill/SKILL.md) and the actual parent/helper chain before editing a workflow.
+`.agents/skills/<name>/SKILL.md` is the sole authored project skill tree. `.claude/skills` is a directory alias. Codex and Claude read canonical AGENTS bodies directly. Read [AGENTS policy](../docs/policy/agents-md-policy.md), [Create Skill](skills/create-skill/SKILL.md) and the actual parent/helper chain before editing a workflow.
 
 Write precise natural task triggers and keep skill selection/composition enabled by default. A slash command is optional. Do not add `disable-model-invocation` or a false Codex implicit-invocation policy without a deliberate user requirement and the policy's recorded exception. Invocation metadata is not action authorization or a security boundary; preserve bounded input, provenance, rights, trusted-source and publication gates.
 

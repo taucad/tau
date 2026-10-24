@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { TauViewerShowResult, TauViewerSyncResult } from '@taucad/mcp/viewer-protocol';
-import { startLiveLink, whenDrawn } from '#app/live-link.js';
+import type { TauViewerShowResult, TauViewerSyncResult, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
+import type { GeometryComponentReference } from '@taucad/types';
+import { startLiveLink, viewStateOf, whenDrawn } from '#app/live-link.js';
 import type { LiveLink, LiveLinkPage } from '#app/live-link.js';
 
 const shown: TauViewerShowResult = {
@@ -48,7 +49,9 @@ const pageOf = (overrides: Partial<LiveLinkPage>): LiveLinkPage => ({
   linked: () => false,
   toolCallId: () => undefined,
   show: vi.fn<LiveLinkPage['show']>(),
+  status: vi.fn<LiveLinkPage['status']>(),
   capture: async () => ({ error: 'unused' }),
+  pose: vi.fn<LiveLinkPage['pose']>(),
   ...overrides,
 });
 
@@ -61,18 +64,120 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const sunGear: GeometryComponentReference = {
+  scheme: 'tau-cad',
+  filePath: 'gear.ts',
+  componentId: 'component:sun',
+  selector: 'node/1',
+  label: 'Sun gear',
+  kind: 'part',
+};
+
+const viewOf = (references: readonly GeometryComponentReference[]): TauViewerViewState =>
+  viewStateOf({
+    model: shown.model,
+    unit: { selectedComponentIds: [], hiddenComponentIds: [], isolatedComponentIds: [] },
+    camera: undefined,
+    sectionActive: false,
+    measurementCount: 0,
+    composition: 'tab',
+    interactedAt: 0,
+    references,
+  });
+
+describe('viewStateOf', () => {
+  it('should report the parts added to chat as view_state names components', () => {
+    const carrier: GeometryComponentReference = {
+      ...sunGear,
+      componentId: 'component:carrier',
+      selector: '',
+      label: 'Carrier',
+    };
+
+    expect(viewOf([sunGear, carrier]).references).toEqual([
+      { componentId: 'component:sun', label: 'Sun gear', kind: 'part', selector: 'node/1' },
+      { componentId: 'component:carrier', label: 'Carrier', kind: 'part' },
+    ]);
+    expect(viewOf([]).references).toEqual([]);
+  });
+});
+
+describe('viewStateOf motion', () => {
+  it('should report the mechanism, playback and coordinates of a unit with motion, and none without', () => {
+    const motion = {
+      mechanism: { preserved: true, joints: 2, animations: ['four-sun-turns'] },
+      playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
+      coordinates: { sun: 360, carrier: 90 },
+    } as const;
+    const view = viewStateOf({
+      model: shown.model,
+      unit: { selectedComponentIds: [], hiddenComponentIds: [], isolatedComponentIds: [] },
+      camera: undefined,
+      sectionActive: false,
+      measurementCount: 0,
+      composition: 'tab',
+      interactedAt: 0,
+      references: [],
+      motion,
+    });
+
+    expect(view).toMatchObject(motion);
+    expect(viewOf([])).not.toHaveProperty('playback');
+  });
+});
+
 describe('startLiveLink', () => {
-  it('should keep a card on its model and name the tool call that opened it', async () => {
-    const { calls, callTool } = scriptedServer([{ version: 1, show: shown }]);
+  it('should apply each pose command once, however often the server repeats it', async () => {
+    const command = {
+      sequence: 3,
+      modelId: 'm2',
+      animation: { id: 'four-sun-turns', action: 'seek', time: 2 },
+    } as const;
+    const { calls, callTool } = scriptedServer([
+      { version: 1, pose: command },
+      { version: 1, pose: command },
+    ]);
+    const pose = vi.fn<LiveLinkPage['pose']>();
+    links.push(startLiveLink(callTool, pageOf({ pose })));
+
+    await vi.waitFor(() => {
+      expect(calls.filter((call) => call.name === 'app_sync')).toHaveLength(3);
+    });
+    expect(pose).toHaveBeenCalledOnce();
+    expect(pose).toHaveBeenCalledWith(command);
+  });
+
+  it('should send the added parts only once the server lists them under accepts', async () => {
+    /* An older server answers without accepts; a newer one lists the field. */
+    const { calls, callTool } = scriptedServer([{ version: 1 }, { version: 1, accepts: ['references'] }]);
+    const view = viewOf([sunGear]);
+    links.push(startLiveLink(callTool, pageOf({ view: () => view })));
+
+    await vi.waitFor(() => {
+      expect(calls.filter((call) => call.name === 'app_sync')).toHaveLength(3);
+    });
+    const views = calls.map((call) => call.args['view'] as TauViewerViewState);
+    expect(views[0]).not.toHaveProperty('references');
+    expect(views[1]).not.toHaveProperty('references');
+    expect(views[2]).toEqual(view);
+  });
+
+  it('should hand a card the newer render of its source the server sends, its status, and name the call that opened it', async () => {
+    const status = { 'main.ts': { building: true, issues: [] } } as const;
+    const { calls, callTool } = scriptedServer([{ version: 1, show: shown, status }]);
     const show = vi.fn<LiveLinkPage['show']>();
-    links.push(startLiveLink(callTool, pageOf({ follows: () => false, toolCallId: () => 'call-7', show })));
+    const onStatus = vi.fn<LiveLinkPage['status']>();
+    links.push(
+      startLiveLink(callTool, pageOf({ follows: () => false, toolCallId: () => 'call-7', show, status: onStatus })),
+    );
 
     await vi.waitFor(() => {
       expect(calls.filter((call) => call.name === 'app_sync')).toHaveLength(2);
     });
     expect(calls[0]?.args).toMatchObject({ follow: false, toolCallId: 'call-7', wait: true });
     expect(calls[1]?.args).toMatchObject({ version: 1 });
-    expect(show).not.toHaveBeenCalled();
+    expect(show).toHaveBeenCalledWith(shown);
+    expect(onStatus).toHaveBeenCalledWith(status);
   });
 
   it('should hand a page the person opened each model shown', async () => {

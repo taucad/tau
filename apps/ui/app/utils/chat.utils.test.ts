@@ -846,6 +846,33 @@ describe('serializeMessage', () => {
       );
     });
 
+    it('serializes the export_model validation of its files', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-export_model',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { targetFile: 'main.ts', to: 'glb' },
+          output: {
+            to: 'glb',
+            exportId: 'glb',
+            files: [
+              {
+                name: 'model.glb',
+                artifactPath: '.tau/artifacts/c1__main.ts-glb/model.glb',
+                mimeType: 'model/gltf-binary',
+                byteLength: 10,
+              },
+            ],
+            validation: { units: 'm', triangles: 12, watertight: true },
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="export_model">\ntargetFile: main.ts\nto: glb\n</tool_call>\n<tool_result>\nto: glb\nexportId: glb\nmodel.glb: .tau/artifacts/c1__main.ts-glb/model.glb (model/gltf-binary, 10 bytes)\nValidation: units m, 12 triangles, watertight\n</tool_result>',
+      );
+    });
+
     it.each<[string, NonNullable<EvaluateModelOutput['mechanism']>, string]>([
       [
         'an admitted mechanism',

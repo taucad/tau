@@ -22,8 +22,18 @@ const bytes = (value: string): Uint8Array<ArrayBuffer> => new TextEncoder().enco
 const snapshot: ShareProjectSnapshot = {
   entryPath: 'main.ts',
   files: [
-    { path: 'main.ts', content: bytes('export default 1;'), sha256: 'main', role: 'entry' },
-    { path: 'tau.json', content: bytes('{}'), sha256: 'manifest', role: 'project-metadata' },
+    {
+      path: 'main.ts',
+      content: bytes('export default 1;'),
+      sha256: 'main',
+      role: 'entry',
+    },
+    {
+      path: 'tau.json',
+      content: bytes('{}'),
+      sha256: 'manifest',
+      role: 'project-metadata',
+    },
   ],
   warnings: [],
 };
@@ -32,7 +42,7 @@ const directAnswer = (encodedArchive: string, warnings: TauViewerDirectShare['wa
   origin: 'https://tau.new',
   entryPath: 'main.ts',
   encodedArchive,
-  closure: 'project-files',
+  closure: 'runtime',
   fileCount: 2,
   uncompressedBytes: 19,
   archiveBytes: 200,
@@ -52,7 +62,7 @@ const request = {
 
 const shareWith = async (
   bridge: HostBridge,
-  id = 'open-in-tau',
+  id = 'direct',
   protection: ShareLinkProtection = request.protection,
 ): Promise<unknown> => {
   const method = createShareSource(bridge, model).methods.find((candidate) => candidate.id === id);
@@ -63,16 +73,13 @@ const shareWith = async (
 };
 
 describe('createShareSource', () => {
-  it('should offer the direct link with a password first, then Open in Tau without one', () => {
+  it('should offer the direct link, with a password, as its one method', () => {
     const { methods } = createShareSource(
       bridgeAnswering(async () => ({})),
       model,
     );
 
-    expect(methods.map(({ id, label }) => [id, label])).toEqual([
-      ['direct', 'Direct link'],
-      ['open-in-tau', 'Open in Tau'],
-    ]);
+    expect(methods.map(({ id, label }) => [id, label])).toEqual([['direct', 'Direct link']]);
     expect(methods[0]).toMatchObject({
       kind: 'link',
       description: 'Create a self-contained link that works without a Tau account or storage.',
@@ -81,19 +88,28 @@ describe('createShareSource', () => {
       action: { label: 'Copy direct link' },
       copiedMessage: 'Direct link copied',
     });
-    expect(methods[1]).not.toHaveProperty('encryption');
   });
 
   it('should make the direct link from the project the server packed', async () => {
     const { encodedArchive } = await shareArtifactCodec.pack(snapshot);
     const bridge = bridgeAnswering(async () => directAnswer(encodedArchive, []));
 
-    const outcome = (await shareWith(bridge, 'direct')) as { readonly url: string };
+    const outcome = (await shareWith(bridge, 'direct')) as {
+      readonly url: string;
+    };
 
-    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, { modelId: 'model-1', kind: 'direct' });
-    expect(outcome).toEqual({ url: `https://tau.new/s/direct#v=2&zip=${encodedArchive}`, warning: undefined });
+    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, {
+      modelId: 'model-1',
+    });
+    expect(outcome).toEqual({
+      url: `https://tau.new/s/direct#v=2&zip=${encodedArchive}`,
+      warning: undefined,
+    });
     const { pathname, hash } = new URL(outcome.url);
-    const { locator, secrets } = parseShareUrl({ slug: pathname.slice('/s/'.length), fragment: hash });
+    const { locator, secrets } = parseShareUrl({
+      slug: pathname.slice('/s/'.length),
+      fragment: hash,
+    });
     expect(locator).toEqual({ providerId: 'direct' });
     const opened = await shareArtifactCodec.openPlain(secrets['zip']!);
     expect(opened.files.map(({ path }) => path)).toEqual(['main.ts', 'tau.json']);
@@ -116,64 +132,22 @@ describe('createShareSource', () => {
     const { hash } = new URL(outcome.url);
     const { secrets } = parseShareUrl({ slug: 'direct', fragment: hash });
     expect(Object.keys(secrets).sort()).toEqual(['jwe', 'v']);
-    const opened = await shareArtifactCodec.openWithPassword({ compactJwe: secrets['jwe']!, password });
+    const opened = await shareArtifactCodec.openWithPassword({
+      compactJwe: secrets['jwe']!,
+      password,
+    });
     expect(opened.files.map(({ path }) => path)).toEqual(['main.ts', 'tau.json']);
   });
 
   it('should pass on a direct link refusal as the error sentence', async () => {
     await expect(
       shareWith(
-        bridgeAnswering(async () => ({ errorCode: 'SHARE_ARTIFACT_LIMIT', message: 'Too large.' })),
+        bridgeAnswering(async () => ({
+          errorCode: 'SHARE_ARTIFACT_LIMIT',
+          message: 'Too large.',
+        })),
         'direct',
       ),
     ).resolves.toEqual({ error: 'Too large.' });
-  });
-
-  it('should ask the server for the shown model link and answer it', async () => {
-    const bridge = bridgeAnswering(async () => ({
-      url: 'https://tau.new/import/https://github.com/taucad/brackets?ref=main&main=bracket.ts',
-      repository: 'taucad/brackets',
-      ref: 'main',
-      hasLocalChanges: false,
-    }));
-
-    await expect(shareWith(bridge)).resolves.toEqual({
-      url: 'https://tau.new/import/https://github.com/taucad/brackets?ref=main&main=bracket.ts',
-      warning: undefined,
-    });
-    expect(bridge.callTool).toHaveBeenCalledWith(appShareLinkTool, {
-      modelId: 'model-1',
-      kind: 'github',
-    });
-  });
-
-  it('should warn when the checkout has changes GitHub does not have', async () => {
-    const bridge = bridgeAnswering(async () => ({
-      url: 'https://tau.new/import/https://github.com/taucad/brackets?ref=main',
-      repository: 'taucad/brackets',
-      ref: 'main',
-      hasLocalChanges: true,
-    }));
-
-    const outcome = (await shareWith(bridge)) as { readonly warning?: string };
-    expect(outcome.warning).toContain('taucad/brackets at main');
-  });
-
-  it('should pass on the server refusal as the error sentence', async () => {
-    await expect(
-      shareWith(
-        bridgeAnswering(async () => {
-          throw new Error('This branch is not pushed to GitHub.');
-        }),
-      ),
-    ).resolves.toEqual({ error: 'This branch is not pushed to GitHub.' });
-    await expect(
-      shareWith(
-        bridgeAnswering(async () => ({
-          errorCode: 'NOT_ON_GITHUB',
-          message: 'Not on GitHub.',
-        })),
-      ),
-    ).resolves.toEqual({ error: 'Not on GitHub.' });
   });
 });

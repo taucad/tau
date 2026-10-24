@@ -1,20 +1,35 @@
-import { Menu, Search } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
+import { Search } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { defaultFilter } from 'cmdk';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Fragment } from 'react/jsx-runtime';
 import { useNavigate } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { CommandDialog, CommandInput, CommandList, CommandEmpty, CommandItem } from '@taucad/ui/components/command';
+import {
+  Command,
+  CommandDialog,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandItem,
+} from '@taucad/ui/components/command';
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+  DrawerTrigger,
+} from '@taucad/ui/components/drawer';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
 import type { KeyCombination } from '@taucad/ui/utils/keys';
-import { ComboBoxResponsive } from '@taucad/ui/components/combobox-responsive';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { menuGroupHeadingClass, menuItemLayoutClass } from '@taucad/ui/components/menu.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
-import { SidebarMenuButton } from '#components/ui/sidebar.js';
+import { SidebarMenuButton, useSidebar } from '#components/ui/sidebar.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 import { ProjectNavigationCommandItems } from '#components/nav/project-navigation-command-items.js';
 
 /**
@@ -116,7 +131,11 @@ const commandValue = (item: CommandPaletteItem): string => `${item.searchValue ?
 
 type CommandPaletteRow =
   | { readonly kind: 'heading'; readonly key: string; readonly group: string }
-  | { readonly kind: 'item'; readonly key: string; readonly item: CommandPaletteItem };
+  | {
+      readonly kind: 'item';
+      readonly key: string;
+      readonly item: CommandPaletteItem;
+    };
 
 /**
  * Ranks items the way cmdk would — drop non-matches, then order each group and the
@@ -127,7 +146,13 @@ type CommandPaletteRow =
  * @returns Flat heading and item rows for the virtualized list.
  */
 export function rankCommandPaletteRows(items: readonly CommandPaletteItem[], search: string): CommandPaletteRow[] {
-  const groups = new Map<string, { score: number; matches: Array<{ item: CommandPaletteItem; score: number }> }>();
+  const groups = new Map<
+    string,
+    {
+      score: number;
+      matches: Array<{ item: CommandPaletteItem; score: number }>;
+    }
+  >();
 
   for (const item of items) {
     if (item.visible === false) {
@@ -149,17 +174,32 @@ export function rankCommandPaletteRows(items: readonly CommandPaletteItem[], sea
       { kind: 'heading', key: `group-${name}`, group: name },
       ...group.matches
         .sort((left, right) => right.score - left.score)
-        .map(({ item }): CommandPaletteRow => ({ kind: 'item', key: item.id, item })),
+        .map(
+          ({ item }): CommandPaletteRow => ({
+            kind: 'item',
+            key: item.id,
+            item,
+          }),
+        ),
     ]);
 }
 
 type CommandPaletteResultsProperties = {
   readonly items: CommandPaletteItem[];
   readonly onRun: (item: CommandPaletteItem) => void;
+  /** Sizes the result list; the dialog keeps the list's own maximum height. */
+  readonly listClassName?: string;
+  /** A control on the field's row, after the field so the field stays the first stop. */
+  readonly inputAction?: React.ReactNode;
 };
 
 /** Mounted only while the dialog is open, so the query resets on every open. */
-function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties): React.JSX.Element {
+export function CommandPaletteResults({
+  items,
+  onRun,
+  listClassName,
+  inputAction,
+}: CommandPaletteResultsProperties): React.JSX.Element {
   const [search, setSearch] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => rankCommandPaletteRows(items, search), [items, search]);
@@ -181,18 +221,29 @@ function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties
     overscan: 8,
   });
 
+  const input = (
+    <CommandInput
+      className='h-9 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
+      placeholder='Search projects, chats, and actions…'
+      value={search}
+      onValueChange={(value) => {
+        setSearch(value);
+        virtualizer.scrollToOffset(0);
+      }}
+    />
+  );
+
   return (
     <>
-      <CommandInput
-        className='h-9 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
-        placeholder='Search projects, chats, and actions…'
-        value={search}
-        onValueChange={(value) => {
-          setSearch(value);
-          virtualizer.scrollToOffset(0);
-        }}
-      />
-      <CommandList ref={listRef} className='py-0'>
+      {inputAction ? (
+        <div className='flex items-center gap-1 border-b pr-1 [&_[data-slot=command-input-wrapper]]:flex-1 [&_[data-slot=command-input-wrapper]>svg]:hidden'>
+          {input}
+          {inputAction}
+        </div>
+      ) : (
+        input
+      )}
+      <CommandList ref={listRef} className={cn('py-0', listClassName)}>
         {rows.length === 0 ? <CommandEmpty>No results found.</CommandEmpty> : null}
         <div className='relative w-full' style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -228,16 +279,15 @@ function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties
   );
 }
 
-type CommandPaletteProperties = {
-  readonly isOpen: boolean;
-  readonly onOpenChange: (isOpen: boolean) => void;
-  readonly items: CommandPaletteItem[];
-};
-
-function CommandPalette({ isOpen, onOpenChange, items }: CommandPaletteProperties): React.JSX.Element {
+/**
+ * Closes the palette, then follows the item's link or runs its action.
+ * @param onOpenChange - The palette's open setter.
+ * @returns The handler for a picked item.
+ */
+function useRunCommand(onOpenChange: (isOpen: boolean) => void): (item: CommandPaletteItem) => void {
   const navigate = useNavigate();
 
-  const runCommand = useCallback(
+  return useCallback(
     (item: CommandPaletteItem) => {
       onOpenChange(false);
       if (item.link) {
@@ -248,6 +298,31 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
     },
     [navigate, onOpenChange],
   );
+}
+
+type CommandPaletteProperties = {
+  readonly isOpen: boolean;
+  readonly onOpenChange: (isOpen: boolean) => void;
+  readonly items: CommandPaletteItem[];
+};
+
+/** Runs `onUnmount` when the dialog content leaves, after its exit animation. */
+function OnContentUnmount({ onUnmount }: { readonly onUnmount: () => void }): undefined {
+  useEffect(() => onUnmount, [onUnmount]);
+  return undefined;
+}
+
+type CommandPaletteDialogProperties = CommandPaletteProperties & {
+  readonly onContentUnmount: () => void;
+};
+
+function CommandPalette({
+  isOpen,
+  onOpenChange,
+  items,
+  onContentUnmount,
+}: CommandPaletteDialogProperties): React.JSX.Element {
+  const runCommand = useRunCommand(onOpenChange);
 
   return (
     <CommandDialog
@@ -256,6 +331,7 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
       onOpenChange={onOpenChange}
       contentClassName='*:data-[slot=dialog-close]:hidden [&_[data-slot=command-input-wrapper]>svg]:hidden'
     >
+      <OnContentUnmount onUnmount={onContentUnmount} />
       <CommandPaletteResults items={items} onRun={runCommand} />
     </CommandDialog>
   );
@@ -266,109 +342,125 @@ const commandKeyCombination = {
   modKey: true,
 } as const satisfies KeyCombination;
 
-type CommandPaletteTriggerProperties = {
-  readonly items: CommandPaletteItem[];
+type CommandPaletteTriggerProperties = CommandPaletteProperties & {
+  readonly formattedKeyCombination: string;
 };
 
-function CommandPaletteTrigger({ items }: CommandPaletteTriggerProperties): React.JSX.Element {
-  const [open, setOpen] = useState(false);
+/** The wide-screen trigger: a labelled Search row with its shortcut, opening the palette dialog. */
+function CommandPaletteTrigger({
+  isOpen,
+  onOpenChange,
+  items,
+  formattedKeyCombination,
+}: CommandPaletteTriggerProperties): React.JSX.Element {
+  /*
+   * `CommandDialog` has no Radix trigger, so on close it would leave focus on the page body. The
+   * opener is the Search row, or whatever had focus when the shortcut fired.
+   */
+  const opener = useRef<HTMLElement | undefined>(undefined);
 
-  const { formattedKeyCombination } = useKeybinding(commandKeyCombination, () => {
-    setOpen((previous) => !previous);
-  });
+  /* Layout effects run before the dialog's focus scope moves focus into the field. */
+  useLayoutEffect(() => {
+    if (isOpen && !opener.current && document.activeElement instanceof HTMLElement) {
+      opener.current = document.activeElement;
+    }
+  }, [isOpen]);
+
+  const returnFocus = useCallback(() => {
+    const element = opener.current;
+    opener.current = undefined;
+    // After the focus scope's own unmount handling; focus an item's action moved elsewhere stays there.
+    setTimeout(() => {
+      const isFocusLost = !document.activeElement || document.activeElement === document.body;
+      if (isFocusLost && element?.isConnected) {
+        element.focus();
+      }
+    }, 0);
+  }, []);
 
   return (
     <>
-      {open ? <ProjectNavigationCommandItems /> : null}
       <SidebarMenuButton
         variant='outline'
         aria-label='Search'
         className='text-muted-foreground max-md:hidden'
-        onClick={() => {
-          setOpen(true);
+        onClick={(event) => {
+          // Safari does not focus a clicked button, so name the row as the opener rather than reading focus.
+          opener.current = event.currentTarget;
+          onOpenChange(true);
         }}
       >
         <Search aria-hidden className='size-4 shrink-0' />
         <span className='flex-1 whitespace-nowrap'>Search</span>
         <KeyShortcut className='ml-2 shrink-0'>{formattedKeyCombination}</KeyShortcut>
       </SidebarMenuButton>
-      <CommandPalette isOpen={open} items={items} onOpenChange={setOpen} />
+      <CommandPalette isOpen={isOpen} items={items} onContentUnmount={returnFocus} onOpenChange={onOpenChange} />
     </>
   );
 }
 
-type CommandPaletteMobileProperties = {
-  readonly items: CommandPaletteItem[];
+type CommandPaletteMobileProperties = CommandPaletteTriggerProperties & {
+  readonly size: 'icon-lg' | 'icon-sm';
 };
 
-function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.JSX.Element {
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-
-  const groupedItems = useMemo(() => {
-    const groupsMap: Record<string, { name: string; items: CommandPaletteItem[] }> = {};
-    const groupOrder: string[] = [];
-
-    for (const item of items) {
-      if (item.visible === false) {
-        continue;
-      }
-
-      if (!groupsMap[item.group]) {
-        groupsMap[item.group] = { name: item.group, items: [] };
-        groupOrder.push(item.group);
-      }
-
-      groupsMap[item.group]!.items.push(item);
-    }
-
-    return Object.values(groupsMap).sort((a, b) => groupOrder.indexOf(a.name) - groupOrder.indexOf(b.name));
-  }, [items]);
-
-  const renderItemLabel = useCallback(
-    (item: CommandPaletteItem, _selectedItem: CommandPaletteItem | undefined) => (
-      <CommandPaletteItemLabel item={item} />
-    ),
-    [],
-  );
-
-  const getItemValue = useCallback((item: CommandPaletteItem) => commandValue(item), []);
-  const isItemDisabled = useCallback((item: CommandPaletteItem) => Boolean(item.disabled), []);
+/**
+ * The phone trigger: a Search icon at the end of the sidebar sheet header, opening the palette as a
+ * full-height sheet with the field focused. The sheet sits above the sidebar sheet (z-100) it opens from.
+ */
+function CommandPaletteMobile({
+  isOpen,
+  onOpenChange,
+  items,
+  formattedKeyCombination,
+  size,
+}: CommandPaletteMobileProperties): React.JSX.Element {
+  const runCommand = useRunCommand(onOpenChange);
 
   return (
-    <Tooltip>
-      {open ? <ProjectNavigationCommandItems /> : null}
-      <ComboBoxResponsive<CommandPaletteItem>
-        isOpen={open}
-        onOpenChange={setOpen}
-        groupedItems={groupedItems}
-        renderLabel={renderItemLabel}
-        getValue={getItemValue}
-        isDisabled={isItemDisabled}
-        withVirtualization
-        searchPlaceHolder='Search projects, chats, and actions…'
-        placeholder='Actions'
-        title='Search projects, chats, and actions'
-        description='Navigate to any project or chat, or run an available action.'
-        onSelect={(itemValue) => {
-          const selectedItem = items.find((item) => getItemValue(item) === itemValue);
-          if (selectedItem) {
-            if (selectedItem.link) {
-              void navigate(selectedItem.link);
-            } else if (selectedItem.action) {
-              selectedItem.action();
-            }
-          }
-        }}
-      >
+    <Drawer autoFocus open={isOpen} onOpenChange={onOpenChange}>
+      <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant='overlay' size='icon' className='text-muted-foreground md:hidden'>
-            <Menu className='size-4' />
-          </Button>
+          <DrawerTrigger asChild>
+            <Button variant='ghost' size={size} aria-label='Search' className='shrink-0 text-muted-foreground'>
+              <Search aria-hidden className='size-4' />
+            </Button>
+          </DrawerTrigger>
         </TooltipTrigger>
-      </ComboBoxResponsive>
-      <TooltipContent>More actions</TooltipContent>
-    </Tooltip>
+        {/* Above the sidebar sheet (z-100) this button sits in. */}
+        <TooltipContent className='z-110'>
+          Search{' '}
+          <KeyShortcut className='ml-1' variant='tooltip'>
+            {formattedKeyCombination}
+          </KeyShortcut>
+        </TooltipContent>
+      </Tooltip>
+      <DrawerContent
+        data-slot='command-palette-sheet'
+        className={cn(
+          'z-110 h-dvh pt-[env(safe-area-inset-top)]',
+          'data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:max-h-dvh data-[vaul-drawer-direction=bottom]:rounded-none data-[vaul-drawer-direction=bottom]:border-t-0',
+        )}
+      >
+        <DrawerTitle className='sr-only'>Search</DrawerTitle>
+        <DrawerDescription className='sr-only'>
+          Navigate to any project or chat, or run an available action.
+        </DrawerDescription>
+        <Command shouldFilter={false} className='min-h-0 flex-1 bg-transparent'>
+          <CommandPaletteResults
+            items={items}
+            listClassName='max-h-none min-h-0 flex-1'
+            inputAction={
+              <DrawerClose asChild>
+                <Button variant='ghost' size='lg' className='shrink-0'>
+                  Cancel
+                </Button>
+              </DrawerClose>
+            }
+            onRun={runCommand}
+          />
+        </Command>
+      </DrawerContent>
+    </Drawer>
   );
 }
 
@@ -444,16 +536,41 @@ export function RouteCommandPaletteItems(): React.JSX.Element {
 }
 
 /**
- * Sidebar search entry point: the palette trigger over every registered item.
- * @returns The palette trigger and its mobile equivalent.
+ * Sidebar search entry point: one palette over every registered item, opened by its trigger or the
+ * shortcut. Wide screens get the labelled Search row and the palette dialog; the phone sidebar sheet
+ * gets a Search icon for its header and the palette as a full-height sheet.
+ * @returns The palette trigger for the current layout.
  */
 export function Commands(): React.JSX.Element {
   const allItems = useContext(CommandPaletteItemsContext);
+  const { isMobile } = useSidebar();
+  const [open, setOpen] = useState(false);
+
+  const { formattedKeyCombination } = useKeybinding(commandKeyCombination, () => {
+    setOpen((previous) => !previous);
+  });
 
   return (
-    <div className='flex items-center gap-2'>
-      <CommandPaletteTrigger items={allItems} />
-      <CommandPaletteMobile items={allItems} />
-    </div>
+    <>
+      {open ? <ProjectNavigationCommandItems /> : null}
+      {isMobile ? (
+        <CommandPaletteMobile
+          isOpen={open}
+          items={allItems}
+          formattedKeyCombination={formattedKeyCombination}
+          size={isDesktopTarget() ? 'icon-sm' : 'icon-lg'}
+          onOpenChange={setOpen}
+        />
+      ) : (
+        <div className='flex items-center gap-2'>
+          <CommandPaletteTrigger
+            isOpen={open}
+            items={allItems}
+            formattedKeyCombination={formattedKeyCombination}
+            onOpenChange={setOpen}
+          />
+        </div>
+      )}
+    </>
   );
 }

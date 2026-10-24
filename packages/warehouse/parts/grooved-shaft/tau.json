@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_EZrzk7IL5NQFwwdSRQAlp",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Retaining-groove shaft",
   "description": "Turned shaft with two circumferential retention grooves.",
   "tags": [

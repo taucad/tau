@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_FKrFXvpNUOoQ61A-E7ahR",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Flanged sleeve bushing",
   "description": "Shouldered sleeve with an integral axial locating flange.",
   "tags": [

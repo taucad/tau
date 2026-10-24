@@ -41,7 +41,7 @@ type Manifest = {
 type LockEntry = { version?: string; resolved?: string; integrity?: string; link?: boolean };
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
-/** The compiled engine published from taucad/geospec; the workspace CLI package is `@taucad/geospec-engine`. */
+/** The compiled engine published from taucad/geospec; Tau's exporter for its pool ships in `@taucad/cli`. */
 const engineName = 'geospec-engine';
 const enginePayload = [
   'dist/node.mjs',
@@ -50,6 +50,22 @@ const enginePayload = [
   'dist/bindings/mixed-wasm/geospec_engine_native.wasm',
   'licenses/SOURCE-RELINK.json',
 ];
+/**
+ * Whether a caret range admits an exact release pin: the same major (and minor below 1.0), at or above its floor.
+ * A prerelease pin or any other range form is never admitted.
+ */
+const caretAdmits = (range: string, pin: string): boolean => {
+  const floor = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range)?.slice(1).map(Number);
+  const target = /^(\d+)\.(\d+)\.(\d+)$/.exec(pin)?.slice(1).map(Number);
+  if (floor === undefined || target === undefined || floor[0] !== target[0]) {
+    return false;
+  }
+  if (floor[0] === 0 && floor[1] !== target[1]) {
+    return false;
+  }
+  const differing = [0, 1, 2].find((index) => floor[index] !== target[index]);
+  return differing === undefined || target[differing]! > floor[differing]!;
+};
 const sha256 = (bytes: BinaryLike): string => createHash('sha256').update(bytes).digest('hex');
 const readManifest = (path: string): Manifest => JSON.parse(readFileSync(path, 'utf8')) as Manifest;
 const run = (command: string, arguments_: string[], cwd = repositoryRoot): string => {
@@ -116,9 +132,9 @@ const main = async (): Promise<void> => {
   assert.ok(engineIntegrity, `pnpm-lock.yaml has no integrity for ${engineName}@${engineVersion}`);
   const resolved = await workspace({ fresh: true });
   const projects = new Map(publishable(resolved).map((project) => [project.name, project]));
-  const closure = publishableClosure(resolved, ['geospec', 'geospec-engine']);
+  const closure = publishableClosure(resolved, ['geospec', 'cli']);
   assert.ok(closure.includes('geospec'), 'GeoSpec is missing from the publishable closure');
-  assert.ok(closure.includes('geospec-engine'), 'GeoSpec CLI is missing from the publishable closure');
+  assert.ok(closure.includes('cli'), 'The Tau CLI is missing from the publishable closure');
   const packages = closure.map((name) => {
     const project = projects.get(name);
     assert.ok(project, `Missing publishable project: ${name}`);
@@ -176,13 +192,18 @@ const main = async (): Promise<void> => {
   );
   for (const { manifest } of packed) {
     for (const dependencies of [manifest.dependencies, manifest.optionalDependencies, manifest.peerDependencies]) {
+      const peers = dependencies !== undefined && dependencies === manifest.peerDependencies;
       for (const [name, version] of Object.entries(dependencies ?? {})) {
         assert.ok(
           !/^(?:workspace|catalog|link|file):/.test(version),
           `Unpublished dependency: ${manifest.name} ${name}`,
         );
         assert.ok(!workspaceNames.has(name) || byName.has(name), `Missing local workspace dependency: ${name}`);
-        assert.ok(name !== engineName || version === engineVersion, `${manifest.name} pins another ${engineName}`);
+        // A peer may name a caret range (`@taucad/host`'s optional engine peer); it must admit the pin.
+        assert.ok(
+          name !== engineName || version === engineVersion || (peers && caretAdmits(version, engineVersion)),
+          `${manifest.name} pins another ${engineName}`,
+        );
       }
     }
   }
@@ -329,6 +350,11 @@ const main = async (): Promise<void> => {
     'f1-public-a1/vitest.config.mjs',
     'fixtures/read-fixture.mjs',
     'fixtures/manifest.json',
+    'installed-cli/cli.test.mjs',
+    'installed-cli/box-project/box-exporter.mjs',
+    'installed-cli/box-project/box.geospec.ts',
+    'installed-cli/box-project/geospec.config.mjs',
+    'installed-cli/box-project/part.box',
   ].map((path) => {
     const input = fileRecord(join(repositoryRoot, 'packages/geospec/host-tests', path));
     const destination = join(consumerRoot, 'host-tests', path);

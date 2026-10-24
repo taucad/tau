@@ -7,14 +7,14 @@ const defaultProductNames = ['Tablet', 'Logo', 'Back URL'] as const;
 
 const expectedEnvelope = {
   size: {
-    x: 20,
-    y: Number('20.0000001'),
-    z: Number('2.8000001000003145'),
+    x: Number('20.0000001'),
+    y: Number('20.0000002'),
+    z: Number('2.8000001000009043'),
   },
   center: {
-    x: 0,
-    y: Number('-4.999999969612645e-8'),
-    z: Number('1.3999999500001574'),
+    x: Number('4.999999969612645e-8'),
+    y: 0,
+    z: Number('1.3999999500004519'),
   },
 } as const;
 
@@ -23,7 +23,7 @@ const expectedHoleCenter = {
   y: -6,
 } as const;
 
-const expectedDefaultVolumeMm3 = Number('802.7033492996917');
+const expectedDefaultVolumeMm3 = Number('784.5168073547474');
 
 const loadDefaultStep = async () =>
   loadModel({ file: 'main.ts', format: 'step' });

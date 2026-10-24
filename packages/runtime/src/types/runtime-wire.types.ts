@@ -26,6 +26,8 @@ export type InitializeMemoryHandle = {
   fileSystemPort?: MessagePortLike;
   computeStorePort?: MessagePortLike;
   computeBindingMode?: 'off' | 'memory' | 'durable';
+  /** The binding's `memoryConstrained`: size the worker's compute caches for a phone-class device. */
+  computeMemoryConstrained?: boolean;
   devtoolsTelemetry?: boolean;
   compiledWasmModules?: readonly CompiledWasmModuleHandle[];
 };

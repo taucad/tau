@@ -82,6 +82,7 @@ export const runtimeInitializeMemoryHandleSchema = z
     fileSystemPort: messagePortSchema.optional(),
     computeStorePort: messagePortSchema.optional(),
     computeBindingMode: z.enum(['off', 'memory', 'durable']).optional(),
+    computeMemoryConstrained: z.boolean().optional(),
     devtoolsTelemetry: z.boolean().optional(),
     compiledWasmModules: z
       .array(z.object({ url: z.string(), module: compiledWasmModuleSchema }).loose())

@@ -1,6 +1,6 @@
 /**
- * Purpose: Resolve and stage the desktop app's runtime-loaded npm packages for one packaged target, and seal the
- * native kernel closures it ships for seeding the payload store.
+ * Purpose: Resolve and stage the desktop app's runtime-loaded npm packages for one packaged target, and prepare the
+ * native kernel closures the app downloads on first use, for the package's verification.
  * Why: Every package script (macOS, Linux, Windows) ships the same externalized engines, adapters and
  * bundled imports; only the native platform packages beside them differ per target.
  * Environment: Node with filesystem access to the workspace store and the staging directory.
@@ -8,9 +8,10 @@
  * Exit codes: n/a (library module).
  */
 
-import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { acpAgentProfiles } from '@taucad/host';
 import { preparationPluginsOf } from '@taucad/native-process-core/store';
@@ -18,7 +19,8 @@ import { createPreparationHost, readManagedPreparation } from '@taucad/runtime/p
 import type { Integrity } from '@taucad/runtime/preparation/node';
 
 import { desktopReleaseIdentity } from '#shared/desktop-release.js';
-import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
+import { desktopNativeDeployments, nativePackageResources } from '#tau/desktop-native-deployments.js';
+import type { NativeKernelDeployment } from '@taucad/native-process-core/adopter';
 
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyRuntimeClosure, copyTree } from '@taucad/nx/runtime-closure';
@@ -185,6 +187,7 @@ export const resolveRuntimePackages = async (
     [
       '@gltf-transform/core',
       '@gltf-transform/functions',
+      'electron-updater',
       'fflate',
       'uint8array-extras',
       'xstate',
@@ -395,35 +398,40 @@ const nativePayloadTargets: Readonly<Record<RuntimeTarget, string | undefined>> 
   'win32-x64': undefined,
 };
 
-/** One sealed closure a package ships under `Contents/Resources/payloads`. */
-export type StagedNativeClosure = Readonly<{
+/** One sealed closure the desktop downloads on first use, as a package's verification prepared it. */
+export type PreparedNativeClosure = Readonly<{
   package: string;
   dependency: string;
+  root: string;
   closureIntegrity: Integrity;
   treeIntegrity: Integrity;
   fileCount: number;
 }>;
 
 /**
- * Seal the desktop's native kernel closures for one target and stage them in the store's own layout
- * (`<payloadsRoot>/closures/sha256/<hex>`), which the app seeds its payload store from at first launch (charter W6
- * phase 1, D10, ruling X30). They are prepared exactly as `tau prepare` prepares them: from each package's
+ * Prepare the desktop's native kernel closures for one target into a scratch store, exactly as the app prepares them
+ * on first use (desktop first-use download blueprint, DS-1) and `tau prepare` does: from each package's
  * `tau-plugin.json` pins, through the same verify-before-write path and seal steps (build123d's bytecode), honouring
- * the managed profile (`TAU_PAYLOAD_DIR`, `TAU_PAYLOAD_MIRROR`) for where the bytes come from. The closures are shipped
- * byte for byte: the package's signing pass must leave them alone, and nothing rewrites a digest afterwards.
- * @param options - The packaged target, the bundle's `payloads` directory and a scratch directory on the same volume.
- * @returns The staged closures; none for a target that runs no native kernel.
+ * the managed profile (`TAU_PAYLOAD_DIR`, `TAU_PAYLOAD_MIRROR`) for where the bytes come from. The app ships none of
+ * them; the package's verification launches what a person would download.
+ * @param options - The packaged target and a scratch directory the caller removes.
+ * @returns The prepared closures; none for a target that runs no native kernel.
  * @throws When a closure the target declares cannot be prepared.
  */
-export const stageNativePayloads = async (
-  options: Readonly<{ target: RuntimeTarget; payloadsRoot: string; workRoot: string }>,
-): Promise<readonly StagedNativeClosure[]> => {
+export const prepareNativeClosures = async (
+  options: Readonly<{
+    target: RuntimeTarget;
+    workRoot: string;
+    /** The deployments to prepare; the packaged app's, read from its resources, when verifying a package. */
+    deployments?: readonly NativeKernelDeployment[];
+  }>,
+): Promise<readonly PreparedNativeClosure[]> => {
   const target = nativePayloadTargets[options.target];
   if (target === undefined) {
     return [];
   }
   /* Each bundled package with its seal step, launch set and directory, which payloads shipped inside it resolve from. */
-  const plugins = preparationPluginsOf(desktopNativeDeployments);
+  const plugins = preparationPluginsOf(options.deployments ?? desktopNativeDeployments);
   const managed = readManagedPreparation(process.env);
   const store = join(options.workRoot, 'payload-store');
   await rm(options.workRoot, { recursive: true, force: true });
@@ -436,7 +444,7 @@ export const stageNativePayloads = async (
     ...(managed.mirror === undefined ? {} : { mirror: managed.mirror }),
     ...(managed.seed === undefined ? {} : { seed: managed.seed }),
   });
-  const staged: StagedNativeClosure[] = [];
+  const prepared: PreparedNativeClosure[] = [];
   try {
     for (const description of await host.describe()) {
       if (description.state === 'unsupported') {
@@ -458,11 +466,10 @@ export const stageNativePayloads = async (
       if (receipt === undefined) {
         throw new Error(`${description.package} prepared no ${description.dependency} closure for ${target}.`);
       }
-      // oxlint-disable-next-line no-await-in-loop -- ditto
-      await copyTree(receipt.root, resolve(options.payloadsRoot, 'closures', 'sha256', basename(receipt.root)));
-      staged.push({
+      prepared.push({
         package: receipt.package,
         dependency: receipt.dependency,
+        root: receipt.root,
         closureIntegrity: receipt.closureIntegrity,
         treeIntegrity: receipt.treeIntegrity,
         fileCount: receipt.files.length,
@@ -470,7 +477,51 @@ export const stageNativePayloads = async (
     }
   } finally {
     host.dispose();
-    await rm(options.workRoot, { recursive: true, force: true });
   }
-  return staged;
+  return prepared;
+};
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null;
+
+/**
+ * The paths of the payloads a `tau-plugin.json` ships inside its package (`packagePath` origins), for every target.
+ * @param manifest - The package's unparsed `tau-plugin.json`.
+ * @returns The package-relative paths, each once.
+ */
+export const packagePathPayloads = (manifest: unknown): readonly string[] => {
+  const paths = new Set<string>();
+  const dependencies = isRecord(manifest) ? manifest['dependencies'] : undefined;
+  for (const variants of isRecord(dependencies) ? Object.values(dependencies) : []) {
+    for (const variant of Array.isArray(variants) ? variants : []) {
+      const payloads: unknown = isRecord(variant) ? variant['payloads'] : undefined;
+      for (const payload of Array.isArray(payloads) ? payloads : []) {
+        const origin: unknown = isRecord(payload) ? payload['origin'] : undefined;
+        if (isRecord(origin) && origin['kind'] === 'packagePath' && typeof origin['path'] === 'string') {
+          paths.add(origin['path']);
+        }
+      }
+    }
+  }
+  return [...paths];
+};
+
+/**
+ * Copy each native package's own payload files (its worker and support modules) into the app's resources, where main
+ * prepares a kernel from on first use (`preparableNativeDeployments`). They are source files, not executables, so the
+ * app signs and notarizes without them changing.
+ * @param resources - The packaged app's resources directory.
+ */
+export const stageNativePackageFiles = async (resources: string): Promise<void> => {
+  await Promise.all(
+    desktopNativeDeployments.flatMap((deployment) =>
+      packagePathPayloads(deployment.manifest).map(async (path) =>
+        cp(
+          join(fileURLToPath(deployment.packageRoot), path),
+          join(resources, nativePackageResources, deployment.package, path),
+          { recursive: true },
+        ),
+      ),
+    ),
+  );
 };

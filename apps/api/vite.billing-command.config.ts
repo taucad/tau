@@ -19,6 +19,7 @@ export default defineConfig({
   build: {
     ssr: 'app/billing-command.ts',
     outDir: 'dist',
+    sourcemap: 'hidden',
     emptyOutDir: false,
     rollupOptions: { output: { entryFileNames: 'billing-command.js' } },
   },

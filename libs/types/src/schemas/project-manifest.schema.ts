@@ -1,20 +1,10 @@
 import { z } from 'zod';
-import {
-  parseProjectManifestBytes,
-  projectIdSchema,
-  projectManifestSchemaUrl,
-  projectRelativePathSchema,
-  projectToManifest,
-} from '@taucad/project-core';
-import type {
-  AdoptableProjectManifest,
-  ProjectManifest,
-  ProjectManifestParseIssue as CoreProjectManifestParseIssue,
-} from '@taucad/project-core';
+import { parseProjectManifestBytes, projectManifestSchemaUrl, projectRelativePathSchema } from '@taucad/project-core';
+import type { ProjectManifest, ProjectManifestParseIssue as CoreProjectManifestParseIssue } from '@taucad/project-core';
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- This private entrypoint forwards the public project manifest authority without duplicating schemas. */
 export {
-  parseAdoptableProjectManifestBytes,
+  convertLegacyProjectManifestBytes,
   parseProjectManifestBytes,
   projectIdSchema,
   projectManifestMaxBytes,
@@ -24,7 +14,7 @@ export {
   projectToManifest,
   serializeProjectManifest,
 } from '@taucad/project-core';
-export type { AdoptableProjectManifest, ProjectManifest, ProjectManifestParseResult } from '@taucad/project-core';
+export type { ProjectManifest, ProjectManifestParseResult } from '@taucad/project-core';
 /* oxlint-enable no-barrel-files/no-barrel-files */
 
 /** Strict parser issues plus discovery's missing-manifest issue. @public */
@@ -33,8 +23,8 @@ export type ProjectManifestParseIssue = CoreProjectManifestParseIssue | { readon
 /**
  * Result of reading `tau.json` for use, as opposed to validating it.
  *
- * Identity (`$schema` and `id`) decides whether a project can be routed; the
- * rest of the declaration only degrades. A degraded result carries the strict
+ * Identity is resolved separately from this declaration. A malformed supported
+ * declaration degrades without changing the mounted project identity. A degraded result carries the strict
  * `issue` beside a normalized, strictly valid view of what could be kept.
  *
  * @public
@@ -50,8 +40,6 @@ export type ProjectManifestReadResult =
   | {
       readonly success: false;
       readonly issue: ProjectManifestParseIssue;
-      /** The salvaged declaration an explicit Adopt would write, present when only the identity is missing. */
-      readonly adoptable?: AdoptableProjectManifest;
     };
 
 /** What a degraded manifest names as its main entry when its own `entryPath` is unusable. */
@@ -102,7 +90,7 @@ const declarationSalvageSchema = z.object({
 });
 /* oxlint-enable promise/prefer-await-to-then, unicorn/prefer-top-level-await */
 
-const salvageDeclaration = (input: Record<string, unknown>): AdoptableProjectManifest => {
+const salvageDeclaration = (input: Record<string, unknown>): ProjectManifest => {
   const { name, description, tags, assets, syncChats, syncLargeExports } = declarationSalvageSchema.parse(input);
   const { entryPath, thumbnail } = assets.main;
   return {
@@ -131,17 +119,13 @@ const stringValuesOf = (text: string, key: string): string[] =>
   });
 
 /**
- * The manifest fields a syntax error left recognizable. The id counts only when
- * every occurrence agrees, so a merge conflict between two identities stays
- * unidentified. ponytail: key-level recovery, not a JSON repair — the person
- * fixes the text; this only keeps the project reachable while they do.
+ * Recover recognizable declaration fields from malformed text without changing
+ * the source bytes. Identity is outside the authored declaration.
  */
 const recoverFromText = (text: string): Record<string, unknown> => {
-  const ids = new Set(stringValuesOf(text, 'id'));
   const [schema] = stringValuesOf(text, String.raw`\$schema`);
   return {
     ...(schema === undefined ? {} : { $schema: schema }),
-    ...(ids.size === 1 ? { id: [...ids][0] } : {}),
     name: stringValuesOf(text, 'name')[0],
     assets: { main: { entryPath: stringValuesOf(text, 'entryPath')[0] } },
   };
@@ -152,23 +136,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Read `tau.json` bytes for use: strict when they are valid, degraded to a
- * normalized strict view when only the declaration is defective, and
- * unidentified — with the declaration an explicit Adopt would write — when the
- * identity is missing.
+ * normalized strict view when the declaration is defective.
  *
  * Unknown keys are reported and dropped, never retained. Oversize bytes and a
  * present `$schema` other than v1 are refused outright: an older reader must
  * not reinterpret a newer contract.
  *
  * @param bytes - Encoded `tau.json`.
- * @param options - `id` is the identity of the mounted project these bytes were read through; it stands in only when the bytes carry no usable id.
- * @returns The strict, degraded, or unidentified reading.
+ * @returns The strict, degraded, or refused reading.
  * @public
  */
-export const readProjectManifestBytes = (
-  bytes: Uint8Array<ArrayBuffer>,
-  options: { readonly id?: string } = {},
-): ProjectManifestReadResult => {
+export const readProjectManifestBytes = (bytes: Uint8Array<ArrayBuffer>): ProjectManifestReadResult => {
   const strict = parseProjectManifestBytes(bytes);
   if (strict.success) {
     return strict;
@@ -192,12 +170,7 @@ export const readProjectManifestBytes = (
     input = isRecord(decoded) ? decoded : {};
   }
 
-  const declaration = salvageDeclaration(input);
-  const parsedId = projectIdSchema.safeParse(input['id']);
-  const id = parsedId.success ? parsedId.data : options.id;
-  return id === undefined
-    ? { success: false, issue, adoptable: declaration }
-    : { success: true, data: projectToManifest({ ...declaration, id }), issue };
+  return { success: true, data: salvageDeclaration(input), issue };
 };
 
 /**
@@ -238,28 +211,21 @@ export const describeProjectManifestIssue = (issue: ProjectManifestParseIssue): 
 
 /**
  * Why replacing `tau.json` with `next` would damage the project, or
- * `undefined` when the replacement is a valid manifest that keeps the current
- * identity. Agent write paths call this before they commit a manifest.
+ * `undefined` when the replacement is a valid authored manifest. Agent write
+ * paths call this before committing a manifest. Identity is stored separately.
  *
  * @param next - The proposed bytes.
- * @param current - The bytes on disk, when there are any.
  * @returns A message naming every defect, or `undefined`.
  * @public
  */
-export const checkProjectManifestReplacement = (
-  next: Uint8Array<ArrayBuffer>,
-  current: Uint8Array<ArrayBuffer> | undefined,
-): string | undefined => {
+export const checkProjectManifestReplacement = (next: Uint8Array<ArrayBuffer>): string | undefined => {
   const proposed = parseProjectManifestBytes(next);
   if (!proposed.success) {
     return [
       'tau.json must stay a valid Tau project manifest.',
       ...describeProjectManifestIssue(proposed.issue),
-      'It holds only $schema, id, name, description, tags, assets.main (entryPath, optional thumbnail), syncChats and syncLargeExports. Other source files need no manifest entry.',
+      'It holds only $schema, name, description, tags, assets.main (entryPath, optional thumbnail), syncChats and syncLargeExports. Other source files need no manifest entry.',
     ].join('\n');
   }
-  const existing = current === undefined ? undefined : readProjectManifestBytes(current);
-  return existing?.success === true && existing.data.id !== proposed.data.id
-    ? `tau.json must keep the project id ${existing.data.id}.`
-    : undefined;
+  return undefined;
 };

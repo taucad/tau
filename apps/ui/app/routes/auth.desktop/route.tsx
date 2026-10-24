@@ -19,6 +19,8 @@ export const desktopHandoffParameterNames = {
 export type DesktopHandoffTarget = {
   /** Opaque nonce minted by main; echoed back untouched so main can match it. */
   readonly state: string;
+  /** Only the two registered Tau schemes are allowed; state still binds the pending sign-in. */
+  readonly scheme?: 'tau' | 'tau-staging';
 };
 
 /**
@@ -41,7 +43,15 @@ export function parseDesktopHandoffTarget(search: string): DesktopHandoffTarget 
     return undefined;
   }
 
-  return { state };
+  const scheme = parameters.get('scheme');
+  if (
+    parameters.getAll('scheme').length > 1 ||
+    parameters.getAll('state').length !== 1 ||
+    (scheme !== null && scheme !== 'tau' && scheme !== 'tau-staging')
+  ) {
+    return undefined;
+  }
+  return scheme === null ? { state } : { state, scheme };
 }
 
 /**
@@ -56,7 +66,7 @@ export function parseDesktopHandoffTarget(search: string): DesktopHandoffTarget 
  * @returns The absolute `tau://auth/callback?...` URL.
  */
 export function buildDesktopCallbackUrl(target: DesktopHandoffTarget, oneTimeToken: string): string {
-  const url = new URL('tau://auth/callback');
+  const url = new URL(`${target.scheme === 'tau-staging' ? 'tau-staging' : 'tau'}://auth/callback`);
   url.searchParams.set(desktopHandoffParameterNames.oneTimeToken, oneTimeToken);
   url.searchParams.set(desktopHandoffParameterNames.state, target.state);
   return url.toString();

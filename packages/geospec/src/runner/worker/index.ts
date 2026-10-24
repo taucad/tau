@@ -13,7 +13,6 @@ export type {
   GeoSpecPoolWorkerMessage,
 } from '#runner/pool/pool-messages.js';
 export type {
-  GeoSpecForensicEvent,
   GeoSpecRunner,
   GeoSpecRunnerEvent,
   GeoSpecRunnerFileResult,
@@ -21,3 +20,8 @@ export type {
   GeoSpecRunnerResult,
   GeoSpecRunnerRunOptions,
 } from '#runner/worker/runner-types.js';
+export { createGeoSpecPoolRunner } from '#runner/pool/pool.js';
+export type { GeoSpecPoolOptions } from '#runner/pool/pool.js';
+export type { ShardTiming, ShardTimings } from '#runner/pool/shard-timings.js';
+export { startGeoSpecPoolWorkerHost } from '#runner/pool/worker-host.js';
+export type { GeoSpecPoolWorkerHostOptions } from '#runner/pool/worker-host.js';

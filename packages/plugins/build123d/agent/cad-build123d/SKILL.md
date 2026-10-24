@@ -1,6 +1,6 @@
 ---
 name: cad-build123d
-description: Guides native Build123d BRep authoring in main.py. Use when creating or editing trusted Python CAD projects in Tau Desktop.
+description: Guides native Build123d BRep authoring in main.py. Use for trusted Python CAD projects in Tau Desktop, or in the Tau plugin after prepare_kernel.
 ---
 
 # Build123d authoring

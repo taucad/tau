@@ -51,7 +51,8 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.grep]: async (args) => handleGrep(args, deps.fileSystem),
     [rpcName.globSearch]: async (args) => handleGlobSearch(args, deps.fileSystem),
     [rpcName.evaluateModel]: async (args, context) => handleEvaluateModel(args, deps.kernelClient, context),
-    [rpcName.captureImages]: async (args, context) => handleCaptureImages(args, deps.images, context),
+    [rpcName.captureImages]: async (args, context) =>
+      handleCaptureImages(args, { images: deps.images, fileSystem: deps.fileSystem }, context),
     [rpcName.runGeoSpecTests]: async (args, context) => handleRunGeoSpecTests(args, deps.geospec, context),
     [rpcName.exportModel]: async (args, context) =>
       handleExportModel(args, { graphics: deps.graphics, fileSystem: deps.fileSystem }, context),

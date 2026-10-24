@@ -1,233 +1,22 @@
+import { useState, useEffect } from 'react';
+import { AlertCircle, HardDrive } from 'lucide-react';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
+import { WorkspaceConnections } from '#components/filesystem/workspace-connections.js';
 import { BrowserStorageStatus } from '#components/settings/browser-storage-status.js';
 import { usePersistentStorageStatus } from '#filesystem/use-persistent-storage-status.js';
-import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
-/**
- * Filesystem settings pane.
- *
- * Surfaces the multi-workspace foundation introduced by the workspaces
- * audit (R4 + R12 + R13 + R19):
- *
- * - Lists every known workspace; each row owns its own connect /
- *   grant-access / change / disconnect controls via `WorkspaceDirectoryPanel`.
- * - Creation destinations are selected where projects are created.
- * - Reports aggregate Home storage pressure without exposing its engine.
- */
-
-import { useState, useCallback, useEffect } from 'react';
-import { AlertCircle, HardDrive, Plus } from 'lucide-react';
-import { Button } from '@taucad/ui/components/button';
-import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
-import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
-import {
-  checkHandlePermission,
-  getWorkspace,
-  listProjectsForWorkspace,
-  listWorkspaces,
-  requestHandlePermission,
-  refreshPersistentStorageStatus,
-} from '#filesystem/handle-store.js';
-import { isWorkspaceIdentityConflictError, workspaceIdentityConflictCopy } from '#filesystem/workspace-errors.js';
+import { refreshPersistentStorageStatus } from '#filesystem/handle-store.js';
 import type { Workspace } from '#filesystem/handle-store.js';
-import { webAccessDirectoryPicker } from '#constants/browser.constants.js';
-import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
-import { Loader } from '@taucad/ui/components/loader';
-import { toast } from '#components/ui/sonner.js';
-import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useFileManager } from '#hooks/use-file-manager.js';
 import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-cloud-projects.js';
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 
-type WorkspaceRow = {
-  workspace: Workspace;
-  status: WorkspaceDirectoryStatus;
-  projectCount: number;
-};
-
 export function FileSystemSettings(): React.JSX.Element {
   const persistenceStatus = usePersistentStorageStatus();
-  const [rows, setRows] = useState<WorkspaceRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [busyWorkspaceId, setBusyWorkspaceId] = useState<string | undefined>(undefined);
-  const telemetry = useWorkspaceTelemetry();
-  const projectManager = useProjectManager();
-  const { workspaceConnection } = projectManager;
-  /* A plan without backup has no Tau Cloud projects to bring: the setting is absent,
-   * as the no-train toggle is on a plan it does not apply to. */
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const { isResolved, canSyncFiles } = useCommercialFeatures();
-  const { workspace } = useFileManager();
-
-  const reloadRows = useCallback(async (): Promise<void> => {
-    try {
-      const workspaces = await listWorkspaces();
-      const built = await Promise.all(
-        workspaces.map(async (workspace): Promise<WorkspaceRow> => {
-          const entry = await getWorkspace(workspace.workspaceId);
-          let status: WorkspaceDirectoryStatus = 'disconnected';
-          if (entry) {
-            const permission = await checkHandlePermission(entry.handle);
-            status = permission === 'granted' ? 'connected' : 'permission';
-          }
-          const projects = await listProjectsForWorkspace(workspace.workspaceId);
-          return { workspace, status, projectCount: projects.length };
-        }),
-      );
-      setRows(built);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void reloadRows();
-  }, [reloadRows]);
-
-  const handleAddWorkspace = useCallback(async () => {
-    if (!webAccessDirectoryPicker()) {
-      return;
-    }
-    try {
-      const connected = await projectManager.connectWorkspace();
-      if (connected === undefined) {
-        telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'aborted' });
-        return;
-      }
-      if (connected.minted) {
-        telemetry.workspaceCreated({
-          workspaceId: connected.workspace.workspaceId,
-        });
-      } else {
-        telemetry.workspaceConnected({ workspaceId: connected.workspace.workspaceId });
-      }
-      await reloadRows();
-      toast.success(`Connected workspace "${connected.workspace.name}"`);
-    } catch (error) {
-      telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown' });
-      toast.error('Failed to connect workspace.');
-      throw error;
-    }
-  }, [projectManager, reloadRows, telemetry]);
-
-  const handleConnectChange = useCallback(
-    async (workspaceId: string) => {
-      const picker = webAccessDirectoryPicker();
-      if (!picker) {
-        return;
-      }
-      setBusyWorkspaceId(workspaceId);
-      try {
-        await projectManager.assertWorkspaceMutationAllowed(workspaceId);
-        const handle = await picker.pick({ id: `tau-workspace-${workspaceId}`, mode: 'readwrite' });
-        if (handle === undefined) {
-          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
-          return;
-        }
-        await workspace.replaceWorkspaceHandle(workspaceId, handle);
-        await projectManager.refreshWorkspaceCatalog();
-        telemetry.workspaceConnected({ workspaceId });
-        await reloadRows();
-        toast.success(`Updated workspace folder to "${handle.name}"`);
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
-          return;
-        }
-        telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
-        toast.error(
-          isWorkspaceIdentityConflictError(error)
-            ? workspaceIdentityConflictCopy
-            : 'Failed to change workspace folder.',
-        );
-        throw error;
-      } finally {
-        setBusyWorkspaceId(undefined);
-      }
-    },
-    [projectManager, reloadRows, telemetry, workspace],
-  );
-
-  const handleGrantAccess = useCallback(
-    async (workspaceId: string) => {
-      setBusyWorkspaceId(workspaceId);
-      try {
-        const entry = await getWorkspace(workspaceId);
-        if (!entry) {
-          return;
-        }
-        const granted = await requestHandlePermission(entry.handle);
-        if (granted) {
-          await workspace.syncProjectRoots();
-          await projectManager.refreshWorkspaceCatalog();
-          telemetry.workspaceConnected({ workspaceId });
-        } else {
-          telemetry.workspaceOpenFailed({ workspaceId, reason: 'permission' });
-          toast.error('Permission was not granted.');
-        }
-        await reloadRows();
-      } finally {
-        setBusyWorkspaceId(undefined);
-      }
-    },
-    [projectManager, reloadRows, telemetry, workspace],
-  );
-
-  const handleDisconnectWorkspace = useCallback(
-    async (target: Workspace) => {
-      setBusyWorkspaceId(target.workspaceId);
-      let disconnected: Awaited<ReturnType<typeof workspace.disconnectWorkspace>>;
-      try {
-        disconnected = await workspace.disconnectWorkspace(target.workspaceId);
-      } catch (error) {
-        console.error('Failed to disconnect workspace:', error);
-        toast.error('Failed to disconnect workspace.');
-        return;
-      } finally {
-        setBusyWorkspaceId(undefined);
-      }
-
-      try {
-        await reloadRows();
-      } catch (error) {
-        console.warn('Workspace disconnected but Settings refresh failed', error);
-      }
-      if (!disconnected) {
-        return;
-      }
-      toast.success(`Disconnected workspace "${disconnected.workspace.name}"`, {
-        action: {
-          label: 'Undo',
-          onClick: async () => {
-            let restored: boolean;
-            try {
-              restored = await workspace.restoreWorkspaceHandle(target.workspaceId, disconnected.handle);
-            } catch (error) {
-              console.error('Failed to undo workspace disconnect:', error);
-              toast.error('Failed to reconnect workspace.');
-              return;
-            }
-            try {
-              await reloadRows();
-              if (restored) {
-                await projectManager.refreshWorkspaceCatalog();
-              }
-            } catch (error) {
-              console.warn('Workspace restored but Settings refresh failed', error);
-            }
-            if (restored) {
-              telemetry.workspaceConnected({ workspaceId: target.workspaceId });
-            } else {
-              toast.info('Workspace connection has already changed.');
-            }
-          },
-        },
-      });
-    },
-    [projectManager, reloadRows, telemetry, workspace],
-  );
-
   const [storageUsage, setStorageUsage] = useState<{ used: number; quota: number } | undefined>(undefined);
 
   useEffect(() => {
@@ -251,126 +40,14 @@ export function FileSystemSettings(): React.JSX.Element {
   // R6: above this share of quota the browser is close to refusing writes.
   const isStorageUnderPressure =
     storageUsage !== undefined && storageUsage.quota > 0 && storageUsage.used / storageUsage.quota > 0.8;
-  const isAddingWorkspace =
-    workspaceConnection.phase !== 'idle' &&
-    workspaceConnection.phase !== 'ready' &&
-    workspaceConnection.phase !== 'failed';
-  const showWorkspaceConnection = isAddingWorkspace || workspaceConnection.phase === 'failed';
-  const pendingWorkspaceName =
-    workspaceConnection.phase === 'registering'
-      ? workspaceConnection.workspaceName
-      : 'workspace' in workspaceConnection
-        ? workspaceConnection.workspace?.name
-        : undefined;
-  const handleRetryWorkspace = useCallback(async (): Promise<void> => {
-    try {
-      await projectManager.retryWorkspaceConnection();
-    } catch {
-      toast.error('Failed to connect workspace.');
-    }
-  }, [projectManager]);
-  const connectionLabel =
-    workspaceConnection.phase === 'registering'
-      ? 'Saving access to this folder'
-      : workspaceConnection.phase === 'mounting'
-        ? 'Making local files available to Tau'
-        : workspaceConnection.phase === 'browsing'
-          ? 'Loading folders and projects'
-          : workspaceConnection.phase === 'discovering'
-            ? 'Reading project folders'
-            : workspaceConnection.phase === 'publishing'
-              ? `Preparing links for ${workspaceConnection.projectCount} projects`
-              : workspaceConnection.phase === 'failed'
-                ? workspaceConnection.message
-                : undefined;
-
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      {webAccessDirectoryPicker() ? (
-        <SettingsItem settingId='workspaces'>
-          <SettingsSectionCard>
-            <CardHeader className='flex flex-row items-center justify-between gap-2'>
-              <CardTitle>Workspaces</CardTitle>
-              <Button size='sm' variant='outline' disabled={isAddingWorkspace} onClick={handleAddWorkspace}>
-                <Plus className='mr-1 size-3.5' />
-                Add Workspace
-              </Button>
-            </CardHeader>
-            <CardContent className='flex flex-col gap-3'>
-              <p className='text-sm text-muted-foreground'>
-                Connected workspaces are folders on your disk. Choose one from the new-project location picker when you
-                do not want to use Home.
-              </p>
-              {showWorkspaceConnection ? (
-                <div role='status' aria-live='polite' className='flex items-center gap-3 rounded-md border p-3'>
-                  {workspaceConnection.phase === 'failed' ? undefined : <Loader className='size-4 shrink-0' />}
-                  <div className='min-w-0'>
-                    <div className='truncate text-sm font-medium'>
-                      {pendingWorkspaceName ?? 'Choose a workspace folder'}
-                    </div>
-                    <div className='text-xs text-muted-foreground'>{connectionLabel ?? 'Folder picker is open'}</div>
-                  </div>
-                  {workspaceConnection.phase === 'failed' ? (
-                    <Button
-                      className='ml-auto'
-                      size='sm'
-                      variant='outline'
-                      onClick={() => {
-                        void handleRetryWorkspace();
-                      }}
-                    >
-                      {workspaceConnection.retry === 'pick-again' ? 'Choose folder again' : 'Try again'}
-                    </Button>
-                  ) : undefined}
-                </div>
-              ) : undefined}
-              {isLoading ? (
-                <Loader className='size-4' />
-              ) : rows.length === 0 ? (
-                <p className='text-sm text-muted-foreground'>
-                  No connected workspaces yet. Add one to store projects in a folder on your disk.
-                </p>
-              ) : (
-                <div className='flex flex-col gap-2'>
-                  {rows.map((row) => {
-                    const isBusyRow = busyWorkspaceId === row.workspace.workspaceId;
-                    const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
-                    const meta = (
-                      <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-                        <span>{projectCountLabel}</span>
-                      </div>
-                    );
-                    return (
-                      <WorkspaceDirectoryPanel
-                        key={row.workspace.workspaceId}
-                        variant='row'
-                        workspaceId={row.workspace.workspaceId}
-                        workspaceName={row.workspace.name}
-                        status={row.status}
-                        isBusy={isBusyRow}
-                        onConnect={async () => {
-                          await handleConnectChange(row.workspace.workspaceId);
-                        }}
-                        onGrantAccess={async () => {
-                          await handleGrantAccess(row.workspace.workspaceId);
-                        }}
-                        onDisconnect={async () => {
-                          await handleDisconnectWorkspace(row.workspace);
-                        }}
-                        meta={meta}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </SettingsSectionCard>
-        </SettingsItem>
-      ) : undefined}
-
+      <SettingsItem settingId='workspaces'>
+        <WorkspaceConnections onWorkspacesChange={setWorkspaces} />
+      </SettingsItem>
       {isResolved && canSyncFiles ? (
         <SettingsItem settingId='tau-cloud-projects'>
-          <TauCloudProjectsSetting workspaces={rows.map((row) => row.workspace)} />
+          <TauCloudProjectsSetting workspaces={workspaces} />
         </SettingsItem>
       ) : undefined}
 

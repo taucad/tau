@@ -29,7 +29,7 @@ export function ThreeProvider(properties: ThreeContextProperties): React.JSX.Ele
         if (properties.graphicsBackend !== 'webgpu' || !(error instanceof WebGpuInitializationError)) {
           throw error ?? new Error('Renderer failed without an error description');
         }
-        // A canvas cannot change its GPU context type. Mount the classic pipeline on a fresh owner.
+        // A canvas cannot change its GPU context type. Mount the node WebGL2 pipeline on a fresh owner.
         return <ThreeProviderCanvas {...properties} graphicsBackend='webgl' />;
       }}
     >
@@ -84,7 +84,11 @@ function ThreeProviderCanvas({
     }
 
     // WebGPU canvases hold a device and surface too, so both backends count against one budget.
-    webglRef.send({ type: 'acquire', id: holderId, bytes: initialSurfaceBytes });
+    webglRef.send({
+      type: 'acquire',
+      id: holderId,
+      bytes: initialSurfaceBytes,
+    });
     return () => {
       webglRef.send({ type: 'release', id: holderId });
     };
@@ -92,7 +96,11 @@ function ThreeProviderCanvas({
 
   const handleSurfaceResize = useCallback(
     (cssPixels: number, pixelRatio: number): void => {
-      webglRef?.send({ type: 'resize', id: holderId, bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio) });
+      webglRef?.send({
+        type: 'resize',
+        id: holderId,
+        bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio),
+      });
     },
     [webglRef, holderId],
   );

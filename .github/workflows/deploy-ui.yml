@@ -7,7 +7,9 @@
 # build did, and publishes the result.
 #
 #   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on a push to `main`
-#     that affects the UI since its last staging deploy.
+#     that affects the UI since its last staging deploy. It publishes to the
+#     site's `staging` alias, which costs no Netlify credits, and
+#     `netlify-staging-router` serves taucad.dev from that alias.
 #   - production (tau.new): `release-build.yml` calls this workflow in a `ui@x.y.z`
 #     release's own run, and `deploy-production.yml` dispatches it at the tag
 #     for a rollback or redeploy. Either way the `ci.yml` push run on `main` for
@@ -20,7 +22,9 @@
 # site IDs below are not secrets.
 #
 # Manual redeploy of staging: `gh workflow run deploy-ui.yml -f
-# environment=staging` from `main`. Production rollbacks and redeploys go
+# environment=staging` from `main`. Add `-f skip_asset_retention=true` only to
+# ship while the live Netlify origin cannot be read, which otherwise fails the
+# deploy rather than drop the assets retained for pages already open. Production rollbacks and redeploys go
 # through `deploy-production.yml` with the release tag.
 
 name: Deploy UI to Netlify
@@ -32,6 +36,11 @@ on:
         required: true
         type: string
         description: 'staging or production'
+      skip_asset_retention:
+        required: false
+        type: boolean
+        default: false
+        description: 'Ship without keeping the previous deploys assets (only while the live origin is down)'
   workflow_dispatch:
     inputs:
       environment:
@@ -41,6 +50,11 @@ on:
         options:
           - staging
           - production
+      skip_asset_retention:
+        required: false
+        type: boolean
+        default: false
+        description: 'Ship without keeping the previous deploys assets (only while the live origin is down)'
 
 permissions:
   contents: read
@@ -80,8 +94,10 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
           case "$ENVIRONMENT" in
-            staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev ;;
-            production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new ;;
+            # retain_from: the Netlify origin of the deploy now live, whose recent assets the new one keeps.
+            # Not the public host: tau.new is still served by Fly, and taucad.dev goes through a router.
+            staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev; retain_from=https://staging--taucad-staging.netlify.app ;;
+            production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new; retain_from=https://taucad-prod-us.netlify.app ;;
             *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
           esac
           if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
@@ -90,6 +106,7 @@ jobs:
           fi
           echo "site_id=$site_id" >> "$GITHUB_OUTPUT"
           echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "retain_from=$retain_from" >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -107,23 +124,33 @@ jobs:
           sha: ${{ github.sha }}
           github-token: ${{ github.token }}
 
-      # `ui:sourcemaps` uploads with the PostHog CLI key. The Netlify site's own
-      # copy is a secret variable, which a CLI build from Actions cannot read, so
-      # HCP also writes it to this environment (tau-cloud `stacks/repo/tau`).
-      # Only a value that is set is exported: an empty one would hide the site's.
-      - name: Hand the PostHog CLI key to the build
+      # GitHub environment credentials are the sole source for UI source maps.
+      # Validate the pair before Netlify resolves its site environment. Missing or
+      # malformed credentials fail before the build; they never fall back.
+      - name: Validate the PostHog source-map credentials
+        id: posthog
         env:
           TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
           ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
+          ENVIRONMENT: ${{ inputs.environment }}
         run: |
           set -euo pipefail
-          if [ -n "$TOKEN" ] && [ -n "$ENV_ID" ]; then
-            {
-              echo "POSTHOG_CLI_TOKEN=$TOKEN"
-              echo "POSTHOG_CLI_ENV_ID=$ENV_ID"
-            } >> "$GITHUB_ENV"
+          if [[ "$TOKEN" =~ ^phx_[A-Za-z0-9_-]+$ ]] && [[ "$ENV_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::POSTHOG_CLI_TOKEN or POSTHOG_CLI_ENV_ID is not set on this environment; the build uses the site's variables."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            message="Configure a PostHog personal API key and numeric project ID in tau-repo: posthog_cli_token_$ENVIRONMENT and posthog_cli_env_id_$ENVIRONMENT, then apply the reviewed plan. Netlify credentials are not used."
+            echo "::error::$message"
+            exit 1
+          fi
+
+      - name: Require the Sentry source-map credential
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [ -z "$SENTRY_AUTH_TOKEN" ]; then
+            echo "::error::Set Sensitive sentry_auth_token in HCP tau-repo and apply its GitHub environment mappings."
+            exit 1
           fi
 
       # The CLI resolves the site base (`apps/ui`) and then joins the workspace
@@ -163,18 +190,49 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           SITE_ID: ${{ steps.site.outputs.site_id }}
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
-          # Only production needs its PostHog source maps to deploy.
-          TAU_SOURCEMAPS_OPTIONAL: ${{ inputs.environment != 'production' }}
+          # Both environments require successful uploads before deployment.
+          TAU_SOURCEMAPS_OPTIONAL: 'false'
+          TAU_SOURCEMAPS_ENABLED: ${{ steps.posthog.outputs.enabled }}
+          # Netlify site variables outrank process variables. Map these distinct
+          # GitHub-owned inputs only at the upload command, after that merge.
+          TAU_SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          TAU_POSTHOG_CLI_TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
+          TAU_POSTHOG_CLI_ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
+          # The live deploy whose recent `/assets/*` this one keeps serving, so pages
+          # loaded before it go live keep loading their chunks (`retain-previous-assets.mts`).
+          TAU_RETAIN_ASSETS_FROM: ${{ steps.site.outputs.retain_from }}
+          # Emergency only: a live origin that cannot be read fails the deploy, so a fix
+          # must say on purpose that it ships without retention (logged as a warning).
+          TAU_RETAIN_ASSETS_SKIP: ${{ inputs.skip_asset_retention && '1' || '' }}
         run: |
           # The CLI reports every refused deploy as a bare `Forbidden`: the token
           # was revoked or cannot deploy this site, or the Netlify team is out of
           # credits, which pauses every production deploy (taucad.dev included).
+          # Staging publishes to the `staging` alias, a draft deploy that costs no
+          # Netlify credits; the router step below serves taucad.dev from it.
+          # Production is a production deploy (15 credits).
+          if [ "$ENVIRONMENT" = staging ]; then
+            target=(--alias staging)
+            MESSAGE="$MESSAGE [staging]"
+          else
+            target=(--prod)
+          fi
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
-            --prod --context production \
+            "${target[@]}" --context production \
             --site "$SITE_ID" --message "$MESSAGE" || {
             echo "::error::Netlify refused the deploy. If it said Forbidden: check the TauCAD team's credits (Netlify > Usage & billing; production deploys pause when they run out), then that netlify_auth_token_$ENVIRONMENT on tau-cloud's tau-repo HCP workspace is a live token with access to this site."
             exit 1
           }
+
+      - name: Serve taucad.dev from the staging alias
+        if: inputs.environment == 'staging' && steps.superseded.outputs.superseded != 'true'
+        uses: ./.github/actions/netlify-staging-router
+        with:
+          site-id: ${{ steps.site.outputs.site_id }}
+          site-name: taucad-staging
+          public-host: taucad.dev
+          # The app's own document, not the marketing page the root serves by default.
+          verify-cookie: tau-entry=app
 
       # The plan of the next push to `main` diffs the UI against this commit.
       - name: Record this staging deploy

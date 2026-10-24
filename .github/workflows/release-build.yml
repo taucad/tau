@@ -12,8 +12,9 @@
 # (and the UI's source kit), a desktop release after native OTA qualification.
 # A UI release also builds the serve UI layer `tau serve` downloads by digest
 # and publishes it as its own immutable release (serve-ui-layer-*).
-# Staging keeps Developer ID signing and release hardening but skips notarization;
-# production also notarizes and staples. Both retain source/relink release assets:
+# Staging keeps Developer ID signing and release hardening but skips notarization
+# unless release-desktop-staging.yml was dispatched with `notarize` (its tag carries a
+# `Notarize: true` line); production always notarizes and staples. Both retain source/relink release assets:
 # the kit is the taucad/geospec release asset for the `geospec-engine` catalog
 # pin, and while that asset is missing, the releases that ship OCCT refuse.
 # The first mirrored candidate establishes a baseline without changing live feeds.
@@ -55,6 +56,7 @@ jobs:
       channel: ${{ steps.tag.outputs.channel }}
       macos: ${{ steps.tag.outputs.macos }}
       macos-targets: ${{ steps.tag.outputs.macos-targets }}
+      notarize: ${{ steps.tag.outputs.notarize }}
     steps:
       - name: Resolve the release tag
         id: tag
@@ -104,13 +106,18 @@ jobs:
           # Mac architectures: a production release packages both. A staging candidate packages Intel
           # only when release-desktop-staging.yml annotated its tag with the line below (the nightly);
           # every other staging candidate is Apple silicon only.
+          # Notarization likewise: production always, a staging candidate only when its tag carries
+          # `Notarize: true` (a dispatch that asked for it).
           arches='arm64 x64'
+          notarize=true
           if [ "$channel" = staging ]; then
             arches=arm64
+            notarize=false
             object=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object | "\(.type) \(.sha)"')
             if [ "${object%% *}" = tag ]; then
               message=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/${object#* }" --jq .message)
               if grep -qx 'Mac architectures: arm64 x64' <<< "$message"; then arches='arm64 x64'; fi
+              if grep -qx 'Notarize: true' <<< "$message"; then notarize=true; fi
             fi
           fi
           macos=$(jq -cn --arg arches "$arches" '[
@@ -118,6 +125,7 @@ jobs:
             {arch: "x64", runner: "macos-26-intel", machine: "x86_64", "package-target": "package-macos-release-intel"}
           ] | map(select(.arch as $arch | $arches | split(" ") | index($arch)))')
           echo "Mac architectures: $arches"
+          echo "Notarize: $notarize"
           {
             echo "tag=$TAG"
             echo "project=$project"
@@ -126,6 +134,7 @@ jobs:
             echo "channel=$channel"
             echo "macos=$macos"
             echo "macos-targets=$(sed -E 's/(^| )/\1darwin-/g' <<< "$arches")"
+            echo "notarize=$notarize"
           } >> "$GITHUB_OUTPUT"
 
   verify-app:
@@ -300,10 +309,13 @@ jobs:
       name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
     env:
       GEOSPEC_WORKERS: 1
+      # Public DSN owned by tau-repo Terraform on each signed desktop environment.
+      SENTRY_DSN: ${{ vars.SENTRY_DSN }}
       # Baked into the desktop main bundle (`tauPostHogClientKey`) from POSTHOG_CLIENT_KEY_PRODUCTION or _STAGING; unset leaves desktop analytics inert.
       POSTHOG_CLIENT_KEY: ${{ vars[format('POSTHOG_CLIENT_KEY_{0}', needs.resolve.outputs.channel)] }}
       TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+      TAU_DESKTOP_NOTARIZE: ${{ needs.resolve.outputs.notarize }}
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos-${{ matrix.arch }}
     steps:
       - name: Checkout the release
@@ -358,7 +370,7 @@ jobs:
         run: |
           set -euo pipefail
           names=(MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_TEAM_ID)
-          if [ "$TAU_DESKTOP_CHANNEL" = production ]; then
+          if [ "$TAU_DESKTOP_NOTARIZE" = true ]; then
             names+=(APPLE_API_KEY_P8_BASE64 APPLE_API_KEY_ID APPLE_API_ISSUER_ID)
           fi
           for name in "${names[@]}"; do
@@ -393,7 +405,7 @@ jobs:
             exit 1
           fi
           # package-macos.mts notarizes through this keychain profile.
-          if [ "$TAU_DESKTOP_CHANNEL" = production ]; then
+          if [ "$TAU_DESKTOP_NOTARIZE" = true ]; then
           printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$api_key"
           xcrun notarytool store-credentials tau-notary --key "$api_key" --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" --keychain "$keychain"
@@ -405,12 +417,15 @@ jobs:
             echo "TAU_SIGNING_KEYCHAIN=$keychain"
           } >> "$GITHUB_ENV"
 
-      - name: Package and sign; notarize production
+      - name: Package and sign; notarize production and requested staging
         env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           TAU_GEOSPEC_SOURCE_RELINK_ARCHIVE: ${{ steps.geospec-kit.outputs.archive }}
         run: |
           config=()
-          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then config+=(--configuration=staging); fi
+          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then
+            config+=(--configuration="$([ "$TAU_DESKTOP_NOTARIZE" = true ] && echo staging-notarized || echo staging)")
+          fi
           pnpm nx run desktop:${{ matrix.package-target }} --parallel=1 "${config[@]}"
 
       # Uploaded before verification so a failed verify leaves the signed app
@@ -448,7 +463,9 @@ jobs:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
         run: |
           config=()
-          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then config+=(--configuration=staging); fi
+          if [ "$TAU_DESKTOP_CHANNEL" = staging ]; then
+            config+=(--configuration="$([ "$TAU_DESKTOP_NOTARIZE" = true ] && echo staging-notarized || echo staging)")
+          fi
           pnpm nx run desktop:verify-macos-release "${config[@]}"
 
       - name: Delete the signing keychain
@@ -458,20 +475,70 @@ jobs:
             security delete-keychain "$TAU_SIGNING_KEYCHAIN" || true
           fi
 
+  # The Tau PicoGK layer for linux-x64 (glibc 2.28): the same framework-dependent
+  # ReadyToRun worker, with the engine prepare-picogk-dotnet compiles from the same
+  # pins in the manylinux_2_28 builder image it names by digest (no network in the
+  # builder), audited for its bundled libraries and glibc/libstdc++ symbol floors.
+  # Nothing is signed or published here; the release and mirror jobs publish it by
+  # digest exactly as the darwin-arm64 layer.
+  picogk-layer-linux:
+    needs: [resolve, verify-app]
+    if: needs.resolve.outputs.kind == 'desktop'
+    name: Build the Tau PicoGK linux-x64 layer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout the release
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+      - name: Build the Tau PicoGK layer
+        run: pnpm nx run picogk:prepare-layer-linux --outputStyle=stream
+      - name: Upload the Tau PicoGK layer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: picogk-layer-linux-x64
+          path: |
+            out/picogk-layer/linux-x64/tau-picogk-layer-linux-x64.tar.gz
+            out/picogk-layer/linux-x64/tau-layer.json
+          if-no-files-found: error
+          retention-days: 7
+
   # One immutable GitHub Release per layer digest, created draft → upload →
   # publish and never clobbered (charter I13, DEL-20): a rerun or a later desktop
   # release that builds the same bytes finds the published release and only
-  # re-verifies it. The composed tau-plugin.json is the pin a follow-up PR lands.
+  # re-verifies it. One leg per layer target, each gated on its own build job, so a
+  # failed Linux build never holds back the darwin-arm64 layer. The composed
+  # tau-plugin.json of each leg is the pin a follow-up PR lands.
   picogk-layer-release:
-    needs: [resolve, desktop-macos]
-    if: needs.resolve.outputs.kind == 'desktop'
-    name: Publish the Tau PicoGK layer release
+    needs: [resolve, desktop-macos, picogk-layer-linux]
+    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' }}
+    name: Publish the Tau PicoGK ${{ matrix.target }} layer release
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            build: desktop-macos
+          - target: linux-x64
+            build: picogk-layer-linux
     environment:
       name: release-pr
       deployment: false
     steps:
+      - name: Require the layer build
+        env:
+          RESULT: ${{ needs[matrix.build].result }}
+          BUILD: ${{ matrix.build }}
+        run: |
+          if [ "$RESULT" != success ]; then
+            echo "::error::$BUILD ended $RESULT; the ${{ matrix.target }} layer is not published."
+            exit 1
+          fi
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: refs/tags/${{ needs.resolve.outputs.tag }}
@@ -479,15 +546,18 @@ jobs:
       - uses: ./.github/actions/setup-nx
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: picogk-layer-darwin-arm64
-          path: out/picogk-layer/darwin-arm64
+          name: picogk-layer-${{ matrix.target }}
+          path: out/picogk-layer/${{ matrix.target }}
+      # A target the manifest does not pin yet takes its variant from tau-plugin.variants.json.
       - name: Verify the layer against its record and compose the pin
         id: layer
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           node --import @oxc-node/core/register packages/plugins/picogk/scripts/compose-tau-plugin.mts \
-            --layer out/picogk-layer/darwin-arm64/tau-layer.json \
-            --archive out/picogk-layer/darwin-arm64/tau-picogk-layer-darwin-arm64.tar.gz \
+            --layer "out/picogk-layer/$TARGET/tau-layer.json" \
+            --archive "out/picogk-layer/$TARGET/tau-picogk-layer-$TARGET.tar.gz" \
             --write out/picogk-layer/tau-plugin.json --outputs >> "$GITHUB_OUTPUT"
       - name: Mint tau-release-bot token
         id: bot
@@ -505,7 +575,8 @@ jobs:
           LAYER_TAG: ${{ steps.layer.outputs.tag }}
           LAYER_ASSET: ${{ steps.layer.outputs.asset }}
           LAYER_SHA256: ${{ steps.layer.outputs.sha256 }}
-          LAYER_DIR: out/picogk-layer/darwin-arm64
+          LAYER_DIR: out/picogk-layer/${{ matrix.target }}
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           # gh resolves a draft by its tag name too, so an interrupted run's draft is reused.
@@ -513,7 +584,7 @@ jobs:
             if ! grep -qi 'release not found' "$RUNNER_TEMP/release-error"; then cat "$RUNNER_TEMP/release-error" >&2; exit 1; fi
             gh release create "$LAYER_TAG" --draft --target "$(git rev-parse HEAD)" --latest=false \
               --title "$LAYER_TAG" \
-              --notes "Tau PicoGK layer for darwin-arm64, sha256 $LAYER_SHA256. Immutable: pinned by the tau-plugin.json of @taucad/picogk."
+              --notes "Tau PicoGK layer for $TARGET, sha256 $LAYER_SHA256. Immutable: pinned by the tau-plugin.json of @taucad/picogk."
             draft=true
           fi
           assets=$(gh release view "$LAYER_TAG" --json assets --jq '[.assets[].name] | join(" ")')
@@ -532,15 +603,15 @@ jobs:
             gh release edit "$LAYER_TAG" --draft=false --latest=false
           fi
           {
-            echo "### Tau PicoGK layer"
+            echo "### Tau PicoGK layer: $TARGET"
             echo
             echo "- sha256 \`$LAYER_SHA256\`"
             echo "- release \`$LAYER_TAG\`"
-            echo "- pin: the \`picogk-tau-plugin\` artifact (\`tau-plugin.json\` and its SBOM \`tau-plugin.cdx.json\`)"
+            echo "- pin: the \`picogk-tau-plugin-$TARGET\` artifact (\`tau-plugin.json\` and its SBOM \`tau-plugin.cdx.json\`)"
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: picogk-tau-plugin
+          name: picogk-tau-plugin-${{ matrix.target }}
           path: |
             out/picogk-layer/tau-plugin.json
             out/picogk-layer/tau-plugin.cdx.json
@@ -553,11 +624,19 @@ jobs:
   # on the `payloads` environment; until the operator sets it this job only
   # verifies the layer and says why it skipped.
   picogk-layer-mirror:
-    needs: [resolve, desktop-macos]
-    if: needs.resolve.outputs.kind == 'desktop'
-    name: Mirror the Tau PicoGK layer to cdn.tau.new
+    needs: [resolve, desktop-macos, picogk-layer-linux]
+    if: ${{ !cancelled() && needs.resolve.outputs.kind == 'desktop' }}
+    name: Mirror the Tau PicoGK ${{ matrix.target }} layer to cdn.tau.new
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            build: desktop-macos
+          - target: linux-x64
+            build: picogk-layer-linux
     environment:
       name: payloads
       deployment: false
@@ -569,17 +648,28 @@ jobs:
       PAYLOAD_R2_BUCKET: ${{ vars.PAYLOAD_R2_BUCKET || 'tau-prod-content' }}
       PAYLOAD_CDN_BASE: https://cdn.tau.new/
     steps:
+      - name: Require the layer build
+        env:
+          RESULT: ${{ needs[matrix.build].result }}
+          BUILD: ${{ matrix.build }}
+        run: |
+          if [ "$RESULT" != success ]; then
+            echo "::error::$BUILD ended $RESULT; the ${{ matrix.target }} layer is not mirrored."
+            exit 1
+          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: picogk-layer-darwin-arm64
+          name: picogk-layer-${{ matrix.target }}
           path: layer
       - name: Verify the layer against its record
         id: layer
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
           sha256=$(jq -r .sha256 layer/tau-layer.json)
           asset=$(jq -r .asset layer/tau-layer.json)
-          [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] && [ "$asset" = tau-picogk-layer-darwin-arm64.tar.gz ]
+          [[ "$sha256" =~ ^[0-9a-f]{64}$ ]] && [ "$asset" = "tau-picogk-layer-$TARGET.tar.gz" ]
           echo "$sha256  layer/$asset" | sha256sum --check --strict
           {
             echo "sha256=$sha256"

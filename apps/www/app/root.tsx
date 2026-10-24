@@ -234,7 +234,10 @@ export function Layout({ children }: { children: React.ReactNode }): React.JSX.E
           dangerouslySetInnerHTML={{ __html: boot }}
         />
       </head>
-      <body data-analytics-endpoint={configuration?.analyticsEndpoint}>
+      <body
+        data-analytics-endpoint={configuration?.analyticsEndpoint}
+        data-installer-catalog={configuration?.installerCatalog === true ? 'true' : undefined}
+      >
         {children}
         <ScrollRestoration nonce={configuration?.nonce} />
         <Scripts nonce={configuration?.nonce} />

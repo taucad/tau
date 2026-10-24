@@ -1,3 +1,4 @@
+import type { DesktopScheme } from '#lib/desktop-deep-link.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import type { ProjectSlugs } from '#utils/project-url.utils.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
@@ -17,7 +18,8 @@ export const isMachineRouteIdentity = (value: string): boolean =>
 export const machineUrl = ({ hostId, machineId }: MachineLocation): string =>
   `/machines/${encodeURIComponent(hostId)}/${encodeURIComponent(machineId)}`;
 /** Native machine link; opening it only navigates. */
-export const machineDeepLink = (location: MachineLocation): string => `tau://${machineUrl(location).slice(1)}`;
+export const machineDeepLink = (location: MachineLocation, scheme: DesktopScheme = 'tau'): string =>
+  `${scheme}://${machineUrl(location).slice(1)}`;
 /** Source project with the same machine and exact durable job selected. */
 export const machineJobProjectUrl = (slugs: ProjectSlugs, location: MachineLocation, jobId: string): string => {
   const query = new URLSearchParams({

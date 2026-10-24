@@ -23,7 +23,11 @@ import { readViewportGizmoStyle, viewportGizmoMetrics } from '#graphics/three/co
 
 const measureCoverage = (
   data: ArrayLike<number>,
-): { opaquePixels: number; interiorGaps: number; antialiasedPixels: number } => {
+): {
+  opaquePixels: number;
+  interiorGaps: number;
+  antialiasedPixels: number;
+} => {
   let interiorGaps = 0;
   let antialiasedPixels = 0;
   let opaquePixels = 0;
@@ -81,13 +85,35 @@ it.each(['light', 'dark', 'black', 'high-contrast'])(
   },
 );
 
+it('should resolve the section plane tiles to their axis hues, deeper for hover and selection', () => {
+  const { planeTiles } = readViewportGizmoStyle({
+    container: document.body,
+    colorScheme: 'light',
+    isHighContrast: false,
+    accentColor: '#008c7d',
+  });
+  const channels = (color: number): Readonly<{ r: number; g: number; b: number }> => new Color(color);
+  // Each axis's strongest channel is its own: X red, Y green, Z blue, as the axis triad.
+  expect(channels(planeTiles.x.edge).r).toBeGreaterThan(channels(planeTiles.x.edge).b);
+  expect(channels(planeTiles.y.edge).g).toBeGreaterThan(channels(planeTiles.y.edge).r);
+  expect(channels(planeTiles.z.edge).b).toBeGreaterThan(channels(planeTiles.z.edge).r);
+  for (const tints of Object.values(planeTiles)) {
+    expect(new Set([tints.edge, tints.strong, tints.deep]).size).toBe(3);
+    const lightness = (color: number): number => new Color(color).getHSL({ h: 0, s: 0, l: 0 }).l;
+    expect(lightness(tints.deep)).toBeLessThan(lightness(tints.strong));
+  }
+});
+
 it.each(['webgl', 'webgpu'] as const)(
   'should keep the %s cube opaque inside and antialiased outside',
   async (backend) => {
     await page.viewport(500, 500);
     const canvas = document.createElement('canvas');
     document.body.append(canvas);
-    const renderer = await createRenderer('viewport', backend, { canvas, preserveDrawingBuffer: true });
+    const renderer = await createRenderer('viewport', backend, {
+      canvas,
+      preserveDrawingBuffer: true,
+    });
     renderer.setSize(384, 384);
     renderer.setClearColor(0, 0);
     renderer.toneMapping = NoToneMapping;
@@ -197,7 +223,10 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
     }
     renderer.setPixelRatio(2);
     renderer.setSize(2560, 1440);
-    const target = new WebGLRenderTarget(5120, 2880, { samples: 0, stencilBuffer: true });
+    const target = new WebGLRenderTarget(5120, 2880, {
+      samples: 0,
+      stencilBuffer: true,
+    });
     let picker = createSectionPlanePicker(execution === 'webgl' ? 'webgl' : 'webgpu');
     picker.paint({ current: 'xz' });
     const camera = new PerspectiveCamera(35, 16 / 9, 0.1, 100);
@@ -217,9 +246,14 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
       isHighContrast: false,
       accentColor: '#008c7d',
     });
+    picker.setStyle(style);
     applyViewportGizmoSurface(gizmo, style, execution === 'webgl' ? 'webgl' : 'webgpu');
     gizmo.scale.multiplyScalar(0.7);
-    gizmo.add(createViewportGizmoCubeAxes({ renderingBackend: execution === 'webgl' ? 'webgl' : 'webgpu' }));
+    gizmo.add(
+      createViewportGizmoCubeAxes({
+        renderingBackend: execution === 'webgl' ? 'webgl' : 'webgpu',
+      }),
+    );
     const viewport = new Vector4();
     const draw = async (side: number, x = 1, z = 1): Promise<Uint8Array<ArrayBuffer>> => {
       await new Promise<void>((resolve) => {
@@ -244,7 +278,11 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
       renderer.render(scene, camera);
       gizmo.cameraUpdate();
       target.viewport.set(0, 0, 5120, 2880);
-      picker.render({ renderer, camera, cubeViewport: [2400, execution === 'webgl' ? 1440 - 20 - 96 : 20, 96, 96] });
+      picker.render({
+        renderer,
+        camera,
+        cubeViewport: [2400, execution === 'webgl' ? 1440 - 20 - 96 : 20, 96, 96],
+      });
       gizmo.render();
       expect(renderer.getViewport(viewport).toArray()).toEqual([0, 0, 2560, 1440]);
       expect(target.viewport.toArray()).toEqual([0, 0, 5120, 2880]);
@@ -306,6 +344,7 @@ it.each(['webgpu', 'node-webgl2', 'webgl'] as const)(
       const historicalBack = await draw(1);
       picker.dispose();
       picker = createSectionPlanePicker(execution === 'webgl' ? 'webgl' : 'webgpu');
+      picker.setStyle(style);
       picker.paint({ current: 'xz' });
       await draw(1);
       expect(differences(historicalBack, await draw(1)), 'History must match a fresh picker').toBe(0);

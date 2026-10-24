@@ -50,17 +50,17 @@ export type RevisionWhere = Readonly<{
 /** A decision waiting on the person, said one way on every surface (HQ1, HQ6). @public */
 export const needsDecision = 'Needs your decision';
 
-/** The calm state of a person whose access the owner removed (HQ3). @public */
-export const accessRemoved = 'Access removed';
+/** A settled missing cloud listing does not distinguish deletion from removed access. @public */
+export const cloudUnavailable = 'Cloud copy unavailable';
 
 /**
- * What a person whose access was removed can do about it (D17's owner-directed
- * sentence): the owner decides, and nothing on this device is lost.
+ * An absent cloud listing proves unavailability, not who removed access or
+ * whether the cloud copy still exists. Local revisions remain available.
  *
  * @public
  */
-export const accessRemovedSentence =
-  'The owner removed your access to this project’s cloud copy. Ask them to add you again; every revision stays on this device.';
+export const cloudUnavailableSentence =
+  'The cloud copy may have been deleted or your access may have changed. Every revision stays on this device.';
 
 /**
  * A revision's public name: `Rev N`, a first-parent ordinal on its line (EQ9).
@@ -208,7 +208,7 @@ export const backupCopy = (
   remote?: RemoteFacet,
 ): string | undefined => {
   if (role === 'revoked' && sync.state !== 'noRemote') {
-    return accessRemoved;
+    return cloudUnavailable;
   }
   if (
     remote !== undefined &&

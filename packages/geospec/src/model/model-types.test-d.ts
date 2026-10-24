@@ -1,44 +1,19 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { GeoSpecSubject } from '#model/subject.js';
 import type {
-  GeoSpecRuntimeClient,
-  GeoSpecRuntimeClientFactory,
-  GeoSpecRuntimeSourceAdapter,
+  CreateModelLoaderOptions,
+  GeoSpecModelArtifact,
+  GeoSpecModelExporter,
+  GeoSpecModelExportRequest,
   LoadModelCodeOptions,
   LoadModelFileOptions,
   LoadModelSourceOptions,
   ManagedGeoSpecModelLoader,
 } from '#model/types.js';
 import { createModelLoader, loadModel } from '#model/index.js';
-import type { RuntimeClient } from '@taucad/runtime/client';
-import type { KernelPlugin } from '@taucad/runtime';
-import { defineRuntime } from '@taucad/runtime';
-import type { z } from 'zod';
 import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 
-type RequiredEvaluationKernel = KernelPlugin<
-  Record<never, never>,
-  Record<string, unknown>,
-  'required-evaluation',
-  never,
-  Record<never, never>,
-  readonly ['cad'],
-  z.ZodObject<{ precision: z.ZodNumber }>
->;
-declare const requiredEvaluationKernel: RequiredEvaluationKernel;
-const requiredEvaluationRuntime = defineRuntime({ kernels: [requiredEvaluationKernel] });
-type OptionalEvaluationKernel = KernelPlugin<
-  Record<never, never>,
-  Record<string, unknown>,
-  'optional-evaluation',
-  never,
-  Record<never, never>,
-  readonly ['cad'],
-  z.ZodObject<{ quality: z.ZodOptional<z.ZodNumber> }>
->;
 declare const engine: GeoSpecNativeModelEngine;
-declare const optionalEvaluationKernel: OptionalEvaluationKernel;
-const optionalEvaluationRuntime = defineRuntime({ kernels: [optionalEvaluationKernel] });
 
 describe('geospec/model public types', () => {
   it('should accept direct parameters for source, code, and file loads', () => {
@@ -71,7 +46,7 @@ describe('geospec/model public types', () => {
     // @ts-expect-error -- loadModel has no output-unit knob; every subject is canonical millimetres.
     void loadModel({ source: new Uint8Array(), format: 'glb', unit: 'mm' });
 
-    // @ts-expect-error -- runtime-backed file loads do not expose source-unit options.
+    // @ts-expect-error -- exported file loads do not expose source-unit options.
     const invalidFileOptions: LoadModelFileOptions = { file: 'main.ts', sourceUnit: 'mm' };
     void invalidFileOptions;
 
@@ -79,19 +54,19 @@ describe('geospec/model public types', () => {
     const invalidCodeOptions: LoadModelCodeOptions<Record<'main.ts', string>> = {
       code,
       file: 'main.ts',
-      // @ts-expect-error -- runtime-backed code loads do not expose source-unit options.
+      // @ts-expect-error -- exported code loads do not expose source-unit options.
       sourceUnit: 'mm',
     };
     void invalidCodeOptions;
 
-    // @ts-expect-error -- shared defaults cannot override the runtime-backed source-unit contract.
+    // @ts-expect-error -- shared defaults cannot override the exported source-unit contract.
     createModelLoader({ engine, sourceUnit: 'mm' });
   });
 
   it('should keep kernel selection out of loadModel authoring options', () => {
     void loadModel({
       file: 'main.ts',
-      // @ts-expect-error -- GeoSpec relies on Tau runtime kernel inference.
+      // @ts-expect-error -- the configured exporter, not the spec, selects the kernel.
       kernel: 'jscad',
     });
 
@@ -105,29 +80,38 @@ describe('geospec/model public types', () => {
     void invalidCodeOptions;
   });
 
-  it('should accept Tau runtime clients through the GeoSpec runtime surface', () => {
-    expectTypeOf<RuntimeClient>().toExtend<GeoSpecRuntimeClient>();
-    expectTypeOf<RuntimeClient<typeof optionalEvaluationRuntime>>().toExtend<GeoSpecRuntimeClient>();
-    // GeoSpec loadModel has no evaluateOptions input; a kernel requiring one cannot be admitted through it.
-    expectTypeOf<RuntimeClient<typeof requiredEvaluationRuntime>>().not.toExtend<GeoSpecRuntimeClient>();
-    expectTypeOf<LoadModelFileOptions['runtime']>().toEqualTypeOf<
-      GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory | undefined
+  it('should export source-kind files only through host-configured model exporters', () => {
+    // A file load names no exporter or Runtime of its own: the host configures exporters on the loader.
+    expectTypeOf<LoadModelFileOptions>().not.toHaveProperty('runtime');
+    expectTypeOf<LoadModelCodeOptions>().not.toHaveProperty('runtime');
+    expectTypeOf<CreateModelLoaderOptions>().not.toHaveProperty('runtime');
+    expectTypeOf<CreateModelLoaderOptions>().not.toHaveProperty('sourceAdapters');
+    expectTypeOf<CreateModelLoaderOptions['exporters']>().toEqualTypeOf<readonly GeoSpecModelExporter[] | undefined>();
+    expectTypeOf<GeoSpecModelExporter['export']>().toEqualTypeOf<
+      (request: GeoSpecModelExportRequest) => Promise<GeoSpecModelArtifact>
     >();
 
-    const adapter: GeoSpecRuntimeSourceAdapter = {
+    const exporter: GeoSpecModelExporter = {
       id: 'custom-source',
       extensions: ['cad'],
-      async createRuntime() {
+      capabilities: { formats: ['glb'] },
+      async export() {
         throw new Error('type-only fixture');
       },
     };
-    createModelLoader({ engine, sourceAdapters: [adapter] });
+    createModelLoader({ engine, exporters: [exporter] });
     expectTypeOf(createModelLoader({ engine })).toEqualTypeOf<ManagedGeoSpecModelLoader>();
     // @ts-expect-error -- a host loader always needs the compiled engine that admits its subjects.
-    createModelLoader({ sourceAdapters: [adapter] });
+    createModelLoader({ exporters: [exporter] });
+    const invalidExporter: GeoSpecModelExporter = {
+      ...exporter,
+      // @ts-expect-error -- an exporter produces GLB or STEP only; GeoSpec admits nothing else from it.
+      capabilities: { formats: ['stl'] },
+    };
+    void invalidExporter;
   });
 
-  it('should accept a bounded work-unit budget everywhere and a crop only on Runtime-backed loads', () => {
+  it('should accept a bounded work-unit budget everywhere and a crop only on exported loads', () => {
     expectTypeOf(loadModel({ file: 'main.ts', workUnitLimit: 16_000_000 })).toEqualTypeOf<Promise<GeoSpecSubject>>();
     expectTypeOf(loadModel({ source: new Uint8Array(), workUnitLimit: 16_000_000 })).toEqualTypeOf<
       Promise<GeoSpecSubject>

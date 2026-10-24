@@ -2,13 +2,21 @@
 
 # Multi-stage Fly.io image for the Tau NestJS API.
 #
-# Stages: base -> deps -> build -> pruned -> runtime
-#   base    : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
-#   deps    : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
-#             + patches); cache key independent of source edits.
-#   build   : full source + `pnpm nx build api`; reuses deps layer cache.
-#   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
-#   runtime : minimal `node:24-slim` running as non-root `nestjs` (uid 1001).
+# Stages: base -> deps -> build -> pruned -> runtime-base -> mirror | maintenance | runtime
+#   base         : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
+#   deps         : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
+#                  + patches); cache key independent of source edits.
+#   build        : full source + `pnpm nx build api`; reuses deps layer cache.
+#   pruned       : `pnpm deploy --prod` to materialise a self-contained app dir.
+#   runtime-base : minimal `node:24-slim` with pinned git, running as non-root `nestjs`
+#                  (uid 1001). Exposes nothing.
+#   mirror       : the private `tau-mirror` app (W13 DM1, the B2 second copy), built with
+#                  `--target mirror`; runs `mirror-command.js worker`, metrics on 9464 only,
+#                  no health check.
+#   maintenance  : the private `tau-maintenance` app (north star DC4), built with
+#                  `--target maintenance`; runs `maintenance-command.js`, no port, no
+#                  health check (`app/maintenance-app.test.ts`).
+#   runtime      : the API. The last stage, so a build without `--target` is the API.
 #
 # Build choices (see also docs/research/api-docker-build-optimization.md):
 #   - `pnpm fetch` removed: split deps/build stages already bound the
@@ -67,6 +75,20 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
     node apps/api/scripts/build-image.mts
 
+# Upload maps from the exact built image before pruning. The token is available
+# only to this BuildKit step, never as an ARG, ENV or runtime image file.
+# Deployment builds opt in; local and PR smoke builds need no hosted credential.
+# The native Sentry CLI uses the OS trust store, absent from node:slim.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+ARG SENTRY_UPLOAD_ENABLED=false
+RUN --mount=type=secret,id=sentry_auth_token,env=SENTRY_AUTH_TOKEN \
+    if [ "$SENTRY_UPLOAD_ENABLED" = true ]; then \
+      test -n "$SENTRY_AUTH_TOKEN" && \
+      scripts/node_modules/.bin/sentry-cli sourcemaps inject apps/api/dist && \
+      scripts/node_modules/.bin/sentry-cli sourcemaps upload --validate --wait --org taucad --project tau-api apps/api/dist; \
+    fi
+
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned
 # Peer auto-install is off because the legacy deploy resolves every workspace
@@ -76,9 +98,8 @@ FROM build AS pruned
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm --config.auto-install-peers=false --filter=@taucad/api --prod deploy /pruned --legacy
 
-# ── Runtime ───────────────────────────────────────────────────────────────
-FROM node:${NODE_VERSION}-slim AS runtime
-LABEL fly_launch_runtime="NestJS"
+# ── Runtime base (shared by the API and the private apps) ─────────────────
+FROM node:${NODE_VERSION}-slim AS runtime-base
 WORKDIR /app
 
 # The Tau Hosted Remote is git's own binaries behind HTTP (charter D15):
@@ -110,8 +131,32 @@ RUN groupadd --system --gid 1001 nodejs && \
 COPY --from=pruned --chown=nestjs:nodejs /pruned /app
 USER nestjs
 
-ENV NODE_ENV="production" \
-    PORT="3000"
+ENV NODE_ENV="production"
+
+# ── Mirror: the private `tau-mirror` copier (W13 DM1) ─────────────────────
+# Same tree as the API, a different entry: copies R2's repositories to the B2
+# second copy under Object Lock. It serves no request: the only listener is the
+# OpenTelemetry Prometheus exporter on 9464, scraped over Fly's private network
+# (`[[metrics]]` in `apps/mirror/fly.*.toml`), so there is no HEALTHCHECK.
+FROM runtime-base AS mirror
+ENV OTEL_SERVICE_NAME="tau-mirror"
+EXPOSE 9464
+CMD ["node", "/app/dist/mirror-command.js", "worker"]
+
+# ── Maintenance: the private singleton `tau-maintenance` (DC4) ────────────
+# Same tree as the API, a different entry: purge, retire-lfs, blob collection,
+# project-deletion recovery and operator restore. `retire-lfs` hydrates a lease,
+# so it keeps the pinned git above. No EXPOSE and no HEALTHCHECK: the
+# command opens no listener, and Fly's `[processes]` entry in
+# `apps/maintenance/fly.*.toml` names the subcommand (`worker`).
+FROM runtime-base AS maintenance
+CMD ["node", "/app/dist/maintenance-command.js", "worker"]
+
+# ── Runtime: the API ──────────────────────────────────────────────────────
+FROM runtime-base AS runtime
+LABEL fly_launch_runtime="NestJS"
+
+ENV PORT="3000"
 EXPOSE 3000 9464
 
 # Backstops Fly.io's [[http_service.checks]] for local `docker run` use and

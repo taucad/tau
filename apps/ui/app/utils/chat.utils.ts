@@ -17,6 +17,7 @@ import {
   parseCadReferenceTokens,
 } from '@taucad/chat/references';
 import type { CadReference } from '@taucad/chat/references';
+import type { ExportValidation } from '@taucad/chat/schemas/tools/export-model';
 import { isUndecidedFailure, summarizeTestModelOutput } from '@taucad/chat/schemas/tools/test-model-summary';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
@@ -34,6 +35,17 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 const maxSnippetLength = 200;
 
 const joinLines = (...lines: Array<string | undefined | false>): string => lines.filter(Boolean).join('\n');
+
+/* An export's validation as one line: its unit, mesh facts and solids, as far as the format carries them. */
+const validationLine = ({ units, triangles, watertight, solids }: ExportValidation): string =>
+  [
+    units === undefined ? 'no declared unit' : `units ${units}`,
+    triangles === undefined ? undefined : `${String(triangles)} triangles`,
+    watertight === undefined ? undefined : watertight ? 'watertight' : 'not watertight',
+    solids === undefined ? undefined : `${String(solids)} solids`,
+  ]
+    .filter((part) => part !== undefined)
+    .join(', ');
 
 /* A job on a simulator reads as one in Copy and export, as the job card says it. */
 const simulatedMark = (simulated: boolean | undefined): string => (simulated === true ? ' (simulated)' : '');
@@ -318,6 +330,7 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
         ...output.files.map(
           (file) => `${file.name}: ${file.artifactPath} (${file.mimeType}, ${file.byteLength} bytes)`,
         ),
+        output.validation === undefined ? undefined : `Validation: ${validationLine(output.validation)}`,
       ),
   },
   [toolName.screenshot]: {

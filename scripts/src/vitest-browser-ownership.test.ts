@@ -99,6 +99,17 @@ describe('Vitest Browser test-runner ownership', () => {
     expect(supportRunnerImport.test("import { expect, test } from './support/test';")).toBe(true);
   });
 
+  it('keeps installed qualification behind disposable renderer-only loopback admission', () => {
+    const source = readFileSync(resolve(root, 'apps/desktop-e2e/scripts/qualification-renderer.mts'), 'utf8');
+    const guard = source.indexOf("process.env['TAU_QUALIFICATION_DISPOSABLE_HOST'] !== '1'");
+    const connect = source.indexOf('chromium.connectOverCDP(`http://127.0.0.1:');
+
+    expect(guard).toBeGreaterThanOrEqual(0);
+    expect(connect).toBeGreaterThan(guard);
+    expect(source).toContain("join(profile, 'DevToolsActivePort')");
+    expect(source).not.toMatch(/_electron|electron\.launch|--inspect/u);
+  });
+
   it('confines the direct browser driver and install command to privileged boundaries', () => {
     const allowedDriverFiles = new Set([
       '.agents/skills/audit-ui/scripts/axe-audit.mjs',
@@ -107,6 +118,9 @@ describe('Vitest Browser test-runner ownership', () => {
       // The staging billing harness pays a hosted Stripe Checkout in headless Chromium, which Browser Mode cannot
       // host; its specs reach the driver only through this module.
       'apps/billing-e2e/src/support/checkout.ts',
+      // Installed release qualification attaches only to an explicitly disposable Electron renderer over loopback
+      // CDP. Browser Mode cannot own the installed app across native installer/relaunch cycles.
+      'apps/desktop-e2e/scripts/qualification-renderer.mts',
       'apps/desktop-e2e/src/desktop-assimp.spec.ts',
       'apps/desktop-e2e/src/desktop-build123d.spec.ts',
       'apps/desktop-e2e/src/desktop-chat-acp.spec.ts',
@@ -119,10 +133,11 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-main-editor-kernels.spec.ts',
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
       'apps/desktop-e2e/src/desktop-print-dry-run.spec.ts',
-      'apps/desktop-e2e/src/desktop-store-seed.spec.ts',
       'apps/desktop-e2e/src/desktop-voice.spec.ts',
       // Native projection scenarios and the launch-helper test stay inside the Electron driver boundary.
       'apps/desktop-e2e/src/filesystem-projection-observation.spec.ts',
+      // Deletion qualification drives a completed Electron package beside disposable browser contexts.
+      'apps/desktop-e2e/src/project-deletion.spec.ts',
       'apps/desktop-e2e/src/support/desktop-app.test.ts',
       'apps/desktop-e2e/src/support/desktop-app.ts',
       'apps/desktop-e2e/src/support/filesystem-projection-delivery.ts',
@@ -141,6 +156,11 @@ describe('Vitest Browser test-runner ownership', () => {
       // a module worker in three engines, which Browser Mode cannot host.
       'apps/ui/scripts/check-asset-integrity.mts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
+      // The TAU-UI-6 deploy-skew check serves two deploys from Node and switches them under one page across a
+      // document reload, which Browser Mode's iframe cannot host.
+      'apps/ui-e2e/src/stale-deploy-recovery.test.ts',
+      // Composer and pane-resize acceptance emulate a coarse pointer through the browser session.
+      'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       // Production SSR audits own isolated no-JavaScript contexts and graphics failure injection.
       // The story harness imports only the Page type; tooling owns the runtime driver import.
@@ -172,7 +192,6 @@ describe('Vitest Browser test-runner ownership', () => {
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
     // The docs deployment gate installs Chromium on the Netlify builder unless one is supplied.
     // The SSR browser gate and its README install the pinned Chromium used by production audits and Lighthouse.
-    // The staging billing harness workflow installs Chromium for the hosted Checkout its rows pay.
     // The pkg.pr.new consumer leg, the publish workflow's release gate and the publish dry-run spike install Chromium
     // for check-pack-install's browser checks.
     // The S31 and S32 native-dependency spikes install the three engines they measure.
@@ -180,7 +199,6 @@ describe('Vitest Browser test-runner ownership', () => {
     expect(installFiles.sort()).toEqual(
       [
         '.agents/skills/create-repo/templates/ci.yml',
-        '.github/workflows/billing-staging-e2e.yml',
         '.github/workflows/ci.yml',
         '.github/workflows/e2e-nightly.yml',
         '.github/workflows/preview-packages.yml',
@@ -250,6 +268,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/panes/editor-layout.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
+        'apps/ui/app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',

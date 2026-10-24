@@ -1,6 +1,6 @@
 {
   "name": "@taucad/filesystem",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.9",
   "description": "Filesystem abstraction layer with watch-based reactivity for Tau (core / worker-facing; UI client facades live in @taucad/fs-client)",
   "type": "module",
   "sideEffects": false,
@@ -98,7 +98,8 @@
     "@taucad/project-core": "workspace:*",
     "jszip": "^3.10.1",
     "nanoid": "catalog:",
-    "type-fest": "catalog:"
+    "type-fest": "catalog:",
+    "xstate": "catalog:"
   },
   "devDependencies": {
     "@parcel/watcher": "catalog:",

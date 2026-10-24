@@ -79,6 +79,8 @@ vi.mock('#filesystem/handle-store.js', () => ({
   requestHandlePermission: mockRequestPermission,
   createWorkspace: mockCreateWorkspace,
   getProjectCreationLocation: mockGetPreference,
+  isNodeWorkspaceConnected: async () => true,
+  subscribeProjectRootConfigurationChanges: () => () => undefined,
   isNodeWorkspace: (workspace: { path?: string }) => workspace.path !== undefined,
 }));
 

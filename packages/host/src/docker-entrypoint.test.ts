@@ -61,12 +61,12 @@ const hostedRemote = async (): Promise<string> => {
   return apiUrl;
 };
 
-/** Run the entrypoint; the stand-in `node` writes `TAU_API_TOKEN` and its argv to `daemon.txt`, a line each. */
+/** Run the entrypoint; the stand-in `node` writes `TAU_AUTH_TOKEN` and its argv to `daemon.txt`, a line each. */
 const runEntrypoint = async (environment: Record<string, string>) => {
   const bin = join(root, 'bin');
   await mkdir(bin, { recursive: true });
   const stand = join(bin, 'node');
-  await writeFile(stand, `#!/bin/sh\nprintf '%s\\n' "$TAU_API_TOKEN" "$@" > "${join(root, 'daemon.txt')}"\n`);
+  await writeFile(stand, `#!/bin/sh\nprintf '%s\\n' "$TAU_AUTH_TOKEN" "$@" > "${join(root, 'daemon.txt')}"\n`);
   await chmod(stand, 0o755);
   return spawnSync('sh', [entrypoint], {
     encoding: 'utf8',

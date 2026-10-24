@@ -22,7 +22,7 @@ pnpm nx g @taucad/workspace-plugin:core <name> \
 
 Update an existing package in place. Do not rerun the generator.
 
-New core projects also receive `AGENTS.md` and exact `CLAUDE.md` import files
+New core projects also receive `AGENTS.md`
 from the shared instruction template. The starter uses `packageName` without
 `@taucad/` as the Nx identity, even when the directory `name` differs, and lists
 the core entrypoint and inferred Nx checks. Maintain the local AGENTS after

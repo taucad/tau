@@ -1,0 +1,923 @@
+import { geoSpecTimeoutCode } from '#runner/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import type { GeoSpecRunnerResult } from '#runner/worker/index.js';
+import {
+  formatFileReport,
+  formatRunHeadline,
+  formatRunReport,
+  geoSpecCliUsage,
+  jsonChunks,
+  parseGeoSpecCliArguments,
+  runGeoSpecCli,
+  runReportJson,
+} from '#cli/cli.js';
+import type { GeoSpecCliHost } from '#cli/cli.js';
+import type { GeometryDiagnostic } from '#mesh/index.js';
+import type { GeoSpecRunResult } from '#runner/index.js';
+
+const bundle = { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
+
+const parsed = (...argv: string[]) => {
+  const command = parseGeoSpecCliArguments(argv);
+  if (command.kind !== 'run') {
+    throw new Error(`expected a run command, got ${command.kind}: ${command.message}`);
+  }
+  return command.options;
+};
+
+/** A CLI host over a fixed file tree and a canned run result. */
+const cliHost = (options: {
+  tree?: Readonly<Record<string, string[]>>;
+  result?: GeoSpecRunnerResult;
+  config?: Awaited<ReturnType<GeoSpecCliHost['loadConfig']>> | Error;
+}): GeoSpecCliHost & { written: string[]; runs: unknown[]; configs: unknown[]; closed: () => number } => {
+  const configs: unknown[] = [];
+  const written: string[] = [];
+  const runs: unknown[] = [];
+  let closed = 0;
+  const tree = options.tree ?? { '/project': ['a.geospec.ts'] };
+  return {
+    written,
+    runs,
+    configs,
+    closed: () => closed,
+    cwd: () => '/project',
+    write: (line) => written.push(line),
+    discoveryFileSystem: () => ({
+      readdir: async (path: string) => tree[path] ?? [],
+      stat: async (path: string) => {
+        const kind: 'directory' | 'file' = path in tree ? 'directory' : 'file';
+        return { kind };
+      },
+    }),
+    loadConfig: async (configOptions) => {
+      configs.push(configOptions);
+      if (options.config instanceof Error) {
+        throw options.config;
+      }
+      return options.config ?? { options: {} };
+    },
+    createRunner: (runnerOptions) => {
+      runs.push(runnerOptions);
+      return {
+        run: async (runOptions) => {
+          runs.push(runOptions);
+          return (
+            options.result ?? {
+              success: true,
+              passed: 1,
+              failed: 0,
+              selectedTests: 1,
+              files: [],
+            }
+          );
+        },
+        on: () => () => undefined,
+        abort: () => undefined,
+        close: async () => {
+          closed += 1;
+        },
+      };
+    },
+  };
+};
+
+describe('parseGeoSpecCliArguments', () => {
+  it('should document every wall-clock timeout code together in the usage', () => {
+    for (const code of Object.values(geoSpecTimeoutCode)) {
+      expect(geoSpecCliUsage).toContain(code);
+    }
+    expect(geoSpecCliUsage).toContain('MATCHER_TIMEOUT');
+  });
+
+  it('should show usage for no arguments and for --help', () => {
+    expect(parseGeoSpecCliArguments([])).toStrictEqual({ kind: 'help', message: geoSpecCliUsage });
+    expect(parseGeoSpecCliArguments(['--help']).kind).toBe('help');
+    expect(parseGeoSpecCliArguments(['-h']).kind).toBe('help');
+    expect(parseGeoSpecCliArguments(['run', '--help']).kind).toBe('help');
+    expect(parseGeoSpecCliArguments(['run', '-h']).kind).toBe('help');
+  });
+
+  it('should reject an unknown command', () => {
+    expect(parseGeoSpecCliArguments(['walk'])).toStrictEqual({ kind: 'error', message: "Unknown command 'walk'." });
+  });
+
+  it('should default to the current directory', () => {
+    expect(parsed('run')).toMatchObject({
+      projectPath: '.',
+      files: [],
+      include: [],
+      exclude: [],
+      bail: false,
+      json: false,
+    });
+  });
+
+  it('should accept one positional project path', () => {
+    expect(parsed('run', 'packages/app').projectPath).toBe('packages/app');
+  });
+
+  it('should reject a second positional argument', () => {
+    expect(parseGeoSpecCliArguments(['run', 'a', 'b'])).toStrictEqual({
+      kind: 'error',
+      message: "Unexpected argument 'b'.",
+    });
+  });
+
+  it('should reject an unknown option', () => {
+    expect(parseGeoSpecCliArguments(['run', '--exlude', 'x'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--exlude'.",
+    });
+  });
+
+  it('should collect repeatable file, include and exclude flags', () => {
+    const options = parsed(
+      'run',
+      '--file',
+      'a.geospec.ts',
+      '--file',
+      'lib',
+      '--include',
+      'parts/**',
+      '--exclude',
+      '**/*.slow.geospec.ts',
+    );
+
+    expect(options).toMatchObject({
+      files: ['a.geospec.ts', 'lib'],
+      include: ['parts/**'],
+      exclude: ['**/*.slow.geospec.ts'],
+    });
+  });
+
+  it('should accept both spellings of the test-name pattern', () => {
+    expect(parsed('run', '-t', 'volume').testNamePattern).toBe('volume');
+    expect(parsed('run', '--test-name-pattern', 'volume').testNamePattern).toBe('volume');
+  });
+
+  it('should parse the numeric flags', () => {
+    expect(parsed('run', '--test-timeout', '30000', '--shard-timeout', '600000')).toMatchObject({
+      testTimeout: 30_000,
+      shardTimeout: 600_000,
+    });
+  });
+
+  it('should reject the retired forensic and matcher backstop flags as unknown options', () => {
+    expect(parseGeoSpecCliArguments(['run', '--forensic'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--forensic'.",
+    });
+    expect(parseGeoSpecCliArguments(['run', '--matcher-wall-backstop', '9000'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--matcher-wall-backstop'.",
+    });
+  });
+
+  it('should reject the retired evidence cache flags as unknown options', () => {
+    expect(parseGeoSpecCliArguments(['run', '--no-cache'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--no-cache'.",
+    });
+    expect(parseGeoSpecCliArguments(['run', '--cache-directory', '/tmp/evidence'])).toStrictEqual({
+      kind: 'error',
+      message: "Unknown option '--cache-directory'.",
+    });
+  });
+
+  it('should auto-size --workers when no count follows it', () => {
+    expect(parsed('run', '--workers').workers).toBe(0);
+    expect(parsed('run', '--workers', '--json')).toMatchObject({ workers: 0, json: true });
+    expect(parsed('run', '--workers', '4').workers).toBe(4);
+  });
+
+  it('should set the boolean flags', () => {
+    expect(parsed('run', '--bail', '--json')).toMatchObject({ bail: true, json: true });
+  });
+
+  it('should reject a flag whose value is missing or not a number', () => {
+    for (const argv of [
+      ['run', '--file'],
+      ['run', '--include'],
+      ['run', '--exclude'],
+      ['run', '-t'],
+      ['run', '--test-timeout'],
+      ['run', '--test-timeout', 'soon'],
+      ['run', '--workers', 'lots'],
+      ['run', '--shard-timeout'],
+      ['run', '--shard-timeout', '-1'],
+    ]) {
+      expect(parseGeoSpecCliArguments(argv).kind).toBe('error');
+    }
+  });
+});
+
+describe('formatFileReport', () => {
+  it('should print the issues of a file that could not execute', () => {
+    const result: GeoSpecRunResult = {
+      success: false,
+      issues: [{ code: 'BUNDLER_FAILED', message: 'boom', severity: 'error', type: 'compilation' }],
+    };
+
+    expect(formatFileReport('a.geospec.ts', result)).toStrictEqual(['FAIL a.geospec.ts', '  BUNDLER_FAILED: boom']);
+  });
+
+  it('should print only the non-passing tests, with every diagnostic', () => {
+    const result: GeoSpecRunResult = {
+      success: true,
+      passed: false,
+      bundle,
+      tests: [
+        { suite: ['s'], name: 'ok', assertions: [], status: 'passed', diagnostics: [] },
+        { suite: ['s'], name: 'todo', assertions: [], status: 'skipped', diagnostics: [] },
+        {
+          suite: ['s'],
+          name: 'bad',
+          status: 'failed',
+          diagnostics: [{ code: 'TEST_FAILED', severity: 'error', message: 'threw' }],
+          assertions: [
+            {
+              kind: 'volume',
+              subject: undefined,
+              expected: {},
+              diagnostics: [{ code: 'GEOSPEC_MEASUREMENT_MISMATCH', severity: 'error', message: 'off by 3' }],
+            },
+            { kind: 'volume', subject: undefined, expected: {} },
+          ],
+        },
+      ],
+    };
+
+    expect(formatFileReport('a.geospec.ts', result)).toStrictEqual([
+      'FAIL a.geospec.ts',
+      '  skip s > todo',
+      '  fail s > bad',
+      '    TEST_FAILED: threw',
+      '    GEOSPEC_MEASUREMENT_MISMATCH: off by 3',
+    ]);
+  });
+
+  it('should print a diagnostic once even though the collector records it twice', () => {
+    const diagnostic: GeometryDiagnostic = {
+      code: 'GEOSPEC_MEASUREMENT_MISMATCH',
+      severity: 'error',
+      message: 'off by 3',
+    };
+    const result: GeoSpecRunResult = {
+      success: true,
+      passed: false,
+      bundle,
+      tests: [
+        {
+          suite: ['s'],
+          name: 'bad',
+          status: 'failed',
+          diagnostics: [diagnostic],
+          assertions: [{ kind: 'volume', subject: undefined, expected: {}, diagnostics: [diagnostic] }],
+        },
+      ],
+    };
+
+    expect(formatFileReport('a.geospec.ts', result)).toStrictEqual([
+      'FAIL a.geospec.ts',
+      '  fail s > bad',
+      '    GEOSPEC_MEASUREMENT_MISMATCH: off by 3',
+    ]);
+  });
+
+  it('should label an undecided test by its status, never fail', () => {
+    const refusal: GeometryDiagnostic = {
+      code: 'GEOSPEC_ANALYSIS_LIMIT',
+      severity: 'error',
+      message: 'Connected components need 9 MiB; the analysis limit is 8 MiB.',
+    };
+    const result: GeoSpecRunResult = {
+      success: true,
+      passed: false,
+      bundle,
+      tests: [
+        { suite: ['knot'], name: 'one solid', status: 'inconclusive', diagnostics: [refusal], assertions: [] },
+        { suite: ['knot'], name: 'step only', status: 'unsupported', diagnostics: [], assertions: [] },
+        { suite: ['knot'], name: 'later', status: 'not-run', diagnostics: [], assertions: [] },
+      ],
+    };
+
+    expect(formatFileReport('knot.geospec.ts', result)).toStrictEqual([
+      'FAIL knot.geospec.ts',
+      '  inconclusive knot > one solid',
+      `    GEOSPEC_ANALYSIS_LIMIT: ${refusal.message}`,
+      '  unsupported knot > step only',
+      '  not-run knot > later',
+    ]);
+  });
+
+  it('should print PASS for a green file', () => {
+    expect(formatFileReport('a.geospec.ts', { success: true, passed: true, tests: [], bundle })).toStrictEqual([
+      'PASS a.geospec.ts',
+    ]);
+  });
+});
+
+describe('formatRunReport', () => {
+  it('should end with the totals and surface run-level issues', () => {
+    const lines = formatRunReport({
+      success: false,
+      passed: 1,
+      failed: 2,
+      selectedTests: 3,
+      files: [{ file: 'a.geospec.ts', result: { success: true, passed: true, tests: [], bundle } }],
+      issues: [{ code: 'GEOSPEC_RUNNER_BAILED', message: 'stopped', severity: 'error', type: 'runtime' }],
+    });
+
+    expect(lines).toStrictEqual([
+      'PASS a.geospec.ts',
+      'GEOSPEC_RUNNER_BAILED: stopped',
+      'GeoSpec failed: 1 passed, 2 failed of 3.',
+    ]);
+  });
+
+  it('should name the inconclusive tests from the accounting, since they are neither passed nor failed', () => {
+    const lines = formatRunReport({
+      success: false,
+      passed: 0,
+      failed: 0,
+      selectedTests: 4,
+      files: [],
+      accounting: {
+        discovered: 4,
+        selected: 4,
+        completed: 4,
+        passed: 0,
+        failed: 0,
+        unsupported: 0,
+        inconclusive: 4,
+        skipped: 0,
+        notRun: 0,
+        requestedFiles: ['a.geospec.ts'],
+        completedFiles: ['a.geospec.ts'],
+        notRunFiles: [],
+        discoveryComplete: true,
+        cancelled: false,
+        bailed: false,
+      },
+    });
+
+    expect(lines).toStrictEqual(['GeoSpec inconclusive: 0 passed, 0 failed, 4 inconclusive of 4.']);
+  });
+
+  // The same counts give the same line as `summarizeTestModelOutput` in @taucad/chat (test-model-summary.test.ts).
+  it('should print the planetary headline that test_model prints over MCP', () => {
+    expect(
+      formatRunHeadline({
+        success: false,
+        passed: 5,
+        failed: 0,
+        selectedTests: 10,
+        files: [],
+        accounting: {
+          discovered: 10,
+          selected: 10,
+          completed: 10,
+          passed: 5,
+          failed: 0,
+          unsupported: 0,
+          inconclusive: 5,
+          skipped: 0,
+          notRun: 0,
+          requestedFiles: ['main.geospec.ts'],
+          completedFiles: ['main.geospec.ts'],
+          notRunFiles: [],
+          discoveryComplete: true,
+          cancelled: false,
+          bailed: false,
+        },
+      }),
+    ).toBe('GeoSpec inconclusive: 5 passed, 0 failed, 5 inconclusive of 10.');
+  });
+
+  // The test-model-summary.test.ts suite in @taucad/chat qualifies the same counts the same way.
+  it('should qualify a cancelled run with an unsupported requirement as inconclusive', () => {
+    expect(
+      formatRunHeadline({
+        success: false,
+        passed: 0,
+        failed: 0,
+        selectedTests: 2,
+        files: [],
+        accounting: {
+          discovered: 2,
+          selected: 2,
+          completed: 1,
+          passed: 0,
+          failed: 0,
+          unsupported: 1,
+          inconclusive: 0,
+          skipped: 0,
+          notRun: 1,
+          requestedFiles: ['main.geospec.ts'],
+          completedFiles: [],
+          notRunFiles: ['main.geospec.ts'],
+          discoveryComplete: true,
+          cancelled: true,
+          bailed: false,
+        },
+      }),
+    ).toBe('GeoSpec inconclusive: 0 passed, 0 failed, 1 unsupported, 1 not run of 2.');
+  });
+});
+
+describe('runReportJson', () => {
+  const diagnostic = { code: 'GEOSPEC_X', message: 'bad', severity: 'error' } as const;
+
+  it.each([true, false])('should transport canonical bytes and load identity after module success=%s', (success) => {
+    const canonical = { claim: [0, 255], plan: [1, 254], result: [2, 253] };
+    const report = runReportJson({
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: [
+        {
+          file: 'a.geospec.ts',
+          result: {
+            success,
+            issues: [],
+            passed: true,
+            bundle,
+            tests: [
+              {
+                suite: [],
+                name: 'canonical',
+                ordinal: 2,
+                status: 'passed',
+                diagnostics: [],
+                assertions: [
+                  {
+                    kind: 'watertight',
+                    subject: { huge: true },
+                    expected: true,
+                    loadId: 'load-1',
+                    report: {
+                      claimId: 'claim-1',
+                      status: 'passed',
+                      polarity: 'positive',
+                      claim: { claimId: 'claim-1' },
+                      result: { status: 'passed' },
+                      diagnostics: [],
+                      evidence: { value: 1 },
+                      canonicalClaim: new Uint8Array(canonical.claim),
+                      canonicalPlan: new Uint8Array(canonical.plan),
+                      canonicalResult: new Uint8Array(canonical.result),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const json = [...jsonChunks(report)].join('');
+    expect(json).not.toContain('huge');
+    expect(JSON.parse(json)).toMatchObject({
+      files: [
+        {
+          tests: [
+            {
+              ordinal: 2,
+              reports: [
+                {
+                  claimId: 'claim-1',
+                  loadId: 'load-1',
+                  canonical,
+                  evidence: { value: 1 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('should preserve selected scope accounting and terminal lineage qualification', () => {
+    const accounting = {
+      requestedFiles: ['a.geospec.ts'],
+      completedFiles: ['a.geospec.ts'],
+      notRunFiles: [],
+      discoveryComplete: true,
+      cancelled: false,
+      bailed: false,
+      discovered: 3,
+      selected: 2,
+      completed: 1,
+      passed: 1,
+      failed: 0,
+      unsupported: 1,
+      inconclusive: 0,
+      skipped: 0,
+      notRun: 1,
+    };
+    const lineage = {
+      status: 'mixed',
+      modules: [
+        {
+          entryPath: 'a.geospec.ts',
+          bundleSha256: 'bundle-hash',
+          files: { 'helper.ts': 'helper-hash' },
+          consistent: true,
+        },
+      ],
+      loads: [
+        {
+          loadId: 'load-1',
+          status: 'complete',
+          subject: { contentHash: 'content-hash' },
+          evidence: {
+            loadId: 'load-1',
+            status: 'complete',
+            format: 'gltf',
+            parameters: { subjectId: 'authored-name', size: 2, nested: { subjectId: 'nested-name', keep: true } },
+            ingestOptions: {},
+            artifacts: [{ name: 'alias.bin', sourcePath: 'assets/actual.bin', sha256: 'actual-hash', byteLength: 2 }],
+          },
+        },
+      ],
+    } as const;
+    const report = runReportJson({
+      success: false,
+      passed: 1,
+      failed: 0,
+      selectedTests: 2,
+      accounting,
+      lineageStatus: 'mixed',
+      files: [
+        {
+          file: 'a.geospec.ts',
+          result: {
+            success: true,
+            passed: false,
+            bundle,
+            tests: [],
+            accounting,
+            lineage,
+          },
+        },
+      ],
+    });
+    expect(JSON.parse([...jsonChunks(report)].join(''))).toMatchObject({
+      accounting,
+      lineageStatus: 'mixed',
+      files: [{ accounting, lineage }],
+    });
+  });
+
+  it('should carry verdicts and diagnostics without the live geometry subjects', () => {
+    const report = runReportJson({
+      success: false,
+      passed: 0,
+      failed: 1,
+      selectedTests: 1,
+      durationMs: 12,
+      issues: [{ code: 'GEOSPEC_RUNNER_BAILED', message: 'stopped', severity: 'error', type: 'runtime' }],
+      files: [
+        {
+          file: 'a.geospec.ts',
+          durationMs: 5,
+          result: {
+            success: true,
+            passed: false,
+            bundle,
+            tests: [
+              {
+                suite: ['s'],
+                name: 't',
+                status: 'failed',
+                durationMs: 3,
+                diagnostics: [],
+                // The whole subject rides on the assertion in process; none of
+                // it may reach the report.
+                assertions: [
+                  { kind: 'volume', subject: { mesh: { huge: true } }, expected: 1, diagnostics: [diagnostic] },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(report).toStrictEqual({
+      success: false,
+      passed: 0,
+      failed: 1,
+      selectedTests: 1,
+      durationMs: 12,
+      issues: [{ code: 'GEOSPEC_RUNNER_BAILED', message: 'stopped', severity: 'error', type: 'runtime' }],
+      files: [
+        {
+          file: 'a.geospec.ts',
+          success: false,
+          durationMs: 5,
+          tests: [{ suite: ['s'], name: 't', status: 'failed', durationMs: 3, diagnostics: [diagnostic] }],
+        },
+      ],
+    });
+    expect(JSON.stringify(report)).not.toContain('huge');
+  });
+
+  it('should omit an absent duration and tolerate an assertion with no diagnostics', () => {
+    const report = runReportJson({
+      success: true,
+      passed: 1,
+      failed: 0,
+      selectedTests: 1,
+      files: [
+        {
+          file: 'a.geospec.ts',
+          result: {
+            success: true,
+            passed: true,
+            bundle,
+            tests: [
+              {
+                suite: [],
+                name: 't',
+                status: 'passed',
+                diagnostics: [],
+                assertions: [{ kind: 'volume', subject: {}, expected: 1 }],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(report['files']).toStrictEqual([
+      { file: 'a.geospec.ts', success: true, tests: [{ suite: [], name: 't', status: 'passed', diagnostics: [] }] },
+    ]);
+  });
+
+  it('should report a file that never ran as its issues', () => {
+    const report = runReportJson({
+      success: false,
+      passed: 0,
+      failed: 1,
+      selectedTests: 0,
+      files: [
+        {
+          file: 'a.geospec.ts',
+          result: { success: false, issues: [{ ...diagnostic, type: 'runtime' }] },
+        },
+      ],
+    });
+
+    expect(report['files']).toStrictEqual([
+      { file: 'a.geospec.ts', success: false, issues: [{ ...diagnostic, type: 'runtime' }] },
+    ]);
+  });
+});
+
+describe('runGeoSpecCli', () => {
+  it('should print usage and succeed for --help', async () => {
+    const host = cliHost({});
+
+    expect(await runGeoSpecCli(['--help'], host)).toBe(0);
+    expect(host.written[0]).toBe(geoSpecCliUsage);
+  });
+
+  it('should print the error plus usage and fail for a bad invocation', async () => {
+    const host = cliHost({});
+
+    expect(await runGeoSpecCli(['fly'], host)).toBe(1);
+    expect(host.written[0]).toContain("Unknown command 'fly'.");
+    expect(host.written[0]).toContain('Usage:');
+  });
+
+  it('should resolve a relative project path against the cwd', async () => {
+    const host = cliHost({ tree: { '/project/sub': ['a.geospec.ts'] } });
+
+    await runGeoSpecCli(['run', 'sub'], host);
+
+    expect(host.runs[0]).toMatchObject({ projectPath: '/project/sub' });
+  });
+
+  it('should keep an absolute project path', async () => {
+    const host = cliHost({ tree: { '/elsewhere': ['a.geospec.ts'] } });
+
+    await runGeoSpecCli(['run', '/elsewhere'], host);
+
+    expect(host.runs[0]).toMatchObject({ projectPath: '/elsewhere' });
+  });
+
+  it('should treat a bare dot as the cwd', async () => {
+    const host = cliHost({});
+
+    await runGeoSpecCli(['run', '.'], host);
+
+    expect(host.runs[0]).toMatchObject({ projectPath: '/project' });
+  });
+
+  it('should FAIL when the filters select no files', async () => {
+    const host = cliHost({ tree: { '/project': [] } });
+
+    const code = await runGeoSpecCli(['run', '.'], host);
+
+    expect(code).toBe(1);
+    expect(host.written[0]).toContain('No GeoSpec files matched');
+  });
+
+  it('should report an empty selection as JSON under --json', async () => {
+    const host = cliHost({ tree: { '/project': [] } });
+
+    await runGeoSpecCli(['run', '.', '--json', '--file', 'nope'], host);
+
+    expect(JSON.parse(host.written[0] ?? '{}')).toMatchObject({ success: false, unmatchedRoots: ['nope'] });
+  });
+
+  it('should thread the run filters through and close exactly once', async () => {
+    const host = cliHost({});
+
+    const code = await runGeoSpecCli(['run', '.', '-t', 'volume', '--test-timeout', '9000', '--bail'], host);
+
+    expect(code).toBe(0);
+    expect(host.runs[1]).toMatchObject({
+      files: ['a.geospec.ts'],
+      testNamePattern: 'volume',
+      testTimeout: 9000,
+      bail: true,
+    });
+    expect(host.closed()).toBe(1);
+  });
+
+  it('should ask for a pool only when --workers is given', async () => {
+    const serial = cliHost({});
+    const pooled = cliHost({});
+
+    await runGeoSpecCli(['run', '.'], serial);
+    await runGeoSpecCli(['run', '.', '--workers', '3', '--shard-timeout', '1000'], pooled);
+
+    expect(serial.runs[0]).toMatchObject({ workers: undefined });
+    expect(pooled.runs[0]).toMatchObject({ workers: 3, shardTimeout: 1000 });
+  });
+
+  it('should map operational flags directly to the runner factory and run', async () => {
+    const host = cliHost({});
+
+    await runGeoSpecCli(['run', '.', '--test-timeout', '1234', '--bail'], host);
+
+    expect(host.runs[0]).toStrictEqual({
+      projectPath: '/project',
+      configPath: undefined,
+      workers: undefined,
+      shardTimeout: undefined,
+    });
+    expect(host.runs[1]).toMatchObject({ testTimeout: 1234, bail: true });
+  });
+
+  it('should print exactly one JSON document under --json', async () => {
+    const host = cliHost({});
+
+    await runGeoSpecCli(['run', '.', '--json'], host);
+
+    // Streamed one chunk per file so a flagship corpus cannot exceed V8's
+    // maximum string; the chunks are still one document, newline-separated.
+    expect(JSON.parse(host.written.join('\n'))).toMatchObject({ success: true, passed: 1 });
+  });
+
+  describe('jsonChunks', () => {
+    const rejoin = (value: unknown, limit: number): unknown => JSON.parse([...jsonChunks(value, limit)].join('\n'));
+
+    it('should emit a value that fits as one chunk', () => {
+      expect([...jsonChunks({ a: 1, b: [2, 3] }, 1024)]).toEqual(['{"a":1,"b":[2,3]}']);
+    });
+
+    it('should descend into arrays and objects that do not fit', () => {
+      const value = { files: [{ name: 'a', rows: [1, 2, 3] }, { name: 'b' }], ok: true };
+
+      expect(rejoin(value, 8)).toEqual(value);
+      expect([...jsonChunks(value, 8)].length).toBeGreaterThan(1);
+    });
+
+    it('should omit undefined members exactly as JSON.stringify does', () => {
+      const value = { kept: 'a'.repeat(40), dropped: undefined, also: () => 1 };
+
+      expect(rejoin(value, 8)).toEqual({ kept: 'a'.repeat(40) });
+    });
+
+    it('should emit an unsplittable leaf whole', () => {
+      expect([...jsonChunks('a'.repeat(40), 8)]).toEqual([`"${'a'.repeat(40)}"`]);
+      expect([...jsonChunks([undefined], 1)]).toEqual(['[', 'null', ']']);
+    });
+  });
+
+  it('should return 1 when the run failed', async () => {
+    const host = cliHost({
+      result: { success: false, passed: 0, failed: 1, selectedTests: 1, files: [] },
+    });
+
+    expect(await runGeoSpecCli(['run', '.'], host)).toBe(1);
+  });
+
+  it('should close even when the run throws', async () => {
+    const host = cliHost({});
+    const failing: GeoSpecCliHost = {
+      ...host,
+      createRunner: () => ({
+        run: async () => {
+          throw new Error('runner exploded');
+        },
+        on: () => () => undefined,
+        abort: () => undefined,
+        close: host.createRunner({
+          projectPath: '/project',
+          configPath: undefined,
+          workers: undefined,
+          shardTimeout: undefined,
+        }).close,
+      }),
+    };
+
+    await expect(runGeoSpecCli(['run', '.'], failing)).rejects.toThrow('runner exploded');
+    expect(host.closed()).toBe(1);
+  });
+
+  it('should include the glob filters in discovery', async () => {
+    const discovery = vi.fn(() => ({
+      readdir: async () => ['a.geospec.ts', 'b.slow.geospec.ts'],
+      stat: async (path: string) => {
+        const kind: 'directory' | 'file' = path === '/project' ? 'directory' : 'file';
+        return { kind };
+      },
+    }));
+    const host: GeoSpecCliHost = { ...cliHost({}), discoveryFileSystem: discovery };
+
+    await runGeoSpecCli(['run', '.', '--include', '**/*.geospec.ts', '--exclude', '**/*.slow.geospec.ts'], host);
+
+    expect(discovery).toHaveBeenCalledWith('/project');
+  });
+});
+
+describe('the project config', () => {
+  it('should load the explicit --config and hand its path to the runner', async () => {
+    const host = cliHost({ config: { configPath: '/project/ci.config.ts', options: {} } });
+
+    await runGeoSpecCli(['run', '.', '--config', 'ci.config.ts'], host);
+
+    expect(host.configs).toStrictEqual([{ projectPath: '/project', configPath: 'ci.config.ts' }]);
+    expect(host.runs[0]).toMatchObject({ configPath: '/project/ci.config.ts' });
+  });
+
+  it("should run with the config's fields where no flag replaces them", async () => {
+    const discovery = vi.fn(() => ({
+      readdir: async () => ['a.geospec.ts', 'b.slow.geospec.ts'],
+      stat: async (path: string) => {
+        const kind: 'directory' | 'file' = path === '/project' ? 'directory' : 'file';
+        return { kind };
+      },
+    }));
+    const host = cliHost({
+      config: {
+        configPath: '/project/geospec.config.ts',
+        options: { exclude: ['**/*.slow.geospec.ts'], testNamePattern: 'volume', testTimeout: 5000, bail: true },
+      },
+    });
+
+    await runGeoSpecCli(['run', '.', '--test-timeout', '9000'], { ...host, discoveryFileSystem: discovery });
+
+    expect(host.runs[1]).toStrictEqual({
+      files: ['a.geospec.ts'],
+      testNamePattern: 'volume',
+      testTimeout: 9000,
+      bail: true,
+    });
+  });
+
+  it('should fail without running when the config cannot load', async () => {
+    const host = cliHost({ config: new TypeError('Multiple GeoSpec configs found: a, b.') });
+
+    expect(await runGeoSpecCli(['run', '.', '--json'], host)).toBe(1);
+    expect(JSON.parse(host.written[0] ?? '{}')).toStrictEqual({
+      success: false,
+      error: 'GeoSpec config: Multiple GeoSpec configs found: a, b.',
+    });
+    expect(host.runs).toHaveLength(0);
+  });
+
+  it('should refuse --config without a path', () => {
+    expect(parseGeoSpecCliArguments(['run', '--config'])).toStrictEqual({
+      kind: 'error',
+      message: '--config needs a path.',
+    });
+  });
+});
+
+describe('the empty-selection message', () => {
+  it('should name the roots that matched nothing', async () => {
+    const host = cliHost({ tree: { '/project': [] } });
+
+    await runGeoSpecCli(['run', '.'], host);
+
+    expect(host.written[0]).toBe('No GeoSpec files matched (unmatched: .).');
+  });
+});

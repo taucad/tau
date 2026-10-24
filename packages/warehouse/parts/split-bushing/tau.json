@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_JqpxOWjPFA_aVmN4FqbpT",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Split sleeve bushing",
   "description": "Slotted sleeve that can accommodate radial compression.",
   "tags": [

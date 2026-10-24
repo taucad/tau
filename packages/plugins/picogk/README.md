@@ -108,8 +108,11 @@ if (preparation.state.status === 'ready') {
 
 The worker launches as Microsoft's `dotnet` muxer running the worker assembly, with the closure root as
 its only readable runtime path. Each launch hashes the muxer and a named set of runtime and engine
-files against the receipt; `tau prepare picogk --verify` re-checks the whole closure. Linux and Windows
-have no closure until a Linux engine builder exists, so preparation reports the host as unsupported.
+files against the receipt; `tau prepare picogk --verify` re-checks the whole closure. The published
+closure serves macOS 14 or later on Apple silicon and linux-x64 with glibc 2.28 or later. The desktop
+release job builds both layers; the Linux engine is headless and builds in the pinned manylinux_2_28
+image. On other hosts, including Windows, musl Linux and Linux on arm64, preparation reports the host as
+unsupported.
 
 ## API
 

@@ -106,6 +106,45 @@ describe('createDotnetLayer', () => {
     ).toThrow(/worker payload/u);
   });
 
+  it('should add a staged variant with the worker pin when the manifest has none for the record target', () => {
+    const linux = { ...record, target: 'linux-x64', asset: 'tau-sample-layer-linux-x64.tar.gz' };
+    const darwinOnly = { schemaVersion: 1, dependencies: { runtime: [variant('darwin', 'arm64')] } };
+    const staged = { 'linux-x64': variant('linux', 'x64', false) };
+
+    const composed = rule.composeManifest(darwinOnly, linux, staged);
+    const { runtime } = composed['dependencies'] as { runtime: Array<{ payloads: unknown[] }> };
+
+    expect(runtime).toEqual([
+      variant('darwin', 'arm64'),
+      {
+        ...variant('linux', 'x64', false),
+        payloads: [...(variant('linux', 'x64', false)['payloads'] as unknown[]), rule.payload(linux)],
+      },
+    ]);
+    expect(manifestText(rule.composeManifest(composed, linux, staged))).toBe(manifestText(composed));
+    expect(darwinOnly.dependencies.runtime).toHaveLength(1);
+  });
+
+  it('should prefer the manifest variant to a staged one and refuse a staged variant of another target', () => {
+    const linux = { ...record, target: 'linux-x64', asset: 'tau-sample-layer-linux-x64.tar.gz' };
+    const staged = { 'linux-x64': variant('linux', 'x64', false) };
+    const pinned = {
+      schemaVersion: 1,
+      dependencies: { runtime: [variant('darwin', 'arm64'), variant('linux', 'x64')] },
+    };
+    const { runtime } = rule.composeManifest(pinned, linux, staged)['dependencies'] as { runtime: unknown[] };
+
+    expect(runtime).toHaveLength(2);
+    expect(() =>
+      rule.composeManifest({ dependencies: { runtime: [] } }, linux, {
+        'linux-x64': variant('darwin', 'arm64', false),
+      }),
+    ).toThrow(/staged linux-x64 variant names another target/u);
+    expect(() => rule.composeManifest({ dependencies: { runtime: [] } }, record, staged)).toThrow(
+      /no darwin-arm64 runtime variant/u,
+    );
+  });
+
   it("should accept only a complete record whose asset is its target's archive", () => {
     const linux = { ...record, target: 'linux-x64', asset: 'tau-sample-layer-linux-x64.tar.gz' };
 
@@ -203,5 +242,29 @@ describe('runComposeTauPlugin', () => {
     ).resolves.toBe(1);
     await expect(runComposeTauPlugin({ layer, manifestPath, args: ['--check'] })).resolves.toBe(2);
     expect(error).toHaveBeenCalledWith(expect.stringContaining('Usage: compose-tau-plugin.mts'));
+  });
+
+  it('should compose a target the manifest does not pin from the staged variants file', async () => {
+    const { manifestPath } = await setUp();
+    const linux = { ...record, target: 'linux-x64', asset: 'tau-sample-layer-linux-x64.tar.gz' };
+    // The darwin-arm64 worker is a published layer, so the SBOM describes every payload.
+    const darwinOnly = rule.composeManifest(
+      { schemaVersion: 1, dependencies: { runtime: [variant('darwin', 'arm64')] } },
+      record,
+    );
+    const staged = { 'linux-x64': variant('linux', 'x64', false) };
+    const recordPath = join(directory ?? '', 'linux-layer.json');
+    const stagedVariantsPath = join(directory ?? '', 'tau-plugin.variants.json');
+    await writeFile(manifestPath, manifestText(darwinOnly));
+    await writeFile(recordPath, JSON.stringify(linux));
+    await writeFile(stagedVariantsPath, manifestText(staged));
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(runComposeTauPlugin({ layer, manifestPath, args: ['--layer', recordPath] })).resolves.toBe(1);
+    await expect(
+      runComposeTauPlugin({ layer, manifestPath, stagedVariantsPath, args: ['--layer', recordPath] }),
+    ).resolves.toBe(0);
+
+    expect(JSON.parse(await readFile(manifestPath, 'utf8'))).toEqual(rule.composeManifest(darwinOnly, linux, staged));
   });
 });

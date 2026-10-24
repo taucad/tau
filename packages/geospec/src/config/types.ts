@@ -1,26 +1,10 @@
-import type { JSONValue } from '@taucad/runtime/types';
-
-/**
- * Imported Tau project data for later host resolution.
- *
- * This descriptor does not validate the original manifest bytes or its schema,
- * admit an asset, export geometry, or establish finalized-artifact provenance.
- * @public
- */
-export type GeoSpecTauProjectDescriptor = {
-  readonly kind: 'tau-project';
-  /** Normalized project-relative POSIX path identifying the imported manifest. */
-  readonly manifestPath: string;
-  readonly manifest: Readonly<Record<string, JSONValue>>;
-  readonly format: 'step' | 'glb';
-  readonly parameters?: Readonly<Record<string, JSONValue>>;
-};
+import type { GeoSpecModelExporter } from '#model/types.js';
 
 /**
  * Trusted project configuration using existing discovery and runner options.
  *
  * Omitted values keep their existing owner's defaults. Defined overrides
- * replace whole fields, including empty arrays, false and the subjects map.
+ * replace whole fields, including empty arrays and false.
  * Existing discovery currently treats an absent or empty include array as its
  * default pattern. Preserving [] here does not change that consumer behavior.
  * This is configuration data, not a canonical engine plan or a geometry result.
@@ -32,15 +16,17 @@ export type GeoSpecConfig = {
   testNamePattern?: string;
   /** Positive finite milliseconds; the runner owns its default. */
   testTimeout?: number;
-  /** Positive finite milliseconds; does not define a geometry verdict. */
-  matcherWallBackstop?: number;
   bail?: boolean;
-  forensic?: boolean;
-  cache?: boolean;
-  /** Requested cache location only; loading configuration creates no store. */
-  cacheDirectory?: string;
-  subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>;
+  /**
+   * Model exporters for `loadModel({ file })`: the first whose `extensions` claims the file exports
+   * it, so order is the override. STEP and GLB sources need none. Only a runner that executes the
+   * config natively reads them; a host that holds its own exporters reads the data fields only.
+   */
+  exporters?: readonly GeoSpecModelExporter[];
 };
+
+/** The config's data fields: everything a host that holds its own exporters reads. @public */
+export type GeoSpecConfigData = Omit<GeoSpecConfig, 'exporters'>;
 
 /** Options for one trusted Node configuration load. @public */
 export type LoadGeoSpecConfigOptions = {

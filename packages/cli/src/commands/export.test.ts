@@ -101,6 +101,7 @@ describe('exportCommand', () => {
     expect(Object.keys(command.args ?? {})).toEqual([
       'file',
       'ext',
+      'out',
       'output',
       'params',
       'exportOptions',

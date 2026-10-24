@@ -1,0 +1,66 @@
+name: Desktop hosted Linux VM proof
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-linux-vm-proof.yml'
+      - 'apps/desktop/scripts/hosted-linux-*.sh'
+      - 'apps/desktop/scripts/qualification-electron-writer.test.mts'
+      - 'apps/desktop/scripts/qualification-appimage-sandbox.test.mts'
+      - 'apps/desktop/scripts/preload-sandbox-fixture.mts'
+      - 'apps/desktop/src/preload/**'
+      - 'apps/desktop/electron.vite.config.ts'
+      - 'apps/desktop/scripts/appimage-package.test.mts'
+      - 'apps/desktop/resources/appimage/AppRun'
+      - 'packages/filesystem/src/backend/node/authority-writer-lock*'
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+env:
+  NX_NO_CLOUD: 'true'
+  pnpm_config_verify_deps_before_run: error
+concurrency:
+  group: desktop-linux-vm-proof-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  guest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu, debian]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+      - name: Reject hosted qualification outside protected staging
+        env:
+          TAU_VM_MODE: qualification
+          TAU_VM_DISTRO: ubuntu
+          TAU_QUALIFICATION_CHANNEL: production
+        run: |
+          if bash apps/desktop/scripts/hosted-linux-vm.sh > "$RUNNER_TEMP/refusal.log" 2>&1; then
+            echo '::error::Unprotected hosted qualification was admitted'
+            exit 1
+          fi
+          grep -F 'Hosted qualification requires protected Linux staging main dispatch' "$RUNNER_TEMP/refusal.log"
+      - name: Prove full guest infrastructure and harness tooling without credentials
+        env:
+          TAU_VM_MODE: tooling
+          TAU_VM_DISTRO: ${{ matrix.distro }}
+        run: bash apps/desktop/scripts/hosted-linux-vm.sh
+      - name: Retain infrastructure evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-vm-proof-${{ matrix.distro }}
+          path: out/test-results/hosted-linux-vm/${{ matrix.distro }}/
+          retention-days: 7
+          if-no-files-found: error

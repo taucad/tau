@@ -1,3 +1,4 @@
+import { addAbortSignal } from 'node:stream';
 import type { Readable } from 'node:stream';
 import {
   AbortMultipartUploadCommand,
@@ -18,10 +19,11 @@ import type { S3ClientConfig } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { ObjectStorageEnvironment } from '#config/environment.config.js';
 import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage/storage.constants.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { instrumentStorageClient } from '#storage/storage-metrics.js';
+import type { StorageMetricTier } from '#storage/storage-metrics.js';
 import { MetricsService } from '#telemetry/metrics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
@@ -66,8 +68,24 @@ export type PutBlobArgs = {
   ifMatch?: string;
   /** Base64 SHA-256 the backend verifies against the received bytes. */
   checksumSha256?: string;
+  /**
+   * Send exactly one request: no AWS SDK retry. For a caller whose own loop
+   * owns the backoff, such as the manifest write's three attempts, where the
+   * SDK's default three attempts inside each would put up to nine requests on
+   * one contended key (review FR21).
+   */
+  singleAttempt?: boolean;
   tier?: StorageTier;
+  signal?: AbortSignal;
 };
+
+/**
+ * A put whose body is a stream (DA4). The stream has no length of its own, so
+ * `contentLength` is required, and the AWS SDK never retries a streamed
+ * request because it cannot rewind the body: a caller that streams owns its
+ * own retry (see `S3RepositoryStore`).
+ */
+export type PutBlobStreamArgs = Omit<PutBlobArgs, 'body'> & { body: Readable; contentLength: number };
 
 /**
  * The outcome of a put, discriminated on `lost` so a caller cannot read an
@@ -92,8 +110,9 @@ export type ObjectStorageServiceContract = {
     key: string;
     range?: { start: number; end: number };
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ body: Readable; contentType: string; etag: string; contentLength?: number }>;
-  headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<
+  headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier; signal?: AbortSignal }): Promise<
     | {
         contentType: string;
         size: number;
@@ -102,7 +121,12 @@ export type ObjectStorageServiceContract = {
       }
     | undefined
   >;
-  deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void>;
+  deleteBlob(args: {
+    namespace: StorageNamespace;
+    key: string;
+    tier?: StorageTier;
+    signal?: AbortSignal;
+  }): Promise<void>;
   deleteBlobs(args: {
     namespace: StorageNamespace;
     keys: readonly string[];
@@ -134,6 +158,7 @@ export type ObjectStorageServiceContract = {
     key: string;
     contentType: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<string>;
   uploadPart?(args: {
     namespace: StorageNamespace;
@@ -143,6 +168,7 @@ export type ObjectStorageServiceContract = {
     body: Uint8Array<ArrayBuffer>;
     checksumSha256: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ etag: string; checksumSha256: string }>;
   presignUploadPart(args: {
     namespace: StorageNamespace;
@@ -159,12 +185,14 @@ export type ObjectStorageServiceContract = {
     uploadId: string;
     parts: ReadonlyArray<{ partNumber: number; etag: string; checksumSha256: string }>;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void>;
   abortMultipartUpload(args: {
     namespace: StorageNamespace;
     key: string;
     uploadId: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void>;
   copyBlob?(args: {
     namespace: StorageNamespace;
@@ -178,7 +206,7 @@ export type ObjectStorageServiceContract = {
     tier?: StorageTier;
   }): Promise<ReadonlyArray<{ key: string; size: number; lastModified: Date | undefined }>>;
   publicUrl(args: { namespace: StorageNamespace; key: string }): string;
-  headProbeObject(): Promise<
+  headProbeObject(signal?: AbortSignal): Promise<
     | {
         etag: string;
         size: number;
@@ -187,7 +215,7 @@ export type ObjectStorageServiceContract = {
       }
     | undefined
   >;
-  headPrivateBucket(): Promise<boolean>;
+  headPrivateBucket(signal?: AbortSignal): Promise<boolean>;
 };
 
 /** Maximum keys one `DeleteObjects` request accepts, per the S3 API. */
@@ -248,6 +276,16 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
   private readonly client: S3Client;
 
+  /**
+   * The same endpoint and credentials with `maxAttempts: 1`, built on first
+   * use, for {@link PutBlobArgs.singleAttempt}.
+   */
+  private singleAttemptClient: S3Client | undefined;
+
+  private readonly clientConfig: S3ClientConfig;
+
+  private readonly tierOfBucket: (bucket: string | undefined) => StorageMetricTier;
+
   private readonly bucket: string;
 
   private readonly privateBucket: string;
@@ -267,7 +305,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   private readonly signingClient: Parameters<typeof getSignedUrl>[0];
 
   public constructor(
-    private readonly configService: ConfigService<Environment, true>,
+    private readonly configService: ConfigService<ObjectStorageEnvironment, true>,
     // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
     @Optional() scopedAccount?: StorageAccount,
     // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
@@ -321,12 +359,10 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
       clientConfig.responseChecksumValidation = 'WHEN_REQUIRED';
     }
 
-    this.client = new S3Client(clientConfig);
-    if (this.metrics !== undefined) {
-      instrumentStorageClient(this.client, this.metrics, (bucket) =>
-        scopedAccount === undefined ? (bucket === this.privateBucket ? 'private' : 'public') : 'account',
-      );
-    }
+    this.clientConfig = clientConfig;
+    this.tierOfBucket = (bucket) =>
+      scopedAccount === undefined ? (bucket === this.privateBucket ? 'private' : 'public') : 'account';
+    this.client = this.newClient(clientConfig);
     this.signingClient = this.client as unknown as Parameters<typeof getSignedUrl>[0];
   }
 
@@ -347,39 +383,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   }
 
   public async putBlob(args: PutBlobArgs): Promise<PutBlobResult> {
-    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    return this.put(args);
+  }
 
-    try {
-      const response = await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.resolveBucket(args.tier),
-          Key: resolvedKey,
-          Body: args.body,
-          ContentType: args.contentType,
-          ...(args.cacheControl ? { CacheControl: args.cacheControl } : {}),
-          ...(args.ifNoneMatch === undefined ? {} : { IfNoneMatch: args.ifNoneMatch }),
-          ...(args.ifMatch === undefined ? {} : { IfMatch: args.ifMatch }),
-          ...(args.checksumSha256 === undefined ? {} : { ChecksumSHA256: args.checksumSha256 }),
-        }),
-      );
-
-      const etag = response.ETag?.replaceAll('"', '') ?? '';
-
-      return { lost: false, etag, alreadyExisted: false };
-    } catch (error) {
-      const conditional = args.ifNoneMatch !== undefined || args.ifMatch !== undefined;
-
-      // A conditional write that loses is an outcome, not a fault. MinIO and R2
-      // answer `404 NoSuchKey` rather than `412` when an `If-Match` names an
-      // absent key (AR-A E7); that is a lost race, never a create.
-      const absentTarget = args.ifMatch !== undefined && isNoSuchKey(error);
-
-      if (conditional && (isPreconditionFailed(error) || absentTarget)) {
-        return { lost: true, alreadyExisted: args.ifNoneMatch === '*' };
-      }
-
-      throw error;
-    }
+  /** {@link putBlob} with a streamed body: memory is the stream's chunks, never the object. */
+  public async putBlobStream(args: PutBlobStreamArgs): Promise<PutBlobResult> {
+    return this.put(args);
   }
 
   public async getBlob(args: {
@@ -387,6 +396,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     key: string;
     range?: { start: number; end: number };
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ body: Readable; contentType: string; etag: string; contentLength?: number }> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
@@ -396,21 +406,31 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         ...(args.range ? { Range: `bytes=${String(args.range.start)}-${String(args.range.end)}` } : {}),
       }),
+      { abortSignal: args.signal },
     );
 
     if (!response.Body || !(typeof response.Body === 'object' && 'pipe' in response.Body)) {
       throw new Error('S3 GetObject returned empty body');
     }
 
+    const body = response.Body as Readable;
+    if (args.signal !== undefined) {
+      addAbortSignal(args.signal, body);
+    }
     return {
-      body: response.Body as Readable,
+      body,
       contentType: response.ContentType ?? 'application/octet-stream',
       etag: response.ETag?.replaceAll('"', '') ?? '',
       ...(response.ContentLength === undefined ? {} : { contentLength: Number(response.ContentLength) }),
     };
   }
 
-  public async headBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<
+  public async headBlob(args: {
+    namespace: StorageNamespace;
+    key: string;
+    tier?: StorageTier;
+    signal?: AbortSignal;
+  }): Promise<
     | {
         contentType: string;
         size: number;
@@ -427,6 +447,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           Bucket: this.resolveBucket(args.tier),
           Key: resolvedKey,
         }),
+        { abortSignal: args.signal },
       );
 
       return {
@@ -444,7 +465,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     }
   }
 
-  public async deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void> {
+  public async deleteBlob(args: {
+    namespace: StorageNamespace;
+    key: string;
+    tier?: StorageTier;
+    signal?: AbortSignal;
+  }): Promise<void> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
     await this.client.send(
@@ -452,6 +478,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Bucket: this.resolveBucket(args.tier),
         Key: resolvedKey,
       }),
+      { abortSignal: args.signal },
     );
   }
 
@@ -608,6 +635,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     key: string;
     contentType: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<string> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     const response = await this.client.send(
@@ -617,6 +645,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         ContentType: args.contentType,
         ...(this.supportsPartChecksums ? { ChecksumAlgorithm: 'SHA256' } : {}),
       }),
+      { abortSignal: args.signal },
     );
     if (!response.UploadId) {
       throw new Error('S3 CreateMultipartUpload returned no upload ID');
@@ -662,6 +691,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     body: Uint8Array<ArrayBuffer>;
     checksumSha256: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<{ etag: string; checksumSha256: string }> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     const response = await this.client.send(
@@ -673,6 +703,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Body: args.body,
         ...(this.supportsPartChecksums ? { ChecksumSHA256: args.checksumSha256 } : {}),
       }),
+      { abortSignal: args.signal },
     );
     return {
       etag: response.ETag?.replaceAll('"', '') ?? '',
@@ -686,6 +717,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     uploadId: string;
     parts: ReadonlyArray<{ partNumber: number; etag: string; checksumSha256: string }>;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     await this.client.send(
@@ -703,6 +735,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           })),
         },
       }),
+      { abortSignal: args.signal },
     );
   }
 
@@ -711,6 +744,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     key: string;
     uploadId: string;
     tier?: StorageTier;
+    signal?: AbortSignal;
   }): Promise<void> {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
     await this.client.send(
@@ -719,6 +753,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         UploadId: args.uploadId,
       }),
+      { abortSignal: args.signal },
     );
   }
 
@@ -773,7 +808,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
    * the `/__health/*` no-store cache rule never interferes with namespace paths.
    * Used only by `S3HealthIndicator`.
    */
-  public async headProbeObject(): Promise<
+  public async headProbeObject(signal?: AbortSignal): Promise<
     | {
         etag: string;
         size: number;
@@ -788,6 +823,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           Bucket: this.bucket,
           Key: storageHealthProbeKey,
         }),
+        { abortSignal: signal },
       );
 
       return {
@@ -811,9 +847,9 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
    * `repos/tau-cloud` private-bucket change fails readiness instead of
    * 500ing on the first private publish.
    */
-  public async headPrivateBucket(): Promise<boolean> {
+  public async headPrivateBucket(signal?: AbortSignal): Promise<boolean> {
     try {
-      await this.client.send(new HeadBucketCommand({ Bucket: this.privateBucket }));
+      await this.client.send(new HeadBucketCommand({ Bucket: this.privateBucket }), { abortSignal: signal });
       return true;
     } catch (error) {
       if (isS3ObjectMissing(error)) {
@@ -824,8 +860,66 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     }
   }
 
+  private async put(args: PutBlobArgs | PutBlobStreamArgs): Promise<PutBlobResult> {
+    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    const contentLength = 'contentLength' in args ? args.contentLength : undefined;
+
+    try {
+      const client = args.singleAttempt === true ? this.singleAttempt() : this.client;
+      const response = await client.send(
+        new PutObjectCommand({
+          Bucket: this.resolveBucket(args.tier),
+          Key: resolvedKey,
+          Body: args.body,
+          ...(contentLength === undefined ? {} : { ContentLength: contentLength }),
+          ContentType: args.contentType,
+          ...(args.cacheControl ? { CacheControl: args.cacheControl } : {}),
+          ...(args.ifNoneMatch === undefined ? {} : { IfNoneMatch: args.ifNoneMatch }),
+          ...(args.ifMatch === undefined ? {} : { IfMatch: args.ifMatch }),
+          ...(args.checksumSha256 === undefined ? {} : { ChecksumSHA256: args.checksumSha256 }),
+        }),
+        { abortSignal: args.signal },
+      );
+
+      const etag = response.ETag?.replaceAll('"', '') ?? '';
+
+      return { lost: false, etag, alreadyExisted: false };
+    } catch (error) {
+      const conditional = args.ifNoneMatch !== undefined || args.ifMatch !== undefined;
+
+      // A conditional write that loses is an outcome, not a fault. MinIO and R2
+      // answer `404 NoSuchKey` rather than `412` when an `If-Match` names an
+      // absent key (AR-A E7); that is a lost race, never a create.
+      const absentTarget = args.ifMatch !== undefined && isNoSuchKey(error);
+
+      if (conditional && (isPreconditionFailed(error) || absentTarget)) {
+        return { lost: true, alreadyExisted: args.ifNoneMatch === '*' };
+      }
+
+      throw error;
+    }
+  }
+
+  private newClient(config: S3ClientConfig): S3Client {
+    const client = new S3Client(config);
+    if (this.metrics !== undefined) {
+      instrumentStorageClient(client, this.metrics, this.tierOfBucket);
+    }
+    return client;
+  }
+
+  private singleAttempt(): S3Client {
+    this.singleAttemptClient ??= this.newClient({ ...this.clientConfig, maxAttempts: 1 });
+    return this.singleAttemptClient;
+  }
+
   private async presign(command: unknown, expiresIn: number): Promise<string> {
-    return getSignedUrl(this.signingClient, command as Parameters<typeof getSignedUrl>[1], { expiresIn });
+    return getSignedUrl(this.signingClient, command as Parameters<typeof getSignedUrl>[1], {
+      expiresIn,
+      // R2 validates the checksum header, but ignores a query-hoisted checksum.
+      // Signing the header also prevents a still-valid URL from replacing verified bytes.
+      unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+    });
   }
 
   /**

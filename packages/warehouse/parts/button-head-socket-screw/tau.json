@@ -1,6 +1,5 @@
 {
-  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
-  "id": "proj_YnlYhrslLpFSCovZ1-Hil",
+  "$schema": "https://tau.new/schemas/tau-v1.json",
   "name": "Button-head socket screw",
   "description": "Button-head socket screw with editable millimetre dimensions and a deliberately symbolic thread.",
   "tags": [

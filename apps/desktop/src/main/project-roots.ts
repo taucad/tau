@@ -28,6 +28,8 @@ import type { ElectronRuntimeForkResolver } from '@taucad/runtime/electron/main'
 export type ProjectRootRegistry = {
   /** Record a directory the user chose (or the app owns). */
   admit(directory: string): void;
+  /** Remove exactly one saved grant, persisting before changing live authority. Never touches its files. */
+  revoke(directory: string): boolean;
   /** Every admitted directory, resolved. */
   roots(): readonly string[];
   /** Whether `directory` is an admitted root or lives inside one. */
@@ -122,6 +124,20 @@ export const createProjectRootRegistry = (options: ProjectRootRegistryOptions = 
       }
       admitted.add(root);
       persist();
+    },
+    revoke(directory) {
+      const root = resolve(directory);
+      if (!admitted.has(root)) {
+        return false;
+      }
+      const remaining = [...admitted].filter((entry) => entry !== root);
+      if (storePath !== undefined) {
+        const temporary = `${storePath}.tmp`;
+        writeFileSync(temporary, `${JSON.stringify(remaining, undefined, 2)}\n`, 'utf8');
+        renameSync(temporary, storePath);
+      }
+      admitted.delete(root);
+      return true;
     },
     roots: () => [...admitted],
     isTrusted(directory) {

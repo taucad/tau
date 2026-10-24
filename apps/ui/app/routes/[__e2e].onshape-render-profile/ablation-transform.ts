@@ -131,6 +131,10 @@ if (tauAblation.has('surfaceFilter')) throw new Error('surfaceFilter is retired:
       "if (tauAblation.get('pickerIdentity') !== 'legacy') material.positionNode = positionLocal;",
     );
   } else if (file.endsWith('/graphics/three/post-processing.tsx')) {
+    code =
+      `import { useFrame as useDiagnosticFrame } from '@react-three/fiber';
+function MainSceneFallback(): undefined { useDiagnosticFrame((state) => { state.gl.render(state.scene, state.camera); }, 1); return undefined; }
+` + code;
     replace(
       "gl.toneMapping = backend === 'webgpu' ? NoToneMapping : rendererToneMappingModes[toneMapping];",
       "gl.toneMapping = backend === 'webgpu' && tauAblation.get('abl') !== 'direct' ? NoToneMapping : rendererToneMappingModes[toneMapping];",
@@ -147,8 +151,8 @@ if (tauAblation.has('surfaceFilter')) throw new Error('surfaceFilter is retired:
     const renderer = new ThreeWebGPURenderer(options);`,
     );
     replace(
-      'if (renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {',
-      "if (tauAblation.get('nodegl') !== '1' && renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {",
+      "if (backend === 'webgpu' && renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {",
+      "if (backend === 'webgpu' && tauAblation.get('nodegl') !== '1' && renderer.coordinateSystem !== THREE.WebGPUCoordinateSystem) {",
     );
     code =
       `import { installAllocationLedger } from '/app/routes/[__e2e].onshape-render-profile/allocation-ledger.ts';\n` +

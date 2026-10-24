@@ -92,13 +92,20 @@ export const installRendererOutput = (renderer: RendererInstance, profile: Rende
     restore: () => undefined,
   };
   if (isWebGpuRenderer(renderer)) {
-    if (!('isWebGPUBackend' in renderer.backend && renderer.backend.isWebGPUBackend)) {
-      throw new Error('WebGPU qualification requires the native WebGPU backend');
+    const nativeWebGpu = 'isWebGPUBackend' in renderer.backend && renderer.backend.isWebGPUBackend;
+    const nodeWebGl2 = 'isWebGLBackend' in renderer.backend && renderer.backend.isWebGLBackend;
+    if (!nativeWebGpu && !nodeWebGl2) {
+      throw new Error('Renderer capture requires a recognized initialized backend');
     }
-    if (profile === 'software') {
+    // WebGL2 captures the presented canvas, like classic WebGL. Only native WebGPU
+    // needs the software adapter's output-target redirect and row-padding conversion.
+    if (profile === 'software' && nativeWebGpu) {
       const size = renderer.getDrawingBufferSize(new Vector2());
       // This is the final encoded output. Three retains its own linear multisampled frame target.
-      const target = new RenderTarget(size.x, size.y, { depthBuffer: renderer.depth, stencilBuffer: renderer.stencil });
+      const target = new RenderTarget(size.x, size.y, {
+        depthBuffer: renderer.depth,
+        stencilBuffer: renderer.stencil,
+      });
       const previousOutput = renderer.getOutputRenderTarget();
       const previousTarget = renderer.getRenderTarget();
       const { render } = renderer;

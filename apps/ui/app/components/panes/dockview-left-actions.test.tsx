@@ -4,7 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
 import { describe, expect, it, vi } from 'vitest';
-import type { FileSelectorDataSource } from '#components/files/file-selector.js';
+import type { FileSelectorDataSource } from '@taucad/workbench-panes/files/file-selector';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const fileSelectorSpy = vi.hoisted(() => vi.fn());

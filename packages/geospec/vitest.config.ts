@@ -23,6 +23,8 @@ export const substrateCoverageSourcePolicy = {
     'src/**/*.test-support.ts',
     'src/**/runner-types.ts',
     'src/runner/pool/pool-messages.ts',
+    // Two-line process shim; every decision lives in cli.ts and node-host.ts.
+    'src/cli/main.ts',
   ],
 };
 
@@ -43,6 +45,7 @@ export default defineConfig({
       'host-tests/m3-corpus/independent-bindings.test.mjs',
       'host-tests/m3-corpus/installed.vitest.test.mjs',
       'host-tests/f1-public-a1/f1-public.vitest.test.mjs',
+      'host-tests/installed-cli/cli.test.mjs',
     ],
     typecheck: {
       enabled: true,

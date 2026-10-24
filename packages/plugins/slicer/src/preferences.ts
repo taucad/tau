@@ -1,4 +1,4 @@
-import { defineConfiguration } from '@taucad/runtime/configuration';
+import { defineConfiguration } from '@taucad/runtime/schema';
 import { z } from 'zod';
 import { slicerOptionsSchema } from '#slicer-options.js';
 

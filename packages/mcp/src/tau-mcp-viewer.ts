@@ -1,6 +1,8 @@
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { viewSettingsSchema } from '@taucad/workbench';
+import { poseModelDescription, poseModelInputSchema } from '@taucad/chat/schemas/tools/pose-model';
 import {
   resolveTauViewerPresentation,
   tauViewerReadEncodings,
@@ -10,20 +12,26 @@ import {
   tauViewerToolName,
 } from '#viewer-protocol.js';
 import type {
-  TauViewerBrowseResult,
   TauViewerCaptureReplyInput,
+  TauViewerComponent,
   TauViewerImage,
+  TauViewerListFilesInput,
+  TauViewerListFilesResult,
+  TauViewerOpenFileInput,
   TauViewerPresentation,
   TauViewerReadInput,
   TauViewerReadResult,
   TauViewerDirectShare,
-  TauViewerShareKind,
-  TauViewerShareLink,
+  TauViewerPreviewParametersInput,
+  TauViewerPreviewResult,
+  TauViewerPoseInput,
+  TauViewerPoseResult,
   TauViewerShowResult,
   TauViewerSyncInput,
   TauViewerSyncResult,
   TauViewerViewState,
   TauViewerViewStateInput,
+  TauViewerWorkbenchState,
 } from '#viewer-protocol.js';
 
 /** A failure a viewer port returns instead of throwing. @public */
@@ -90,8 +98,19 @@ export type TauMcpViewer = Readonly<{
     input: Readonly<{ path: string }>,
     options: TauMcpViewerCallOptions,
   ): Promise<TauViewerShowResult | TauMcpViewerFailure>;
-  /** List the project's renderable files. */
-  browse(options: TauMcpViewerCallOptions): Promise<TauViewerBrowseResult | TauMcpViewerFailure>;
+  /** One folder of the project, or a search, for the page's Files pane; a host without it leaves the tool out. */
+  listFiles?(
+    input: TauViewerListFilesInput,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerListFilesResult | TauMcpViewerFailure>;
+  /**
+   * Show one project file in the calling page only, leaving the model shown last as it is; a host without it leaves
+   * the tool out.
+   */
+  openFile?(
+    input: TauViewerOpenFileInput,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerShowResult | TauMcpViewerFailure>;
   /** Read one byte range of a model `show` or `open` returned. */
   read(input: TauViewerReadInput, options: TauMcpViewerCallOptions): Promise<TauViewerReadResult | TauMcpViewerFailure>;
   /** A page's long poll: record its view, then answer with what it has not seen. */
@@ -108,11 +127,35 @@ export type TauMcpViewer = Readonly<{
     input: TauViewerCaptureReplyInput,
     options: TauMcpViewerCallOptions,
   ): Promise<Readonly<{ accepted: boolean }> | TauMcpViewerFailure>;
-  /** A Tau link to a shown model's project, for the page's Share pane; a host without one leaves the tool out. */
-  shareLink?(
-    input: Readonly<{ modelId: string; kind?: TauViewerShareKind | undefined }>,
+  /**
+   * Drive or read the mechanism of the shown model (the model `targetFile` names, shown first when another is
+   * shown); every page showing it applies the pose. A host without it leaves `pose_model` out.
+   */
+  pose?(
+    input: TauViewerPoseInput,
     options: TauMcpViewerCallOptions,
-  ): Promise<TauViewerDirectShare | TauViewerShareLink | TauMcpViewerFailure>;
+  ): Promise<TauViewerPoseResult | TauMcpViewerFailure>;
+  /** A shown model's project packed for the page's direct link; a host without one leaves the tool out. */
+  shareLink?(
+    input: Readonly<{ modelId: string }>,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerDirectShare | TauMcpViewerFailure>;
+  /**
+   * What the project's `.tau/workbench` records keep for a shown model's entry, for the page to restore; a host without
+   * one leaves the tool out.
+   */
+  workbenchState?(
+    input: Readonly<{ modelId: string }>,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerWorkbenchState | TauMcpViewerFailure>;
+  /**
+   * Render a drag's transient parameter values on a shown source's watched document; a host without watched sources
+   * leaves the tool out.
+   */
+  previewParameters?(
+    input: TauViewerPreviewParametersInput,
+    options: TauMcpViewerCallOptions,
+  ): Promise<TauViewerPreviewResult | TauMcpViewerFailure>;
 }>;
 
 const descriptions = {
@@ -120,14 +163,21 @@ const descriptions = {
     'Show a CAD source file (targetFile), a STEP, STL, 3MF or OBJ file (converted to GLB), or a GLB or SVG file, in the Tau viewer the person sees; omit targetFile to show the model shown last or the project main file. Call it after evaluate_model succeeds when the person should look at the result. Pass the CAD source, not a GLB exported from it: the viewer shows a source with its parameters, kinematics and exports.',
   openModelFile:
     'Open one project model file in the Tau viewer. The host calls this when the person opens a file with Tau.',
-  browseModels: "List the project's renderable model files for the Tau viewer's file list.",
   appRead: 'Read a byte range of a model the Tau viewer shows. Only the viewer page calls this.',
   viewState:
-    'Report what the person sees in the Tau viewer: the model, the selected components (ids as @cad references and arrange_workbench take them), hidden and isolated components, and the camera. Set capture to also get an image of the live view.',
+    'Report what the person sees in the Tau viewer: the model, the selected components and those the person added to chat (each with the component id that follows # in a @cad[<path>#<componentId>] reference, as show_model select and arrange_workbench take it), hidden and isolated components, the camera, and the animation playback and joint coordinates of a moving model. Call it when the person names a part they picked or added in the viewer. Set capture to also get an image of the live view.',
   appSync: "The Tau viewer page's sync with the server. Only the viewer page calls this.",
   appCaptureReply: "The Tau viewer page's answer to a capture request. Only the viewer page calls this.",
   appShareLink:
-    "A Tau link to the shown model's project, for the Tau viewer page's Share pane: kind 'direct' (the default) packs the project for a self-contained link, kind 'github' imports it from GitHub. Only the viewer page calls this.",
+    "The shown model's project packed for the Tau viewer page's direct share link. Only the viewer page calls this.",
+  appWorkbenchState:
+    "The view the project's Tau workbench records keep for a shown model, which the Tau viewer page restores. Only the viewer page calls this.",
+  appListFiles:
+    "One folder of the project, or the files a search finds, for the Tau viewer page's Files pane. Only the viewer page calls this.",
+  appOpenFile:
+    'Show one project file in the Tau viewer page that asks, without changing the model show_model showed last. Only the viewer page calls this.',
+  appPreviewParameters:
+    "Render a drag's transient parameter values on the source the Tau viewer shows, without writing them. Only the viewer page calls this.",
 } as const;
 
 const showModelInputSchema = z
@@ -141,11 +191,16 @@ const showModelInputSchema = z
       .array(z.string().min(1).max(256))
       .max(64)
       .optional()
-      .describe('Component ids to select in the viewer, as @cad references and view_state name them.'),
+      .describe(
+        'Component ids to select in the viewer: the part after # in a @cad[<path>#<componentId>] reference, as view_state names them.',
+      ),
   })
   .strict();
 
 const vectorSchema = z.tuple([z.number(), z.number(), z.number()]);
+
+/** Files one reported source revision lists at most: a model's import closure, not a checkout. */
+const sourceRevisionFileLimit = 1024;
 
 const componentSchema = z
   .object({
@@ -184,6 +239,37 @@ const viewSchema = z
     measurementCount: z.number().int().nonnegative(),
     composition: z.enum(['inline', 'tab']),
     interactedAt: z.number().nonnegative(),
+    references: z.array(componentSchema).max(64).optional(),
+    sourceRevision: z
+      .object({
+        entry: z.string().min(1).max(1024),
+        files: z
+          .record(z.string().min(1).max(1024), z.string().min(1).max(128))
+          .refine((files) => Object.keys(files).length <= sourceRevisionFileLimit, {
+            message: `A source revision lists at most ${String(sourceRevisionFileLimit)} files.`,
+          }),
+      })
+      .strict()
+      .optional(),
+    settings: viewSettingsSchema.optional(),
+    mechanism: z
+      .object({
+        preserved: z.boolean(),
+        joints: z.number().int().nonnegative(),
+        animations: z.array(z.string().min(1).max(128)).max(64),
+      })
+      .strict()
+      .optional(),
+    playback: z
+      .object({
+        status: z.enum(['stopped', 'playing', 'paused']),
+        animationId: z.string().min(1).max(128).optional(),
+        time: z.number().nonnegative(),
+        speed: z.number().positive(),
+      })
+      .strict()
+      .optional(),
+    coordinates: z.record(z.string().min(1).max(256), z.number()).optional(),
   })
   .strict();
 
@@ -198,8 +284,39 @@ const appSyncInputSchema = z
   })
   .strict();
 
-const appShareLinkInputSchema = z
-  .object({ modelId: z.string().min(1), kind: z.enum(['direct', 'github']).optional() })
+const appShareLinkInputSchema = z.object({ modelId: z.string().min(1) }).strict();
+
+/** Parameters one preview carries at most: a drag moves one field, a reset a group. */
+const previewParameterLimit = 256;
+
+const appPreviewParametersInputSchema = z
+  .object({
+    modelId: z.string().min(1).max(64),
+    parameters: z
+      .record(z.string().min(1).max(256), z.json())
+      .refine((parameters) => Object.keys(parameters).length <= previewParameterLimit, {
+        message: `A preview carries at most ${String(previewParameterLimit)} parameters.`,
+      })
+      .optional(),
+  })
+  .strict();
+
+const appWorkbenchStateInputSchema = z.object({ modelId: z.string().min(1).max(64) }).strict();
+const appListFilesInputSchema = z
+  .object({
+    modelId: z.string().min(1).max(64).optional(),
+    path: z.string().max(1024).optional(),
+    query: z.string().min(1).max(256).optional(),
+  })
+  .strict()
+  .refine((input) => (input.path === undefined) !== (input.query === undefined), 'Give path or query.');
+
+const appOpenFileInputSchema = z
+  .object({
+    pageId: z.string().min(8).max(64),
+    modelId: z.string().min(1).max(64).optional(),
+    path: z.string().min(1).max(1024),
+  })
   .strict();
 
 /** A capture travels base64 in one reply; 8 MiB of base64 is a 6 MiB image, far above a 1280 px frame. */
@@ -253,6 +370,10 @@ export const tauViewerPageInputSchemas = {
   appSync: appSyncInputSchema,
   appCaptureReply: appCaptureReplyInputSchema,
   appShareLink: appShareLinkInputSchema,
+  appWorkbenchState: appWorkbenchStateInputSchema,
+  appListFiles: appListFilesInputSchema,
+  appOpenFile: appOpenFileInputSchema,
+  appPreviewParameters: appPreviewParametersInputSchema,
 } as const;
 
 /** The file extensions the file entrypoint claims: the page's own formats and those the server converts to GLB (W7). */
@@ -290,7 +411,36 @@ const listed = (ids: readonly string[]): string =>
       ? ids.join(', ')
       : `${ids.slice(0, 8).join(', ')} and ${String(ids.length - 8)} more`;
 
+const components = (list: readonly TauViewerComponent[], empty: string): string =>
+  list.length === 0 ? empty : list.map((component) => `${component.label} (${component.componentId})`).join(', ');
+
 const vector = (value: readonly number[]): string => `(${value.map((axis) => axis.toPrecision(3)).join(', ')})`;
+
+/**
+ * Coordinates as `sun 360, carrier 90`.
+ *
+ * @param coordinates - Every degree of freedom, by id.
+ * @returns One phrase.
+ */
+const describeCoordinates = (coordinates: Readonly<Record<string, number>> | undefined): string => {
+  const entries = Object.entries(coordinates ?? {});
+  return entries.length === 0
+    ? 'no degrees of freedom'
+    : entries.map(([id, value]) => `${id} ${String(Number(value.toPrecision(6)))}`).join(', ');
+};
+
+/**
+ * The playback as the model reads it.
+ *
+ * @param playback - The page's or the server's playback.
+ * @param coordinates - Every degree of freedom at the pose.
+ * @returns One sentence.
+ */
+const describePlayback = (
+  playback: NonNullable<TauViewerViewState['playback']>,
+  coordinates: Readonly<Record<string, number>> | undefined,
+): string =>
+  `Motion: ${playback.animationId === undefined ? 'no animation' : `animation ${playback.animationId}`} ${playback.status} at ${String(Number(playback.time.toPrecision(6)))} s (speed ${String(playback.speed)}); coordinates ${describeCoordinates(coordinates)}.`;
 
 /**
  * The view as the model reads it; the structured result carries the same facts.
@@ -301,12 +451,15 @@ const vector = (value: readonly number[]): string => `(${value.map((axis) => axi
 const describeView = (view: TauViewerViewState): string =>
   [
     `The Tau viewer (${view.composition === 'inline' ? 'a card in the conversation' : 'a tab'}) shows ${view.model.sourceFile ?? view.model.path}.`,
-    `Selected: ${view.selected.length === 0 ? 'nothing' : view.selected.map((component) => `${component.label} (${component.componentId})`).join(', ')}.`,
+    `Selected: ${components(view.selected, 'nothing')}.`,
+    /* A page older than the field reports no added set, which is not an empty one. */
+    ...(view.references === undefined ? [] : [`Added to chat: ${components(view.references, 'none')}.`]),
     `Hidden: ${listed(view.hidden)}. Isolated: ${listed(view.isolated)}.`,
     view.camera === undefined
       ? 'The camera has not framed the model yet.'
       : `Camera looks at ${vector(view.camera.target)} from direction ${vector(view.camera.direction)}, spanning ${view.camera.verticalSpan.toPrecision(3)} m.`,
     `Section view ${view.sectionActive ? 'on' : 'off'}; ${String(view.measurementCount)} measurements.`,
+    ...(view.playback === undefined ? [] : [describePlayback(view.playback, view.coordinates)]),
   ].join('\n');
 
 /**
@@ -321,7 +474,7 @@ const describeMechanism = (mechanism: NonNullable<TauViewerShowResult['mechanism
     : 'This GLB carries no mechanism.';
 
 const shown = (result: TauViewerShowResult, presentation: TauViewerPresentation): CallToolResult => {
-  const { model, viewerUrl, mechanism } = result;
+  const { model, viewerUrl, mechanism, hint } = result;
   const name = model.sourceFile ?? model.path;
   const text =
     presentation === 'text'
@@ -330,7 +483,16 @@ const shown = (result: TauViewerShowResult, presentation: TauViewerPresentation)
         : `Open ${name} in the Tau viewer: ${viewerUrl}`
       : `Showing ${name} in the Tau viewer.`;
   return {
-    content: [{ type: 'text', text: mechanism === undefined ? text : `${text}\n${describeMechanism(mechanism)}` }],
+    content: [
+      {
+        type: 'text',
+        text: [
+          text,
+          ...(mechanism === undefined ? [] : [describeMechanism(mechanism)]),
+          ...(hint === undefined ? [] : [hint]),
+        ].join('\n'),
+      },
+    ],
     structuredContent: result,
   };
 };
@@ -381,7 +543,7 @@ export const registerTauMcpViewer = (
 
   /* The page needs no origin at all: its bytes travel through `app_read`
    * (blueprint D4, I2), so the CSP lists only `data:` (inlined wasm) and
-   * `blob:` (inlined workers, decoded models). Copy prompt writes the clipboard. */
+   * `blob:` (inlined workers, decoded models). Add to chat's clipboard route writes the clipboard. */
   const resourceMeta = {
     ui: {
       csp: { connectDomains: ['data:', 'blob:'], resourceDomains: ['data:', 'blob:'] },
@@ -435,20 +597,6 @@ export const registerTauMcpViewer = (
       return isFailure(result) ? failure(result) : shown(result, presentation);
     },
   );
-  const browseModels = server.registerTool(
-    tauViewerToolName.browseModels,
-    { description: descriptions.browseModels, annotations: readOnlyAnnotations, _meta: alwaysLoad },
-    async (extra) => {
-      const result = await viewer.browse(callOptions(extra));
-      if (isFailure(result)) {
-        return failure(result);
-      }
-      return {
-        content: [{ type: 'text', text: result.files.map((file) => file.path).join('\n') || 'No renderable files.' }],
-        structuredContent: result,
-      };
-    },
-  );
   const appRead = server.registerTool(
     tauViewerToolName.appRead,
     {
@@ -487,7 +635,9 @@ export const registerTauMcpViewer = (
       if (isFailure(result)) {
         return failure(result);
       }
-      const { view, image, captureError } = result;
+      /* The view's settings are the page's record of its display for the server to keep, not what the model reads. */
+      const { view: reported, image, captureError } = result;
+      const { settings: _settings, ...view } = reported;
       return {
         content: [
           {
@@ -550,14 +700,130 @@ export const registerTauMcpViewer = (
       return isFailure(result)
         ? failure(result)
         : {
-            /* A direct answer carries the packed project; its text stays short. */
+            /* The answer carries the packed project; its text stays short. */
+            content: [{ type: 'text', text: 'The project is packed for a direct link.' }],
+            structuredContent: result,
+          };
+    },
+  );
+  const appWorkbenchState = server.registerTool(
+    tauViewerToolName.appWorkbenchState,
+    {
+      description: descriptions.appWorkbenchState,
+      inputSchema: appWorkbenchStateInputSchema,
+      annotations: liveLinkAnnotations,
+      _meta: alwaysLoad,
+    },
+    async (args, extra) => {
+      const result =
+        viewer.workbenchState === undefined
+          ? { errorCode: 'NOT_SUPPORTED', message: 'This Tau server keeps no workbench records.' }
+          : await viewer.workbenchState(args, callOptions(extra));
+      return isFailure(result)
+        ? failure(result)
+        : {
+            content: [{ type: 'text', text: result.view === undefined ? 'No saved view.' : 'The saved view.' }],
+            structuredContent: result,
+          };
+    },
+  );
+  const appPreviewParameters = server.registerTool(
+    tauViewerToolName.appPreviewParameters,
+    {
+      description: descriptions.appPreviewParameters,
+      inputSchema: appPreviewParametersInputSchema,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      _meta: alwaysLoad,
+    },
+    async (args, extra) => {
+      const result =
+        viewer.previewParameters === undefined
+          ? { errorCode: 'NOT_SUPPORTED', message: 'This Tau server cannot preview parameters.' }
+          : await viewer.previewParameters(args, callOptions(extra));
+      return isFailure(result)
+        ? failure(result)
+        : {
             content: [
-              { type: 'text', text: 'kind' in result ? 'The project is packed for a direct link.' : result.url },
+              { type: 'text', text: result.accepted ? 'Previewing.' : 'A newer change replaced this preview.' },
             ],
             structuredContent: result,
           };
     },
   );
+  const appListFiles = server.registerTool(
+    tauViewerToolName.appListFiles,
+    {
+      description: descriptions.appListFiles,
+      inputSchema: appListFilesInputSchema,
+      annotations: liveLinkAnnotations,
+      _meta: alwaysLoad,
+    },
+    async (args, extra) => {
+      const result =
+        viewer.listFiles === undefined
+          ? { errorCode: 'NOT_SUPPORTED', message: 'This Tau server cannot list project files.' }
+          : await viewer.listFiles(args, callOptions(extra));
+      return isFailure(result)
+        ? failure(result)
+        : {
+            /* The listing travels structured; its text stays short. */
+            content: [{ type: 'text', text: `${String(result.entries.length)} entries.` }],
+            structuredContent: result,
+          };
+    },
+  );
+  const appOpenFile = server.registerTool(
+    tauViewerToolName.appOpenFile,
+    {
+      description: descriptions.appOpenFile,
+      inputSchema: appOpenFileInputSchema,
+      annotations: liveLinkAnnotations,
+      _meta: alwaysLoad,
+    },
+    async (args, extra) => {
+      const result =
+        viewer.openFile === undefined
+          ? { errorCode: 'NOT_SUPPORTED', message: 'This Tau server cannot open files for a page.' }
+          : await viewer.openFile(args, callOptions(extra));
+      return isFailure(result) ? failure(result) : shown(result, presentation);
+    },
+  );
+  const { pose } = viewer;
+  const poseModel =
+    pose === undefined
+      ? undefined
+      : server.registerTool(
+          tauViewerToolName.poseModel,
+          {
+            description: poseModelDescription,
+            inputSchema: poseModelInputSchema,
+            annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+            _meta: alwaysLoad,
+          },
+          async (args, extra) => {
+            const result = await pose(args, callOptions(extra));
+            if (isFailure(result)) {
+              return failure(result);
+            }
+            const name = result.model.sourceFile ?? result.model.path;
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: [
+                    `Posed ${name} (${String(result.mechanism.joints)} joints; animations ${listed(result.mechanism.animations)}).`,
+                    describePlayback(result.playback, result.coordinates),
+                    ...(result.atLimit.length === 0 ? [] : [`At a limit: ${result.atLimit.join(', ')}.`]),
+                    result.viewers === 0
+                      ? 'No viewer page is open to show it; screenshot with pose captures it.'
+                      : `${String(result.viewers)} viewer ${result.viewers === 1 ? 'page applies' : 'pages apply'} it.`,
+                  ].join('\n'),
+                },
+              ],
+              structuredContent: result,
+            };
+          },
+        );
   const pageTools = (viewer.pageTools ?? []).map((tool) =>
     server.registerTool(
       tool.name,
@@ -576,12 +842,15 @@ export const registerTauMcpViewer = (
     ),
   );
 
-  const pageMeta = (entrypoint?: Readonly<Record<string, unknown>>): Record<string, unknown> => ({
+  const pageMeta = (...entrypoints: ReadonlyArray<Readonly<Record<string, unknown>>>): Record<string, unknown> => ({
     ...alwaysLoad,
     ui: { resourceUri },
     'ui/resourceUri': resourceUri,
     ...(presentation === 'openai'
-      ? { 'openai/outputTemplate': resourceUri, ...(entrypoint ? { 'openai/ui': { entrypoints: [entrypoint] } } : {}) }
+      ? {
+          'openai/outputTemplate': resourceUri,
+          ...(entrypoints.length > 0 ? { 'openai/ui': { entrypoints: [...entrypoints] } } : {}),
+        }
       : {}),
   });
   const present = (tool: RegisteredTool, enabled: boolean, meta: Record<string, unknown>): void => {
@@ -592,18 +861,38 @@ export const registerTauMcpViewer = (
   };
   const applyPresentation = (): void => {
     const hasPage = presentation !== 'text';
-    present(showModel, true, hasPage ? pageMeta({ type: 'thread' }) : { ...alwaysLoad });
+    /* Codex's thread tab and its sidebar both open the page on the model shown last, or the main entry. */
+    present(showModel, true, hasPage ? pageMeta({ type: 'thread' }, { type: 'global' }) : { ...alwaysLoad });
     present(openModelFile, presentation === 'openai', pageMeta({ type: 'file', extensions: fileEntrypointExtensions }));
-    present(browseModels, presentation === 'openai', pageMeta({ type: 'global' }));
     present(appRead, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     /* A text host's loopback page syncs over HTTP, so view_state serves every presentation. */
     present(viewState, true, { ...alwaysLoad });
+    if (poseModel !== undefined) {
+      present(poseModel, true, { ...alwaysLoad });
+    }
     present(appSync, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     present(appCaptureReply, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
+    /* Every page lists and opens files; a text host's loopback page reaches the same port over HTTP. */
+    present(appListFiles, hasPage && viewer.listFiles !== undefined, {
+      ...alwaysLoad,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    present(appOpenFile, hasPage && viewer.openFile !== undefined, {
+      ...alwaysLoad,
+      ui: { resourceUri, visibility: ['app'] },
+    });
     for (const tool of pageTools) {
       present(tool, hasPage, { ...alwaysLoad, ui: { resourceUri, visibility: ['app'] } });
     }
     present(appShareLink, hasPage && viewer.shareLink !== undefined, {
+      ...alwaysLoad,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    present(appWorkbenchState, hasPage && viewer.workbenchState !== undefined, {
+      ...alwaysLoad,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    present(appPreviewParameters, hasPage && viewer.previewParameters !== undefined, {
       ...alwaysLoad,
       ui: { resourceUri, visibility: ['app'] },
     });

@@ -18,6 +18,7 @@ export default defineConfig(({ command }) => ({
   base: '/',
   publicDir: command === 'serve' ? fileURLToPath(new URL('../../out/www-public/', import.meta.url)) : false,
   define: {
+    'import.meta.env.WWW_INSTALLER_CATALOG': JSON.stringify(process.env['WWW_INSTALLER_CATALOG'] ?? 'false'),
     'import.meta.env.WWW_LAUNCH': JSON.stringify(process.env['WWW_LAUNCH'] ?? 'false'),
     'import.meta.env.WWW_ORIGIN': JSON.stringify(process.env['WWW_ORIGIN'] ?? ''),
     'import.meta.env.WWW_ANALYTICS_ENDPOINT': JSON.stringify(process.env['WWW_ANALYTICS_ENDPOINT'] ?? ''),

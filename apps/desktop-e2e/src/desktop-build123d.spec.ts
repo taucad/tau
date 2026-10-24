@@ -10,6 +10,7 @@ import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@t
 import { authenticatePackagedDesktop, desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { desktopE2ECompletedArtifact } from '#support/config.js';
+import { expectFirstNativeRender } from '#support/prepared-kernels.js';
 import {
   gatewayFixtureFinalText,
   gatewayFixtureModelName,
@@ -288,20 +289,15 @@ const exportToProject = async (page: Page, projectRoot: string, extension: 'glb'
   if (await exportButton.isVisible().catch(() => false)) {
     await exportButton.click();
   }
-  const formats = page.getByRole('region', { name: 'Formats' });
+  const formats = page.getByRole('region', { name: 'Format' });
   await expectVisible(formats, 30_000);
-  const requestedFormat = formats.getByRole('button', { name: extension, exact: true });
-  for (const selected of await formats.locator('button[aria-pressed="true"]').all()) {
-    // oxlint-disable-next-line no-await-in-loop -- React must observe each toggle before the next click.
-    const selectedText = await selected.textContent();
-    if (selectedText?.trim().toLowerCase() !== extension) {
-      // oxlint-disable-next-line no-await-in-loop -- See the sequencing rationale above.
-      await selected.click();
-    }
+  await formats.getByRole('button', { name: 'Export format' }).click();
+  await page.locator('[cmdk-list]').first().waitFor();
+  const requestedFormat = page.locator(`[cmdk-item][data-value="${extension}"]`);
+  if (!(await requestedFormat.isVisible())) {
+    await page.getByRole('button', { name: /^More formats/u }).click();
   }
-  if ((await requestedFormat.getAttribute('aria-pressed')) !== 'true') {
-    await requestedFormat.click();
-  }
+  await requestedFormat.click();
   const download = page.getByLabel('Download to disk');
   if (await download.isChecked()) {
     await download.click();
@@ -415,14 +411,16 @@ test('boots the packaged desktop app with no endpoint environment', async () => 
   await expectCount(session.page.getByText('Application Error', { exact: true }), 0);
 });
 
+// 600 s for the loop, plus `firstNativeRenderMilliseconds` for a first-use download on a cold cache.
 test('[completed-artifact] runs the Build123d filesystem, parameter, topology, watcher, viewer, and STEP loop', async () => {
   const existingWorkerPids = new Set(nativeWorkers().map(({ pid }) => pid));
   const account = tauTestAccount('build123d');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
   fixture = await startGatewayFixture({ targetFile: 'main.py', content: build123dSource });
-  /* The package, not the workspace app: only a packaged app bundles the Build123d closure its store seeds from
-   * (`main.ts` passes no bundle when unpackaged), so the workspace app reports the closure absent and cannot build. */
+  /* The package, whose STEP export and worker shutdown are the product's. The app ships no Build123d closure: the
+   * fixture copies the suite's prepared one into the store, or, on a cold cache, the viewer downloads it on first use
+   * (`expectFirstNativeRender`). */
   session = await launchDesktopApp({
     token,
     packaged: true,
@@ -453,8 +451,8 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
     await expectCount(page.getByText('File not found', { exact: true }), 0);
     await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
+    await expectFirstNativeRender(page);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
-    await expectGeometryFramed(page);
 
     writeFileSync(sourcePath, failingBuild123dSource, 'utf8');
     const failureIssues = await openViewerIssues(page);
@@ -509,9 +507,10 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectGeometryFramed(page);
 
     await page.getByRole('button', { name: 'Export', exact: true }).click();
-    await expectVisible(page.getByRole('region', { name: 'Formats' }), 30_000);
-    await page.getByRole('button', { name: /^step$/iu }).click();
-    await expectVisible(page.getByText('STEP options', { exact: true }), 30_000);
+    await expectVisible(page.getByRole('region', { name: 'Format' }), 30_000);
+    await page.getByRole('button', { name: 'Export format' }).click();
+    await page.locator('[cmdk-item][data-value="step"]').click();
+    await expectVisible(page.getByText('Export options', { exact: true }), 30_000);
     expect(await page.getByText(/unsafe-eval/u).allTextContents()).toEqual([]);
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);
     await page.getByLabel('Download to disk').click();
@@ -519,7 +518,9 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await page.getByRole('button', { name: 'Export STEP', exact: true }).click();
     const stepPath = join(projectRoot, 'exports/assembly.step');
     await expect
-      .poll(() => (existsSync(stepPath) ? readFileSync(stepPath).subarray(0, 13).toString() : ''), { timeout: 120_000 })
+      .poll(() => (existsSync(stepPath) ? readFileSync(stepPath).subarray(0, 13).toString() : ''), {
+        timeout: 120_000,
+      })
       .toBe('ISO-10303-21;');
     const size = validateStep(stepPath);
     expect(size[0]).toBeCloseTo(64, 7);
@@ -562,7 +563,7 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await session?.capture('build123d-failure');
     throw error;
   }
-});
+}, 1_200_000);
 
 test('renders a persisted Replicad project card without relaxing the Electron CSP', async () => {
   const account = tauTestAccount('replicad-preview');
@@ -604,6 +605,7 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
   }
 });
 
+// 900 s for the row, plus `firstNativeRenderMilliseconds` for a first-use download on a cold cache.
 test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology, failures, export, and cleanup', async () => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     return;
@@ -651,8 +653,8 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await expect.poll(() => readFileSync(sourcePath, 'utf8'), { timeout: 120_000 }).toBe(picogkSource);
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 420_000);
     await expectCount(page.getByText('Native code enabled', { exact: true }), 0);
+    await expectFirstNativeRender(page);
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
-    await expectGeometryFramed(page);
 
     await ensureFilesPane(page);
     const sourceItem = fileTreeItemOf(page, 'main.cs');
@@ -950,4 +952,4 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     }
     throw error;
   }
-}, 900_000);
+}, 1_500_000);

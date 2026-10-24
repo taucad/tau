@@ -410,12 +410,15 @@ export type GeoSpecAssemblyOccurrencesExpectation = {
  * One spatial relationship accepted by
  * `expectGeo(...).toHaveSpatialRelationships(...)`.
  *
- * Verdicts are decided by exact BRep evidence only (D3): extrema for
- * `contact`/`clearance`, analytic fact comparison for
- * `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`,
- * exact solid classification for `containment`/`insertion`, and exact
- * boolean common volume for `interference` (positive volume outside the
- * `minVolume`/`maxVolume` allowance band fails).
+ * Each kind admits narrow geometry and refuses outside it, never falling
+ * back to an estimate (D3). On STEP, `clearance`, `contact`, `insertion` and
+ * `interference` take complete box-shaped occurrences (`insertion` also a
+ * Cartesian `axis`); `coaxial`, `concentric`, `coplanar`, `parallel`,
+ * `perpendicular` and `angle` take one analytic face, axis or plane per
+ * endpoint; `containment` takes closed solids. On glTF/GLB, `body`
+ * endpoints admit `contact`, `clearance`, `containment` and `interference`
+ * over closed shells. Shared volume for `interference` must lie in
+ * `[minVolume, maxVolume]`.
  *
  * @public
  */
@@ -781,10 +784,6 @@ export type RunGeoSpecModuleOptions = {
   testNamePattern?: string | RegExp;
   /** Timeout for async test callbacks, in milliseconds. */
   testTimeout?: number;
-  /** Milliseconds. Non-verdict matcher infrastructure backstop. */
-  matcherWallBackstop?: number;
-  /** Emit structured forensic events for this run. */
-  forensic?: boolean;
   /** Observes each selected test as it starts and settles, for host progress reporting. */
   onTestEvent?: (event: GeoSpecTestEvent) => void;
   /**

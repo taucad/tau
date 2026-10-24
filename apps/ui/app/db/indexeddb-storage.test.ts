@@ -1,9 +1,10 @@
+import { projectToManifest } from '@taucad/types';
+import { createProjectFixture } from '#lib/project.fixture.js';
 // oxlint-disable-next-line import/no-unassigned-import -- side-effect import polyfills IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { ProjectManifest } from '@taucad/types';
-import { projectToManifest } from '@taucad/types';
+import type { Project } from '@taucad/types';
 import { IndexedDbStorageProvider } from '#db/indexeddb-storage.js';
 import { defaultPanelState } from '#constants/editor.constants.js';
 import type { PendingProjectOperation } from '#types/pending-project-operation.types.js';
@@ -21,8 +22,8 @@ let projectSequence = 0;
 
 const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(21, '0')}`;
 
-const sampleManifest = (id = nextProjectId()): ProjectManifest =>
-  projectToManifest({
+const sampleManifest = (id = nextProjectId()): Project =>
+  createProjectFixture({
     id,
     name: 'Test Project',
     description: 'test project',
@@ -333,7 +334,8 @@ describe('IndexedDbStorageProvider', () => {
         backend: 'opfs',
         providerBasePath: 'test',
         sourceProjectId: project.projectId,
-        manifest,
+        projectId: manifest.id,
+        manifest: projectToManifest(manifest),
         library: { projectId: manifest.id, lastActivityAt: 3 },
         files: { 'main.ts': { content: new Uint8Array([1]) } },
         chats: [],
@@ -349,6 +351,54 @@ describe('IndexedDbStorageProvider', () => {
 
       await provider.deletePendingProjectOperation(operation.operationId);
       expect(await provider.getPendingProjectOperations()).toEqual([]);
+    });
+
+    it('should preserve a pre-release pending operation identity and resources during replay', async () => {
+      const provider = new IndexedDbStorageProvider();
+      const project = sampleManifest();
+      const legacy = {
+        operationId: 'req_legacy_duplicate',
+        kind: 'duplicate',
+        backend: 'opfs',
+        providerBasePath: 'legacy',
+        sourceProjectId: nextProjectId(),
+        manifest: { ...project, $schema: 'https://tau.new/schemas/tau-schema-v1.json' },
+        library: { projectId: project.id, lastActivityAt: 42 },
+        files: { 'main.ts': { content: new Uint8Array([4, 2]) } },
+        chats: [],
+      };
+      // Open the current database, then insert the exact pre-release durable row.
+      await provider.getPendingProjectOperations();
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('tau-db');
+        request.addEventListener('success', () => {
+          const db = request.result;
+          const transaction = db.transaction('pendingProjectOperations', 'readwrite');
+          transaction.objectStore('pendingProjectOperations').put(legacy);
+          transaction.addEventListener('complete', () => {
+            db.close();
+            resolve();
+          });
+          transaction.addEventListener('abort', () => {
+            db.close();
+            reject(transaction.error ?? new Error('Pending operation transaction aborted'));
+          });
+        });
+        request.addEventListener('error', () => {
+          reject(request.error ?? new Error('Pending operation database failed'));
+        });
+      });
+      const recovered = await provider.getPendingProjectOperation(legacy.operationId);
+      expect(structuredClone(recovered)).toMatchObject(
+        structuredClone({
+          projectId: project.id,
+          library: legacy.library,
+          files: legacy.files,
+          chats: legacy.chats,
+        }),
+      );
+      expect(recovered?.kind !== 'permanent-delete' && recovered?.manifest).not.toHaveProperty('id');
+      expect(await provider.getPendingProjectOperations()).toEqual([recovered]);
     });
 
     /* The chat half of this case moved with the chat: `resumePendingProjectOperationResources`

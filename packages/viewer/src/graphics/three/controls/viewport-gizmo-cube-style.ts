@@ -1,5 +1,6 @@
 import { Color, SRGBColorSpace } from 'three';
 import { axesHelperColors } from '#graphics/three/overlay-colors.constants.js';
+import { sectionPlaneTileTints } from '#constants/axes-colors.js';
 
 /** The cube's dimensions and texture density, independent of canvas pixel ratio. @internal */
 export const viewportGizmoMetrics = { radius: 0.3, segments: 4, textureSize: 256, fontSize: 64 } as const;
@@ -13,7 +14,12 @@ export type ViewportGizmoStyle = {
   readonly hoverLabel: number;
   readonly font: string;
   readonly axes: Readonly<{ x: string; y: string; z: string }>;
+  /** The section plane picker's tile tints, by the axis normal to each tile's plane. */
+  readonly planeTiles: Readonly<Record<'x' | 'y' | 'z', ViewportGizmoPlaneTileStyle>>;
 };
+
+/** One section plane tile's tints, as sRGB hex. @internal */
+export type ViewportGizmoPlaneTileStyle = Readonly<{ edge: number; strong: number; deep: number }>;
 
 // Achromatic OKLCH lightness maps to linear RGB as L³. These token-scale fallbacks also
 // serve embedders that supply ViewerEnvironment without loading the Tau stylesheet.
@@ -40,9 +46,11 @@ export const readViewportGizmoStyle = ({
   canvas.width = 1;
   canvas.height = 1;
   const context = canvas.getContext('2d', { willReadFrequently: true });
-  const readColor = (token: string, fallback: number): number => {
-    const value = styles.getPropertyValue(token).trim();
-    if (!context || !value || !CSS.supports('color', value)) {
+  // Environments without `CSS.supports` (jsdom) keep the fallback.
+  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the DOM lib types `CSS.supports` as always present.
+  const supportsColor = (value: string): boolean => typeof CSS.supports === 'function' && CSS.supports('color', value);
+  const parseColor = (value: string, fallback: number): number => {
+    if (!context || !value || !supportsColor(value)) {
       return fallback;
     }
     context.clearRect(0, 0, 1, 1);
@@ -50,6 +58,18 @@ export const readViewportGizmoStyle = ({
     context.fillRect(0, 0, 1, 1);
     const [red = 0, green = 0, blue = 0] = context.getImageData(0, 0, 1, 1).data;
     return new Color().setRGB(red / 255, green / 255, blue / 255, SRGBColorSpace).getHex();
+  };
+  const readColor = (token: string, fallback: number): number =>
+    parseColor(styles.getPropertyValue(token).trim(), fallback);
+  // A browser without OKLCH keeps the axis helper's own tint for every state.
+  const planeTile = (axis: 'x' | 'y' | 'z'): ViewportGizmoPlaneTileStyle => {
+    const fallback = new Color(axesHelperColors[axis]).getHex();
+    const tints = sectionPlaneTileTints[axis];
+    return {
+      edge: parseColor(tints.edge, fallback),
+      strong: parseColor(tints.strong, fallback),
+      deep: parseColor(tints.deep, fallback),
+    };
   };
   const isDark = colorScheme === 'dark';
   const hover = new Color(accentColor);
@@ -70,5 +90,6 @@ export const readViewportGizmoStyle = ({
     hoverLabel: neutral(luminance > 0.179 ? 0 : 1),
     font: styles.getPropertyValue('--font-sans').trim() || "'Geist Sans', ui-sans-serif, system-ui, sans-serif",
     axes: { x: axisColor(axesHelperColors.x), y: axisColor(axesHelperColors.y), z: axisColor(axesHelperColors.z) },
+    planeTiles: { x: planeTile('x'), y: planeTile('y'), z: planeTile('z') },
   };
 };

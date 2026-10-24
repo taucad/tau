@@ -33,6 +33,20 @@
           "TAU_ACP_LIVE": "1"
         }
       }
+    },
+    "test:shell-conformance": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "The shell service's conformance rows (H01-H06), extending native-process-core's provider rows: the real service over the real sandbox provider and the machine's own Bash, positive controls before negatives, negatives judged by bytes outside the sandbox. Writes a JSON receipt when TAU_SHELL_CONFORMANCE_RECEIPT is set. Never cached: a receipt is only evidence of the run that wrote it."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/packages/host",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/shell/shell-service.conformance.test.ts",
+        "env": {
+          "TAU_SHELL_CONFORMANCE": "1"
+        }
+      }
     }
   }
 }

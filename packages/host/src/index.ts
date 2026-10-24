@@ -180,3 +180,33 @@ export type {
   LocalHostMcp,
   LocalHostMcpOptions,
 } from '#mcp-server.js';
+export { createShellService, probeHostShell, shellApprovalKey, shellApprovalPrompt } from '#shell/shell-service.js';
+export type {
+  HostShell,
+  ProbeHostShellOptions,
+  ShellCheckout,
+  ShellIdentity,
+  ShellProbe,
+  ShellServiceOptions,
+  ShellUnavailable,
+  ShellUnavailableCode,
+  TerminalAccess,
+  TerminalRefusalCode,
+  TerminalSession,
+  TerminalSessionOutcome,
+  TerminalSessionRequest,
+} from '#shell/shell-service.js';
+export { isShellError, shellLimits, shellLogDirectory, shellNotStartedCodes } from '#shell/shell-contract.js';
+export type {
+  ApprovedBy,
+  PermissionMode,
+  ShellAccess,
+  ShellApprovalPayload,
+  ShellApprovalRecord,
+  ShellInput,
+  ShellLog,
+  ShellNotStartedCode,
+  ShellOutput,
+  ShellRunRequest,
+  ShellStream,
+} from '#shell/shell-contract.js';

@@ -435,11 +435,12 @@ export const createTerminalConcern = (options: TerminalConcernOptions): Terminal
       }
     };
 
-    const openTimer = setTimeout(() => {
+    const abandonUnopened = (): void => {
       if (!opening) {
         void connection.end(undefined);
       }
-    }, openMilliseconds);
+    };
+    const openTimer = setTimeout(abandonUnopened, openMilliseconds);
     openTimer.unref();
 
     /* Frames are handled in arrival order, each stamped with the session it was sent against. `close` and an invalid

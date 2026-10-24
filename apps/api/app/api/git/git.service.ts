@@ -31,6 +31,12 @@ import { withOwnerLock, readOwnerUsage } from '#database/owner-lock.js';
 import { DatabaseService } from '#database/database.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import type {
+  GitAdmissionAttributes,
+  GitCommitAttemptAttributes,
+  GitOperation,
+  HotProjectRank,
+} from '#telemetry/metrics.js';
 import { project, projectDeletion, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
@@ -50,6 +56,8 @@ import {
   repositoryStoreKey,
 } from '#api/git/git.constants.js';
 import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
+import { HotProjects, hotProjectRanks } from '#api/git/hot-projects.js';
+import type { HotProject } from '#api/git/hot-projects.js';
 import { commitLease } from '#api/git/store/commit.js';
 import type { MovedRef } from '#api/git/store/commit.js';
 import type { SweepOutcome } from '#api/git/store/sweep.js';
@@ -257,6 +265,31 @@ const flushPacketBytes = 4;
  */
 const ownerLeaseCap = (slots: number): number => Math.max(1, Math.floor(slots / 2));
 
+/** The pack bytes a manifest names: what a hydrate draws, and the repository's size once committed. */
+const manifestPackBytes = (manifest: Manifest | undefined): number =>
+  (manifest?.packs ?? []).reduce((total, pack) => total + pack.bytes, 0);
+
+/**
+ * Store refusals raised before the conditional manifest write, so they are not CAS attempts:
+ * `tau.git.commit.attempts` counts writes, and these reach the client as their own refusal codes.
+ */
+const refusedBeforeManifestWrite: ReadonlySet<string> = new Set([
+  'deadline',
+  'loose-objects',
+  'connectivity',
+  'ceiling-exceeded',
+]);
+
+/** Ranks `1`..`10` with what each holds; an empty rank reads 0 so every series keeps reporting. */
+const rankedValues = (
+  ranked: readonly HotProject[] | undefined,
+  value: (project: HotProject) => number,
+): Array<[number, HotProjectRank]> =>
+  Array.from({ length: hotProjectRanks }, (_, index) => {
+    const entry = ranked?.[index];
+    return [entry === undefined ? 0 : value(entry), String(index + 1) as HotProjectRank];
+  });
+
 @Injectable()
 export class GitRepositoryService {
   /**
@@ -323,6 +356,23 @@ export class GitRepositoryService {
   /** The projects whose sweep is running (`sweepAfterReply`). */
   readonly #sweeping = new Set<string>();
 
+  /**
+   * Committed writes per project per minute, for the rank-only hot-project
+   * gauges (DA2). Project ids leave this process only on the
+   * `git.hot_projects` log line, never as a metric label.
+   */
+  readonly #hotProjects = new HotProjects((closed) => {
+    this.#logger.log(
+      {
+        event: 'git.hot_projects',
+        minuteStart: closed.minuteStart.toISOString(),
+        byCommits: closed.byCommits.map((entry, index) => ({ rank: index + 1, ...entry })),
+        byWriters: closed.byWriters.map((entry, index) => ({ rank: index + 1, ...entry })),
+      },
+      'git.hot_projects',
+    );
+  });
+
   public constructor(
     private readonly databaseService: DatabaseService,
     @Inject(commercialEntitlementsKey)
@@ -341,6 +391,22 @@ export class GitRepositoryService {
        rather than awaited: nothing may wait on a sweep to serve a request. */
     this.#bootSweep = this.sweepAbandonedLeases({ atBoot: true });
     this.track(this.#bootSweep);
+    this.metrics.gitHotProjectCommitRate.addCallback((result) => {
+      for (const [rate, rank] of rankedValues(
+        this.#hotProjects.lastFullMinute()?.byCommits,
+        (entry) => entry.commits / 60,
+      )) {
+        result.observe(rate, { rank });
+      }
+    });
+    this.metrics.gitHotProjectWriters.addCallback((result) => {
+      for (const [writers, rank] of rankedValues(
+        this.#hotProjects.lastFullMinute()?.byWriters,
+        (entry) => entry.writers,
+      )) {
+        result.observe(writers, { rank });
+      }
+    });
   }
 
   /**
@@ -667,13 +733,32 @@ export class GitRepositoryService {
    * is taken before the hydrate and released after the dispose, so the counter
    * covers the whole window the disk is occupied.
    *
+   * The publication routes' entry, so their leases count as `derive` on the
+   * admission and lease series; this service's own routes name theirs.
+   *
    * @param access - What `authorize` resolved.
    * @param work - What to do with the disposable bare directory.
    * @returns Whatever `work` returned.
    * @throws ServiceUnavailableException When this worker has no disk for another lease.
    */
   public async withLease<T>(access: GitAccess, work: (lease: RepositoryLease) => Promise<T>): Promise<T> {
-    const release = await this.admitLease(access);
+    return this.leaseFor('derive', access, work);
+  }
+
+  /**
+   * {@link withLease} for a named operation (DA2).
+   *
+   * @param operation - What the lease is for, as `tau.git.admissions` and `tau.git.leases.active` label it.
+   * @param access - What `authorize` resolved.
+   * @param work - What to do with the disposable bare directory.
+   * @returns Whatever `work` returned.
+   */
+  public async leaseFor<T>(
+    operation: GitOperation,
+    access: GitAccess,
+    work: (lease: RepositoryLease) => Promise<T>,
+  ): Promise<T> {
+    const release = await this.admitLease(access, operation);
     let lease: RepositoryLease | undefined;
     try {
       lease = await this.hydrate(access);
@@ -701,7 +786,7 @@ export class GitRepositoryService {
    * @returns The advertisement bytes, without the service prefix.
    */
   public async advertiseRefs(access: GitAccess, service: GitSmartService): Promise<Uint8Array<ArrayBuffer>> {
-    return this.withLease(access, async (lease) => {
+    return this.leaseFor('advertise', access, async (lease) => {
       await this.repairDerivedState(access, lease);
       return this.runGit([service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', '.'], lease.directory);
     });
@@ -724,7 +809,7 @@ export class GitRepositoryService {
     maximumInputBytes: number;
     abort?: AbortSignal;
   }): Promise<Readable> {
-    const release = await this.admitLease(args.access);
+    const release = await this.admitLease(args.access, 'upload_pack');
     let lease: RepositoryLease | undefined;
     try {
       lease = await this.hydrate(args.access);
@@ -770,7 +855,7 @@ export class GitRepositoryService {
     maximumInputBytes: number;
     abort?: AbortSignal;
   }): Promise<Uint8Array<ArrayBuffer>> {
-    return this.withLease(args.access, async (lease) => {
+    return this.leaseFor('receive_pack', args.access, async (lease) => {
       await this.repairDerivedState(args.access, lease);
       const ceilingRemaining = Math.max(
         0,
@@ -897,7 +982,7 @@ export class GitRepositoryService {
     }
     const tag = ref.startsWith('refs/tags/') ? ref.slice('refs/tags/'.length) : undefined;
 
-    const removal = await this.withLease(access, async (lease): Promise<RefRemoval> => {
+    const removal = await this.leaseFor('remove_ref', access, async (lease): Promise<RefRemoval> => {
       /* Before the transaction: a repair re-materializes under the same lock. */
       await this.repairDerivedState(access, lease);
       const held = lease.manifest?.refs[ref]?.oid;
@@ -1151,26 +1236,40 @@ export class GitRepositoryService {
    * bytes instead if a small repository's hydrates ever need a different
    * ceiling from a large one's.
    *
+   * Each decision is a `tau.git.admissions` outcome; an admitted lease is held
+   * on `tau.git.leases.active` until its release, and the reservation and the
+   * free bytes `statfs` read are the two disk gauges (DA2).
+   *
    * @param access - Whose repository the lease hydrates, and who asked.
+   * @param operation - What the lease is for, as the admission and lease series label it.
    * @returns The release, which every path must call.
    * @throws HttpException `429` when a daily hydrate budget is spent.
    * @throws ServiceUnavailableException When another lease would not fit, or the owner already holds its share.
    */
-  private async admitLease(access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>): Promise<() => void> {
+  private async admitLease(
+    access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>,
+    operation: GitOperation,
+  ): Promise<() => void> {
     const { ownerId } = access;
+    const admission = (outcome: GitAdmissionAttributes['outcome']): void => {
+      this.metrics.gitAdmissions.add(1, { 'tau.git.operation': operation, outcome });
+    };
     await this.#bootSweep;
     await this.sweepAbandonedLeases();
     await mkdir(this.#leaseParent, { recursive: true });
     const { bavail, bsize } = await statfs(this.#leaseParent);
+    this.metrics.gitDiskFreeBytes.record(bavail * bsize);
     const slots = Math.floor((bavail * bsize) / this.leaseDiskBytesPerLease);
     const held = this.#leasesByOwner.get(ownerId) ?? 0;
     if (this.#inFlightLeases + 1 > slots) {
+      admission('disk_full');
       throw new ServiceUnavailableException({
         code: 'GIT_LEASE_DISK_FULL',
         message: 'This server has no room for another repository right now; retry shortly.',
       });
     }
     if (held >= ownerLeaseCap(slots) || (held > 0 && this.#inFlightLeases + 1 >= slots)) {
+      admission('owner_busy');
       throw new ServiceUnavailableException({
         code: 'GIT_LEASE_OWNER_BUSY',
         message: 'This account already has repository work running on this server; retry shortly.',
@@ -1182,6 +1281,7 @@ export class GitRepositoryService {
     this.#inFlightLeases += 1;
     this.#leasesByOwner.set(ownerId, held + 1);
     let released = false;
+    let active = false;
     const release = (): void => {
       if (!released) {
         released = true;
@@ -1192,15 +1292,34 @@ export class GitRepositoryService {
         } else {
           this.#leasesByOwner.set(ownerId, remaining);
         }
+        if (active) {
+          this.metrics.gitLeasesActive.add(-1, { 'tau.git.operation': operation });
+        }
+        this.recordReservedBytes();
       }
     };
     try {
       await this.spendHydrate(access);
     } catch (error) {
+      if (
+        error instanceof HttpException &&
+        (error.getResponse() as { code?: unknown }).code === 'GIT_HYDRATE_BUDGET_EXHAUSTED'
+      ) {
+        admission('budget_exhausted');
+      }
       release();
       throw error;
     }
+    admission('admitted');
+    active = true;
+    this.metrics.gitLeasesActive.add(1, { 'tau.git.operation': operation });
+    this.recordReservedBytes();
     return release;
+  }
+
+  /** The lease disk this Machine has reserved now: admitted leases at today's flat per-lease figure (D33). */
+  private recordReservedBytes(): void {
+    this.metrics.gitLeaseReservedBytes.record(this.#inFlightLeases * this.leaseDiskBytesPerLease);
   }
 
   /**
@@ -1251,11 +1370,16 @@ export class GitRepositoryService {
   private async hydrate(access: GitAccess): Promise<RepositoryLease> {
     const startedAt = performance.now();
     try {
-      return await hydrateLease({
+      const lease = await hydrateLease({
         store: this.store,
         locator: await this.resolveActiveLocator(access),
         parentDirectory: this.#leaseParent,
       });
+      /* Every hydrate reads its packs from the object store today; `cache` arrives with DC2. */
+      this.metrics.gitHydrateBytes.record(manifestPackBytes(lease.manifest), {
+        'tau.git.hydrate.source': 'object_store',
+      });
+      return lease;
     } finally {
       this.metrics.syncLeaseDuration.record((performance.now() - startedAt) / 1000, {
         'tau.sync.lease.phase': 'hydrate',
@@ -1263,14 +1387,40 @@ export class GitRepositoryService {
     }
   }
 
-  /** `commitLease`, timed as the `commit` lease phase, counting a lost conditional manifest write. */
+  /**
+   * `commitLease`, timed as the `commit` lease phase, counting a lost conditional manifest write.
+   *
+   * A push and a ref removal are both `push` commits. A write the store reports `lost` is
+   * `lost_race` whether a racing writer or an exhausted R2 rate limit lost it (`commit.ts`
+   * reconciles both to `lost`); telling `throttled` and `indeterminate` apart needs the store's
+   * own attempts (W14 N10).
+   */
   private async commit(args: Parameters<typeof commitLease>[0]): ReturnType<typeof commitLease> {
     const startedAt = performance.now();
+    const attempt = (outcome: GitCommitAttemptAttributes['outcome']): void => {
+      this.metrics.gitCommitAttempts.add(1, { outcome, 'tau.git.commit.kind': 'push' });
+      this.metrics.gitCommitDuration.record((performance.now() - startedAt) / 1000, {
+        'tau.git.commit.phase': 'total',
+        'tau.git.commit.kind': 'push',
+      });
+    };
     try {
-      return await commitLease(args);
+      const result = await commitLease(args);
+      if (result.committed) {
+        attempt('committed');
+        this.metrics.gitRepositorySize.record(manifestPackBytes(result.manifest));
+        this.#hotProjects.record(
+          args.lease.locator.projectId,
+          args.viaDevice === undefined ? args.committedBy : `${args.committedBy}:${args.viaDevice}`,
+        );
+      }
+      return result;
     } catch (error) {
       if (error instanceof RepositoryStoreError && error.code === 'lost') {
         this.metrics.syncManifestConflicts.add(1);
+        attempt('lost_race');
+      } else if (!(error instanceof RepositoryStoreError && refusedBeforeManifestWrite.has(error.code))) {
+        attempt('error');
       }
       throw error;
     } finally {

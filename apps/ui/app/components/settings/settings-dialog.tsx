@@ -2,7 +2,7 @@ import { GithubRepositorySettings } from '#components/settings/github-repository
 import { BrowserSettingsPanel } from '#components/browser/browser-settings.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefCallback } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
@@ -19,6 +19,7 @@ import { RemoteComputeSettings } from '#components/settings/remote-compute-setti
 import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
 import { MachinesSettings } from '#components/settings/machines-settings.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 
 import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
@@ -148,6 +149,9 @@ export function SettingsDialog(): React.JSX.Element {
   );
 }
 
+/** The section a plain open lands on; on a phone it opens the section list instead. */
+const defaultSection: SettingsSection = 'general';
+
 /** Settings presentation with navigation supplied by the owning host. */
 export function SettingsSurface({
   activeSection,
@@ -163,19 +167,40 @@ export function SettingsSurface({
   readonly isEmbedded?: boolean;
 }): React.JSX.Element {
   const Content = isEmbedded ? EmbeddedSettingsContent : DialogContent;
+  const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
   const [searchDestination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
   const searchRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  // Settings opens from the URL rather than a dialog trigger, so the dialog has no trigger to return
+  // focus to. Whatever held focus when the surface mounted is the opener.
+  const [opener] = useState(() => {
+    if (typeof document === 'undefined') {
+      return undefined;
+    }
+    return document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+  });
   // State, not a ref: the dialog mounts its content after the first effects run, and a
   // deep link opening the dialog has to wait for it.
   const [content, setContent] = useState<HTMLDivElement>();
   const contentRef = useCallback<RefCallback<HTMLDivElement>>((element) => {
     setContent(element ?? undefined);
   }, []);
+  // Phones show one level at a time. A plain open (`open()` writes the default section) starts on
+  // the section list; an open that names another section or a setting lands on its detail.
+  const [isListShown, setIsListShown] = useState(() => activeSection === defaultSection && !linkedSetting);
+  const [request, setRequest] = useState({ section: activeSection, setting: linkedSetting });
+  if (request.section !== activeSection || request.setting !== linkedSetting) {
+    setRequest({ section: activeSection, setting: linkedSetting });
+    setIsListShown(false);
+  }
+  // The list row (or search result) that opened the detail takes focus back when the list returns.
+  const returnFocusKey = useRef<string>(undefined);
+  const isReturning = useRef(false);
+  const showsList = isMobile && isListShown;
+  const showsDetail = !isMobile || !isListShown;
   const results = searchSettings(query);
-  const isSearching = query.trim().length > 0;
   const active = settingsSections.find((section) => section.id === activeSection)!;
-  const resultCount = results.reduce((total, group) => total + group.entries.length, 0);
 
   // A deep link from outside the dialog (`?setting=`) reveals its control like a search result does.
   // Navigating inside the dialog drops the parameter, so a present link is always the latest request.
@@ -232,154 +257,305 @@ export function SettingsSurface({
     };
   }, [activeSection, content, destination]);
 
+  useEffect(() => {
+    if (!showsList || !isReturning.current) {
+      return;
+    }
+    isReturning.current = false;
+    const key = returnFocusKey.current ?? `section:${activeSection}`;
+    const row = listRef.current?.querySelector<HTMLElement>(`[data-return-focus="${CSS.escape(key)}"]`);
+    (row ?? searchRef.current)?.focus();
+  }, [activeSection, showsList]);
+
   const navigate = (section: SettingsSection, id?: string): void => {
     openSection(section);
     setDestination({ section, id });
+    returnFocusKey.current = id ? `setting:${id}` : `section:${section}`;
+    setIsListShown(false);
+  };
+  const showList = (): void => {
+    isReturning.current = true;
+    setIsListShown(true);
   };
   const clearSearch = (): void => {
     setQuery('');
     searchRef.current?.focus();
   };
 
+  const search = (
+    <form
+      className='relative'
+      role='search'
+      aria-label='Search settings'
+      onSubmit={(event) => {
+        event.preventDefault();
+        const first = results[0];
+        if (first?.entries[0]) {
+          navigate(first.section.id, first.entries[0].id);
+        }
+      }}
+    >
+      <SearchInput
+        ref={searchRef}
+        aria-label='Search settings'
+        placeholder='Search settings…'
+        value={query}
+        onClear={clearSearch}
+        onChange={(event) => {
+          setQuery(event.target.value);
+        }}
+      />
+    </form>
+  );
+
+  const region = (
+    <div
+      ref={contentRef}
+      role='region'
+      aria-label={`${active.label} settings`}
+      tabIndex={-1}
+      className={cn(
+        'min-h-0 min-w-0 flex-1 overflow-y-auto bg-muted/40 focus-visible:focus-outline',
+        isMobile ? 'p-4' : 'p-6 md:p-10',
+      )}
+    >
+      <div className='mx-auto flex max-w-3xl flex-col gap-6 [&_[data-settings-section]]:gap-3 [&_[data-settings-section]]:border-0 [&_[data-settings-section]]:bg-transparent [&_[data-settings-section]]:py-0 [&_[data-settings-section]>[data-slot=card-content]]:rounded-xl [&_[data-settings-section]>[data-slot=card-content]]:border [&_[data-settings-section]>[data-slot=card-content]]:bg-card [&_[data-settings-section]>[data-slot=card-content]]:py-4 [&_[data-settings-section]>[data-slot=card-content]:has(>[data-slot=settings-item])]:gap-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:pt-4 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:absolute [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:inset-x-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:top-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:border-t [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:content-[""] [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:last-child)]:pb-4 [&_[data-settings-section]>[data-slot=card-header]]:px-0 [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-description]]:hidden [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:text-sm [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:font-medium [&_[data-slot=card]]:shadow-none [&_h2]:text-sm [&_h2]:font-medium'>
+        {isMobile ? null : <h1 className='text-lg font-medium'>{active.label}</h1>}
+        <SettingsContent section={activeSection} />
+      </div>
+    </div>
+  );
+
   return (
     <Content
-      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input]]:bg-card [&_[data-slot=select-trigger]]:bg-card [&_[data-slot=slider-input]]:bg-card [&_[data-slot=textarea]]:bg-card'
+      className={cn(
+        'h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input]]:bg-card [&_[data-slot=select-trigger]]:bg-card [&_[data-slot=slider-input]]:bg-card [&_[data-slot=textarea]]:bg-card',
+        // Phones get a full-screen sheet; its headers carry a 40px close in place of the corner glyph.
+        isMobile &&
+          'top-0 left-0 h-dvh max-w-none translate-x-0 translate-y-0 rounded-none border-0 sm:max-w-none [&>[data-slot=dialog-close]]:hidden',
+      )}
       onOpenAutoFocus={(event) => {
         // A deep link owns focus: its reveal moves it to the content, not the dialog's first button.
         if (linkedDestination) {
           event.preventDefault();
         }
       }}
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        if (opener?.isConnected && opener !== opener.ownerDocument.body) {
+          opener.focus();
+        }
+      }}
       onEscapeKeyDown={(event) => {
-        if (query) {
+        if (isMobile && !isListShown) {
+          event.preventDefault();
+          showList();
+        } else if (query) {
           event.preventDefault();
           clearSearch();
         }
       }}
     >
-      <DialogTitle className='sr-only'>Settings</DialogTitle>
+      {showsList ? null : <DialogTitle className='sr-only'>Settings</DialogTitle>}
       <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
-      <div className='flex min-h-0 min-w-0 flex-col md:flex-row'>
-        <aside className='flex shrink-0 flex-col gap-4 border-b bg-sidebar p-4 max-md:max-h-[45%] md:w-64 md:border-r md:border-b-0'>
-          <Button variant='ghost' className='w-full justify-start' onClick={close}>
-            <ArrowLeft className='size-4' aria-hidden='true' /> Back to app
-          </Button>
-          <form
-            className='relative'
-            role='search'
-            aria-label='Search settings'
-            onSubmit={(event) => {
-              event.preventDefault();
-              const first = results[0];
-              if (first?.entries[0]) {
-                navigate(first.section.id, first.entries[0].id);
-              }
-            }}
-          >
-            <SearchInput
-              ref={searchRef}
-              aria-label='Search settings'
-              placeholder='Search settings…'
-              value={query}
-              onClear={clearSearch}
-              onChange={(event) => {
-                setQuery(event.target.value);
-              }}
+      <div className={cn('flex min-h-0 min-w-0 flex-col', !isMobile && 'md:flex-row')}>
+        {isMobile && !showsList ? null : (
+          <SettingsNavigationPane isMobile={isMobile} close={close} search={search} listRef={listRef}>
+            <SettingsNavigationItems
+              query={query}
+              activeSection={activeSection}
+              destination={destination}
+              isMobile={isMobile}
+              navigate={navigate}
             />
-          </form>
-          <nav aria-label='Settings navigation' className='min-h-0 overflow-y-auto'>
-            {isSearching ? (
-              <div className='space-y-4'>
-                <p role='status' className='px-2 text-xs text-muted-foreground'>
-                  {resultCount === 0
-                    ? 'No settings found'
-                    : `${resultCount} ${resultCount === 1 ? 'setting' : 'settings'} found`}
-                </p>
-                {resultCount === 0 ? (
-                  <p className='px-2 text-sm text-muted-foreground'>
-                    Try a setting name or a word like theme, models, or storage.
-                  </p>
-                ) : null}
-                {results.map(({ section, entries }) => (
-                  <SidebarGroup key={section.id} role='group' aria-label={section.label} className='px-0'>
-                    <SidebarMenu>
-                      <SidebarMenuItem>
-                        <SidebarMenuButton
-                          className='text-muted-foreground'
-                          onClick={() => {
-                            navigate(section.id);
-                          }}
-                        >
-                          <section.icon className='size-4 shrink-0' aria-hidden='true' />
-                          <span>{section.label}</span>
-                        </SidebarMenuButton>
-                        <SidebarMenuSub>
-                          {entries.map((entry) => (
-                            <SidebarMenuSubItem key={entry.id}>
-                              <SidebarMenuSubButton
-                                asChild
-                                title={entry.description}
-                                isActive={destination?.section === activeSection && destination.id === entry.id}
-                              >
-                                <button
-                                  type='button'
-                                  onClick={() => {
-                                    navigate(section.id, entry.id);
-                                  }}
-                                >
-                                  <span>{entry.label}</span>
-                                </button>
-                              </SidebarMenuSubButton>
-                            </SidebarMenuSubItem>
-                          ))}
-                        </SidebarMenuSub>
-                      </SidebarMenuItem>
-                    </SidebarMenu>
-                  </SidebarGroup>
-                ))}
-              </div>
-            ) : (
-              <div className='flex md:flex-col'>
-                {[...new Set(settingsSections.map((section) => section.group))].map((group) => (
-                  <SidebarGroup key={group} className='shrink-0 px-0'>
-                    <SidebarGroupLabel className='max-md:hidden'>{group}</SidebarGroupLabel>
-                    <SidebarMenu>
-                      {settingsSections
-                        .filter((section) => section.group === group)
-                        .map((section) => (
-                          <SidebarMenuItem key={section.id}>
-                            <SidebarMenuButton
-                              isActive={activeSection === section.id}
-                              onClick={() => {
-                                navigate(section.id);
-                              }}
-                            >
-                              <section.icon className='size-4' aria-hidden='true' />
-                              <span>{section.label}</span>
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        ))}
-                    </SidebarMenu>
-                  </SidebarGroup>
-                ))}
-              </div>
-            )}
-          </nav>
-        </aside>
-        <div
-          ref={contentRef}
-          role='region'
-          aria-label={`${active.label} settings`}
-          tabIndex={-1}
-          className='min-h-0 min-w-0 flex-1 overflow-y-auto bg-muted/40 p-6 focus-visible:focus-outline md:p-10'
-        >
-          <div className='mx-auto flex max-w-3xl flex-col gap-6 [&_[data-settings-section]]:gap-3 [&_[data-settings-section]]:border-0 [&_[data-settings-section]]:bg-transparent [&_[data-settings-section]]:py-0 [&_[data-settings-section]>[data-slot=card-content]]:rounded-xl [&_[data-settings-section]>[data-slot=card-content]]:border [&_[data-settings-section]>[data-slot=card-content]]:bg-card [&_[data-settings-section]>[data-slot=card-content]]:py-4 [&_[data-settings-section]>[data-slot=card-content]:has(>[data-slot=settings-item])]:gap-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:pt-4 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:absolute [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:inset-x-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:top-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:border-t [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:content-[""] [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:last-child)]:pb-4 [&_[data-settings-section]>[data-slot=card-header]]:px-0 [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-description]]:hidden [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:text-sm [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:font-medium [&_[data-slot=card]]:shadow-none [&_h2]:text-sm [&_h2]:font-medium'>
-            <h1 className='text-lg font-medium'>{active.label}</h1>
-            <SettingsContent section={activeSection} />
+          </SettingsNavigationPane>
+        )}
+        {showsDetail && isMobile ? (
+          <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
+            <SettingsSheetHeader close={close} back={showList}>
+              <h2 className={sheetTitleClassName}>{active.label}</h2>
+            </SettingsSheetHeader>
+            {region}
           </div>
-        </div>
+        ) : null}
+        {isMobile ? null : region}
       </div>
     </Content>
+  );
+}
+
+/** The navigation column on desktop; on a phone, the full-height section list with its own header. */
+function SettingsNavigationPane({
+  isMobile,
+  close,
+  search,
+  listRef,
+  children,
+}: {
+  readonly isMobile: boolean;
+  readonly close: () => void;
+  readonly search: React.ReactNode;
+  readonly listRef: React.Ref<HTMLElement>;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <aside
+      className={cn(
+        'flex shrink-0 flex-col bg-sidebar',
+        isMobile
+          ? 'min-h-0 flex-1 gap-2 pb-4'
+          : 'gap-4 border-b p-4 max-md:max-h-[45%] md:w-64 md:border-r md:border-b-0',
+      )}
+    >
+      {isMobile ? (
+        <SettingsSheetHeader close={close}>
+          <DialogTitle className={sheetTitleClassName}>Settings</DialogTitle>
+        </SettingsSheetHeader>
+      ) : (
+        <Button variant='ghost' className='w-full justify-start' onClick={close}>
+          <ArrowLeft className='size-4' aria-hidden='true' /> Back to app
+        </Button>
+      )}
+      <div className={cn(isMobile && 'px-3')}>{search}</div>
+      <nav
+        ref={listRef}
+        aria-label='Settings navigation'
+        className={cn('min-h-0 overflow-y-auto', isMobile && 'flex-1 px-2')}
+      >
+        {children}
+      </nav>
+    </aside>
+  );
+}
+
+/** Section rows, or search results while there is a query; a phone gets 44px rows with group labels. */
+function SettingsNavigationItems({
+  query,
+  activeSection,
+  destination,
+  isMobile,
+  navigate,
+}: {
+  readonly query: string;
+  readonly activeSection: SettingsSection;
+  readonly destination: { section: SettingsSection; id?: string } | undefined;
+  readonly isMobile: boolean;
+  readonly navigate: (section: SettingsSection, id?: string) => void;
+}): React.JSX.Element {
+  const results = searchSettings(query);
+  const resultCount = results.reduce((total, group) => total + group.entries.length, 0);
+  if (query.trim().length > 0) {
+    return (
+      <div className='space-y-4'>
+        <p role='status' className='px-2 text-xs text-muted-foreground'>
+          {resultCount === 0
+            ? 'No settings found'
+            : `${resultCount} ${resultCount === 1 ? 'setting' : 'settings'} found`}
+        </p>
+        {resultCount === 0 ? (
+          <p className='px-2 text-sm text-muted-foreground'>
+            Try a setting name or a word like theme, models, or storage.
+          </p>
+        ) : null}
+        {results.map(({ section, entries }) => (
+          <SidebarGroup key={section.id} role='group' aria-label={section.label} className='px-0'>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  size={isMobile ? 'lg' : 'default'}
+                  className='text-muted-foreground'
+                  data-return-focus={`section:${section.id}`}
+                  onClick={() => {
+                    navigate(section.id);
+                  }}
+                >
+                  <section.icon className='size-4 shrink-0' aria-hidden='true' />
+                  <span>{section.label}</span>
+                </SidebarMenuButton>
+                <SidebarMenuSub>
+                  {entries.map((entry) => (
+                    <SidebarMenuSubItem key={entry.id}>
+                      <SidebarMenuSubButton
+                        asChild
+                        title={entry.description}
+                        isActive={destination?.section === activeSection && destination.id === entry.id}
+                        className={cn(isMobile && 'h-11')}
+                      >
+                        <button
+                          type='button'
+                          data-return-focus={`setting:${entry.id}`}
+                          onClick={() => {
+                            navigate(section.id, entry.id);
+                          }}
+                        >
+                          <span>{entry.label}</span>
+                        </button>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  ))}
+                </SidebarMenuSub>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className={cn('flex', isMobile ? 'flex-col' : 'md:flex-col')}>
+      {[...new Set(settingsSections.map((section) => section.group))].map((group) => (
+        <SidebarGroup key={group} className='shrink-0 px-0'>
+          <SidebarGroupLabel className={cn(!isMobile && 'max-md:hidden')}>{group}</SidebarGroupLabel>
+          <SidebarMenu>
+            {settingsSections
+              .filter((section) => section.group === group)
+              .map((section) => (
+                <SidebarMenuItem key={section.id}>
+                  <SidebarMenuButton
+                    size={isMobile ? 'lg' : 'default'}
+                    isActive={!isMobile && activeSection === section.id}
+                    data-return-focus={`section:${section.id}`}
+                    onClick={() => {
+                      navigate(section.id);
+                    }}
+                  >
+                    <section.icon className='size-4' aria-hidden='true' />
+                    <span className={cn(isMobile && 'min-w-0 flex-1 truncate')}>{section.label}</span>
+                    {isMobile ? <ChevronRight className='text-muted-foreground' aria-hidden='true' /> : null}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+          </SidebarMenu>
+        </SidebarGroup>
+      ))}
+    </div>
+  );
+}
+
+const sheetTitleClassName = 'min-w-0 flex-1 truncate text-base font-medium';
+
+/** The phone sheet's 48px bar: back to the section list when there is one, the title and a 40px close. */
+function SettingsSheetHeader({
+  back,
+  close,
+  children,
+}: {
+  readonly back?: () => void;
+  readonly close: () => void;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <header className={cn('flex h-12 shrink-0 items-center gap-1 border-b pr-1', back ? 'pl-1' : 'pl-4')}>
+      {back ? (
+        <Button variant='ghost' size='icon-lg' aria-label='Back to Settings' className='shrink-0' onClick={back}>
+          <ChevronLeft className='size-5' aria-hidden='true' />
+        </Button>
+      ) : null}
+      {children}
+      <Button variant='ghost' size='icon-lg' aria-label='Close settings' className='shrink-0' onClick={close}>
+        <X className='size-5' aria-hidden='true' />
+      </Button>
+    </header>
   );
 }
 

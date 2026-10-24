@@ -73,6 +73,14 @@ describe('AgentSettings', () => {
 
   // ── Card rendering ─────────────────────────────────────────────────────
 
+  it('should toggle a switch when its row text is tapped', async () => {
+    renderAgentSettings();
+
+    await userEvent.click(screen.getByText('Include all open editor tabs'));
+
+    expect(mockSetIncludeOpenFiles).toHaveBeenCalledWith(false);
+  });
+
   it('should render all setting cards', () => {
     renderAgentSettings();
 

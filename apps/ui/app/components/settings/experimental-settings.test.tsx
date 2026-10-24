@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
 import { featureFlagDefaults } from '#flags/flag.constants.js';
@@ -35,5 +36,13 @@ describe('ExperimentalSettings', () => {
     ]) {
       expect(screen.queryByText(hidden)).not.toBeInTheDocument();
     }
+  });
+
+  it('should toggle a flag when its row text is tapped', async () => {
+    render(<ExperimentalSettings />);
+
+    await userEvent.click(screen.getByText('Tau Debug'));
+
+    expect(mockState.setFlag).toHaveBeenCalledWith('tauDebug', !featureFlagDefaults.tauDebug);
   });
 });

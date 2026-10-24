@@ -64,3 +64,49 @@ test('supports keyboard search selection in the mobile dialog', async () => {
   await target.expectFocused(dialog.getByRole('region', { name: 'Theme' }));
   await target.screenshot(dialog, 'settings-search-mobile.png');
 });
+
+test('opens settings on a phone as a section list that steps into one section and back', async () => {
+  await target.setViewport({ width: 390, height: 844 });
+  await target.navigate('/?settings=general');
+
+  const navigation = dialog.getByRole('navigation', { name: 'Settings navigation' });
+  const security = navigation.getByRole('button', { name: 'Security' });
+  await target.expectVisible(navigation);
+  await target.expectVisible(searchbox);
+  await target.expectHidden(dialog.getByRole('region', { name: 'General settings' }));
+  // One column of rows: nothing in the list scrolls sideways.
+  expect(await target.evaluateLocator(navigation, (element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  const row = await target.boundingBox(security);
+  expect(row?.height).toBeGreaterThanOrEqual(40);
+  await target.screenshot(dialog, 'settings-mobile-list.png');
+
+  await target.click(security);
+
+  const back = dialog.getByRole('button', { name: 'Back to Settings' });
+  await target.expectUrl(/[?&]settings=security(?:&|$)/u);
+  await target.expectVisible(dialog.getByRole('heading', { level: 2, name: 'Security' }));
+  await target.expectHidden(navigation);
+  const backBox = await target.boundingBox(back);
+  expect(backBox?.height).toBeGreaterThanOrEqual(40);
+  await target.screenshot(dialog, 'settings-mobile-section.png');
+
+  await target.click(back);
+  await target.expectVisible(navigation);
+  await target.expectFocused(security);
+
+  await target.click(security);
+  await target.keyboardPress('Escape');
+  await target.expectFocused(security);
+
+  await target.click(dialog.getByRole('button', { name: 'Close settings' }));
+  await target.expectHidden(dialog);
+});
+
+test('lands a phone deep link on its section with a way back to the list', async () => {
+  await target.setViewport({ width: 390, height: 844 });
+  await target.navigate('/?settings=models');
+
+  await target.expectVisible(dialog.getByRole('heading', { level: 2, name: 'Models' }));
+  await target.click(dialog.getByRole('button', { name: 'Back to Settings' }));
+  await target.expectFocused(dialog.getByRole('button', { name: 'Models' }));
+});

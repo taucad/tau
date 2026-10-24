@@ -134,33 +134,33 @@ export function GeneralSettings(): React.JSX.Element {
 
           {/* Code Inlay Hints */}
           <SettingsItem settingId='code-inlay-hints'>
-            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-              <div className='flex flex-col gap-1'>
+            <label className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+              <span className='flex flex-col gap-1'>
                 <span className='font-medium'>Code Inlay Hints</span>
                 <span className='text-sm text-muted-foreground'>Show inline parameter names in code editors</span>
-              </div>
+              </span>
               <Switch
                 aria-label='Code Inlay Hints'
                 checked={areCodeInlayHintsEnabled}
                 onCheckedChange={setCodeInlayHintsEnabled}
               />
-            </div>
+            </label>
           </SettingsItem>
 
           <SettingsItem settingId='pointer-cursors'>
-            <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-              <div className='flex flex-col gap-1'>
+            <label className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+              <span className='flex flex-col gap-1'>
                 <span className='font-medium'>Use pointer cursors</span>
                 <span className='text-sm text-muted-foreground'>
                   Change the cursor to a pointer when hovering over interactive elements
                 </span>
-              </div>
+              </span>
               <Switch
                 aria-label='Use pointer cursors'
                 checked={usePointerCursors}
                 onCheckedChange={setUsePointerCursors}
               />
-            </div>
+            </label>
           </SettingsItem>
 
           {/* Color Picker */}
@@ -298,14 +298,14 @@ export function GeneralSettings(): React.JSX.Element {
                   </div>
                 )}
                 {/* Usage metrics are not training data, so the no-train guarantee does not replace this choice. */}
-                <div className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
-                  <div className='flex flex-col gap-1'>
+                <label className='flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center'>
+                  <span className='flex flex-col gap-1'>
                     <span className='font-medium'>Share anonymous usage metrics</span>
                     <span id={usageMetricsDescriptionId} className='text-sm text-muted-foreground'>
                       Reports counts about how the agent works — tool calls, lookups, errors — with no prompts, code,
                       file names or identity. Operational health metrics are always sent.
                     </span>
-                  </div>
+                  </span>
                   <Switch
                     aria-label='Share anonymous usage metrics'
                     aria-describedby={usageMetricsDescriptionId}
@@ -315,7 +315,7 @@ export function GeneralSettings(): React.JSX.Element {
                       updatePreferences({ allowsUsageMetrics: checked });
                     }}
                   />
-                </div>
+                </label>
               </>
             )}
           </CardContent>

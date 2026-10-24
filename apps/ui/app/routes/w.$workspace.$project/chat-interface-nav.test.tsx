@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { ChatInterfaceNav, chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 
+const flags = vi.hoisted(() => ({ machines: false, tauDebug: false }));
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (flag: 'machines' | 'tauDebug') => flags[flag],
+}));
+
 describe('mobile workbench navigation', () => {
   it('restores the model and keeps Files reachable through All', () => {
     const onTabChange = vi.fn<(id: MobilePanelId) => void>();
@@ -40,19 +45,46 @@ function ControlledNav({ initial = 'chat' }: { readonly initial?: MobilePanelId 
 }
 
 describe('All surfaces', () => {
-  it('should list only the secondary surfaces, by their workbench titles, under All surfaces', () => {
+  it('should list only the secondary surfaces, by their workbench titles, grouped as the desktop launcher', () => {
+    flags.machines = true;
+    flags.tauDebug = true;
     render(<ControlledNav />);
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
 
     const sheet = screen.getByRole('dialog', { name: 'All surfaces' });
-    expect(
+    const groups = Object.fromEntries(
       within(sheet)
-        .getAllByRole('button')
-        .map((button) => button.textContent),
-    ).toEqual(['Files', 'Editor', 'Details', 'Export', 'Share', 'Revisions']);
+        .getAllByRole('region')
+        .map((group) => [
+          group.getAttribute('aria-label') ?? within(group).getByRole('heading').textContent,
+          within(group)
+            .getAllByRole('button')
+            .map((button) => button.textContent),
+        ]),
+    );
+    expect(groups).toEqual({
+      Design: ['Model tree', 'Kinematics', 'Print'],
+      Activity: ['Browser', 'Revisions', 'Agents', 'Jobs'],
+      Project: ['Files', 'Editor', 'Export', 'Share', 'Details'],
+      Diagnostics: ['Telemetry', 'Console'],
+    });
     for (const primary of ['Chat', 'Parameters', 'Model']) {
       expect(within(sheet).queryByRole('button', { name: primary })).not.toBeInTheDocument();
     }
+  });
+
+  it('should hide Print without Machines and the diagnostics without debug mode, as the desktop launcher does', () => {
+    flags.machines = false;
+    flags.tauDebug = false;
+    render(<ControlledNav />);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
+
+    const sheet = screen.getByRole('dialog', { name: 'All surfaces' });
+    expect(within(sheet).getByRole('button', { name: 'Model tree' })).toBeInTheDocument();
+    for (const gated of ['Print', 'Telemetry', 'Console']) {
+      expect(within(sheet).queryByRole('button', { name: gated })).not.toBeInTheDocument();
+    }
+    expect(within(sheet).queryByRole('heading', { name: 'Diagnostics' })).not.toBeInTheDocument();
   });
 
   it('should mark the selected surface in the nav and in All, and close All once a surface is chosen', async () => {
@@ -81,11 +113,17 @@ describe('All surfaces', () => {
     render(<ControlledNav />);
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
 
-    const grid = within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('button', {
-      name: 'Files',
-    }).parentElement!;
-    expect(grid).toHaveClass('grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]');
-    expect(grid).not.toHaveClass('grid-cols-3');
+    for (const name of ['Files', 'Model tree', 'Revisions']) {
+      const grid = within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('button', {
+        name,
+      }).parentElement!;
+      expect(grid).toHaveClass('grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]');
+      expect(grid).not.toHaveClass('grid-cols-3');
+    }
+    for (const button of within(screen.getByRole('dialog', { name: 'All surfaces' })).getAllByRole('button')) {
+      // The touch size: 44px rows, past the 40px floor for primary targets (I3).
+      expect(button).toHaveClass('h-11');
+    }
   });
 });
 
@@ -119,5 +157,33 @@ describe('mobile navigation frame', () => {
     expect(selected).toHaveAttribute('aria-current', 'page');
     expect(selected).toHaveClass('border-border', 'bg-background');
     expect(selected.querySelector('[data-slot=tabs-active-indicator]')).toBeNull();
+  });
+});
+
+describe('Chat cue (I5)', () => {
+  it('should mark Chat while a decision waits there and another surface has the sheet, keeping its name', () => {
+    const { rerender } = render(
+      <ChatInterfaceNav
+        activeTab='parameters'
+        chatCue={{ tone: 'attention', description: 'A chat needs you' }}
+        onTabChange={vi.fn()}
+      />,
+    );
+    const chat = within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'Chat' });
+    expect(chat).toHaveAccessibleName('Chat');
+    expect(chat).toHaveAccessibleDescription('A chat needs you');
+    expect(chat.querySelector('[data-slot=destination-cue]')).toHaveAttribute('data-tone', 'attention');
+
+    // On the chat itself the decision is in view; the nav says nothing more (I4).
+    rerender(
+      <ChatInterfaceNav
+        activeTab='chat'
+        chatCue={{ tone: 'attention', description: 'A chat needs you' }}
+        onTabChange={vi.fn()}
+      />,
+    );
+    const shown = within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'Chat' });
+    expect(shown).not.toHaveAccessibleDescription();
+    expect(shown.querySelector('[data-slot=destination-cue]')).toBeNull();
   });
 });

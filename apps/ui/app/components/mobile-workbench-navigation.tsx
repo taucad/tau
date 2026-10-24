@@ -1,4 +1,5 @@
 import { Box, LayoutGrid, MessageCircle, SlidersHorizontal } from 'lucide-react';
+import { useId } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 
 const destinations = [
@@ -9,6 +10,12 @@ const destinations = [
 ] as const;
 
 type Destination = (typeof destinations)[number]['id'];
+
+/** Something waiting behind a destination: an attention dot, and the sentence a screen reader hears after its name. */
+export type MobileWorkbenchDestinationCue = Readonly<{
+  tone: 'attention' | 'failed';
+  description: string;
+}>;
 
 /**
  * The nav's height contract, set on the shell and on any portalled surface that sits above the nav: `--nav-height` is
@@ -22,11 +29,15 @@ export function MobileWorkbenchNavigation({
   active,
   onSelect,
   className,
+  cues,
 }: {
   readonly active: string;
   readonly onSelect: (destination: Destination) => void;
   readonly className?: string;
+  /** Cues by destination; the name stays the label, the cue is its description (I6). */
+  readonly cues?: Partial<Record<Destination, MobileWorkbenchDestinationCue>>;
 }): React.JSX.Element {
+  const cueId = useId();
   return (
     <nav
       aria-label='Workbench'
@@ -38,25 +49,49 @@ export function MobileWorkbenchNavigation({
         className,
       )}
     >
-      {destinations.map(({ id, label, icon: Icon }) => (
-        <button
-          key={id}
-          type='button'
-          aria-current={active === id ? 'page' : undefined}
-          onClick={() => {
-            onSelect(id);
-          }}
-          className={cn(
-            'flex h-10 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-transparent text-xs outline-none focus-visible:focus-outline',
-            active === id
-              ? 'border-border bg-background font-medium text-foreground'
-              : 'text-muted-foreground hover:bg-accent/60',
-          )}
-        >
-          <Icon aria-hidden className='size-4' />
-          <span className='max-w-full text-center wrap-anywhere'>{label}</span>
-        </button>
-      ))}
+      {destinations.map(({ id, label, icon: Icon }) => {
+        const cue = cues?.[id];
+        return (
+          <button
+            key={id}
+            type='button'
+            aria-current={active === id ? 'page' : undefined}
+            aria-describedby={cue ? `${cueId}-${id}` : undefined}
+            onClick={() => {
+              onSelect(id);
+            }}
+            className={cn(
+              'flex h-10 min-w-0 flex-col items-center justify-center gap-0.5 rounded-lg border border-transparent text-xs outline-none focus-visible:focus-outline',
+              active === id
+                ? 'border-border bg-background font-medium text-foreground'
+                : 'text-muted-foreground hover:bg-accent/60',
+            )}
+          >
+            <span className='relative'>
+              <Icon aria-hidden className='size-4' />
+              {cue ? (
+                <span
+                  aria-hidden
+                  data-slot='destination-cue'
+                  data-tone={cue.tone}
+                  className={cn(
+                    'absolute -top-0.5 -right-1 size-2 rounded-full ring-2 ring-background',
+                    // The sidebar's mark hues (status-mark.tsx): amber needs you, the feature hue failed.
+                    cue.tone === 'failed' ? 'bg-feature/80' : 'bg-warning/80',
+                  )}
+                />
+              ) : null}
+            </span>
+            <span className='max-w-full text-center wrap-anywhere'>{label}</span>
+            {cue ? (
+              // Hidden from the name computation, still read as the description.
+              <span hidden id={`${cueId}-${id}`}>
+                {cue.description}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
     </nav>
   );
 }

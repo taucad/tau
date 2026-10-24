@@ -29,6 +29,7 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 const { useChatInterfaceState } = await import('./use-chat-interface-state.js');
+const { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } = await import('#constants/editor.constants.js');
 
 describe('useChatInterfaceState mobile drawer', () => {
   beforeEach(() => {
@@ -109,7 +110,7 @@ describe('useChatInterfaceState mobile drawer', () => {
     expect(result.current.drawerOpen).toBe(false);
   });
 
-  it('reopens the drawer at its first snap point after the Model tab collapses it', () => {
+  it('reopens the drawer at half height, not the peek, after the Model tab collapses it', () => {
     state.activeTab = 'parameters';
     const { result, rerender } = renderHook(() => useChatInterfaceState());
 
@@ -126,10 +127,10 @@ describe('useChatInterfaceState mobile drawer', () => {
     rerender();
 
     expect(result.current.drawerOpen).toBe(true);
-    expect(result.current.activeSnapPoint).toBe(result.current.snapPoints[0]);
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
   });
 
-  it('reopens the drawer at its first snap point after an external action returns to the Viewer', () => {
+  it('reopens the drawer at half height, not the peek, after an external action returns to the Viewer', () => {
     state.activeTab = 'parameters';
     const { result, rerender } = renderHook(() => useChatInterfaceState());
 
@@ -142,10 +143,10 @@ describe('useChatInterfaceState mobile drawer', () => {
     rerender();
 
     expect(result.current.drawerOpen).toBe(true);
-    expect(result.current.activeSnapPoint).toBe(result.current.snapPoints[0]);
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
   });
 
-  it('reopens the drawer at its first snap point after it is dismissed', () => {
+  it('reopens the drawer at half height, not the peek, after it is dismissed', () => {
     state.activeTab = 'parameters';
     const { result, rerender } = renderHook(() => useChatInterfaceState());
 
@@ -157,10 +158,11 @@ describe('useChatInterfaceState mobile drawer', () => {
     });
     rerender();
 
-    expect(result.current.activeSnapPoint).toBe(result.current.snapPoints[0]);
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
   });
 
   it('retains drawer snap-point and editor readiness state', () => {
+    state.activeTab = 'parameters';
     const { result, rerender } = renderHook(() => useChatInterfaceState());
     expect(result.current.isEditorReady).toBe(true);
     expect(result.current.snapPoints.length).toBeGreaterThan(1);
@@ -173,5 +175,67 @@ describe('useChatInterfaceState mobile drawer', () => {
     state.ready = false;
     rerender();
     expect(result.current.isEditorReady).toBe(false);
+  });
+
+  it('offers peek, half and full detents, in that order', () => {
+    const { result } = renderHook(() => useChatInterfaceState());
+    expect(result.current.snapPoints).toEqual([mobileDrawerPeekSnapPoint, mobileDrawerOpenSnapPoint, 1]);
+  });
+
+  it('opens a file at full height and keeps the chosen height when switching between surfaces', () => {
+    state.activeTab = 'chat';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    state.activeTab = 'editor';
+    rerender();
+    expect(result.current.activeSnapPoint).toBe(1);
+
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    state.activeTab = 'parameters';
+    rerender();
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+  });
+
+  it('falls back to the model when the persisted surface is unknown to this build', () => {
+    state.activeTab = 'retired-surface';
+    const { result } = renderHook(() => useChatInterfaceState());
+    expect(result.current.activeTab).toBe('viewer');
+    expect(result.current.drawerOpen).toBe(false);
+  });
+
+  it('drops the snap reset vaul sends after a close, so a quick reopen keeps half height', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleTabChange('viewer');
+    });
+    rerender();
+    // Closed: vaul's late reset has nothing to move.
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+    now.mockReturnValue(1300);
+    // Reopened within vaul's transition: its reset to the first detent still arrives, and is ignored.
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+
+    // Afterwards the person's own move to the peek is honoured.
+    now.mockReturnValue(5000);
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
   });
 });

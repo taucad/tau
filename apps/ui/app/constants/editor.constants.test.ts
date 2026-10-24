@@ -15,6 +15,14 @@ describe('editor device defaults', () => {
       'details',
       'share',
       'revisions',
+      'model-tree',
+      'kinematics',
+      'print',
+      'browser',
+      'agents',
+      'jobs',
+      'kernel',
+      'console',
     ]);
     expect(defaultPanelState.desktopLayout).toMatchObject({
       chatOpen: true,

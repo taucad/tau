@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import type { PaneviewApi } from 'dockview-react';
-import type { chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import { useProject } from '#hooks/use-project.js';
-import { mobileDrawerSnapPoints } from '#constants/editor.constants.js';
+import { mobileDrawerOpenSnapPoint, mobileDrawerSnapPoints, mobilePanelIds } from '#constants/editor.constants.js';
+import type { MobilePanelId } from '#constants/editor.constants.js';
 import type { PaneviewPanelState, PanelState } from '#types/editor.types.js';
 
 export type ChatInterfaceState = {
@@ -11,8 +11,8 @@ export type ChatInterfaceState = {
   /** Whether the editor state has been loaded from storage (ready for rendering) */
   isEditorReady: boolean;
 
-  activeTab: (typeof chatTabs)[number]['id'];
-  setActiveTab: (value: (typeof chatTabs)[number]['id']) => void;
+  activeTab: MobilePanelId;
+  setActiveTab: (value: MobilePanelId) => void;
   // Mobile drawer state
   drawerOpen: boolean;
   handleDrawerChange: (value: boolean) => void;
@@ -24,6 +24,9 @@ export type ChatInterfaceState = {
   // Actions
   handleTabChange: (value: string) => void;
 };
+
+/** Vaul's close transition, after which it resets to its first snap point (with margin). Milliseconds. */
+const vaulCloseResetMilliseconds = 700;
 
 /**
  * Custom hook to manage chat interface state
@@ -39,10 +42,13 @@ export function useChatInterfaceState(): ChatInterfaceState {
 
   const mobileActiveTab = useSelector(editorRef, (state) => state.context.panelState.mobileActiveTab);
 
-  const activeTab = mobileActiveTab;
+  // A surface persisted by a build that no longer has it falls back to the model rather than an empty sheet.
+  const activeTab: MobilePanelId = (mobilePanelIds as readonly string[]).includes(mobileActiveTab)
+    ? mobileActiveTab
+    : 'viewer';
 
   const setActiveTab = useCallback(
-    (value: (typeof chatTabs)[number]['id']) => {
+    (value: MobilePanelId) => {
       editorRef.send({ type: 'setPanelState', panelState: { mobileActiveTab: value } });
     },
     [editorRef],
@@ -54,15 +60,19 @@ export function useChatInterfaceState(): ChatInterfaceState {
    * it because selecting the already active tab is not a change. */
   const drawerOpen = activeTab !== 'viewer';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
-  const [snapPoint, setSnapPoint] = useState<number | string | null>(mobileDrawerSnapPoints[0]!);
-  const [wasDrawerOpen, setWasDrawerOpen] = useState(drawerOpen);
+  const [snapPoint, setSnapPoint] = useState<number | string | null>(
+    activeTab === 'editor' ? 1 : mobileDrawerOpenSnapPoint,
+  );
+  const [previousTab, setPreviousTab] = useState(activeTab);
 
-  // Every collapse, whichever action caused it, returns the drawer to its first snap point, so the next
-  // panel never reopens over the whole viewer.
-  if (wasDrawerOpen !== drawerOpen) {
-    setWasDrawerOpen(drawerOpen);
-    if (!drawerOpen) {
-      setSnapPoint(mobileDrawerSnapPoints[0]!);
+  /* Every collapse, whichever action caused it, returns the drawer to half height, so the next panel never reopens
+   * over the whole viewer nor at a peek too short for its content. A file opens at full height (WB-07). */
+  if (previousTab !== activeTab) {
+    setPreviousTab(activeTab);
+    if (activeTab === 'editor') {
+      setSnapPoint(1);
+    } else if (previousTab === 'viewer' || activeTab === 'viewer') {
+      setSnapPoint(mobileDrawerOpenSnapPoint);
     }
   }
 
@@ -77,13 +87,29 @@ export function useChatInterfaceState(): ChatInterfaceState {
 
   const handleTabChange = useCallback(
     (value: string): void => {
-      setActiveTab(value as (typeof chatTabs)[number]['id']);
+      setActiveTab(value as MobilePanelId);
     },
     [setActiveTab],
   );
 
+  /* Vaul returns to its first snap point 500ms after every close. The hook owns the height a surface reopens at, so
+   * that late reset is dropped: while closed, and just after a close should the sheet reopen within it. */
+  const isOpenRef = useRef(drawerOpen);
+  const closedAtRef = useRef(Number.NEGATIVE_INFINITY);
+  useEffect(() => {
+    if (isOpenRef.current && !drawerOpen) {
+      closedAtRef.current = performance.now();
+    }
+    isOpenRef.current = drawerOpen;
+  }, [drawerOpen]);
+
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
   const handleSnapChange = useCallback((value: number | string | null): void => {
+    const isVaulCloseReset =
+      value === mobileDrawerSnapPoints[0] && performance.now() - closedAtRef.current < vaulCloseResetMilliseconds;
+    if (!isOpenRef.current || isVaulCloseReset) {
+      return;
+    }
     setSnapPoint(value);
   }, []);
 

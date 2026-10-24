@@ -199,12 +199,20 @@ function FloatingPanelTriggerButton({
 
 type FloatingPanelCloseProps = {
   readonly icon: LucideIcon | React.ReactNode;
+  /** The accessible name; pass the words the tooltip shows, so name and tooltip agree (I6). */
+  readonly label?: string;
   readonly className?: string;
   readonly children?: React.ReactNode;
   readonly tooltipContent: (isOpen: boolean) => React.ReactNode;
 };
 
-function FloatingPanelClose({ icon, className, children, tooltipContent }: FloatingPanelCloseProps): React.JSX.Element {
+function FloatingPanelClose({
+  icon,
+  label = 'Close panel',
+  className,
+  children,
+  tooltipContent,
+}: FloatingPanelCloseProps): React.JSX.Element {
   const { isOpen, close } = useFloatingPanel();
   const isMobile = useIsMobile();
   const isInsideDrawer = useIsInsideDrawer();
@@ -227,7 +235,7 @@ function FloatingPanelClose({ icon, className, children, tooltipContent }: Float
         'max-md:border max-md:bg-background/70 max-md:backdrop-blur-lg',
         className,
       )}
-      aria-label='Close panel'
+      aria-label={label}
       onClick={close}
     >
       {renderIcon()}

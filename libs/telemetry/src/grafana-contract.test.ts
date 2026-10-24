@@ -846,15 +846,22 @@ const selectorLabelProblems = (file: string, metric: string, body: string): stri
   ];
 };
 
-/** `by (…)` labels exist on every runtime series inside the aggregated expression. */
-const groupingProblems = (file: string, unquoted: string): string[] =>
-  [...unquoted.matchAll(/\bby\s*\((?<labels>[^)]*)\)\s*\(/gu)].flatMap((match) =>
+/**
+ * `by (…)` labels exist on every runtime series inside the aggregated expression. Runtime queries
+ * write `by (…)` before the expression, because only that form names the series the check reads.
+ */
+const groupingProblems = (file: string, unquoted: string): string[] => [
+  ...(runtimeSeries(unquoted).length > 0 && /\)\s*by\s*\(/u.test(unquoted)
+    ? [`${file}: write by (…) before the aggregated expression so its labels are checked`]
+    : []),
+  ...[...unquoted.matchAll(/\bby\s*\((?<labels>[^)]*)\)\s*\(/gu)].flatMap((match) =>
     runtimeSeries(groupAt(unquoted, match.index + match[0].length - 1)).flatMap((series) =>
       labelList(match.groups?.['labels'] ?? '')
         .filter((label) => !(labelsOf(series) ?? []).includes(label))
         .map((label) => `${file}: by (${label}) over ${series}, which has no label ${label}`),
     ),
-  );
+  ),
+];
 
 /** `on (…)` and `ignoring (…)` labels exist on at least one runtime series of the query. */
 const matchingProblems = (file: string, unquoted: string, query: string): string[] => {
@@ -871,7 +878,10 @@ const matchingProblems = (file: string, unquoted: string, query: string): string
 /** `label_values(series{…}, label)` names a label the runtime series has. */
 const labelValuesProblems = (file: string, query: string): string[] =>
   [...query.matchAll(/label_values\((?<series>tau_\w+)\{[^}]*\},\s*(?<label>\w+)\)/gu)]
-    .map(({ groups }) => ({ series: groups?.['series'] ?? '', label: groups?.['label'] ?? '' }))
+    .map(({ groups }) => ({
+      series: groups?.['series'] ?? '',
+      label: groups?.['label'] ?? '',
+    }))
     .filter(({ series, label }) => isRuntimeSeries(series) && !(labelsOf(series) ?? []).includes(label))
     .map(({ series, label }) => `${file}: label_values over ${series} names ${label}, which it lacks`);
 
@@ -1040,6 +1050,18 @@ describe('Runtime observability dashboards and rules (T13, T32)', () => {
       'seeded.json: by (error_type) over tau_runtime_operations_total, which has no label error_type',
       'seeded.json: on/ignoring (tau_runtime_set) names a label no runtime series in the query has',
     ]);
+  });
+
+  it('should reject a postfix by clause on a runtime query', () => {
+    expect(
+      runtimeLabelProblems([
+        {
+          file: 'seeded.json',
+          kind: 'rule',
+          query: 'sum(rate(tau_runtime_operations_total{app=~"$app"}[5m])) by (error_type)',
+        },
+      ]),
+    ).toEqual(['seeded.json: write by (…) before the aggregated expression so its labels are checked']);
   });
 
   it('should reject the seeded runtime tree: an unconditioned absence rule, unbound selectors and an all-population default', () => {

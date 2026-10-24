@@ -149,7 +149,9 @@
         {
           "expr": "sum by (kernel_id) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render|export\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{kernel_id}}"
+          "legendFormat": "{{kernel_id}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -298,7 +300,9 @@
         {
           "expr": "histogram_quantile(0.95, sum by (le, kernel_id) (rate(tau_runtime_kernel_heap_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_failed=\"true\",tau_runtime_population=~\"$population\"}[$__range])))",
           "refId": "A",
-          "legendFormat": "{{kernel_id}}"
+          "legendFormat": "{{kernel_id}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -324,7 +328,9 @@
         {
           "expr": "histogram_quantile(0.95, sum by (le, kernel_id, tau_runtime_device) (rate(tau_runtime_kernel_heap_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range])))",
           "refId": "A",
-          "legendFormat": "{{kernel_id}} {{tau_runtime_device}}"
+          "legendFormat": "{{kernel_id}} {{tau_runtime_device}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -396,7 +402,9 @@
           "expr": "sum by (le) (increase(tau_runtime_parameters_declared_bucket{app=~\"$app\",service_name=~\"$service\",kernel_id=~\"$kernel\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
           "legendFormat": "{{le}}",
-          "format": "heatmap"
+          "format": "heatmap",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -422,7 +430,9 @@
         {
           "expr": "1 - sum by (kernel_id) (increase(tau_runtime_parameters_declared_bucket{app=~\"$app\",service_name=~\"$service\",le=\"0\",tau_runtime_population=~\"$population\"}[$__range])) / sum by (kernel_id) (increase(tau_runtime_parameters_declared_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{kernel_id}}"
+          "legendFormat": "{{kernel_id}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -447,7 +457,9 @@
       "targets": [
         {
           "expr": "sum(increase(tau_runtime_parameter_evaluations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_parameter_class=~\"some|most|all\",tau_runtime_population=~\"$population\"}[$__range])) / sum(increase(tau_runtime_parameter_evaluations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_parameter_class!=\"none\",tau_runtime_population=~\"$population\"}[$__range]))",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -510,7 +522,9 @@
         {
           "expr": "sum by (kernel_id, tau_runtime_parameter_feature) (increase(tau_runtime_parameter_features_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range])) / ignoring(tau_runtime_parameter_feature) group_left sum by (kernel_id) (increase(tau_runtime_parameters_declared_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{kernel_id}} {{tau_runtime_parameter_feature}}"
+          "legendFormat": "{{kernel_id}} {{tau_runtime_parameter_feature}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -782,7 +796,9 @@
       "targets": [
         {
           "expr": "sum(increase(tau_runtime_operation_duration_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_cold=\"true\"}[$__range])) / sum(increase(tau_runtime_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -880,7 +896,9 @@
       "targets": [
         {
           "expr": "sum(increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=\"signed-out\"}[$__range])) / sum(increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\".*\"}[$__range]))",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -906,7 +924,9 @@
         {
           "expr": "sum by (tau_runtime_route) (increase(tau_runtime_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_route}}"
+          "legendFormat": "{{tau_runtime_route}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -932,7 +952,9 @@
         {
           "expr": "sum by (tau_runtime_caller) (increase(tau_runtime_operations_by_caller_total{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_caller}}"
+          "legendFormat": "{{tau_runtime_caller}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -963,7 +985,9 @@
           "expr": "sum by (platform) (count_over_time({service_name=~\"$service\"} | json | event=\"runtime.operation\" [$__range]))",
           "legendFormat": "{{platform}}",
           "refId": "A",
-          "queryType": "instant"
+          "queryType": "instant",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -993,7 +1017,9 @@
           "expr": "sum by (os) (count_over_time({service_name=~\"$service\"} | json | event=\"runtime.operation\" [$__range]))",
           "legendFormat": "{{os}}",
           "refId": "A",
-          "queryType": "instant"
+          "queryType": "instant",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1018,7 +1044,9 @@
         {
           "expr": "sum by (tau_runtime_route) (increase(tau_runtime_operations_by_host_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_route}}"
+          "legendFormat": "{{tau_runtime_route}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1044,7 +1072,9 @@
         {
           "expr": "sum by (tau_runtime_platform) (increase(tau_runtime_operations_by_host_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_platform}}"
+          "legendFormat": "{{tau_runtime_platform}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1070,7 +1100,9 @@
         {
           "expr": "sum by (tau_runtime_os) (increase(tau_runtime_operations_by_host_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_os}}"
+          "legendFormat": "{{tau_runtime_os}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1502,7 +1534,9 @@
         {
           "expr": "1000 * sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_viewer_event=\"context-lost\"}[$__range])) / sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_viewer_event=\"first-frame\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_backend}}"
+          "legendFormat": "{{tau_runtime_backend}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1587,7 +1621,9 @@
       "targets": [
         {
           "expr": "sum(increase(tau_runtime_verify_tests_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"passed\"}[$__range])) / sum(increase(tau_runtime_verify_tests_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"selected\"}[$__range]))",
-          "refId": "A"
+          "refId": "A",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {
@@ -1924,7 +1960,9 @@
         {
           "expr": "sum by (tau_runtime_caller) (increase(tau_runtime_machine_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_caller}}"
+          "legendFormat": "{{tau_runtime_caller}}",
+          "instant": true,
+          "range": false
         }
       ],
       "fieldConfig": {

@@ -1242,7 +1242,10 @@ export const replicadKernel = defineKernel({
     return {
       ...serialized,
       shapes: serialized.shapes.map((entry) => ({
-        shape: readBinaryBrep(context.replicadLibrary, entry.brep),
+        shape:
+          'drawing' in entry
+            ? (context.replicadLibrary.deserializeDrawing(entry.drawing) as unknown as AnyShape)
+            : readBinaryBrep(context.replicadLibrary, entry.brep),
         ...entry.metadata,
       })),
     };
@@ -1342,7 +1345,10 @@ const serializeReplicadHandle = (nativeHandle: NativeHandle, library: ReplicadLi
   textures: nativeHandle.textures,
   samplers: nativeHandle.samplers,
   shapes: nativeHandle.shapes.map((entry) => ({
-    brep: writeBinaryBrep(library, entry.shape),
+    // A drawing has no native BRep; it keeps replicad's own serialisation.
+    ...(isDrawingShape(entry.shape)
+      ? { drawing: entry.shape.serialize() }
+      : { brep: writeBinaryBrep(library, entry.shape) }),
     metadata: {
       name: entry.name,
       color: entry.color,

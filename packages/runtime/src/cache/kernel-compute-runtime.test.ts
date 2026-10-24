@@ -896,6 +896,31 @@ describe('deferred whole-action publication (D1)', () => {
     await expect(evaluate({ value: 3 })).resolves.toMatchObject({ source: 'cache' });
   });
 
+  it('should run again when the worker went idle while an interrupted task was still unwinding', async () => {
+    let idle = true;
+    const gate = Promise.withResolvers<void>();
+    const { host, settled, encoded, evaluate } = createDeferredHost({
+      idle: () => idle,
+      encodeGate: async () => gate.promise,
+    });
+    await evaluate({ value: 4 });
+    host.permitPublication();
+    await vi.waitFor(() => {
+      expect(encoded).toHaveLength(1);
+    });
+    // An operation interrupts the task and finishes before the task observes the interrupt; its
+    // idle notification arrives while the task is still running.
+    idle = false;
+    host.interruptPublication();
+    idle = true;
+    host.notifyIdle();
+    gate.resolve();
+
+    await vi.waitFor(() => {
+      expect(settled.map(({ status }) => status)).toEqual(['stored']);
+    });
+  });
+
   it('should hold at most four deferred publications, dropping the oldest', async () => {
     const { host, settled, evaluate } = createDeferredHost({ idle: () => false });
     for (const value of [10, 11, 12, 13, 14]) {

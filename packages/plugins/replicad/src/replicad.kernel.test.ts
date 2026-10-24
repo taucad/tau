@@ -4664,8 +4664,9 @@ describe('serializeNativeHandle', () => {
     );
 
     expect(serialized).toHaveLength(1);
-    expect(serialized[0]!.brep).toBeInstanceOf(Uint8Array);
-    expect(serialized[0]!.brep.byteLength).toBeGreaterThan(0);
+    const [first] = serialized;
+    expect(first && 'brep' in first ? first.brep : undefined).toBeInstanceOf(Uint8Array);
+    expect(first && 'brep' in first ? first.brep.byteLength : 0).toBeGreaterThan(0);
     expect(serialized[0]!.metadata.name).toBe('TestBox');
     expect(serialized[0]!.metadata.color).toBe('#ff0000');
     expect(serialized[0]!.metadata.metalness).toBe(0.8);
@@ -4729,7 +4730,11 @@ describe('serializeNativeHandle', () => {
     );
     const [entry] = restored.shapes;
     try {
-      const { brep } = snapshot.shapes[0]!;
+      const [written] = snapshot.shapes;
+      if (!written || !('brep' in written)) {
+        throw new TypeError('Expected a binary BRep snapshot entry.');
+      }
+      const { brep } = written;
       expect(brep).toBeInstanceOf(Uint8Array);
       expect(brep.byteLength).toBeLessThan(textBytes / 2);
       expect(entry!.shape.faces).toHaveLength(faces);
@@ -4757,6 +4762,23 @@ describe('serializeNativeHandle', () => {
       shape.delete();
     }
   }, 30_000);
+
+  it('should snapshot a drawing as its own serialisation and restore it as a drawing', async () => {
+    const replicad = await import('replicad');
+    const drawing = replicad.drawCircle(5);
+    const snapshot = await serializeHandle([
+      { shape: drawing as unknown as NativeHandleEntry['shape'], name: 'Sketch' },
+    ]);
+    const restored = replicadDefinition.deserializeHandle!(
+      { serialized: structuredClone(snapshot) },
+      createMockKernelRuntime(),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+    );
+
+    expect(snapshot.shapes[0]).toMatchObject({ drawing: drawing.serialize() });
+    expect(restored.shapes[0]!.shape).toBeInstanceOf(replicad.Drawing);
+    expect(restored.shapes[0]!.name).toBe('Sketch');
+  });
 
   it('should refuse a snapshot in another format instead of restoring a wrong shape', async () => {
     const replicad = await import('replicad');

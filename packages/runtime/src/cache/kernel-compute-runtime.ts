@@ -658,6 +658,10 @@ export const createComputeCapabilityHost = (input: {
           // Each task settles its own failure; only a throwing settlement observer can land here.
         } finally {
           pumpPromise = undefined;
+          // An idle notification that arrived while this pump ran was skipped; honour it now.
+          if (deferred.some((queued) => queued.permitted) && (input.isIdle?.() ?? true)) {
+            pump();
+          }
         }
       })();
     }, 0);

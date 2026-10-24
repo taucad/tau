@@ -31,7 +31,10 @@ failure rate on the Tau endpoint) — part of the launch-checklist click-ops.
 
 1. Append a new object to the `rules` array of the appropriate file.
 2. Pick a stable, kebab-case `uid`; provisioning retains it for in-place updates.
-3. Use `severity: critical` for P0, `severity: warning` for P1.
+3. Use `severity: critical` for P0, `severity: warning` for P1, or `severity: info` for a trigger
+   (email only; it also needs `kind: trigger`, `trigger` and `package`). Set `annotations.runbook_url`
+   to a `docs/handbooks/cloud/**.md` page, and keep the `uid` unique within its first 20 characters
+   (see `../README.md`, binding contract version 2).
 4. Update the local YAML copy and run `pnpm nx run scripts:validate-grafana`.
 5. Sync locally; promote the pinned definition commit in Tau Cloud for hosted changes.
 

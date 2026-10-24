@@ -91,15 +91,15 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — sixty today', () => {
+  it('is every non-private type:package project, sorted — fifty-nine today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(60);
+    expect(names).toHaveLength(59);
     expect(names).toEqual([...names].sort());
     // Both ends of the train.
-    for (const name of ['archive-core', 'runtime', 'runtime-testing', 'geospec-engine']) {
+    for (const name of ['archive-core', 'runtime', 'runtime-testing', 'geospec']) {
       expect(names).toContain(name);
     }
 
@@ -302,8 +302,8 @@ describe('publishWaves()', () => {
         }
       }
     }
-    // The current publishable graph has ten dependency layers; removing the native kernel roster took the twelfth,
-    // and dropping host's dependency on geospec-engine (#1027) took the eleventh.
+    // The current publishable graph has ten dependency layers; removing the native kernel roster took the
+    // twelfth and removing geospec-engine from Tau took the eleventh.
     expect(waves).toHaveLength(10);
     expect(publishWaves(fixture)).toEqual([['base'], ['leaf']]);
   });

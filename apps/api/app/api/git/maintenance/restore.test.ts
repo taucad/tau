@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
@@ -19,7 +20,15 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
-import type { RepositoryLocator } from '#api/git/store/port.js';
+import {
+  incompressibleClient,
+  largePackMebibytes,
+  measureGrowth,
+  mebibytes,
+  recordMeasurement,
+  streamedGrowthBoundMebibytes,
+} from '#api/git/store/pack-memory.fixture.js';
+import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
 
@@ -299,6 +308,67 @@ describe('repository restore from a second bucket', () => {
     );
     expect(await readManifest(primary, locator)).toBeUndefined();
   }, 120_000);
+
+  it('should refuse a source that answers the upload read with bytes other than the ones it verified', async () => {
+    const locator = newRepository();
+    await pushAndCommit(source, locator, newClient().directory);
+    const sourceManifest = await readManifest(source, locator);
+    const packKey = sourceManifest?.packs[0]?.key ?? '';
+    let reads = 0;
+    // The first read is the verified one; the second, which is uploaded, has one byte flipped.
+    const shifting: RepositoryStore = {
+      capabilities: source.capabilities,
+      readManifest: async (target) => source.readManifest(target),
+      commitManifest: async (target, next, expected) => source.commitManifest(target, next, expected),
+      // oxlint-disable-next-line max-params -- the port's own signature
+      putObject: async (target, key, body, options) => source.putObject(target, key, body, options),
+      getObject: async (target, key, range) => {
+        const stream = await source.getObject(target, key, range);
+        if (key !== packKey) {
+          return stream;
+        }
+        reads += 1;
+        if (reads === 1) {
+          return stream;
+        }
+        const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+        for await (const chunk of stream) {
+          chunks.push(chunk as Uint8Array<ArrayBuffer>);
+        }
+        const bytes = new Uint8Array(Buffer.concat(chunks));
+        bytes[0] = ((bytes[0] ?? 0) + 1) % 256;
+        return Readable.from([bytes]);
+      },
+      listObjects: (target, prefix) => source.listObjects(target, prefix),
+      deleteObjects: async (target, keys) => source.deleteObjects(target, keys),
+    };
+
+    await expect(
+      restoreRepository({ database, source: shifting, primary, locator, operator: 'rifont' }),
+    ).rejects.toThrow();
+
+    expect(reads).toBe(2);
+    expect(await readManifest(primary, locator)).toBeUndefined();
+    expect(await packKeys(primary, locator)).toStrictEqual([]);
+  }, 120_000);
+
+  it(`should restore a ${String(largePackMebibytes)} MiB pack with retained memory growth under ${String(streamedGrowthBoundMebibytes)} MiB`, async () => {
+    const locator = newRepository();
+    await pushAndCommit(source, locator, incompressibleClient(scratch('large-client'), largePackMebibytes));
+    const sourceManifest = await readManifest(source, locator);
+
+    const { result, growth } = await measureGrowth(async () =>
+      restoreRepository({ database, source, primary, locator, operator: 'rifont' }),
+    );
+    recordMeasurement(
+      `da4 restore pack=${String(largePackMebibytes)}MiB retained heap+arrayBuffers peak growth=${mebibytes(growth.heapAndBuffers)}MiB rss peak growth=${mebibytes(growth.rss)}MiB`,
+    );
+
+    expect(result.manifest.refs).toStrictEqual(sourceManifest?.refs);
+    expect(growth.heapAndBuffers).toBeLessThan(streamedGrowthBoundMebibytes * 1024 * 1024);
+    const restored = await packKeys(primary, locator);
+    expect(restored.filter((key) => key.endsWith('.pack'))).toHaveLength(1);
+  }, 600_000);
 
   it('should refuse to restore over a tombstoned primary', async () => {
     const locator = newRepository();

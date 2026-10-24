@@ -620,14 +620,14 @@ describe('internalImportsIssues', () => {
       internalImportsIssues(
         [
           {
-            name: '@taucad/geospec-engine',
+            name: '@taucad/example',
             imports: { '#*.js': { browser: './src/browser/*.ts', default: './src/*.ts' }, '#*': './src/*' },
           },
         ],
         {},
       ),
     ).toEqual([
-      '@taucad/geospec-engine: package.json imports retargets "#*.js" to {"browser":"./src/browser/*.ts","default":"./src/*.ts"} (expected "./src/*.ts")',
+      '@taucad/example: package.json imports retargets "#*.js" to {"browser":"./src/browser/*.ts","default":"./src/*.ts"} (expected "./src/*.ts")',
     ]);
   });
 
@@ -637,7 +637,7 @@ describe('internalImportsIssues', () => {
       internalImportsIssues(
         [
           {
-            name: '@taucad/geospec-engine',
+            name: '@taucad/example',
             imports: {
               '#cache/node-evidence-store.js': {
                 browser: './src/cache/browser-evidence-store.ts',
@@ -649,7 +649,7 @@ describe('internalImportsIssues', () => {
           { name: '@taucad/image', imports: canonical },
         ],
         {
-          '@taucad/geospec-engine': { '#cache/node-evidence-store.js': 'browser/default platform swap' },
+          '@taucad/example': { '#cache/node-evidence-store.js': 'browser/default platform swap' },
           '@taucad/image': { '#gone.js': 'an exception that outlived its key' },
         },
       ),

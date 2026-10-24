@@ -39,7 +39,7 @@ const mebibytes = (bytes: number): string => `${String(bytes / 1024 / 1024)} MiB
 // The geospec-authoring skill tells agents these limits; they must be the ones the installed engine enforces.
 describe('GeoSpec doctrine ceilings', () => {
   it('should state the admission limits the engine reports', async () => {
-    const doctrine = await readFile(resolve(import.meta.dirname, '../../geospec/agent/doctrine.md'), 'utf8');
+    const doctrine = await readFile(resolve(import.meta.dirname, '../agent/doctrine.md'), 'utf8');
     const limits = engineLimits();
 
     expect(limits.maxResourceBytes).toBe(limits.maxSubjectBytes);

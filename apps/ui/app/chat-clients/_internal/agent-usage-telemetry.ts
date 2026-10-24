@@ -210,14 +210,21 @@ const tauPathOf = (input: unknown): string | undefined => {
   return typeof path === 'string' ? path : Object.values(input).find((value) => typeof value === 'string');
 };
 
+/** The Tau tool a call's name means. Tau's MCP server never offers `shell` (E21), so an external agent's `shell` is its own. */
+const tauSemanticsOf = (toolName: string | undefined, external: boolean): TauToolName | undefined =>
+  toolName !== undefined && knownTauTools.has(toolName) && !(external && toolName === 'shell')
+    ? (toolName as TauToolName)
+    : undefined;
+
 const classifyCall = (
   chunk: Readonly<Record<string, unknown>>,
   ordinal: number,
 ): Omit<CallFacts, 'ordinal'> & { ordinal: number } => {
   const kind = toolKindOf(chunk);
   const toolName = typeof chunk['toolName'] === 'string' ? chunk['toolName'] : undefined;
-  const semantics = toolName !== undefined && knownTauTools.has(toolName) ? (toolName as TauToolName) : undefined;
-  const own = semantics !== undefined && tauMetadataOf(chunk)?.['origin'] !== 'external';
+  const external = tauMetadataOf(chunk)?.['origin'] === 'external';
+  const semantics = tauSemanticsOf(toolName, external);
+  const own = semantics !== undefined && !external;
   const { input } = chunk;
   const facts: CallFacts = { ordinal, kind, reference: false, write: false };
   if (own) {

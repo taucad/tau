@@ -9,7 +9,9 @@ import { inProcessTransport } from '#transport/in-process-transport.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
-const heapKernel = (heap: { bytes: number | undefined }) =>
+type Heap = { bytes: number | undefined; observedBytes?: number };
+
+const heapKernel = (heap: Heap) =>
   defineKernel({
     id: 'heap-report',
     name: 'Heap report',
@@ -44,6 +46,7 @@ const heapKernel = (heap: { bytes: number | undefined }) =>
       return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
     },
     heapBytes: (context) => context.heap.bytes,
+    observedHeapBytes: (context) => context.heap.observedBytes,
   })();
 
 const clients: Array<ReturnType<typeof createRuntimeClient>> = [];
@@ -52,7 +55,7 @@ afterEach(async () => {
   await Promise.all(clients.splice(0).map(async (client) => client.shutdown()));
 });
 
-const renderOnce = async (heap: { bytes: number | undefined }) => {
+const renderOnce = async (heap: Heap) => {
   const runtime: AnyRuntimeDefinition = defineRuntime({ kernels: [heapKernel(heap)] });
   const client = createRuntimeClient({
     transport: inProcessTransport({
@@ -87,5 +90,16 @@ describe('kernel heap report', () => {
 
     expect(rendering.success).toBe(true);
     expect(rendering).not.toHaveProperty('heapBytes');
+  });
+
+  // T26 (AR-W15-01): the observation hook must never reach the rendering, because `rendering.heapBytes` is the
+  // D-RT-03 recycling input; only the recycling hook may set it.
+  it('never reports the observation hook on a rendering', async () => {
+    const observedOnly = await renderOnce({ bytes: undefined, observedBytes: 900 * 2 ** 20 });
+    const both = await renderOnce({ bytes: 600 * 2 ** 20, observedBytes: 900 * 2 ** 20 });
+
+    expect(observedOnly.success).toBe(true);
+    expect(observedOnly).not.toHaveProperty('heapBytes');
+    expect(both).toMatchObject({ heapBytes: 600 * 2 ** 20 });
   });
 });

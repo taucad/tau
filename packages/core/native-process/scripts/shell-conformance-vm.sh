@@ -105,5 +105,6 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 \
   "GITHUB_SHA=$GITHUB_SHA GITHUB_RUN_ID=$GITHUB_RUN_ID GITHUB_REPOSITORY=$GITHUB_REPOSITORY GITHUB_SERVER_URL=https://github.com TAU_SHELL_CONFORMANCE_ROW=$row bash -s -- $TAU_VM_DISTRO" \
   < "$REPO_ROOT/packages/core/native-process/scripts/shell-conformance-guest.sh" | tee "$output/guest.txt" || status=$?
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-conformance-receipt.json' > "$output/receipt.json" || true
+ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-service-conformance-receipt.json' > "$output/service-receipt.json" || true
 printf '%s\n' "$status" > "$output/exit-code.txt"
 exit "$status"

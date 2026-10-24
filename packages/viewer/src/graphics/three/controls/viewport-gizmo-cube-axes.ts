@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { SpriteNodeMaterial } from 'three/webgpu';
+import { vec3 } from 'three/tsl';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -135,7 +137,9 @@ export const createViewportGizmoCubeAxes = ({
     // keeps distance * tan(fov/2) constant, the labels maintain a fixed visual
     // size regardless of FOV. The scale values are multiplied by
     // GIZMO_BASE_DISTANCE to preserve the same appearance at the default FOV.
-    const spriteMaterial = new THREE.SpriteMaterial({
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Constructor alias keeps Three's material classes.
+    const SpriteMaterial = renderingBackend === 'webgpu' ? SpriteNodeMaterial : THREE.SpriteMaterial;
+    const spriteMaterial = new SpriteMaterial({
       map: texture,
       sizeAttenuation: true,
       depthTest: true,
@@ -145,7 +149,14 @@ export const createViewportGizmoCubeAxes = ({
     });
 
     // Set render order to ensure it renders on top
-    const sprite = new THREE.Sprite(spriteMaterial);
+    if (spriteMaterial instanceof SpriteNodeMaterial) {
+      // Match the moving cube/picker surfaces: a changed sort order must not
+      // suppress the label's current transform in Three r184.
+      // Sprite positionNode is the anchor, not the quad vertices. Zero preserves billboarding.
+      spriteMaterial.positionNode = vec3(0);
+    }
+    // Three's Sprite declaration accepts only its classic material; node Sprite is its renderer counterpart.
+    const sprite = new THREE.Sprite(spriteMaterial as THREE.SpriteMaterial);
     sprite.renderOrder = 3;
     sprite.position.copy(endPoint);
     sprite.scale.set(0.07 * gizmoBaseDistance, 0.07 * gizmoBaseDistance, 1);

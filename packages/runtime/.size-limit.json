@@ -1,8 +1,8 @@
 [
   {
-    "name": "total (ESM JS) — measured 233.75 kB brotli on 2026-10-24; 234 kB adds compute read-cache sizing by binding and device (T5: the Memory publication staging and the root refetch, ~0.7 kB) to the 233 kB budget for the Tau project config, memory bounds, Machines and the Node preparation host; 233.84 kB on 2026-10-24 with fromComputeStoreChannel",
+    "name": "total (ESM JS) — measured 237.41 kB brotli on 2026-10-24; 238 kB adds per-operation root spans, the bounded span path, resource-limit details and the Node-only telemetry file sink with its OTLP encoder (~3.7 kB, 1.5 kB of it the sink and encoder on @taucad/runtime/node) to the 234 kB budget for compute read-cache sizing, the Tau project config, memory bounds, Machines and the Node preparation host; 237.53 kB on 2026-10-24 with fromComputeStoreChannel",
     "path": ["dist/**/*.mjs", "!dist/**/wasm/**", "!dist/**/fonts/**"],
-    "limit": "234 kB"
+    "limit": "238 kB"
   },
   {
     "name": "@taucad/runtime",

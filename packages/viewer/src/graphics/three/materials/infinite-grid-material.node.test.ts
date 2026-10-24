@@ -2,12 +2,24 @@
 import { describe, expect, it } from 'vitest';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NormalBlending } from 'three';
 import { infiniteGridNodeMaterial } from '#graphics/three/materials/infinite-grid-material.node.js';
 import { serialiseStrippedTslGraph } from '#graphics/three/utils/tsl-node-graph-snapshot.js';
 
 const currentDirectory = fileURLToPath(new URL('.', import.meta.url));
 
 describe('infiniteGridNodeMaterial TSL snapshots', () => {
+  it('should blend into retained color without a viewport-copy output graph', () => {
+    const material = infiniteGridNodeMaterial();
+    try {
+      expect(material.outputNode).toBeNull();
+      expect(material.blending).toBe(NormalBlending);
+      expect(material.depthTest).toBe(true);
+      expect(material.depthWrite).toBe(false);
+    } finally {
+      material.dispose();
+    }
+  });
   it('matches stable stripped material JSON snapshot', async () => {
     const material = infiniteGridNodeMaterial({
       smallSize: 2,

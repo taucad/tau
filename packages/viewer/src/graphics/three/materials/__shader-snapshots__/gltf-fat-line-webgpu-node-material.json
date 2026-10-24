@@ -1,17 +1,18 @@
 {
   "blendColor": 0,
-  "blending": 0,
   "color": 0,
   "dashSize": 3,
   "depthWrite": false,
+  "forceSinglePass": true,
   "gapSize": 1,
   "inputNodes": {},
-  "linewidth": 2,
   "metadata": {
     "generator": "Material.toJSON",
     "type": "Material",
     "version": 4.7
   },
   "scale": 1,
+  "side": 2,
+  "transparent": true,
   "type": "Line2NodeMaterial"
 }

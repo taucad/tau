@@ -80,4 +80,39 @@ describe('OTLP conversion at the sink', () => {
     expect(orphan?.parentSpanId).toBeUndefined();
     expect(orphan?.traceId).toMatch(/^[\da-f]{32}$/u);
   });
+
+  it('should keep the children of a dropped root in one trace derived from its operation id', () => {
+    const child = (spanId: string, name: string) => ({
+      name,
+      startTime: 20,
+      duration: 5,
+      workerTimeOrigin: 5,
+      detail: { spanId, parentSpanId: '0' },
+    });
+    const orphaned = convert({
+      ...batch,
+      entries: [child('1', 'kernel.select'), child('2', 'kernel.compute')],
+      dropped: 1,
+      droppedRoots: { '0': 'render:v1:e1:r1' },
+    });
+    const survived = convert({
+      ...batch,
+      entries: [
+        {
+          name: 'kernel.render',
+          startTime: 10,
+          duration: 100,
+          workerTimeOrigin: 5,
+          detail: { spanId: '0', 'operation.id': 'render:v1:e1:r1' },
+        },
+      ],
+    });
+
+    expect(orphaned).toHaveLength(2);
+    expect(orphaned[0]?.traceId).toMatch(/^[\da-f]{32}$/u);
+    expect(orphaned[1]?.traceId).toBe(orphaned[0]?.traceId);
+    expect(survived[0]?.traceId).toBe(orphaned[0]?.traceId);
+    // The children still name their missing parent, so the trace shows one gap, not two roots.
+    expect(orphaned[0]?.parentSpanId).toBe(survived[0]?.spanId);
+  });
 });

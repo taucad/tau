@@ -22,6 +22,26 @@ const memoryFs = (files: Map<string, string>): KernelFileSystem =>
     },
   }) as unknown as KernelFileSystem;
 
+// T26 (PR-1b, AR-W15-01): the observation heap is the KCL module's own WebAssembly memory.
+describe('KclUtilities WebAssembly heap', () => {
+  it('should report no heap before initializeWasm and the module memory after it', async () => {
+    const fs = new FileSystemManager(memoryFs(new Map()));
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
+    expect(utils.wasmHeapBytes).toBeUndefined();
+    try {
+      await utils.initializeWasm();
+      const wasmModule = await import('@taucad/kcl-wasm-lib');
+      const { memory } = await wasmModule.default();
+
+      expect(Number.isSafeInteger(utils.wasmHeapBytes)).toBe(true);
+      expect(utils.wasmHeapBytes).toBeGreaterThan(0);
+      expect(utils.wasmHeapBytes).toBe(memory.buffer.byteLength);
+    } finally {
+      await utils.cleanup();
+    }
+  });
+});
+
 describe('KclUtilities execution normalization', () => {
   it.each(['1.0', '2.0', '3.0'])('should execute stable KCL %s with explicit units', async (version) => {
     const source = `@settings(defaultLengthUnit = mm, kclVersion = ${version})

@@ -338,14 +338,22 @@ export function MeasureTool(): React.JSX.Element {
       }
     | undefined
   >(undefined);
-  const cameraMatrixRef = useRef('');
+  const cameraMatrices = useMemo(
+    () => ({ world: new THREE.Matrix4(), projection: new THREE.Matrix4(), initialized: false }),
+    [],
+  );
   useFrame(() => {
     if (!isMeasureActive) {
       return;
     }
-    const key = `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
-    if (key !== cameraMatrixRef.current) {
-      cameraMatrixRef.current = key;
+    if (
+      !cameraMatrices.initialized ||
+      !cameraMatrices.world.equals(camera.matrixWorld) ||
+      !cameraMatrices.projection.equals(camera.projectionMatrix)
+    ) {
+      cameraMatrices.world.copy(camera.matrixWorld);
+      cameraMatrices.projection.copy(camera.projectionMatrix);
+      cameraMatrices.initialized = true;
       setCameraRevision((revision) => revision + 1);
     }
   });

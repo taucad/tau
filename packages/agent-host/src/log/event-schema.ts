@@ -296,6 +296,13 @@ const sharedEventShapes = {
     reason: nonEmptyString,
     payload: jsonValueSchema.optional(),
   },
+  approvalSpent: {
+    type: z.literal('approval.spent'),
+    phase: z.enum(['spent', 'released']),
+    interruptId: nonEmptyString,
+    toolCallId: nonEmptyString,
+    approvalKey: nonEmptyString,
+  },
   turnChanged: {
     type: z.literal('turn.changed'),
     turnId: nonEmptyString,
@@ -373,6 +380,7 @@ const sharedEventSchemas = [
   z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationBound }),
   z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationSettledCharged }),
   z.looseObject({ ...eventBase, ...sharedEventShapes.modelInvocationSettledVoided }),
+  z.looseObject({ ...eventBase, ...sharedEventShapes.approvalSpent }),
 ] as const;
 const knownLogEventSchema = z.union([...sharedEventSchemas, lifecycleEventSchema, committedHistoryEventSchema]);
 
@@ -399,6 +407,7 @@ export const projectionEffectSchemas = [
   z.object(sharedEventShapes.modelInvocationBound),
   z.object(sharedEventShapes.modelInvocationSettledCharged),
   z.object(sharedEventShapes.modelInvocationSettledVoided),
+  z.object(sharedEventShapes.approvalSpent),
   lifecycleEventSchema
     .omit({
       version: true,

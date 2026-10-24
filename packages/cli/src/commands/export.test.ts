@@ -327,7 +327,7 @@ describe('exportCommand', () => {
         epoch: Date.now() - performance.now(),
         entries: [
           {
-            name: 'kernel.export-model',
+            name: 'kernel.export',
             startTime: performance.now(),
             duration: 0,
             workerTimeOrigin: performance.timeOrigin,
@@ -355,8 +355,43 @@ describe('exportCommand', () => {
     expect(profile.schema).toBe('tau.cli-export-profile.v1');
     expect(profile.accounting.phaseDurationSum).toBeCloseTo(profile.accounting.profiledDuration, 10);
     expect(profile.accounting.unaccounted).toBe(0);
-    expect(profile.runtime.spans).toEqual([expect.objectContaining({ name: 'kernel.export-model', selfDuration: 0 })]);
+    expect(profile.runtime.spans).toEqual([expect.objectContaining({ name: 'kernel.export', selfDuration: 0 })]);
     expect(onFunction).toHaveBeenCalledWith('telemetry', expect.any(Function));
+  });
+
+  it("should keep the export's spans that arrive after its reply in the profile", async () => {
+    const bytes = new Uint8Array([1, 2, 3]);
+    const telemetryPath = join(workspace, 'trailing-profile.json');
+    exportFunction.mockImplementationOnce(async () => {
+      const telemetryListener = onFunction.mock.calls.find(([event]) => event === 'telemetry')?.[1];
+      // The runtime posts an operation's spans after its terminal reply.
+      setTimeout(() => {
+        telemetryListener?.({
+          origin: { label: 'cli', instance: 'test-producer' },
+          epoch: Date.now() - performance.now(),
+          entries: [
+            {
+              name: 'kernel.export',
+              startTime: performance.now(),
+              duration: 0,
+              workerTimeOrigin: performance.timeOrigin,
+              detail: { spanId: 'root', format: 'glb' },
+            },
+          ],
+        });
+      }, 0);
+      return buildSuccessResult(bytes);
+    });
+    const command = await importExportCommand();
+
+    await runCommand(command, {
+      rawArgs: [inputPath, '--ext=glb', `--output=${join(workspace, 'trailing.glb')}`, `--telemetry=${telemetryPath}`],
+    });
+
+    const profile = JSON.parse(await readFile(telemetryPath, 'utf8')) as {
+      runtime: { spans: Array<{ name: string }> };
+    };
+    expect(profile.runtime.spans).toEqual([expect.objectContaining({ name: 'kernel.export' })]);
   });
 
   it('loads an explicit named plugin from the invoking project', async () => {

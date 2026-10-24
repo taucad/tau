@@ -284,6 +284,27 @@ export type InterruptRecordedEvent = LogEventBase & {
 };
 
 /**
+ * A recalled approval, spent durably before the effect it approves (D23, I13).
+ *
+ * The host writes `spent` inside a tool's `recall` and waits for it to persist before the tool is told the answer, so
+ * a host that dies after the tool started its effect and before the call's output row leaves the answer spent: the
+ * next incarnation never recalls it again. `released` hands the answer back when the recalling call threw, so it
+ * produced no output and a retry recalls it rather than asking twice. A crash before `released` lands keeps it spent.
+ *
+ * @public
+ */
+export type ApprovalSpentEvent = LogEventBase & {
+  readonly type: 'approval.spent';
+  readonly phase: 'spent' | 'released';
+  /** The interrupt whose answer was recalled. */
+  readonly interruptId: string;
+  /** The call that recalled it. */
+  readonly toolCallId: string;
+  /** The key the call recalled under. */
+  readonly approvalKey: string;
+};
+
+/**
  * The host-attested settlement of one turn, as the chat's own log carries it
  * (A4, D9, S9).
  *
@@ -508,6 +529,7 @@ export type AgentLogEvent =
   | SnapshotContextRefreshedEvent
   | SafeguardRecordedEvent
   | InterruptRecordedEvent
+  | ApprovalSpentEvent
   | TurnChangedLogEvent
   | TurnFinalizedLogEvent
   | TurnConflictedLogEvent

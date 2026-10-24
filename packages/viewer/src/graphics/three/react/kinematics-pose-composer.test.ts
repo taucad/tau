@@ -1,9 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Group, Matrix4, Mesh } from 'three';
 import type { Object3D } from 'three';
 import type { Mechanism, Pose } from '@taucad/kinematics';
 import { createKinematicsPoseComposer } from '#graphics/three/react/kinematics-pose-composer.js';
 import { setModelComponentOwner } from '#graphics/three/utils/model-component-owner.js';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 const mechanism: Mechanism = {
   schemaVersion: 1,
@@ -50,6 +54,28 @@ const expectMatrix = (actual: Matrix4, expected: Matrix4): void => {
 };
 
 describe('createKinematicsPoseComposer', () => {
+  it('should skip unchanged and grounded link propagation across new pose revisions', () => {
+    const root = new Group();
+    const base = addNode(root, 'component:base');
+    const arm = addNode(root, 'component:arm');
+    const composer = createKinematicsPoseComposer(root);
+    composer.update({ mechanism, revision: 1, pose: poseOf(hingeQuarterTurn) });
+    const baseUpdate = vi.spyOn(base, 'updateMatrixWorld');
+    const armUpdate = vi.spyOn(arm, 'updateMatrixWorld');
+    const baseWorldUpdate = vi.spyOn(base, 'updateWorldMatrix');
+    const armWorldUpdate = vi.spyOn(arm, 'updateWorldMatrix');
+    expect(composer.update({ mechanism, revision: 2, pose: poseOf(hingeQuarterTurn) })).toBe(false);
+    expect(baseUpdate).not.toHaveBeenCalled();
+    expect(armUpdate).not.toHaveBeenCalled();
+    expect(baseWorldUpdate).not.toHaveBeenCalled();
+    expect(armWorldUpdate).not.toHaveBeenCalled();
+    expect(composer.update({ mechanism, revision: 3, pose: poseOf(new Matrix4()) })).toBe(true);
+    expect(baseUpdate).not.toHaveBeenCalled();
+    expect(baseWorldUpdate).not.toHaveBeenCalled();
+    expect(armWorldUpdate).toHaveBeenCalledOnce();
+    expectMatrix(arm.matrixWorld, new Matrix4());
+  });
+
   it('should set each linked node to its link delta and leave unlinked components at identity', () => {
     const root = new Group();
     const base = addNode(root, 'component:base');

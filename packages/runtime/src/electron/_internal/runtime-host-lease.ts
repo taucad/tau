@@ -1,3 +1,5 @@
+import type { ResourceLimitDetails } from '#types/runtime.types.js';
+
 type ElectronRuntimeHostReleaseReason = 'requested' | 'operation-timeout';
 
 type ElectronRuntimeHostRelease = (reason: ElectronRuntimeHostReleaseReason) => void;
@@ -24,6 +26,8 @@ export type ElectronRuntimeHostExitDetail = {
   readonly exitCode?: number;
   readonly released: boolean;
   readonly stderrTail?: string;
+  /** The limit main killed the utility for, when it killed it for one. */
+  readonly exceeded?: ResourceLimitDetails;
 };
 
 /**

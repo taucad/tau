@@ -22,12 +22,27 @@ const shaderCacheKey = 'tau-gltf-surface-depth-bias-v3';
 const webGlSlopeScale = { value: gltfEdgeLineWidth * 0.5 + 0.5 };
 
 /**
- * The one render hook every biased material shares, so surface batching can still compare them.
+ * The shared surface update. Classic materials call it as a render hook; the node renderer
+ * calls it from its draw callback because Three does not invoke material hooks there.
  * It reads the pixel ratio per draw because one material can serve renderers at different ratios.
- * @param renderer - The renderer about to draw the material.
+ * @param renderer - The renderer about to draw the material, including its depth convention.
  */
-function syncWebGlSlopeScale(renderer: Readonly<{ getPixelRatio: () => number }>): void {
-  webGlSlopeScale.value = gltfEdgeLineWidth * 0.5 * renderer.getPixelRatio() + 0.5;
+export function syncGltfSurfaceDepthBias(
+  this: Material,
+  renderer: Readonly<{ getPixelRatio: () => number; reversedDepthBuffer?: boolean }>,
+): void {
+  const margin = gltfEdgeLineWidth * 0.5 * renderer.getPixelRatio() + 0.5;
+  webGlSlopeScale.value = margin;
+  const state = states.get(this);
+  if (state?.backend === 'webgpu') {
+    // The node family can execute with either depth convention. Separate surfaces
+    // away from the camera, using the actual device-pixel stroke footprint.
+    const sign = renderer.reversedDepthBuffer ? -1 : 1;
+    this.polygonOffsetFactor = sign * margin;
+    this.polygonOffsetUnits = sign * constantDepthSteps;
+    state.appliedPolygonOffsetFactor = this.polygonOffsetFactor;
+    state.appliedPolygonOffsetUnits = this.polygonOffsetUnits;
+  }
 }
 
 /**
@@ -35,11 +50,13 @@ function syncWebGlSlopeScale(renderer: Readonly<{ getPixelRatio: () => number }>
  * @param hook - A material's `onBeforeRender`.
  * @returns True for the depth bias's own hook.
  */
-export const isGltfSurfaceDepthBiasRenderHook = (hook: unknown): boolean => hook === syncWebGlSlopeScale;
+export const isGltfSurfaceDepthBiasRenderHook = (hook: unknown): boolean => hook === syncGltfSurfaceDepthBias;
 
 type SurfaceDepthBiasState = {
   configuredBackend: ResolvedGraphicsBackend;
   composed: boolean;
+  appliedPolygonOffsetFactor?: number;
+  appliedPolygonOffsetUnits?: number;
   hookKeyPrefix?: { previous: string; composed: string };
   previousHooks?: Pick<Material, 'onBeforeCompile' | 'customProgramCacheKey'>;
   composedHooks?: Pick<Material, 'onBeforeCompile' | 'customProgramCacheKey'>;
@@ -109,7 +126,7 @@ const composeSurfaceDepthBias = (material: Material, state: SurfaceDepthBiasStat
     }
   };
   if (material.onBeforeRender === Object.getPrototypeOf(material).onBeforeRender) {
-    material.onBeforeRender = syncWebGlSlopeScale;
+    material.onBeforeRender = syncGltfSurfaceDepthBias;
   }
   if (hookDerivedKey) {
     state.hookKeyPrefix = { previous: previousHookText, composed: material.onBeforeCompile.toString() };
@@ -182,6 +199,8 @@ export const applyGltfSurfaceDepthBias = (material: Material, backend: ResolvedG
   material.polygonOffset = true;
   material.polygonOffsetFactor = gltfSurfacePolygonOffset[backend].polygonOffsetFactor;
   material.polygonOffsetUnits = gltfSurfacePolygonOffset[backend].polygonOffsetUnits;
+  state.appliedPolygonOffsetFactor = material.polygonOffsetFactor;
+  state.appliedPolygonOffsetUnits = material.polygonOffsetUnits;
   material.needsUpdate = true;
 };
 
@@ -224,7 +243,9 @@ export const getGltfSurfaceDepthBiasCohort = (
   if (!state || Boolean(state.backend) !== isOpaqueDepthWriter(material)) {
     return undefined;
   }
-  const expected = state.backend ? gltfSurfacePolygonOffset[state.backend] : state;
+  const expected = state.backend
+    ? { polygonOffsetFactor: state.appliedPolygonOffsetFactor, polygonOffsetUnits: state.appliedPolygonOffsetUnits }
+    : state;
   if (
     material.polygonOffset !== (state.backend ? true : state.polygonOffset) ||
     material.polygonOffsetFactor !== expected.polygonOffsetFactor ||

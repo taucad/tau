@@ -17,6 +17,17 @@ export const modelPickSettleMilliseconds = 100;
 
 /** Floats per pick record: the pick ID, then the world position. */
 const recordFloats = 4;
+/** Cache nearby pointer requests without retaining a full-viewport position buffer. */
+const regionExtent = 128;
+
+type PickRegion = Readonly<{
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
+}>;
 
 /**
  * The answer to one model ray. `pending` means the pick buffer does not show the scene as it is now: the caller treats
@@ -37,6 +48,7 @@ export type ModelGpuPickerFrame = Readonly<{
   meshes: readonly THREE.Mesh[];
 }>;
 
+/** Lifecycle and cached answers owned by one viewer canvas. */
 export type ModelGpuPicker = Readonly<{
   /** Whether this renderer picks on the GPU; when not, every pick is `unavailable`. */
   readonly supported: boolean;
@@ -44,11 +56,12 @@ export type ModelGpuPicker = Readonly<{
   frame(input: ModelGpuPickerFrame): void;
   /** Answers a ray synchronously from the last pass read back. */
   pick(raycaster: THREE.Raycaster): ModelPickResult;
-  /** Draws and reads back a pass for the last frame now, unless the current one is fresh; resolves when it lands. */
+  /** Refreshes the last requested pointer region, if stale; does nothing before the first camera-ray request. */
   refresh(): Promise<void>;
   dispose(): void;
 }>;
 
+/** Renderer and clipping authority supplied by the viewer. */
 export type ModelGpuPickerOptions = Readonly<{
   renderer: unknown;
   /** The viewer's section clip, compiled into the pick materials so the pass removes what the model draw removes. */
@@ -67,6 +80,8 @@ type ReadablePickRenderer = Readonly<{
   isWebGLRenderer?: boolean;
   isWebGPURenderer?: boolean;
   backend?: { isWebGPUBackend?: boolean };
+  coordinateSystem?: THREE.CoordinateSystem;
+  reversedDepthBuffer?: boolean;
   getRenderTarget(): CurrentRenderTarget;
   setRenderTarget(target: CurrentRenderTarget): void;
   getClearColor(target: THREE.Color): THREE.Color;
@@ -90,8 +105,7 @@ type ReadablePickRenderer = Readonly<{
 type PickCopy = Readonly<{
   revision: number;
   data: Float32Array;
-  width: number;
-  height: number;
+  region: PickRegion;
   /** Floats between the starts of two rows; WebGPU pads each row to 256 bytes. */
   rowFloats: number;
   /** Whether the first row read back is the top of the view (WebGPU) rather than the bottom (WebGL). */
@@ -100,7 +114,6 @@ type PickCopy = Readonly<{
   camera: THREE.Camera;
   /** The camera's world and projection matrices at the pass, which a ray is checked against. */
   cameraState: Float64Array;
-  viewProjection: THREE.Matrix4;
 }>;
 
 const isWorldVisible = (object: THREE.Object3D): boolean => {
@@ -193,27 +206,33 @@ const isCameraRay = (ray: THREE.Ray, camera: THREE.Camera): boolean => {
   return false;
 };
 
-/** Where the record of the pixel `ray` leaves the camera through starts, or `undefined` off the view. */
-const recordOffset = (copy: PickCopy, ray: THREE.Ray): number | undefined => {
+/** Full-viewport CSS pixel of a camera ray; the crop never changes this sampling grid. */
+const rayPixel = (
+  camera: THREE.Camera,
+  ray: THREE.Ray,
+  { width, height }: { width: number; height: number },
+): THREE.Vector2 | undefined => {
   rayClip.set(ray.origin.x + ray.direction.x, ray.origin.y + ray.direction.y, ray.origin.z + ray.direction.z, 1);
-  rayClip.applyMatrix4(copy.viewProjection);
+  rayClip.applyMatrix4(camera.matrixWorldInverse).applyMatrix4(camera.projectionMatrix);
   if (rayClip.w <= 0) {
     return undefined;
   }
-  const column = Math.floor(((rayClip.x / rayClip.w + 1) / 2) * copy.width);
-  const rowFromTop = Math.floor(((1 - rayClip.y / rayClip.w) / 2) * copy.height);
-  if (column < 0 || column >= copy.width || rowFromTop < 0 || rowFromTop >= copy.height) {
-    return undefined;
-  }
-  const row = copy.topRowFirst ? rowFromTop : copy.height - 1 - rowFromTop;
-  return row * copy.rowFloats + column * recordFloats;
+  const column = Math.floor(((rayClip.x / rayClip.w + 1) / 2) * width);
+  const row = Math.floor(((1 - rayClip.y / rayClip.w) / 2) * height);
+  return column < 0 || column >= width || row < 0 || row >= height ? undefined : new THREE.Vector2(column, row);
 };
+
+const containsPixel = (region: PickRegion, pixel: THREE.Vector2): boolean =>
+  pixel.x >= region.left &&
+  pixel.x < region.left + region.width &&
+  pixel.y >= region.top &&
+  pixel.y < region.top + region.height;
 
 /**
  * GPU ID picking for the model's surfaces. A pass draws every pickable mesh, as the viewport draws it (world
- * transform, visibility, layers, face side and the section clip), into a float target at CSS-pixel resolution: per
+ * transform, visibility, layers, face side and the section clip), into a bounded float target on the original CSS-pixel grid: per
  * pixel the mesh's pick ID and the world position under it. The pass runs only when its inputs changed and the camera
- * is still, and is read back asynchronously into one CPU copy stamped with the input revision it shows. A ray is then
+ * is still and a pointer has requested a region, and is read back asynchronously into one CPU copy stamped with the input revision it shows. A ray is then
  * answered synchronously from the copy while the revision is current, and is `pending` otherwise.
  */
 export const createModelGpuPicker = ({
@@ -237,6 +256,10 @@ export const createModelGpuPicker = ({
   const materials = new Map<THREE.Side, ModelPickMaterial | MeshBasicNodeMaterial>();
   let proxies = new Map<THREE.Mesh, THREE.Mesh>();
   let target: PickRenderTarget | undefined;
+  let region: PickRegion | undefined;
+  let cropCamera: THREE.Camera | undefined;
+  let cameraOwner: THREE.Camera | undefined;
+  const cropProjection = new THREE.Matrix4();
   const buffers: Float32Array[] = [];
   const cameraInput = new InputState();
   const sceneInput = new InputState();
@@ -340,8 +363,8 @@ export const createModelGpuPicker = ({
   const drawPass = async (input: ModelGpuPickerFrame): Promise<void> => {
     const startedAt = performance.now();
     const passRevision = revision;
-    const width = Math.max(1, Math.round(input.width));
-    const height = Math.max(1, Math.round(input.height));
+    const passRegion = region!;
+    const { width, height, left, top, viewportWidth, viewportHeight } = passRegion;
     const pickTarget = ensureTarget(width, height);
     const { camera } = input;
     const drawn: THREE.Mesh[] = [];
@@ -374,7 +397,47 @@ export const createModelGpuPicker = ({
     }
     proxies = nextProxies;
 
-    camera.updateMatrixWorld();
+    // A detached clone retains the resolved camera-rig transform, view offset and depth precision.
+    if (cameraOwner !== camera) {
+      cropCamera = camera.clone();
+      cameraOwner = camera;
+    }
+    const cropped = cropCamera!;
+    cropped.copy(camera, false);
+    cropped.matrixAutoUpdate = false;
+    cropped.matrixWorldAutoUpdate = false;
+    // Three r184 Camera.copy omits this getter-only flag. Set it before the renderer can
+    // rebuild the projection and erase the XY crop; installed-source tests guard this seam.
+    const reversedDepth = pickRenderer.reversedDepthBuffer === true || camera.reversedDepth;
+    const coordinateSystem = pickRenderer.coordinateSystem ?? camera.coordinateSystem;
+    Object.assign(cropped, { _reversedDepth: reversedDepth });
+    cropped.coordinateSystem = coordinateSystem;
+    if (
+      (reversedDepth !== camera.reversedDepth || coordinateSystem !== camera.coordinateSystem) &&
+      (cropped instanceof THREE.PerspectiveCamera || cropped instanceof THREE.OrthographicCamera)
+    ) {
+      cropped.updateProjectionMatrix();
+    }
+    cropProjection.set(
+      viewportWidth / width,
+      0,
+      0,
+      (viewportWidth - 2 * left - width) / width,
+      0,
+      viewportHeight / height,
+      0,
+      (2 * top + height - viewportHeight) / height,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+    );
+    cropped.projectionMatrix.premultiply(cropProjection);
+    cropped.projectionMatrixInverse.copy(cropped.projectionMatrix).invert();
     const previousTarget = pickRenderer.getRenderTarget();
     const previousClearAlpha = pickRenderer.getClearAlpha();
     pickRenderer.getClearColor(previousClearColor);
@@ -383,18 +446,14 @@ export const createModelGpuPicker = ({
       pickRenderer.setRenderTarget(pickTarget);
       pickRenderer.setClearColor(0x00_00_00, 0);
       pickRenderer.autoClear = true;
-      pickRenderer.render(scene, camera);
+      pickRenderer.render(scene, cropped);
     } finally {
       pickRenderer.setRenderTarget(previousTarget);
       pickRenderer.setClearColor(previousClearColor, previousClearAlpha);
       pickRenderer.autoClear = previousAutoClear;
     }
-    // Taken after the draw: a renderer may adjust the projection on a camera's first draw (reversed depth).
+    // Stamp the original camera, which the picker never mutates.
     const cameraState = cameraValues(camera);
-    const viewProjection = new THREE.Matrix4().multiplyMatrices(
-      camera.projectionMatrix,
-      new THREE.Matrix4().copy(camera.matrixWorld).invert(),
-    );
     const submittedAt = performance.now();
     const read = isWebGl
       ? pickRenderer.readRenderTargetPixelsAsync(pickTarget, 0, 0, width, height, freeBuffer(width * height * 4))
@@ -423,7 +482,11 @@ export const createModelGpuPicker = ({
     recordRendererSpan('renderer.pick', {
       startTime: startedAt,
       duration: performance.now() - startedAt,
-      attributes: { ...attributes, readbackMilliseconds: performance.now() - submittedAt, outcome: 'ready' },
+      attributes: {
+        ...attributes,
+        readbackMilliseconds: performance.now() - submittedAt,
+        outcome: 'ready',
+      },
     });
     if (disposed) {
       return;
@@ -432,14 +495,12 @@ export const createModelGpuPicker = ({
     copy = {
       revision: passRevision,
       data: data as Float32Array,
-      width,
-      height,
+      region: passRegion,
       rowFloats,
       topRowFirst,
       meshes: drawn,
       camera,
       cameraState,
-      viewProjection,
     };
   };
 
@@ -451,7 +512,10 @@ export const createModelGpuPicker = ({
       recordRendererSpan('renderer.pick', {
         startTime: performance.now(),
         duration: 0,
-        attributes: { outcome: 'failed', reason: error instanceof Error ? error.message : String(error) },
+        attributes: {
+          outcome: 'failed',
+          reason: error instanceof Error ? error.message : String(error),
+        },
       });
       supported = false;
     }
@@ -473,7 +537,7 @@ export const createModelGpuPicker = ({
       return inFlight;
     }
     const input = latest;
-    if (disposed || !supported || !input || copy?.revision === revision) {
+    if (disposed || !supported || !input || !region || copy?.revision === revision) {
       return;
     }
     inFlight = settlePass(input);
@@ -500,6 +564,7 @@ export const createModelGpuPicker = ({
       disposed ||
       !supported ||
       latest === undefined ||
+      region === undefined ||
       inFlight !== undefined ||
       passFrame !== undefined ||
       copy?.revision === revision
@@ -531,6 +596,14 @@ export const createModelGpuPicker = ({
         return;
       }
       latest = input;
+      if (
+        region &&
+        (region.viewportWidth !== Math.max(1, Math.round(input.width)) ||
+          region.viewportHeight !== Math.max(1, Math.round(input.height)))
+      ) {
+        region = undefined;
+        revision += 1;
+      }
       input.camera.updateMatrixWorld();
       cameraInput.begin();
       cameraInput.push(input.camera.id);
@@ -539,7 +612,9 @@ export const createModelGpuPicker = ({
       if (cameraInput.changed()) {
         revision += 1;
         lastMotionAt = performance.now();
-        armSettle(true);
+        if (region) {
+          armSettle(true);
+        }
         return;
       }
       writeSceneInput(input);
@@ -559,6 +634,25 @@ export const createModelGpuPicker = ({
       if (!isCameraRay(raycaster.ray, camera)) {
         return { status: 'unavailable' };
       }
+      const width = Math.max(1, Math.round(latest.width));
+      const height = Math.max(1, Math.round(latest.height));
+      const pixel = rayPixel(camera, raycaster.ray, { width, height });
+      if (!pixel) {
+        return { status: 'miss' };
+      }
+      if (!region || !containsPixel(region, pixel)) {
+        const regionWidth = Math.min(regionExtent, width);
+        const regionHeight = Math.min(regionExtent, height);
+        region = {
+          left: Math.max(0, Math.min(width - regionWidth, pixel.x - Math.floor(regionWidth / 2))),
+          top: Math.max(0, Math.min(height - regionHeight, pixel.y - Math.floor(regionHeight / 2))),
+          width: regionWidth,
+          height: regionHeight,
+          viewportWidth: width,
+          viewportHeight: height,
+        };
+        revision += 1;
+      }
       if (
         !copy ||
         copy.revision !== revision ||
@@ -568,10 +662,10 @@ export const createModelGpuPicker = ({
         return pending();
       }
       const { ray } = raycaster;
-      const offset = recordOffset(copy, ray);
-      if (offset === undefined) {
-        return { status: 'miss' };
-      }
+      const column = pixel.x - copy.region.left;
+      const rowFromTop = pixel.y - copy.region.top;
+      const row = copy.topRowFirst ? rowFromTop : copy.region.height - 1 - rowFromTop;
+      const offset = row * copy.rowFloats + column * recordFloats;
       const id = copy.data[offset]!;
       if (id === 0) {
         return { status: 'miss' };
@@ -593,7 +687,11 @@ export const createModelGpuPicker = ({
       }
       return {
         status: 'hit',
-        intersection: { distance, point: ray.at(distance, new THREE.Vector3()), object: mesh },
+        intersection: {
+          distance,
+          point: ray.at(distance, new THREE.Vector3()),
+          object: mesh,
+        },
       };
     },
     async refresh() {
@@ -622,6 +720,9 @@ export const createModelGpuPicker = ({
       buffers.length = 0;
       copy = undefined;
       latest = undefined;
+      region = undefined;
+      cropCamera = undefined;
+      cameraOwner = undefined;
     },
   };
 };

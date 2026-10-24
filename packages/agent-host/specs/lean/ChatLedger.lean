@@ -23,8 +23,13 @@ namespace ChatLedger
 
 /-! ## Rows -/
 
+/-- `W` is the person's turn appended as its run settled before committing it (`abandonedTurnOf`): a user
+`message.appended` row whose message id `w-<arg>` names its content, so two devices that append it append the same
+message. `C` is that turn as the run's own device said it (a person's `message.appended` with no internal kind): the
+row a copy `W` repeats, which merges after the copy when its device's clock ran far ahead. `C` rows appear only in
+merge traces. -/
 inductive Kind where
-  | L | S | H | O | R | P | V | M | U
+  | L | S | H | O | R | P | V | M | U | W | C
   deriving DecidableEq, Repr, Inhabited
 
 structure Row where
@@ -166,23 +171,32 @@ def Seq.commit (S : Seq) (e : Row) : Seq :=
 
 /-! ## reducer.ts: the history rules the generated rows reach -/
 
-/-- A provider message id: `m-<term>-<seq>` (assistant reply) or `u-<term>-<seq>-<arg>` (committed user turn). -/
+/-- A provider message id: `m-<term>-<seq>` (assistant reply), `u-<term>-<seq>-<arg>` (committed user turn) or
+`w-<arg>` (a person's turn appended as its run settled, the same id from every device that appends it, and the id of
+the run's own row of that turn). -/
 def msgId (e : Row) : Option (Nat × Nat × Nat × Nat) :=
   match e.kind with
   | .M => some (0, e.term, e.seq, 0)
   | .H => some (1, e.term, e.seq, e.arg)
+  | .W => some (2, e.arg, 0, 0)
+  | .C => some (2, e.arg, 0, 0)
   | _ => none
 
-/-- `knownMessageIds`, `preparedInvocations`, `settledInvocations` (attempt ids `a<n>` as `n`). -/
+/-- `knownMessageIds`, `preparedInvocations`, `settledInvocations` (attempt ids `a<n>` as `n`), and `copiedTurns`:
+the ids the history first took from a copy `W`. -/
 structure Hist where
   ids : List (Nat × Nat × Nat × Nat) := []
   prepared : List Nat := []
   settled : List Nat := []
+  copied : List (Nat × Nat × Nat × Nat) := []
 
-/-- `transitionOf`: `none` is `HISTORY_INVALID`. -/
+/-- `transitionOf`: `none` is `HISTORY_INVALID`. A person's turn the history already holds is the same message said
+again: a copy `W` of it, or the run's own row `C` after a copy (`turnSaidAgain`), changes nothing (XD3, round 16). -/
 def Hist.transition (h : Hist) (e : Row) : Option Hist :=
   match msgId e with
-  | some id => if id ∈ h.ids then none else some { h with ids := h.ids ++ [id] }
+  | some id =>
+    if id ∈ h.ids then (if e.kind = .W ∨ (e.kind = .C ∧ id ∈ h.copied) then some h else none)
+    else some { h with ids := h.ids ++ [id], copied := if e.kind = .W then h.copied ++ [id] else h.copied }
   | none =>
     match e.kind with
     | .P => if e.arg % 4 ∈ h.prepared then none else some { h with prepared := h.prepared ++ [e.arg % 4] }
@@ -558,6 +572,8 @@ def Ledger.known (L : Ledger) (e : Row) : Ledger :=
         inv.run (e.arg % 4)
   | .M => if e.arg < 4 then L.markShown (e.arg % 4) else L
   | .U => L
+  | .W => let en := L.entry e.run; L.put e.run { en with committed := true }
+  | .C => L
 
 /-- The term rules' bookkeeping for a row that is not a redelivery: its anomaly, its term, the position. -/
 def Ledger.book (L0 : Ledger) (e : Row) (broken : Bool) (ep : Nat) : Ledger :=
@@ -790,7 +806,8 @@ structure Copy where
   device : Nat
   deriving DecidableEq, Repr, Inhabited
 
-/-- A term across segments: `orders` is `orderByDevice`, `copies` maps a sequence to every copy read. -/
+/-- A term across segments: `orders` maps a writer (the first term of a segment holding it, `firstTerm`) to its
+place in that writer's file; `copies` maps a sequence to every copy read. -/
 structure MTerm where
   term : Nat
   orders : List (Nat × Nat)
@@ -799,7 +816,7 @@ structure MTerm where
   deriving Repr
 
 def Kind.ix : Kind → Nat
-  | .L => 0 | .S => 1 | .H => 2 | .O => 3 | .R => 4 | .P => 5 | .V => 6 | .M => 7 | .U => 8
+  | .L => 0 | .S => 1 | .H => 2 | .O => 3 | .R => 4 | .P => 5 | .V => 6 | .M => 7 | .U => 8 | .W => 9 | .C => 10
 
 /-- A row's `canonicalJson` as a sort key. For the merge's interrupt rows (keys sorted: epoch, interruptId,
 leaderEpoch, phase, reason, recordedAt, runId, sequence, type, version) the first six fields are exactly its code-unit
@@ -810,21 +827,22 @@ def canonKey (r : Row) : List (List Nat) :=
 /-- The kept copy's comparator: canonical form, then device id. -/
 def copyKey (c : Copy) : List (List Nat) := canonKey c.row.fp ++ [digits c.device]
 
-/-- Record one copy of `e` read from device `dev`; `order` is the term's place in this segment when the segment
-introduces it here. -/
-def MTerm.add (t : MTerm) (dev : Nat) (order : Option Nat) (e : Row) : MTerm :=
+/-- Record one copy of `e` read from device `dev`; `order` is `(writer, place)`, the segment's first term and the
+term's place in it, when the segment introduces it here. -/
+def MTerm.add (t : MTerm) (dev : Nat) (order : Option (Nat × Nat)) (e : Row) : MTerm :=
   { t with
     orders := match order with
-      | some o => upsert dev (min o ((lookup dev t.orders).getD o)) t.orders
+      | some (w, o) => upsert w (min o ((lookup w t.orders).getD o)) t.orders
       | none => t.orders
     started := min t.started e.ms
     copies := upsert e.seq (((lookup e.seq t.copies).getD []) ++ [⟨e, dev⟩]) t.copies }
 
-/-- One row of one segment; `st.2` is this segment's `introduced`, in order. -/
+/-- One row of one segment; `st.2` is this segment's `introduced`, in order. The segment's writer is the first term it
+introduces: the same row in every copy of one file, whatever the segment is called. -/
 def addRow (dev : Nat) (st : List MTerm × List Nat) (e : Row) : List MTerm × List Nat :=
   let fresh := !st.2.contains e.term
   let intro := if fresh then st.2 ++ [e.term] else st.2
-  let order := if fresh then some (intro.length - 1) else none
+  let order := if fresh then some (st.2.headD e.term, intro.length - 1) else none
   if st.1.any (fun t => decide (t.term = e.term)) then
     (st.1.map (fun t => if t.term = e.term then t.add dev order e else t), intro)
   else (st.1 ++ [MTerm.add ⟨e.term, [], [], e.ms⟩ dev order e], intro)
@@ -832,9 +850,11 @@ def addRow (dev : Nat) (st : List MTerm × List Nat) (e : Row) : List MTerm × L
 def mergeSegment (terms : List MTerm) (seg : Nat × List Row) : List MTerm :=
   (seg.2.foldl (addRow seg.1) (terms, [])).1
 
-/-- `deviceOf(term)`: the smallest device id holding the term. -/
+/-- `writerOf(term)`: the smallest writer (in term order) of the segments holding the term. It reads no segment id:
+a writer reads its own file under no id and others read it under theirs, and a device whose id changed leaves two
+overlapping files on one machine and one on another. -/
 def deviceOf (t : MTerm) : Nat :=
-  match keySort (fun d => [digits d]) (t.orders.map Prod.fst) with
+  match keySort (fun d => [termId d]) (t.orders.map Prod.fst) with
   | d :: _ => d
   | [] => 0
 
@@ -850,11 +870,10 @@ def clampStarts (placed : List (MTerm × Nat × Nat)) : List (Nat × Nat) :=
       let floor := match acc.1 with | some f => max f p.1.started | none => p.1.started
       (some floor, acc.2 ++ [(p.1.term, floor)])) (none, [])).2
 
-/-- The kept copy of one key: the smallest canonical form (then device id) among the term device's own copies, or
-among all copies when that device holds none. -/
-def keptCopy (device : Nat) (copies : List Copy) : Copy :=
-  let own := copies.filter (fun c => decide (c.device = device))
-  (keySort copyKey (if own.isEmpty then copies else own)).headD default
+/-- The kept copy of one key: the smallest canonical form among all copies, whichever segment holds it (then device id,
+which only names the copy reported kept). -/
+def keptCopy (copies : List Copy) : Copy :=
+  (keySort copyKey copies).headD default
 
 /-- One copy per distinct content other than the kept one, from the smallest device holding it. -/
 def dropped (kept : Copy) (copies : List Copy) : List Copy :=
@@ -862,17 +881,17 @@ def dropped (kept : Copy) (copies : List Copy) : List Copy :=
     if c.row.fp = kept.row.fp ∨ acc.any (fun d => decide (d.row.fp = c.row.fp)) then acc else acc ++ [c]) []
 
 /-- The kept copy of one key and the devices of the distinct dropped copies. -/
-def keep (device : Nat) (copies : List Copy) : Copy × List Nat :=
-  (keptCopy device copies, (dropped (keptCopy device copies) copies).map (·.device))
+def keep (copies : List Copy) : Copy × List Nat :=
+  (keptCopy copies, (dropped (keptCopy copies) copies).map (·.device))
 
 /-- One merged key: the kept row, and the conflicts `(key, kept device, dropped device)` it reports. -/
 def mergeKey (p : MTerm × Nat × Nat) (sc : Nat × List Copy) : Row × List (Key × Nat × Nat) :=
-  let k := keep p.2.1 sc.2
+  let k := keep sc.2
   (k.1.row, k.2.map fun d => ((p.1.term, sc.1), k.1.device, d))
 
-/-- The final order's key of a placed term: clamped start, device, file order, term. -/
+/-- The final order's key of a placed term: clamped start, writer, file order, term. -/
 def placedKey (clamped : List (Nat × Nat)) (p : MTerm × Nat × Nat) : List (List Nat) :=
-  [[(lookup p.1.term clamped).getD 0], digits p.2.1, [p.2.2], termId p.1.term]
+  [[(lookup p.1.term clamped).getD 0], termId p.2.1, [p.2.2], termId p.1.term]
 
 /-- `mergeLogSegments(segments, {onConflict})`: the merged rows and the conflicts `(key, kept, dropped)`. -/
 def mergeFull (segs : List (Nat × List Row)) : List Row × List (Key × Nat × Nat) :=
@@ -882,5 +901,21 @@ def mergeFull (segs : List (Nat × List Row)) : List Row × List (Key × Nat × 
   (keys.map Prod.fst, keys.flatMap Prod.snd)
 
 def merge (segs : List (Nat × List Row)) : List Row := (mergeFull segs).1
+
+/-- A term's clamped start in the merge of `segs` (0 for a term it does not hold). -/
+def clampOf (segs : List (Nat × List Row)) (τ : Nat) : Nat :=
+  (lookup τ (clampStarts ((segs.foldl mergeSegment []).map place))).getD 0
+
+/-- `mergeSegmentsUpTo(segments, B)`: the merge's terms whose clamped start is at most `B`, in merge order. A reader
+folds this at `B` = its wall clock plus `foreignClockAheadMilliseconds` (or its own newest row, if later), and stamps
+its next term after the newest start kept: a hybrid logical clock bounded by its own. -/
+def mergeUpTo (B : Nat) (segs : List (Nat × List Row)) : List Row :=
+  let placed := (segs.foldl mergeSegment []).map place
+  let cl := clampStarts placed
+  ((keySort (placedKey cl) placed).filter (fun p => decide ((lookup p.1.term cl).getD 0 ≤ B))).flatMap fun p =>
+    (keySort (fun sc => [[sc.1]]) p.1.copies).map fun sc => (mergeKey p sc).1
+
+/-- The history a fold of `rows` reaches from nothing (`createEventLogReducer('history')`), `none` once invalid. -/
+def histOf (rows : List Row) : Option Hist := rows.foldlM Hist.transition {}
 
 end ChatLedger

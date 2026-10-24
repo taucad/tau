@@ -9,11 +9,11 @@ import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useAgentHostPlacements, useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
-import { placementRungOf } from '#lib/agent-host-placement.js';
+import { daemonPlacementOf, localAgentHostId, placementRungOf } from '#lib/agent-host-placement.js';
 import { externalAgentRefusalReasons } from '#lib/external-agent.js';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
-import { withTauExecutionModel } from '#utils/chat-execution.js';
-import type { TauAgentHostId } from '@taucad/chat';
+import { withoutHostId, withTauExecutionModel } from '#utils/chat-execution.js';
+import type { CadAgentExecution, TauAgentHostId } from '@taucad/chat';
 
 type TauTarget = {
   readonly key: 'tau';
@@ -107,6 +107,10 @@ const acpAgentTarget = (placement: AgentHostPlacementTarget, agent: ExternalAgen
 /** A descriptor for an agent no host has described yet, so a persisted selection still names itself. */
 const unknownAgent = (agentId: string): ExternalAgentDescriptor => ({ id: agentId, displayName: agentId, models: [] });
 
+/** A Tau execution on this device's local row: no host at all, which is local placement on every device. */
+const localExecution = (execution: CadAgentExecution): CadAgentExecution =>
+  execution.kind === 'tau' ? withoutHostId(execution) : execution;
+
 /** Launcher 2's own row — the one the desktop tier drives by label and test id. */
 const isDesktopRow = (target: ExecutionTarget): target is TauHostTarget =>
   target.kind === 'tau-host' && target.placement.hostId === 'desktop' && target.agentId === undefined;
@@ -153,7 +157,9 @@ const useExecutionTargets = (): {
 
   const selectedTarget = useMemo<ExecutionTarget>(() => {
     if (execution.kind === 'tau') {
-      const { hostId } = execution;
+      /* The chat owns intent and the device owns placement (XD2): no host, or the desktop launcher's id read
+       * off-desktop, is this device's local row — launcher 2 on the desktop build, the browser worker elsewhere. */
+      const hostId = daemonPlacementOf(execution);
       if (hostId === undefined) {
         return tauTarget;
       }
@@ -244,10 +250,7 @@ export const ChatExecutionSelector = memo(function ({
     (key: string) => {
       if (key === tauTarget.key) {
         // Dropping `hostId` is what returns a chat to this browser's own host.
-        const { hostId: _hostId, ...browserExecution } = withTauExecutionModel(execution, modelId) as {
-          readonly hostId?: unknown;
-        };
-        setActiveExecution(browserExecution as typeof execution);
+        setActiveExecution(localExecution(withTauExecutionModel(execution, modelId)));
         onSelect?.();
         return;
       }
@@ -267,9 +270,12 @@ export const ChatExecutionSelector = memo(function ({
            * seeded with the model the host probed as that agent's current one
            * and the picker beside it writes any other. `withTauExecutionModel`
            * is never reached from here — it would convert the row back to Tau. */
+          /* This device's local row is written as no host at all, which is local placement on every device. */
           setActiveExecution(
             hostTarget.agentId === undefined
-              ? { ...withTauExecutionModel(execution, modelId), kind: 'tau', model: modelId, hostId }
+              ? hostId === localAgentHostId()
+                ? localExecution(withTauExecutionModel(execution, modelId))
+                : { ...withTauExecutionModel(execution, modelId), kind: 'tau', model: modelId, hostId }
               : {
                   kind: 'acp',
                   hostId,

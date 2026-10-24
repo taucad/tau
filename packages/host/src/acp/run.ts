@@ -28,13 +28,14 @@ import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type { ContentBlock, McpServer, StopReason, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
-import { isResumableRunFailure, materializeAttachments, reduceEventLog } from '@taucad/agent-host';
+import { isPersonsMessage, isResumableRunFailure, materializeAttachments, reduceEventLog } from '@taucad/agent-host';
 import type {
   DocumentBlockBuilder,
   ExternalAgentPort,
   ExternalAgentTurn,
   JsonObject,
   JsonValue,
+  ProviderMessage,
   RunLifecycleEvent,
 } from '@taucad/agent-host';
 import { createNodeAttachmentReader } from '@taucad/agent-host/node';
@@ -334,6 +335,131 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
   ];
 };
 
+/** How long the handoff block one prompt carries may be, in characters, header included: the most recent turns are kept. */
+const handoffCharacters = 24_000;
+
+/** A message's plain text, or `undefined` when it carries none (tool calls, media). */
+const messageText = (message: ProviderMessage): string | undefined => {
+  const { content } = message as { readonly content?: unknown };
+  if (typeof content === 'string') {
+    return content.trim() === '' ? undefined : content;
+  }
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const text = content
+    .map((part: unknown) =>
+      isRecord(part) && part['type'] === 'text' && typeof part['text'] === 'string' ? part['text'] : '',
+    )
+    .join('')
+    .trim();
+  return text === '' ? undefined : text;
+};
+
+/**
+ * Where the vendor session `sessionId` ran its last turn in a transcript: the index of that turn's user message, or -1.
+ * A session's opening turn names it on its marker; a later turn's marker may carry no id, and then continues the
+ * session its own host (`hostId`) most recently named.
+ */
+const lastTurnOfSession = (transcript: readonly ProviderMessage[], agentId: string, sessionId: string): number => {
+  /* Each host's most recently named session: two devices' sessions of one agent interleave in a merged chat. */
+  const named = new Map<string, string>();
+  let last = -1;
+  for (const [index, message] of transcript.entries()) {
+    const marker = message.metadata?.tauInternal;
+    if (
+      message.role !== 'user' ||
+      !isRecord(marker) ||
+      marker['kind'] !== 'external-agent' ||
+      marker['agentId'] !== agentId
+    ) {
+      continue;
+    }
+    const host = typeof marker['hostId'] === 'string' ? marker['hostId'] : '';
+    const opened = marker['acpSessionId'];
+    if (typeof opened === 'string' && opened !== '') {
+      named.set(host, opened);
+    }
+    if (named.get(host) === sessionId) {
+      last = index;
+    }
+  }
+  return last;
+};
+
+/** Keep a line within `budget` characters: its tail, marked as cut. */
+const tailOf = (line: string, budget: number): string => {
+  const marker = '[earlier text cut] ';
+  return line.length <= budget ? line : `${marker}${line.slice(line.length - (budget - marker.length))}`;
+};
+
+/**
+ * The chat's turns this vendor session has not seen, as one context block (seamless handoff, XD1).
+ *
+ * An agent keeps its own session: a turn Tau ran, or another device ran and sync brought into the chat's segments,
+ * never reached it. A fresh session has seen none of the chat; a session it continues has seen everything up to the
+ * end of its own last turn. The person's words ({@link isPersonsMessage}, never a user message Tau made for itself)
+ * and the replies are carried as text, most recent kept within {@link handoffCharacters}; tool calls and media are not.
+ *
+ * @param turn - The turn, with the chat's merged transcript.
+ * @param sessionId - The vendor session the prompt goes to, or `undefined` for a fresh one.
+ * @returns The block, or none when nothing is unseen or this turn sends no new message.
+ * @internal
+ */
+export const handoffBlocks = (turn: ExternalAgentTurn, sessionId: string | undefined): readonly ContentBlock[] => {
+  const { transcript, message } = turn;
+  if (transcript === undefined || message === undefined) {
+    return [];
+  }
+  const end = transcript.findIndex((entry) => entry.id === message.id);
+  const prior = end === -1 ? transcript : transcript.slice(0, end);
+  let start = 0;
+  if (sessionId !== undefined) {
+    const own = lastTurnOfSession(prior, turn.agentId, sessionId);
+    if (own === -1) {
+      /* The session's own turns are gone from the history (compacted or rewound away): it saw the chat up to there,
+       * and what came after cannot be told from what it saw, so nothing is resent rather than everything. */
+      return [];
+    }
+    start = own + 1;
+    while (start < prior.length && prior[start]!.role !== 'user') {
+      start++;
+    }
+  }
+  const lines = prior.slice(start).flatMap((entry) => {
+    /* The person's words as theirs, never a user message Tau made for itself (the same rule an abandoned run keeps). */
+    const text = isPersonsMessage(entry) || entry.role === 'assistant' ? messageText(entry) : undefined;
+    return text === undefined ? [] : [{ label: `**${entry.role}**: `, text }];
+  });
+  if (lines.length === 0) {
+    return [];
+  }
+  /*
+   * Most recent first within the budget, counted on the block as sent: the header and each separator count. The newest
+   * message alone is cut to what is left, keeping its tail.
+   */
+  const header =
+    'Earlier turns of this chat that this session has not seen (run by Tau, or on another device), oldest first:\n\n';
+  const separator = '\n\n';
+  const budget = handoffCharacters - header.length;
+  const kept: string[] = [];
+  let size = 0;
+  for (const { label, text } of lines.toReversed()) {
+    const line = `${label}${text}`;
+    const cost = line.length + (kept.length === 0 ? 0 : separator.length);
+    if (size + cost > budget) {
+      /* Who said it stays; only what they said is cut. */
+      if (kept.length === 0) {
+        kept.unshift(`${label}${tailOf(text, budget - label.length)}`);
+      }
+      break;
+    }
+    kept.unshift(line);
+    size += cost;
+  }
+  return [contextBlock('tau://chat-handoff', 'text/markdown', `${header}${kept.join(separator)}`)];
+};
+
 /**
  * The prompt this turn sends, as content blocks.
  *
@@ -341,7 +467,11 @@ const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): 
  * @param first - Whether this is the first prompt of a fresh vendor session.
  * @returns The blocks, or `undefined` when this turn only reattaches.
  */
-const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly ContentBlock[] | undefined => {
+const promptBlocksOf = (
+  turn: ExternalAgentTurn,
+  first: boolean,
+  handoff: readonly ContentBlock[] = [],
+): readonly ContentBlock[] | undefined => {
   const { content } = turn.message ?? {};
   const blocks =
     typeof content === 'string'
@@ -362,7 +492,7 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
   }
   /* The user's own blocks lead: a vendor names its mirrored thread after the
    * prompt's first text (Codex titled every Tau thread "tau://agent-guidance…"). */
-  return [...blocks, ...cadContextBlocks(turn.config, first)];
+  return [...blocks, ...handoff, ...cadContextBlocks(turn.config, first)];
 };
 
 /**
@@ -787,11 +917,15 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           prompt: {
             /* A vendor session Tau has not prompted before has never seen Tau's CAD
              * context, so its prompt carries it (V12). */
-            fresh: promptBlocksOf(materialized, true),
+            fresh: promptBlocksOf(materialized, true, handoffBlocks(turn, undefined)),
             /* Reattached to the session the agent stopped in: it still holds the
              * turn, so a resume with no message nudges it on (R9/S11). */
             reattached:
-              promptBlocksOf(materialized, false) ??
+              promptBlocksOf(
+                materialized,
+                false,
+                acpSessionId === undefined ? [] : handoffBlocks(turn, acpSessionId),
+              ) ??
               (stopRecorded(turn) ? [{ type: 'text', text: continuationPrompt } satisfies ContentBlock] : undefined),
           },
           ...(ownedState === undefined ? {} : { record: ownedState }),

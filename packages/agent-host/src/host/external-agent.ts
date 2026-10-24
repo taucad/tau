@@ -6,7 +6,14 @@
 import type { ClientContext } from '#harness/cad-middleware.js';
 import type { AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
 import type { LogRowBody } from '#log/chat-ledger.js';
-import type { AgentLogEvent, AgentToolChoice, JsonObject, JsonValue, UserProviderMessage } from '#log/event-types.js';
+import type {
+  AgentLogEvent,
+  AgentToolChoice,
+  JsonObject,
+  JsonValue,
+  ProviderMessage,
+  UserProviderMessage,
+} from '#log/event-types.js';
 import type { AgentLiveEventPayload, InterruptResolution } from '#waist/ports.js';
 
 /**
@@ -77,6 +84,12 @@ export type ExternalAgentTurn = {
   readonly state?: JsonObject | undefined;
   /** Every durable event recorded for this chat so far. */
   readonly history: readonly AgentLogEvent[];
+  /**
+   * The chat's history as a model reads it: every device's turns merged (XD1), Tau's and the agents' alike. An agent
+   * keeps its own session, so a runner hands it the turns its session has not seen (seamless handoff). Absent on an
+   * older host.
+   */
+  readonly transcript?: readonly ProviderMessage[] | undefined;
   /** Aborted by `cancel`, or by the host closing. */
   readonly signal: AbortSignal;
   /** Publish one non-durable text/reasoning delta before its durable envelope settles. */

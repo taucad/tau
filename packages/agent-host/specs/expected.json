@@ -345,6 +345,11 @@
       "ref": "L2a D9, D11: after a restart resolveInterrupt refuses INTERRUPT_NOT_PENDING and records nothing; today = W0.5 and W0.6 landed (ReleaseOnFailure and HoldUntilRows TRUE), the other switches FALSE",
       "fixedBy": "W7"
     },
+    "CrossDevice.handoff.cfg": {
+      "tier": "nightly",
+      "expect": "pass",
+      "ref": "XD1 handoff: AdmittedAfterSeen under Rehome (rehomeStaleTerm: the rows a term has read since its first row, no clock), W3's merge, a term's first row stamped after the rows its device read (the merge's clock assumption), MaxRows 3, MaxTerms 3, MaxSyncs 2 (16 s, 33,965 states)"
+    },
     "CrossDevice.ledger-OneLiveRunMerged.cfg": {
       "tier": "nightly",
       "expect": {
@@ -383,6 +388,15 @@
       "tier": "nightly",
       "expect": "pass",
       "ref": "EQ3: the candidate read-side rule keeps I8 and I9, agrees across devices and drops no settlement"
+    },
+    "CrossDevice.today-AdmittedAfterSeen.cfg": {
+      "tier": "nightly",
+      "expect": {
+        "violated": "AdmittedAfterSeen"
+      },
+      "kind": "witness",
+      "ref": "XD1 handoff: a device that keeps one term across another device's turn merges its next turn ahead of rows it had seen (terms merge whole, CL-R14); Rehome = FALSE is the knob for the behaviour before rehomeStaleTerm",
+      "fixedBy": "XD1"
     },
     "CrossDevice.today-EventuallyConverged.cfg": {
       "tier": "nightly",

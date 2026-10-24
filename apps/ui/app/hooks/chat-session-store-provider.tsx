@@ -20,6 +20,11 @@ import { ChatSessionStore } from '#services/chat-session-store.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { inspect } from '#machines/inspector.js';
+import {
+  isPlacementOnThisDevice,
+  isPlacementOnThisDeviceNow,
+  onPlacementReachabilityChanged,
+} from '#lib/agent-host-placement.js';
 
 const ChatSessionStoreContext = createContext<ChatSessionStore | undefined>(undefined);
 
@@ -53,6 +58,10 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
   store.setDependencies({
     getChat: projectManager.getChat,
     patchChat: projectManager.patchChat,
+    adoptLegacyChatPlacement: projectManager.adoptLegacyChatPlacement,
+    isPlacementOnThisDevice,
+    isPlacementOnThisDeviceNow,
+    onPlacementReachabilityChanged,
     touchChatRecency: projectManager.touchChatRecency,
     consumeChatStartupRequest: projectManager.consumeChatStartupRequest,
     commitCancelledDraftRestore: projectManager.commitCancelledDraftRestore,

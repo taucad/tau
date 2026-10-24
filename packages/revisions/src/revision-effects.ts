@@ -45,6 +45,7 @@ import {
   verifyPreparedProjectManifest,
 } from '#project-manifest-conversion.js';
 import { caseCollisions } from '#case-collisions.js';
+import { checkoutIdOfBranch } from '#checkout-id.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
 import { revisionTreeId } from '#git-tree-id.js';
 import { createHandles } from '#handle-table.js';
@@ -446,6 +447,14 @@ export type TurnStore = Readonly<{
   retire: (key: TurnAttemptKey) => Promise<'retired' | 'absent' | 'held'>;
   /** Resolves once the root that holds the run's record has stopped; at once when none does. */
   holderReleased: (runId: string, signal: AbortSignal) => Promise<void>;
+  /**
+   * The branch a checkout id derives from, when this device knows that branch (XD4). A chat record synced from another
+   * device can name a linked checkout this device never opened; its branch is the portable fact. `unborn` when the
+   * branch has no revision here yet, which only the live checkout's or the default branch can be. `removed` when this
+   * device removed that checkout, or saw its branch removed, and has not opened the branch since: the id is refused for
+   * good, never opened again. `undefined` when no branch on this device derives the id: a later sync may bring it.
+   */
+  branchOf: (checkoutId: string) => Promise<Readonly<{ branch: string; unborn: boolean }> | 'removed' | undefined>;
 }>;
 
 /**
@@ -688,8 +697,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * themselves (`withOwedPushes`). Upgrade path: write the log commit before
    * the head moves and publish both in one ref transaction.
    */
-  /* The newest queued log commit: appends run in order, so it settles last. */
+  /*
+   * Every head move's records, settled: each move's promise also waits for the ones before it, so the newest settles
+   * last even when an earlier move's records (an operation log append, a removal) take longer than a later one's.
+   */
   let loggedOperation: Promise<void> = Promise.resolve();
+  const afterBoth = async (prior: Promise<void>, next: Promise<void>): Promise<void> => {
+    await Promise.all([prior, next]);
+  };
   const port: RevisionPort = Object.freeze({
     ...options.port,
     listRemoteRefs: async (
@@ -716,7 +731,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       if (result.status === 'updated') {
         /* Held, so `settled()` — and a host removing the project — waits for it;
          * `recordOperation` never rejects. */
-        loggedOperation = recordOperation(input.name, result.previousHead, result.head);
+        loggedOperation = afterBoth(loggedOperation, recordOperation(input.name, result.previousHead, result.head));
       }
       return result;
     },
@@ -935,8 +950,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   };
 
   let described: Promise<RevisionEngineDescriptor> | undefined;
+  /* A description that failed is asked again next time, never kept: every later caller would inherit the rejection. */
   const describePort = async (): Promise<RevisionEngineDescriptor> => {
-    described ??= port.describe();
+    described ??= (async () => {
+      try {
+        return await port.describe();
+      } catch (error) {
+        described = undefined;
+        throw error;
+      }
+    })();
     return described;
   };
   const formatOf = async (): Promise<ObjectFormat> => {
@@ -1709,6 +1732,81 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   /* An undo's plan, by checkout, waiting for the `restore` cut that mints its tree (D15). */
   const pendingUndos = new Map<string, Readonly<{ treeId: string; undoes: string }>>();
 
+  /*
+   * XD4: the checkouts this device removed, and the checkouts of branches it saw removed, by id. A chat record synced
+   * from elsewhere can still name one; it is refused for good rather than opened again or waited on. Opening the
+   * branch here again forgets it. Device state in a control-plane file no tree records, like the record devices.
+   */
+  const removedCheckoutsPath = '.git/tau-removed-checkouts.json';
+  /*
+   * Absent is none, and a read that fails throws (the caller refuses retryably). A file that reads but does not parse
+   * as a list of ids would refuse every checkout for ever and is never repaired by a write, so it is moved aside whole
+   * (`.corrupt-<time>`, never written over), reported, and read as none: losing a removal marker only lets that
+   * checkout's id open its branch again, or wait on it, instead of refusing it for good.
+   */
+  const readRemovedCheckouts = async (): Promise<ReadonlySet<string>> => {
+    const records = await recordsFileSystem();
+    if (!(await records.exists(removedCheckoutsPath))) {
+      return new Set();
+    }
+    const text = await records.readFile(removedCheckoutsPath, 'utf8');
+    let stored: unknown;
+    try {
+      stored = JSON.parse(text);
+    } catch {
+      stored = undefined;
+    }
+    if (Array.isArray(stored) && stored.every((id) => typeof id === 'string')) {
+      return new Set(stored);
+    }
+    const aside = `${removedCheckoutsPath}.corrupt-${String(Date.now())}`;
+    try {
+      await records.rename(removedCheckoutsPath, aside);
+      console.warn(`[revisions] ${removedCheckoutsPath} is not a list of checkout ids; kept as ${aside}.`);
+    } catch {
+      /* Another reader moved it aside first, or a writer replaced it: the next read answers from what is there. */
+    }
+    return new Set();
+  };
+  let removedWrites: Promise<void> = Promise.resolve();
+  /* Written whole beside the file, then renamed over it, as the record devices are: a torn write leaves the old list. */
+  const writeRemovedCheckout = async (id: string, removed: boolean): Promise<void> => {
+    const ids = new Set(await readRemovedCheckouts());
+    if (ids.has(id) === removed) {
+      return;
+    }
+    if (removed) {
+      ids.add(id);
+    } else {
+      ids.delete(id);
+    }
+    const records = await recordsFileSystem();
+    await records.writeFile(`${removedCheckoutsPath}.writing`, `${JSON.stringify([...ids])}\n`);
+    await records.rename(`${removedCheckoutsPath}.writing`, removedCheckoutsPath);
+  };
+  const noteRemovedCheckout = async (id: string, removed: boolean): Promise<void> => {
+    const prior = removedWrites;
+    const write = (async (): Promise<void> => {
+      await prior;
+      try {
+        await writeRemovedCheckout(id, removed);
+      } catch {
+        /* Evidence, never a verb's outcome: a write that fails, or a list that cannot be read, is left as it was. */
+      }
+    })();
+    removedWrites = write;
+    await write;
+  };
+  /* Never rejects: the head has already moved, and this is evidence for a later placement, not the move's outcome. */
+  const noteBranchRemoved = async (branch: string, removed: boolean): Promise<void> => {
+    try {
+      const { objectFormat } = await describePort();
+      await noteRemovedCheckout(checkoutIdOfBranch(objectFormat, branch.replace(/^refs\/heads\//u, '')), removed);
+    } catch {
+      /* A store with no checkout to keep the record beside, or no format yet, records nothing. */
+    }
+  };
+
   /**
    * Append one head move to the log of the form that made it (D15, I5).
    *
@@ -1746,6 +1844,10 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
        * report a landed revision as lost. Only this operation is missing from
        * *Undo*; the push is still derived from the head (`withOwedPushes`). */
       console.error('[revisions] operation log', error);
+    }
+    /* After the operation log, which *Undo* needs, and never failing the move (XD4). */
+    if (from === undefined || to === undefined) {
+      await noteBranchRemoved(ref.slice('refs/heads/'.length), to === undefined);
     }
   };
 
@@ -2823,6 +2925,34 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const locks = lockManager();
         await (locks === undefined ? heldMarks.get(name) : locks.request(name, { signal }, () => undefined));
       },
+      branchOf: async (checkoutId) => {
+        await ensureStore();
+        /*
+         * A head move records its removal evidence after the move resolves (`recordOperation`): a pull that made a
+         * dropped branch again has cleared its record only once that settles, so the record is read after it.
+         */
+        await loggedOperation;
+        await removedWrites;
+        const removed = await readRemovedCheckouts();
+        if (removed.has(checkoutId)) {
+          return 'removed';
+        }
+        const { objectFormat } = await describePort();
+        const [heads, places] = await Promise.all([port.listRefs('refs/heads'), listPlaces()]);
+        const born = new Set(heads.map((reference) => reference.name.replace(/^refs\/heads\//, '')));
+        /* An unborn branch is a candidate only where a checkout already tracks it or a new project starts on it. */
+        const candidates = new Set([
+          ...born,
+          mainBranch,
+          ...places.flatMap((place) => (place.branch === undefined ? [] : [place.branch])),
+        ]);
+        for (const branch of candidates) {
+          if (checkoutIdOfBranch(objectFormat, branch) === checkoutId) {
+            return { branch, unborn: !born.has(branch) };
+          }
+        }
+        return undefined;
+      },
     },
     release: releaseMark,
     recordEditorConflict,
@@ -3304,6 +3434,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           branch: input.branch,
           ...(input.from === '' ? {} : { from: revisionId(input.from) }),
         });
+        await noteRemovedCheckout(added.id, false);
         return { checkout: await recordOf(added, await readLeases()) };
       }),
 
@@ -3324,6 +3455,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           );
         }
         await port.removeCheckout(input.id);
+        await noteRemovedCheckout(input.id, true);
         /* The bytes a closed checkout's captures could reuse describe a tree
          * this process can no longer reach (EQ7). */
         checkoutMemos.delete(input.id);
@@ -4501,6 +4633,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           // oxlint-disable-next-line no-await-in-loop -- each deleted remote branch has its own CAS.
           const removed = await port.updateRef({ name: branch, expectedHead: revisionId(prior) });
           if (removed.status === 'updated') {
+            /* XD4: the wrapped port records the removal (`recordOperation`), so a chat naming it is refused for good. */
             localByName.delete(branch);
           }
           const tracking = remoteTrackingRef(input.remote, branch);

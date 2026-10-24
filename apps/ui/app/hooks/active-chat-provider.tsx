@@ -43,10 +43,11 @@ import {
 } from 'react';
 import type { Chat } from '@ai-sdk/react';
 import { isResumableRun } from '@taucad/agent-host';
+import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
 import type { ActorRefFrom } from 'xstate';
-import type { CadAgentExecution, ContextUsageData, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, ContextUsageData, MyUIMessage, TauAgentHostId } from '@taucad/chat';
 import type { KernelEntry, KernelId } from '@taucad/types/constants';
 import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { isKernelAvailable } from '#constants/available-kernel-configurations.js';
@@ -58,7 +59,8 @@ import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
-import { selectCaughtUp, selectCurrentRun } from '#machines/chat-projection.logic.js';
+import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
+import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
@@ -122,6 +124,11 @@ export type ActiveChatModel = {
 export type ActiveChatExecution = {
   execution: CadAgentExecution;
   setActiveExecution: (execution: CadAgentExecution) => void;
+  /**
+   * This device's placement for the chat that this tab cannot reach, so `execution` runs locally instead (XD2). The
+   * composer names it; it stays this device's placement for the tab that can reach it.
+   */
+  heldPlacement?: TauAgentHostId | undefined;
 };
 
 export type ChatAgentActivity = 'ready' | 'working' | 'approval-required' | 'stopping';
@@ -137,6 +144,13 @@ export type ActiveChatKernel = {
   kernelId: KernelId;
   kernel: KernelEntry;
   setActiveKernel: (kernelId: KernelId) => void;
+  /**
+   * The chat's own kernel when this runtime cannot execute it, such as a
+   * native kernel only Tau Desktop advertises, read on the web. `kernel` is
+   * the one used instead; the chat keeps its preference, so it returns
+   * wherever that kernel runs. Absent when the chat's kernel is the one used.
+   */
+  unavailableKernel?: KernelEntry;
 };
 
 /**
@@ -182,6 +196,11 @@ export type ChatComposerContextValue = {
   stop: (origin: StopOrigin) => void;
   /** Continue a failed host run while it can still be resumed. */
   resume: (() => void) | undefined;
+  /**
+   * The run another device is running on this chat now (XD3): the host refuses a new run until it settles or goes
+   * stale, so the composer holds its send. Always `undefined` under the composer provider.
+   */
+  runElsewhere: ForeignRun | undefined;
   /**
    * Most-recent `data-context-usage` part across the chat's messages, or
    * `undefined` when no usage data has streamed. Always `undefined` under
@@ -295,6 +314,7 @@ export function ChatComposerProvider({
       agentActivity: 'ready',
       stop: noopStop,
       resume: undefined,
+      runElsewhere: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: false,
@@ -377,6 +397,7 @@ export function HomeNewProjectComposerProvider({
       agentActivity: 'ready',
       stop: noopStop,
       resume: undefined,
+      runElsewhere: undefined,
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: true,
@@ -441,6 +462,7 @@ function ActiveChatSessionProvider({
   const agentActivity = useSessionAgentActivity(session);
   const stop = useSessionStop(session);
   const resume = useSessionResume(session, chatId);
+  const runElsewhere = useSessionRunElsewhere(chatId);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
 
@@ -464,6 +486,7 @@ function ActiveChatSessionProvider({
       agentActivity,
       stop,
       resume,
+      runElsewhere,
       contextUsage,
       session: sessionValue,
       canSelectExecution: true,
@@ -479,6 +502,7 @@ function ActiveChatSessionProvider({
       agentActivity,
       stop,
       resume,
+      runElsewhere,
       contextUsage,
       sessionValue,
       consumeDraft,
@@ -657,8 +681,15 @@ function useConsumeDraft(
   }, [draftActorRef, owner]);
 }
 
+/**
+ * Session execution: the one this device runs the chat on — the chat record's intent with this device's placement
+ * for it — else the device default. A choice goes whole to the device default and to the session, whose persistence
+ * splits it: the portable execution to `chat.json`, a device-relative placement to this device's placements record
+ * (XD2). A placement this tab cannot reach is held, and the chat runs locally.
+ */
 function useSessionExecution(session: ChatSession): ActiveChatExecution {
   const persisted = useSelector(session.persistenceActorRef, (state) => state.context.activeExecution);
+  const heldPlacement = useSelector(session.persistenceActorRef, (state) => state.context.heldPlacement);
   const { defaultExecution, rememberExecution } = useModels();
   const execution = persisted ?? defaultExecution;
   const setActiveExecution = useCallback(
@@ -668,7 +699,10 @@ function useSessionExecution(session: ChatSession): ActiveChatExecution {
     },
     [session.persistenceActorRef, rememberExecution],
   );
-  return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
+  return useMemo(
+    () => ({ execution, setActiveExecution, heldPlacement }),
+    [execution, setActiveExecution, heldPlacement],
+  );
 }
 
 /**
@@ -676,15 +710,19 @@ function useSessionExecution(session: ChatSession): ActiveChatExecution {
  * The chat-row id is re-validated via {@link isKernelId} so a stale id
  * (e.g. a kernel that was retired from `kernelConfigurations` after the
  * row was persisted) heals to the cookie default instead of resurrecting
- * into the UI.
+ * into the UI. A known kernel this runtime cannot execute also runs the
+ * cookie default, but stays on the chat row and is named as
+ * `unavailableKernel`, so the composer can say which kernel runs and why
+ * (cross-device chat handoff, XD5).
  */
 function useSessionKernel(session: ChatSession): ActiveChatKernel {
   const chatActiveKernel = useSelector(session.persistenceActorRef, (state) => state.context.activeKernel);
   const { kernel: cookieKernel, setKernel: setCookieKernel } = useKernel();
-  const sessionKernel =
-    isKernelId(chatActiveKernel) && isKernelAvailable(chatActiveKernel) ? chatActiveKernel : undefined;
+  const knownKernel = isKernelId(chatActiveKernel) ? chatActiveKernel : undefined;
+  const sessionKernel = knownKernel !== undefined && isKernelAvailable(knownKernel) ? knownKernel : undefined;
   const kernelId: KernelId = sessionKernel ?? cookieKernel;
   const kernel = resolveKernel(kernelId);
+  const unavailableKernelId = sessionKernel === undefined ? knownKernel : undefined;
   const setActiveKernel = useCallback(
     (next: KernelId) => {
       setCookieKernel(next);
@@ -692,7 +730,15 @@ function useSessionKernel(session: ChatSession): ActiveChatKernel {
     },
     [session.persistenceActorRef, setCookieKernel],
   );
-  return useMemo<ActiveChatKernel>(() => ({ kernelId, kernel, setActiveKernel }), [kernelId, kernel, setActiveKernel]);
+  return useMemo<ActiveChatKernel>(
+    () => ({
+      kernelId,
+      kernel,
+      setActiveKernel,
+      ...(unavailableKernelId === undefined ? {} : { unavailableKernel: resolveKernel(unavailableKernelId) }),
+    }),
+    [kernelId, kernel, setActiveKernel, unavailableKernelId],
+  );
 }
 
 /**
@@ -783,6 +829,23 @@ function useSessionResume(session: ChatSession, chatId: string): (() => void) | 
     void store.requestTurn(chatId, { kind: 'continue' });
   }, [chatId, session, store]);
   return canResume() ? resume : undefined;
+}
+
+/**
+ * The run another device holds this chat with, kept current (XD3), by `subscribeRunElsewhere`'s clock.
+ */
+function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
+  const store = useChatSessionStore();
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeRunElsewhere(store, chatId, listener),
+    [chatId, store],
+  );
+  /* Stable for one held run: the selector returns the run object the projection holds. */
+  const snapshot = useCallback(() => {
+    const projection = store.getProjection(chatId);
+    return projection === undefined ? undefined : selectRunElsewhere(projection, Date.now());
+  }, [chatId, store]);
+  return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
 /**

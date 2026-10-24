@@ -1,7 +1,7 @@
 /** Chat metadata persistence: loading, execution, kernel and command refusals. */
 
 import { createAsyncLogic, setup, types } from 'xstate';
-import type { CadAgentExecution, Chat } from '@taucad/chat';
+import type { CadAgentExecution, Chat, TauAgentHostId } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { eventSchemas } from '#lib/xstate.lib.js';
@@ -23,13 +23,24 @@ export type ChatPersistenceMachineContext = {
   loadError?: Error;
   /** The last refused command; host run failures are selected from the log. */
   persistedError?: ChatError;
+  /**
+   * The execution this device runs the chat on: the chat record's portable
+   * execution with this device's own placement for the chat put back on it.
+   * `persistActiveExecutionActor` splits it again on write, so `chat.json`
+   * never holds a device-relative host (cross-device chat handoff, XD2).
+   */
   activeExecution?: CadAgentExecution;
+  /**
+   * This device's placement for the chat that this tab cannot reach (a loopback daemon another tab was handed, or
+   * `origin` on a page no daemon served), so `activeExecution` runs locally instead and the composer says so (XD2).
+   */
+  heldPlacement?: TauAgentHostId;
   activeKernel?: KernelId;
   fault?: string;
 };
 
 /** What loading a chat answers: its row, or `undefined` when it has none yet. @public */
-export type ChatLoadOutput = Readonly<{ chat: Chat | undefined }>;
+export type ChatLoadOutput = Readonly<{ chat: Chat | undefined; heldPlacement?: TauAgentHostId | undefined }>;
 
 type ChatPersistenceMachineEvents =
   | { type: 'setActiveChatId'; chatId: string }
@@ -38,7 +49,22 @@ type ChatPersistenceMachineEvents =
   | { type: 'clearPersistedError' }
   | { type: 'turnRequested' }
   | { type: 'setActiveExecution'; execution: CadAgentExecution | undefined }
+  /* This tab can now reach this device's held placement for the chat: run on it, persisting nothing (XD2). */
+  | { type: 'placementReachable'; execution: CadAgentExecution }
+  /** A placement applied before its reach was known turned out unreachable: the chat runs here, holding it if it is
+   * this device's own (XD2). */
+  | { type: 'placementUnreachable'; execution: CadAgentExecution; heldPlacement?: TauAgentHostId }
   | { type: 'setActiveKernel'; kernel: KernelId | undefined };
+
+/**
+ * The held placement a newly chosen execution leaves standing: only while the chat stays on this tab's local Tau,
+ * which is what the held placement explains. Any other choice — a daemon, a paired device, an external agent — ends it.
+ */
+const stillHeld = (
+  context: ChatPersistenceMachineContext,
+  execution: CadAgentExecution | undefined,
+): TauAgentHostId | undefined =>
+  execution?.kind === 'tau' && execution.hostId === undefined ? context.heldPlacement : undefined;
 
 const loadChatActor = createAsyncLogic<ChatLoadOutput, { chatId: string }>({
   run: async () => {
@@ -60,7 +86,12 @@ const clearErrorActor = createAsyncLogic<void, { chatId: string }>({
 
 const persistActiveExecutionActor = createAsyncLogic<
   void,
-  { chatId: string; activeExecution: CadAgentExecution | undefined }
+  {
+    chatId: string;
+    activeExecution: CadAgentExecution | undefined;
+    /** The placement this tab holds but cannot reach, which a local choice leaves in place for the tab that can. */
+    heldPlacement: TauAgentHostId | undefined;
+  }
 >({
   run: async () => {
     throw new Error('chatPersistenceMachine: the persistActiveExecutionActor actor was not provided.');
@@ -138,6 +169,7 @@ export const chatPersistenceMachine = setup({
                 isLoadingChat: false,
                 persistedError: event.output.chat?.error,
                 activeExecution: event.output.chat?.activeExecution,
+                heldPlacement: event.output.heldPlacement,
                 activeKernel: event.output.chat?.activeKernel,
               }),
             },
@@ -166,22 +198,45 @@ export const chatPersistenceMachine = setup({
           on: {
             setActiveExecution: ({ context, event }) =>
               hasValidChatId(context)
-                ? { target: 'persisting', context: { activeExecution: event.execution } }
+                ? {
+                    target: 'persisting',
+                    context: { activeExecution: event.execution, heldPlacement: stillHeld(context, event.execution) },
+                  }
                 : undefined,
+            placementReachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: undefined },
+            }),
+            placementUnreachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
+            }),
           },
         },
         persisting: {
           invoke: {
             src: 'persistActiveExecutionActor',
-            input: ({ context }) => ({ chatId: context.activeChatId!, activeExecution: context.activeExecution }),
+            input: ({ context }) => ({
+              chatId: context.activeChatId!,
+              activeExecution: context.activeExecution,
+              heldPlacement: context.heldPlacement,
+            }),
             onDone: { target: 'idle' },
             onError: { target: 'idle' },
           },
           on: {
             setActiveExecution: ({ context, event }) =>
               hasValidChatId(context)
-                ? { target: 'persisting', reenter: true, context: { activeExecution: event.execution } }
+                ? {
+                    target: 'persisting',
+                    reenter: true,
+                    context: { activeExecution: event.execution, heldPlacement: stillHeld(context, event.execution) },
+                  }
                 : undefined,
+            placementReachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: undefined },
+            }),
+            placementUnreachable: ({ event }) => ({
+              context: { activeExecution: event.execution, heldPlacement: event.heldPlacement },
+            }),
           },
         },
       },

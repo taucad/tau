@@ -93,6 +93,38 @@
       "owner": "W5"
     },
     {
+      "id": "A10P",
+      "bound": "Run heartbeat: a live run (admitted, running, or paused and held by an open incarnation) whose chat went a minute without a row writes a run.heartbeat and asks the placement to publish the chat's ref, so another device's run fence sees it alive (XD3)",
+      "site": "packages/agent-host/src/host/tau-agent-host.ts",
+      "token": "runHeartbeatMilliseconds",
+      "class": "Debounce",
+      "owner": "XD3"
+    },
+    {
+      "id": "APPROVAL-REFRESH",
+      "bound": "An approval waits at most ten seconds to read the other devices' segments, then is refused SEGMENTS_UNREADABLE (wait) instead of continuing a paused run on a fence it could not check",
+      "site": "packages/agent-host/src/host/tau-agent-host.ts",
+      "token": "approvalRefreshMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
+      "id": "CHAT-CLOSING-WAIT",
+      "bound": "A command that reaches a chat whose incarnation is closing waits at most ten seconds for its log to close, then is refused WRITER_LOCKED (wait)",
+      "site": "packages/agent-host/src/host/chat-run-registry.ts",
+      "token": "chatClosingWaitMilliseconds",
+      "class": "Liveness",
+      "owner": "XD3"
+    },
+    {
+      "id": "XD4-OPEN",
+      "bound": "Turn placement waits at most thirty seconds for a branch's checkout to open on this device, then refuses REVISIONS_UNAVAILABLE (wait) (XD4)",
+      "site": "packages/revisions/src/turn-placement.ts",
+      "token": "checkoutOpenMilliseconds",
+      "class": "External edge",
+      "owner": "XD4"
+    },
+    {
       "id": "A11",
       "bound": "Sync backoff",
       "site": "packages/revisions/src/sync.machine.ts",

@@ -8,6 +8,9 @@ import type { AttachmentReader } from '#harness/session-record.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { EventLogError } from '#log/event-log-error.js';
 import type { StorageDurabilityClass } from '#log/event-types.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
+import { compareSegmentDeviceIds } from '#log/segments.js';
+import type { ChatLogSegment } from '#log/segments.js';
 import type { SourceLiveEvent } from '#waist/ports.js';
 import type { CommandAnswer, HostCommand } from '#wire/commands.schema.js';
 import type { ReadAnswer, ReadInput } from '#wire/frames.schema.js';
@@ -110,6 +113,149 @@ const bindingKey = Symbol('tau.chatStore');
 
 /** The chat record's name beside the log, restated: `@taucad/revisions` owns it and this package does not import it. @internal */
 export const chatRecordFileName = 'chat.json';
+
+/**
+ * The directory beside a chat's `events.jsonl` that holds every other device's log, restated from `@taucad/revisions`
+ * (`chatSegmentPath`: `events/<deviceId>.jsonl`), which this package does not import. @internal
+ */
+export const chatSegmentsDirectoryName = 'events';
+
+/**
+ * The device a segment file belongs to: what every reader of a chat's `events/` directory, host or page, names it.
+ *
+ * @param name - One entry of the chat's `events/` directory.
+ * @returns The device id `chatSegmentPath` spelled it from, or `undefined` for any other entry.
+ * @public
+ */
+export const segmentDeviceIdOf = (name: string): string | undefined =>
+  /^[^/\\]+\.jsonl$/u.test(name) ? name.slice(0, -'.jsonl'.length) : undefined;
+
+/**
+ * Run a filesystem read that answers `absent` when its path is not there (`ENOENT`, `ENOTDIR`), and rethrows anything
+ * else: every platform's segment source reads its directory and files this way.
+ *
+ * @param read - The read.
+ * @param absent - What a missing path answers.
+ * @returns The read's answer, or `absent`.
+ * @internal
+ */
+export const readOrAbsent = async <Answer>(read: () => Promise<Answer>, absent: Answer): Promise<Answer> => {
+  try {
+    return await read();
+  } catch (error) {
+    const { code } = error as { readonly code?: unknown };
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return absent;
+    }
+    throw error;
+  }
+};
+
+const sameBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index]);
+
+/** How a platform reaches one chat's `events/` directory, for {@link createChatSegmentsReader}. @internal */
+export type ChatSegmentsSource = Readonly<{
+  /** The directory's entry names; none when it does not exist. */
+  list: () => Promise<readonly string[]>;
+  /** One entry's bytes, `undefined` when it vanished meanwhile. */
+  read: (name: string) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  /**
+   * A fingerprint of one entry that changes whenever its bytes do (its size and a modification time), read without its
+   * bytes. `undefined` when there is none to trust — no modification time, or the entry vanished — and the bytes are
+   * read instead. Without it every call reads every segment.
+   */
+  version?: ((name: string) => Promise<string | undefined>) | undefined;
+}>;
+
+/**
+ * Read every other device's segment of one chat, again on each call (XD1).
+ *
+ * A segment whose fingerprint did not change since the last call is answered with the same object, read once: a
+ * writer refreshes before every admission, and most refreshes find nothing new.
+ *
+ * A segment that is listed but cannot be read (a directory in its place, a denied read) may hold a live run, so the
+ * whole read rejects while that can still be so (XD3). A live run keeps its device's segment changing — a row, a
+ * heartbeat or a publish at least every `runHeartbeatMilliseconds` — so a segment whose fingerprint has not changed
+ * while it failed for a whole {@link foreignRunStaleMilliseconds} holds no live run: it is answered empty, with
+ * `unreadable` saying why, and the chat is no longer held on it. Any change to it starts the bound again. Without a
+ * fingerprint the bound runs from the first failure.
+ *
+ * @param source - The chat's `events/` directory on this platform.
+ * @param options - `now`, this device's clock in epoch milliseconds (`Date.now` by default).
+ * @returns A read of the segments: one per `<deviceId>.jsonl` entry, in device-id order.
+ * @internal
+ */
+export const createChatSegmentsReader = (
+  source: ChatSegmentsSource,
+  options: Readonly<{ now?: (() => number) | undefined }> = {},
+): (() => Promise<readonly ChatLogSegment[]>) => {
+  const now = options.now ?? Date.now;
+  const known = new Map<string, Readonly<{ version: string | undefined; segment: ChatLogSegment }>>();
+  /** Each segment failing to read now: its fingerprint, since when it has failed under it, and its empty answer. */
+  const failing = new Map<
+    string,
+    Readonly<{ version: string | undefined; since: number; segment?: ChatLogSegment | undefined }>
+  >();
+  const unreadable = (name: string, version: string | undefined, error: unknown): ChatLogSegment => {
+    const prior = failing.get(name);
+    const since = prior !== undefined && prior.version === version ? prior.since : now();
+    if (now() - since <= foreignRunStaleMilliseconds) {
+      failing.set(name, { version, since });
+      throw error;
+    }
+    const segment = prior?.segment ?? {
+      deviceId: segmentDeviceIdOf(name)!,
+      bytes: new Uint8Array(),
+      unreadable: error instanceof Error ? error.message : String(error),
+    };
+    failing.set(name, { version, since, segment });
+    return segment;
+  };
+  return async () => {
+    const listed = await source.list();
+    const names = listed
+      .filter((name) => segmentDeviceIdOf(name) !== undefined)
+      .toSorted((left, right) =>
+        compareSegmentDeviceIds({ deviceId: segmentDeviceIdOf(left)! }, { deviceId: segmentDeviceIdOf(right)! }),
+      );
+    for (const map of [known, failing]) {
+      for (const name of map.keys()) {
+        if (!names.includes(name)) {
+          map.delete(name);
+        }
+      }
+    }
+    const found = await Promise.all(
+      names.map(async (name): Promise<ChatLogSegment | undefined> => {
+        const deviceId = segmentDeviceIdOf(name)!;
+        const version = await source.version?.(name).catch(() => undefined);
+        const prior = known.get(name);
+        if (version !== undefined && prior?.version === version) {
+          return prior.segment;
+        }
+        let bytes: Uint8Array<ArrayBuffer> | undefined;
+        try {
+          bytes = await source.read(name);
+        } catch (error) {
+          known.delete(name);
+          return unreadable(name, version, error);
+        }
+        failing.delete(name);
+        if (bytes === undefined) {
+          known.delete(name);
+          return undefined;
+        }
+        /* With no fingerprint to trust the bytes were read; unchanged ones keep their identity, so nothing refolds. */
+        const segment =
+          prior !== undefined && sameBytes(prior.segment.bytes, bytes) ? prior.segment : { deviceId, bytes };
+        known.set(name, { version, segment });
+        return segment;
+      }),
+    );
+    return found.filter((segment) => segment !== undefined);
+  };
+};
 
 /**
  * Whether a chat record's text carries a permanent delete's tombstone.

@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type React from 'react';
-import { Bot, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
+import { Bot, CircleAlert, MonitorSmartphone, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
@@ -204,24 +204,32 @@ function codedErrorCard({
   if (category === 'pausedTurn') {
     // The orphan rule records why the driver went (`orphanRows`): an agent left waiting for approval asks again.
     const awaitingApproval = code === 'RUN_ABANDONED' && error.details?.['cause'] === 'awaiting-approval';
+    /* A `wait` refusal that ended an admitted run is recorded RUN_ABANDONED with its code kept (RA-R1, XD3/XD4). */
+    const abandonedCode = code === 'RUN_ABANDONED' ? error.details?.['code'] : undefined;
+    const waitingOnSync =
+      typeof abandonedCode === 'string' && cardOf(abandonedCode, error.category).category === 'waitingOnSync';
     return (
       <ChatErrorPausedTurn
         className={className}
         title={
           awaitingApproval
             ? 'Tau closed while the agent waited for your approval'
-            : code === 'RUN_ABANDONED'
-              ? 'Chat paused'
-              : code === 'NETWORK_ERROR'
-                ? 'Connection lost'
-                : undefined
+            : waitingOnSync
+              ? 'Waiting on sync from another device'
+              : code === 'RUN_ABANDONED'
+                ? 'Chat paused'
+                : code === 'NETWORK_ERROR'
+                  ? 'Connection lost'
+                  : undefined
         }
         reason={
           awaitingApproval
             ? 'Resume and the agent asks for it again.'
-            : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
-              ? undefined
-              : error.message
+            : waitingOnSync
+              ? 'Resume once sync brings what another device wrote.'
+              : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
+                ? undefined
+                : error.message
         }
         resumable={retry === 'resume' && resumable}
         icon={error.category === errorCategory.overloaded ? WifiOff : CircleAlert}
@@ -308,6 +316,34 @@ function codedErrorCard({
         icon={Bot}
         title='This chat continued in another tab'
         description='Keep working there. Reload this page to follow along here.'
+      />
+    );
+  }
+
+  // Another device is running this chat (XD3). Its run cannot be moved or stopped from here (OQ-N21); the composer
+  // holds its send until sync brings that run's ending, and the draft that was refused is kept.
+  if (category === 'otherDevice') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={MonitorSmartphone}
+        title='This chat is running on another device'
+        description='Send again here once that run finishes.'
+      />
+    );
+  }
+
+  // Another device's copy of the chat, or the branch it ran on, has not reached this device yet (XD3, XD4). Both are
+  // refused `wait`: the same send is admitted once sync brings it, and nothing here can hurry it.
+  if (category === 'waitingOnSync') {
+    return (
+      <ChatErrorCard
+        className={className}
+        tone='neutral'
+        icon={MonitorSmartphone}
+        title='Waiting on sync from another device'
+        description='This chat continues once sync brings what another device wrote. Send again then.'
       />
     );
   }

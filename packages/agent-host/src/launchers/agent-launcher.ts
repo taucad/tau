@@ -570,9 +570,19 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       },
       read: async () => log.read(),
       readBatch: async (input) => log.readBatch(input),
+      /* The chat's history over every device's segment; `read` above stays this device's rows (XD1). */
       messages: async () => log.messages(),
       historyIntact: async () => log.historyIntact(),
       anomalies: async () => log.anomalies(),
+      ...(log.refresh === undefined ? {} : { refresh: log.refresh.bind(log) }),
+      /* Other devices' unsettled runs, which the cross-device run fence reads (XD3). */
+      ...(log.foreignRuns === undefined ? {} : { foreignRuns: log.foreignRuns.bind(log) }),
+      /* When another device last wrote the chat: a turn after it opens a new term (XD1). */
+      ...(log.stampAfterRead === undefined ? {} : { stampAfterRead: log.stampAfterRead.bind(log) }),
+      ...(log.foreignWroteSinceTermBegan === undefined
+        ? {}
+        : { foreignWroteSinceTermBegan: log.foreignWroteSinceTermBegan.bind(log) }),
+      ...(log.historyUnknown === undefined ? {} : { historyUnknown: log.historyUnknown.bind(log) }),
       close: async () => {
         writers.delete(chatId);
         writerGenerations.delete(chatId);

@@ -12,8 +12,19 @@ export type { FoldProjectionFactsInput } from '#log/chat-ledger.js';
 export { EventLogError } from '#log/event-log-error.js';
 export { parseEventLog, serializeLogEvent } from '#log/serialization.js';
 export { reduceEventLog } from '#log/reducer.js';
-export { mergeLogSegments } from '#log/segments.js';
-export type { ChatLogSegment, MergeLogSegmentsOptions } from '#log/segments.js';
+export { compareSegmentDeviceIds, mergeLogSegments, mergeSegmentRows, parseLogSegments } from '#log/segments.js';
+export type { ChatLogSegment, MergeLogSegmentsOptions, ParsedLogSegment } from '#log/segments.js';
+export {
+  foreignRunStaleMilliseconds,
+  foreignRunStanding,
+  isAbandonedForeignRun,
+  liveForeignRun,
+  parseSegmentFrom,
+  unsettledForeignRuns,
+  unsettledParsedRuns,
+} from '#log/foreign-runs.js';
+export type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
+export { segmentDeviceIdOf } from '#launchers/chat-store.js';
 export {
   agentLogEventSchema,
   jsonValueSchema,
@@ -22,7 +33,7 @@ export {
   userProviderMessageSchema,
 } from '#log/event-schema.js';
 export { createAgentSession, createTransportStreamFunction, requestedMaxTokens } from '#harness/session.js';
-export { createTauAgentHost } from '#host/tau-agent-host.js';
+export { createTauAgentHost, pausedRunHoldMilliseconds, runHeartbeatMilliseconds } from '#host/tau-agent-host.js';
 export { isResumableRun, isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
 export {
   emptyChatLedger,
@@ -95,6 +106,7 @@ export type {
   TurnChangedLogEvent,
   TurnFinalizedLogEvent,
   RunLifecycleEvent,
+  RunHeartbeatEvent,
   RunTrigger,
   RunLifecycleState,
   SafeguardRecordedEvent,
@@ -110,7 +122,7 @@ export type {
   TurnPlacement,
   UserProviderMessage,
 } from '#log/event-types.js';
-export { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
+export { isPersonsMessage, modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
 export type { PromptCacheControl } from '#log/event-types.js';
 export type {
   DurableEventLog,

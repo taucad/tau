@@ -1,4 +1,4 @@
-import type { CadAgentConfigInput, TauAgentHostId } from '@taucad/chat';
+import type { CadAgentConfigInput, CadAgentExecution, TauAgentHostId } from '@taucad/chat';
 import type { CadReference } from '@taucad/chat/references';
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import { getProviderFacingToolInputSchemas } from '@taucad/chat/schemas';
@@ -11,10 +11,11 @@ import type { AgentChannelClient } from '@taucad/agent-host';
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
 import {
   AgentHostPlacementError,
+  daemonPlacementOf,
   desktopWorkspaceRoot,
   openAgentHostChannel,
   placementRungOf,
-  unreachablePlacementReason,
+  unplaceableExecutionReason,
 } from '#lib/agent-host-placement.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { admittedReasoning } from '#utils/model-reasoning.js';
@@ -303,23 +304,44 @@ export const hostAdmission = (input: {
  * placement resolves this project's absolute node path first. Every other
  * placement names its own workspace on the wire, and is dialled by id alone.
  *
- * A placement this build cannot reach — a persisted `desktop` placement opened
- * on the web — is refused before anything is resolved or dialled.
- *
  * @param hostId - The placement to dial.
  * @param projectId - Project whose node root launcher 2 is granted.
  * @returns An open channel client.
- * @throws {AgentHostPlacementError} When this build cannot reach the placement.
  */
-export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): Promise<AgentChannelClient> => {
-  const unreachable = unreachablePlacementReason(hostId);
-  if (unreachable !== undefined) {
-    throw new AgentHostPlacementError('DESKTOP_ROOT_NOT_GRANTED', placementRungOf(hostId), unreachable);
-  }
-  return hostId === 'desktop'
+export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): Promise<AgentChannelClient> =>
+  hostId === 'desktop'
     ? openAgentHostChannel(hostId, {
         projectId,
         workspaceRoot: await desktopWorkspaceRoot(projectId),
       })
     : openAgentHostChannel(hostId);
+
+/**
+ * Dial the daemon one chat's execution is placed on, from this device.
+ *
+ * The placement is this device's ({@link daemonPlacementOf}): a Tau chat with a
+ * device-relative host runs locally, so only a paired device or a daemon this
+ * device chose is dialled. An external agent whose host this device already
+ * knows it cannot reach (`unplaceableExecutionReason`) is refused before
+ * anything is resolved or dialled.
+ *
+ * @param execution - The chat's execution, as this device places it.
+ * @param projectId - Project whose node root launcher 2 is granted.
+ * @returns An open channel client.
+ * @throws {AgentHostPlacementError} `HOST_NOT_ON_THIS_DEVICE` when this device cannot place the execution.
+ * @throws When the execution is placed on this page's own worker, which is not dialled.
+ */
+export const dialExecutionHost = async (
+  execution: CadAgentExecution,
+  projectId: string,
+): Promise<AgentChannelClient> => {
+  const hostId = daemonPlacementOf(execution);
+  if (hostId === undefined) {
+    throw new Error('This chat runs in this page’s own agent host, not on a daemon.');
+  }
+  const unplaceable = unplaceableExecutionReason(execution);
+  if (unplaceable !== undefined) {
+    throw new AgentHostPlacementError('HOST_NOT_ON_THIS_DEVICE', placementRungOf(hostId), unplaceable);
+  }
+  return dialAgentHost(hostId, projectId);
 };

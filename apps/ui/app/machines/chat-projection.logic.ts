@@ -18,8 +18,13 @@ import {
   agentLogEventSchema,
   emptyChatLedger,
   foldReadAnswer,
+  compareSegmentDeviceIds,
   foldProjectionFacts,
-  mergeLogSegments,
+  foreignRunStanding,
+  liveForeignRun,
+  mergeSegmentRows,
+  parseSegmentFrom,
+  unsettledParsedRuns,
 } from '@taucad/agent-host';
 import type {
   AgentLiveEvent,
@@ -29,7 +34,10 @@ import type {
   ProjectionSourceHealth,
   ChatLedger,
   ChatLogSegment,
+  ForeignRun,
+  ParsedLogSegment,
   RowKey,
+  SegmentParse,
   TurnPlacement,
 } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
@@ -170,6 +178,8 @@ export type ChatProjection = Readonly<{
   remote?: Readonly<{
     digest: string;
     views: Readonly<Record<string, RunView>>;
+    /** Runs another device has not settled, each segment read on its own ledger (XD3). */
+    unsettled?: readonly ForeignRun[];
   }>;
   /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
   blocks: Readonly<Record<string, Readonly<Record<string, Block>>>>;
@@ -201,8 +211,11 @@ export type ChatProjectionEvent =
   | Readonly<{ type: 'live'; event: AgentLiveEvent }>
   /** Retire only the named ephemeral overlay after terminal delivery or reader loss. */
   | Readonly<{ type: 'clear-live'; runId: string }>
-  /** Other devices' projected segment files; no own-log cursor applies to them. */
-  | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[] }>;
+  /**
+   * Other devices' projected segment files; no own-log cursor applies to them. `at` is when this device read them, on
+   * its own clock: a foreign run's staleness counts from when this device first saw its rows change.
+   */
+  | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[]; at: number }>;
 
 /** What the projection tells its reader. @public */
 export type ChatProjectionEmitted =
@@ -335,13 +348,42 @@ const hashSegment = (bytes: Uint8Array<ArrayBuffer>): number => {
   return hash >>> 0;
 };
 
+type SegmentSignature = Readonly<{ deviceId: string; byteLength: number; hash: number }>;
+
+/** Each segment's signature, in the order given: callers pass segments already in device-id order. */
+const signaturesOf = (sorted: readonly ChatLogSegment[]): readonly SegmentSignature[] =>
+  sorted.map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }));
+
+const signatureKey = ({ deviceId, byteLength, hash }: SegmentSignature): string =>
+  `${deviceId}:${String(byteLength)}:${String(hash)}`;
+
+/** One device's segment as the projection last parsed it, and the signature of the bytes it parsed. */
+type KeptParse = Readonly<{ key: string; parse: SegmentParse }>;
+
+/*
+ * Each remote projection's segment parses, beside the projection rather than in it: the state stays plain data, and
+ * the next `remote` event parses on from the parses of the projection it replaces. A projection rebuilt any other way
+ * simply parses whole once.
+ */
+const segmentParses = new WeakMap<NonNullable<ChatProjection['remote']>, ReadonlyMap<string, KeptParse>>();
+
+/**
+ * The segment parses a remote projection was folded from, by device.
+ *
+ * @param remote - The projection's `remote`.
+ * @returns Each device's parse, or `undefined` for none.
+ * @internal
+ */
+export const remoteSegmentParsesOf = (
+  remote: ChatProjection['remote'],
+): ReadonlyMap<string, SegmentParse> | undefined => {
+  const kept = remote === undefined ? undefined : segmentParses.get(remote);
+  return kept === undefined ? undefined : new Map([...kept].map(([deviceId, { parse }]) => [deviceId, parse]));
+};
+
 /** One bounded digest of the segment bytes that can change the merged transcript. @public */
 export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =>
-  JSON.stringify(
-    segments
-      .map(({ deviceId, bytes }) => ({ deviceId, byteLength: bytes.byteLength, hash: hashSegment(bytes) }))
-      .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0)),
-  );
+  JSON.stringify(signaturesOf(segments.toSorted(compareSegmentDeviceIds)));
 
 /** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
 const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
@@ -1037,12 +1079,29 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
     return { state: { ...initialChatProjection, resetVersion: state.resetVersion + 1 } };
   }
   if (event.type === 'remote') {
-    const digest = digestLogSegments(event.segments);
+    const sorted = event.segments.toSorted(compareSegmentDeviceIds);
+    const signatures = signaturesOf(sorted);
+    const digest = JSON.stringify(signatures);
     if (digest === state.remote?.digest) {
       return { state };
     }
-    const { views } = foldRunViews(mergeLogSegments(event.segments), {}, {});
-    return { state: { ...state, remote: { digest, views } } };
+    /* Each segment is parsed once, for the merged views and for the runs another device has not settled (XD3): not
+     * again while its bytes stay the same, and only its new rows when it grew, as the agent host's appender does. */
+    const known = state.remote === undefined ? undefined : segmentParses.get(state.remote);
+    const parses = new Map<string, KeptParse>();
+    const parsed: ParsedLogSegment[] = sorted.map(({ deviceId, bytes }, index) => {
+      const key = signatureKey(signatures[index]!);
+      const prior = known?.get(deviceId);
+      /* The same signature is the same bytes, though a read may hand them over as a new array. */
+      const parse = prior?.key === key ? prior.parse : parseSegmentFrom(prior?.parse, bytes);
+      parses.set(deviceId, { key, parse });
+      return { deviceId, events: parse.events };
+    });
+    const { views } = foldRunViews(mergeSegmentRows(parsed), {}, {});
+    const unsettled = unsettledParsedRuns(parsed, event.at);
+    const remote = { digest, views, ...(unsettled.length === 0 ? {} : { unsettled }) };
+    segmentParses.set(remote, parses);
+    return { state: { ...state, remote } };
   }
   if (event.type === 'live') {
     const { runId } = event.event;
@@ -1255,6 +1314,62 @@ export const selectCurrentRun = (
   const runId = projection.ledger.currentRunId;
   const run = runId === undefined ? undefined : projection.ledger.runs[runId];
   return runId === undefined || run === undefined ? undefined : { runId, ...run };
+};
+
+/** Unsettled runs in other devices' segments that are not this device's own runs read back. */
+const foreignUnsettledRuns = (projection: ChatProjection): readonly ForeignRun[] =>
+  (projection.remote?.unsettled ?? []).filter((run) => projection.ledger.runs[run.runId] === undefined);
+
+/**
+ * The run another device is running on this chat now, if any (XD3): unsettled in that device's synced segment, not
+ * this device's own run, and not past the staleness bound at `now`. The host refuses a new run while it holds; it is
+ * gone once sync brings its settlement or once it goes stale.
+ *
+ * @param projection - The chat's projection.
+ * @param now - This device's time, in epoch milliseconds.
+ * @returns The run, or `undefined`.
+ * @public
+ */
+export const selectRunElsewhere = (projection: ChatProjection, now: number): ForeignRun | undefined =>
+  liveForeignRun(foreignUnsettledRuns(projection), now);
+
+/**
+ * When `selectRunElsewhere` next changes with the clock alone, if it can (XD3): the earliest moment an unsettled
+ * foreign run crosses the staleness bound (`foreignRunStanding`). No store announces that moment, so a reader arms one
+ * timeout for it; `undefined` means only new segment bytes can change the answer.
+ *
+ * @param projection - The chat's projection.
+ * @param now - This device's time, in epoch milliseconds.
+ * @returns The epoch milliseconds of the next change, or `undefined`.
+ * @public
+ */
+export const selectRunElsewhereChangesAt = (projection: ChatProjection, now: number): number | undefined => {
+  let soonest: number | undefined;
+  for (const run of foreignUnsettledRuns(projection)) {
+    const at = foreignRunStanding(run, now).changesAt;
+    if (at !== undefined && (soonest === undefined || at < soonest)) {
+      soonest = at;
+    }
+  }
+  return soonest;
+};
+
+/** The longest delay one `setTimeout` holds: a longer one fires at once. */
+const longestTimerMilliseconds = 2_147_483_647;
+
+/**
+ * How long a reader of `selectRunElsewhere` waits before it reads again (XD3): until the answer next changes with the
+ * clock (`selectRunElsewhereChangesAt`), never longer than one timer can wait, and `undefined` when only new segment
+ * bytes can change it. A foreign clock far ahead of this one then re-arms once a timer's span instead of spinning.
+ *
+ * @param projection - The chat's projection.
+ * @param now - This device's time, in epoch milliseconds.
+ * @returns The delay in milliseconds, or `undefined`.
+ * @public
+ */
+export const selectRunElsewhereRecheckDelay = (projection: ChatProjection, now: number): number | undefined => {
+  const changesAt = selectRunElsewhereChangesAt(projection, now);
+  return changesAt === undefined ? undefined : Math.min(Math.max(0, changesAt - now), longestTimerMilliseconds);
 };
 
 /** Ordered run sources for the one SDK transcript, with the own log winning a duplicate run id. @public */

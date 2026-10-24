@@ -463,6 +463,9 @@ export type TurnCompleteInput = TurnAttemptInput & Readonly<{ cut: boolean }>;
 /** `reconcile`: list the lease records of the project, or of one chat. @public */
 export type TurnReconcileInput = Readonly<{ requestId: string; chatId?: string | undefined }>;
 
+/** `publish`: record one chat's log in its ref now, so the other devices see its run (XD3). @public */
+export type TurnPublishInput = Readonly<{ requestId: string; chatId: string }>;
+
 /** `settlements`: a listen that replays every unacknowledged fact on subscribe. @public */
 export type TurnSettlementsInput = Readonly<{ signal: AbortSignal }>;
 
@@ -524,6 +527,7 @@ export type TurnPlacementPort = Readonly<{
     TurnPlacementAnswer<
       Readonly<{ placement: TurnPlacementGrant }>,
       | 'CHECKOUT_UNKNOWN'
+      | 'BRANCH_UNAVAILABLE'
       | 'CHECKOUT_CONFLICT'
       | 'BASE_CUT_FAILED'
       | 'TURN_ALREADY_LEASED'
@@ -549,6 +553,15 @@ export type TurnPlacementPort = Readonly<{
   acknowledge: (
     input: TurnAttemptInput,
   ) => Promise<TurnPlacementAnswer<NoResult, 'LEASE_HELD_ELSEWHERE' | 'REVISIONS_BUSY' | 'SESSION_FENCED'>>;
+  /**
+   * Record the chat's log in its ref now, for a live run (XD3), so another device that syncs sees the run is still
+   * live. An offline remote queues the push. Refused `CHAT_NOT_SHARED` where the project syncs with no remote: no other
+   * device reads the chat, and the host then writes no `run.heartbeat` row, which builds older than XD3 read as an
+   * opaque row of the run. Absent on an older session.
+   */
+  publish?:
+    | ((input: TurnPublishInput) => Promise<TurnPlacementAnswer<NoResult, 'SESSION_FENCED' | 'CHAT_NOT_SHARED'>>)
+    | undefined;
 }>;
 
 /** A launcher live delta qualified by its emitting writer incarnation. @public */

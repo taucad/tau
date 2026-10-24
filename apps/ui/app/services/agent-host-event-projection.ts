@@ -1354,10 +1354,12 @@ export const projectAgentHostEvent = (
     case 'turn.finalized':
     case 'turn.conflicted':
     case 'turn.failed':
-    case 'turn.history-projection-committed': {
+    case 'turn.history-projection-committed':
+    case 'run.heartbeat': {
       /* The three turn settlements are facts about the project's revision
        * graph, not about the transcript: they are read by
-       * `projectTurnFinalized` and render no chunk of their own. */
+       * `projectTurnFinalized` and render no chunk of their own. A heartbeat
+       * only says the run is alive, for the cross-device fence (XD3). */
       return [];
     }
     case 'interrupt.recorded': {

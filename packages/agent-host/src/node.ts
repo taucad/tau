@@ -1,7 +1,7 @@
 import { watch } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { link, mkdir, open, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
+import { link, mkdir, open, readdir, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
@@ -13,11 +13,15 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
 import { parseEventLogBytes } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
+import type { ChatLogSegment } from '#log/segments.js';
 import { chatAttachmentPath } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
 import {
   chatRecordFileName,
+  chatSegmentsDirectoryName,
+  createChatSegmentsReader,
   createChatStore,
+  readOrAbsent,
   isPurgedChatRecord,
   purgedChatError,
   requireChatPathSegment,
@@ -325,7 +329,33 @@ const syncDirectory = async (directory: string): Promise<void> => {
   }
 };
 
-const openWriter = async (filePath: string): Promise<EventLogAppender> => {
+/**
+ * Every other device's segment beside a chat log (XD1): `events/<deviceId>.jsonl`, as sync projected it. A segment
+ * whose size and modification time did not change is not read again.
+ *
+ * @param directory - The chat's `events/` directory.
+ * @returns A read of the segments; none while the directory does not exist.
+ */
+const nodeSegmentsReader = (directory: string): (() => Promise<readonly ChatLogSegment[]>) =>
+  createChatSegmentsReader({
+    list: async () => readOrAbsent(async () => readdir(directory), []),
+    version: async (name) =>
+      readOrAbsent(async () => {
+        const { size, mtimeMs } = await stat(join(directory, name));
+        return `${String(size)}:${String(mtimeMs)}`;
+      }, undefined),
+    read: async (name) => readOrAbsent(async () => new Uint8Array(await readFile(join(directory, name))), undefined),
+  });
+
+/**
+ * Open a chat log's writer.
+ *
+ * @param filePath - The log this device appends to.
+ * @param segmentsDirectory - The chat's `events/` directory, whose other devices' segments the history merges in; a
+ *   bare log file has none.
+ * @returns The appender.
+ */
+const openWriter = async (filePath: string, segmentsDirectory?: string): Promise<EventLogAppender> => {
   await mkdir(dirname(filePath), { recursive: true });
   const kernelLock = await acquireKernelLock(filePath);
   const releaseKernelLock = async (): Promise<void> => kernelLock?.release();
@@ -394,6 +424,7 @@ const openWriter = async (filePath: string): Promise<EventLogAppender> => {
     },
     // The kernel lock is held for the log's life, so every section is already exclusive.
     exclusive: async (section) => section(),
+    ...(segmentsDirectory === undefined ? {} : { segments: nodeSegmentsReader(segmentsDirectory) }),
     close: async () => {
       try {
         await file.close();
@@ -545,7 +576,9 @@ export const createNodeChatStore = (options: NodeChatStoreOptions): ChatStore =>
       }
       return release;
     },
-    openWriter: async (chatId) => createNodeEventLog({ filePath: filePath(chatId), access: 'write' }),
+    /* The writer appends to this device's file only; its history also reads the other devices' segments (XD1). */
+    openWriter: async (chatId) =>
+      openWriter(filePath(chatId), join(dirname(filePath(chatId)), chatSegmentsDirectoryName)),
     leadership: createNodeLeadership,
   });
 };

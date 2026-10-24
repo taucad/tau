@@ -8,8 +8,12 @@ import { describe, expect, it } from 'vitest';
 
 type Step = { id?: string; run?: string; env?: Record<string, string> };
 const root = resolve(import.meta.dirname, '../..');
+type Inputs = Record<string, { type?: string; default?: unknown; required?: boolean }>;
 const workflow = load(readFileSync(join(root, '.github/workflows/deploy-ui.yml'), 'utf8')) as {
-  jobs: { deploy: { steps: Step[] } };
+  on: { workflow_call: { inputs: Inputs }; workflow_dispatch: { inputs: Inputs } };
+  jobs: {
+    deploy: { steps: Step[]; concurrency?: { group?: string; 'cancel-in-progress'?: boolean } };
+  };
 };
 const validation = workflow.jobs.deploy.steps.find((step) => step.id === 'posthog');
 if (!validation?.run) {
@@ -103,6 +107,8 @@ describe('UI source-map credential ownership', () => {
           '#!/bin/sh\necho "$*" >> "$CALLS"\nif [ "$3" = ui:sourcemaps ]; then echo "$POSTHOG_CLI_TOKEN:$POSTHOG_CLI_ENV_ID:$SENTRY_AUTH_TOKEN" >> "$CALLS"; exit "$UPLOAD_EXIT"; fi\n',
           { mode: 0o700 },
         );
+        // The asset retention step that ends the command (TAU-UI-6); recorded, not run.
+        writeFileSync(join(directory, 'node'), '#!/bin/sh\necho "node $*" >> "$CALLS"\n', { mode: 0o700 });
         expect(uploadCommands).toHaveLength(2);
         for (const command of uploadCommands) {
           writeFileSync(calls, '');
@@ -131,6 +137,8 @@ describe('UI source-map credential ownership', () => {
           if (uploads) {
             expect(recordedCalls).toContain('phx_github:123:sentry_github');
           }
+          // Assets are retained last, and only from a build that passed its upload policy.
+          expect(recordedCalls.trimEnd().endsWith('node scripts/retain-previous-assets.mts')).toBe(status === 0);
           if (optional === 'true' && (!uploads || uploadExit !== '0')) {
             expect(result.stdout).toContain('Warning: source map upload disabled or failed');
           }
@@ -140,4 +148,68 @@ describe('UI source-map credential ownership', () => {
       }
     },
   );
+});
+
+describe('UI asset retention origin', () => {
+  const site = workflow.jobs.deploy.steps.find((step) => step.id === 'site');
+  const deploy = workflow.jobs.deploy.steps.find((step) => step.env?.['TAU_RETAIN_ASSETS_FROM'] !== undefined);
+
+  it.each([
+    ['staging', 'https://staging--taucad-staging.netlify.app'],
+    // The public tau.new host is still served by Fly, which answers every path with its app's HTML.
+    ['production', 'https://taucad-prod-us.netlify.app'],
+  ])('should retain the %s assets from the Netlify deploy that is live, not the public host', (environment, origin) => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-retain-origin-'));
+    try {
+      const output = join(directory, 'output');
+      writeFileSync(output, '');
+      const result = spawnSync('bash', ['-c', site!.run!], {
+        encoding: 'utf8',
+        env: Object.fromEntries([
+          ['PATH', process.env['PATH']],
+          ['ENVIRONMENT', environment],
+          ['NETLIFY_AUTH_TOKEN', 'fixture'],
+          ['GITHUB_OUTPUT', output],
+        ]),
+      });
+      expect(result.status).toBe(0);
+      expect(readFileSync(output, 'utf8')).toContain(`retain_from=${origin}\n`);
+      expect(deploy?.env?.['TAU_RETAIN_ASSETS_FROM']).toMatch(/^\$\{\{ steps\.site\.outputs\.retain_from \}\}$/u);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('UI asset retention escape hatch', () => {
+  const deploy = workflow.jobs.deploy.steps.find((step) => step.env?.['TAU_RETAIN_ASSETS_FROM'] !== undefined);
+
+  it.each(['workflow_call', 'workflow_dispatch'] as const)(
+    'should let a %s deploy skip retention on purpose, off by default',
+    (trigger) => {
+      expect(workflow.on[trigger].inputs['skip_asset_retention']).toMatchObject({ type: 'boolean', default: false });
+    },
+  );
+
+  it('should hand the choice to the retention script, and only when asked', () => {
+    expect(deploy?.env?.['TAU_RETAIN_ASSETS_SKIP']).toMatch(
+      /^\$\{\{ inputs\.skip_asset_retention && '1' \|\| '' \}\}$/u,
+    );
+  });
+
+  it('should let a production redeploy pass the choice on to the UI deploy', () => {
+    const production = readFileSync(join(root, '.github/workflows/deploy-production.yml'), 'utf8');
+    expect(production).toMatch(
+      /skip_asset_retention:\n\s+description: .+\n\s+required: false\n\s+type: boolean\n\s+default: false/u,
+    );
+    expect(production).toContain('-f skip_asset_retention=true');
+  });
+});
+
+describe('UI deploy serialization', () => {
+  it('should run one deploy per environment at a time, so each reads the index of the deploy that is live', () => {
+    // The retention script runs inside `netlify deploy`'s build in this job, before it publishes.
+    expect(workflow.jobs.deploy.concurrency?.group).toMatch(/^deploy-ui-\$\{\{ inputs\.environment \}\}$/u);
+    expect(workflow.jobs.deploy.concurrency?.['cancel-in-progress']).toBe(false);
+  });
 });

@@ -14,13 +14,13 @@ import {
   requestProjectDeletion,
 } from '#api/projects/project-deletion.js';
 import type { ProjectDeletionStatus } from '#api/projects/project-deletion.js';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import type { Environment } from '#config/environment.config.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { DatabaseService } from '#database/database.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
 
 // The HTTP adapter, guard and exception filter are real. The durable deletion
 // protocol is mocked here; its PostgreSQL and storage semantics have separate tests.
@@ -35,7 +35,7 @@ describe('ProjectDeletionController over HTTP', () => {
   const ownerId = 'user-controller-owner';
   const deletedAt = '2026-10-24T00:00:00.000Z';
   const databaseService = Object.assign(mock<DatabaseService>(), { database: mock<DatabaseService['database']>() });
-  const storage = mock<ObjectStorageService>();
+  const executor = mock<GitExecutor>();
   const config = mock<ConfigService<Environment, true>>();
   const auth = mockDeep<Auth>();
   const signedIn = {
@@ -70,7 +70,7 @@ describe('ProjectDeletionController over HTTP', () => {
         { provide: authInstanceKey, useValue: auth },
         { provide: ConfigService, useValue: config },
         { provide: DatabaseService, useValue: databaseService },
-        { provide: ObjectStorageService, useValue: storage },
+        { provide: gitExecutorKey, useValue: executor },
       ],
     }).compile();
     app = module.createNestApplication<NestFastifyApplication>(new FastifyAdapter(), { logger: false });
@@ -192,7 +192,16 @@ describe('ProjectDeletionController over HTTP', () => {
       const completion = vi.mocked(completeProjectDeletion).mock.calls[0]?.[0];
       expect(completion?.database).toBe(databaseService.database);
       expect(completion?.projectId).toBe(projectId);
-      expect(completion?.store).toBeInstanceOf(S3RepositoryStore);
+      /* DC1: the fence is tau-storage's tombstone, under a grant for the requester. */
+      executor.tombstone.mockResolvedValue({ tombstonedAt: deletedAt, purgeAfter: deletedAt });
+      await completion?.fence(
+        { locator: { ownerId, projectId }, committedBy: ownerId, at: new Date(deletedAt) },
+        AbortSignal.timeout(5000),
+      );
+      expect(executor.tombstone).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: ownerId, project: projectId, committedBy: ownerId }),
+        expect.objectContaining({ abort: expect.any(AbortSignal) as unknown }),
+      );
     },
   );
 

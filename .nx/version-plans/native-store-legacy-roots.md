@@ -1,5 +1,4 @@
 ---
-geospec-engine: minor
 picogk: minor
 ---
 

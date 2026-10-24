@@ -126,6 +126,35 @@ export type HydrateLeaseArguments = {
   parentDirectory?: string;
   /** Extra or overriding git configuration. Tests use it to reproduce AR-A's failure modes. */
   config?: Readonly<Record<string, string>>;
+  /**
+   * The manifest admission already read to size this lease (DA3), so the
+   * hydrate costs no second Class B read and builds exactly what was reserved
+   * for. Absent, the hydrate reads the manifest itself.
+   */
+  preread?: PrereadManifest;
+};
+
+/** A manifest read and decoded ahead of the hydrate: `undefined` and `'absent'` are generation 0. */
+export type PrereadManifest = {
+  readonly manifest: Manifest | undefined;
+  readonly token: CommitToken | 'absent';
+};
+
+/**
+ * Reads and decodes the manifest a lease will hydrate.
+ *
+ * @param store - The repository store.
+ * @param locator - Which repository.
+ * @returns The decoded manifest and the token that commits against it.
+ */
+export const readLeaseManifest = async (
+  store: RepositoryStore,
+  locator: RepositoryLocator,
+): Promise<PrereadManifest> => {
+  const read = await store.readManifest(locator);
+  return read === undefined
+    ? { manifest: undefined, token: 'absent' }
+    : { manifest: decodeManifest(read.manifest), token: read.token };
 };
 
 /** `pack-<hash>-<nonce>.pack`, exactly as the manifest key spells it. */
@@ -142,8 +171,7 @@ const indexFileName = (key: string): string => `${packFileName(key).slice(0, -'.
  * a pack the store does not hold is already `missing-pack` from `getObject`.
  */
 export const hydrateLease = async (args: HydrateLeaseArguments): Promise<RepositoryLease> => {
-  const read = await args.store.readManifest(args.locator);
-  const manifest = read === undefined ? undefined : decodeManifest(read.manifest);
+  const { manifest, token } = args.preread ?? (await readLeaseManifest(args.store, args.locator));
 
   if (isTombstoned(manifest)) {
     throw new RepositoryStoreError(
@@ -166,7 +194,7 @@ export const hydrateLease = async (args: HydrateLeaseArguments): Promise<Reposit
       directory,
       locator: args.locator,
       manifest,
-      token: read === undefined ? 'absent' : read.token,
+      token,
       hydratedPackFiles,
       dispose: async () => rm(directory, { recursive: true, force: true }),
     };

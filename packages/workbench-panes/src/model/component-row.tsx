@@ -153,7 +153,8 @@ export const ComponentRow = memo(function ComponentRow({
     className: cn(
       'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0',
       'focus-visible:bg-nested-action-hover focus-visible:text-foreground focus-visible:opacity-100 focus-visible:focus-outline',
-      'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100',
+      /* Hover reveals the actions for a mouse; touch and coarse-pointer tablets always show them (I2, D12). */
+      'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 pointer-coarse:opacity-100',
       (isHovered || isIsolated) && 'opacity-100',
     ),
   });
@@ -214,7 +215,8 @@ export const ComponentRow = memo(function ComponentRow({
         // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
         'group/part relative flex w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
         // A part row leads with its 80 px preview; groups stay compact.
-        isPreviewRow ? 'h-22 gap-2' : 'h-7',
+        // Under a coarse pointer a compact row grows 4px so its 20px part button reaches the 24px floor (I3).
+        isPreviewRow ? 'h-22 gap-2' : 'h-7 pointer-coarse:h-8',
         'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
         isSelected ? 'bg-primary/10 text-foreground' : 'text-sidebar-foreground',
         !isSelected && isFocused ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30' : undefined,
@@ -267,7 +269,7 @@ export const ComponentRow = memo(function ComponentRow({
         data-model-component-id={node.id}
         tabIndex={activeRowId === undefined || activeRowId === node.id ? 0 : -1}
         className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
-        aria-label={node.name}
+        aria-label={isHidden ? `${node.name}, hidden` : node.name}
         aria-pressed={isSelected}
         aria-busy={preview?.status === 'pending' || undefined}
         onClick={toggleSelection}
@@ -302,13 +304,16 @@ export const ComponentRow = memo(function ComponentRow({
         {materialMatchName ? (
           <span className='truncate text-xs text-muted-foreground'>· {materialMatchName}</span>
         ) : undefined}
+        {/* A hidden part is labelled, not only dimmed (PN-TREE-2). */}
+        {isHidden ? <span className='shrink-0 text-xs text-muted-foreground'>Hidden</span> : undefined}
       </button>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type='button'
             tabIndex={-1}
-            className={actionButtonClassName}
+            /* A hidden part keeps its Show action in view, so it can be brought back without hover. */
+            className={cn(actionButtonClassName, isHidden && 'opacity-100')}
             aria-label={visibilityAction.ariaLabel}
             onClick={() => {
               graphicsRef.send(visibilityAction.event);

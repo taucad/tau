@@ -182,14 +182,34 @@ describe('positive ancillary query authoring', () => {
     expect(engine.processRequest).toHaveBeenCalledTimes(1);
   });
 
-  it('lets native malformed-payload errors escape unchanged', async () => {
+  it('returns a malformed-payload refusal as that query report, with its field and path', async () => {
+    // Since geospec-engine 0.4 a malformed payload refuses its own claim instead of rejecting the plan.
+    const diagnostics = [
+      {
+        code: 'GEOSPEC_INVALID_EXPECTATION',
+        severity: 'error',
+        message: "inspectGeometry payload contains unknown field 'selector'.",
+        details: { field: 'selector', path: '$.selector' },
+      },
+    ];
+    const { engine, requests } = recordingEngine('refused', { diagnostics });
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1 });
+    const report = await client.query({ subject, capability: 'inspectGeometry', payload: { selector: 'bore' } });
+    expect(requests).toHaveLength(1);
+    expect(report).toMatchObject({ status: 'refused', diagnostics });
+    expect(report).not.toHaveProperty('evidence');
+  });
+
+  it('lets plan-level invalid-claim errors escape unchanged', async () => {
+    // A negated query, an unadmitted subject or an out-of-range budget still rejects the whole plan.
     const { engine } = recordingEngine();
-    const error = Object.assign(new Error('analyzeMesh payload must be null or omitted.'), { code: 'invalid-claim' });
-    engine.evaluateClaim = (request) => {
-      expect(new TextDecoder().decode(request)).toContain('"payload":{}');
+    const error = Object.assign(new Error("Subject for slot 'subject' must first be ingested into this Engine."), {
+      code: 'invalid-claim',
+    });
+    engine.evaluateClaim = () => {
       throw error;
     };
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1 });
-    await expect(client.query({ subject, capability: 'analyzeMesh', payload: {} })).rejects.toBe(error);
+    await expect(client.query({ subject, capability: 'analyzeMesh' })).rejects.toBe(error);
   });
 });

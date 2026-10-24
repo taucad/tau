@@ -28,6 +28,14 @@
       "owner": "storage-gateway W15"
     },
     {
+      "id": "STORAGE-HTTP-RETRY",
+      "bound": "Abortable Tau git HTTP client retry wait: a 429, or a 503 that names Retry-After, waits Retry-After plus up to 1 s of jitter (without one, 0.5 to 1 s doubling); a wait over 10 s is not taken, at most four attempts per request",
+      "site": "packages/revisions/src/http-client.ts",
+      "token": "signal?.removeEventListener('abort', abort)",
+      "class": "Backoff",
+      "owner": "Hosted Remote Storage DA6"
+    },
+    {
       "id": "STORAGE-PROCESS-CLEANUP",
       "bound": "Windows taskkill process-tree cleanup, 1 second inside the close persistence margin; failure is reported",
       "site": "packages/revisions/src/git-command.ts",

@@ -4,8 +4,9 @@
  *
  * Charter D16, D20, **D33**; north star "Size bounds", NI4, NI5. D33 is the
  * coordinator's ruling from W0a's report
- * (`execution/W0/w0a-report.md`), and the two figures below are its figures,
- * not this lane's.
+ * (`execution/W0/w0a-report.md`): the pack bound below is its figure, not
+ * this lane's. Its per-lease disk figure is superseded by DA3's real-byte
+ * reservation (blueprint OD2; the note after the pack bound).
  */
 
 /**
@@ -39,26 +40,22 @@ export const repositoryByteCeiling = 1024 ** 3;
  */
 export const livePackBound = 8;
 
-/**
- * Scratch a worker reserves per in-flight lease: **2.5 GiB (D33, from W0a)**,
- * against D20's 1 GiB ceiling. W0a's measured components, out of process
- * because an in-process sampler cannot fire while `execFileSync` blocks:
+/*
+ * Lease disk is no longer reserved here. D33's flat **2.5 GiB per in-flight
+ * lease** was D20's worst case taken before the manifest was read; on a
+ * staging Machine's ≈ 7.3 GiB of free rootfs it admitted two leases, not the
+ * three this comment used to promise, and one per owner (blueprint Finding 3).
+ * DA3 reserves each lease's real bytes by kind instead
+ * (`admission/reservation.ts`), from W0a's measured components:
  *
- * | Component | measured | allowance |
+ * | Component | measured | where it is reserved now |
  * | --- | --- | --- |
- * | Packs on disk after hydration | 1.00× repository | 1.0 GiB |
- * | Derived or stored `.idx` | 28 B/object, 0.17 % of pack bytes | 0.01 GiB |
- * | Full `repack -a -d` transient (new pack written before the old unlink) | 1.98–1.99× | +1.0 GiB |
- * | `receive-pack` quarantine, `tmp_pack_*`, index scratch | bounded by D20 | +0.5 GiB |
- *
- * Admission is concurrent leases × this figure against the worker's ephemeral
- * disk, which admits three ceiling-sized leases on an 8 GiB Fly rootfs. It is
- * set by the *full* repack, which the push path no longer performs — a
- * push-path-only lease peaks at 1.08× and needs 1.5 GiB — but an explicit full
- * compaction must stay possible somewhere, so 2.5 GiB is what W4 admits
- * against.
+ * | Packs on disk after hydration | 1.00× repository | every kind, from the manifest |
+ * | Derived or stored `.idx` | 28 B/object, 0.17 % of pack bytes | every kind, as 1/512 |
+ * | `repack -a -d --keep-pack` transient on the push path | 1.08× at the realistic ceiling shape | a push whose pack compacts |
+ * | Full `repack -a -d` transient (new pack written before the old unlink) | 1.98–1.99× | the `compaction` kind only |
+ * | `receive-pack` quarantine, `tmp_pack_*`, index scratch | bounded by `receive.maxInputSize` | a push, as its quarantine bound |
  */
-export const leaseDiskBytesPerLease = Math.round(2.5 * 1024 ** 3);
 
 /**
  * The hard deadline for the commit phase, measured from before the first
@@ -74,6 +71,9 @@ export const leaseDiskBytesPerLease = Math.round(2.5 * 1024 ** 3);
  * timeout the receive phase already has.
  */
 export const commitDeadlineMilliseconds = 5 * 60 * 1000;
+
+/** A clone of a large repository is slow; an abandoned smart-HTTP git child is forever. */
+export const gitRpcTimeoutMilliseconds = 10 * 60 * 1000;
 
 /**
  * How old an object no manifest has ever listed must be before the sweeping

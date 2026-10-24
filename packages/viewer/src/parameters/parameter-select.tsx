@@ -33,10 +33,12 @@ export type ParameterSelectGroup = Readonly<{
 }>;
 
 /**
- * A parameter field's height (`--param-field-h`, 1.5rem in every pane), shared by the trigger and its options so the
- * selected option still lands on the trigger. The options are portaled outside the pane, so they read the fallback.
+ * A parameter field's height (`--param-field-h`: 1.5rem, and 2.5rem under a coarse pointer), shared by the trigger
+ * and its options so the selected option still lands on the trigger. The options are portaled outside the pane, so
+ * they read the fallback and take the coarse-pointer height themselves.
  */
 const parameterFieldHeight = 'h-[var(--param-field-h,1.5rem)] py-0';
+const parameterOptionHeight = `${parameterFieldHeight} pointer-coarse:h-10`;
 
 /**
  * The class names of the Parameters select trigger, sized to the parameter field height.
@@ -74,7 +76,7 @@ export function ParameterSelect({
   readonly onBlur?: () => void;
 }): React.JSX.Element {
   const item = (option: ParameterSelectOption): React.JSX.Element => (
-    <SelectItem key={option.value} value={option.value} disabled={option.disabled} className={parameterFieldHeight}>
+    <SelectItem key={option.value} value={option.value} disabled={option.disabled} className={parameterOptionHeight}>
       {/* Full width, so the secondary's half is half the row rather than half of its own content. */}
       <span className='flex w-full min-w-0 items-center gap-1.5'>
         {option.swatch === undefined ? null : (

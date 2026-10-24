@@ -374,10 +374,16 @@ vi.mock('#constants/browser.constants.js', () => ({
 }));
 
 let mockBuildSuperseded = false;
+const buildSkewListeners = new Set<() => void>();
 vi.mock('#filesystem/build-skew.js', () => ({
   buildId: 1,
   isBuildSuperseded: () => mockBuildSuperseded,
-  subscribeBuildSkew: () => () => undefined,
+  subscribeBuildSkew: (listener: () => void) => {
+    buildSkewListeners.add(listener);
+    return () => {
+      buildSkewListeners.delete(listener);
+    };
+  },
 }));
 
 const pendingCreate: Extract<PendingProjectOperation, { kind: 'create' }> = {
@@ -4122,6 +4128,104 @@ describe('useProjectManager.createProject', () => {
 
     expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
     expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
+  it('records the listing a write-stopped pass read, so route access reuses it instead of discovering again', async () => {
+    mockBuildSuperseded = true;
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    const passes = mockListProjectManifests.mock.calls.length;
+
+    await result.current.getProjectRouteAccess(fakeProject.id);
+
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(passes);
+  });
+
+  it('stops writing when the stop flips while a pass is already reconciling', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    mockListWorkspaces.mockImplementation(async () => {
+      // A newer tab announces itself while this pass is between its gate and its writes.
+      mockBuildSuperseded = true;
+      return [];
+    });
+
+    await result.current.getProjectListing();
+
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+  });
+
+  it('writes no config upserts when the stop begins while orphaned resources are being deleted', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    mockDeleteProjectResources.mockImplementationOnce(async () => {
+      // A newer tab announces itself while this pass deletes an orphan's resources.
+      mockBuildSuperseded = true;
+    });
+
+    await result.current.getProjectListing();
+
+    expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+    // The deleted resources' config rows still follow them, so nothing re-attaches.
+    expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith('proj_ccccccccccccccccccccc');
+  });
+
+  it('runs the reconciliation it skipped once a provisional write stop lifts', async () => {
+    mockBuildSuperseded = true;
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    mockGetAllProjectFileSystemConfigs.mockResolvedValue([
+      { projectId: 'proj_ccccccccccccccccccccc', backend: 'opfs', providerBasePath: 'gone' },
+    ]);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    expect(mockDeleteProjectFileSystemConfig).not.toHaveBeenCalled();
+
+    mockBuildSuperseded = false;
+    act(() => {
+      for (const listener of buildSkewListeners) {
+        listener();
+      }
+    });
+
+    await waitFor(() => {
+      expect(mockDeleteProjectFileSystemConfig).toHaveBeenCalledWith('proj_ccccccccccccccccccccc');
+    });
+  });
+
+  it('runs no discovery when a write stop lifts that skipped nothing', async () => {
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+    await result.current.getProjectListing();
+    const passes = mockListProjectManifests.mock.calls.length;
+
+    // A peer's claim stopped writes and the server named this build before any pass ran.
+    mockBuildSuperseded = true;
+    act(() => {
+      for (const listener of buildSkewListeners) {
+        listener();
+      }
+    });
+    mockBuildSuperseded = false;
+    act(() => {
+      for (const listener of buildSkewListeners) {
+        listener();
+      }
+    });
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+    });
+
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(passes);
   });
 
   it('reconciles and garbage-collects normally when this build is current', async () => {

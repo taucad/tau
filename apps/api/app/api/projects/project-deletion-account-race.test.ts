@@ -7,6 +7,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { completeProjectDeletion, requestProjectDeletion } from '#api/projects/project-deletion.js';
+import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { releaseDeletedProjectPublicationReferences } from '#api/publications/publication-deletion.js';
 import type { Database } from '#database/owner-lock.js';
 import { readProjectDeletion } from '#database/project-lifecycle.js';
@@ -131,7 +132,7 @@ describe.skipIf(!process.env['CPD_ACCEPTANCE_POSTGRES_CONTAINER'])('project dele
     });
     const completed = await completeProjectDeletion({
       database,
-      store: createMemoryRepositoryStore(),
+      fence: storeTombstoneFence(createMemoryRepositoryStore()),
       projectId: fixture.projectId,
     });
     expect(completed.state).toBe('deleted');

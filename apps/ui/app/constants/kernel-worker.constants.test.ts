@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { createDefaultKernelOptions, createDebugKernelOptions } from '#constants/kernel-worker.constants.js';
+import {
+  createDefaultKernelOptions,
+  createDebugKernelOptions,
+  sizeComputeBinding,
+} from '#constants/kernel-worker.constants.js';
 import { runtime } from '#runtime/ui-runtime.definition.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
@@ -119,5 +123,24 @@ describe('kernel-worker constants', () => {
     expect(source).not.toContain('#environment.config.js');
     expect(source).not.toContain(' ENV ');
     expect(source).not.toContain('ENV.');
+  });
+});
+
+describe('compute binding sizing', () => {
+  const store = Object.freeze({}) as Extract<Parameters<typeof sizeComputeBinding>[0], { mode: 'durable' }>['store'];
+
+  it.each([
+    { compute: undefined, expected: { mode: 'memory', memoryConstrained: true } },
+    { compute: { mode: 'memory' }, expected: { mode: 'memory', memoryConstrained: true } },
+    { compute: { mode: 'durable', store }, expected: { mode: 'durable', store, memoryConstrained: true } },
+    { compute: { mode: 'off' }, expected: { mode: 'off' } },
+  ] as const)('should size a $compute.mode binding for a memory-constrained device', ({ compute, expected }) => {
+    expect(sizeComputeBinding(compute, true)).toStrictEqual(expected);
+  });
+
+  it('should leave the binding as the host selected it on other devices', () => {
+    const compute = { mode: 'durable', store } as const;
+    expect(sizeComputeBinding(compute, false)).toBe(compute);
+    expect(sizeComputeBinding(undefined, undefined)).toBeUndefined();
   });
 });

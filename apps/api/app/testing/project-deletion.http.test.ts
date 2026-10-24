@@ -15,6 +15,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import { startStorageHop } from '#testing/storage-hop.js';
+import type { StorageHop } from '#testing/storage-hop.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import {
   hashHostGitCredential,
@@ -41,6 +44,8 @@ describe('project deletion HTTP against isolated PostgreSQL and MinIO', () => {
   let app: NestFastifyApplication | undefined;
   let fastify: FastifyInstance;
   let storage: ObjectStorageService;
+  /** DC1: tau-storage commits the deletion's tombstone. */
+  let hop: StorageHop | undefined;
   let config: ConfigService<Environment, true>;
 
   const sessionHeaders = async (userId: string) => {
@@ -113,6 +118,7 @@ describe('project deletion HTTP against isolated PostgreSQL and MinIO', () => {
       secret: randomBytes(32).toString('hex'),
       rateLimit: { enabled: false },
     });
+    hop = await startStorageHop({ store: new S3RepositoryStore(storage) });
     const module = await Test.createTestingModule({
       controllers: [ProjectDeletionController],
       providers: [
@@ -120,7 +126,7 @@ describe('project deletion HTTP against isolated PostgreSQL and MinIO', () => {
         AuthGuard,
         { provide: authInstanceKey, useValue: auth },
         { provide: DatabaseService, useValue: Object.assign(mock<DatabaseService>(), { database }) },
-        { provide: ObjectStorageService, useValue: storage },
+        { provide: gitExecutorKey, useValue: hop.forwarder },
         { provide: ConfigService, useValue: config },
       ],
     }).compile();
@@ -136,6 +142,7 @@ describe('project deletion HTTP against isolated PostgreSQL and MinIO', () => {
   });
   afterAll(async () => {
     await app?.close();
+    await hop?.close();
     await client?.end();
   });
 

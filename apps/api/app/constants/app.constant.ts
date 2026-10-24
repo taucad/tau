@@ -26,6 +26,10 @@ export const loggingRedactPaths = [
   'req.headers["x-tau-proxy-authorization"]',
   'req.headers["x-tau-lfs-key"]',
   'req.headers["tau-zoo-token"]',
+  // DC1: the storage grant (API to tau-storage) and the receipt tau-storage
+  // posts back are signed bearer facts; neither belongs in a log line.
+  'req.headers["tau-storage-grant"]',
+  'req.body.receipt',
   'req.headers.cookie',
   'req.headers["set-cookie"]',
   // A sign-in's response carries the new session token twice; both are live credentials.

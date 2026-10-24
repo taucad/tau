@@ -32,10 +32,8 @@ import {
   gitRequestsPerUserPerWindow,
   gitRequestsPerWindow,
   isGitService,
-  negotiationInputLimitBytes,
   noCacheHeaders,
   projectIdFromRepository,
-  quotaOverrunSlackBytes,
   quotaRefusalMarker,
   serviceAdvertisementPrefix,
 } from '#api/git/git.constants.js';
@@ -43,14 +41,17 @@ import { LfsBatchDto, LfsVerifyDto } from '#api/git/git.dto.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service.js';
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
-import { GitRepositoryService, gitRetryAfterSeconds } from '#api/git/git.service.js';
+import { GitRepositoryService } from '#api/git/git.service.js';
+import { gitRetryAfterSeconds } from '#api/git/git-refusals.js';
 import type { AffectedPublication } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+import { TauMetrics } from '@taucad/telemetry';
 import { MetricsService } from '#telemetry/metrics.js';
-import type { SyncOperationAttributes } from '#telemetry/metrics.js';
+import type { SyncOperationAttributes, SyncRefusalAttributes } from '#telemetry/metrics.js';
 
 type SyncOperation = SyncOperationAttributes['tau.sync.operation'];
 type SyncOutcome = SyncOperationAttributes['outcome'];
+type SyncRefusalCode = SyncRefusalAttributes['tau.sync.refusal.code'];
 
 /**
  * How a push ended, read from git's report-status (`ok`/`ng` pkt-lines, possibly
@@ -77,6 +78,48 @@ export const receivePackOutcome = (report: Uint8Array<ArrayBuffer>): SyncOutcome
 };
 
 /**
+ * The retryable capacity refusals: a lease this Machine cannot hold yet, an owner at its share, a
+ * process that is stopping, the two request budgets, and a repository frozen past the hold (DW2). Each carries `Retry-After`, and each is
+ * `busy`, not `error`, so an availability SLO is not read off a client being told to wait (W14
+ * Finding 3, TAU-API-5). A lost manifest race is `conflict`, which is retryable too.
+ */
+const busyRefusalCodes: ReadonlySet<string> = new Set([
+  'GIT_LEASE_OWNER_BUSY',
+  'GIT_LEASE_DISK_FULL',
+  'GIT_SERVICE_RESTARTING',
+  'GIT_HYDRATE_BUDGET_EXHAUSTED',
+  'GIT_RATE_LIMITED',
+  /* DW2: a repository frozen past the hold, answered 429 with `Retry-After: 1`. */
+  'GIT_REPOSITORY_FROZEN',
+  /* DA6: an owner over its in-flight cap, answered 429 with a jittered `Retry-After` of 1–3 s. */
+  'GIT_OWNER_IN_FLIGHT_LIMIT',
+]);
+
+/** The codes `tau.sync.refusals` names; any other code counts as `other`, so the label stays bounded. */
+const declaredRefusalCodes: ReadonlySet<string> = new Set(
+  TauMetrics.syncRefusals.attributes.shape['tau.sync.refusal.code'].options,
+);
+
+/**
+ * The labels of one typed refusal: its code when the registry declares it, otherwise `other`. A
+ * throw that is not an HTTP answer is a failure rather than a refusal, and has none.
+ *
+ * @param error - What the route raised.
+ * @returns The code and status to count, or `undefined`.
+ */
+export const syncRefusalOf = (error: unknown): Omit<SyncRefusalAttributes, 'tau.sync.operation'> | undefined => {
+  if (!(error instanceof HttpException)) {
+    return undefined;
+  }
+  const { code } = error.getResponse() as { code?: unknown };
+  return {
+    'tau.sync.refusal.code':
+      typeof code === 'string' && declaredRefusalCodes.has(code) ? (code as SyncRefusalCode) : 'other',
+    'http.response.status_code': error.getStatus(),
+  };
+};
+
+/**
  * The bounded outcome of a sync request that threw.
  *
  * @param error - What the route raised.
@@ -98,7 +141,10 @@ export const syncOutcomeOf = (error: unknown): SyncOutcome => {
   ) {
     return 'unauthorized';
   }
-  return code === 'GIT_PUSH_RACE_LOST' ? 'conflict' : 'error';
+  if (code === 'GIT_PUSH_RACE_LOST') {
+    return 'conflict';
+  }
+  return typeof code === 'string' && busyRefusalCodes.has(code) ? 'busy' : 'error';
 };
 
 const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, string>>): void => {
@@ -158,7 +204,13 @@ export class GitController {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
     applyHeaders(reply, noCacheHeaders);
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc' });
+    await this.admitRequest(reply, {
+      userId,
+      viaDevice,
+      projectId,
+      family: 'rpc',
+      operation: service === 'git-receive-pack' ? 'push' : 'fetch',
+    });
 
     if (!isGitService(service)) {
       /* A missing `service` used to mean "walk the dumb layout". D12 removed
@@ -170,8 +222,10 @@ export class GitController {
       });
     }
 
-    /* Only a refusal counts here: the advertisement is the first leg of a push or fetch,
-       whose POST counts the attempt. A push refused for quota is refused here first. */
+    /* A refusal here counts against the push or fetch this advertisement opens, whose POST
+       counts the attempt: a push refused for quota is refused here first. A served
+       advertisement is answered from the manifest with no lease (DB1) and counts as its own
+       `advertise` operation, whose latency is W14's SLO-7. */
     const startedAt = performance.now();
     const operation: SyncOperation = service === 'git-receive-pack' ? 'push' : 'fetch';
     const advertisement = await this.withRetryAfter(reply, async () => {
@@ -183,9 +237,10 @@ export class GitController {
       });
       return this.repositories.advertiseRefs(access, service);
     }).catch((error: unknown) => {
-      this.recordSync(operation, syncOutcomeOf(error), startedAt);
+      this.recordFailure(operation, error, startedAt);
       throw error;
     });
+    this.recordSync('advertise', 'ok', startedAt);
     return new StreamableFile(
       Buffer.concat([Buffer.from(serviceAdvertisementPrefix(service), 'utf8'), advertisement]),
       { type: `application/x-${service}-advertisement` },
@@ -204,7 +259,7 @@ export class GitController {
   ): Promise<StreamableFile> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc' });
+    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc', operation: 'fetch' });
     const startedAt = performance.now();
     let output: Readable;
     try {
@@ -214,17 +269,14 @@ export class GitController {
         this.repositories.uploadPack({
           access,
           body: request.raw,
+          /* The tau-storage worker bounds a fetch's negotiation body (review C32) and a
+             push's quarantine (DA3); the API streams both through unread. */
           gzipped: request.headers['content-encoding'] === 'gzip',
-          /* A fetch's body is `want`/`have` negotiation rather than a pack, so it
-             gets the flat negotiation ceiling — but it gets one: neither
-             Fastify's `bodyLimit` (the git parser streams past it) nor git itself
-             bounded `upload-pack`'s stdin (review C32). */
-          maximumInputBytes: negotiationInputLimitBytes,
           abort: this.abortWhenClientLeaves(reply),
         }),
       );
     } catch (error) {
-      this.recordSync('fetch', syncOutcomeOf(error), startedAt);
+      this.recordFailure('fetch', error, startedAt);
       throw error;
     }
     /* A fetch's outcome and size are known once the pack has streamed out, not when it starts. */
@@ -264,7 +316,7 @@ export class GitController {
   ): Promise<StreamableFile> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc' });
+    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'rpc', operation: 'push' });
     const startedAt = performance.now();
     let output: Uint8Array<ArrayBuffer>;
     try {
@@ -278,12 +330,11 @@ export class GitController {
           committedBy: userId,
           body: request.raw,
           gzipped: request.headers['content-encoding'] === 'gzip',
-          maximumInputBytes: access.remainingBytes + quotaOverrunSlackBytes,
           abort: this.abortWhenClientLeaves(reply),
         }),
       );
     } catch (error) {
-      this.recordSync('push', syncOutcomeOf(error), startedAt);
+      this.recordFailure('push', error, startedAt);
       throw error;
     }
     const outcome = receivePackOutcome(output);
@@ -309,8 +360,8 @@ export class GitController {
   ): Promise<LfsBatchResponse | LfsQuotaRefusal> {
     const projectId = this.requireProjectId(repository);
     const viaDevice = hostDeviceOf(request.raw)?.deviceId;
-    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'lfs' });
     const operation: SyncOperation = body.operation === 'upload' ? 'lfs_upload' : 'lfs_download';
+    await this.admitRequest(reply, { userId, viaDevice, projectId, family: 'lfs', operation });
     const startedAt = performance.now();
     let outcome: Awaited<ReturnType<GitLfsService['batch']>>;
     try {
@@ -328,7 +379,7 @@ export class GitController {
         endpoint: `${this.#apiUrl}/v1/git/${repository}/info/lfs/objects`,
       });
     } catch (error) {
-      this.recordSync(operation, syncOutcomeOf(error), startedAt);
+      this.recordFailure(operation, error, startedAt);
       throw error;
     }
     this.recordSync(operation, outcome.status === 413 ? 'quota_refused' : 'ok', startedAt);
@@ -444,6 +495,9 @@ export class GitController {
    * (`device:<id>`, RV-W10 F1): a looping host spends its windows, never the
    * owner's on this project or any other (I10, I11).
    *
+   * A refusal on a sync route is counted as a `GIT_RATE_LIMITED` refusal of
+   * `operation`; it is refused before the request's own count starts.
+   *
    * @throws HttpException `429` with `Retry-After` when the window is spent.
    */
   private async admitRequest(
@@ -453,6 +507,8 @@ export class GitController {
       viaDevice: string | undefined;
       projectId: string;
       family: keyof typeof gitRequestsPerWindow;
+      /** The sync operation this request is, when it is one. */
+      operation?: SyncOperation;
     },
   ): Promise<void> {
     const caller = args.viaDevice === undefined ? args.userId : `device:${args.viaDevice}`;
@@ -464,10 +520,14 @@ export class GitController {
       const budget = await this.rateLimiter.consumeWindowBudget({ ...bucket, windowSeconds: gitRequestWindowSeconds });
       if (!budget.allowed) {
         void reply.header('retry-after', String(budget.retryAfterSeconds));
-        throw new HttpException(
+        const refusal = new HttpException(
           { code: 'GIT_RATE_LIMITED', message: 'Too many requests; retry shortly.' },
           HttpStatus.TOO_MANY_REQUESTS,
         );
+        if (args.operation !== undefined) {
+          this.recordRefusal(args.operation, refusal);
+        }
+        throw refusal;
       }
     }
   }
@@ -503,6 +563,20 @@ export class GitController {
     const attributes = { 'tau.sync.operation': operation, outcome } satisfies SyncOperationAttributes;
     this.metrics.syncOperations.add(1, attributes);
     this.metrics.syncOperationDuration.record((performance.now() - startedAt) / 1000, attributes);
+  }
+
+  /** A sync request that threw: its typed refusal, if it was one, then its count and latency. */
+  private recordFailure(operation: SyncOperation, error: unknown, startedAt: number): void {
+    this.recordRefusal(operation, error);
+    this.recordSync(operation, syncOutcomeOf(error), startedAt);
+  }
+
+  /** One `tau.sync.refusals` increment for an HTTP refusal; nothing for any other throw. */
+  private recordRefusal(operation: SyncOperation, error: unknown): void {
+    const refusal = syncRefusalOf(error);
+    if (refusal !== undefined) {
+      this.metrics.syncRefusals.add(1, { 'tau.sync.operation': operation, ...refusal } satisfies SyncRefusalAttributes);
+    }
   }
 
   /**

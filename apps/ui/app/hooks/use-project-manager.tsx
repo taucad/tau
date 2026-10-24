@@ -64,7 +64,7 @@ import { createChatFileStore } from '#db/chat-file-storage.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { chatPlacementOf } from '#utils/chat-execution.js';
 import { writeChatPlacement } from '#db/chat-placements.js';
-import { isBuildSuperseded } from '#filesystem/build-skew.js';
+import { isBuildSuperseded, subscribeBuildSkew } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
@@ -770,6 +770,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   /** Settle attempts per pending operation this session (DF11 retry cap). */
   const recoveryAttemptsRef = useRef(new Map<string, number>());
   const discoveryPassRef = useRef<Promise<ProjectDiscoveryResult> | undefined>(undefined);
+  /** A discovery pass skipped its writes at a DF20 gate during the current write stop; it runs again once the stop lifts. */
+  const skippedDuringStopRef = useRef(false);
   const discoveryPassEpochRef = useRef<number | undefined>(undefined);
   const connectionTraceRef = useRef<WorkspaceConnectionTrace | undefined>(undefined);
   const connectionPromiseRef = useRef<Promise<ConnectedWorkspace | undefined> | undefined>(undefined);
@@ -1743,10 +1745,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
           return manifestId !== undefined && manifestId !== claimedBy;
         });
       let result: ProjectDiscoveryResult = { ...discovered, entries };
+      // The listing this pass read is the current one, whether or not it gets to write (DF20 gates below).
+      const recordSnapshot = (): ProjectDiscoveryResult => {
+        if (epoch === discoveryEpochRef.current) {
+          discoverySnapshotRef.current = { epoch, result };
+        }
+        return result;
+      };
       if (isBuildSuperseded()) {
         // A newer bundle owns durable state now: publish what we can read and
         // write nothing (DF20).
-        return result;
+        skippedDuringStopRef.current = true;
+        return recordSnapshot();
       }
       const rootStatuses = new Map(
         result.roots.map((root) => [persistentStorageRootKey(root.root), root.status] as const),
@@ -1819,6 +1829,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       const orphanCandidates = [...configs.values()];
       // Only the newest epoch may prune: an older snapshot would delete configs
       // a newer pass — or another tab — has already written.
+      // DF20 again, right before writing: a newer tab may have announced itself while this pass awaited.
+      if (isBuildSuperseded()) {
+        skippedDuringStopRef.current = true;
+        return recordSnapshot();
+      }
       if (epoch === discoveryEpochRef.current) {
         const worker = await getReadiedWorker();
         for (const config of orphanCandidates) {
@@ -1837,16 +1852,25 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             configDeletes.push(config.projectId);
           }
         }
+        if (isBuildSuperseded()) {
+          skippedDuringStopRef.current = true;
+          return recordSnapshot();
+        }
         await Promise.all(configDeletes.map(async (projectId) => worker.deleteProjectResources(projectId)));
       }
-      if (configUpserts.length > 0 || configDeletes.length > 0) {
-        await applyProjectFileSystemConfigChanges({ upserts: configUpserts, deletes: configDeletes });
+      /* Once resources are deleted their config rows must follow, so no gate splits the two. The
+       * upserts are new writes, though: DF20 once more after the awaits above, and skip them if a
+       * newer bundle took over meanwhile. */
+      const isStoppedNow = isBuildSuperseded();
+      if (isStoppedNow && configUpserts.length > 0) {
+        skippedDuringStopRef.current = true;
+      }
+      const upserts = isStoppedNow ? [] : configUpserts;
+      if (upserts.length > 0 || configDeletes.length > 0) {
+        await applyProjectFileSystemConfigChanges({ upserts, deletes: configDeletes });
         await fileManager.workspace.syncProjectRoots();
       }
-      if (epoch === discoveryEpochRef.current) {
-        discoverySnapshotRef.current = { epoch, result };
-      }
-      return result;
+      return recordSnapshot();
     },
     [fileManager, getReadiedWorker],
   );
@@ -1872,6 +1896,32 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       return pass;
     },
     [runDiscoveryPass],
+  );
+
+  /* DF20: a pass that ran while durable writes were stopped published without reconciling.
+   * A provisional stop lifts when the server names this build live, so run that pass again, and only
+   * when one was actually skipped: a stop no pass ran into left nothing to redo. */
+  useEffect(
+    () =>
+      subscribeBuildSkew(() => {
+        if (isBuildSuperseded() || !skippedDuringStopRef.current) {
+          return;
+        }
+        skippedDuringStopRef.current = false;
+        invalidateProjectsList();
+        const reconcile = async (): Promise<void> => {
+          try {
+            // A pass in flight may already have read the stop and bailed: let it end, then run a fresh one.
+            await discoveryPassRef.current?.catch(() => undefined);
+            await discoverProjects();
+          } catch (error) {
+            console.warn('[ProjectManager] reconciliation after the write stop lifted failed', error);
+          }
+        };
+        // async-iife: bootstrap -- a skew listener cannot await; the pass owns its failures.
+        void reconcile();
+      }),
+    [discoverProjects, invalidateProjectsList],
   );
 
   const settleRecovery = useCallback(

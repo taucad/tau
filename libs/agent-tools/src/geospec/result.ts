@@ -170,6 +170,8 @@ type RunnerIssue = NonNullable<GeoSpecRunnerResult['issues']>[number];
 const analysisLimitCodes = new Set(['GEOSPEC_ANALYSIS_LIMIT']);
 const resourceLimitCodes = new Set(['GEOSPEC_RESOURCE_LIMIT', 'LIMIT_EXCEEDED', 'limit-exceeded']);
 const workBudgetCodes = new Set(['MATCHER_TIMEOUT', 'GEOSPEC_WORK_BUDGET_EXHAUSTED']);
+/** The engine refuses one claim, and runs its siblings, when that claim's expectation payload is malformed. */
+const invalidExpectationCode = 'GEOSPEC_INVALID_EXPECTATION';
 const evidenceCodes = new Set([
   'GEOSPEC_UNSUPPORTED_EVIDENCE',
   'GEOSPEC_EVIDENCE_UNSUPPORTED',
@@ -213,6 +215,9 @@ const diagnosticCategory = (diagnostic: GeometryDiagnostic): FailureCategory | u
   if (codes.some((code) => isGeoSpecTimeoutCode(code))) {
     return 'timeout';
   }
+  if (codes.includes(invalidExpectationCode)) {
+    return 'invalid-expectation';
+  }
   if (codes.some((code) => analysisLimitCodes.has(code))) {
     return 'analysis-limit';
   }
@@ -237,6 +242,7 @@ const diagnosticCategory = (diagnostic: GeometryDiagnostic): FailureCategory | u
 /** Most specific first: a decided claim stands; then what keeps the claim undecided. */
 const categoryPriority: readonly FailureCategory[] = [
   'geometry',
+  'invalid-expectation',
   'timeout',
   'resource-limit',
   'analysis-limit',
@@ -272,6 +278,21 @@ const keepsAssertion = (suggestion: string | undefined): suggestion is string =>
   suggestion.trim() !== '' &&
   !weakeningSuggestion.test(suggestion) &&
   !reducingSuggestion.test(suggestion);
+
+/**
+ * Advice for a claim the engine refused as malformed: correct the authored expectation, never remove the claim.
+ *
+ * @param diagnostics - The row's diagnostics; the refusal's `details` name the field and, when unique, its path.
+ * @returns The next step for the row.
+ */
+const invalidExpectationSuggestion = (diagnostics: readonly GeometryDiagnostic[]): string => {
+  const details = diagnostics.find((diagnostic) => diagnostic.code === invalidExpectationCode)?.details;
+  const field = isRecord(details) && typeof details['field'] === 'string' ? details['field'] : undefined;
+  const path = isRecord(details) && typeof details['path'] === 'string' ? details['path'] : undefined;
+  const where =
+    field === undefined ? 'the field the diagnostic names' : `'${field}'${path === undefined ? '' : ` at ${path}`}`;
+  return `Not a geometry verdict: the engine refused this claim because its expectation is malformed (${where}); its other claims still ran. Keep the assertion and the requirement it states: correct the expectation to the matcher's documented fields and values, then re-run.`;
+};
 
 const evidenceSuggestion = (
   kernels: readonly GeoSpecKernelEvidence[],
@@ -432,6 +453,9 @@ const categorySuggestion = (options: {
         any ??
         'Change the model so it meets this requirement, using the expected and actual values in the diagnostics. Keep the assertion and its tolerance.'
       );
+    }
+    case 'invalid-expectation': {
+      return invalidExpectationSuggestion(diagnostics);
     }
     case 'timeout': {
       return (

@@ -66,8 +66,15 @@ const defaultAdmissionFloor = 1;
 const defaultDrainBudget = 2000;
 const defaultWarmEntries = 4096;
 const defaultWarmBytes = 64 * 1024 * 1024;
-/** Bound on the read cache `evaluate` keeps in front of the store session. */
-const readCacheBytes = 64 * 1024 * 1024;
+/**
+ * Bound on the read cache `evaluate` keeps in front of a Durable store session (T5). A Memory
+ * binding keeps none: its engine is in the same worker and is itself the cache.
+ */
+const durableReadCacheBytes = 64 * 1024 * 1024;
+/** The Durable read-cache bound on a memory-constrained device; its hits come from IndexedDB instead. */
+const constrainedReadCacheBytes = 16 * 1024 * 1024;
+/** Bytes a memory-constrained device's memory engine retains (T5). */
+const constrainedMemoryEngineBytes = 32 * 1024 * 1024;
 /**
  * Best-effort whole-action publications held for idle: the build and mesh of two edits. Each
  * holds its computed value until it runs, so the bound is on held results, not on bytes.
@@ -157,12 +164,6 @@ const emptySettlement = (status: ComputeScopeSettlement['status'], reason?: stri
 });
 
 /**
- * Adapt one store session to the content/action store pair `evaluate` uses.
- *
- * Whole-action reuse and kernel-scope reuse therefore share one physical store,
- * one generation and one poisoning rule instead of being implemented twice.
- */
-/**
  * Fixed identity for an opaque owned byte leaf; independent of codec metadata.
  * @param digest - Validated identity of the owned payload.
  * @returns Its canonical store action.
@@ -178,23 +179,154 @@ const contentAction = (digest: ContentDigest): ComputeAction => ({
   codec: { id: 'tau.runtime.bytes', version: '1' },
 });
 
-const adaptSession = (
-  session: ComputeStoreSession,
-  publications: ReadonlyMap<ActionDigest, PublicationSource>,
-  liveGeneration: () => Promise<ComputeGeneration>,
-): { readonly contentStore: ContentStore; readonly actionStore: ActionStore } => {
+/** Producer writes held only until their publication reaches the store session. */
+type PublicationStaging = ContentStore & {
+  /** The staged bytes themselves, for the session put that copies them. */
+  readonly peek: (digest: ContentDigest) => Uint8Array<ArrayBuffer> | undefined;
+  /** One publication of these digests settled: drop each once no other publication still stages it. */
+  readonly release: (digests: Iterable<ContentDigest>) => void;
+  readonly heldBytes: () => number;
+};
+
+/**
+ * Stage producer writes for a binding whose engine is itself the cache (T5: Memory).
+ *
+ * A publication writes its closure, then puts it to the session, which keeps its own copy; the
+ * staged bytes are released there, so nothing is held twice. Only a publication aborted between
+ * its writes and its put leaves bytes behind; they are evicted oldest first past `maxBytes`.
+ * @param maxBytes - Bound on bytes staged at once.
+ * @returns The staging content store.
+ */
+const createPublicationStaging = (maxBytes: number): PublicationStaging => {
+  const entries = new Map<ContentDigest, { readonly bytes: Uint8Array<ArrayBuffer>; writers: number }>();
+  let held = 0;
+  let evictions = 0;
+  const remove = (digest: ContentDigest): void => {
+    const entry = entries.get(digest);
+    if (entry) {
+      entries.delete(digest);
+      held -= entry.bytes.byteLength;
+    }
+  };
+  return {
+    read: async ({ digest, signal }) => {
+      signal?.throwIfAborted();
+      const entry = entries.get(digest);
+      return entry ? { status: 'hit', bytes: new Uint8Array(entry.bytes) } : { status: 'miss' };
+    },
+    write: async ({ digest, bytes, signal }) => {
+      signal?.throwIfAborted();
+      const existing = entries.get(digest);
+      if (existing) {
+        existing.writers += 1;
+        return { status: 'existing' };
+      }
+      if (bytes.byteLength > maxBytes) {
+        return { status: 'rejected', reason: 'entry-too-large' };
+      }
+      for (const [oldest] of entries) {
+        if (held + bytes.byteLength <= maxBytes) {
+          break;
+        }
+        remove(oldest);
+        evictions += 1;
+      }
+      entries.set(digest, { bytes, writers: 1 });
+      held += bytes.byteLength;
+      return { status: 'stored' };
+    },
+    maintenance: {
+      status: 'supported',
+      inspect: async ({ signal }) => {
+        signal?.throwIfAborted();
+        return {
+          status: 'supported',
+          statistics: { entries: entries.size, bytes: held, hits: 0, misses: 0, evictions },
+        };
+      },
+      clear: async ({ signal }) => {
+        signal?.throwIfAborted();
+        entries.clear();
+        held = 0;
+        return { status: 'cleared' };
+      },
+    },
+    peek: (digest) => entries.get(digest)?.bytes,
+    release: (digests) => {
+      for (const digest of digests) {
+        const entry = entries.get(digest);
+        if (entry && --entry.writers <= 0) {
+          remove(digest);
+        }
+      }
+    },
+    heldBytes: () => held,
+  };
+};
+
+/** The store pair `evaluate` uses, and the bytes it holds in front of the session. */
+type AdaptedSession = {
+  readonly contentStore: ContentStore;
+  readonly actionStore: ActionStore;
+  readonly heldBytes: () => Promise<number>;
+};
+
+/**
+ * Adapt one store session to the content/action store pair `evaluate` uses.
+ *
+ * Whole-action reuse and kernel-scope reuse therefore share one physical store,
+ * one generation and one poisoning rule instead of being implemented twice.
+ * @param options - The worker's one store session, what `evaluate` knows about each publication in
+ * flight, the live generation reader and the read-cache bound (0 keeps none).
+ * @returns The adapted store pair.
+ */
+const adaptSession = (options: {
+  readonly session: ComputeStoreSession;
+  readonly publications: ReadonlyMap<ActionDigest, PublicationSource>;
+  readonly liveGeneration: () => Promise<ComputeGeneration>;
+  readonly readCacheBytes: number;
+}): AdaptedSession => {
+  const { session, publications, liveGeneration, readCacheBytes } = options;
   // The bounded LRU tiers are a read cache only: the session is the one writer.
   // Its only writer is this realm's publication, which already owns and hashed each leaf (one
   // producer hash); the store session's authority verifies them again on put (U20).
-  const contentCache = createMemoryContentStore({ maxBytes: readCacheBytes, ownsProducerWrites: true });
-  const actionCache = createMemoryActionStore({ maxBytes: readCacheBytes });
+  const tier =
+    readCacheBytes > 0
+      ? {
+          content: createMemoryContentStore({ maxBytes: readCacheBytes, ownsProducerWrites: true }),
+          action: createMemoryActionStore({ maxBytes: readCacheBytes }),
+        }
+      : undefined;
+  // Without a tier (a Memory binding, whose engine is the cache), producer writes are staged
+  // until their put, and every hit reads the engine.
+  const staging = tier ? undefined : createPublicationStaging(maxPendingBytes);
+  const contentCache: ContentStore = tier?.content ?? staging!;
+  /**
+   * The action each looked-up root content belongs to, so the content read that follows the
+   * lookup can fetch it again when no tier holds it. Digests only; bounded like the pending entries.
+   */
+  const roots = new Map<ContentDigest, ActionDigest>();
+  const rememberRoot = (content: ContentDigest, action: ActionDigest): void => {
+    roots.delete(content);
+    roots.set(content, action);
+    for (const [oldest] of roots) {
+      if (roots.size <= maxPendingEntries) {
+        break;
+      }
+      roots.delete(oldest);
+    }
+  };
+  const clearCaches = async (): Promise<void> => {
+    roots.clear();
+    await contentCache.maintenance.clear({});
+    await tier?.action.maintenance.clear({});
+  };
   let { generation } = session;
   const refreshGeneration = async (): Promise<ComputeGeneration> => {
     const current = await liveGeneration();
     if (current !== generation) {
       generation = current;
-      await contentCache.maintenance.clear({});
-      await actionCache.maintenance.clear({});
+      await clearCaches();
     }
     return current;
   };
@@ -204,8 +336,7 @@ const adaptSession = (
     }
     // Another request may have refreshed before this request finished its writes.
     // Clear again so late writes from the old generation cannot become new hits.
-    await contentCache.maintenance.clear({});
-    await actionCache.maintenance.clear({});
+    await clearCaches();
     return false;
   };
   const fetchLeaf = async (input: {
@@ -240,16 +371,42 @@ const adaptSession = (
     input.signal?.throwIfAborted();
     return entry.bytes;
   };
+  /**
+   * Fetch a looked-up root's content again; `readCache` verifies its digest before decoding.
+   * @param input - The root's action and content identities.
+   * @returns The engine's copy of the root bytes, or `undefined` once it is gone.
+   */
+  const fetchRoot = async (input: {
+    readonly action: ActionDigest;
+    readonly digest: ContentDigest;
+    readonly generation: ComputeGeneration;
+    readonly signal?: AbortSignal;
+  }): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    const result = await session.get({
+      digests: [input.action],
+      maxEntries: 1,
+      maxBytes: defaultWarmBytes,
+      generation: input.generation,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    const entry = result.status === 'ok' ? result.entries[0] : undefined;
+    return entry?.actionDigest === input.action && entry.contentDigest === input.digest ? entry.bytes : undefined;
+  };
   const validRoot = async (entry: ComputeStoreEntry, digest: ActionDigest): Promise<boolean> =>
     entry.bytes.byteLength <= defaultWarmBytes &&
     entry.actionDigest === digest &&
     (await validateComputeEntry(entry)) !== undefined;
-  const publishedContent = async (
-    record: ComputeActionRecord,
+  /** Bytes this realm wrote for a publication, before its put. */
+  const stagedContent = async (
+    digest: ContentDigest,
     signal?: AbortSignal,
   ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
-    const content = await contentCache.read({ digest: record.output.digest, ...(signal ? { signal } : {}) });
-    return content.status === 'hit' && content.bytes.byteLength === record.output.size ? content.bytes : undefined;
+    if (staging) {
+      signal?.throwIfAborted();
+      return staging.peek(digest);
+    }
+    const content = await contentCache.read({ digest, ...(signal ? { signal } : {}) });
+    return content.status === 'hit' ? content.bytes : undefined;
   };
   const contentStore: ContentStore = {
     ...contentCache,
@@ -259,41 +416,163 @@ const adaptSession = (
       if (cached.status === 'hit') {
         return (await isCurrent(current)) ? cached : { status: 'miss' };
       }
-      const bytes = await fetchLeaf({ ...input, generation: current });
+      const root = roots.get(input.digest);
+      const bytes =
+        root === undefined
+          ? await fetchLeaf({ ...input, generation: current })
+          : await fetchRoot({ ...input, action: root, generation: current });
       if (!bytes) {
         return { status: 'miss' };
+      }
+      if (!tier) {
+        // The engine already handed out its own copy; nothing in this realm keeps it.
+        return (await isCurrent(current)) ? { status: 'hit', bytes } : { status: 'miss' };
       }
       await contentCache.write({ ...input, bytes });
       return (await isCurrent(current)) ? { status: 'hit', bytes: new Uint8Array(bytes) } : { status: 'miss' };
     },
+  };
+  /**
+   * Put one publication's closure to the session, then record it in the tier when there is one.
+   * @param input - The closure's entries, its action record and the generation it was built in.
+   * @returns The action store's publication outcome.
+   */
+  const putClosure = async (input: {
+    readonly entries: readonly ComputeStoreEntry[];
+    readonly record: ComputeActionRecord;
+    readonly current: ComputeGeneration;
+    readonly signal?: AbortSignal;
+  }): ReturnType<ActionStore['publish']> => {
+    const { record, current, signal } = input;
+    const result = await session.put({
+      entries: input.entries,
+      generation: current,
+      durability: 'disposable',
+      ...(signal ? { signal } : {}),
+    });
+    if (result.status !== 'committed') {
+      const reason = result.status === 'quota' || result.status === 'stale-generation' ? result.status : 'unavailable';
+      return { status: 'rejected', reason };
+    }
+    if (!result.published.includes(record.actionDigest)) {
+      return { status: 'rejected', reason: 'conflict' };
+    }
+    if (!(await isCurrent(current))) {
+      return { status: 'rejected', reason: 'stale-generation' };
+    }
+    return tier ? tier.action.publish({ record, ...(signal ? { signal } : {}) }) : { status: 'published' };
+  };
+  /**
+   * Look one action up in the session and rebuild its record from the validated root.
+   * @param digest - The action to look up.
+   * @param current - The generation the lookup runs in.
+   * @param signal - Cancels the lookup.
+   * @returns The root entry and its record, or `undefined` on a miss.
+   */
+  const lookupRoot = async (
+    digest: ActionDigest,
+    current: ComputeGeneration,
+    signal: AbortSignal | undefined,
+  ): Promise<{ readonly entry: ComputeStoreEntry; readonly record: ComputeActionRecord } | undefined> => {
+    const result = await session.get({
+      digests: [digest],
+      maxEntries: 1,
+      maxBytes: defaultWarmBytes,
+      generation: current,
+      ...(signal ? { signal } : {}),
+    });
+    const entry = result.status === 'ok' ? result.entries[0] : undefined;
+    if (!entry || !(await validRoot(entry, digest)) || !(await isCurrent(current))) {
+      return undefined;
+    }
+    const requiredContent = [...new Set(entry.requiredContent ?? [])].sort();
+    if (requiredContent.length + 1 > maxPendingEntries) {
+      return undefined;
+    }
+    rememberRoot(entry.contentDigest, entry.actionDigest);
+    return {
+      entry,
+      record: {
+        schemaVersion: 1,
+        actionDigest: entry.actionDigest,
+        codec: entry.action.codec,
+        output: { digest: entry.contentDigest, size: entry.bytes.byteLength, mediaType: entry.mediaType },
+        dependencies: entry.action.inputs.filter((input) => input.kind === 'action').map((input) => input.digest),
+        ...(requiredContent.length > 0 ? { requiredContent } : {}),
+      },
+    };
+  };
+  const publish: ActionStore['publish'] = async ({ record, signal }) => {
+    const current = await refreshGeneration();
+    const source = publications.get(record.actionDigest);
+    const content = await stagedContent(record.output.digest, signal);
+    if (!source || source.generation !== current || content?.byteLength !== record.output.size) {
+      return { status: 'rejected', reason: 'unavailable' };
+    }
+    const requiredContent = [...new Set(record.requiredContent ?? [])].sort();
+    if (requiredContent.length + 1 > maxPendingEntries) {
+      return { status: 'rejected', reason: 'entry-too-large' };
+    }
+    let bytes = content.byteLength;
+    const entries: ComputeStoreEntry[] = [];
+    for (const required of requiredContent) {
+      // oxlint-disable-next-line no-await-in-loop -- read only already-owned parts before atomic session publication.
+      const leaf = await stagedContent(required, signal);
+      if (!leaf) {
+        return { status: 'rejected', reason: 'unavailable' };
+      }
+      bytes += leaf.byteLength;
+      if (bytes > maxPendingBytes) {
+        return { status: 'rejected', reason: 'entry-too-large' };
+      }
+      const action = contentAction(required);
+      entries.push({
+        action,
+        // oxlint-disable-next-line no-await-in-loop -- leaf identity is verified in the bounded publication order.
+        actionDigest: await digestAction({ action }),
+        contentDigest: required,
+        mediaType: 'application/octet-stream',
+        bytes: leaf,
+        determinism: 'byte-exact',
+      });
+    }
+    if (bytes > maxPendingBytes || !(await isCurrent(current))) {
+      return { status: 'rejected', reason: 'unavailable' };
+    }
+    entries.push({
+      action: source.action,
+      actionDigest: record.actionDigest,
+      contentDigest: record.output.digest,
+      mediaType: record.output.mediaType,
+      bytes: content,
+      determinism: source.determinism,
+      ...(requiredContent.length > 0 ? { requiredContent } : {}),
+    });
+    return putClosure({ entries, record, current, ...(signal ? { signal } : {}) });
   };
   return {
     contentStore,
     actionStore: {
       read: async ({ digest, signal }) => {
         const current = await refreshGeneration();
-        const cached = await actionCache.read({ digest, ...(signal ? { signal } : {}) });
-        if (cached.status === 'hit') {
+        const cached = tier ? await tier.action.read({ digest, ...(signal ? { signal } : {}) }) : undefined;
+        if (cached?.status === 'hit') {
+          // The content tier may have evicted this root while its record stayed.
+          rememberRoot(cached.record.output.digest, cached.record.actionDigest);
           return (await isCurrent(current)) ? cached : { status: 'miss' };
         }
-        const result = await session.get({
-          digests: [digest],
-          maxEntries: 1,
-          maxBytes: defaultWarmBytes,
-          generation: current,
-          ...(signal ? { signal } : {}),
-        });
-        const entry = result.status === 'ok' ? result.entries[0] : undefined;
-        if (!entry || !(await validRoot(entry, digest)) || !(await isCurrent(current))) {
+        const root = await lookupRoot(digest, current, signal);
+        if (!root) {
           return { status: 'miss' };
         }
-        const requiredContent = [...new Set(entry.requiredContent ?? [])].sort();
-        if (requiredContent.length + 1 > maxPendingEntries) {
-          return { status: 'miss' };
+        const { entry, record } = root;
+        if (!tier) {
+          // `readCache` reads the root and every leaf next, each from the engine, and verifies them.
+          return { status: 'hit', record };
         }
         let bytes = entry.bytes.byteLength;
         const leaves: Array<{ digest: ContentDigest; bytes: Uint8Array<ArrayBuffer> }> = [];
-        for (const required of requiredContent) {
+        for (const required of record.requiredContent ?? []) {
           // oxlint-disable-next-line no-await-in-loop -- reuse the verified leaf tier before loading another metadata root.
           const cachedLeaf = await contentCache.read({ digest: required, ...(signal ? { signal } : {}) });
           const leaf =
@@ -317,85 +596,35 @@ const adaptSession = (
         if (!(await isCurrent(current))) {
           return { status: 'miss' };
         }
-        const record: ComputeActionRecord = {
-          schemaVersion: 1,
-          actionDigest: entry.actionDigest,
-          codec: entry.action.codec,
-          output: { digest: entry.contentDigest, size: entry.bytes.byteLength, mediaType: entry.mediaType },
-          dependencies: entry.action.inputs.filter((input) => input.kind === 'action').map((input) => input.digest),
-          ...(requiredContent.length > 0 ? { requiredContent } : {}),
-        };
         await Promise.all(leaves.map(async (leaf) => contentCache.write({ ...leaf, ...(signal ? { signal } : {}) })));
         await contentCache.write({ digest: entry.contentDigest, bytes: entry.bytes, ...(signal ? { signal } : {}) });
-        await actionCache.publish({ record, ...(signal ? { signal } : {}) });
+        await tier.action.publish({ record, ...(signal ? { signal } : {}) });
         return (await isCurrent(current)) ? { status: 'hit', record } : { status: 'miss' };
       },
-      publish: async ({ record, signal }) => {
-        const current = await refreshGeneration();
-        const source = publications.get(record.actionDigest);
-        const content = await publishedContent(record, signal);
-        if (!source || source.generation !== current || !content) {
-          return { status: 'rejected', reason: 'unavailable' };
-        }
-        const requiredContent = [...new Set(record.requiredContent ?? [])].sort();
-        if (requiredContent.length + 1 > maxPendingEntries) {
-          return { status: 'rejected', reason: 'entry-too-large' };
-        }
-        let bytes = content.byteLength;
-        const entries: ComputeStoreEntry[] = [];
-        for (const required of requiredContent) {
-          // oxlint-disable-next-line no-await-in-loop -- read only already-owned parts before atomic session publication.
-          const leaf = await contentCache.read({ digest: required, ...(signal ? { signal } : {}) });
-          if (leaf.status === 'miss') {
-            return { status: 'rejected', reason: 'unavailable' };
+      publish: staging
+        ? async (input) => {
+            try {
+              return await publish(input);
+            } finally {
+              // Settled either way: the engine holds its copy, or nothing will put these bytes.
+              staging.release([input.record.output.digest, ...new Set(input.record.requiredContent ?? [])]);
+            }
           }
-          bytes += leaf.bytes.byteLength;
-          if (bytes > maxPendingBytes) {
-            return { status: 'rejected', reason: 'entry-too-large' };
-          }
-          const action = contentAction(required);
-          entries.push({
-            action,
-            // oxlint-disable-next-line no-await-in-loop -- leaf identity is verified in the bounded publication order.
-            actionDigest: await digestAction({ action }),
-            contentDigest: required,
-            mediaType: 'application/octet-stream',
-            bytes: leaf.bytes,
-            determinism: 'byte-exact',
-          });
-        }
-        if (bytes > maxPendingBytes || !(await isCurrent(current))) {
-          return { status: 'rejected', reason: 'unavailable' };
-        }
-        entries.push({
-          action: source.action,
-          actionDigest: record.actionDigest,
-          contentDigest: record.output.digest,
-          mediaType: record.output.mediaType,
-          bytes: content,
-          determinism: source.determinism,
-          ...(requiredContent.length > 0 ? { requiredContent } : {}),
-        });
-        const result = await session.put({
-          entries,
-          generation: current,
-          durability: 'disposable',
-          ...(signal ? { signal } : {}),
-        });
-        if (result.status !== 'committed') {
-          const reason =
-            result.status === 'quota' || result.status === 'stale-generation' ? result.status : 'unavailable';
-          return { status: 'rejected', reason };
-        }
-        if (!result.published.includes(record.actionDigest)) {
-          return { status: 'rejected', reason: 'conflict' };
-        }
-        if (!(await isCurrent(current))) {
-          return { status: 'rejected', reason: 'stale-generation' };
-        }
-        return actionCache.publish({ record, ...(signal ? { signal } : {}) });
-      },
+        : publish,
       maintenance: unsupportedCacheMaintenance,
+    },
+    heldBytes: async () => {
+      if (staging) {
+        return staging.heldBytes();
+      }
+      const [content, action] = await Promise.all([
+        tier!.content.maintenance.inspect({}),
+        tier!.action.maintenance.inspect({}),
+      ]);
+      return (
+        (content.status === 'supported' ? content.statistics.bytes : 0) +
+        (action.status === 'supported' ? action.statistics.bytes : 0)
+      );
     },
   };
 };
@@ -423,6 +652,8 @@ export type ComputeCapabilityHost = {
   readonly dispose: () => Promise<void>;
   /** Authority-side inspect/clear/collect, when this binding has a control facet. */
   readonly control: ComputeStoreControl | undefined;
+  /** Bytes the read cache in front of the store session holds now; 0 for a binding without one. */
+  readonly readCacheBytes: () => Promise<number>;
 };
 
 /** Off installs nothing: every lifecycle hook is an explicit no-operation. */
@@ -441,6 +672,7 @@ const offHost: ComputeCapabilityHost = {
   drain: noAsyncOperation,
   dispose: noAsyncOperation,
   control: undefined,
+  readCacheBytes: async () => 0,
 };
 
 /**
@@ -482,7 +714,8 @@ export const createComputeCapabilityHost = (input: {
     return offHost;
   }
 
-  const memory = createMemoryComputeEngine();
+  const memoryConstrained = input.binding.memoryConstrained === true;
+  const memory = createMemoryComputeEngine(memoryConstrained ? { maxBytes: constrainedMemoryEngineBytes } : {});
   const resolved = input.binding.mode === 'durable' ? durableEngines.get(input.binding.store) : undefined;
   if (input.binding.mode === 'durable' && !resolved) {
     input.onDiagnostic?.(
@@ -493,6 +726,10 @@ export const createComputeCapabilityHost = (input: {
   const engine = resolved?.engine ?? memory.engine;
   const workspace = resolved?.workspace ?? input.workspace;
   const control = resolved?.control ?? memory.control({ workspace });
+  let readCacheBytes = 0;
+  if (mode === 'durable') {
+    readCacheBytes = memoryConstrained ? constrainedReadCacheBytes : durableReadCacheBytes;
+  }
 
   let sessionPromise: Promise<ComputeStoreSession> | undefined;
   const openSession = async (): Promise<ComputeStoreSession> => {
@@ -688,12 +925,14 @@ export const createComputeCapabilityHost = (input: {
   };
 
   let servicePromise: Promise<ComputeReuseService> | undefined;
+  let adapted: AdaptedSession | undefined;
   const openService = async (): Promise<ComputeReuseService> => {
     servicePromise ??= (async () => {
       const session = await openSession();
-      const stores = adaptSession(session, publications, liveGeneration);
+      adapted = adaptSession({ session, publications, liveGeneration, readCacheBytes });
       return createComputeReuseService({
-        ...stores,
+        contentStore: adapted.contentStore,
+        actionStore: adapted.actionStore,
         schedulePublication,
         promote: async ({ actionDigest: action, retention, signal }) => {
           const generation = await liveGeneration();
@@ -1139,6 +1378,7 @@ export const createComputeCapabilityHost = (input: {
       }
     },
     control,
+    readCacheBytes: async () => (adapted ? adapted.heldBytes() : 0),
   };
 };
 

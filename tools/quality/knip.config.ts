@@ -161,6 +161,8 @@ const config: KnipConfig = {
       entry: [
         'app/main.ts',
         'app/*-command.ts',
+        // tau-storage (DC1): the Dockerfile `storage` target runs it, built by vite.storage-worker.config.ts.
+        'app/storage-worker.ts',
         'app/api/**/*.module.ts',
         'app/database/**/*.ts',
         'app/telemetry/**/*.ts',
@@ -350,8 +352,6 @@ const config: KnipConfig = {
         // `scripts:prepare-geospec-test-consumer` stages from this directory.
         'host-tests/{f1-public-a1,m3-corpus}/vitest.config.mjs',
       ],
-    },
-    'packages/geospec-engine': {
       // Fixture model sources: the runtime CLI evaluates them to regenerate the committed
       // STEP corpus, and each fixture manifest records its script as provenance.
       ignore: ['fixtures/scripts/*/**'],

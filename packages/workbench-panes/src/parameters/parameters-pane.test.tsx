@@ -357,7 +357,8 @@ describe('ParametersPane', () => {
     const { container } = renderPane({}, []);
 
     expect(screen.getByRole('searchbox', { name: 'Filter parameters' })).toBeVisible();
-    expect(screen.getByText('No geometry units.')).toBeVisible();
+    expect(screen.getByText('No parameters yet')).toBeVisible();
+    expect(screen.getByText(/Ask the agent to expose a value as a parameter/u)).toBeVisible();
     expect(container.querySelector('[data-slot="parameters-panel-body"]')?.className).toContain('bg-sidebar');
     expect(container.querySelector('[data-slot="parameters-filter"]')?.className).not.toContain('border-b');
   });

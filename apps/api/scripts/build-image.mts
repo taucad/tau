@@ -58,7 +58,13 @@ const main = (): void => {
     .filter((task) => task.endsWith(':build') && task !== 'api:build')
     .map((task) => task.slice(0, -':build'.length));
   nx('run-many', '-t', 'build', '-p', projects.join(','));
-  for (const target of ['api:build', 'api:build:billing-command', 'api:build:maintenance-command']) {
+  for (const target of [
+    'api:build',
+    'api:build:billing-command',
+    'api:build:maintenance-command',
+    'api:build:mirror-command',
+    'api:build:storage-worker',
+  ]) {
     nx('run', target, '--exclude-task-dependencies');
   }
 };

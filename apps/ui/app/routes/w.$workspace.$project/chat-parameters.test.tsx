@@ -814,10 +814,11 @@ describe('ChatParameters', () => {
     }
   });
 
-  it('shows empty message when no geometry units', async () => {
+  it('explains an empty pane and what to ask for when no geometry units (PN-PAR-4)', async () => {
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
-    expect(screen.getByText('No geometry units.')).toBeInTheDocument();
+    expect(screen.getByText('No parameters yet')).toBeInTheDocument();
+    expect(screen.getByText(/Ask the agent to expose a value as a parameter/u)).toBeInTheDocument();
   });
 
   it('returns empty params when entry is missing', async () => {

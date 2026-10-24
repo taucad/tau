@@ -15,6 +15,7 @@ import {
   desktopE2EPackagedExecutable,
   desktopE2EProviderStubKey,
   desktopE2EProviderStubUrl,
+  desktopE2EStorageUrl,
 } from './src/support/config.ts';
 /* oxlint-enable no-restricted-imports */
 
@@ -61,6 +62,31 @@ const waitForApi = async (child: ChildProcess): Promise<void> => {
     if (Date.now() >= deadline) {
       child.kill('SIGTERM');
       throw new Error(`Tau API test server did not become ready at ${desktopE2EApiUrl}`);
+    }
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+};
+
+/** Waits for a child's `/health/live`, failing early if it exits. */
+const waitForLive = async (child: ChildProcess, url: string): Promise<void> => {
+  const deadline = Date.now() + apiReadyTimeout;
+  for (;;) {
+    try {
+      const response = await fetch(new URL('/health/live', url));
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      /* Not listening yet. */
+    }
+    if (child.exitCode !== null) {
+      throw new Error(`The test server for ${url} exited with code ${String(child.exitCode)}`);
+    }
+    if (Date.now() >= deadline) {
+      child.kill('SIGTERM');
+      throw new Error(`The test server did not become ready at ${url}`);
     }
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 250);
@@ -131,6 +157,14 @@ export const setup = async (): Promise<() => void> => {
    * 24 for a tsdown config-loader bug. */
   if (!desktopE2ECompletedArtifact) {
     execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
+    execFileSync(
+      resolve(workspaceRoot, 'node_modules/.bin/vite'),
+      ['build', '--config', 'vite.storage-worker.config.ts'],
+      {
+        cwd: apiRoot,
+        stdio: 'ignore',
+      },
+    );
   }
 
   const environment = { ...process.env };
@@ -140,6 +174,9 @@ export const setup = async (): Promise<() => void> => {
   environment['TAU_API_URL'] = desktopE2EApiUrl;
   environment['TAU_FRONTEND_URL'] = desktopE2EFrontendUrl;
   environment['TAU_TEST_MODE'] = 'true';
+  /* DC1: git RPCs and repository tombstones are forwarded to the tau-storage
+   * worker booted below, with the development grant and receipt keys. */
+  environment['TAU_STORAGE_URL'] = desktopE2EStorageUrl;
   /* No `TAU_GIT_ROOT`: the git storage substrate charter retired it (D1, S3)
    * and `environment.config.ts` now *refuses to boot* a process that carries
    * one, which is what stopped this whole tier starting (W10 defect 3).
@@ -209,6 +246,45 @@ export const setup = async (): Promise<() => void> => {
   if (!apiCwd) {
     throw new Error('Completed-artifact E2E requires the isolated launcher API directory.');
   }
+  /* The worker first: it is what the API forwards to, and it holds no database
+   * or Redis (blanked so `.env` cannot fill them in). */
+  const storageLog = createWriteStream(resolve(logDirectory, apiLogName.replace(/^api/u, 'storage')), { flags: 'w' });
+  const storage = spawn(
+    process.execPath,
+    [
+      ...(desktopE2ECompletedArtifact ? [] : ['--env-file-if-exists=.env']),
+      '--import',
+      new URL('register.mjs', pathToFileURL(createRequire(import.meta.url).resolve('@oxc-node/core/package.json')))
+        .href,
+      resolve(apiRoot, 'dist/storage-worker.js'),
+    ],
+    {
+      cwd: apiCwd,
+      /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+      env: {
+        ...process.env,
+        NODE_ENV: 'development',
+        PORT: new URL(desktopE2EStorageUrl).port,
+        DATABASE_URL: '',
+        REDIS_URL: '',
+        OTEL_SERVICE_NAME: 'tau-storage',
+        OTEL_METRICS_PORT: '0',
+        TAU_STORAGE_RECEIPT_URL: new URL('/v1/internal/storage/receipts', desktopE2EApiUrl).href,
+      },
+      /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  storage.stdout.pipe(storageLog);
+  storage.stderr.pipe(storageLog);
+  try {
+    await waitForLive(storage, desktopE2EStorageUrl);
+  } catch (error) {
+    await stopChild(storage);
+    await closeLog(storageLog);
+    throw error;
+  }
+
   const api = spawn(
     process.execPath,
     [
@@ -228,11 +304,15 @@ export const setup = async (): Promise<() => void> => {
   } catch (error) {
     await stopChild(api);
     await closeLog(apiLog);
+    await stopChild(storage);
+    await closeLog(storageLog);
     throw error;
   }
 
   return async () => {
     await stopChild(api);
     await closeLog(apiLog);
+    await stopChild(storage);
+    await closeLog(storageLog);
   };
 };

@@ -47,7 +47,7 @@ const HALF_CUBE = Object.freeze({
 });
 
 const STEP = Object.freeze({
-  path: 'packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step',
+  path: 'packages/geospec/fixtures/clearance/bolt-clearance-hole-positive/model.step',
   bytes: 33_203,
   sha256: 'cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4',
   subjectHash: '27c1aed9b8d0c3dec13faf7f65c337d0e794e7e99cb16f71fe89e3d0b61df80b',
@@ -103,7 +103,7 @@ const errorRecord = (error) => ({
 export const assertMissingBrepRefusal = (error) => {
   const result = frameworkResult(error);
   assert.equal(result.status, 'refused');
-  assert.equal(result.diagnostics[0].code, 'GEOSPEC_EVIDENCE_UNSUPPORTED');
+  assert.equal(result.diagnostics[0].code, 'GEOSPEC_UNSUPPORTED_EVIDENCE');
   assert.equal(result.diagnostics[0].details.matcher, 'toHaveFilletFeature');
   assert.equal(result.diagnostics[0].details.missing, 'exact BRep fillet-feature evidence');
 };

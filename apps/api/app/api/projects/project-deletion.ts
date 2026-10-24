@@ -17,8 +17,7 @@ import {
   publicationAccess,
   user,
 } from '#database/schema.js';
-import { commitTombstone } from '#api/git/store/commit.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import type { RepositoryLocator } from '#api/git/store/port.js';
 
 export type ProjectDeletionStatus = { projectId: string; state: 'active' | 'deleting' | 'deleted'; deletedAt?: string };
 
@@ -141,10 +140,21 @@ export async function requestProjectDeletion(input: {
   });
 }
 
+/**
+ * Writes a project's tombstone manifest and reports its moments (D10, NI12).
+ * tau-api's is `executorTombstoneFence`, which has tau-storage commit it, so no
+ * repository write is reachable from the API image (DC1); the maintenance
+ * worker and the suites use `storeTombstoneFence` over a store they hold.
+ */
+export type TombstoneFence = (
+  target: { readonly locator: RepositoryLocator; readonly committedBy: string; readonly at: Date },
+  signal: AbortSignal,
+) => Promise<{ readonly tombstonedAt: string; readonly purgeAfter: string }>;
+
 /** Recoverable storage fence. The request and maintenance worker share this implementation. */
 export async function completeProjectDeletion(input: {
   database: Database;
-  store: RepositoryStore;
+  fence: TombstoneFence;
   projectId: string;
   at?: Date;
 }): Promise<ProjectDeletionStatus> {
@@ -162,9 +172,9 @@ export async function completeProjectDeletion(input: {
     .where(and(eq(projectDeletion.projectId, input.projectId), isNull(projectDeletion.deletedAt)));
   try {
     // Cancellation reaches the SDK and is awaited; no abandoned request can commit later.
-    const { manifest } = await fenceWithRetry(
+    const tombstone = await fenceWithRetry(
+      input.fence,
       {
-        store: input.store,
         locator: repositoryLocator({
           ownerId: deletion.ownerId,
           projectId: input.projectId,
@@ -175,11 +185,8 @@ export async function completeProjectDeletion(input: {
       },
       AbortSignal.timeout(5000),
     );
-    if (!manifest.tombstone) {
-      throw new Error('Deletion fence missing');
-    }
-    const fencedAt = new Date(manifest.tombstone.tombstonedAt);
-    const purgeAfter = new Date(manifest.tombstone.purgeAfter);
+    const fencedAt = new Date(tombstone.tombstonedAt);
+    const purgeAfter = new Date(tombstone.purgeAfter);
     await withOwnerLock(input.database, deletion.ownerId, async (transaction) => {
       await lockProjectLifecycle(transaction, input.projectId);
       const [usage] = await transaction
@@ -215,13 +222,14 @@ export async function completeProjectDeletion(input: {
 
 /** A short CAS race can settle in this request; longer failures belong to durable recovery. */
 async function fenceWithRetry(
-  input: Parameters<typeof commitTombstone>[0],
+  fence: TombstoneFence,
+  input: Parameters<TombstoneFence>[0],
   signal: AbortSignal,
-): ReturnType<typeof commitTombstone> {
+): ReturnType<TombstoneFence> {
   for (let attempt = 0; ; attempt += 1) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- bounded retry of the same conditional commit.
-      return await commitTombstone(input, signal);
+      return await fence(input, signal);
     } catch (error) {
       if (!(error instanceof RepositoryStoreError) || error.code !== 'lost' || attempt >= 2) {
         throw error;

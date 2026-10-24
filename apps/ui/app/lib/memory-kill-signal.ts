@@ -10,6 +10,8 @@
  * heavy work (open, render, export) says what the page was doing.
  */
 
+import { readSessionStorage } from '#lib/session-storage.js';
+
 /** The analytics event a suspected memory kill is reported as. @public */
 export const memoryKillEventName = 'memory.suspected_kill';
 
@@ -149,14 +151,6 @@ const readNavigationType = (): string | undefined => {
   try {
     const [entry] = globalThis.performance.getEntriesByType('navigation');
     return entry !== undefined && 'type' in entry && typeof entry.type === 'string' ? entry.type : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-const readSessionStorage = (): Storage | undefined => {
-  try {
-    return globalThis.sessionStorage;
   } catch {
     return undefined;
   }

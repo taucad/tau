@@ -116,15 +116,17 @@ describe('ProjectWorkspaceActions', () => {
     expect(openPanel.mock.calls).toEqual([['share'], ['export']]);
   });
 
-  it('keeps Share, Export, and sidebar recovery on mobile without desktop lane controls', () => {
+  /* D2, I4: on a phone the top bar owns the sidebar, the status and Share, and the project sheet owns Export and
+   * Revisions; the dock strip draws none of them a second time. */
+  it('draws nothing on a phone, where the project top bar owns every project control', () => {
     state.isMobile = true;
     state.lanes = { chat: false, workbench: false };
-    renderActions();
+    const { container } = renderActions();
 
-    expect(screen.queryByRole('button', { name: 'Toggle Workbench lane' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Rotor housing/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Export' })).toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('button', { name: 'Share' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Export' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('revision-trigger')).not.toBeInTheDocument();
     expect(screen.queryByTestId('workbench-toggle-slot')).not.toBeInTheDocument();
   });
 });

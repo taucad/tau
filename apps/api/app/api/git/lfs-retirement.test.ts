@@ -33,7 +33,8 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
-import { relocateLegacyLfsObjects, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
+import { relocateLegacyLfsObjects } from '#api/git/maintenance/lfs-relocation.js';
 import {
   retireDueLfsObjects as streamDueLfsObjects,
   retireLfsObjects as streamLfsObjects,

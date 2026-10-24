@@ -7,6 +7,7 @@ import type { ProjectAccessService } from '#api/collaboration/project-access.ser
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
+import { objectStoragePreviewWriter } from '#api/projects/project-preview-store.js';
 import { inspectProjectPreview, ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { projectPreviewSchema } from '#api/projects/project-preview.dto.js';
 import type { DatabaseService } from '#database/database.service.js';
@@ -31,7 +32,7 @@ describe('authenticated project previews', () => {
   const access = mock<ProjectAccessService>();
   const storage = mock<ObjectStorageService>();
   const budget = mock<PublicationRateLimiterService>();
-  const service = new ProjectPreviewService(storage);
+  const service = new ProjectPreviewService(storage, objectStoragePreviewWriter(storage));
   const transaction = mock<OwnerLockTransaction>();
   const database = mock<DatabaseService['database']>();
   const controller = new ProjectPreviewController(

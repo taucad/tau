@@ -70,12 +70,17 @@ export type ComputeRetention = CacheRetention;
  * Omission defaults to `memory` in the library; workspace hosts select
  * `durable`. `off` installs no hook, constructs no recipe and emits no
  * telemetry.
+ *
+ * `memoryConstrained` sizes what the worker keeps in memory for a phone-class
+ * device: a Memory engine retains 32 MiB instead of 64 MiB, and a Durable
+ * binding keeps a 16 MiB read cache in front of its store instead of 64 MiB.
+ * A Memory binding keeps no read cache at all: its engine is the cache.
  * @public
  */
 export type ComputeBinding =
   | { readonly mode: 'off' }
-  | { readonly mode: 'memory' }
-  | { readonly mode: 'durable'; readonly store: ComputeStore };
+  | { readonly mode: 'memory'; readonly memoryConstrained?: boolean }
+  | { readonly mode: 'durable'; readonly store: ComputeStore; readonly memoryConstrained?: boolean };
 
 // =============================================================================
 // A3. Store engine and session

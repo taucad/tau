@@ -135,6 +135,40 @@ describe('document worker dispatcher', () => {
     }
   });
 
+  it.each([
+    { memoryHandle: { computeBindingMode: 'memory', computeMemoryConstrained: true }, mode: 'memory' },
+    { memoryHandle: { computeBindingMode: 'durable', computeMemoryConstrained: true }, mode: 'memory' },
+    { memoryHandle: { computeBindingMode: 'memory' }, mode: 'memory', unconstrained: true },
+  ] as const)('binds a $mode compute facet sized by the device memory class', async (input) => {
+    const ports = new MessageChannel();
+    const setComputeBinding = vi.fn();
+    const worker = {
+      setTelemetrySend: vi.fn(),
+      setDevtoolsTelemetryEnabled: vi.fn(),
+      setCompiledWasmModules: vi.fn(),
+      setComputeBinding,
+      initialize: vi.fn(async () => undefined),
+      capabilitiesManifest: { registrations: [], routes: [], renderCapabilities: {} },
+      permitComputePublication: vi.fn(),
+    } as unknown as KernelWorker;
+    const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(ports.port1));
+    const client = createChannelClient<RuntimeDocumentProtocol>({
+      port: wrapMessagePort(ports.port2),
+      sessionKey: 'tau.runtime/v1',
+      protocolSchemas: runtimeDocumentProtocolSchemas,
+    });
+    try {
+      await client.ready;
+      await client.call('initialize', { memoryHandle: input.memoryHandle });
+      expect(setComputeBinding).toHaveBeenCalledExactlyOnceWith(
+        'unconstrained' in input ? { mode: input.mode } : { mode: input.mode, memoryConstrained: true },
+      );
+    } finally {
+      client.close();
+      server.dispose();
+    }
+  });
+
   it('copies direct transcoder output into wire-owned binary and forwards the request signal', async () => {
     const ports = new MessageChannel();
     const source = new Uint8Array([7, 8]);

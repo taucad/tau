@@ -1,0 +1,39 @@
+{
+  "title": "tau-storage-triggers",
+  "interval": 300,
+  "rules": [
+    {
+      "uid": "trigger-stage2-commit",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": { "expr": "max(tau_git_hot_project_commit_rate{app=~\".*storage.*\"}) > 0.5" }
+        },
+        { "refId": "B", "datasourceUid": "__expr__", "model": { "type": "threshold", "expression": "A" } }
+      ]
+    },
+    {
+      "uid": "storage-mirror-absent",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": { "expr": "absent(tau_mirror_rounds_total{app=~\".*mirror.*\"})" }
+        }
+      ]
+    },
+    {
+      "uid": "storage-push-slo-fast-burn",
+      "data": [
+        {
+          "refId": "A",
+          "datasourceUid": "prometheus",
+          "model": {
+            "expr": "sum(rate(tau_sync_operations_total{app=~\".*\",tau_sync_operation=\"push\",outcome=\"error\"}[1h])) / sum(rate(tau_sync_operations_total{app=~\".*\",tau_sync_operation=\"push\"}[1h])) > 0.0144"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -42,8 +42,8 @@ test.each([
 
   await target.click(navButton('All'), { touch: true });
   await target.expectVisible(allSheet());
-  const listed = await target.evaluate(() =>
-    [...document.querySelectorAll('[role="dialog"] button')].map((button) => button.textContent.trim()),
+  const listed = await target.evaluateLocator(allSheet(), (sheet) =>
+    [...sheet.querySelectorAll('button')].map((button) => button.textContent.trim()),
   );
   for (const title of ungatedSurfaces) {
     expect(listed).toContain(title);

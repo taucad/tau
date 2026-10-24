@@ -53,6 +53,26 @@ test.each([
   // From the peek up: the chat's composer must clear the nav at the lowest detent too (R4).
   await target.press(grabber(), 'Home');
   await expect.poll(async () => target.getAttribute(grabber(), 'aria-valuenow')).toBe('1');
+  // Chat fits the peek at rest: after a frame the sheet has not raised itself (I5) and nothing in it is clipped.
+  await target.evaluate(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    });
+  });
+  expect(await target.getAttribute(grabber(), 'aria-valuenow')).toBe('1');
+  expect(await target.getAttribute(grabber(), 'aria-valuetext')).toBe('Peek');
+  const clipped = await target.evaluateLocator(
+    selectors.getByRole('region', { name: 'Chat', exact: true }),
+    (surface) => {
+      const content = surface.querySelector('[data-slot=floating-panel-content]');
+      return content ? content.scrollHeight - content.clientHeight : Number.POSITIVE_INFINITY;
+    },
+  );
+  expect(clipped).toBeLessThanOrEqual(1);
   for (let detent = 0; detent < detents; detent++) {
     if (detent > 0) {
       // oxlint-disable-next-line no-await-in-loop -- each detent in turn.
@@ -104,11 +124,8 @@ test.each([
       { x: handle.x + handle.width / 2, top: handle.y, bottom: handle.y + handle.height },
     );
     expect(hits).toEqual({ above: true, below: false });
-    const bar = await target.boundingBox(
-      selectors.getByCss('[data-slot=viewer-controls] [data-slot=viewer-controls]').first(),
-    );
-    if (bar) {
-      expect(bar.y + bar.height).toBeLessThanOrEqual(handle.y + 0.5);
-    }
+    // The viewer bar stays on the stage above the sheet, clear of the grabber target.
+    const bar = await boxOf(selectors.getByRole('group', { name: 'Viewer controls' }).first(), 'The viewer bar');
+    expect(bar.y + bar.height).toBeLessThanOrEqual(handle.y + 0.5);
   },
 );

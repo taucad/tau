@@ -23,8 +23,8 @@ const allSheet = (): Locator => selectors.getByRole('dialog', { name: 'All surfa
 const surface = (title: string): Locator => selectors.getByRole('region', { name: title, exact: true });
 
 /**
- * Opened as a person would: Parameters from the nav, the rest from All. Revisions, Jobs and Agents needed no change
- * in the pass; they stay here as a 320px regression guard.
+ * Opened as a person would: Parameters from the nav, the rest from All. Revisions and Agents needed no change in the
+ * pass; they stay here as a 320px regression guard. Jobs is not shipped, so All does not list it.
  */
 const panes = [
   'Parameters',
@@ -35,7 +35,6 @@ const panes = [
   'Share',
   'Export',
   'Details',
-  'Jobs',
   'Agents',
 ] as const;
 

@@ -177,11 +177,17 @@ export const createCanvasConfig = (
   if (existsSync(aliasesPath)) {
     const entries: unknown = JSON.parse(readFileSync(aliasesPath, 'utf8'));
     if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
-      throw new Error('canvas.aliases.json must map app # imports to repository-relative fixture files');
+      throw new Error(
+        'canvas.aliases.json must map app # imports or workspace hooks to repository-relative fixture files',
+      );
     }
     for (const [specifier, target] of Object.entries(entries)) {
-      if (!specifier.startsWith('#') || typeof target !== 'string' || isAbsolute(target)) {
-        throw new Error('Canvas aliases require # imports and repository-relative fixture paths');
+      if (
+        !(specifier.startsWith('#') || /^@taucad\/[a-z-]+\/hooks\/[a-z-]+$/.test(specifier)) ||
+        typeof target !== 'string' ||
+        isAbsolute(target)
+      ) {
+        throw new Error('Canvas aliases require # imports or workspace hooks and repository-relative fixture paths');
       }
       const fixture = realpathSync(resolve(repoRoot, target));
       if (!fixtureRoots.some((directory) => fixture.startsWith(`${directory}${sep}`))) {
@@ -190,6 +196,18 @@ export const createCanvasConfig = (
       aliases.set(specifier, fixture);
     }
   }
+  const resolveFixture = (source: string): string | undefined => {
+    const exact = aliases.get(source);
+    if (exact) {
+      return exact;
+    }
+    const queryIndex = source.indexOf('?');
+    if (queryIndex === -1) {
+      return undefined;
+    }
+    const asset = aliases.get(source.slice(0, queryIndex));
+    return asset ? `${asset}${source.slice(queryIndex)}` : undefined;
+  };
   const styleSources = new Set([
     root,
     // Tailwind must see the shared guide renderer's classes.
@@ -205,6 +223,8 @@ export const createCanvasConfig = (
     root,
     base: './',
     publicDir: false,
+    // App component graphs include module workers, which use top-level await.
+    worker: { format: 'es' },
     // One dependency optimizer cache per canvas: canvases served at once from one checkout
     // otherwise rewrite each other's `deps/_metadata.json`, and every page but the last
     // writer's fails with 504 Outdated Optimize Dep.
@@ -226,6 +246,12 @@ export const createCanvasConfig = (
         name: 'tau-canvas-styles',
         enforce: 'pre',
         async resolveId(source, importer) {
+          if (importer && sourceRoots.some((directory) => importer.startsWith(`${directory}${sep}`))) {
+            const fixture = resolveFixture(source);
+            if (fixture) {
+              return fixture;
+            }
+          }
           if (source === 'package.json' && importer?.startsWith(`${appRoot}${sep}`)) {
             return resolve(appRoot, '../package.json');
           }
@@ -251,7 +277,7 @@ export const createCanvasConfig = (
           if (!sourceRoots.some((directory) => importer.startsWith(`${directory}${sep}`))) {
             return undefined;
           }
-          const fixture = aliases.get(source);
+          const fixture = resolveFixture(source);
           if (fixture) {
             return fixture;
           }

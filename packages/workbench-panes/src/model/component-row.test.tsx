@@ -64,7 +64,7 @@ describe('Model component rows', () => {
 
     const row = screen.getByRole('button', { name: 'planetary_housing' }).parentElement;
     expect(getComponentRowPaddingLeft({ depth: node.depth, rootDepth: 0 })).toBe(8);
-    expect(row).toHaveClass('h-7', 'rounded-md', 'text-sm', 'leading-5');
+    expect(row).toHaveClass('h-7', 'pointer-coarse:h-8', 'rounded-md', 'text-sm', 'leading-5');
     expect(row).toHaveStyle({ paddingLeft: '8px' });
   });
 

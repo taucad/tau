@@ -3,7 +3,8 @@
 import { describe, expect, it } from 'vitest';
 import { esbuildBundler } from '@taucad/esbuild';
 import { occtTriangleBudgets } from '@taucad/occt-core';
-import { assertRenderingSuccess, createTestGeometry } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createMockKernelRuntime, createTestGeometry } from '@taucad/runtime-testing';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { opencascadeOptionsSchema } from '#opencascade.schemas.js';
@@ -47,5 +48,25 @@ describe('OpenCascade host memory budget', { timeout: 120_000 }, () => {
     });
     assertRenderingSuccess(rendering);
     expect(rendering.heapBytes).toBeGreaterThan(16 * 2 ** 20);
+  });
+});
+
+// T26 (PR-1b, AR-W15-01): the observation-only heap hook reads the same linear memory as the recycling hook, which
+// stays exactly as it was.
+describe('OpenCascade observed heap', { timeout: 120_000 }, () => {
+  it('reports its WebAssembly memory after initialize, equal to the recycling hook', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', opencascadeKernel());
+    const runtime = createMockKernelRuntime();
+    const context = await definition.initialize(opencascadeOptionsSchema.parse({}), runtime);
+    try {
+      const observed = definition.observedHeapBytes?.(context);
+
+      expect(Number.isSafeInteger(observed)).toBe(true);
+      expect(observed).toBeGreaterThan(0);
+      expect(observed).toBe(context.occt.value.wasmMemory.buffer.byteLength);
+      expect(observed).toBe(definition.heapBytes?.(context));
+    } finally {
+      await definition.onDispose?.(context);
+    }
   });
 });

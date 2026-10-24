@@ -186,6 +186,11 @@ export type PicovoxelContext = {
    * after its render (D-RT-18).
    */
   readonly runtimes: Map<PicovoxelArtifact, Promise<PicoRuntime>>;
+  /**
+   * Each warm runtime's Emscripten module, recorded from the sessions it opens: a `PicoRuntime` exposes no memory, but
+   * every session's `module` is its runtime's. Read only by the observation heap hook; dropped with the runtime.
+   */
+  readonly heaps: Map<PicovoxelArtifact, Pick<Pico['module'], 'HEAPU8'>>;
   /** Sessions and runtimes author code created during the current render; disposed when it ends. */
   readonly authorResources: Set<AuthorResource>;
 };
@@ -307,6 +312,7 @@ const recycleRuntime = async (
   const loading = context.runtimes.get(artifact);
   if (loading) {
     context.runtimes.delete(artifact);
+    context.heaps.delete(artifact);
     try {
       const picoRuntime = await loading;
       picoRuntime.dispose();
@@ -405,7 +411,9 @@ const openSession = async (
   const runtime = await loadRuntime(context, kernelRuntime, input.artifact);
   // No explicit `fastRenorm` or `serialLattice`: the lane bundle decides both. `memoryWarningBytes: 0`
   // silences PicoVoxel's console warning; the kernel reports memory through its logger instead.
-  return runtime.createPico({ voxelSize: input.voxelSize, lane: input.lane, memoryWarningBytes: 0 });
+  const pico = await runtime.createPico({ voxelSize: input.voxelSize, lane: input.lane, memoryWarningBytes: 0 });
+  context.heaps.set(input.artifact, pico.module);
+  return pico;
 };
 
 /**
@@ -1198,6 +1206,7 @@ export const picovoxelKernel = defineKernel({
       wasm: options.wasm,
       recycleHeapBytes: options.recycleHeapBytes,
       runtimes: new Map(),
+      heaps: new Map(),
       authorResources,
     };
   },
@@ -1370,6 +1379,7 @@ export const picovoxelKernel = defineKernel({
   async onDispose(context) {
     const runtimes = await Promise.allSettled(context.runtimes.values());
     context.runtimes.clear();
+    context.heaps.clear();
     // Author resources left by module top-level code, then every started runtime; a teardown that
     // throws never stops the rest.
     for (const settled of runtimes) {
@@ -1378,6 +1388,19 @@ export const picovoxelKernel = defineKernel({
       }
     }
     releaseRender(undefined, context.authorResources);
+  },
+
+  // Observation only (PR-1b): the linear memory of every warm runtime, summed; none before the first render or after
+  // the last runtime is recycled. The recycle threshold above keeps reading the session's own heap.
+  observedHeapBytes(context) {
+    if (context.heaps.size === 0) {
+      return undefined;
+    }
+    let bytes = 0;
+    for (const module of context.heaps.values()) {
+      bytes += module.HEAPU8.byteLength;
+    }
+    return bytes;
   },
 
   serializeHandle({ handle }): PicovoxelSerializedHandle {

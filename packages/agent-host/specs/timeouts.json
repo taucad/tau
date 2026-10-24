@@ -988,6 +988,22 @@
       "token": "await delay(pollInterval, undefined, { signal })",
       "class": "External edge",
       "owner": "CLI-A1"
+    },
+    {
+      "id": "SHELL-COMMAND-TIMEOUT",
+      "bound": "Agent shell command deadline: the call's timeoutMs clamped to 1 s..600 s (default 120 s); on expiry the provider stops the command and every descendant and the call returns timed-out",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "admitted.commandTimeout",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
+    },
+    {
+      "id": "SHELL-PROBE-TIMEOUT",
+      "bound": "30-second bound on the shell availability probe's version command",
+      "site": "packages/host/src/shell/shell-service.ts",
+      "token": "AbortSignal.timeout(30_000)",
+      "class": "External edge",
+      "owner": "desktop-bash-terminal W3"
     }
   ]
 }

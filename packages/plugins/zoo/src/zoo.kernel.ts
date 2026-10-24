@@ -550,6 +550,9 @@ export const zooKernel = defineKernel({
     await context.kclUtils?.cleanup();
     context.kclUtils = undefined;
   },
+
+  // Observation only (PR-1b): the KCL module's linear memory, once the first resolve or describe has loaded it.
+  observedHeapBytes: (context) => context.kclUtils?.wasmHeapBytes,
 });
 
 class KclBuildError extends Error {

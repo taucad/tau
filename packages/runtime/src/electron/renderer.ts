@@ -16,6 +16,7 @@ import {
   registerElectronRuntimeHostRelease,
 } from '#electron/_internal/runtime-host-lease.js';
 import type { ElectronRuntimeHostExitDetail } from '#electron/_internal/runtime-host-lease.js';
+import { readResourceLimit } from '#types/resource-limit.js';
 
 export {
   electronUtilityClient,
@@ -278,17 +279,26 @@ export const requestElectronRuntimePort = async (
   const hostExitTag = bridge.relayTag.hostExit;
   const onHostExit = (event: MessageEvent): void => {
     const data = event.data as
-      | { taucadRelay?: string; hostId?: string; exitCode?: number; released?: boolean; stderrTail?: string }
+      | {
+          taucadRelay?: string;
+          hostId?: string;
+          exitCode?: number;
+          released?: boolean;
+          stderrTail?: string;
+          exceeded?: unknown;
+        }
       | undefined;
     if (!data || data.taucadRelay !== hostExitTag || data.hostId !== hostId || !isSameWindowRelay(event)) {
       return;
     }
     /* This host reports exactly one exit, so the listener retires with it. */
     target.removeEventListener('message', onHostExit);
+    const exceeded = readResourceLimit(data.exceeded);
     notifyHostExit?.({
       released: data.released === true,
       ...(typeof data.exitCode === 'number' ? { exitCode: data.exitCode } : {}),
       ...(data.stderrTail === undefined ? {} : { stderrTail: data.stderrTail }),
+      ...(exceeded === undefined ? {} : { exceeded }),
     });
   };
   /* `release()` asks main to kill the utility, so the exit relay it provokes

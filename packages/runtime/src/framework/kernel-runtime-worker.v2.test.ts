@@ -2280,7 +2280,7 @@ describe('effective tessellation on the render span', () => {
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
     const telemetry: Array<{ readonly name: string; readonly detail?: Record<string, unknown> }> = [];
-    worker.setTelemetrySend((entries) => telemetry.push(...entries));
+    worker.setTelemetrySend(({ entries }) => telemetry.push(...entries));
     const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
     worker.onRendered = (event) => {
       rendered.push(event);

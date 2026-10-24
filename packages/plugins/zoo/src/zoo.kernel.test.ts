@@ -1291,3 +1291,26 @@ cone = startSketchOn(XZ)
     });
   });
 });
+
+// T26 (PR-1b, AR-W15-01): the observation-only heap hook reads the KCL module's memory once a parse has loaded it.
+describe('zoo observed heap', () => {
+  it('should observe no heap after initialize and the KCL module memory after describe', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', zooKernel());
+    const runtime = createMockKernelRuntime({
+      filesystemOverrides: { existsResult: () => true, readFileResult: async () => 'width = 10' },
+    });
+    const context = await definition.initialize(zooOptionsSchema.parse({ baseUrl: 'https://api.zoo.dev' }), runtime);
+    try {
+      expect(definition.observedHeapBytes?.(context)).toBeUndefined();
+      await definition.describe({ entryPath: 'main.kcl' }, runtime, context);
+      const observed = definition.observedHeapBytes?.(context);
+
+      expect(Number.isSafeInteger(observed)).toBe(true);
+      expect(observed).toBeGreaterThan(0);
+      expect(observed! % 65_536).toBe(0);
+      expect(definition.heapBytes).toBeUndefined();
+    } finally {
+      await definition.onDispose?.(context);
+    }
+  });
+});

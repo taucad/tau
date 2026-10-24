@@ -302,8 +302,9 @@ describe('publishWaves()', () => {
         }
       }
     }
-    // The current publishable graph has eleven dependency layers; removing the native kernel roster took the twelfth.
-    expect(waves).toHaveLength(11);
+    // The current publishable graph has ten dependency layers; removing the native kernel roster took the twelfth,
+    // and dropping host's dependency on geospec-engine (#1027) took the eleventh.
+    expect(waves).toHaveLength(10);
     expect(publishWaves(fixture)).toEqual([['base'], ['leaf']]);
   });
 });

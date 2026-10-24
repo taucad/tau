@@ -161,6 +161,11 @@ export type WorkerRevisionCommand =
      with and sent its frame first; `remote.machine` re-validates (D3). */
   | Readonly<{ command: 'authorizeRemote' }>
   | Readonly<{ command: 'syncNow' }>
+  /**
+   * Pull the remote now (XD3, round 18): another device's run on one of this project's chats has been quiet here past
+   * the staleness bound, and only a pull shows whether it stayed quiet there.
+   */
+  | Readonly<{ command: 'pullRemote' }>
   /** Separate, consent-gated candidate artifact route; never authored sync. */
   | Readonly<{ command: 'fetchGeoSpecCandidates' }>
   | Readonly<{ command: 'publishGeoSpecCandidate'; candidate: Uint8Array<ArrayBuffer> }>
@@ -1299,6 +1304,11 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'syncNow': {
           actor.send({ type: 'syncNow' });
+          return;
+        }
+        /* A pull, as a move the remote announced would make one; a pull already under way takes it next. */
+        case 'pullRemote': {
+          actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
           return;
         }
         case 'recordsChanged': {

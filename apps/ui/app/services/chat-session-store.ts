@@ -103,7 +103,7 @@ import type {
   ChatProjectionReadAnswer,
   ChatRunPhase as ProjectedRunPhase,
 } from '#machines/chat-projection.logic.js';
-import { segmentDeviceIdOf } from '@taucad/agent-host';
+import { chatPulledAtFileName, pulledAtOf, segmentDeviceIdOf } from '@taucad/agent-host';
 import type { RowKey } from '@taucad/agent-host';
 import type { HostCommand } from '@taucad/agent-host/wire';
 import { sdkWatch } from '#chat-clients/_internal/sdk-watch.js';
@@ -212,6 +212,11 @@ export type ChatSessionDeps = {
    */
   onPlacementReachabilityChanged?: ((listener: () => void) => () => void) | undefined;
   queueLock?: QueueLock;
+  /**
+   * Ask a project's revisions to pull its remote now (XD3, round 18): another device's run on one of its chats awaits
+   * a pull to show whether it stayed quiet. Absent: nothing is asked, and the run holds until a pull happens anyway.
+   */
+  pullRemote?: ((projectId: string) => void) | undefined;
   /** Acknowledged observation through the root owning the chat records. */
   watchRecordFile?: (
     path: string,
@@ -861,6 +866,19 @@ export class ChatSessionStore {
    * call on every render — closures are read through `this.#deps` at call
    * time, so swapping never tears in-flight work.
    */
+  /**
+   * Ask the chat's project to pull its remote now (XD3, round 18), for another device's run on the chat that awaits a
+   * pull (`selectRunElsewhereAwaitsPull`). What the pull brings reaches the projection as any sync does.
+   *
+   * @param chatId - The chat.
+   */
+  public requestRemotePull(chatId: string): void {
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    if (projectId !== undefined) {
+      this.#deps.pullRemote?.(projectId);
+    }
+  }
+
   public setDependencies(deps: ChatSessionDeps): void {
     const replaced = deps.client !== this.#deps.client || deps.watchRecordFile !== this.#deps.watchRecordFile;
     this.#deps = deps;
@@ -2330,8 +2348,18 @@ export class ChatSessionStore {
             }
             const paths = event.type === 'rename' ? [event.oldPath, event.newPath] : [event.path];
             // This is the foreign segment directory, not the owned events.jsonl
-            // writer or chat.json metadata. Ancestor deletion/rename also refolds it.
-            if (paths.some((path) => path.endsWith('.jsonl') || directory.endsWith(`/${path}`) || directory === path)) {
+            // writer or chat.json metadata. Ancestor deletion/rename also refolds it,
+            // and so does a pull that brought nothing new (XD3, round 18).
+            if (
+              paths.some(
+                (path) =>
+                  path.endsWith('.jsonl') ||
+                  path.endsWith(`/${chatPulledAtFileName}`) ||
+                  path === chatPulledAtFileName ||
+                  directory.endsWith(`/${path}`) ||
+                  directory === path,
+              )
+            ) {
               invalidate();
             }
           },
@@ -4402,11 +4430,19 @@ export class ChatSessionStore {
       const deviceId = segmentDeviceIdOf(name);
       return deviceId === undefined ? [] : [{ name, deviceId }];
     });
+    /*
+     * This device's last pull of the chat, as the agent host's reader reads it (XD3, round 18): read before the
+     * segments, since sync records a pull only once the segments it brought are written.
+     */
+    const pulledAt = entries.includes(chatPulledAtFileName)
+      ? pulledAtOf(await client.readFile(`${directory}/${chatPulledAtFileName}`).catch(() => undefined))
+      : undefined;
     const segments = await Promise.all(
       named.map(async ({ name, deviceId }) => ({
         deviceId,
         bytes: await this.#readForeignSegment(`${directory}/${name}`, client),
         ...(await receivedAtOf(client, `${directory}/${name}`)),
+        ...(pulledAt === undefined ? {} : { pulledAt }),
       })),
     );
     if (

@@ -24,7 +24,7 @@ import type * as AiSdk from 'ai';
 import type { WatchEvent } from '@taucad/filesystem';
 import type { CatchUpFrame, CommandAnswer, HostCommand } from '@taucad/agent-host/wire';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
-import { chunksOf } from '#machines/chat-projection.logic.js';
+import { chunksOf, selectRunElsewhere, selectRunElsewhereAwaitsPull } from '#machines/chat-projection.logic.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatRequest, ChatTurnGesture } from '#machines/chat-session.machine.js';
@@ -225,6 +225,7 @@ type StubDeps = {
     | 'isPlacementOnThisDevice'
     | 'isPlacementOnThisDeviceNow'
     | 'onPlacementReachabilityChanged'
+    | 'pullRemote'
   >]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
 } & { client: MemoryClient; queueLock: NonNullable<ChatSessionDeps['queueLock']> };
 
@@ -6790,6 +6791,54 @@ describe('ChatSessionStore — a run on another device (XD3)', () => {
       expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
         expect.objectContaining({ runId: 'run-received', observedAt: receivedAt }),
       ]);
+    });
+    store.release(chatId);
+    unobserve();
+  });
+
+  /*
+   * Round 18: quiet is evidenced by a pull, as the agent host reads it. The page reads this device's last pull of the
+   * chat beside the segments, so a run quiet here for twenty minutes holds the chat until a pull past the bound finds
+   * nothing newer, and the page asks its project for that pull meanwhile.
+   */
+  it('should hold a foreign run until a pull past the bound, and ask the project for that pull', async () => {
+    const projectId = 'project_run_pulled';
+    const chatId = 'chat_run_pulled';
+    const receivedAt = Date.now() - 20 * 60 * 1000;
+    const client = Object.assign(createMemoryClient(), {
+      stat: vi.fn(async (path: string) => ({ size: 0, mtimeMs: path.endsWith('.jsonl') ? receivedAt : 0 })),
+    });
+    const events = `/projects/${projectId}/.tau/chats/${chatId}/events`;
+    const row = (sequence: number, state: string) =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'desk', sequence, recordedAt: new Date(receivedAt).toISOString(), runId: 'run-pulled', type: 'run.lifecycle', state })}\n`;
+    await client.writeFile(
+      `${events}/device-desktop.jsonl`,
+      new TextEncoder().encode(row(0, 'admitted') + row(1, 'running')),
+    );
+    await client.writeFile(`${events}/pulled-at`, new TextEncoder().encode(String(receivedAt + 60_000)));
+    const pulls: string[] = [];
+    const store = new ChatSessionStore({ chatSession });
+    store.setDependencies({ ...createStubDeps(client), pullRemote: (id) => pulls.push(id) });
+    const unobserve = store.observe(chatId, projectId);
+    store.acquire(chatId, projectId);
+
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(store.getProjection(chatId)?.remote?.unsettled).toEqual([
+        expect.objectContaining({ runId: 'run-pulled', observedAt: receivedAt, pulledAt: receivedAt + 60_000 }),
+      ]);
+    });
+    const projection = store.getProjection(chatId)!;
+    expect(selectRunElsewhere(projection, Date.now())).toMatchObject({ runId: 'run-pulled' });
+    expect(selectRunElsewhereAwaitsPull(projection, Date.now())).toBe(true);
+    store.requestRemotePull(chatId);
+    expect(pulls).toEqual([projectId]);
+
+    /* The pull found nothing newer, twenty minutes after the run last changed here: the run no longer holds. */
+    await client.writeFile(`${events}/pulled-at`, new TextEncoder().encode(String(Date.now())));
+    await store.refreshRemoteSegments(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(selectRunElsewhere(store.getProjection(chatId)!, Date.now())).toBeUndefined();
     });
     store.release(chatId);
     unobserve();

@@ -348,18 +348,26 @@ const hashSegment = (bytes: Uint8Array<ArrayBuffer>): number => {
   return hash >>> 0;
 };
 
-type SegmentSignature = Readonly<{ deviceId: string; byteLength: number; hash: number; receivedAt?: number }>;
+type SegmentSignature = Readonly<{
+  deviceId: string;
+  byteLength: number;
+  hash: number;
+  receivedAt?: number;
+  pulledAt?: number;
+}>;
 
 /**
  * Each segment's signature, in the order given: callers pass segments already in device-id order. When it last changed
- * here is part of it, as it is of the agent host's fingerprint, so both measure a foreign run from the same time.
+ * here and this device's last pull are part of it, as they are of the agent host's fingerprint, so both measure a
+ * foreign run from the same times (XD3, round 18).
  */
 const signaturesOf = (sorted: readonly ChatLogSegment[]): readonly SegmentSignature[] =>
-  sorted.map(({ deviceId, bytes, receivedAt }) => ({
+  sorted.map(({ deviceId, bytes, receivedAt, pulledAt }) => ({
     deviceId,
     byteLength: bytes.byteLength,
     hash: hashSegment(bytes),
     ...(receivedAt === undefined ? {} : { receivedAt }),
+    ...(pulledAt === undefined ? {} : { pulledAt }),
   }));
 
 const signatureKey = ({ deviceId, byteLength, hash }: SegmentSignature): string =>
@@ -1097,13 +1105,18 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
      * again while its bytes stay the same, and only its new rows when it grew, as the agent host's appender does. */
     const known = state.remote === undefined ? undefined : segmentParses.get(state.remote);
     const parses = new Map<string, KeptParse>();
-    const parsed: ParsedLogSegment[] = sorted.map(({ deviceId, bytes, receivedAt }, index) => {
+    const parsed: ParsedLogSegment[] = sorted.map(({ deviceId, bytes, receivedAt, pulledAt }, index) => {
       const key = signatureKey(signatures[index]!);
       const prior = known?.get(deviceId);
       /* The same signature is the same bytes, though a read may hand them over as a new array. */
       const parse = prior?.key === key ? prior.parse : parseSegmentFrom(prior?.parse, bytes);
       parses.set(deviceId, { key, parse });
-      return { deviceId, events: parse.events, ...(receivedAt === undefined ? {} : { receivedAt }) };
+      return {
+        deviceId,
+        events: parse.events,
+        ...(receivedAt === undefined ? {} : { receivedAt }),
+        ...(pulledAt === undefined ? {} : { pulledAt }),
+      };
     });
     const { views } = foldRunViews(mergeSegmentRows(parsed), {}, {});
     const unsettled = unsettledParsedRuns(parsed, event.at);
@@ -1330,8 +1343,8 @@ const foreignUnsettledRuns = (projection: ChatProjection): readonly ForeignRun[]
 
 /**
  * The run another device is running on this chat now, if any (XD3): unsettled in that device's synced segment, not
- * this device's own run, and not past the staleness bound at `now`. The host refuses a new run while it holds; it is
- * gone once sync brings its settlement or once it goes stale.
+ * this device's own run, and not abandoned at `now` (`foreignRunStanding`). The host refuses a new run while it holds;
+ * it is gone once sync brings its settlement, or once a pull past the staleness bound finds nothing newer.
  *
  * @param projection - The chat's projection.
  * @param now - This device's time, in epoch milliseconds.
@@ -1342,9 +1355,22 @@ export const selectRunElsewhere = (projection: ChatProjection, now: number): For
   liveForeignRun(foreignUnsettledRuns(projection), now);
 
 /**
- * When `selectRunElsewhere` next changes with the clock alone, if it can (XD3): the earliest moment an unsettled
- * foreign run crosses the staleness bound (`foreignRunStanding`). No store announces that moment, so a reader arms one
- * timeout for it; `undefined` means only new segment bytes can change the answer.
+ * Whether another device's run that holds this chat awaits a pull of the remote (XD3, round 18): quiet here past the
+ * staleness bound, with no pull since that shows it stayed quiet there (`foreignRunStanding`). Only a pull changes
+ * that, so a reader asks for one.
+ *
+ * @param projection - The chat's projection.
+ * @param now - This device's time, in epoch milliseconds.
+ * @returns `true` while such a run holds the chat.
+ * @public
+ */
+export const selectRunElsewhereAwaitsPull = (projection: ChatProjection, now: number): boolean =>
+  foreignUnsettledRuns(projection).some((run) => foreignRunStanding(run, now).awaitsPull);
+
+/**
+ * When a foreign run's standing next changes with the clock alone, if it can (XD3): the earliest moment an unsettled
+ * foreign run crosses the staleness bound and starts awaiting a pull (`foreignRunStanding`). No store announces that
+ * moment, so a reader arms one timeout for it; `undefined` means only new segment bytes or a pull record can change it.
  *
  * @param projection - The chat's projection.
  * @param now - This device's time, in epoch milliseconds.

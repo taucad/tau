@@ -10,7 +10,7 @@ export const runElsewhereTitle = 'Running on another device';
  *
  * A run is never moved or stopped from another device while it runs (client-host topology OQ-N21), so the notice
  * states where it is and holds the composer's send, with no action: it leaves by itself once sync brings that run's
- * ending, or once the run has gone without progress long enough to count as abandoned.
+ * ending, or once a pull of the remote shows the run went without progress long enough to count as abandoned.
  *
  * @returns The notice, or nothing while no other device runs this chat.
  * @public

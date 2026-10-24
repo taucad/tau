@@ -48,6 +48,8 @@
 \* elsewhere goes stale by this device's clock; queue paths unchanged.
 \* Each segment also carries when it last changed on this device (its modification time), the one
 \* time the page and the agent host both measure a foreign run from; queue paths unchanged.
+\* A foreign run goes stale only once this device's last pull, read beside the segments, came past
+\* the bound after that time with nothing newer, and the page asks for that pull; queue paths unchanged.
 \* QueuePlacement.tla separately checks host-local lost-ACK recovery and scoped
 \* legacy receipt rebasing; this module retains its single-host FIFO scope.
 EXTENDS Naturals, Sequences, FiniteSets, TLC

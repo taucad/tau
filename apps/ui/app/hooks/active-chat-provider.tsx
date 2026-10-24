@@ -42,7 +42,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { Chat } from '@ai-sdk/react';
-import { isResumableRun } from '@taucad/agent-host';
+import { isResumableRun, runHeartbeatMilliseconds } from '@taucad/agent-host';
 import type { ForeignRun } from '@taucad/agent-host';
 import { createAsyncLogic } from 'xstate';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
@@ -59,7 +59,12 @@ import { useChatSession, useChatSessionSnapshot } from '#hooks/use-chat-session.
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSession, StopOrigin } from '#services/chat-session-store.js';
 import { selectVisibleChatStatus } from '#services/chat-visible-status.js';
-import { selectCaughtUp, selectCurrentRun, selectRunElsewhere } from '#machines/chat-projection.logic.js';
+import {
+  selectCaughtUp,
+  selectCurrentRun,
+  selectRunElsewhere,
+  selectRunElsewhereAwaitsPull,
+} from '#machines/chat-projection.logic.js';
 import { subscribeRunElsewhere } from '#hooks/run-elsewhere-clock.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import { useModels } from '#hooks/use-models.js';
@@ -463,6 +468,7 @@ function ActiveChatSessionProvider({
   const stop = useSessionStop(session);
   const resume = useSessionResume(session, chatId);
   const runElsewhere = useSessionRunElsewhere(chatId);
+  useRunElsewherePull(chatId);
   const contextUsage = useSessionContextUsage(chatId);
   const consumeDraft = useConsumeDraft(session.draftActorRef);
 
@@ -846,6 +852,37 @@ function useSessionRunElsewhere(chatId: string): ForeignRun | undefined {
     return projection === undefined ? undefined : selectRunElsewhere(projection, Date.now());
   }, [chatId, store]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+/**
+ * Ask for a pull of the project's remote while another device's run on this chat awaits one (XD3, round 18): quiet
+ * here past the staleness bound, it holds the chat until a pull shows whether it stayed quiet there, and the composer
+ * holds its send meanwhile, so nothing else would ask. Asked once it starts awaiting one, then once a heartbeat's
+ * interval while it still does (a pull that failed offline is asked again).
+ */
+function useRunElsewherePull(chatId: string): void {
+  const store = useChatSessionStore();
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeRunElsewhere(store, chatId, listener),
+    [chatId, store],
+  );
+  const snapshot = useCallback(() => {
+    const projection = store.getProjection(chatId);
+    return projection !== undefined && selectRunElsewhereAwaitsPull(projection, Date.now());
+  }, [chatId, store]);
+  const awaitsPull = useSyncExternalStore(subscribe, snapshot, snapshot);
+  useEffect(() => {
+    if (!awaitsPull) {
+      return undefined;
+    }
+    store.requestRemotePull(chatId);
+    const timer = setInterval(() => {
+      store.requestRemotePull(chatId);
+    }, runHeartbeatMilliseconds);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [awaitsPull, chatId, store]);
 }
 
 /**

@@ -29,6 +29,7 @@ import {
   selectCaughtUp,
   selectOpenInterrupts,
   selectRunElsewhere,
+  selectRunElsewhereAwaitsPull,
   selectRunElsewhereChangesAt,
   selectRunElsewhereRecheckDelay,
   selectRunFailure,
@@ -537,10 +538,11 @@ describe('chatProjectionLogic (PV-S7)', () => {
   /* XD3: a run in flight on another device holds this chat's composer until it settles or goes stale. */
   describe('another device’s run in flight', () => {
     const at = Date.parse('2026-09-28T00:00:00.000Z');
-    const remoteOf = (rows: readonly unknown[]) => [
+    const remoteOf = (rows: readonly unknown[], pulledAt?: number) => [
       {
         deviceId: 'other-device',
         bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
+        ...(pulledAt === undefined ? {} : { pulledAt }),
       },
     ];
 
@@ -560,7 +562,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
       });
     });
 
-    it('names none once the run settles, or once it has gone stale', () => {
+    /* Round 18: gone stale means a pull past the bound found nothing newer, never this clock alone. */
+    it('names none once the run settles, or once a pull past the bound found nothing newer', () => {
       const settled = reduceChatProjection(initialChatProjection, {
         type: 'remote',
         at,
@@ -575,9 +578,17 @@ describe('chatProjectionLogic (PV-S7)', () => {
         at,
         segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
       }).state;
+      const pulled = reduceChatProjection(running, {
+        type: 'remote',
+        at,
+        segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')], at + foreignRunStaleMilliseconds + 1),
+      }).state;
 
       expect(selectRunElsewhere(settled, at)).toBeUndefined();
-      expect(selectRunElsewhere(running, at + foreignRunStaleMilliseconds + 1)).toBeUndefined();
+      expect(selectRunElsewhere(running, at + foreignRunStaleMilliseconds + 1)).toBeDefined();
+      expect(selectRunElsewhereAwaitsPull(running, at + foreignRunStaleMilliseconds + 1)).toBe(true);
+      expect(selectRunElsewhere(pulled, at + foreignRunStaleMilliseconds + 1)).toBeUndefined();
+      expect(selectRunElsewhereAwaitsPull(pulled, at + foreignRunStaleMilliseconds + 1)).toBe(false);
     });
 
     it('names the moment the answer next changes with the clock, and none once nothing is unsettled', () => {
@@ -594,8 +605,10 @@ describe('chatProjectionLogic (PV-S7)', () => {
       const changesAt = selectRunElsewhereChangesAt(running, at + 60_000);
 
       expect(changesAt).toBe(at + foreignRunStaleMilliseconds + 1);
-      expect(selectRunElsewhere(running, changesAt! - 1)).toBeDefined();
-      expect(selectRunElsewhere(running, changesAt!)).toBeUndefined();
+      expect(selectRunElsewhereAwaitsPull(running, changesAt! - 1)).toBe(false);
+      /* From then on only a pull changes it: the run awaits one, and still holds the chat. */
+      expect(selectRunElsewhereAwaitsPull(running, changesAt!)).toBe(true);
+      expect(selectRunElsewhere(running, changesAt!)).toBeDefined();
       expect(selectRunElsewhereChangesAt(running, changesAt!)).toBeUndefined();
       expect(selectRunElsewhereChangesAt(settled, at)).toBeUndefined();
       expect(selectRunElsewhereChangesAt(initialChatProjection, at)).toBeUndefined();

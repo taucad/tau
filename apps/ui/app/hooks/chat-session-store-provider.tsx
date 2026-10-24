@@ -19,6 +19,7 @@ import type { EventRejection } from 'xstate';
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { inspect } from '#machines/inspector.js';
 import {
   isPlacementOnThisDevice,
@@ -68,6 +69,10 @@ export function ChatSessionStoreProvider({ children }: ChatSessionStoreProviderP
     // Composer records and chat attachments are files, reached through the root that owns them.
     client: recordFiles,
     watchRecordFile,
+    /* The project's revision client, wherever its revisions run: this tab's worker or the desktop host. */
+    pullRemote: (projectId) => {
+      peekRevisionClient(projectId)?.send({ command: 'pullRemote' });
+    },
   });
 
   return <ChatSessionStoreContext.Provider value={store}>{children}</ChatSessionStoreContext.Provider>;

@@ -22,9 +22,13 @@ const getServerSnapshot = (): boolean => false;
 
 /**
  * Report whether the viewport is narrower than Tau's mobile breakpoint. The
- * value is read from `matchMedia` on the first client render, so a phone never
- * mounts the desktop layout first. Server rendering and hydration report
- * `false`; React re-renders with the client value right after hydrating.
+ * value is read from `matchMedia` on the first client render, so a component
+ * mounted on the client never sees the desktop value first on a phone. Server
+ * rendering and hydration have no viewport and report `false`; React
+ * re-renders with the client value right after hydrating. A layout that must
+ * not mount its desktop branch on a phone therefore renders a placeholder
+ * arranged by CSS until its first client render, rather than the `false`
+ * branch.
  *
  * @returns Whether the current viewport is mobile-sized.
  * @public

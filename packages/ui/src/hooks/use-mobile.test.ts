@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
+import { hydrateRoot } from 'react-dom/client';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ResponsiveSurfaceProvider, useIsMobile } from '#hooks/use-mobile.js';
@@ -68,6 +69,36 @@ describe('useIsMobile', () => {
     const probe = (): React.JSX.Element => createElement('span', undefined, String(useIsMobile()));
 
     expect(renderToString(createElement(probe))).toBe('<span>false</span>');
+  });
+
+  it('hydrates a phone with the server value, then re-renders with the viewport without a mismatch (D13)', async () => {
+    stubViewport(true);
+    const seen: boolean[] = [];
+    const probe = (): React.JSX.Element => {
+      const isMobile = useIsMobile();
+      seen.push(isMobile);
+      return createElement('span', undefined, String(isMobile));
+    };
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(createElement(probe));
+    seen.length = 0;
+    const recoverableErrors: unknown[] = [];
+
+    const root = await act(async () =>
+      hydrateRoot(container, createElement(probe), {
+        onRecoverableError(error) {
+          recoverableErrors.push(error);
+        },
+      }),
+    );
+
+    expect(seen[0]).toBe(false);
+    expect(seen.at(-1)).toBe(true);
+    expect(container.textContent).toBe('true');
+    expect(recoverableErrors).toEqual([]);
+    act(() => {
+      root.unmount();
+    });
   });
 });
 

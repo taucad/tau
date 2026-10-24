@@ -5,9 +5,16 @@ import '@testing-library/jest-dom/vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SidebarProvider } from '@taucad/ui/components/sidebar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import { SettingsDialog, SettingsSurface } from '#components/settings/settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 const renderSecuritySettings = vi.hoisted(() => vi.fn(() => <div>Mounted security settings</div>));
 const deferredBillingState = vi.hoisted(() => ({ showTarget: false }));
@@ -67,14 +74,59 @@ vi.mock('#components/settings/settings-auth-gate.js', () => ({
 }));
 vi.mock('@taucad/ui/components/keyboard', () => ({ useKeybinding: vi.fn() }));
 
+function SettingsOpener(): React.JSX.Element {
+  const { open } = useSettingsDialog();
+  return (
+    <button
+      type='button'
+      onClick={() => {
+        open();
+      }}
+    >
+      Open settings
+    </button>
+  );
+}
+
+/** Opens settings the way the user menu does: from an item that unmounts with its menu. */
+function SettingsMenu(): React.JSX.Element {
+  const { open } = useSettingsDialog();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger>Account</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem
+          onSelect={() => {
+            open('general');
+          }}
+        >
+          Settings
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function SettingsTestSurface({ url = '/home/project?settings=general' }: { readonly url?: string }): React.JSX.Element {
   return (
     <MemoryRouter initialEntries={[url]}>
       <SidebarProvider>
+        <SettingsOpener />
+        <SettingsMenu />
         <SettingsDialog />
       </SidebarProvider>
     </MemoryRouter>
   );
+}
+
+/** Report a viewport below the 768px breakpoint, as a phone does. */
+function emulatePhone(): void {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query === '(max-width: 767px)',
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }));
 }
 
 describe('SettingsDialog', () => {
@@ -106,10 +158,10 @@ describe('SettingsDialog', () => {
     expect(renderSecuritySettings).toHaveBeenCalledOnce();
   });
 
-  it('should close settings when Back to app is selected', async () => {
+  it('should close settings when Close settings is selected', async () => {
     render(<SettingsTestSurface />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Back to app' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Close settings' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
@@ -184,6 +236,185 @@ describe('SettingsDialog', () => {
     expect(searchbox).toHaveValue('');
     expect(screen.getByRole('button', { name: 'General' })).toBeInTheDocument();
     expect(screen.queryByText('No settings found')).not.toBeInTheDocument();
+  });
+
+  it('should return focus to the opener when settings close', async () => {
+    const user = userEvent.setup();
+    render(<SettingsTestSurface url='/home/project' />);
+    const opener = screen.getByRole('button', { name: 'Open settings' });
+
+    await user.click(opener);
+    await user.click(screen.getByRole('button', { name: 'Close settings' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(opener).toHaveFocus();
+    });
+  });
+
+  it('should return focus to the menu trigger when settings opened from a menu item close', async () => {
+    const user = userEvent.setup();
+    render(<SettingsTestSurface url='/home/project' />);
+    const trigger = screen.getByRole('button', { name: 'Account' });
+
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    await user.click(await screen.findByRole('menuitem', { name: 'Settings' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Close settings' }));
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(trigger).toHaveFocus();
+    });
+  });
+
+  it('should show the desktop navigation and section together without a back control', () => {
+    render(<SettingsTestSurface />);
+
+    expect(screen.getByRole('navigation', { name: 'Settings navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'General settings' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1, name: 'General' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back to Settings' })).not.toBeInTheDocument();
+  });
+
+  describe('on a phone', () => {
+    beforeEach(() => {
+      emulatePhone();
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('should render the embedded section list outside a dialog', () => {
+      render(
+        <MemoryRouter initialEntries={['/settings']}>
+          <SidebarProvider>
+            <SettingsSurface isEmbedded activeSection='general' openSection={vi.fn()} close={vi.fn()} />
+          </SidebarProvider>
+        </MemoryRouter>,
+      );
+
+      expect(screen.getByRole('heading', { level: 2, name: 'Settings' })).toBeInTheDocument();
+      expect(screen.getByRole('navigation', { name: 'Settings navigation' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Close settings' })).toBeInTheDocument();
+    });
+
+    it('should open on the section list and step into a section and back to its row', async () => {
+      const user = userEvent.setup();
+      render(<SettingsTestSurface url='/home/project' />);
+      const opener = screen.getByRole('button', { name: 'Open settings' });
+
+      await user.click(opener);
+
+      const navigation = screen.getByRole('navigation', { name: 'Settings navigation' });
+      expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByRole('searchbox', { name: 'Search settings' })).toHaveFocus();
+      });
+      expect(screen.queryByRole('region', { name: 'General settings' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Back to Settings' })).not.toBeInTheDocument();
+      for (const group of ['Personal', 'Workspace', 'Advanced']) {
+        expect(screen.getByText(group)).toBeInTheDocument();
+      }
+
+      await user.click(screen.getByRole('button', { name: 'Security' }));
+
+      expect(await screen.findByText('Mounted security settings')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Security' })).toBeInTheDocument();
+      expect(navigation).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Back to Settings' }));
+
+      expect(screen.queryByText('Mounted security settings')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Security' })).toHaveFocus();
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Close settings' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(opener).toHaveFocus();
+      });
+    });
+
+    it('should return from a section to the list with Escape and close from the list', async () => {
+      const user = userEvent.setup();
+      render(<SettingsTestSurface url='/home/project' />);
+      const opener = screen.getByRole('button', { name: 'Open settings' });
+      await user.click(opener);
+
+      await user.click(screen.getByRole('button', { name: 'Agents' }));
+      expect(await screen.findByText('Mounted agents')).toBeInTheDocument();
+
+      await user.keyboard('{Escape}');
+
+      expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+      expect(screen.queryByText('Mounted agents')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Agents' })).toHaveFocus();
+      });
+
+      await user.keyboard('{Escape}');
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(opener).toHaveFocus();
+      });
+    });
+
+    it('should find a setting from the list search, open it, and return to the result', async () => {
+      const user = userEvent.setup();
+      render(<SettingsTestSurface />);
+      const searchbox = screen.getByRole('searchbox', { name: 'Search settings' });
+
+      await user.type(searchbox, 'theme');
+      await user.click(screen.getByRole('button', { name: 'Theme' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Theme' })).toHaveFocus();
+      });
+      expect(screen.getByRole('heading', { level: 2, name: 'General' })).toBeInTheDocument();
+      expect(screen.queryByRole('searchbox', { name: 'Search settings' })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: 'Back to Settings' }));
+
+      expect(screen.getByRole('searchbox', { name: 'Search settings' })).toHaveValue('theme');
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Theme' })).toHaveFocus();
+      });
+    });
+
+    it('should land a link to a section on its detail with a way back to the list', async () => {
+      const user = userEvent.setup();
+      render(<SettingsTestSurface url='/home/project?settings=agents&setting=filesystem-context' />);
+
+      expect(screen.getByRole('heading', { level: 2, name: 'Agents' })).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.getByRole('region', { name: 'Filesystem' })).toHaveFocus();
+      });
+
+      await user.click(screen.getByRole('button', { name: 'Back to Settings' }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Agents' })).toHaveFocus();
+      });
+    });
+
+    it('should show the detail when the dialog is opened to a section', () => {
+      render(<SettingsTestSurface url='/home/project?settings=models' />);
+
+      expect(screen.getByText('Mounted models')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Models' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Back to Settings' })).toBeInTheDocument();
+      expect(screen.queryByRole('navigation', { name: 'Settings navigation' })).not.toBeInTheDocument();
+    });
   });
 
   it('should render embedded outside a dialog and keep search-clearing Escape from the host', async () => {

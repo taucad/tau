@@ -328,6 +328,9 @@ export const webSocketClient = (
        * cross a socket; the host binds the filesystem from the `/fs` socket. */
       const memoryHandle: RuntimeInitializeMemoryHandle = {
         computeBindingMode: options.compute?.mode ?? 'memory',
+        ...(options.compute?.mode !== 'off' && options.compute?.memoryConstrained === true
+          ? { computeMemoryConstrained: true }
+          : {}),
       };
       return channel.call('initialize', { ...input, memoryHandle });
     },

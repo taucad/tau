@@ -1,6 +1,6 @@
 import { ENV } from '#environment.config.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
-import { sendSentryEventDirectly, sendSentryEventsAtPageExit } from '#lib/sentry-event.lib.js';
+import { sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
 import { isWeakKey } from '#lib/weak-key.js';
 
 /**
@@ -18,9 +18,10 @@ const loadSentry = async (): Promise<typeof SentryLibrary | undefined> => {
 export const unreportedErrorLimit = 50;
 
 /**
- * Errors one page sends without the SDK, at most, those that waited for its load included: the
- * SDK's own deduplication and rate limits are not there, and a boundary that keeps catching new
- * errors (a remount loop) would otherwise post one event each.
+ * Errors one page sends without the SDK, at most, those that waited for its load and went as the
+ * page was hidden included: the SDK's own deduplication and rate limits are not there, and a
+ * boundary that keeps catching new errors (a remount loop) would otherwise post one event each.
+ * Every such send is admitted in one place ({@link admitDirect}).
  */
 export const directErrorLimit = 100;
 
@@ -30,6 +31,9 @@ export type ErrorDescriber = {
   readonly settled: (error: unknown) => Promise<Readonly<Record<string, string>>>;
 };
 
+/** How the SDK's one load ended: the SDK when it started, the import's error when it failed. */
+type LoadOutcome = { readonly sentry?: typeof SentryLibrary; readonly failure?: unknown };
+
 /**
  * The one load of the SDK this page makes. A failed load is not retried on the same page: whether a
  * browser fetches a failed module again differs (the HTML spec cached the failure in the module map
@@ -37,7 +41,9 @@ export type ErrorDescriber = {
  * a deploy that stopped serving the SDK's chunk, would fail again anyway. Errors reported after it
  * are sent without the SDK (`sendSentryEventDirectly`).
  */
-let started: Promise<{ readonly sentry?: typeof SentryLibrary; readonly failure?: unknown }> | undefined;
+let started: Promise<LoadOutcome> | undefined;
+/** The load's outcome once it is in ({@link isSdkLoadFailure} reads it without waiting). */
+let loadOutcome: LoadOutcome | undefined;
 /** The SDK once it has started on this page; captures go straight to it from then on. */
 let liveSentry: typeof SentryLibrary | undefined;
 /** Whether the SDK cannot be used on this page (its load or start failed): errors go out without it. */
@@ -60,6 +66,8 @@ let droppedWhileLoading = 0;
 let directReports = 0;
 /** Whether this page has said it dropped errors beyond {@link directErrorLimit} (said once). */
 let hasWarnedDirectLimit = false;
+/** Whether the page is hidden and not shown since: a report that would wait for the load goes now. */
+let isPageHidden = false;
 /** Whether the SDK has already thrown once on this page (logged once, never reported). */
 let hasLoggedSdkThrow = false;
 /** Tags for reported values, from whoever knows them (the stale-build recovery's `stale_build`). */
@@ -109,7 +117,10 @@ const capture = (sentry: typeof SentryLibrary, reportedError: unknown): void => 
   }
 };
 
-/** Take one report onto the path without the SDK, unless the page's {@link directErrorLimit} is spent. */
+/**
+ * Take one report onto the path without the SDK, unless the page's {@link directErrorLimit} is
+ * spent: the one admission point for every send without the SDK.
+ */
 const admitDirect = (): boolean => {
   if (directReports >= directErrorLimit) {
     if (!hasWarnedDirectLimit) {
@@ -124,6 +135,11 @@ const admitDirect = (): boolean => {
   return true;
 };
 
+/** Give back an admission whose report did not go after all (it did not fit as the page was hidden). */
+const releaseDirect = (): void => {
+  directReports -= 1;
+};
+
 /** The SDK cannot be used: what waited for it goes without it, each once its tags settle. */
 const sendWaitingWithoutSdk = (): void => {
   isSdkUnavailable = true;
@@ -136,39 +152,46 @@ const sendWaitingWithoutSdk = (): void => {
 };
 
 /**
- * Start the SDK once per page and hand it what waited. Only the import failing is a load failure
- * (`failure`); the SDK throwing as it starts leaves it unusable, logged once, and is not.
+ * Start the SDK and hand it what waited. Only the import failing is a load failure (`failure`);
+ * the SDK throwing as it starts leaves it unusable, logged once, and is not.
  */
-const start = async (): Promise<{ readonly sentry?: typeof SentryLibrary; readonly failure?: unknown }> => {
-  started ??= (async () => {
-    let sentry: typeof SentryLibrary | undefined;
+const loadAndStart = async (): Promise<LoadOutcome> => {
+  let sentry: typeof SentryLibrary | undefined;
+  try {
+    sentry = await loadSentry();
+  } catch (error) {
+    sendWaitingWithoutSdk();
+    return { failure: error };
+  }
+  try {
+    sentry?.initSentry();
+  } catch (error) {
+    logSdkThrow(error);
+    // Half-started: the client may be bound with its global handlers installed; turn it off first.
     try {
-      sentry = await loadSentry();
-    } catch (error) {
-      sendWaitingWithoutSdk();
-      return { failure: error };
+      sentry?.stopSentry();
+    } catch {
+      // Nothing more can be undone.
     }
-    try {
-      sentry?.initSentry();
-    } catch (error) {
-      logSdkThrow(error);
-      // Half-started: the client may be bound with its global handlers installed; turn it off first.
-      try {
-        sentry?.stopSentry();
-      } catch {
-        // Nothing more can be undone.
-      }
-      sendWaitingWithoutSdk();
-      return {};
+    sendWaitingWithoutSdk();
+    return {};
+  }
+  liveSentry = sentry;
+  for (const report of waitingForLoad.splice(0)) {
+    if (sentry !== undefined) {
+      capture(sentry, report.error);
     }
-    liveSentry = sentry;
-    for (const report of waitingForLoad.splice(0)) {
-      if (sentry !== undefined) {
-        capture(sentry, report.error);
-      }
-    }
-    warnDropped();
-    return { sentry };
+  }
+  warnDropped();
+  return { sentry };
+};
+
+/** Start the SDK once per page ({@link loadAndStart}), noting how it ended. */
+const start = async (): Promise<LoadOutcome> => {
+  started ??= (async (): Promise<LoadOutcome> => {
+    const outcome = await loadAndStart();
+    loadOutcome = outcome;
+    return outcome;
   })();
   return started;
 };
@@ -208,20 +231,75 @@ export const setErrorDescriber = (next: ErrorDescriber): void => {
 };
 
 /**
+ * Whether a value is this page's own failed load of the SDK, so the stale-build recovery can tell a
+ * preload failure Vite reported for the SDK's import from any other, whichever reaches it first:
+ * known at once when no load is under way (none started, or its outcome is in), else once the load
+ * settles. Vite dispatches the import's own value before rethrowing it into the loader (a test
+ * runner may wrap it, so its `cause` counts too).
+ *
+ * @param value - A value a channel reported.
+ * @returns Whether the SDK's load failed with it, now or once the load settles.
+ */
+export const isSdkLoadFailure = (value: unknown): boolean | Promise<boolean> => {
+  const matches = (failure: unknown): boolean =>
+    failure !== undefined && (value === failure || (failure instanceof Error && value === failure.cause));
+  if (started === undefined) {
+    return false;
+  }
+  if (loadOutcome !== undefined) {
+    return matches(loadOutcome.failure);
+  }
+  const matchesOnceSettled = async (load: Promise<LoadOutcome>): Promise<boolean> => {
+    const { failure } = await load;
+    return matches(failure);
+  };
+  return matchesOnceSettled(started);
+};
+
+/**
  * The page is hidden (the document turning hidden, and every `pagehide`, kept in the back/forward
  * cache or not, since a hidden page may be frozen or discarded without running again): the errors
  * still waiting, for the SDK's load or for their tags, go now without the SDK, with the tags known
- * now, as far as the page-exit budget allows (`sendSentryEventsAtPageExit`: newest first, stacks
- * trimmed, the rest counted in one summary event). None is sent again; errors reported after the
- * page is shown again are handled as usual.
+ * now, as far as the keepalive budget allows (`sendSentryEventsOnHide`: newest first, stacks
+ * trimmed). Each is admitted ({@link admitDirect}) as it goes, so tab switches during a stalled load
+ * never pass {@link directErrorLimit}.
+ *
+ * Hidden is not gone: what does not fit stays waiting, for the SDK or the next hide, and while the
+ * page stays hidden a report that would wait for the load goes the same way at once. Only at exit
+ * (`exit`: a `pagehide` the page does not come back from) is the rest counted in one summary event
+ * and given up.
+ *
+ * @param phase - `hidden` while the page may still be shown again; `exit` when it is going for good.
  */
-export const sendWaitingErrors = (): void => {
-  const waiting = [...waitingForLoad.splice(0), ...waitingForTags].filter((report) => !sentDirectly.has(report));
-  waitingForTags.clear();
-  for (const report of waiting) {
+export const sendWaitingErrors = (phase: 'hidden' | 'exit'): void => {
+  isPageHidden = true;
+  const isExit = phase === 'exit';
+  const forLoad = waitingForLoad.filter((report) => !sentDirectly.has(report));
+  const forTags = [...waitingForTags].filter((report) => !sentDirectly.has(report));
+  /* What waited for the load is admitted here, newest first as the budget sends, so the errors the
+   * limit leaves room for are the ones that can go; what waited for its tags was admitted already. */
+  const admitted = new Set(forLoad.toReversed().filter(() => admitDirect()));
+  const offered = [...forLoad.filter((report) => admitted.has(report)), ...forTags];
+  const done = sendSentryEventsOnHide(
+    offered.map((report) => ({ report, error: report.error, tags: describer.now(report.error) })),
+    { isExit },
+  );
+  const gone = new Set([...done].map(({ report }) => report));
+  for (const report of isExit ? [...forLoad, ...forTags] : gone) {
     sentDirectly.add(report);
+    waitingForTags.delete(report);
   }
-  sendSentryEventsAtPageExit(waiting.map((report) => ({ error: report.error, tags: describer.now(report.error) })));
+  for (const report of admitted) {
+    if (!gone.has(report) && !isExit) {
+      releaseDirect();
+    }
+  }
+  waitingForLoad = isExit ? [] : waitingForLoad.filter((report) => !gone.has(report));
+};
+
+/** The page is shown again (`pageshow`, the document visible): reports wait for the SDK as usual. */
+export const resumeErrorReporting = (): void => {
+  isPageHidden = false;
 };
 
 /**
@@ -261,6 +339,10 @@ export const reportUiError = async (error: unknown): Promise<void> => {
   }
   markReported();
   waitingForLoad = [...waitingForLoad, { error }];
+  if (isPageHidden) {
+    // Nothing may wait on a hidden page, which may never run again: it goes now, within the budget.
+    sendWaitingErrors('hidden');
+  }
   // Starts this page's only load when nothing has; the error goes with what it does.
   await start();
 };

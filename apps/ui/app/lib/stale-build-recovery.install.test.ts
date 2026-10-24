@@ -9,6 +9,9 @@ vi.mock('#lib/error-reporting.js', () => ({
   isErrorTrackerListening: () => true,
   setErrorDescriber: () => undefined,
   sendWaitingErrors,
+  resumeErrorReporting: () => undefined,
+  // No SDK load is under way in these tests: nothing is its failure.
+  isSdkLoadFailure: () => false,
 }));
 
 /** The document turns hidden or visible (`visibilitychange`), as switching tabs or apps does. */
@@ -144,6 +147,24 @@ describe('installStaleBuildRecovery', () => {
     await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
     await expect(decided).resolves.toBe('current');
     await expect(laterTag).resolves.toBe('current');
+  });
+
+  it('should treat a document that boots hidden as hidden from the start, so nothing waits for it to be shown', async () => {
+    const { installStaleBuildRecovery, classifyStaleBuildFailure } = await load();
+    stubServer(ownBuildId);
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    // Opened in a background tab: no `visibilitychange` comes until the user looks at it.
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    uninstall = installStaleBuildRecovery();
+    expect(sendWaitingErrors).toHaveBeenCalledExactlyOnceWith('hidden');
+    const held = new TypeError('Importing a module script failed.');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: held }));
+    const tag = classifyStaleBuildFailure(held);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Settled already, with what is known: nothing waits on a page that may never be shown.
+    await expect(Promise.race([tag, Promise.resolve('still waiting')])).resolves.toBe('undecided');
   });
 
   it("should hand a failure only Vite's preloader reported to the tracker when the page is hidden into the back/forward cache", async () => {

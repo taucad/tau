@@ -2,9 +2,10 @@
 import * as Sentry from '@sentry/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  beaconHold,
   keepaliveBudget,
   sendSentryEventDirectly,
-  sendSentryEventsAtPageExit,
+  sendSentryEventsOnHide,
   undeliveredAtPageExitFingerprint,
   undeliveredAtPageExitMessage,
 } from '#lib/sentry-event.lib.js';
@@ -134,13 +135,13 @@ describe('decorateForStaleBuild', () => {
   });
 });
 
-describe('sendSentryEventsAtPageExit', () => {
+describe('sendSentryEventsOnHide', () => {
   it('should mark what it sends as captured, so the SDK started later never sends it again', () => {
     const events = recordEvents();
     const failure = new Error('sent as the page went');
 
-    sendSentryEventsAtPageExit([{ error: failure, tags: {} }]);
-    sendSentryEventsAtPageExit([{ error: failure, tags: {} }]);
+    sendSentryEventsOnHide([{ error: failure, tags: {} }], { isExit: true });
+    sendSentryEventsOnHide([{ error: failure, tags: {} }], { isExit: true });
 
     expect(events).toHaveLength(1);
     expect((failure as { __sentry_captured__?: unknown }).__sentry_captured__).toBe(true);
@@ -154,7 +155,10 @@ describe('sendSentryEventsAtPageExit', () => {
       return error;
     };
 
-    sendSentryEventsAtPageExit(Array.from({ length: 40 }, (_, index) => ({ error: large(index), tags: {} })));
+    sendSentryEventsOnHide(
+      Array.from({ length: 40 }, (_, index) => ({ error: large(index), tags: {} })),
+      { isExit: true },
+    );
 
     const summary = events.at(-1)?.event;
     expect(summary?.exception?.values[0]?.value).toMatch(/^\d+ further UI errors/u);
@@ -164,6 +168,8 @@ describe('sendSentryEventsAtPageExit', () => {
   });
 
   it('should count what the browser refused to queue (its keepalive quota is shared) in the summary, unmarked', () => {
+    // The beacons stay in the ledger for a while; let them go before the next test.
+    vi.useFakeTimers();
     const queued: string[] = [];
     // The page's other requests (the SDK, analytics) left room for one error and a summary.
     vi.stubGlobal('navigator', {
@@ -186,11 +192,63 @@ describe('sendSentryEventsAtPageExit', () => {
     const older = report('older');
     const newer = report('newer');
 
-    sendSentryEventsAtPageExit([older, newer]);
+    sendSentryEventsOnHide([older, newer], { isExit: true });
 
     expect(queued.map((body) => messageOf(body))).toStrictEqual(['newer', undeliveredAtPageExitMessage(1)]);
     expect((newer.error as { __sentry_captured__?: unknown }).__sentry_captured__).toBe(true);
     expect((older.error as { __sentry_captured__?: unknown }).__sentry_captured__).toBeUndefined();
+    vi.advanceTimersByTime(beaconHold);
+    vi.useRealTimers();
+  });
+
+  it('should count the beacons a hidden page queued as in flight, so an error right after it is shown again does not post into a full quota', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal('navigator', { sendBeacon: () => true });
+      const posted: boolean[] = [];
+      vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+        posted.push(init.keepalive === true);
+        return new Response('{}');
+      });
+      const report = (index: number): { readonly error: Error; readonly tags: Record<string, string> } => {
+        const error = new Error(`hidden ${String(index)}`);
+        error.stack = 'y'.repeat(1500);
+        return { error, tags: {} };
+      };
+      // A tab switch spends the keepalive requests on beacons, still uploading when the page is shown again.
+      sendSentryEventsOnHide(
+        Array.from({ length: keepaliveBudget.requests }, (_, index) => report(index)),
+        { isExit: false },
+      );
+
+      await sendSentryEventDirectly(new Error('right after the page was shown again'), {});
+      expect(posted).toStrictEqual([false]);
+
+      // Once the beacons have had time to go, the quota is the page's again.
+      await vi.advanceTimersByTimeAsync(beaconHold);
+      await sendSentryEventDirectly(new Error('later'), {});
+      expect(posted).toStrictEqual([false, true]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should send again without keepalive an event whose keepalive request the browser refused while the page lives', async () => {
+    const posted: Array<{ readonly keepalive: boolean; readonly body: string }> = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      posted.push({ keepalive: init.keepalive === true, body: typeof init.body === 'string' ? init.body : '' });
+      if (init.keepalive === true) {
+        // The page's other keepalive requests (analytics) filled the shared quota.
+        throw new TypeError('Failed to fetch');
+      }
+      return new Response('{}');
+    });
+
+    await sendSentryEventDirectly(new Error('posted into a full quota'), {});
+
+    expect(posted.map((request) => request.keepalive)).toStrictEqual([true, false]);
+    // The same envelope, so Sentry keeps one event should both arrive.
+    expect(posted[1]?.body).toBe(posted[0]?.body);
   });
 
   it('should send the very summary it kept room for, however its timestamp is written', async () => {
@@ -211,7 +269,7 @@ describe('sendSentryEventsAtPageExit', () => {
         error.stack = '€'.repeat(1500);
         return { error, tags: {} };
       });
-      sendSentryEventsAtPageExit(reports);
+      sendSentryEventsOnHide(reports, { isExit: true });
       // Let every request settle, so the next page exit starts with nothing in flight.
       for (let round = 0; round < 5; round += 1) {
         // oxlint-disable-next-line no-await-in-loop -- Each round lets the previous one's promises settle.

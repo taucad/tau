@@ -127,7 +127,7 @@ describe('error reporting', () => {
 
     await page.reportUiError(error);
     await page.reportUiError(error);
-    page.sendWaitingErrors();
+    page.sendWaitingErrors('exit');
     await settle();
 
     expect(posted).toHaveLength(1);
@@ -170,7 +170,9 @@ describe('error reporting', () => {
     await expect(page.reportUiError(new Error('caught by a boundary'))).resolves.toBeUndefined();
     await settle();
 
-    expect(posted).toHaveLength(1);
+    // The refused keepalive request goes once more as an ordinary one (the quota may only have been full), then no more.
+    expect(posted.map((envelope) => envelope.init.keepalive)).toStrictEqual([true, false]);
+    expect(posted[1]?.header['event_id']).toBe(posted[0]?.header['event_id']);
     expect(sentry.loads).toBe(1);
   });
 
@@ -184,8 +186,8 @@ describe('error reporting', () => {
     void page.startErrorReporting();
     void page.reportUiError(new Error('caught at boot'));
 
-    page.sendWaitingErrors();
-    page.sendWaitingErrors();
+    page.sendWaitingErrors('exit');
+    page.sendWaitingErrors('exit');
     await settle();
 
     expect(posted.map((envelope) => envelope.event.exception.values[0]?.value)).toStrictEqual(['caught at boot']);
@@ -295,7 +297,7 @@ describe('error reporting', () => {
       void page.reportUiError(error);
     }
 
-    page.sendWaitingErrors();
+    page.sendWaitingErrors('exit');
     await settle();
 
     expect(posted.length).toBeGreaterThan(1);
@@ -327,7 +329,8 @@ describe('error reporting', () => {
     void page.reportUiError(new Error('before the page was hidden'));
 
     // Hidden into the back/forward cache, then shown again.
-    page.sendWaitingErrors();
+    page.sendWaitingErrors('hidden');
+    page.resumeErrorReporting();
     const after = new Error('after the page was shown again');
     const reported = page.reportUiError(after);
     release();
@@ -351,11 +354,72 @@ describe('error reporting', () => {
       // oxlint-disable-next-line no-await-in-loop -- One report after another, as a loop would make them.
       await page.reportUiError(new Error(`caught again ${String(index)}`));
     }
-    page.sendWaitingErrors();
+    page.sendWaitingErrors('exit');
     await settle();
 
     expect(posted).toHaveLength(page.directErrorLimit);
     expect(warn).toHaveBeenCalledOnce();
+  });
+
+  it('should count errors that waited for the SDK and went as the page was hidden against the limit for errors without it', async () => {
+    const posted = stubIngest();
+    // A load that stalls for the whole page.
+    sentry.holdNextLoad = new Promise<void>((resolve) => {
+      setTimeout(resolve, 60_000);
+    });
+    const page = await load();
+    void page.startErrorReporting();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    // A remount loop while the user keeps switching tabs: each hide sends what waited.
+    for (let round = 0; round < 12; round += 1) {
+      for (let index = 0; index < page.unreportedErrorLimit; index += 1) {
+        const error = new Error(`round ${String(round)} error ${String(index)}`);
+        error.stack = 'short';
+        void page.reportUiError(error);
+      }
+      page.sendWaitingErrors('hidden');
+      page.resumeErrorReporting();
+      // oxlint-disable-next-line no-await-in-loop -- The page is shown again before the next switch.
+      await settle();
+    }
+
+    expect(posted).toHaveLength(page.directErrorLimit);
+  });
+
+  it('should keep what did not fit as the document was hidden for the SDK, which captures it once it loads', async () => {
+    const posted = stubIngest();
+    let release: () => void = () => undefined;
+    sentry.holdNextLoad = new Promise((resolve) => {
+      release = resolve;
+    });
+    const page = await load();
+    const started = page.startErrorReporting();
+    const errors = Array.from({ length: 30 }, (_, index) => {
+      const error = new Error(`caught while the SDK loads ${String(index)}`);
+      error.stack = 'y'.repeat(5000);
+      return error;
+    });
+    for (const error of errors) {
+      void page.reportUiError(error);
+    }
+
+    // A short tab switch: the page lives on, and the SDK arrives right after.
+    page.sendWaitingErrors('hidden');
+    page.resumeErrorReporting();
+    release();
+    await started;
+    await settle();
+
+    const sent = posted.map((envelope) => envelope.event.exception.values[0]?.value ?? '');
+    const captured = sentry.captureUiError.mock.calls.map(([error]) => (error as Error).message);
+    const byText = (left: string, right: string): number => left.localeCompare(right);
+    expect(sent.length).toBeGreaterThan(0);
+    expect(captured.length).toBeGreaterThan(0);
+    // Each error once, by one path or the other, and no summary: nothing was given up.
+    expect([...sent, ...captured].toSorted(byText)).toStrictEqual(
+      errors.map((error) => error.message).toSorted(byText),
+    );
   });
 
   it('should send the same thrown string twice when it is reported twice', async () => {

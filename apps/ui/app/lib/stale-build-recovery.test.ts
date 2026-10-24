@@ -397,6 +397,63 @@ describe('createStaleBuildRecovery', () => {
       expect(reportToErrorTracker.mock.calls).toStrictEqual([[error]]);
     });
 
+    it.each([
+      ['a bundle without a build id', 0],
+      ['a build the server still runs', ownBuildId],
+    ])(
+      "should never report the SDK's own load failure, though a fast verdict lands before the loader hands it over (%s)",
+      async (_case, buildId) => {
+        vi.useFakeTimers();
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+        let settleLoad: (failure: unknown) => void = () => undefined;
+        const loadFailure = new Promise<unknown>((resolve) => {
+          settleLoad = resolve;
+        });
+        const { recovery, onGenuineFailure, reportToErrorTracker } = setup({
+          buildId,
+          fetchServerBuildId: async () => ownBuildId,
+          isSdkLoadFailure: async (value) => value === (await loadFailure),
+        });
+        const error = failure();
+
+        // Vite's preload helper dispatches the SDK's own import failure first ...
+        void recovery.recover(error, 'preload');
+        await vi.advanceTimersByTimeAsync(0);
+        // ... then rethrows it into the loader, which hears it fail, and hands it over later still.
+        settleLoad(error);
+        await vi.advanceTimersByTimeAsync(0);
+        void recovery.recover(error, 'sdk');
+        await vi.advanceTimersByTimeAsync(preloadFollowUpDelay * 3);
+
+        expect(recovery.readOutcome(error)).toBe('current');
+        expect(onGenuineFailure).not.toHaveBeenCalled();
+        expect(reportToErrorTracker).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should report a preload failure that is not the SDK load, once the load turned out fine', async () => {
+      vi.useFakeTimers();
+      let settleLoad: (failure: unknown) => void = () => undefined;
+      const loadFailure = new Promise<unknown>((resolve) => {
+        settleLoad = resolve;
+      });
+      const { recovery, onGenuineFailure, reportToErrorTracker } = setup({
+        buildId: 0,
+        isSdkLoadFailure: async (value) => value === (await loadFailure),
+      });
+      const error = failure();
+
+      void recovery.recover(error, 'preload');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onGenuineFailure).not.toHaveBeenCalled();
+      // The SDK loaded: whatever the preloader saw was something else.
+      settleLoad(undefined);
+      await vi.advanceTimersByTimeAsync(preloadFollowUpDelay * 3);
+
+      expect(onGenuineFailure.mock.calls).toStrictEqual([[error]]);
+      expect(reportToErrorTracker.mock.calls).toStrictEqual([[error]]);
+    });
+
     it('should hand the error tracker a global failure that came before its handlers were listening', async () => {
       const { recovery, reportToErrorTracker } = setup({ isErrorTrackerListening: () => false });
       const error = failure();

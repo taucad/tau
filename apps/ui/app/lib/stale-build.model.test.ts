@@ -9,8 +9,10 @@
  * guard and budget) across its pages. An error reported once the SDK failed to load is sent without
  * it, as an envelope the model ingest counts alongside the SDK's own captures. A page is hidden by
  * `pagehide` (into the back/forward cache) or by its document turning hidden (switching tabs or
- * apps), and the SDK's own chunk can fail as Vite's preload helper reports it: `vite:preloadError`
- * first, then the loader's own hand-over.
+ * apps), and the SDK's own chunk can fail through the real loader as Vite's preload helper reports
+ * it: `vite:preloadError` first, then the import rejecting into the loader, whose hand-over to the
+ * recovery comes at once or only after the failure's verdict (a fast verdict: no build id, a quick
+ * answer), so whose failure it is cannot depend on which arrives first (I9).
  */
 import process from 'node:process';
 import { array, assert, asyncProperty, constant, constantFrom, oneof, record, tuple } from 'fast-check';
@@ -37,7 +39,7 @@ type Step =
   | { readonly kind: 'query'; readonly tab: 0 | 1 }
   | { readonly kind: 'reload'; readonly tab: 0 | 1 }
   | { readonly kind: 'leave'; readonly tab: 0 | 1 }
-  | { readonly kind: 'sdkFails'; readonly tab: 0 | 1 }
+  | { readonly kind: 'sdkFails'; readonly tab: 0 | 1; readonly handOver: 'prompt' | 'late' }
   | { readonly kind: 'freeze'; readonly tab: 0 | 1; readonly via: 'pagehide' | 'hidden' };
 
 /**
@@ -48,6 +50,8 @@ type Step =
 const model = {
   tabs: [] as Tab[],
   failNextTrackerLoad: false,
+  /** The next SDK load fails with this value, which Vite's preloader dispatches first. */
+  sdkLoadFailure: undefined as { readonly tab: Tab; readonly failure: TypeError } | undefined,
   installing: undefined as Tab | undefined,
   failures: 0,
   visibility: 'visible' as 'visible' | 'hidden',
@@ -134,6 +138,10 @@ type Tab = {
   }>;
   everStopped: boolean;
   wasWriting: boolean;
+  /** Whether this page has started its one SDK load. */
+  loadStarted: boolean;
+  /** Whether this page's loader hands a failed load over only after a timer turn (a fast verdict wins). */
+  lateHandOver: boolean;
   resumedWithOwn: number | undefined;
   skew?: typeof BuildSkew;
   recovery?: typeof StaleBuildRecovery;
@@ -177,6 +185,14 @@ const loadTab = async (tab: Tab): Promise<void> => {
    * capture to the tab whose failure it is, and whether a tab's handlers are installed is that tab's
    * own `isErrorTrackerListening`. */
   vi.doMock('#lib/sentry.lib.js', () => {
+    const sdkLoad = model.sdkLoadFailure;
+    if (sdkLoad !== undefined) {
+      model.sdkLoadFailure = undefined;
+      // Vite's preload helper wraps the SDK's import: it dispatches the failure, then rethrows it into the loader.
+      sdkLoad.tab.failures.push({ failure: sdkLoad.failure, recovery: sdkLoad.tab.recovery!, sdk: true });
+      sight(sdkLoad.tab, sdkLoad.failure, 'preload');
+      throw sdkLoad.failure;
+    }
     if (model.failNextTrackerLoad) {
       model.failNextTrackerLoad = false;
       throw new TypeError('Importing a module script failed.');
@@ -198,6 +214,8 @@ const loadTab = async (tab: Tab): Promise<void> => {
   tab.pageHide = [];
   tab.pageShow = [];
   tab.visibility = [];
+  tab.loadStarted = false;
+  tab.lateHandOver = false;
   model.installing = tab;
   tab.recovery.installStaleBuildRecovery();
   model.installing = undefined;
@@ -316,6 +334,8 @@ const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   failures: [],
   everStopped: false,
   wasWriting: true,
+  loadStarted: false,
+  lateHandOver: false,
   resumedWithOwn: undefined,
 });
 
@@ -333,8 +353,19 @@ function track(tab: Tab, failure: unknown): void {
   tab.tags.set(failure, page.classifyStaleBuildFailure(failure));
 }
 
+/** The entry starts error reporting and hands a failed load to the recovery, as `entry.client` does. */
 const startTracker = async (tab: Tab): Promise<void> => {
-  await tab.errorReporting?.startErrorReporting();
+  tab.loadStarted = true;
+  const page = tab.recovery!;
+  await tab.errorReporting?.startErrorReporting((failure) => {
+    if (tab.lateHandOver) {
+      setTimeout(() => {
+        page.recoverFromSdkLoadFailure(failure);
+      }, 1000);
+    } else {
+      page.recoverFromSdkLoadFailure(failure);
+    }
+  });
 };
 
 const sight = (tab: Tab, failure: unknown, channel: Channel): void => {
@@ -348,19 +379,25 @@ const sight = (tab: Tab, failure: unknown, channel: Channel): void => {
 };
 
 /**
- * The error tracker's own chunk fails to load: Vite's preload helper, which wraps that import too,
- * dispatches the failure, then rethrows it into the loader, which hands it over.
+ * The error tracker's own chunk fails to load, on a page that has not loaded it yet: Vite's preload
+ * helper, which wraps that import too, dispatches the failure, then rethrows it into the loader,
+ * which hands it over at once or a second later (after a fast verdict).
  */
-const failSdkLoad = async (tab: Tab): Promise<void> => {
+const failSdkLoad = async (tab: Tab, handOver: 'prompt' | 'late'): Promise<void> => {
+  if (tab.loadStarted) {
+    return;
+  }
   model.failures += 1;
-  const page = tab.recovery!;
-  const failure = new TypeError(
-    `Failed to fetch dynamically imported module: /assets/sentry.lib-${String(model.failures)}.js`,
-  );
-  tab.failures.push({ failure, recovery: page, sdk: true });
-  sight(tab, failure, 'preload');
-  await Promise.resolve();
-  page.recoverFromSdkLoadFailure(failure);
+  model.sdkLoadFailure = {
+    tab,
+    failure: new TypeError(
+      `Failed to fetch dynamically imported module: /assets/sentry.lib-${String(model.failures)}.js`,
+    ),
+  };
+  tab.lateHandOver = handOver === 'late';
+  await startTracker(tab);
+  // A load that did not run its factory (the SDK was already loaded for the other tab) fails nothing.
+  model.sdkLoadFailure = undefined;
 };
 
 /** Hidden (into the back/forward cache, or by switching away), then shown again: the page carries on. */
@@ -431,7 +468,7 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
       return 0;
     }
     case 'sdkFails': {
-      await failSdkLoad(tabs[step.tab]);
+      await failSdkLoad(tabs[step.tab], step.handOver);
       return 0;
     }
     case 'freeze': {
@@ -560,7 +597,14 @@ const step: Arbitrary<Step> = oneof(
   { weight: 1, arbitrary: record({ kind: constant<'query'>('query'), tab: tabIndex }) },
   { weight: 1, arbitrary: record({ kind: constant<'reload'>('reload'), tab: tabIndex }) },
   { weight: 1, arbitrary: record({ kind: constant<'leave'>('leave'), tab: tabIndex }) },
-  { weight: 1, arbitrary: record({ kind: constant<'sdkFails'>('sdkFails'), tab: tabIndex }) },
+  {
+    weight: 1,
+    arbitrary: record({
+      kind: constant<'sdkFails'>('sdkFails'),
+      tab: tabIndex,
+      handOver: constantFrom<'prompt' | 'late'>('prompt', 'late'),
+    }),
+  },
   {
     weight: 1,
     arbitrary: record({ kind: constant<'freeze'>('freeze'), tab: tabIndex, via: constantFrom('pagehide', 'hidden') }),
@@ -630,6 +674,7 @@ const runModel = async (
   const tabs = [newTab(buildX, answerA, answerDelayA), newTab(buildY, answerB, 0)] as const;
   model.tabs = [...tabs];
   model.failNextTrackerLoad = false;
+  model.sdkLoadFailure = undefined;
   await loadTab(tabs[0]);
   await loadTab(tabs[1]);
   try {
@@ -766,18 +811,27 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
   );
 
   it.each([
-    ['the live build (a content blocker)', 'X', 'current'],
+    { name: 'the live build (a content blocker)', served: 'X', decided: 'current', handOver: 'prompt' },
     // The reload it started never goes through here, so it stalls and is offered.
-    ['a deploy that stopped serving it', 'Y', 'superseded'],
+    { name: 'a deploy that stopped serving it', served: 'Y', decided: 'superseded', handOver: 'prompt' },
+    // A fast verdict (the edge cannot answer) lands before the loader hands the failure over.
+    {
+      name: 'an edge that cannot answer, the verdict first',
+      served: 'unreachable',
+      decided: 'current',
+      handOver: 'late',
+    },
+    { name: 'the live build, the verdict first', served: 'X', decided: 'current', handOver: 'late' },
   ] as const)(
-    "never report the error tracker's own chunk failing on %s, though Vite's preloader reported it first",
-    async (_case, served, decided) => {
+    "never report the error tracker's own chunk failing on $name, though Vite's preloader reported it first",
+    async ({ served, decided, handOver }) => {
       vi.spyOn(console, 'warn').mockImplementation(() => undefined);
       await runModel(
         [served, served, 0, 1000],
-        [{ kind: 'tracker', tab: 0 }, { kind: 'sdkFails', tab: 0 }, ...untilReloadPending.slice(1)],
+        [{ kind: 'sdkFails', tab: 0, handOver }, ...untilReloadPending.slice(1)],
         ([tab]) => {
           const [blocked] = tab.failures;
+          expect(blocked?.sdk).toBe(true);
           expect(blocked?.recovery.readStaleBuildOutcome(blocked.failure)).toBe(decided);
           expect(tab.tracked.get(blocked?.failure) ?? 0).toBe(0);
           expect(tab.analytics.get(blocked?.failure) ?? 0).toBe(0);

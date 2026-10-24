@@ -105,19 +105,46 @@ const isStaleBuildTag = (value: string | undefined): value is StaleBuildTag =>
  * What Sentry's own fetch transport allows `keepalive` requests: browsers refuse one once the
  * bodies in flight pass 64 KiB, or (in some engines) past a handful of requests, so the transport
  * uses `keepalive` only while, counting the new request, at most 60 KB and fewer than 15 requests
- * are in flight. The browser's quota is the whole page's (the SDK, analytics and beacons share it),
- * and this module counts only its own requests: at page exit the browser's own answer decides
- * ({@link sendSentryEventsAtPageExit}).
+ * are in flight. The browser's quota is the whole page's (the SDK, analytics and beacons share it):
+ * this module counts what it put in flight itself ({@link keepaliveLedger}), a beacon the browser
+ * answers at once, and a `keepalive` fetch it refused anyway goes again as an ordinary request.
  */
 export const keepaliveBudget = { bytes: 60_000, requests: 15 } as const;
+
+/**
+ * Milliseconds a beacon counts as in flight. The browser never says when a beacon has gone, so the
+ * ledger holds one for as long as a slow connection takes to upload the whole budget, then lets it
+ * go; a beacon still uploading after that only costs a `keepalive` fetch its refusal, never the event.
+ */
+export const beaconHold = 10_000;
 
 /** Longest message and stack text an event sent without the SDK carries; tighter at page exit. */
 export const directEventTextLimit = { message: 2000, stack: 6000, stackAtPageExit: 2000 } as const;
 
-const inFlight = { bytes: 0, requests: 0 };
+/**
+ * Everything this module has in flight against the page's keepalive quota, whichever way it went:
+ * `keepalive` fetches until they are answered, beacons for {@link beaconHold}. Every send reads it,
+ * so an error sent right after the page is shown again sees the beacons its hiding queued.
+ */
+const keepaliveLedger = { bytes: 0, requests: 0 };
+
+/** Count one request in the ledger; the returned function takes it out again, once. */
+const holdInLedger = (bytes: number): (() => void) => {
+  keepaliveLedger.bytes += bytes;
+  keepaliveLedger.requests += 1;
+  let isHeld = true;
+  return () => {
+    if (isHeld) {
+      isHeld = false;
+      keepaliveLedger.bytes -= bytes;
+      keepaliveLedger.requests -= 1;
+    }
+  };
+};
 
 const fitsKeepalive = (bytes: number, requests: number): boolean =>
-  inFlight.bytes + bytes <= keepaliveBudget.bytes && inFlight.requests + requests < keepaliveBudget.requests;
+  keepaliveLedger.bytes + bytes <= keepaliveBudget.bytes &&
+  keepaliveLedger.requests + requests < keepaliveBudget.requests;
 
 /**
  * Mark a value as captured the way the SDK does (`__sentry_captured__`, which its
@@ -198,26 +225,38 @@ const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeIn
   return { body, size: new TextEncoder().encode(body).length };
 };
 
-/** Post one envelope, with `keepalive` when asked; never rejects, and a refused request is simply lost. */
+/** One ordinary or `keepalive` request; rejects as `fetch` does. */
+const request = async (endpoint: string, envelope: Envelope, keepalive: boolean): Promise<void> => {
+  // A simple request (no preflight), as the SDK's own transport sends.
+  await fetch(endpoint, {
+    method: 'POST',
+    body: envelope.body,
+    keepalive,
+    headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+  });
+};
+
+/**
+ * Post one envelope, with `keepalive` when asked; never rejects. A `keepalive` request the browser
+ * refused (the page's shared quota was full) goes once more as an ordinary one, which works while
+ * the page lives: the same envelope, so Sentry keeps one event should both arrive. A refused
+ * ordinary request (a content blocker) is simply lost.
+ */
 const post = async (endpoint: string, envelope: Envelope, keepalive: boolean): Promise<void> => {
-  if (keepalive) {
-    inFlight.bytes += envelope.size;
-    inFlight.requests += 1;
-  }
+  const release = keepalive ? holdInLedger(envelope.size) : undefined;
   try {
-    // A simple request (no preflight), as the SDK's own transport sends.
-    await fetch(endpoint, {
-      method: 'POST',
-      body: envelope.body,
-      keepalive,
-      headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
-    });
+    await request(endpoint, envelope, keepalive);
+    return;
   } catch {
-    // Blocked or unavailable: the error is lost, and nothing reports that.
+    // Refused, or blocked: an ordinary request may still go.
   } finally {
-    if (keepalive) {
-      inFlight.bytes -= envelope.size;
-      inFlight.requests -= 1;
+    release?.();
+  }
+  if (keepalive) {
+    try {
+      await request(endpoint, envelope, false);
+    } catch {
+      // Blocked or unavailable: the error is lost, and nothing reports that.
     }
   }
 };
@@ -281,36 +320,42 @@ const buildSummaryEnvelope = (dsn: string, count: number): Envelope =>
     fingerprint: undeliveredAtPageExitFingerprint,
   });
 
+/** One error to send as the page is hidden. */
+export type HiddenPageReport = { readonly error: unknown; readonly tags: Readonly<Record<string, string>> };
+
 /**
  * Report errors without the SDK as the page is hidden (the document hidden, or `pagehide`), where
  * only beacons and `keepalive` requests survive: within {@link keepaliveBudget} (counting what is
- * already in flight), newest first, each stack trimmed to {@link directEventTextLimit}`.stackAtPageExit`,
- * and only while the browser takes each one: a beacon where the browser has one, since its quota
- * is the whole page's and only the browser knows what is left of it; else a `keepalive` fetch, taken
- * as queued. An error is marked captured only once the browser took it. Those not sent are counted in one
- * small final event ({@link undeliveredAtPageExitMessage}): room is kept for it while anything
- * might be left out, and the summary sent is the very envelope that room was measured for, so its
- * own bytes (a timestamp written longer, a shorter count) cannot push it out. The errors
- * themselves are lost.
+ * already in flight, {@link keepaliveLedger}), newest first, each stack trimmed to
+ * {@link directEventTextLimit}`.stackAtPageExit`, and only while the browser takes each one: a
+ * beacon where the browser has one, since its quota is the whole page's and only the browser knows
+ * what is left of it; else a `keepalive` fetch, taken as queued. An error is marked captured only
+ * once the browser took it.
+ *
+ * Hidden is not gone: what does not fit is the caller's still, to keep for the SDK or the next
+ * hide. Only at exit (`isExit`, a `pagehide` the page will not come back from) is the rest counted
+ * in one small final event ({@link undeliveredAtPageExitMessage}): room is kept for it while
+ * anything might be left out, and the summary sent is the very envelope that room was measured
+ * for, so its own bytes (a timestamp written longer, a shorter count) cannot push it out.
  *
  * @param reports - The errors and their tags, oldest first.
+ * @param options - `isExit`: the page is going for good, so what is left is summarised and given up.
+ * @returns The reports that need nothing more: sent now, or captured already.
  */
-export const sendSentryEventsAtPageExit = (
-  reports: ReadonlyArray<{ readonly error: unknown; readonly tags: Readonly<Record<string, string>> }>,
-): void => {
+export const sendSentryEventsOnHide = <Report extends HiddenPageReport>(
+  reports: readonly Report[],
+  { isExit }: { readonly isExit: boolean },
+): ReadonlySet<Report> => {
+  const done = new Set(reports.filter((report) => isCaptured(report.error)));
   const target = endpointOf();
   if (target === undefined) {
-    return;
+    return done;
   }
-  const newestFirst = reports.filter((report) => !isCaptured(report.error)).toReversed();
+  const newestFirst = reports.filter((report) => !done.has(report)).toReversed();
   const beacon = beaconOf();
-  // Beacons are never answered, so what this exit queued is counted here; a fetch counts itself in flight.
-  const beaconed = { bytes: 0, requests: 0 };
-  const fits = (bytes: number, requests: number): boolean =>
-    fitsKeepalive(beaconed.bytes + bytes, beaconed.requests + requests);
   const queue = (envelope: Envelope): boolean => {
     if (beacon === undefined) {
-      // async-iife: bootstrap -- the page is going; nothing on it can wait for the answer.
+      // async-iife: bootstrap -- the page may be going; nothing on it can wait for the answer.
       void post(target.endpoint, envelope, true);
       return true;
     }
@@ -321,14 +366,14 @@ export const sendSentryEventsAtPageExit = (
       // Refused outright (a URL the browser will not beacon to): not queued.
     }
     if (isTaken) {
-      beaconed.bytes += envelope.size;
-      beaconed.requests += 1;
+      // Never answered: held in the ledger for as long as it may take to go.
+      setTimeout(holdInLedger(envelope.size), beaconHold);
     }
     return isTaken;
   };
   let left = newestFirst.length;
-  // The summary for what is left if the next error does not go; replaced each time one does.
-  let summary = buildSummaryEnvelope(target.dsn, left);
+  // At exit, the summary for what is left if the next error does not go; replaced each time one does.
+  let summary = isExit ? buildSummaryEnvelope(target.dsn, left) : undefined;
   for (const report of newestFirst) {
     const envelope = buildEnvelope({
       dsn: target.dsn,
@@ -336,15 +381,17 @@ export const sendSentryEventsAtPageExit = (
       tags: report.tags,
       stackLimit: directEventTextLimit.stackAtPageExit,
     });
-    const next = left > 1 ? buildSummaryEnvelope(target.dsn, left - 1) : undefined;
-    if (!fits(envelope.size + (next?.size ?? 0), next === undefined ? 1 : 2) || !queue(envelope)) {
+    const next = isExit && left > 1 ? buildSummaryEnvelope(target.dsn, left - 1) : undefined;
+    if (!fitsKeepalive(envelope.size + (next?.size ?? 0), next === undefined ? 1 : 2) || !queue(envelope)) {
       break;
     }
     markCaptured(report.error);
+    done.add(report);
     left -= 1;
     summary = next ?? summary;
   }
-  if (left > 0 && fits(summary.size, 1)) {
+  if (summary !== undefined && left > 0 && fitsKeepalive(summary.size, 1)) {
     queue(summary);
   }
+  return done;
 };

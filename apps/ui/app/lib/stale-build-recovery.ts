@@ -52,7 +52,14 @@ import {
   serverConfirmations,
 } from '#filesystem/build-skew.js';
 import type { ServerVerdict } from '#filesystem/build-skew.js';
-import { isErrorTrackerListening, reportUiError, sendWaitingErrors, setErrorDescriber } from '#lib/error-reporting.js';
+import {
+  isErrorTrackerListening,
+  isSdkLoadFailure,
+  reportUiError,
+  resumeErrorReporting,
+  sendWaitingErrors,
+  setErrorDescriber,
+} from '#lib/error-reporting.js';
 import { readSessionStorage } from '#lib/session-storage.js';
 import { isWeakKey } from '#lib/weak-key.js';
 
@@ -122,6 +129,13 @@ export type StaleBuildRecoveryOptions = {
    * that (at boot) reaches no handler, so the recovery reports it itself. Defaults to listening.
    */
   readonly isErrorTrackerListening?: () => boolean;
+  /**
+   * Whether a value is the error tracker's own failed load ({@link FailureSource} `sdk`): a boolean
+   * when that is known now, else a promise that settles once the load does. Asked of a failure
+   * Vite's preloader reports first, so the SDK's own import failing is never reported whichever
+   * arrives first, the loader's hand-over or a fast verdict. Defaults to never.
+   */
+  readonly isSdkLoadFailure?: (failure: unknown) => boolean | Promise<boolean>;
   /** Whether a reload cannot lose user work: nothing has been done on the page since it loaded. */
   readonly canReloadSafely: () => boolean;
   /** Milliseconds a reload may take before it is called stalled; defaults to {@link reloadTimeout}. */
@@ -166,6 +180,10 @@ export type StaleBuildTag = 'superseded' | 'current' | 'unknown' | 'undecided';
  *
  * An `sdk` sighting decides for the failure whatever else saw it: Vite's preload helper wraps the
  * SDK's import too, so it dispatches the same value (`preload`) before rethrowing it into the loader.
+ * Which is the SDK's is not left to the order they arrive in: a `preload` sighting asks the loader
+ * (`isSdkLoadFailure`), and nothing is reported for it, to the tracker or to analytics, until the
+ * answer is in (at most {@link preloadFollowUpDelay}: the loader hears its import fail in the task
+ * Vite dispatches it, so a load still pending that long did not fail with this value).
  *
  * Vite rethrows a preload failure into the import that asked for it, so a `preload` sighting is
  * usually followed by a `boundary` or `unhandledrejection` one; the recovery waits
@@ -244,9 +262,10 @@ export type StaleBuildRecovery = {
   /**
    * The page is hidden (the document turning hidden, and every `pagehide`, kept in the back/forward
    * cache or not): a hidden page may be frozen or discarded and never run again, so every wait for
-   * a decision ends now (tagged {@link StaleBuildRecovery.tagNow}) and failures only Vite's
-   * preloader reported go to the tracker now. New failures afterwards
-   * (the page shown again) are handled as usual.
+   * a decision ends now (tagged {@link StaleBuildRecovery.tagNow}), while hidden none starts, and
+   * failures only Vite's preloader reported go to the tracker now, except one that may still be the
+   * tracker's own load (its follow-up reports it once the loader answers). New failures after the
+   * page is shown again are handled as usual.
    */
   readonly flush: () => void;
   /** The page is shown again (`pageshow`, the document visible) after a flush: waits work as usual again. */
@@ -296,6 +315,13 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     reportedToAnalytics: boolean;
     /** Waiting for the channel Vite rethrows a preload failure into. */
     preloadWait?: ReturnType<typeof setTimeout>;
+    /**
+     * Whether the failure may still turn out to be the error tracker's own load: a `preload`
+     * sighting while the loader's answer is not in. Nothing is reported for it meanwhile.
+     */
+    isSdkLoadPending: boolean;
+    /** Settles once {@link FailureRecord.isSdkLoadPending} is over; `undefined` when it never was. */
+    sdkLoadKnown?: Promise<void>;
   };
   const records = new WeakMap<WeakKey, FailureRecord>();
   const recordOf = (failure: WeakKey): FailureRecord => {
@@ -307,6 +333,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         seenByTracker: false,
         reportedToErrorTracker: false,
         reportedToAnalytics: false,
+        isSdkLoadPending: false,
       };
       records.set(failure, record);
     }
@@ -354,11 +381,15 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       awaitingFollowUp.add(failure);
       record.preloadWait ??= setTimeout(() => {
         record.preloadWait = undefined;
-        awaitingFollowUp.delete(failure);
-        if (isOwedToTracker(record)) {
-          record.reportedToErrorTracker = true;
-          options.reportToErrorTracker?.(failure);
-        }
+        // async-iife: bootstrap -- a timer cannot await; it reports once the loader's answer is in.
+        void (async () => {
+          await record.sdkLoadKnown;
+          awaitingFollowUp.delete(failure);
+          if (isOwedToTracker(record)) {
+            record.reportedToErrorTracker = true;
+            options.reportToErrorTracker?.(failure);
+          }
+        })();
       }, preloadFollowUpDelay);
       return;
     }
@@ -367,6 +398,22 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     awaitingFollowUp.delete(failure);
     record.reportedToErrorTracker = true;
     options.reportToErrorTracker?.(failure);
+  };
+
+  /**
+   * Tell analytics of a failure decided genuine, once, unless it is the error tracker's own load:
+   * that one ends with one console warning (the SDK's chunk is blocked, not gone: a content blocker).
+   */
+  const tellGenuine = (failure: WeakKey, record: FailureRecord): void => {
+    if (isSdkLoad(record.sources)) {
+      if (!hasWarnedSdkBlocked) {
+        hasWarnedSdkBlocked = true;
+        console.warn('[stale-build-recovery] the error tracker could not be loaded on the live build');
+      }
+    } else if (!record.reportedToAnalytics) {
+      record.reportedToAnalytics = true;
+      options.onGenuineFailure?.(failure);
+    }
   };
 
   /** Record a decision; analytics hears a genuine one when it settles, and never later. */
@@ -383,17 +430,59 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
     record.outcome = outcome;
     record.verdict = liveBuild.readVerdict();
-    if (outcome === 'current' && isSdkLoad(record.sources)) {
-      // The SDK's chunk is blocked, not gone (a content blocker): nothing to report, and nothing to report it with.
-      if (!hasWarnedSdkBlocked) {
-        hasWarnedSdkBlocked = true;
-        console.warn('[stale-build-recovery] the error tracker could not be loaded on the live build');
+    if (outcome === 'current') {
+      if (record.isSdkLoadPending) {
+        // A fast verdict (no build id, a quick answer) must not beat the loader's answer to analytics.
+        // async-iife: bootstrap -- analytics hears it once the loader has said whose failure it is.
+        void (async () => {
+          await record.sdkLoadKnown;
+          tellGenuine(failure, record);
+        })();
+      } else {
+        tellGenuine(failure, record);
       }
-    } else if (outcome === 'current' && !record.reportedToAnalytics) {
-      record.reportedToAnalytics = true;
-      options.onGenuineFailure?.(failure);
     }
     outcomeTopic.emit();
+  };
+
+  /**
+   * Ask the loader whether a failure Vite's preloader reported first is the error tracker's own
+   * load, so its identity never depends on which arrives first ({@link FailureSource}).
+   */
+  const identifySdkLoad = (record: FailureRecord, failure: WeakKey): void => {
+    let known: boolean | Promise<boolean> = false;
+    try {
+      known = options.isSdkLoadFailure?.(failure) ?? false;
+    } catch {
+      // No answer: not the SDK's.
+    }
+    if (typeof known === 'boolean') {
+      if (known) {
+        record.sources.add('sdk');
+      }
+      return;
+    }
+    const answer = known;
+    record.isSdkLoadPending = true;
+    record.sdkLoadKnown = (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      // The loader hears its import fail in the task Vite dispatches it; a load pending longer did not fail with it.
+      const pendingTooLong = new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(false);
+        }, preloadFollowUpDelay);
+      });
+      try {
+        if (await Promise.race([answer, pendingTooLong])) {
+          record.sources.add('sdk');
+        }
+      } catch {
+        // No answer: not the SDK's.
+      } finally {
+        clearTimeout(timer);
+        record.isSdkLoadPending = false;
+      }
+    })();
   };
 
   const now = options.now ?? Date.now;
@@ -521,6 +610,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         record.seenByTracker = true;
       }
       if (record.decision === undefined) {
+        if (source === 'preload') {
+          identifySdkLoad(record, failure);
+        }
         const decided = decide();
         record.decision = decided;
         // async-iife: bootstrap -- the settled outcome is published once the decision lands.
@@ -579,6 +671,10 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       isHidden = true;
       for (const failure of awaitingFollowUp) {
         const record = records.get(failure);
+        if (record?.isSdkLoadPending === true) {
+          // It may be the error tracker's own load: its follow-up reports it once the loader answers.
+          continue;
+        }
         awaitingFollowUp.delete(failure);
         if (record !== undefined && isOwedToTracker(record)) {
           clearTimeout(record.preloadWait);
@@ -667,6 +763,8 @@ const getPageRecovery = (): StaleBuildRecovery => {
       void reportUiError(failure);
     },
     isErrorTrackerListening,
+    // The loader knows whether the SDK's own import failed, and with which value.
+    isSdkLoadFailure,
     onGenuineFailure: (failure) => {
       genuineForAnalytics.push(failure);
       genuineFailureTopic.emit();
@@ -844,28 +942,36 @@ export const installStaleBuildRecovery = (): (() => void) => {
    * browser reliably fires before it freezes or discards a background tab without a `pagehide`) and
    * every `pagehide` (a page kept in the back/forward cache is frozen and may be evicted without
    * running again), so nothing may wait past either. Chrome freezes only a page already hidden one
-   * of these ways, so `freeze` adds nothing. Only a page that is really going (`pagehide`, not
-   * persisted) settles what a pending reload covered; one shown again carries on as usual. */
-  const hide = (): void => {
+   * of these ways, so `freeze` adds nothing. Hidden is not gone: what waited goes as far as the
+   * keepalive budget allows and the rest keeps waiting. Only a page that is really going
+   * (`pagehide`, not persisted) settles what a pending reload covered and gives up what is left
+   * (counted in one summary event); one shown again carries on as usual. A document that starts
+   * hidden (opened in a background tab) gets no `visibilitychange` until it is shown, so it is
+   * hidden from the start. */
+  const hide = (phase: 'hidden' | 'exit'): void => {
     getPageRecovery().flush();
-    sendWaitingErrors();
+    sendWaitingErrors(phase);
   };
   const onPageHide = (event: PageTransitionEvent): void => {
     if (!event.persisted) {
       getPageRecovery().leave();
     }
-    hide();
+    hide(event.persisted ? 'hidden' : 'exit');
   };
   const onPageShow = (): void => {
     getPageRecovery().resume();
+    resumeErrorReporting();
   };
   const onVisibilityChange = (): void => {
     if (globalThis.document.visibilityState === 'hidden') {
-      hide();
+      hide('hidden');
     } else {
       onPageShow();
     }
   };
+  if (globalThis.document.visibilityState === 'hidden') {
+    hide('hidden');
+  }
   globalThis.addEventListener('pagehide', onPageHide);
   globalThis.addEventListener('pageshow', onPageShow);
   globalThis.document.addEventListener('visibilitychange', onVisibilityChange);

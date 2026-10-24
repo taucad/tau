@@ -93,21 +93,24 @@ export function useChatInterfaceState(): ChatInterfaceState {
   );
 
   /* Vaul returns to its first snap point 500ms after every close. The hook owns the height a surface reopens at, so
-   * that late reset is dropped: while closed, and just after a close should the sheet reopen within it. */
+   * each close arms a one-shot guard that drops that one reset, whether it lands while closed or after a quick reopen.
+   * The guard lapses after the reset's window, so a reset vaul skips never swallows a later move of the person's. */
   const isOpenRef = useRef(drawerOpen);
-  const closedAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const vaulResetDeadlineRef = useRef(Number.NEGATIVE_INFINITY);
   useEffect(() => {
     if (isOpenRef.current && !drawerOpen) {
-      closedAtRef.current = performance.now();
+      vaulResetDeadlineRef.current = performance.now() + vaulCloseResetMilliseconds;
     }
     isOpenRef.current = drawerOpen;
   }, [drawerOpen]);
 
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
   const handleSnapChange = useCallback((value: number | string | null): void => {
-    const isVaulCloseReset =
-      value === mobileDrawerSnapPoints[0] && performance.now() - closedAtRef.current < vaulCloseResetMilliseconds;
-    if (!isOpenRef.current || isVaulCloseReset) {
+    if (value === mobileDrawerSnapPoints[0] && performance.now() < vaulResetDeadlineRef.current) {
+      vaulResetDeadlineRef.current = Number.NEGATIVE_INFINITY;
+      return;
+    }
+    if (!isOpenRef.current) {
       return;
     }
     setSnapPoint(value);

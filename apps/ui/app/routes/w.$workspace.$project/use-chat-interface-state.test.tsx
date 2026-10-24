@@ -215,10 +215,6 @@ describe('useChatInterfaceState mobile drawer', () => {
       result.current.handleTabChange('viewer');
     });
     rerender();
-    // Closed: vaul's late reset has nothing to move.
-    act(() => {
-      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
-    });
     act(() => {
       result.current.handleTabChange('chat');
     });
@@ -230,7 +226,55 @@ describe('useChatInterfaceState mobile drawer', () => {
     });
     expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
 
-    // Afterwards the person's own move to the peek is honoured.
+    // The guard is one-shot: the person's own move to the peek, still inside that window, is honoured.
+    now.mockReturnValue(1400);
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
+  });
+
+  it('spends the close guard on a reset that lands while closed, so a quick reopen honours the peek', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleTabChange('viewer');
+    });
+    rerender();
+    now.mockReturnValue(1500);
+    // Closed: vaul's late reset has nothing to move, and spends the guard.
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerOpenSnapPoint);
+    now.mockReturnValue(1600);
+    act(() => {
+      result.current.handleSnapChange(mobileDrawerPeekSnapPoint);
+    });
+    expect(result.current.activeSnapPoint).toBe(mobileDrawerPeekSnapPoint);
+    now.mockRestore();
+  });
+
+  it('lets the close guard lapse when vaul sends no reset', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    state.activeTab = 'parameters';
+    const { result, rerender } = renderHook(() => useChatInterfaceState());
+
+    act(() => {
+      result.current.handleTabChange('viewer');
+    });
+    rerender();
+    act(() => {
+      result.current.handleTabChange('chat');
+    });
+    rerender();
     now.mockReturnValue(5000);
     act(() => {
       result.current.handleSnapChange(mobileDrawerPeekSnapPoint);

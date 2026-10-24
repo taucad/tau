@@ -1,0 +1,1978 @@
+{
+  "uid": "tau-runtime-product",
+  "title": "Runtime product insights",
+  "description": "Runtime product facets P1–P12: kernels, memory, parameters, formats, model size, hosts, callers, releases, stages, viewer, jobs and plugin usage (Runtime Observability Blueprint, package.md §11). Product panels never page.",
+  "tags": ["tau", "runtime", "product"],
+  "timezone": "browser",
+  "refresh": "5m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 2
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Runtime telemetry is recorded by the API's ingest route. A constant, so Loki selectors stay exactly service_name=~\"$service\", which Tau Cloud rewrites per environment.",
+        "current": {
+          "text": "tau-api",
+          "value": "tau-api"
+        },
+        "options": [
+          {
+            "text": "tau-api",
+            "value": "tau-api",
+            "selected": true
+          }
+        ],
+        "includeAll": false
+      },
+      {
+        "name": "kernel",
+        "label": "Kernel",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\"}, kernel_id)",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 1
+      },
+      {
+        "name": "population",
+        "label": "Population",
+        "type": "custom",
+        "description": "Signed-in by default (AR-W4-07): forged signed-out traffic can inflate only the signed-out series. Panels on metrics without a population label say so.",
+        "query": "signed-in,signed-out",
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
+        "current": {
+          "text": "signed-in",
+          "value": "signed-in"
+        },
+        "options": [
+          {
+            "text": "All",
+            "value": "$__all",
+            "selected": false
+          },
+          {
+            "text": "signed-in",
+            "value": "signed-in",
+            "selected": true
+          },
+          {
+            "text": "signed-out",
+            "value": "signed-out",
+            "selected": false
+          }
+        ]
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Kernels",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": [],
+      "id": 1
+    },
+    {
+      "title": "Attempts by Kernel (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 1. Completed evaluate, render and export attempts per kernel: the popularity denominator. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render|export\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2
+    },
+    {
+      "title": "Kernel Share",
+      "type": "piechart",
+      "description": "§11 panel 2. Share of completed evaluate, render and export attempts over the dashboard range. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"evaluate|render|export\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 3
+    },
+    {
+      "title": "Estimated Users per Kernel, Today",
+      "type": "bargauge",
+      "description": "§11 panel 3. Distinct signed-in principals with an attempt on each kernel today; the Runtime operations dashboard shows the _ALL fleet total. Population: signed-in only, by construction; signed-out users are not counted (unavailable by design). HyperLogLog, ±0.81 %, read with max across Machines, never summed.",
+      "targets": [
+        {
+          "expr": "max by (kernel_id) (tau_runtime_active_principals{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"any\",kernel_id!=\"_ALL\"})",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "id": 4
+    },
+    {
+      "title": "Users Who Met a Failure, per Kernel",
+      "type": "bargauge",
+      "description": "§11 panel 4. The failed set is a subset of any and is read on its own, never added to it. Population: signed-in only, by construction; signed-out users are not counted (unavailable by design). HyperLogLog, ±0.81 %, read with max across Machines, never summed.",
+      "targets": [
+        {
+          "expr": "max by (kernel_id) (tau_runtime_active_principals{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"failed\",kernel_id!=\"_ALL\"})",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "id": 5
+    },
+    {
+      "title": "Memory",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "panels": [],
+      "id": 6
+    },
+    {
+      "title": "Kernel Heap p50 / p95 by Kernel and Source",
+      "type": "timeseries",
+      "description": "§11 panel 5. Memory at settle of successful attempts: kernel = WASM linear memory, child = a native kernel's worker process tree resident set, resident = a dedicated kernel process. Attempts without a reading (none) write no bucket. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, kernel_id, tau_runtime_heap_source) (rate(tau_runtime_kernel_heap_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_failed=\"false\",tau_runtime_population=~\"$population\"}[1h])))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}} {{tau_runtime_heap_source}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, kernel_id, tau_runtime_heap_source) (rate(tau_runtime_kernel_heap_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_failed=\"false\",tau_runtime_population=~\"$population\"}[1h])))",
+          "refId": "B",
+          "legendFormat": "{{kernel_id}} {{tau_runtime_heap_source}} p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 7
+    },
+    {
+      "title": "Heap Coverage per Kernel",
+      "type": "table",
+      "description": "§11 panel 5a. Share of completed attempts of every operation with a heap reading, by source. A kernel at 0 % has no row: compare with panel 1. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "clamp_max(sum by (kernel_id, tau_runtime_heap_source) (increase(tau_runtime_kernel_heap_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range])) / ignoring(tau_runtime_heap_source) group_left sum by (kernel_id) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[$__range])), 1)",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 8
+    },
+    {
+      "title": "Heap of Failed Attempts",
+      "type": "bargauge",
+      "description": "§11 panel 5b. p95 memory at the moment of failure: the number OOM triage needs. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, kernel_id) (rate(tau_runtime_kernel_heap_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_failed=\"true\",tau_runtime_population=~\"$population\"}[$__range])))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "id": 9
+    },
+    {
+      "title": "Heap by Device Class",
+      "type": "bargauge",
+      "description": "§11 panel 6. p95 heap on constrained vs standard devices (browsers and the desktop renderer). Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, kernel_id, tau_runtime_device) (rate(tau_runtime_kernel_heap_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range])))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}} {{tau_runtime_device}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      },
+      "id": 10
+    },
+    {
+      "title": "Heap Distribution, Selected Kernel",
+      "type": "heatmap",
+      "description": "§11 panel 7. Heap buckets over time for the Kernel variable. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(tau_runtime_kernel_heap_bucket{app=~\"$app\",service_name=~\"$service\",kernel_id=~\"$kernel\",tau_runtime_population=~\"$population\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{le}}",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health"
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      },
+      "id": 11
+    },
+    {
+      "title": "Parameters",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "panels": [],
+      "id": 12
+    },
+    {
+      "title": "Parameters Declared per Model",
+      "type": "bargauge",
+      "description": "§11 panel 8. Parameter leaves per succeeded evaluate, buckets 0…100 (cumulative, le). Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(tau_runtime_parameters_declared_bucket{app=~\"$app\",service_name=~\"$service\",kernel_id=~\"$kernel\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{le}}",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 35
+      },
+      "id": 13
+    },
+    {
+      "title": "Models with Any Parameters, by Kernel",
+      "type": "bargauge",
+      "description": "§11 panel 9. Share of succeeded evaluates whose model declares at least one parameter. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "1 - sum by (kernel_id) (increase(tau_runtime_parameters_declared_bucket{app=~\"$app\",service_name=~\"$service\",le=\"0\",tau_runtime_population=~\"$population\"}[$__range])) / sum by (kernel_id) (increase(tau_runtime_parameters_declared_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 35
+      },
+      "id": 14
+    },
+    {
+      "title": "Share of Parameterised Evaluates with Modified Defaults",
+      "type": "stat",
+      "description": "§11 panel 11. How often parameters are changed from their defaults, over evaluates of models that declare any. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_runtime_parameter_evaluations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_parameter_class=~\"some|most|all\",tau_runtime_population=~\"$population\"}[$__range])) / sum(increase(tau_runtime_parameter_evaluations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_parameter_class!=\"none\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "graphMode": "area"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 35
+      },
+      "id": 15
+    },
+    {
+      "title": "Evaluates by Parameter Class (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 10. none (0 declared), default (0 modified), some (< 50 %), most (< 100 %), all. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_parameter_class) (increase(tau_runtime_parameter_evaluations_total{app=~\"$app\",service_name=~\"$service\",kernel_id=~\"$kernel\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_parameter_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 43
+      },
+      "id": 16
+    },
+    {
+      "title": "Parameter Features by Kernel",
+      "type": "bargauge",
+      "description": "§11 panel 37. Share of succeeded evaluates whose manifest uses units, arrays, decimals or structured values. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id, tau_runtime_parameter_feature) (increase(tau_runtime_parameter_features_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range])) / ignoring(tau_runtime_parameter_feature) group_left sum by (kernel_id) (increase(tau_runtime_parameters_declared_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}} {{tau_runtime_parameter_feature}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      },
+      "id": 17
+    },
+    {
+      "title": "Exports, conversions and formats",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 51
+      },
+      "panels": [],
+      "id": 18
+    },
+    {
+      "title": "Exports by Format (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 12. Succeeded exports by registry format. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_format) (increase(tau_runtime_exports_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"succeeded\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_format}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 52
+      },
+      "id": 19
+    },
+    {
+      "title": "Export Failure Rate by Format",
+      "type": "table",
+      "description": "§11 panel 13. Failed / completed exports per format, for formats with at least 20 completed exports in the range. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_format) (increase(tau_runtime_exports_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=~\"issue|failed|timed-out|terminated|discarded\",tau_runtime_population=~\"$population\"}[$__range])) / (sum by (tau_runtime_format) (increase(tau_runtime_exports_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[$__range])) >= 20)",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 52
+      },
+      "id": 20
+    },
+    {
+      "title": "Conversions: Source → Target",
+      "type": "table",
+      "description": "§11 panel 35. Completed conversions per registry edge (A) and their failure rate (B); conversions off a registry edge read _OTHER. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_source_format, tau_runtime_format) (increase(tau_runtime_transcode_formats_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (tau_runtime_source_format, tau_runtime_format) (increase(tau_runtime_transcode_formats_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_failed=\"true\",tau_runtime_population=~\"$population\"}[$__range])) / sum by (tau_runtime_source_format, tau_runtime_format) (increase(tau_runtime_transcode_formats_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 60
+      },
+      "id": 21
+    },
+    {
+      "title": "Entry Formats by Kernel",
+      "type": "table",
+      "description": "§11 panel 35. Completed evaluates by entry file format (py, cs, kcl, scad, ts, step, stl, 3dm, …). Evaluates are edit-weighted: an editing session evaluates many times, so this is not documents opened. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id, tau_runtime_entry_format) (increase(tau_runtime_entry_formats_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 60
+      },
+      "id": 22
+    },
+    {
+      "title": "Viewer Downloads by Format (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 38. Downloads from the viewer by format. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_format) (increase(tau_runtime_viewer_events_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_viewer_event=\"download\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_format}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "id": 23
+    },
+    {
+      "title": "Model size and latency",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 76
+      },
+      "panels": [],
+      "id": 24
+    },
+    {
+      "title": "Render p95 by Size Class",
+      "type": "timeseries",
+      "description": "§11 panel 14. Succeeded renders by delivered triangles: xs < 10k, s < 100k, m < 1M, l < 5M, xl. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_size_class) (rate(tau_runtime_render_duration_by_size_bucket{app=~\"$app\",service_name=~\"$service\",kernel_id=~\"$kernel\",tau_runtime_population=~\"$population\"}[1h])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_size_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 77
+      },
+      "id": 25
+    },
+    {
+      "title": "Renders by Size Class (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 15. Succeeded renders per size class. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_size_class) (increase(tau_runtime_render_duration_by_size_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_size_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 77
+      },
+      "id": 26
+    },
+    {
+      "title": "Cold vs Warm Share",
+      "type": "stat",
+      "description": "§11 panel 16. Share of attempts that booted their worker. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_runtime_operation_duration_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_cold=\"true\"}[$__range])) / sum(increase(tau_runtime_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 85
+      },
+      "id": 27
+    },
+    {
+      "title": "Cache Hit Ratio by Kernel",
+      "type": "timeseries",
+      "description": "§11 panel 17. Compute reuse from the narrow reuse counter. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id) (rate(tau_runtime_reuse_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_reuse=\"cache\"}[1h])) / sum by (kernel_id) (rate(tau_runtime_reuse_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_reuse=~\"cache|computed\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 8,
+        "y": 85
+      },
+      "id": 28
+    },
+    {
+      "title": "Mix: operations, hosts, callers, populations",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 93
+      },
+      "panels": [],
+      "id": 29
+    },
+    {
+      "title": "Operation Mix (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 18. Settled attempts by operation. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_operation) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 94
+      },
+      "id": 30
+    },
+    {
+      "title": "Population Share (signed-out)",
+      "type": "stat",
+      "description": "§11 panel 20. Signed-out attempts over all attempts. Population: always both populations, whatever the Population variable.",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=\"signed-out\"}[$__range])) / sum(increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\".*\"}[$__range]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 94
+      },
+      "id": 31
+    },
+    {
+      "title": "Route Mix",
+      "type": "piechart",
+      "description": "§11 panel 19. Attempts by host route, from the duration histogram (the operations counter carries no route). Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_route) (increase(tau_runtime_operation_duration_count{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 94
+      },
+      "id": 32
+    },
+    {
+      "title": "Caller Mix",
+      "type": "piechart",
+      "description": "§11 panel 19. Completed attempts by caller: editor, agent, geospec, quicklook, host, converter, capture, viewer. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_caller) (increase(tau_runtime_operations_by_caller_total{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_caller}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 102
+      },
+      "id": 33
+    },
+    {
+      "title": "Platform Mix — sample: non-success attempts only",
+      "type": "piechart",
+      "description": "§11 panel 19a. A sample, not a mix of all attempts: the runtime.operation Loki event is written only for non-success outcomes and capacity issues (package.md §1.6), so this is the platform mix of attempts that failed or were refused. Panel 36 has the counts for every completed attempt. Population: all populations recorded.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "expr": "sum by (platform) (count_over_time({service_name=~\"$service\"} | json | event=\"runtime.operation\" [$__range]))",
+          "legendFormat": "{{platform}}",
+          "refId": "A",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 102
+      },
+      "id": 34
+    },
+    {
+      "title": "OS Mix — sample: non-success attempts only",
+      "type": "piechart",
+      "description": "§11 panel 19a. A sample, not a mix of all attempts: the runtime.operation Loki event is written only for non-success outcomes and capacity issues (package.md §1.6), so this is the os mix of attempts that failed or were refused. Panel 36 has the counts for every completed attempt. Population: all populations recorded.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "expr": "sum by (os) (count_over_time({service_name=~\"$service\"} | json | event=\"runtime.operation\" [$__range]))",
+          "legendFormat": "{{os}}",
+          "refId": "A",
+          "queryType": "instant"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 102
+      },
+      "id": 35
+    },
+    {
+      "title": "Hosts",
+      "type": "piechart",
+      "description": "§11 panel 36. Completed attempts by host, engine family and OS class (_OTHER where an entry carries none); replaces the Loki sample of panel 19a for mix questions. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_route) (increase(tau_runtime_operations_by_host_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 110
+      },
+      "id": 36
+    },
+    {
+      "title": "Platforms",
+      "type": "piechart",
+      "description": "§11 panel 36. Completed attempts by host, engine family and OS class (_OTHER where an entry carries none); replaces the Loki sample of panel 19a for mix questions. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_platform) (increase(tau_runtime_operations_by_host_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_platform}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 110
+      },
+      "id": 37
+    },
+    {
+      "title": "Operating Systems",
+      "type": "piechart",
+      "description": "§11 panel 36. Completed attempts by host, engine family and OS class (_OTHER where an entry carries none); replaces the Loki sample of panel 19a for mix questions. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_os) (increase(tau_runtime_operations_by_host_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_os}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 110
+      },
+      "id": 38
+    },
+    {
+      "title": "Kernels by Host",
+      "type": "table",
+      "description": "§11 panel 39. Completed attempts per kernel and route: which kernels the browser, desktop, CLI, MCP, daemon and cloud hosts use. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id, tau_runtime_route) (increase(tau_runtime_kernel_usage_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "columnField": "tau_runtime_route",
+            "rowField": "kernel_id",
+            "valueField": "Value"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 118
+      },
+      "id": 39
+    },
+    {
+      "title": "Kernels by Caller",
+      "type": "table",
+      "description": "§11 panel 39. Completed attempts per kernel and caller: how much agent, GeoSpec, converter and capture use each kernel gets. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id, tau_runtime_caller) (increase(tau_runtime_kernel_usage_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "transformations": [
+        {
+          "id": "groupingToMatrix",
+          "options": {
+            "columnField": "tau_runtime_caller",
+            "rowField": "kernel_id",
+            "valueField": "Value"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 118
+      },
+      "id": 40
+    },
+    {
+      "title": "Attempts by Transport (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 28. Attempts by transport: in-process, web-worker, node-worker, utility, websocket. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_transport) (increase(tau_runtime_operations_by_transport_total{app=~\"$app\",service_name=~\"$service\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_transport}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 126
+      },
+      "id": 41
+    },
+    {
+      "title": "Terminations by Transport (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 28. Terminated attempts by transport. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_transport) (increase(tau_runtime_operations_by_transport_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"terminated\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_transport}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 126
+      },
+      "id": 42
+    },
+    {
+      "title": "Failures, refusals and releases",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 134
+      },
+      "panels": [],
+      "id": 43
+    },
+    {
+      "title": "Top Failure Codes by Kernel",
+      "type": "table",
+      "description": "§11 panel 21. Non-success attempts by kernel and error.type, from the narrow errors counter. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "topk(10, sum by (kernel_id, error_type) (increase(tau_runtime_operation_errors_total{app=~\"$app\",service_name=~\"$service\"}[$__range])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 135
+      },
+      "id": 44
+    },
+    {
+      "title": "Refusals by Limit and Kernel",
+      "type": "table",
+      "description": "§11 panel 22. Capacity refusals by allowlisted limit and kernel (A) and by demand kind (B). Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_limit, kernel_id) (increase(tau_runtime_capacity_refusals_total{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "expr": "sum by (tau_runtime_limit, tau_runtime_demand_kind) (increase(tau_runtime_capacity_refusals_total{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
+          "refId": "B",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 135
+      },
+      "id": 45
+    },
+    {
+      "title": "Release Cohorts: Render p95 by Kernel and Release",
+      "type": "timeseries",
+      "description": "§11 panel 23. Succeeded renders by admitted client release; _OTHER is hidden. Population: all populations recorded (release cohorts are bounded by release admission, not by population).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, kernel_id, tau_release) (rate(tau_runtime_operation_cohort_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=\"render\",tau_release!=\"_OTHER\"}[1h])))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}} {{tau_release}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 143
+      },
+      "id": 46
+    },
+    {
+      "title": "Success Rate by Release",
+      "type": "table",
+      "description": "§11 panel 24. The by-release counter counts completed attempts only, so merged outcomes never enter the denominator. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "1 - sum by (tau_release) (increase(tau_runtime_operations_by_release_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_failed=\"true\"}[$__range])) / sum by (tau_release) (increase(tau_runtime_operations_by_release_total{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 143
+      },
+      "id": 47
+    },
+    {
+      "title": "Stages and adaptations",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 151
+      },
+      "panels": [],
+      "id": 48
+    },
+    {
+      "title": "Stage Breakdown: Render p95 per Phase",
+      "type": "timeseries",
+      "description": "§11 panel 25. prepare, resolve, compute, mesh, export, reuse, other (the generated span map); middleware self-time is panel 26, never inside a phase. Succeeded attempts only. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_phase) (rate(tau_runtime_phase_duration_bucket{app=~\"$app\",service_name=~\"$service\",kernel_id=~\"$kernel\",tau_runtime_operation=\"render\"}[1h])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "s",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 152
+      },
+      "id": 49
+    },
+    {
+      "title": "Middleware Share of Operation Time",
+      "type": "stat",
+      "description": "§11 panel 26. Middleware time is first-class and never attributed to the kernel. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum(rate(tau_runtime_middleware_duration_sum{app=~\"$app\",service_name=~\"$service\"}[1h])) / sum(rate(tau_runtime_operation_duration_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"succeeded\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 152
+      },
+      "id": 50
+    },
+    {
+      "title": "Slowest Middleware",
+      "type": "table",
+      "description": "§11 panel 26. Middleware ids by time spent; third-party ids are _OTHER. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "topk(5, sum by (tau_runtime_middleware) (rate(tau_runtime_middleware_duration_sum{app=~\"$app\",service_name=~\"$service\"}[1h])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 152
+      },
+      "id": 51
+    },
+    {
+      "title": "Adaptation Rate by Kernel and Code",
+      "type": "table",
+      "description": "§11 panel 27. The share of successes reached through a fallback, clamp or downgrade; a kernel whose successes are mostly adaptations is not healthy. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum by (kernel_id, error_type) (increase(tau_runtime_adaptations_total{app=~\"$app\",service_name=~\"$service\"}[$__range])) / ignoring(error_type) group_left sum by (kernel_id) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"succeeded\",tau_runtime_population=~\".*\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 160
+      },
+      "id": 52
+    },
+    {
+      "title": "Viewer, jobs and GeoSpec",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 168
+      },
+      "panels": [],
+      "id": 53
+    },
+    {
+      "title": "Viewer Context Loss per 1,000 First Frames",
+      "type": "bargauge",
+      "description": "§11 panel 29. Context losses per 1,000 first frames by backend. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "1000 * sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_viewer_event=\"context-lost\"}[$__range])) / sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_viewer_event=\"first-frame\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_backend}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 169
+      },
+      "id": 54
+    },
+    {
+      "title": "Viewer First-Frame p95 by Size Class",
+      "type": "timeseries",
+      "description": "§11 panel 29. Geometry receipt to first presented frame. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_size_class) (rate(tau_runtime_viewer_first_frame_bucket{app=~\"$app\",service_name=~\"$service\"}[1h])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_size_class}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 169
+      },
+      "id": 55
+    },
+    {
+      "title": "Jobs by Outcome (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 29. Terminal job states. Attention is its own counter (panel 31), never an outcome on the operations counter. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_outcome) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=\"job\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 169
+      },
+      "id": 56
+    },
+    {
+      "title": "GeoSpec Pass Rate",
+      "type": "stat",
+      "description": "§11 panel 29. Passed / selected GeoSpec tests. Population: all populations recorded (this metric has no population label).",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_runtime_verify_tests_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"passed\"}[$__range])) / sum(increase(tau_runtime_verify_tests_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"selected\"}[$__range]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 169
+      },
+      "id": 57
+    },
+    {
+      "title": "Plugin usage",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 177
+      },
+      "panels": [],
+      "id": 58
+    },
+    {
+      "title": "Transcoder Usage (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 30. Completed uses of each transcoder (assimp, gltf, image, svg-image, slicer); operation separates direct transcodes from the transcoder hop of an export. A transcoder unused in the range has no series. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_operation) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"transcoder\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_plugin}} {{tau_runtime_operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 178
+      },
+      "id": 59
+    },
+    {
+      "title": "Transcoder Failure Rate",
+      "type": "table",
+      "description": "§11 panel 30. Failed / completed uses per transcoder, hard failures included (the client stamps the transcoder). Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"transcoder\",tau_runtime_outcome=~\"issue|failed|timed-out|terminated|discarded\",tau_runtime_population=~\"$population\"}[$__range])) / sum by (tau_runtime_plugin) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"transcoder\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 178
+      },
+      "id": 60
+    },
+    {
+      "title": "Job Usage by Provider (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 31. Terminal states per job provider, so each job is counted once. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_outcome) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"job\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_plugin}} {{tau_runtime_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 186
+      },
+      "id": 61
+    },
+    {
+      "title": "Jobs Entering Attention by Provider (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 31. Jobs that entered attention_required, from their own counter, once per job. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin) (increase(tau_runtime_job_attention_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_plugin}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 186
+      },
+      "id": 62
+    },
+    {
+      "title": "Middleware Usage",
+      "type": "table",
+      "description": "§11 panel 32. Uses per middleware by operation (file parameters show as ParameterFileResolver use). Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_operation) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"middleware\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 194
+      },
+      "id": 63
+    },
+    {
+      "title": "Middleware Share of Joined Attempts",
+      "type": "table",
+      "description": "§11 panel 32. The denominator is attempts with joined worker facts in which any middleware ran (one middleware histogram sample per such attempt, all populations); attempts without joined facts are on tau_runtime_facts_missing_total. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_operation) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"middleware\",tau_runtime_population=~\"$population\"}[$__range])) / ignoring(tau_runtime_plugin) group_left sum by (tau_runtime_operation) (increase(tau_runtime_middleware_duration_count{app=~\"$app\",service_name=~\"$service\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 194
+      },
+      "id": 64
+    },
+    {
+      "title": "Bundler Usage (daily)",
+      "type": "timeseries",
+      "description": "§11 panel 33. Bundles that ran (esbuild, rolldown); per-entry cache hits are not a use. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_operation) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_capability=\"bundler\",tau_runtime_population=~\"$population\"}[1d]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_plugin}} {{tau_runtime_operation}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "interval": "1d",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 202
+      },
+      "id": 65
+    },
+    {
+      "title": "Machine Operations by Provider and Kind",
+      "type": "table",
+      "description": "§11 panel 34. New operations by provider and kind: action, stop, hold, transfer (a print or cut sent), start (a job started). Node machine hosts only; no machine identity. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_machine_kind) (increase(tau_runtime_machine_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 210
+      },
+      "id": 66
+    },
+    {
+      "title": "Machine Actions by Family",
+      "type": "table",
+      "description": "§11 panel 34. Action operations by standard action family (provider extensions are _OTHER). Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_machine_action) (increase(tau_runtime_machine_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_machine_kind=\"action\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 210
+      },
+      "id": 67
+    },
+    {
+      "title": "Machine Outcomes by Provider",
+      "type": "table",
+      "description": "§11 panel 34. Outcome mix of new machine operations. Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin, tau_runtime_outcome) (increase(tau_runtime_machine_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 210
+      },
+      "id": 68
+    },
+    {
+      "title": "Machine Operations: Person vs Agent",
+      "type": "piechart",
+      "description": "§11 panel 34. editor = a person, agent = an agent action (counted when it runs, after any approval). Population: the Population variable (default signed-in).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_caller) (increase(tau_runtime_machine_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_population=~\"$population\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_caller}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 210
+      },
+      "id": 69
+    },
+    {
+      "title": "Plugin Reach, Today",
+      "type": "bargauge",
+      "description": "§11 panel 40. Distinct signed-in users per transcoder, job provider, machine provider, middleware and bundler today, with the failed set beside it. Population: signed-in only, by construction; signed-out users are not counted (unavailable by design). HyperLogLog, ±0.81 %, read with max across Machines, never summed.",
+      "targets": [
+        {
+          "expr": "max by (tau_runtime_plugin) (tau_runtime_active_plugin_principals{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"any\"})",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_plugin}} any"
+        },
+        {
+          "expr": "max by (tau_runtime_plugin) (tau_runtime_active_plugin_principals{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"failed\"})",
+          "refId": "B",
+          "legendFormat": "{{tau_runtime_plugin}} failed"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no runtime telemetry recorded in this window; see Runtime operations → Telemetry health",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 218
+      },
+      "id": 70
+    }
+  ],
+  "schemaVersion": 39
+}

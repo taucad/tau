@@ -1,0 +1,1295 @@
+{
+  "uid": "tau-runtime-operations",
+  "title": "Runtime operations",
+  "description": "Runtime attempts, latency, capacity, stages, viewer, jobs, plugins and telemetry health (Runtime Observability Blueprint, package.md §12.1).",
+  "tags": ["tau", "runtime", "operations"],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "app",
+        "label": "Application",
+        "type": "constant",
+        "query": ".*",
+        "description": "Local default matches unlabeled series. Hosted provisioning binds this to exactly one application.",
+        "current": {
+          "text": ".*",
+          "value": ".*"
+        },
+        "hide": 2
+      },
+      {
+        "name": "service",
+        "label": "Service",
+        "type": "custom",
+        "query": "tau-api",
+        "description": "Runtime telemetry is recorded by the API's ingest route. A constant, so Loki selectors stay exactly service_name=~\"$service\", which Tau Cloud rewrites per environment.",
+        "current": {
+          "text": "tau-api",
+          "value": "tau-api"
+        },
+        "options": [
+          {
+            "text": "tau-api",
+            "value": "tau-api",
+            "selected": true
+          }
+        ],
+        "includeAll": false
+      },
+      {
+        "name": "outcome",
+        "label": "Outcome",
+        "type": "custom",
+        "description": "Filters the runtime.operation drill-down; the event is written only for these outcomes and capacity issues.",
+        "query": "issue,refused,timed-out,terminated,discarded,failed,unknown,attention",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "options": []
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Health at a glance",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": [],
+      "id": 1
+    },
+    {
+      "title": "Telemetry Enabled",
+      "type": "stat",
+      "description": "tau_telemetry_runtime_enabled: 1 where TAU_RUNTIME_TELEMETRY resolves on for this API, else 0. Every other panel here is empty while it reads 0.",
+      "targets": [
+        {
+          "expr": "max(tau_telemetry_runtime_enabled{app=~\"$app\",service_name=~\"$service\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "no gauge: the API predates runtime telemetry",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "telemetry disabled on this deployment",
+                  "color": "orange"
+                },
+                "1": {
+                  "text": "recording",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2
+    },
+    {
+      "title": "Attempts / min",
+      "type": "stat",
+      "description": "Settled attempts of every operation and outcome, all populations.",
+      "targets": [
+        {
+          "expr": "sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\"}[5m])) * 60",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 3
+    },
+    {
+      "title": "Completed Success Rate",
+      "type": "stat",
+      "description": "Succeeded / completed attempts (completed = every outcome except superseded, cancelled and abandoned; package.md §1.3).",
+      "targets": [
+        {
+          "expr": "sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"succeeded\"}[5m])) / sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4
+    },
+    {
+      "title": "Implementation-Failure Rate",
+      "type": "stat",
+      "description": "Completed attempts with cause implementation (failed, discarded, implementation-class issues) over completed attempts.",
+      "targets": [
+        {
+          "expr": "sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_cause=\"implementation\"}[5m])) / sum(rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome!~\"superseded|cancelled|abandoned\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 5
+    },
+    {
+      "title": "Render p95",
+      "type": "stat",
+      "description": "Client-observed duration of succeeded renders, submission to settlement.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=\"render\",tau_runtime_outcome=\"succeeded\"}[5m])))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 6
+    },
+    {
+      "title": "Signed-In Users Today",
+      "type": "stat",
+      "description": "Distinct signed-in principals with an attempt today (HyperLogLog, ±0.81 %), read with max across Machines, never summed. Signed-out users are not counted, by design.",
+      "targets": [
+        {
+          "expr": "max(tau_runtime_active_principals{app=~\"$app\",service_name=~\"$service\",tau_runtime_set=\"any\",kernel_id=\"_ALL\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 7
+    },
+    {
+      "title": "Outcomes",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "panels": [],
+      "id": 8
+    },
+    {
+      "title": "Outcome Mix by Operation",
+      "type": "timeseries",
+      "description": "Attempts per second by operation and outcome.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_outcome, tau_runtime_operation) (rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_operation}} {{tau_runtime_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 7
+      },
+      "id": 9
+    },
+    {
+      "title": "Failures by Cause",
+      "type": "timeseries",
+      "description": "Completed, unsuccessful attempts by cause (input, policy, capacity, implementation, environment).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_cause) (rate(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome!~\"succeeded|superseded|cancelled|abandoned\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_cause}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 30,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 7
+      },
+      "id": 10
+    },
+    {
+      "title": "Top Error Types (1h)",
+      "type": "table",
+      "description": "Non-success attempts by error.type on the narrow errors counter.",
+      "targets": [
+        {
+          "expr": "topk(15, sum by (error_type) (increase(tau_runtime_operation_errors_total{app=~\"$app\",service_name=~\"$service\"}[1h])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "id": 11
+    },
+    {
+      "title": "Refused Before Dispatch by Code (1h)",
+      "type": "table",
+      "description": "Pre-dispatch refusals (preparation, host admission, durable submit) by code.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_operation, error_type) (increase(tau_runtime_operation_errors_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=~\"prepare|admit|submit\"}[1h]))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "id": 12
+    },
+    {
+      "title": "Latency",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 23
+      },
+      "panels": [],
+      "id": 13
+    },
+    {
+      "title": "Duration p50 / p95 / p99 by Operation",
+      "type": "timeseries",
+      "description": "Client-observed attempt duration, submission to settlement, every outcome.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, tau_runtime_operation) (rate(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_operation}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_operation) (rate(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "B",
+          "legendFormat": "{{tau_runtime_operation}} p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, tau_runtime_operation) (rate(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "C",
+          "legendFormat": "{{tau_runtime_operation}} p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 14
+    },
+    {
+      "title": "Queue Wait p95 by Route",
+      "type": "timeseries",
+      "description": "Worker-reported wait behind earlier operations, for attempts that got a reply.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_route) (rate(tau_runtime_operation_queue_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 15
+    },
+    {
+      "title": "Cold vs Warm p95",
+      "type": "timeseries",
+      "description": "Duration p95 split by whether the attempt booted its worker.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_cold) (rate(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "cold={{tau_runtime_cold}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "id": 16
+    },
+    {
+      "title": "Stalls (abandoned > 120 s) and Late Terminals (1h)",
+      "type": "timeseries",
+      "description": "Stall evidence (package.md §1.3): abandoned attempts longer than 120 s (le exists only on _bucket) and worker replies that arrived after their attempt settled.",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"abandoned\",le=\"+Inf\"}[1h])) - sum(increase(tau_runtime_operation_duration_bucket{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"abandoned\",le=\"120\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "abandoned > 120 s"
+        },
+        {
+          "expr": "sum by (tau_runtime_settled_as) (increase(tau_runtime_late_terminals_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "B",
+          "legendFormat": "late after {{tau_runtime_settled_as}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "id": 17
+    },
+    {
+      "title": "Hosts and capacity",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "panels": [],
+      "id": 18
+    },
+    {
+      "title": "Terminations by Error Type (1h)",
+      "type": "timeseries",
+      "description": "Host exits, limit kills, boot failures, transport failures and timeout recoveries, from the errors counter.",
+      "targets": [
+        {
+          "expr": "sum by (error_type) (increase(tau_runtime_operation_errors_total{app=~\"$app\",service_name=~\"$service\",error_type=~\"HOST_.*|TRANSPORT_FAILED|TIMEOUT_RECOVERY\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{error_type}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "id": 19
+    },
+    {
+      "title": "Terminations by Route (1h)",
+      "type": "timeseries",
+      "description": "Terminated attempts by route, from the duration histogram (no single series carries both error.type and route).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_route) (increase(tau_runtime_operation_duration_count{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"terminated\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "id": 20
+    },
+    {
+      "title": "Initialize Failures (1h)",
+      "type": "timeseries",
+      "description": "Worker boots that did not succeed, by kernel and outcome.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_outcome, kernel_id) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=\"initialize\",tau_runtime_outcome!=\"succeeded\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{kernel_id}} {{tau_runtime_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 49
+      },
+      "id": 21
+    },
+    {
+      "title": "Capacity Refusals by Limit (1h)",
+      "type": "timeseries",
+      "description": "RESOURCE_LIMIT issues and supervisor limit kills by allowlisted limit.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_limit, kernel_id) (increase(tau_runtime_capacity_refusals_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_limit}} {{kernel_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 49
+      },
+      "id": 22
+    },
+    {
+      "title": "Demand Ratio",
+      "type": "heatmap",
+      "description": "Known demand / effective limit for allowlisted refusals with a measured or estimated demand.",
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(tau_runtime_capacity_demand_ratio_bucket{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{le}}",
+          "format": "heatmap"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment."
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 49
+      },
+      "id": 23
+    },
+    {
+      "title": "Stages and transport",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "panels": [],
+      "id": 24
+    },
+    {
+      "title": "Phase p95 by Operation",
+      "type": "timeseries",
+      "description": "Worker-measured time per closed phase of succeeded attempts; middleware self-time is never inside a phase.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_phase, tau_runtime_operation) (rate(tau_runtime_phase_duration_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_operation}} {{tau_runtime_phase}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "id": 25
+    },
+    {
+      "title": "Middleware Share of Operation Time",
+      "type": "stat",
+      "description": "Time inside middleware.wrap over succeeded attempt time.",
+      "targets": [
+        {
+          "expr": "sum(rate(tau_runtime_middleware_duration_sum{app=~\"$app\",service_name=~\"$service\"}[5m])) / sum(rate(tau_runtime_operation_duration_sum{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"succeeded\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 58
+      },
+      "id": 26
+    },
+    {
+      "title": "Slowest Middleware (5m)",
+      "type": "table",
+      "description": "Middleware ids by time spent; third-party ids are _OTHER.",
+      "targets": [
+        {
+          "expr": "topk(5, sum by (tau_runtime_middleware) (rate(tau_runtime_middleware_duration_sum{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 58
+      },
+      "id": 27
+    },
+    {
+      "title": "Terminations by Transport (1h)",
+      "type": "timeseries",
+      "description": "Terminated attempts by the transport the client was composed with.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_transport) (increase(tau_runtime_operations_by_transport_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=\"terminated\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_transport}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "id": 28
+    },
+    {
+      "title": "Adaptations by Code (1h)",
+      "type": "table",
+      "description": "Warning-severity codes attempts adapted through (fallbacks, clamps, downgrades).",
+      "targets": [
+        {
+          "expr": "topk(10, sum by (error_type) (increase(tau_runtime_adaptations_total{app=~\"$app\",service_name=~\"$service\"}[1h])))",
+          "refId": "A",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 66
+      },
+      "id": 29
+    },
+    {
+      "title": "Viewer and jobs",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "panels": [],
+      "id": 30
+    },
+    {
+      "title": "Viewer Context Losses by Backend (1h)",
+      "type": "timeseries",
+      "description": "WebGL/WebGPU context losses reported by the viewer. Empty until the activation release.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_backend) (increase(tau_runtime_viewer_events_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_viewer_event=\"context-lost\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_backend}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 75
+      },
+      "id": 31
+    },
+    {
+      "title": "Viewer First-Frame p95",
+      "type": "timeseries",
+      "description": "Geometry receipt to first presented frame.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_backend) (rate(tau_runtime_viewer_first_frame_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_backend}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 75
+      },
+      "id": 32
+    },
+    {
+      "title": "Jobs in Attention (1h)",
+      "type": "timeseries",
+      "description": "Jobs that entered attention_required, once per job, by provider. Read from tau_runtime_job_attention_total: attention is never on the operations counter (AR-W15-10). Empty until the activation release.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_plugin) (increase(tau_runtime_job_attention_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_plugin}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 75
+      },
+      "id": 33
+    },
+    {
+      "title": "GeoSpec Runs by Outcome (1h)",
+      "type": "timeseries",
+      "description": "GeoSpec verify runs. Empty until the activation release.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_outcome) (increase(tau_runtime_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_operation=\"verify\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 75
+      },
+      "id": 34
+    },
+    {
+      "title": "Plugins",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 83
+      },
+      "panels": [],
+      "id": 35
+    },
+    {
+      "title": "Plugin Failures by Capability (1h)",
+      "type": "timeseries",
+      "description": "Failed uses of transcoders, job providers, middleware, bundlers and machine providers by registry id.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_capability, tau_runtime_plugin) (increase(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\",tau_runtime_outcome=~\"issue|failed|timed-out|terminated|discarded\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_capability}} {{tau_runtime_plugin}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 84
+      },
+      "id": 36
+    },
+    {
+      "title": "Plugin Uses / min by Capability",
+      "type": "timeseries",
+      "description": "Bundles, middleware runs, transcodes, jobs and machine operations per minute.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_capability) (rate(tau_runtime_plugin_operations_total{app=~\"$app\",service_name=~\"$service\"}[5m])) * 60",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_capability}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 84
+      },
+      "id": 37
+    },
+    {
+      "title": "Telemetry health",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 92
+      },
+      "panels": [],
+      "id": 38
+    },
+    {
+      "title": "Ingest Dispositions by Population",
+      "type": "timeseries",
+      "description": "Entries the ingest route received, by what it did with them.",
+      "targets": [
+        {
+          "expr": "sum by (disposition, tau_runtime_population) (rate(tau_telemetry_ingest_entries_total{app=~\"$app\",service_name=~\"$service\"}[5m]))",
+          "refId": "A",
+          "legendFormat": "{{disposition}} {{tau_runtime_population}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 93
+      },
+      "id": 39
+    },
+    {
+      "title": "Client Drops by Reason and Route (1h)",
+      "type": "timeseries",
+      "description": "Entries reporters dropped before delivery, reported by their next delivered batch.",
+      "targets": [
+        {
+          "expr": "sum by (reason, tau_runtime_route) (increase(tau_telemetry_client_dropped_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}} {{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 93
+      },
+      "id": 40
+    },
+    {
+      "title": "Spans Dropped by Route (1h)",
+      "type": "timeseries",
+      "description": "Spans worker collectors refused at their 10,000-entry bound (D-T5).",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_route) (increase(tau_telemetry_spans_dropped_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 93
+      },
+      "id": 41
+    },
+    {
+      "title": "Worker Facts Missing (1h)",
+      "type": "timeseries",
+      "description": "Attempts recorded without worker facts although a reply settled them. A rising missing-timeout during a deploy is the old-worker window; outside one it is a join defect.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_reason, tau_runtime_operation) (increase(tau_runtime_facts_missing_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_operation}} {{tau_runtime_reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 101
+      },
+      "id": 42
+    },
+    {
+      "title": "Partial Batches (1h)",
+      "type": "stat",
+      "description": "Batches whose recording threw after the first instrument write: marked recorded and counted, never double counted.",
+      "targets": [
+        {
+          "expr": "sum(increase(tau_telemetry_ingest_partial_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 8,
+        "y": 101
+      },
+      "id": 43
+    },
+    {
+      "title": "Delivery Delay p95",
+      "type": "timeseries",
+      "description": "Age of the oldest entry in each delivered batch.",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, tau_runtime_route) (rate(tau_telemetry_client_delivery_delay_bucket{app=~\"$app\",service_name=~\"$service\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 101
+      },
+      "id": 44
+    },
+    {
+      "title": "Rate-Limit Rejections by Population (1h)",
+      "type": "timeseries",
+      "description": "Entries refused by the per-key and global budgets.",
+      "targets": [
+        {
+          "expr": "sum by (tau_runtime_population) (increase(tau_telemetry_ingest_entries_total{app=~\"$app\",service_name=~\"$service\",disposition=\"rejected-rate-limit\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_population}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 109
+      },
+      "id": 45
+    },
+    {
+      "title": "Redis Fail-Open (1h)",
+      "type": "timeseries",
+      "description": "Batches admitted while Redis was unavailable for the budget or the dedupe key (FR-23). Empty until the activation release.",
+      "targets": [
+        {
+          "expr": "sum by (check) (increase(tau_telemetry_ingest_unavailable_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{check}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 109
+      },
+      "id": 46
+    },
+    {
+      "title": "Metric Overflow Series",
+      "type": "stat",
+      "description": "Series that hit their cardinality limit, for every registry metric. Any value above zero undercounts that instrument.",
+      "targets": [
+        {
+          "expr": "count({app=~\"$app\",service_name=~\"$service\",otel_metric_overflow=\"true\"})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "0",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 109
+      },
+      "id": 47
+    },
+    {
+      "title": "Policy Probes by Answer (1h)",
+      "type": "timeseries",
+      "description": "Entry-free GET /v1/telemetry/policy requests; before activation the only runtime-telemetry traffic a deployment answers.",
+      "targets": [
+        {
+          "expr": "sum by (answer, tau_runtime_route) (increase(tau_telemetry_policy_probes_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "refId": "A",
+          "legendFormat": "{{tau_runtime_route}} {{answer}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "No runtime telemetry in this window. If Telemetry Enabled reads 0, runtime telemetry is disabled on this deployment.",
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 109
+      },
+      "id": 48
+    },
+    {
+      "title": "Drill-down",
+      "type": "row",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 117
+      },
+      "panels": [],
+      "id": 49
+    },
+    {
+      "title": "runtime.operation Events",
+      "type": "logs",
+      "description": "Loki events the API writes for non-success attempts and capacity issues (package.md §1.6), filtered by outcome.",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "expr": "{service_name=~\"$service\"} | json | event=\"runtime.operation\" | outcome=~\"$outcome\"",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "prettifyLogMessage": false,
+        "enableLogDetails": true,
+        "sortOrder": "Descending"
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 118
+      },
+      "id": 50
+    }
+  ],
+  "schemaVersion": 39
+}

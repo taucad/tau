@@ -370,14 +370,14 @@ describe.runIf(enabled)('shell conformance', () => {
         const address = interfaceAddress();
         const port = String(listener.port);
         const probes = [
-          { command: `curl -sS --max-time 5 http://127.0.0.1:${port}/`, domains: [] },
-          { command: `curl -sS --max-time 5 http://localtest.me:${port}/`, domains: ['localtest.me'] },
-          { command: `curl -sS --max-time 5 --noproxy '*' http://127.0.0.1:${port}/`, domains: [] },
+          { command: `curl -fsS --max-time 5 http://127.0.0.1:${port}/`, domains: [] },
+          { command: `curl -fsS --max-time 5 http://localtest.me:${port}/`, domains: ['localtest.me'] },
+          { command: `curl -fsS --max-time 5 --noproxy '*' http://127.0.0.1:${port}/`, domains: [] },
           { command: `exec 3<>/dev/tcp/127.0.0.1/${port}`, domains: [] },
           ...(address === undefined
             ? []
             : [
-                { command: `curl -sS --max-time 5 --noproxy '*' http://${address}:${port}/`, domains: [] },
+                { command: `curl -fsS --max-time 5 --noproxy '*' http://${address}:${port}/`, domains: [] },
                 { command: `exec 3<>/dev/tcp/${address}/${port}`, domains: [] },
               ]),
         ];
@@ -386,8 +386,12 @@ describe.runIf(enabled)('shell conformance', () => {
         );
         await delay(500);
 
-        expect(outcomes.map((outcome) => outcome.exitCode !== 0)).toStrictEqual(probes.map(() => true));
+        /* The canary is the judge; a refusal may be a proxy error status, which `--fail` turns into a failed exit. */
         expect(listener.connections()).toBe(1);
+        expect(
+          outcomes.map((outcome) => outcome.exitCode !== 0),
+          outcomes.map((outcome) => outcome.stderr.trim()).join('\n'),
+        ).toStrictEqual(probes.map(() => true));
       } finally {
         listener.server.close();
       }

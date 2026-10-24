@@ -144,6 +144,28 @@ describe('drawer height keyboard controls', () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it('should cycle through its detents with Enter and Space, wrapping from the tallest to the first', () => {
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    render(
+      <Drawer open snapPoints={[0.25, 0.58, 1]} onOpenChange={onOpenChange}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    expect(fireEvent.keyDown(handle, { key: 'Enter' })).toBe(false);
+    expect(handle).toHaveAttribute('aria-valuetext', '58% height');
+    // Handled, so Space neither scrolls the page nor reaches a parent's key handler.
+    expect(fireEvent.keyDown(handle, { key: ' ' })).toBe(false);
+    expect(handle).toHaveAttribute('aria-valuetext', '100% height');
+    fireEvent.keyDown(handle, { key: 'Enter' });
+    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
   it('should send keyboard snap changes to a controlled host', () => {
     const setActiveSnapPoint = vi.fn<NonNullable<React.ComponentProps<typeof Drawer>['setActiveSnapPoint']>>();
     render(

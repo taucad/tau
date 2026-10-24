@@ -18,7 +18,7 @@ import type { MachineBindingOutcome } from '@taucad/runtime/machine';
 import type { DesktopKernelPreparation, DesktopKernelProgress } from '@taucad/types/desktop-native-kernels';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem', 'machines', 'terminal'] as const;
 
 /**
  * A concern the renderer may ask for a port to.

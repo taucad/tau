@@ -31,6 +31,10 @@ NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
 NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
   TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/shell-service-conformance-receipt.json" \
   pnpm nx run host:test:shell-conformance --skip-nx-cache || status=$?
+# The desktop Terminal's rows through the services host's terminal concern (W5), with their own receipt.
+NX_NO_CLOUD=true NX_DAEMON=false TAU_SHELL_CONFORMANCE_BWRAP="$bwrap" \
+  TAU_SHELL_CONFORMANCE_RECEIPT="$HOME/terminal-conformance-receipt.json" \
+  pnpm nx run desktop:test:terminal-conformance --skip-nx-cache || status=$?
 # The run never relaxed the stock policy.
 [[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || printf 'absent')" == "$before" ]]
 exit "$status"

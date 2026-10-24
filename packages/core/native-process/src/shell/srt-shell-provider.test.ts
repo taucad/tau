@@ -292,6 +292,17 @@ describe('shellSandboxProfile', () => {
     expect(profile.filesystem['denyRead']).not.toContain(join(root, 'link'));
   });
 
+  it('should let the sandbox read the supervisor runtime directory but not write it', () => {
+    const profile = shellSandboxProfile(
+      { filesystem: { readable: [], writable: [], denied: [] }, network: { domains: ['example.com'] } },
+      {},
+      '/tmp/tau-shell-runtime-test',
+    ) as { filesystem: Record<string, string[]> };
+
+    expect(profile.filesystem['allowRead']).toContain('/tmp/tau-shell-runtime-test');
+    expect(profile.filesystem['allowWrite']).not.toContain('/tmp/tau-shell-runtime-test');
+  });
+
   it('should deny reads and writes of denied paths and the baseline set inside granted roots', () => {
     const profile = shellSandboxProfile(
       {

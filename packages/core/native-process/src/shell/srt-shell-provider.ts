@@ -8,9 +8,9 @@
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync, lstatSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { isAbsolute, relative } from 'node:path';
+import { closeSync, existsSync, lstatSync, mkdtempSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { isAbsolute, join, relative } from 'node:path';
 import { createInterface } from 'node:readline';
 import { ReadStream } from 'node:tty';
 import { fileURLToPath } from 'node:url';
@@ -180,6 +180,7 @@ const deniedVariants = (paths: readonly string[]): string[] =>
 export const shellSandboxProfile = (
   launch: Pick<ShellLaunch, 'filesystem' | 'network'>,
   options: SandboxShellProviderOptions = {},
+  runtimeDirectory?: string,
 ): Record<string, unknown> => {
   const denied = deniedVariants([
     ...launch.filesystem.denied,
@@ -194,6 +195,7 @@ export const shellSandboxProfile = (
         ...launch.filesystem.readable,
         ...launch.filesystem.writable,
         ...sandboxRuntimeReadRoots(),
+        ...(runtimeDirectory === undefined ? [] : [runtimeDirectory]),
       ]),
       allowWrite: physicalVariants(launch.filesystem.writable),
       denyWrite: [...new Set([...deniedWriteRoots(), ...denied])],
@@ -264,15 +266,28 @@ export const bindOwnPty = (argv: readonly string[]): readonly string[] | undefin
 
 type Supervisor = Readonly<{ reply: SupervisorReply; close: () => Promise<void> }>;
 
-const startSupervisor = async (job: SupervisorJob, options: SandboxShellProviderOptions): Promise<Supervisor> => {
+/**
+ * On Linux the runtime bridges the sandbox's network to its proxies through Unix sockets it creates under `TMPDIR`,
+ * which the profile denies. Each supervisor gets a private directory there instead, readable inside the sandbox so the
+ * bridge can connect, and removed when the supervisor closes.
+ */
+const createRuntimeDirectory = (): string | undefined =>
+  process.platform === 'linux' ? mkdtempSync(join(tmpdir(), 'tau-shell-runtime-')) : undefined;
+
+const startSupervisor = async (
+  job: SupervisorJob,
+  options: SandboxShellProviderOptions,
+  runtimeDirectory: string | undefined,
+): Promise<Supervisor> => {
   const { executablePath, arguments: supervisorArguments } = options.supervisor ?? defaultSupervisor();
+  const temporaryDirectory = runtimeDirectory ?? process.env['TMPDIR'];
   const child = spawn(executablePath, supervisorArguments, {
     /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
     env: {
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
       LANG: 'C.UTF-8',
       HOME: options.home ?? homedir(),
-      ...(process.env['TMPDIR'] === undefined ? {} : { TMPDIR: process.env['TMPDIR'] }),
+      ...(temporaryDirectory === undefined ? {} : { TMPDIR: temporaryDirectory }),
       ...(process.versions['electron'] === undefined ? {} : { ELECTRON_RUN_AS_NODE: '1' }),
     },
     /* eslint-enable @typescript-eslint/naming-convention -- camelCase names resume. */
@@ -295,6 +310,9 @@ const startSupervisor = async (job: SupervisorJob, options: SandboxShellProvider
     const timer = setTimeout(() => child.kill('SIGKILL'), terminationMilliseconds);
     await exited;
     clearTimeout(timer);
+    if (runtimeDirectory !== undefined) {
+      rmSync(runtimeDirectory, { recursive: true, force: true });
+    }
   };
   child.stdin.write(`${JSON.stringify(job)}\n`);
   const lines = createInterface({ input: child.stdout });
@@ -729,15 +747,17 @@ export const createSandboxShellProvider = (options: SandboxShellProviderOptions 
         return { status: 'sandbox-unavailable', message: 'node-pty has no POSIX binding on this host.' };
       }
     }
+    const runtimeDirectory = createRuntimeDirectory();
     const supervisor = await startSupervisor(
       {
-        profile: shellSandboxProfile(launch, options),
+        profile: shellSandboxProfile(launch, options, runtimeDirectory),
         command: shellSandboxCommand(launch),
         workingDirectory: launch.workingDirectory,
         commandId: launch.commandId,
         guard: launch.network.domains.length > 0,
       },
       options,
+      runtimeDirectory,
     );
     if (supervisor.reply.status !== 'ready') {
       await supervisor.close();

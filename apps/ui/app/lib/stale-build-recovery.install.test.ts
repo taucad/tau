@@ -2,13 +2,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reportUiError = vi.hoisted(() => vi.fn(async () => undefined));
+const sendWaitingErrors = vi.hoisted(() => vi.fn());
 const lookupConfirmDelay = 1000;
 vi.mock('#lib/error-reporting.js', () => ({
   reportUiError,
   isErrorTrackerListening: () => true,
   setErrorDescriber: () => undefined,
-  sendWaitingErrors: () => undefined,
+  sendWaitingErrors,
 }));
+
+/** The document turns hidden or visible (`visibilitychange`), as switching tabs or apps does. */
+const setVisibility = (state: DocumentVisibilityState): void => {
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(state);
+  document.dispatchEvent(new Event('visibilitychange'));
+};
 
 /** This bundle's build id and the deploy that replaced it, set by {@link load} from the real module. */
 let ownBuildId = 0;
@@ -110,6 +117,35 @@ describe('installStaleBuildRecovery', () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it("should release the tracker's held tag as undecided, and send what waited, when the document is hidden, then carry on once visible", async () => {
+    const { installStaleBuildRecovery, classifyStaleBuildFailure, readStaleBuildOutcome, recoverFromStaleBuild } =
+      await load();
+    stubServer(ownBuildId);
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    uninstall = installStaleBuildRecovery();
+    const held = new TypeError('Importing a module script failed.');
+    const preloaded = new TypeError('Failed to fetch dynamically imported module: /assets/a-1.js');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: held }));
+    globalThis.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: preloaded }));
+    const tag = classifyStaleBuildFailure(held);
+    // Switched away (Android may then freeze or discard the tab without a `pagehide`) while the lookup runs.
+    setVisibility('hidden');
+    await expect(tag).resolves.toBe('undecided');
+    expect(reportUiError).toHaveBeenCalledExactlyOnceWith(preloaded);
+    expect(sendWaitingErrors).toHaveBeenCalledOnce();
+
+    setVisibility('visible');
+    await settle();
+    expect(readStaleBuildOutcome(held)).toBe('current');
+    const later = new TypeError('Importing a module script failed.');
+    const decided = recoverFromStaleBuild(later);
+    const laterTag = classifyStaleBuildFailure(later);
+    await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
+    await expect(decided).resolves.toBe('current');
+    await expect(laterTag).resolves.toBe('current');
+  });
+
   it("should hand a failure only Vite's preloader reported to the tracker when the page is hidden into the back/forward cache", async () => {
     const { installStaleBuildRecovery } = await load();
     stubServer(deployedBuildId);
@@ -192,6 +228,37 @@ describe('installStaleBuildRecovery', () => {
     expect(warn).toHaveBeenCalledOnce();
     unsubscribe();
   });
+
+  it.each([
+    ['the live build (a content blocker)', 'own'],
+    ['a deploy that stopped serving it', 'deployed'],
+  ] as const)(
+    "should never report the error tracker's own chunk failing on %s, though Vite's preloader reported it first",
+    async (_case, served) => {
+      const { installStaleBuildRecovery, recoverFromSdkLoadFailure, subscribeGenuineFailures } = await load();
+      stubServer(served === 'own' ? ownBuildId : deployedBuildId);
+      stubReload();
+      uninstall = installStaleBuildRecovery();
+      const heard: unknown[] = [];
+      const unsubscribe = subscribeGenuineFailures((failure) => {
+        heard.push(failure);
+      });
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const blocked = new TypeError('Failed to fetch dynamically imported module: /assets/sentry.lib-1.js');
+
+      // Vite's preload helper wraps the SDK's import: it dispatches the failure, then rethrows it into the loader.
+      globalThis.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: blocked }));
+      recoverFromSdkLoadFailure(blocked);
+      await settle();
+      await vi.advanceTimersByTimeAsync(2000);
+      globalThis.dispatchEvent(new Event('pagehide'));
+
+      expect(reportUiError).not.toHaveBeenCalled();
+      expect(heard).toStrictEqual([]);
+      expect(warn).toHaveBeenCalledTimes(served === 'own' ? 1 : 0);
+      unsubscribe();
+    },
+  );
 
   it('should decide a failure the reload covered again when the reload stalls and the server names this build', async () => {
     const {

@@ -164,6 +164,9 @@ export type StaleBuildTag = 'superseded' | 'current' | 'unknown' | 'undecided';
  * | React boundary (route page, `onCaughtError`) | `boundary` | No: a caught error reaches no global handler |
  * | The error tracker's own SDK failing to load | `sdk`      | Never reported: there is nothing to report it with |
  *
+ * An `sdk` sighting decides for the failure whatever else saw it: Vite's preload helper wraps the
+ * SDK's import too, so it dispatches the same value (`preload`) before rethrowing it into the loader.
+ *
  * Vite rethrows a preload failure into the import that asked for it, so a `preload` sighting is
  * usually followed by a `boundary` or `unhandledrejection` one; the recovery waits
  * {@link preloadFollowUpDelay} for it before deciding Sentry has not seen the failure. Analytics
@@ -181,8 +184,11 @@ const capturedBySentry: Readonly<Record<FailureSource, boolean>> = {
   sdk: false,
 };
 
-/** Whether only the error tracker's own load reported a failure ({@link FailureSource} `sdk`). */
-const isSdkOnly = (sources: ReadonlySet<FailureSource>): boolean => sources.size === 1 && sources.has('sdk');
+/**
+ * Whether a failure is the error tracker's own load failing ({@link FailureSource} `sdk`): never
+ * reported, to the tracker or to analytics, whichever other channel also saw it.
+ */
+const isSdkLoad = (sources: ReadonlySet<FailureSource>): boolean => sources.has('sdk');
 
 /**
  * Milliseconds the slowest lookup `build-skew` makes takes: one answer and its confirmations, each
@@ -236,13 +242,14 @@ export type StaleBuildRecovery = {
    */
   readonly tagNow: (failure: unknown) => StaleBuildTag;
   /**
-   * The page is hidden (every `pagehide`, kept in the back/forward cache or not): a frozen page may
-   * never run again, so every wait for a decision ends now (tagged {@link StaleBuildRecovery.tagNow})
-   * and failures only Vite's preloader reported go to the tracker now. New failures afterwards
+   * The page is hidden (the document turning hidden, and every `pagehide`, kept in the back/forward
+   * cache or not): a hidden page may be frozen or discarded and never run again, so every wait for
+   * a decision ends now (tagged {@link StaleBuildRecovery.tagNow}) and failures only Vite's
+   * preloader reported go to the tracker now. New failures afterwards
    * (the page shown again) are handled as usual.
    */
   readonly flush: () => void;
-  /** The page is shown again (`pageshow`) after {@link StaleBuildRecovery.flush}: waits work as usual again. */
+  /** The page is shown again (`pageshow`, the document visible) after a flush: waits work as usual again. */
   readonly resume: () => void;
   /** The settled decision for a failure, or `undefined` while none is. */
   readonly readOutcome: (failure: unknown) => StaleBuildOutcome | undefined;
@@ -318,6 +325,9 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   };
 
   const isCapturedBySentry = (record: FailureRecord): boolean => record.seenByTracker;
+  /** Whether the tracker is still owed a failure: nobody handed it over, Sentry did not see it, and it is no SDK load. */
+  const isOwedToTracker = (record: FailureRecord): boolean =>
+    !record.reportedToErrorTracker && !isCapturedBySentry(record) && !isSdkLoad(record.sources);
   /** Failures decided `reloading` while the reload is pending: settled by the page leaving, or decided again. */
   const coveredByReload = new Set<WeakKey>();
   /** Failures only Vite's preloader has reported, waiting for the channel it rethrows into. */
@@ -332,7 +342,11 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   /** Hand a failure to the error tracker once, unless a channel the tracker captures itself saw it. */
   const reportToErrorTracker = (failure: WeakKey): void => {
     const record = recordOf(failure);
-    if (record.reportedToErrorTracker || isCapturedBySentry(record)) {
+    if (!isOwedToTracker(record)) {
+      // Owed no more (an `sdk` sighting after a `preload` one): a follow-up wait ends unreported.
+      clearTimeout(record.preloadWait);
+      record.preloadWait = undefined;
+      awaitingFollowUp.delete(failure);
       return;
     }
     if (record.sources.size === 1 && record.sources.has('preload')) {
@@ -341,7 +355,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       record.preloadWait ??= setTimeout(() => {
         record.preloadWait = undefined;
         awaitingFollowUp.delete(failure);
-        if (!record.reportedToErrorTracker && !isCapturedBySentry(record)) {
+        if (isOwedToTracker(record)) {
           record.reportedToErrorTracker = true;
           options.reportToErrorTracker?.(failure);
         }
@@ -369,7 +383,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     }
     record.outcome = outcome;
     record.verdict = liveBuild.readVerdict();
-    if (outcome === 'current' && isSdkOnly(record.sources)) {
+    if (outcome === 'current' && isSdkLoad(record.sources)) {
       // The SDK's chunk is blocked, not gone (a content blocker): nothing to report, and nothing to report it with.
       if (!hasWarnedSdkBlocked) {
         hasWarnedSdkBlocked = true;
@@ -515,9 +529,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         })();
       }
       // After the decision is under way, so the tracker's `beforeSend` can wait for it (`classifySettled`).
-      if (!isSdkOnly(record.sources)) {
-        reportToErrorTracker(failure);
-      }
+      reportToErrorTracker(failure);
       return record.decision;
     },
     classify(failure) {
@@ -568,7 +580,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       for (const failure of awaitingFollowUp) {
         const record = records.get(failure);
         awaitingFollowUp.delete(failure);
-        if (record !== undefined && !record.reportedToErrorTracker && !isCapturedBySentry(record)) {
+        if (record !== undefined && isOwedToTracker(record)) {
           clearTimeout(record.preloadWait);
           record.preloadWait = undefined;
           record.reportedToErrorTracker = true;
@@ -828,25 +840,39 @@ export const installStaleBuildRecovery = (): (() => void) => {
   for (const [type, listener] of failureListeners) {
     globalThis.addEventListener(type, listener as EventListener, { capture: true });
   }
-  /* Every `pagehide` flushes: a page kept in the back/forward cache is frozen and may be evicted
-   * without running again, so nothing may wait past it. Only a page that is really going (not
+  /* Every hide flushes: the document turning hidden (`visibilitychange`, the last event a mobile
+   * browser reliably fires before it freezes or discards a background tab without a `pagehide`) and
+   * every `pagehide` (a page kept in the back/forward cache is frozen and may be evicted without
+   * running again), so nothing may wait past either. Chrome freezes only a page already hidden one
+   * of these ways, so `freeze` adds nothing. Only a page that is really going (`pagehide`, not
    * persisted) settles what a pending reload covered; one shown again carries on as usual. */
-  const onPageHide = (event: PageTransitionEvent): void => {
-    const recovery = getPageRecovery();
-    if (!event.persisted) {
-      recovery.leave();
-    }
-    recovery.flush();
+  const hide = (): void => {
+    getPageRecovery().flush();
     sendWaitingErrors();
+  };
+  const onPageHide = (event: PageTransitionEvent): void => {
+    if (!event.persisted) {
+      getPageRecovery().leave();
+    }
+    hide();
   };
   const onPageShow = (): void => {
     getPageRecovery().resume();
   };
+  const onVisibilityChange = (): void => {
+    if (globalThis.document.visibilityState === 'hidden') {
+      hide();
+    } else {
+      onPageShow();
+    }
+  };
   globalThis.addEventListener('pagehide', onPageHide);
   globalThis.addEventListener('pageshow', onPageShow);
+  globalThis.document.addEventListener('visibilitychange', onVisibilityChange);
   return () => {
     globalThis.removeEventListener('pagehide', onPageHide);
     globalThis.removeEventListener('pageshow', onPageShow);
+    globalThis.document.removeEventListener('visibilitychange', onVisibilityChange);
     stopWatchingInput();
     for (const [type, listener] of failureListeners) {
       globalThis.removeEventListener(type, listener as EventListener, { capture: true });

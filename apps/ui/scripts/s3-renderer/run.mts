@@ -21,7 +21,6 @@ import { pathToFileURL } from 'node:url';
 import process from 'node:process';
 import { parseArgs } from 'node:util';
 import { build } from 'esbuild';
-import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
 
 type Kind = 'xterm' | 'ghostty' | 'ghostty131' | 'aurigax';
@@ -70,7 +69,8 @@ const desktopRequire = createRequire(path.join(root, 'apps/desktop/package.json'
 const electronPath = desktopRequire('electron') as unknown as string;
 const isWindows = process.platform === 'win32';
 // The standard user run-nonadmin.ps1 starts inherits the administrator's TEMP and AppData paths, which it cannot
-// write, so they move to a home it owns before Playwright or Electron reads them.
+// write, so they move to a home it owns before Playwright or Electron reads them. Playwright fixes its artifacts
+// folder from os.tmpdir() when it loads, so it is imported after this.
 if (values['user-home']) {
   const home = path.resolve(values['user-home']);
   const folders: Array<[name: string, relative: string]> = [
@@ -87,6 +87,7 @@ if (values['user-home']) {
   process.env['USERPROFILE'] = home;
   console.log(`user home ${home}; temporary files in ${os.tmpdir()}`);
 }
+const { _electron: electron } = await import('playwright');
 /** Set by `--packaged`: the packaged fixture executable and the client root inside its resources. */
 let packagedApp: { executable: string; clientRoot: string } | undefined;
 const softwareGlArguments = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];

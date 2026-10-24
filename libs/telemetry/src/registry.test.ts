@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(87);
+    expect(metrics).toHaveLength(92);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -40,6 +40,48 @@ describe('TauMetrics', () => {
       tau_git_hot_project_commit_rate: { type: 'gauge', unit: '{commit}/s' },
       tau_git_hot_project_writers: { type: 'gauge', unit: '{writer}' },
     });
+  });
+
+  /* Hosted Remote Storage DW1/DW2 with OB5: the route table, freeze and hold series by their catalogue names. */
+  it('should declare the route table and freeze instruments by their catalogue names', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.gitRouteFrozen,
+        TauMetrics.gitRouteFrozenOldest,
+        TauMetrics.gitRouteHolds,
+        TauMetrics.gitRouteHoldDuration,
+        TauMetrics.gitRouteLookupDuration,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_git_route_frozen: { type: 'gauge', unit: '{repository}' },
+      tau_git_route_frozen_oldest: { type: 'gauge', unit: 's' },
+      tau_git_route_holds_total: { type: 'counter', unit: '{request}' },
+      tau_git_route_hold_duration: { type: 'histogram', unit: 's' },
+      tau_git_route_lookup_duration: { type: 'histogram', unit: 's' },
+    });
+  });
+
+  it('should bound the route labels to enums, never a repository, owner or migration id', () => {
+    for (const metric of [TauMetrics.gitRouteFrozen, TauMetrics.gitRouteFrozenOldest]) {
+      expect(metric.attributes.safeParse({ 'tau.git.route.scope': 'repository' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ 'tau.git.route.scope': 'global' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ 'tau.git.route.scope': 'mig_1' }).success).toBe(false);
+    }
+    for (const metric of [TauMetrics.gitRouteHolds, TauMetrics.gitRouteHoldDuration]) {
+      expect(Object.keys(metric.attributes.shape)).toEqual(['outcome']);
+      expect(metric.attributes.safeParse({ outcome: 'released' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ outcome: 'timed_out' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ outcome: 'proj_1' }).success).toBe(false);
+    }
+    const lookup = (source: string): boolean =>
+      TauMetrics.gitRouteLookupDuration.attributes.safeParse({ 'tau.git.route.source': source }).success;
+    expect(lookup('cache')).toBe(true);
+    expect(lookup('database')).toBe(true);
+    expect(lookup('redis')).toBe(false);
+    /* A hold is at most about 5 s, so its buckets end there; a lookup is a cache hit or one indexed read. */
+    expect(TauMetrics.gitRouteHoldDuration.buckets.at(-1)).toBeGreaterThanOrEqual(5);
+    expect(TauMetrics.gitRouteLookupDuration.buckets.at(0)).toBeLessThanOrEqual(0.0001);
   });
 
   it('should split retryable refusals out of error as busy on the sync edge', () => {

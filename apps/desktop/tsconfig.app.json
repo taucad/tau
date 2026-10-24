@@ -5,6 +5,7 @@
     "src/**/*.d.ts",
     "macos/quick-look-formats.json",
     "scripts/**/*.mts",
+    "scripts/s3-renderer-fixture/*.ts",
     "electron.vite.config.ts",
     "package.json"
   ],

@@ -1,0 +1,31 @@
+<!doctype html>
+<html class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <title>S3 renderer comparison</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        background: var(--background);
+        color: var(--foreground);
+        font-family: system-ui, sans-serif;
+      }
+      #pane {
+        box-sizing: border-box;
+        overflow: hidden;
+      }
+      #cad {
+        margin-top: 8px;
+      }
+    </style>
+    <script type="module" src="/app/s3-renderer/harness.ts"></script>
+  </head>
+  <body>
+    <header id="chrome" aria-label="Trusted chrome">Tau · S3 renderer comparison (dev only)</header>
+    <main>
+      <section id="pane" aria-label="Terminal"></section>
+      <div id="cad"></div>
+    </main>
+  </body>
+</html>

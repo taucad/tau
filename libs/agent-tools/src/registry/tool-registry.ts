@@ -51,6 +51,8 @@ import type { MachineSettingsService } from '@taucad/types';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
 import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-tool-registry.js';
 import { createRuntimeWorkbenchClient } from '#registry/workbench-client.js';
+import { createShellSource, invokeShell } from '#registry/shell-tool.js';
+import type { ShellSource } from '#registry/shell-tool.js';
 
 /** The optional dispatcher client one tool needs beyond the filesystem. */
 type ToolClientKey =
@@ -316,6 +318,12 @@ export type ChatToolRegistryOptions = {
   readonly testingEnabled: boolean;
   /** The host's managed acquisition profile; `locked` makes `install_packages` refuse with no request. */
   readonly acquisition?: 'open' | 'locked' | undefined;
+  /**
+   * The host's contained shell, once it probed ready (D1). `shell` is listed iff one is supplied; only the desktop
+   * services host supplies one, so the browser, `tau mcp` and the daemon never offer it. A function is read at every
+   * listing and call, so a host whose probe settles later offers `shell` from then on and never before.
+   */
+  readonly shell?: ShellSource | undefined;
 };
 
 /**
@@ -659,13 +667,26 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
       })
     : undefined;
   definitions.push(...(machineRegistry?.list() ?? []));
+  const shellOf = createShellSource(options.shell);
 
   return {
-    list: () => definitions,
+    list: () => {
+      const shell = shellOf();
+      return shell === undefined ? definitions : [...definitions, shell.definition];
+    },
     /* Only the machine tools ask for approvals (D5). */
     answerApproval: async (answer) => machineRegistry?.answerApproval?.(answer),
     async invoke(invocation) {
       assertNotAborted(invocation.signal);
+      if (invocation.toolName === toolName.shell) {
+        const shell = shellOf();
+        return shell === undefined
+          ? {
+              content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+              isError: true,
+            }
+          : invokeShell(shell.client, invocation);
+      }
       if (isMachineToolName(invocation.toolName)) {
         return (
           machineRegistry?.invoke(invocation) ?? {

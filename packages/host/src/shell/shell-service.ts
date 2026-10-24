@@ -44,12 +44,13 @@ import type {
 import { shellEnvironment } from '#shell/shell-environment.js';
 import {
   compileShellFilesystem,
-  projectDenied,
+  projectProtected,
+  protectedPaths,
   resolveShellAccess,
   resolveShellCwd,
   rootIdentity,
 } from '#shell/shell-grant.js';
-import type { ShellGrantHost, ShellResolvedAccess } from '#shell/shell-grant.js';
+import type { ShellGrantHost, ShellProjectProtected, ShellResolvedAccess } from '#shell/shell-grant.js';
 import { createShellCapture } from '#shell/shell-output.js';
 
 /**
@@ -458,8 +459,8 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return notStarted('invalid-cwd', cwd.message);
     }
     const host = grantHost();
-    const checkoutDenied = await projectDenied(root);
-    const access = await resolveShellAccess(input.access, host, checkoutDenied);
+    const checkoutProtected = await projectProtected(root);
+    const access = await resolveShellAccess(input.access, host, protectedPaths(checkoutProtected));
     if ('status' in access) {
       return notStarted('access-unsupported', `${access.message} Nothing ran and nothing was widened.`);
     }
@@ -504,7 +505,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         checkout,
         root,
         cwd: cwd.path,
-        checkoutDenied,
+        checkoutProtected,
         access,
         host,
         commandTimeout,
@@ -522,7 +523,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       checkout: ShellCheckout;
       root: string;
       cwd: string;
-      checkoutDenied: readonly string[];
+      checkoutProtected: ShellProjectProtected;
       access: ShellResolvedAccess;
       host: ShellGrantHost;
       /** Milliseconds. */
@@ -549,7 +550,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     try {
       const filesystem = await compileShellFilesystem({
         checkout: admitted.root,
-        checkoutDenied: admitted.checkoutDenied,
+        checkoutProtected: admitted.checkoutProtected,
         session: [session.home, session.temporary],
         toolchain: options.toolchain?.roots ?? [],
         access: admitted.access,
@@ -685,7 +686,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
       return refuse('session-limit', 'Too many Terminal sessions are open.', 'Close another Terminal, then try again.');
     }
     const root = identity.real;
-    const checkoutDenied = await projectDenied(root);
+    const checkoutProtected = await projectProtected(root);
     const requested = request.access;
     const access =
       requested === undefined
@@ -693,7 +694,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
         : await resolveShellAccess(
             { reason: 'Terminal access the person allowed', ...requested },
             host,
-            checkoutDenied,
+            protectedPaths(checkoutProtected),
           );
     if ('status' in access) {
       return refuse('access-unsupported', access.message, 'Choose a named folder outside protected locations.');
@@ -715,7 +716,7 @@ export const createShellService = (options: ShellServiceOptions): HostShell => {
     try {
       const filesystem = await compileShellFilesystem({
         checkout: root,
-        checkoutDenied,
+        checkoutProtected,
         session: [session.home, session.temporary],
         toolchain: options.toolchain?.roots ?? [],
         access,

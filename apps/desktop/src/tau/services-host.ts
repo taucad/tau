@@ -13,6 +13,7 @@ import type { HostPrepareKernel } from '@taucad/host';
 import { preparableKernels } from '@taucad/native-process-core/store';
 
 import { createServicesHost, refusedRuntimePortMessage } from '#tau/services-host.impl.js';
+import { createDesktopShell } from '#tau/services-host-shell.js';
 import { desktopNativeDeployments } from '#tau/desktop-native-deployments.js';
 import type { UtilityMessage } from '#tau/services-host.impl.js';
 
@@ -148,6 +149,20 @@ const prepareNativeKernel: HostPrepareKernel = async ({ kernel }, { signal, onPr
 /* The `git` main resolved from the bundle, when this build ships one (OQ3);
  * absent, the toolchain comes from `PATH` and says so once if it is not there. */
 const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
+/* The agent's contained shell, probed on first use (desktop shell W4). */
+const shell = createDesktopShell({
+  appDataRoots: [process.env['TAU_DESKTOP_USER_DATA_DIR'], process.env['TAU_CONFIG_DIR'], authorityDirectory].filter(
+    (root): root is string => root !== undefined && root !== '',
+  ),
+  bwrapPath: process.env['TAU_DESKTOP_SHELL_BWRAP'] === '' ? undefined : process.env['TAU_DESKTOP_SHELL_BWRAP'],
+  ...(diagnostics === undefined
+    ? {}
+    : {
+        log: (event: string, detail?: unknown, level?: 'info' | 'warn') => {
+          diagnostics.log(level ?? 'info', `services.${event}`, detail);
+        },
+      }),
+});
 
 const host = createServicesHost({
   authorityDirectory,
@@ -157,6 +172,7 @@ const host = createServicesHost({
   requestGeometryPort,
   nativeKernels: { prepare: prepareNativeKernel, preparable: preparableKernels(desktopNativeDeployments) },
   ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
+  shell,
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
   },

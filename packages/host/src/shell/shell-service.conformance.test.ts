@@ -2,7 +2,8 @@
 // @vitest-environment node
 /*
  * The shell service's conformance rows (testing contract, `host:test:shell-conformance`; A03–A05, A08, A09 at the
- * service layer). They extend the provider rows C01–C09 in `native-process-core`, never repeat them: each row drives
+ * service layer, and H08–H09 end to end: a scripted model drives a real Tau agent host, its tool registry and admission,
+ * the service and the native shell). They extend the provider rows C01–C09 in `native-process-core`, never repeat them: each row drives
  * the real service over the real sandbox provider and the machine's own Bash, starts with a positive control, and
  * judges every negative by the bytes outside the sandbox, not by the command's own report.
  *
@@ -26,9 +27,16 @@ import { dirname, join } from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { createTauAgentHost } from '@taucad/agent-host';
+import type { JsonValue } from '@taucad/agent-host';
+import { createNodeEventLog } from '@taucad/agent-host/node';
 import { createSandboxShellProvider } from '@taucad/native-process-core/shell';
+import type { ShellProvider } from '@taucad/native-process-core/shell';
 
+import { createHostToolRegistry } from '#agent-tools.js';
 import type { ShellInput, ShellOutput } from '#shell/shell-contract.js';
+import { placementOver, scriptedTransport } from '#shell/tau-host.fixture.js';
+import type { ScriptedResponse } from '#shell/tau-host.fixture.js';
 import { probeHostShell } from '#shell/shell-service.js';
 import type { HostShell, ShellCheckout } from '#shell/shell-service.js';
 
@@ -110,6 +118,7 @@ describe.runIf(enabled)('shell service conformance', () => {
       mkdirSync(directory, { recursive: true });
     }
     writeFileSync(join(project, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+    writeFileSync(join(project, '.tau', 'chats', 'chat-1.json'), '{"record":"CHAT-RECORD"}\n');
     writeFileSync(join(other, 'canary.txt'), 'OTHER-PROJECT\n');
     writeFileSync(join(appData, 'granted-roots.json'), 'APP-DATA\n');
     writeFileSync(join(supplier, 'part.step'), 'SUPPLIER\n');
@@ -213,6 +222,29 @@ describe.runIf(enabled)('shell service conformance', () => {
     },
   );
 
+  conformance('H07', 'records read but cannot be written, deleted or moved (E03)', async () => {
+    const record = join(project, '.tau', 'chats', 'chat-1.json');
+    const positive = completed(await run({ command: 'cat .tau/chats/chat-1.json' }));
+
+    expect(positive.exitCode, positive.stderr.text).toBe(0);
+    expect(positive.stdout.text).toBe('{"record":"CHAT-RECORD"}\n');
+
+    for (const command of [
+      'printf FORGED > .tau/chats/chat-1.json',
+      'rm .tau/chats/chat-1.json',
+      'mv .tau/chats/chat-1.json models/stolen.json',
+      'mv .tau/chats .tau/chats-moved',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one probe at a time, each judged alone.
+      const output = await run({ command });
+      expect(output.status === 'completed' ? output.exitCode : 0, command).not.toBe(0);
+    }
+    /* A move out of the read-only records falls back to copy-then-unlink: the copy a read allows may land, the unlink
+     * never does, so the record stays where it was, unchanged. */
+    expect(readFileSync(record, 'utf8')).toBe('{"record":"CHAT-RECORD"}\n');
+    expect(existsSync(join(project, '.tau', 'chats-moved'))).toBe(false);
+  });
+
   conformance('H03', 'large output stays bounded and the full log lands in the records row', async () => {
     const output = completed(await run({ command: "head -c 300000 /dev/zero | tr '\\0' a; printf END" }));
 
@@ -268,6 +300,126 @@ describe.runIf(enabled)('shell service conformance', () => {
       expect(negative.status === 'completed' ? negative.stdout.text : '').not.toContain('UNRELATED');
     } finally {
       mode = 'ask';
+    }
+  });
+  /**
+   * A real Tau agent host over the host registry, offering this machine's shell from its own probe. The provider is the
+   * real sandbox provider; it only notes, at each launch, what the run's event log already holds.
+   */
+  const agentHostOver = async (label: string, responses: readonly ScriptedResponse[]) => {
+    const logPath = join(root, `${label}-events.jsonl`);
+    const runId = `run-${label}`;
+    const chatId = `chat-${label}`;
+    const real = createSandboxShellProvider({ bwrapPath, home });
+    const launches: Array<Readonly<{ readable: readonly string[]; log: string }>> = [];
+    const provider: ShellProvider = {
+      name: real.name,
+      launch: async (launch) => {
+        launches.push({
+          readable: launch.filesystem.readable,
+          log: existsSync(logPath) ? readFileSync(logPath, 'utf8') : '',
+        });
+        return real.launch(launch);
+      },
+    };
+    const probe = await probeHostShell({
+      provider,
+      checkouts: new Map([[runId, { cwd: project, admission: `admission-${label}` }]]),
+      appDataRoots: [appData],
+      projectRoots: () => [project, other],
+      home,
+      sessionDirectory: sessions,
+    });
+    if (probe.status !== 'available') {
+      throw new Error(`the probe refused the shell: ${JSON.stringify(probe)}`);
+    }
+    const transport = scriptedTransport(responses);
+    const toolRegistry = createHostToolRegistry({ workspaceRoot: project, shell: probe.shell });
+    let tick = 0;
+    let id = 0;
+    const host = createTauAgentHost({
+      systemPrompt: 'You are the shell conformance fixture.',
+      model: { id: 'scripted-shell-model', contextWindow: 200_000 },
+      modelTransport: transport,
+      toolRegistry,
+      placement: placementOver(toolRegistry),
+      openEventLog: async () => createNodeEventLog({ filePath: logPath, access: 'write' }),
+      createId: () => `${label}-${String(id++)}`,
+      createLeaderEpoch: () => `epoch-${label}`,
+      now: () => new Date(Date.UTC(2026, 9, 24, 0, 0, tick++)),
+    });
+    const admit = async (content: string) =>
+      host.admit({ chatId, runId, trigger: 'submit', message: { id: `turn-${label}`, role: 'user', content } });
+    const outputOf = async (toolCallId: string) => {
+      const snapshot = await host.snapshot(chatId);
+      const message = snapshot.messages.find(
+        (entry) => entry.role === 'tool-output' && entry.toolCallId === toolCallId,
+      );
+      return message?.role === 'tool-output' ? message : undefined;
+    };
+    return { host, transport, toolRegistry, launches, logPath, runId, chatId, admit, outputOf };
+  };
+
+  const shellCall = (id: string, input: JsonValue) => ({ toolCalls: [{ id, name: 'shell', input }] });
+
+  conformance('H08', 'a scripted model runs the native shell through the agent host and its registry', async () => {
+    const driven = await agentHostOver('h08', [
+      shellCall('call-h08', { command: 'pwd; printf E2E > driven.txt' }),
+      { text: 'Done.' },
+    ]);
+    try {
+      await driven.admit('Write driven.txt.');
+
+      const offered = driven.transport.requests[0]?.tools.find((tool) => tool.name === 'shell');
+      expect(offered?.description).toContain('Write Bash syntax.');
+      expect(driven.toolRegistry.list().find((tool) => tool.name === 'shell')?.executionMode).toBe('sequential');
+      const message = await driven.outputOf('call-h08');
+      expect(message?.isError, JSON.stringify(message)).toBe(false);
+      expect(message?.content).toMatchObject({ status: 'completed', exitCode: 0 });
+      expect(JSON.stringify(message?.content)).toContain(project);
+      expect(readFileSync(join(project, 'driven.txt'), 'utf8')).toBe('E2E');
+    } finally {
+      await driven.host.close();
+    }
+  });
+
+  conformance('H09', "the person's answer is spent durably before the approved command spawns (D23)", async () => {
+    const input = {
+      command: `cat ${join(supplier, 'part.step')}`,
+      access: { reason: 'Read the part', read: [supplier] },
+    };
+    const driven = await agentHostOver('h09', [
+      shellCall('call-h09-ask', input),
+      shellCall('call-h09-run', input),
+      { text: 'Read it.' },
+    ]);
+    try {
+      await driven.admit('Read the supplier part.');
+      /* Ask: the run paused on the shell's structured request, and nothing widened ran. */
+      const [asked, ...more] = await driven.host.pendingInterrupts(driven.runId);
+      expect(more).toEqual([]);
+      expect(asked?.kind).toBe('approval');
+      expect(asked?.payload).toMatchObject({ kind: 'shell', command: input.command, access: { read: [supplier] } });
+      expect(driven.launches.filter((launch) => launch.readable.includes(supplier))).toEqual([]);
+
+      await driven.host.resolveInterrupt({ runId: driven.runId, interruptId: asked!.interruptId, outcome: 'approved' });
+      await driven.host.resume(driven.chatId);
+
+      const message = await driven.outputOf('call-h09-run');
+      expect(message?.isError, JSON.stringify(message)).toBe(false);
+      expect(message?.content).toMatchObject({
+        status: 'completed',
+        exitCode: 0,
+        stdout: { text: 'SUPPLIER\n' },
+        approval: { approvedBy: 'person', mode: 'ask' },
+      });
+      const widened = driven.launches.filter((launch) => launch.readable.includes(supplier));
+      expect(widened).toHaveLength(1);
+      /* The log as it stood when the sandbox was asked to spawn already held the spend for this call. */
+      const spends = widened[0]!.log.split('\n').filter((line) => line.includes('"approval.spent"'));
+      expect(spends.some((line) => line.includes('"call-h09-run"') && line.includes('"phase":"spent"'))).toBe(true);
+    } finally {
+      await driven.host.close();
     }
   });
 });

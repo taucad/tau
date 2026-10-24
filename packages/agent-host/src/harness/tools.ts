@@ -69,6 +69,7 @@ export const tauToolKinds = new Map<string, string>([
   ['get_print_profiles', 'read'],
   ['request_job', 'other'],
   ['check_job', 'read'],
+  ['shell', 'execute'],
 ]);
 
 const normalizeBracketArrays = (input: Record<string, unknown>): Record<string, unknown> => {

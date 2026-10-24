@@ -18,14 +18,17 @@ export type ShellNetwork = Readonly<{ domains: readonly string[] }>;
 /**
  * The filesystem one launch may touch, as absolute native paths the host has already resolved.
  *
- * `writable` includes the private HOME and temporary roots. `denied` wins over both. The provider always adds the
- * baseline read-deny set ({@link shellBaselineDenied}) to it, so a host that forgets an entry cannot open it.
+ * `writable` includes the private HOME and temporary roots. `readOnly` names paths inside a readable or writable root
+ * that the launch may read but never write or replace, such as a checkout's records. `denied` wins over all three. The
+ * provider always adds the baseline read-deny set ({@link shellBaselineDenied}) to it, so a host that forgets an entry
+ * cannot open it.
  *
  * @public
  */
 export type ShellFilesystem = Readonly<{
   readable: readonly string[];
   writable: readonly string[];
+  readOnly?: readonly string[] | undefined;
   denied: readonly string[];
 }>;
 

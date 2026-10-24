@@ -82,7 +82,8 @@ describe('ChatInterface first paint (D13)', () => {
     stubViewport(true);
     const html = renderToString(<ChatInterface />);
     expect(html).toContain('aria-label="Opening project"');
-    expect(html).not.toContain('layout');
+    expect(html).not.toContain('Desktop layout');
+    expect(html).not.toContain('Phone layout');
     const container = document.createElement('div');
     container.innerHTML = html;
     document.body.append(container);

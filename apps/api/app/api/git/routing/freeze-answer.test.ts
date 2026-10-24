@@ -164,7 +164,9 @@ const createService = (
     metrics,
     routes,
   );
-  service.leaseDiskBytesPerLease = 1024;
+  /* DA3: a 1 TiB stand-in disk, so a push's quarantine reservation never meets the runner's free space. */
+  service.leaseReservationFloorBytes = 1024;
+  service.readLeaseDiskFreeBytes = async () => 1024 ** 4;
   return service;
 };
 

@@ -1,6 +1,5 @@
 ---
 geospec: patch
-geospec-engine: patch
 cli: patch
 ---
 

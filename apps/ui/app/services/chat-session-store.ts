@@ -46,6 +46,7 @@ import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {
   ChatRequest,
@@ -603,6 +604,8 @@ type ObservedChat = {
   projectId: string;
   refs: number;
   attachment?: Actor<typeof hostAttachment>;
+  /** Placement of that live connection, not the chat's desired execution. */
+  placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
@@ -623,9 +626,11 @@ export type ProjectClosePlan = Readonly<{
 }>;
 
 type ProjectHostConnector = Readonly<{
-  connect: (
-    chatId: string,
-  ) => Promise<Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'>>;
+  connect: (chatId: string) => Promise<
+    Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'> & {
+      placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
+    }
+  >;
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
 }>;
 
@@ -2300,6 +2305,7 @@ export class ChatSessionStore {
     observed.retry = undefined;
     observed.attachment?.stop();
     observed.attachment = undefined;
+    observed.placement = undefined;
     observed.status = 'unknown';
   }
 
@@ -2311,7 +2317,13 @@ export class ChatSessionStore {
     const attachment = createActor(hostAttachment, {
       input: {
         chatId,
-        connect: async () => connector.connect(chatId),
+        connect: async () => {
+          const client = await connector.connect(chatId);
+          if (observed.attachment === attachment) {
+            observed.placement = client.placement;
+          }
+          return client;
+        },
         projection: {
           getSnapshot: () => this.#projectionOf(chatId).getSnapshot(),
           send: (event) => {
@@ -3648,8 +3660,28 @@ export class ChatSessionStore {
             },
           }),
           persistActiveExecutionActor: createAsyncLogic({
-            run: async ({ input }) => {
+            run: async ({ input, signal }) => {
               await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
+              signal.throwIfAborted();
+              if (this.#sessions.get(input.chatId) !== session) {
+                return;
+              }
+              // Commands resolve the persisted placement for each turn. Its
+              // long-lived log subscription must follow the same host change.
+              const observed = this.#observed.get(input.chatId);
+              if (
+                observed?.placement !== undefined &&
+                input.activeExecution !== undefined &&
+                observed.placement.hostId === daemonPlacementOf(input.activeExecution)
+              ) {
+                return;
+              }
+              if (observed !== undefined) {
+                this.#stopObservedAttachment(input.chatId, observed);
+                this.#projectionTopics.get(input.chatId)?.emit();
+                observed.attempts = 0;
+                this.#startObservedAttachment(input.chatId, observed);
+              }
             },
           }),
           persistActiveKernelActor: createAsyncLogic({

@@ -389,6 +389,117 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       lifecycleRow(1, 'running', runId),
     ];
   };
+  it.each(['changed host', 'same host', 'failed save', 'released save', 'superseded save'] as const)(
+    'hands the chat observation over only after a current placement save: %s',
+    async (scenario) => {
+      const store = createStore();
+      const chatId = 'chat_placement';
+      const projectId = 'project_placement';
+      const deps = createStubDeps();
+      let row = chatRow(chatId, projectId, {
+        activeExecution: { kind: 'tau', model: 'model-a', hostId: 'host-a' },
+      });
+      deps.getChat.mockImplementation(async (id) => ({ ...row, id }));
+      const pending = Promise.withResolvers<void>();
+      deps.patchChat.mockImplementation(async (_id, key, value) => {
+        if (key !== 'activeExecution') {
+          return;
+        }
+        if (scenario === 'failed save') {
+          throw new Error('Placement save failed');
+        }
+        row = { ...row, activeExecution: value as ChatEntity['activeExecution'] };
+        if (
+          scenario === 'released save' ||
+          (scenario === 'superseded save' && deps.patchChat.mock.calls.length === 1)
+        ) {
+          await pending.promise;
+        }
+      });
+      store.setDependencies(deps);
+      const unsubscribeA = vi.fn();
+      const closeA = vi.fn(async () => undefined);
+      const subscribeA = vi.fn((..._args: Parameters<AgentHostClient['subscribe']>) => unsubscribeA);
+      const subscribeB = vi.fn((...args: Parameters<AgentHostClient['subscribe']>) => {
+        queueMicrotask(() =>
+          args[3]?.({
+            status: 'batch',
+            chatId: args[0].chatId,
+            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+            cursor: 0,
+            nextCursor: 3,
+            endCursor: 3,
+            events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running'), lifecycleRow(2, 'completed')],
+          }),
+        );
+        return vi.fn();
+      });
+      const connect = vi.fn(async (id: string) => ({
+        placement: { hostId: id === chatId ? row.activeExecution?.hostId : 'host-a' },
+        catchUp: writerOwnedCatchUp,
+        read: vi.fn<AgentHostClient['read']>(),
+        subscribe: id === chatId && row.activeExecution?.hostId === 'host-b' ? subscribeB : subscribeA,
+        hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
+        close: closeA,
+      }));
+      const unpublish = store.publishProjectHostConnector(projectId, connect);
+      const unobserve = store.observe(chatId, projectId);
+      const unobserveOther = store.observe('chat_other', projectId);
+      const session = store.acquire(chatId, projectId);
+      try {
+        await vi.waitFor(() => {
+          expect(subscribeA).toHaveBeenCalledTimes(2);
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+        session.persistenceActorRef.send({
+          type: 'setActiveExecution',
+          execution: { kind: 'tau', model: 'model-b', hostId: scenario === 'same host' ? 'host-a' : 'host-b' },
+        });
+        await vi.waitFor(() => expect(deps.patchChat).toHaveBeenCalled());
+        if (scenario === 'released save') {
+          // Disposing the session cancels its persistence effect; a late write
+          // must not replace the observation belonging to a future session.
+          store.release(chatId);
+          pending.resolve();
+        } else if (scenario === 'superseded save') {
+          // B is durable before the first save resolves. A second B choice
+          // cancels that effect while the actual subscription still belongs to A.
+          session.persistenceActorRef.send({
+            type: 'setActiveExecution',
+            execution: { kind: 'tau', model: 'model-c', hostId: 'host-b' },
+          });
+          await vi.waitFor(() => expect(deps.patchChat).toHaveBeenCalledTimes(2));
+          pending.resolve();
+        }
+        await vi.waitFor(() =>
+          expect(
+            session.persistenceActorRef.getSnapshot().matches({ activeExecutionPersistence: 'idle' }) ||
+              scenario === 'released save',
+          ).toBe(true),
+        );
+        await settle();
+        if (scenario === 'changed host' || scenario === 'superseded save') {
+          await vi.waitFor(() => expect(subscribeB).toHaveBeenCalledOnce());
+          expect(unsubscribeA).toHaveBeenCalledOnce();
+          expect(closeA).toHaveBeenCalledOnce();
+          expect(store.getProjection(chatId)?.ledger.runs['run_1']?.lifecycle).toBe('completed');
+        } else {
+          expect(subscribeB).not.toHaveBeenCalled();
+          expect(unsubscribeA).not.toHaveBeenCalled();
+          expect(closeA).not.toHaveBeenCalled();
+        }
+        expect(subscribeA).toHaveBeenCalledTimes(2);
+      } finally {
+        unpublish();
+        unobserve();
+        unobserveOther();
+        if (scenario !== 'released save') {
+          store.release(chatId);
+        }
+      }
+    },
+  );
+
   it('should reopen the transcript watch when an external approval resumes the same attempt', async () => {
     const store = createStore();
     const chatId = 'chat_external_approval';

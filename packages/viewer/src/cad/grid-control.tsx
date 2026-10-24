@@ -1,3 +1,5 @@
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import { Grid3X3, Info, Lock, LockOpen } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -22,6 +24,8 @@ import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.jsx';
  * @public
  */
 export function GridSizeIndicator(): React.ReactNode {
+  const controlSize = useViewerControlSize();
+  const isMobile = useIsMobile();
   const graphicsRef = useGraphics();
   const gridSizes = useGraphicsSelector((state) => state.context.gridSizes);
   const isGridSizeLocked = useGraphicsSelector((state) => state.context.isGridSizeLocked);
@@ -74,14 +78,20 @@ export function GridSizeIndicator(): React.ReactNode {
           <DropdownMenuTrigger asChild>
             <Button
               variant='ghost'
-              size='sm'
+              size={isMobile ? controlSize : 'sm'}
               aria-label={`Grid ${gridLabel}, units and grid`}
-              className='h-7 gap-1 px-2 font-mono text-xs tabular-nums has-[>svg]:px-2'
+              className={`gap-1 px-2 font-mono text-xs tabular-nums has-[>svg]:px-2 ${controlSize === 'icon-touch' ? '' : 'h-7'}`}
             >
               {/* Below 520 px of viewer width the readout keeps its value and drops its glyph. */}
-              <Grid3X3 className='hidden size-3.5 @min-[520px]/viewer:block' />
-              {gridLabel}
-              {isGridSizeLocked ? <Lock className='size-3' /> : null}
+              {isMobile ? (
+                <Grid3X3 className='size-4' />
+              ) : (
+                <>
+                  <Grid3X3 className='hidden size-3.5 @min-[520px]/viewer:block' />
+                  {gridLabel}
+                  {isGridSizeLocked ? <Lock className='size-3' /> : null}
+                </>
+              )}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

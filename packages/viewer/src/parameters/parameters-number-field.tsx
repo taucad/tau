@@ -59,7 +59,7 @@ const UnitIndicator = ({
           aria-label={isApproximation ? approximationDetail : undefined}
           aria-hidden={isApproximation ? undefined : true}
           className={cn(
-            'flex h-[var(--param-field-h,1.5rem)] w-6 items-center justify-center text-[11px] text-muted-foreground/60 select-none',
+            'flex h-[var(--param-field-h,1.5rem)] w-6 items-center justify-center text-[11px] text-muted-foreground select-none',
             lines.length === 0 && 'pointer-events-none',
           )}
         >
@@ -70,7 +70,7 @@ const UnitIndicator = ({
             )}
           >
             {isApproximation ? (
-              <span className='-mb-0.5 text-[0.6rem] leading-none text-muted-foreground/60'>&asymp;</span>
+              <span className='-mb-0.5 text-[0.6rem] leading-none text-muted-foreground'>&asymp;</span>
             ) : null}
             <span className={cn(isApproximation && 'leading-none')}>{unit}</span>
           </span>

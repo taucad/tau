@@ -1,3 +1,4 @@
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import { Check, Focus } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
@@ -16,6 +17,7 @@ type FitViewControlProps = Readonly<{
  * @public
  */
 export function FitViewControl({ shortcut }: FitViewControlProps): React.JSX.Element {
+  const controlSize = useViewerControlSize();
   const graphicsRef = useGraphics();
   const canFit = useGraphicsSelector(
     (state) => state.context.geometryRadius > 0 || state.context.artifact?.mimeType === 'image/svg+xml',
@@ -32,7 +34,7 @@ export function FitViewControl({ shortcut }: FitViewControlProps): React.JSX.Ele
       <TooltipTrigger asChild>
         <Button
           variant='ghost'
-          size='icon-sm'
+          size={controlSize}
           aria-label='Fit view'
           aria-disabled={!canFit}
           onClick={canFit ? handleFit : undefined}

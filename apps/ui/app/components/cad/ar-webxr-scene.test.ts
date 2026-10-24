@@ -41,7 +41,7 @@ vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
 
 function createRenderer(): FakeRenderer {
   const renderer: FakeRenderer = {
-    loop: null,
+    loop: undefined,
     rendered: [],
     camera: { position: { x: 0, y: 1.6, z: 0 } },
     setPixelRatio: vi.fn(),

@@ -1,25 +1,19 @@
 import { useCallback } from 'react';
-import { Camera, Check } from 'lucide-react';
-import { Button } from '@taucad/ui/components/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { randomUuid } from '@taucad/utils/id';
 import type { Rendering } from '@taucad/runtime';
-import { useGraphics, useGraphicsSelector } from '@taucad/viewer/hooks/use-graphics';
+import { useGraphics } from '@taucad/viewer/hooks/use-graphics';
+import { CaptureViewControl as SharedCaptureViewControl } from '@taucad/workbench-panes/shell/capture-view-control';
 import { useCad } from '#hooks/use-cad.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { useTickAnimation } from '@taucad/ui/hooks/use-tick-animation';
 import { toast } from '#components/ui/sonner.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls, omittedSectionCutsNotice } from '#services/headless-capture.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import { attachmentModelForExecution } from '#utils/chat.utils.js';
 
-const useCaptureCurrentViewToChat = (
-  onSuccess?: () => void,
-  captureRendering?: () => Promise<Rendering>,
-): (() => Promise<void>) => {
+const useCaptureCurrentViewToChat = (captureRendering?: () => Promise<Rendering>): (() => Promise<boolean>) => {
   const graphicsRef = useGraphics();
   const cadRef = useCad();
   const { projectRef } = useProject();
@@ -34,7 +28,7 @@ const useCaptureCurrentViewToChat = (
     const clickStartedAt = performance.now();
     if (!cadRef) {
       toast.error('No CAD view available for image capture');
-      return;
+      return false;
     }
     const { entryPath } = cadRef.getSnapshot().context;
     const claimId = entryPath ? randomUuid() : undefined;
@@ -58,63 +52,29 @@ const useCaptureCurrentViewToChat = (
       if (omittedSectionCutIds.length > 0) {
         toast.warning(omittedSectionCutsNotice);
       }
-      onSuccess?.();
       recordHeadlessImageTiming('capture.click-to-draft', clickStartedAt);
+      return true;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to capture view');
+      return false;
     } finally {
       if (claimId) {
         projectRef.send({ type: 'releaseGeometryUnit', claimId });
       }
     }
-  }, [
-    addDraftAttachment,
-    cadRef,
-    captureRendering,
-    execution,
-    graphicsRef,
-    imageService,
-    onSuccess,
-    projectRef,
-    selectedModel,
-  ]);
+  }, [addDraftAttachment, cadRef, captureRendering, execution, graphicsRef, imageService, projectRef, selectedModel]);
 };
 
 /**
- * Capture-view control button for the viewer toolbar.
- *
- * Headlessly renders the current pane's settled geometry at its exact camera
- * angles and adds the annotated image to the active chat draft.
- *
- * Mirrors {@link FitViewControl} for visual + interaction parity and
- * relies on the surrounding `<GraphicsProvider>` (per-view) and
- * `<ActiveChatProvider>` (project route) for context resolution.
+ * Capture-view control button for the viewer toolbar: the shared `CaptureViewControl` that headlessly renders the
+ * current pane's settled geometry at its exact camera angles and adds the annotated image to the active chat draft.
+ * It relies on the surrounding `<GraphicsProvider>` (per-view) and `<ActiveChatProvider>` (project route).
  */
 export function CaptureViewControl({
   captureRendering,
 }: {
   readonly captureRendering?: () => Promise<Rendering>;
 }): React.JSX.Element {
-  const { ticked, trigger } = useTickAnimation();
-  const handleCapture = useCaptureCurrentViewToChat(trigger, captureRendering);
-  const canCapture = useGraphicsSelector((state) => state.context.artifact !== undefined);
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant='ghost'
-          size='icon-sm'
-          aria-label='Capture view to chat'
-          aria-disabled={!canCapture}
-          onClick={canCapture ? handleCapture : undefined}
-        >
-          {ticked ? <Check className='size-4 text-success' /> : <Camera className='size-4' />}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {canCapture ? (ticked ? 'Added to chat' : 'Capture view to chat') : 'Available when a model is displayed'}
-      </TooltipContent>
-    </Tooltip>
-  );
+  const capture = useCaptureCurrentViewToChat(captureRendering);
+  return <SharedCaptureViewControl onCapture={capture} label='Capture view to chat' doneLabel='Added to chat' />;
 }

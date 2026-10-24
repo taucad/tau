@@ -352,6 +352,8 @@ const config: KnipConfig = {
     'packages/host': {
       // `runtime-child-render.integration.test.ts` spawns it by path.
       entry: ['src/fixtures/render-child-probe.ts'],
+      // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime.
+      ignoreDependencies: ['@taucad/kinematics'],
     },
     'packages/plugins/bambu': {
       // The `qualify-x1c` target runs it from the workspace root.

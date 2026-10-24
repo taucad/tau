@@ -53,6 +53,8 @@ import { createLocalMcpViewer } from '#mcp-viewer.js';
 import { createMcpViewerExport } from '#mcp-viewer-export.js';
 import type { EntrySessionRuntime } from '#mcp-entry-sessions.js';
 import type { ViewerExportRuntime } from '#mcp-viewer-export.js';
+import { createMcpViewerPartThumbnails } from '#mcp-viewer-thumbnails.js';
+import type { ViewerThumbnailRuntime } from '#mcp-viewer-thumbnails.js';
 import type { SourceSnapshotter } from '#mcp-viewer-share.js';
 import { prepareKernelToolName } from '#prepare-kernel-tool.js';
 
@@ -870,12 +872,19 @@ export type LocalHostMcpOptions = {
    * runtime document whose renders refresh every page showing it, and the viewer page's Export pane lists the entry's
    * formats and their options; without it, the viewer draws GLB and SVG files only and offers no Export pane tools.
    */
-  readonly runtimeClient?: ((root: string) => Promise<ViewerExportRuntime & EntrySessionRuntime>) | undefined;
+  readonly runtimeClient?:
+    | ((root: string) => Promise<ViewerExportRuntime & EntrySessionRuntime & ViewerThumbnailRuntime>)
+    | undefined;
   /**
    * Collect a source's closure, as the Tau app's direct share link packs it. Without it, the viewer page offers no
    * direct link.
    */
   readonly snapshotSource?: SourceSnapshotter | undefined;
+  /**
+   * The render timeout the server's runtime applies (`tau mcp --operation-timeout`), which the viewer page's Viewer
+   * settings shows as the default. Milliseconds. 600000 by default.
+   */
+  readonly renderTimeout?: number | undefined;
   /** The serving CLI and how it was started: the `initialize` instructions name it, and every `test_model` answer carries it as `runtime`. */
   readonly runtime?: TauMcpRuntime | undefined;
 };
@@ -1027,6 +1036,7 @@ export const serveLocalHostMcp = async (
           },
           /* A shown source is watched in its project's runtime; its renders stay in memory (PAR-1). */
           liveRuntime: options.runtimeClient,
+          ...(options.renderTimeout === undefined ? {} : { defaultRenderTimeout: options.renderTimeout }),
           snapshotSource: options.snapshotSource,
           ...(options.runtimeClient === undefined
             ? {}
@@ -1034,6 +1044,7 @@ export const serveLocalHostMcp = async (
                 export: createMcpViewerExport({
                   runtimeFor: options.runtimeClient,
                 }),
+                partThumbnails: createMcpViewerPartThumbnails(options.runtimeClient),
               }),
           /* The loopback page's panes reach the same host tools an MCP App page reaches through `tools/call`. */
           hostCall: async ({ root, call, signal }) =>

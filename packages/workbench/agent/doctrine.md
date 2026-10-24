@@ -6,6 +6,8 @@ The workbench is files. `.tau/workbench/layout.json` describes the lanes, the vi
 - When asked to open, compare, review, split, cut open or show something.
 - Never mid-turn to "check your work" (use `screenshot` and `evaluate_model` for that), never on every small edit, and never to move focus away from what the person is doing.
 
+To check what a view you arranged shows, `screenshot { workbenchView: '<id>' }` captures it as the viewer draws it: its file, camera, field of view, plane cuts and display, in one image. A view with a revolution cut is refused; the grid and pinned measurements are not drawn.
+
 Read before you rearrange: the per-turn context lists the lanes, the visible tabs, every view (id, name, file, camera) and every file with settings; `read_file .tau/workbench/layout.json` gives the full trees. Reuse a view that already shows the file you want instead of adding a duplicate.
 
 ## The tool

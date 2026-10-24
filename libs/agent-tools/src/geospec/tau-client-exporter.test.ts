@@ -175,7 +175,7 @@ describe('tauClientExporter client lifetime', () => {
     expect(factory).not.toHaveBeenCalled();
     await exporter.close?.();
     await exporter.export(request());
-    await exporter.export(request());
+    await exporter.export(request({ format: 'step' }));
     expect(factory).toHaveBeenCalledOnce();
     expect(created[0]?.client.connect).toHaveBeenCalledOnce();
     expect(created[0]?.exportModel).toHaveBeenCalledTimes(2);
@@ -819,5 +819,57 @@ describe('tauClientExporter kernel description', () => {
       [{ code: 'GEOSPEC_MODEL_REGION_UNSUPPORTED', details: { kernelIds: ['replicad'] } }],
     );
     expect(fixture.exportModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('tauClientExporter reuse within a scope', () => {
+  it('should export a model once for every load of the same request while its sources are unchanged', async () => {
+    const fixture = fixtureClient();
+    const exporter = await tauClientExporter({ client: fixture.client, extensions: ['ts'] });
+
+    const loads = await Promise.all(
+      Array.from({ length: 8 }, async () => exporter.export(request({ format: 'step' }))),
+    );
+
+    expect(fixture.exportModel).toHaveBeenCalledOnce();
+    expect(new Set(loads.map(({ bytes }) => bytes)).size).toBe(8);
+    expect(loads.every(({ bytes }) => bytes[0] === 7)).toBe(true);
+  });
+
+  it('should export again for another format or parameters, after a source edit, and after close', async () => {
+    const fixture = fixtureClient();
+    const exporter = await tauClientExporter({ client: fixture.client, extensions: ['ts'] });
+
+    await exporter.export(request({ format: 'step' }));
+    await exporter.export(request({ format: 'glb' }));
+    await exporter.export(request({ format: 'step', parameters: { size: 2 } }));
+    expect(fixture.exportModel).toHaveBeenCalledTimes(3);
+
+    fixture.files['part.ts'] = digest('edited');
+    fixture.byte.value = 9;
+    await expect(exporter.export(request({ format: 'step' }))).resolves.toMatchObject({
+      bytes: Uint8Array.of(9),
+    });
+    expect(fixture.exportModel).toHaveBeenCalledTimes(4);
+
+    await exporter.close?.();
+    await exporter.export(request({ format: 'step' }));
+    expect(fixture.exportModel).toHaveBeenCalledTimes(5);
+  });
+
+  it('should not reuse an export it cannot confirm, nor a failed one', async () => {
+    const fixture = fixtureClient({ snapshot: false });
+    const exporter = await tauClientExporter({ client: fixture.client, extensions: ['ts'] });
+
+    await exporter.export(request());
+    await exporter.export(request());
+    expect(fixture.exportModel).toHaveBeenCalledTimes(2);
+
+    const failing = fixtureClient();
+    failing.exportModel.mockRejectedValueOnce(new Error('worker lost'));
+    const retried = await tauClientExporter({ client: failing.client, extensions: ['ts'] });
+    await expect(retried.export(request())).rejects.toThrow('worker lost');
+    await retried.export(request());
+    expect(failing.exportModel).toHaveBeenCalledTimes(2);
   });
 });

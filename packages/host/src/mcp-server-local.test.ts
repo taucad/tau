@@ -392,6 +392,7 @@ describe('serveLocalHostMcp', () => {
         ...withRoutes([]),
         lifecycleState: runtime.lifecycleState,
         capabilities: { ...runtime.capabilities!, routes: [] },
+        transcode: vi.fn(),
         connect: async () => undefined,
         describe: async () => ({ kernelId: undefined }),
       }),
@@ -461,6 +462,7 @@ describe('serveLocalHostMcp', () => {
         ...withRoutes([stlRoute]),
         lifecycleState: watched.lifecycleState,
         capabilities: { ...watched.capabilities!, routes: [stlRoute] },
+        transcode: vi.fn(),
         connect: async () => undefined,
         describe: async ({ source }) => ({
           kernelId: (await exists(join(root, source.path))) ? 'replicad' : undefined,

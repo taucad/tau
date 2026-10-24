@@ -9,10 +9,12 @@
  */
 import { App, PostMessageTransport, applyDocumentTheme, applyHostStyleVariables } from '@modelcontextprotocol/ext-apps';
 import type { McpUiHostCapabilities, McpUiHostContext } from '@modelcontextprotocol/ext-apps';
+import { EmptyResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type { TauViewerShowResult } from '@taucad/mcp/viewer-protocol';
 import type { ChatReference } from '#app/chat-reference.js';
+import { computeDocumentColor, hostThemeOf, prefersMoreContrast } from '#app/host-theme.js';
 
 /** Which composition the page draws (blueprint "Composition per presentation"). */
 export type ViewerComposition = 'inline' | 'tab';
@@ -42,6 +44,10 @@ export type HostView = Readonly<{
   /** The id of the `tools/call` whose result opened the page (`toolInfo.id`), when a tool result did. */
   toolCallId: string | undefined;
   colorScheme: 'light' | 'dark';
+  /** Whether the host's theme is a high-contrast one, or the system asks for more contrast. */
+  isHighContrast: boolean;
+  /** The host's accent as a CSS hex colour, or `undefined` to keep Tau's. */
+  accentColor: string | undefined;
   /** Whether the page may offer its own fullscreen action: Claude hosts want one, Codex draws its own (E3). */
   canRequestFullscreen: boolean;
   /** The route "Add to chat" takes on this host; text hosts copy. */
@@ -74,10 +80,21 @@ export class ToolCallError extends Error {
 export type HostEvent =
   | Readonly<{ type: 'show'; result: TauViewerShowResult }>
   | Readonly<{ type: 'context'; view: HostView }>
-  | Readonly<{ type: 'error'; message: string }>;
+  /**
+   * A show that failed: the server's code, such as `KERNEL_NOT_PREPARED`, its message, and the file the show named
+   * when the page knows it, so the page can show it again.
+   */
+  | Readonly<{ type: 'error'; message: string; code?: string | undefined; targetFile?: string | undefined }>;
 
 /** The page's bridge to its host. */
 export type HostBridge = Readonly<{
+  /**
+   * Open a project file in the host, such as an issue's location: Codex desktop's `openai/files/open`. Absent on hosts
+   * that open no files, where the page shows the path instead. The path is project-relative, the only form the page
+   * has: the viewer protocol does not carry the project's absolute root. A host that refuses it rejects, and the page
+   * says so in a notice.
+   */
+  openFile?: ((path: string) => Promise<void>) | undefined;
   view(): HostView;
   subscribe(listener: (event: HostEvent) => void): () => void;
   /**
@@ -135,7 +152,12 @@ const showModel = async (
       listener({ type: 'show', result });
     }
   } catch (error) {
-    listener({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+    const targetFile = typeof args['targetFile'] === 'string' ? args['targetFile'] : undefined;
+    listener(
+      error instanceof ToolCallError
+        ? { type: 'error', message: error.message, code: error.code, targetFile }
+        : { type: 'error', message: error instanceof Error ? error.message : String(error), targetFile },
+    );
   }
 };
 
@@ -251,9 +273,9 @@ const connectMcpApp = async (): Promise<HostBridge> => {
     }
   };
 
+  const isCodexHost = (): boolean => /codex|openai|chatgpt/iu.test(app.getHostVersion()?.name ?? '');
   const viewOf = (context: McpUiHostContext | undefined): HostView => {
-    const host = app.getHostVersion()?.name ?? '';
-    const isCodex = /codex|openai|chatgpt/iu.test(host);
+    const isCodex = isCodexHost();
     const toolCallId = context?.toolInfo?.id;
     return {
       kind: 'mcp-app',
@@ -262,6 +284,11 @@ const connectMcpApp = async (): Promise<HostBridge> => {
       linked: false,
       toolCallId: toolCallId === undefined ? undefined : String(toolCallId),
       colorScheme: context?.theme === 'dark' ? 'dark' : 'light',
+      ...hostThemeOf({
+        variables: context?.styles?.variables as Readonly<Record<string, string | undefined>> | undefined,
+        compute: computeDocumentColor,
+        prefersMoreContrast: prefersMoreContrast(),
+      }),
       canRequestFullscreen:
         !isCodex && context?.displayMode === 'inline' && (context.availableDisplayModes ?? []).includes('fullscreen'),
       chatRoute: chatRouteOf(app.getHostCapabilities()),
@@ -289,9 +316,16 @@ const connectMcpApp = async (): Promise<HostBridge> => {
     }
   };
 
+  /* The file the tool that opened the page named, so a failed show can be shown again. */
+  let inputFile: string | undefined;
+  app.addEventListener('toolinput', (params) => {
+    const named = params.arguments?.['targetFile'] ?? params.arguments?.['path'];
+    inputFile = typeof named === 'string' ? named : undefined;
+  });
   app.addEventListener('toolresult', (params) => {
     if (params.isError) {
-      emit({ type: 'error', message: errorText(params) });
+      const { message, code } = toolCallErrorOf(tauViewerToolName.showModel, params);
+      emit({ type: 'error', message, code, targetFile: inputFile });
       return;
     }
     if (isShowResult(params.structuredContent)) {
@@ -359,6 +393,18 @@ const connectMcpApp = async (): Promise<HostBridge> => {
     async requestFullscreen() {
       await app.requestDisplayMode({ mode: 'fullscreen' });
     },
+    /* Codex desktop opens a local file for an app (`openai/files/open`); the ext-apps client does not type the request. */
+    ...(isCodexHost()
+      ? {
+          async openFile(path: string) {
+            const request = app.request.bind(app) as unknown as (
+              message: Readonly<{ method: string; params: Readonly<{ path: string }> }>,
+              schema: typeof EmptyResultSchema,
+            ) => Promise<unknown>;
+            await request({ method: 'openai/files/open', params: { path } }, EmptyResultSchema);
+          },
+        }
+      : {}),
   };
 };
 
@@ -380,6 +426,8 @@ const connectLoopback = (): HostBridge => {
     linked: modelId !== null,
     toolCallId: undefined,
     colorScheme: prefersDark.matches ? 'dark' : 'light',
+    isHighContrast: prefersMoreContrast(),
+    accentColor: undefined,
     canRequestFullscreen: false,
     chatRoute: 'clipboard',
     maxHeight: undefined,

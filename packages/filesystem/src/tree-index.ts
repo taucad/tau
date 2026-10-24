@@ -62,7 +62,7 @@ const treeRelative = (root: string, absolutePath: string): string | undefined =>
   return undefined;
 };
 
-/** Node in the in-memory file tree. */
+/** Node in the in-memory file tree. @public */
 export type TreeNode =
   | ({
       type: 'file';
@@ -85,7 +85,21 @@ export type TreeNode =
  * incrementally on every write/delete/rename.
  *
  * Held per root by {@link TreeIndexes}, so paths are **relative to that root's
- * first full scan** (not host absolute paths like `/projects/id/...`).
+ * first full scan** (not host absolute paths like `/projects/id/...`). A host
+ * without a workspace service builds one from its own scan and keeps it current
+ * from its provider's watch events.
+ *
+ * @public
+ *
+ * @example <caption>An index kept current from a write</caption>
+ * ```typescript
+ * import { TreeIndex } from '@taucad/filesystem';
+ *
+ * const index = new TreeIndex();
+ * index.build([{ path: 'main.ts', type: 'file', size: 12, mtimeMs: 0, contentKind: 'text', lineCount: 1 }]);
+ * index.addFile('exports/part.stl', { size: 84, contentKind: 'binary' });
+ * index.getDirectoryStat('').map(({ path }) => path); // ['main.ts', 'exports/part.stl']
+ * ```
  */
 export class TreeIndex {
   private _root: TreeNode = { type: 'dir', size: 0, mtimeMs: 0, children: new Map() };

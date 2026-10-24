@@ -51,6 +51,7 @@ const pageOf = (overrides: Partial<LiveLinkPage>): LiveLinkPage => ({
   show: vi.fn<LiveLinkPage['show']>(),
   status: vi.fn<LiveLinkPage['status']>(),
   capture: async () => ({ error: 'unused' }),
+  pose: vi.fn<LiveLinkPage['pose']>(),
   ...overrides,
 });
 
@@ -101,7 +102,51 @@ describe('viewStateOf', () => {
   });
 });
 
+describe('viewStateOf motion', () => {
+  it('should report the mechanism, playback and coordinates of a unit with motion, and none without', () => {
+    const motion = {
+      mechanism: { preserved: true, joints: 2, animations: ['four-sun-turns'] },
+      playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
+      coordinates: { sun: 360, carrier: 90 },
+    } as const;
+    const view = viewStateOf({
+      model: shown.model,
+      unit: { selectedComponentIds: [], hiddenComponentIds: [], isolatedComponentIds: [] },
+      camera: undefined,
+      sectionActive: false,
+      measurementCount: 0,
+      composition: 'tab',
+      interactedAt: 0,
+      references: [],
+      motion,
+    });
+
+    expect(view).toMatchObject(motion);
+    expect(viewOf([])).not.toHaveProperty('playback');
+  });
+});
+
 describe('startLiveLink', () => {
+  it('should apply each pose command once, however often the server repeats it', async () => {
+    const command = {
+      sequence: 3,
+      modelId: 'm2',
+      animation: { id: 'four-sun-turns', action: 'seek', time: 2 },
+    } as const;
+    const { calls, callTool } = scriptedServer([
+      { version: 1, pose: command },
+      { version: 1, pose: command },
+    ]);
+    const pose = vi.fn<LiveLinkPage['pose']>();
+    links.push(startLiveLink(callTool, pageOf({ pose })));
+
+    await vi.waitFor(() => {
+      expect(calls.filter((call) => call.name === 'app_sync')).toHaveLength(3);
+    });
+    expect(pose).toHaveBeenCalledOnce();
+    expect(pose).toHaveBeenCalledWith(command);
+  });
+
   it('should send the added parts only once the server lists them under accepts', async () => {
     /* An older server answers without accepts; a newer one lists the field. */
     const { calls, callTool } = scriptedServer([{ version: 1 }, { version: 1, accepts: ['references'] }]);

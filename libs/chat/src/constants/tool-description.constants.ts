@@ -77,13 +77,17 @@ A value operation names its field by group and pointer, exactly as get_parameter
 A source-unit operation changes the unit the source interprets a value in, and is the operation that asks for confirmation. Only a binding with sourceUnitCapability admits it. Build it from get_parameters with detail "full", with binding = manifest.bindings[pointer]: producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }.`,
   [toolName.screenshot]: `Capture a declared model view for visual inspection.
 
-Pass \`targetFile\` explicitly. Choose a kernel \`view\`, optional sheet/drawing \`instance\`, and that view's \`options\` from \`evaluate_model\`; omit \`view\` for the default. A 2D view produces one image. Each result echoes its view, instance and, for 3D, camera \`angle\`. The call fails for a missing source, unavailable view or instance, render failure, timeout or invalid image. ${sourceRevisionRule}
+Pass \`targetFile\` explicitly, or \`workbenchView\` alone. Choose a kernel \`view\`, optional sheet/drawing \`instance\`, and that view's \`options\` from \`evaluate_model\`; omit \`view\` for the default. A 2D view produces one image. Each result echoes its view, instance and, for 3D, camera \`angle\`. The call fails for a missing source, unavailable view or instance, render failure, timeout or invalid image. ${sourceRevisionRule}
 
 Modes (\`mode\`, default \`single\`):
 - single: one deterministic perspective isometric image for a 3D view
 - multi_angle: six orthographic camera angles for a 3D view (front, back, right, left, top, bottom)
 
 Section (\`section\`, 3D views only) cuts the model with one axis plane to show its inside, e.g. { plane: 'xy', offset: 0.006 } for a horizontal cut 6 mm above the origin. The kept half defaults to the one whose cut face looks at the single-mode camera; \`keep\` names the side to retain instead, and the result \`message\` states what was kept. Cuts are capped.
+
+Workbench view (\`workbenchView\`) captures a view \`arrange_workbench\` saved, by its id: its file, kernel view and options, camera, field of view, cuts and display, as the viewer shows them, in one image. It takes no \`view\`, \`instance\`, \`options\`, \`section\` or multi_angle; the result \`message\` says what the viewer draws that the image does not.
+
+Pose (\`pose\`, a 3D view with a mechanism) moves the parts first: { animation: { id, time } } samples an animation from \`evaluate_model\` mechanism.animations at a time in seconds, { coordinates } sets driver joints; the result \`message\` lists every coordinate.
 
 ${parameterOverrideRule}
 

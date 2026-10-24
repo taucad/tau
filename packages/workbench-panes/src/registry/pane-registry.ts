@@ -1,4 +1,4 @@
-import { Box, Download, Rotate3d, Share2, SlidersHorizontal } from 'lucide-react';
+import { Box, Download, FolderOpen, Rotate3d, Share2, SlidersHorizontal } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 /**
@@ -6,7 +6,7 @@ import type { LucideIcon } from 'lucide-react';
  *
  * @public
  */
-export const workbenchPaneIds = ['parameters', 'model', 'kinematics', 'export', 'share'] as const;
+export const workbenchPaneIds = ['parameters', 'model', 'kinematics', 'export', 'share', 'files'] as const;
 
 /**
  * One of {@link workbenchPaneIds}.
@@ -60,4 +60,5 @@ export const workbenchPanes: Readonly<Record<WorkbenchPaneId, WorkbenchPaneDefin
   },
   export: { id: 'export', title: 'Export', icon: Download, group: 'project', shortcut: { key: 'd', ctrlKey: true } },
   share: { id: 'share', title: 'Share', icon: Share2, group: 'project' },
+  files: { id: 'files', title: 'Files', icon: FolderOpen, group: 'project', shortcut: { key: 'f', ctrlKey: true } },
 };

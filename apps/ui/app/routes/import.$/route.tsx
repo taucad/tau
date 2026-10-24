@@ -24,7 +24,8 @@ import { useProjectCreationLocationError } from '#hooks/use-project-creation-loc
 import { RepositoryCard } from '#routes/import.$/repository-card.js';
 import { BranchSelector } from '#routes/import.$/branch-selector.js';
 import { FolderSelector, repositoryFolders } from '#routes/import.$/folder-selector.js';
-import { FileSelector, createStaticDataSource } from '#components/files/file-selector.js';
+import { createStaticDataSource } from '@taucad/workbench-panes/files/file-selector';
+import { FileSelector } from '#components/files/file-selector.js';
 import { SuggestedClones } from '#routes/import.$/suggested-clones.js';
 import { UploadCard } from '#routes/import.$/upload-card.js';
 import {

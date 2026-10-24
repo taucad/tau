@@ -23,6 +23,7 @@
  * exactly when they are.
  */
 
+import { createHash } from 'node:crypto';
 import { readFile, realpath, readdir, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
@@ -884,6 +885,22 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       ? createRuntimeParameterAgentClient({
           mapRuntimeError: runtimeFailure,
           parameterActorFor: async (targetFile) => parameterActor(workspaceRoot, targetFile),
+          /* A read on unchanged sources answers from the resolved manifest, without waiting on the runtime (LRP-11). */
+          sourceDigests: async (paths) =>
+            Object.fromEntries(
+              await Promise.all(
+                paths.map(async (path): Promise<[string, string]> => {
+                  try {
+                    const bytes = await provider.readFile(assertRootedPath(path));
+                    return [path, `sha256:${createHash('sha256').update(bytes).digest('hex')}`];
+                  } catch (error) {
+                    const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
+                    // An unreadable file matches no digest, so the read resolves and reports it.
+                    return [path, missing ? 'missing' : 'unreadable'];
+                  }
+                }),
+              ),
+            ),
         })
       : undefined;
 

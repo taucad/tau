@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 import type { ActorRefFrom } from 'xstate';
 import type { graphicsMachine } from '@taucad/viewer/machines/graphics.machine';
 import type { ExportSource } from '#export/export-source.js';
+import type { FilesSource } from '#files/files-source.js';
 import type { KinematicsSource } from '#kinematics/kinematics-source.js';
 import type { ModelSource } from '#model/model-source.js';
 import type { ParametersSource } from '#parameters/parameters-source.js';
@@ -45,6 +46,7 @@ export type WorkbenchPanesHost = Readonly<{
   model?: ModelSource;
   export?: ExportSource;
   share?: ShareSource;
+  files?: FilesSource;
 }>;
 
 const WorkbenchPanesHostContext = createContext<WorkbenchPanesHost | undefined>(undefined);

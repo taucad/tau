@@ -1,0 +1,661 @@
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSelector } from '@xstate/react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  AtSign,
+  Box,
+  CircleAlert,
+  Download,
+  Ellipsis,
+  EyeOff,
+  FileBox,
+  Focus,
+  LoaderCircle,
+  Target,
+  X,
+} from 'lucide-react';
+import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
+import { ActionButton } from '@taucad/ui/components/actions';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@taucad/ui/components/breadcrumb';
+import { Button } from '@taucad/ui/components/button';
+import { Dialog, DialogContent, DialogTitle } from '@taucad/ui/components/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
+import { KeyShortcut } from '@taucad/ui/components/key-shortcut';
+import { useKeybinding } from '@taucad/ui/components/keyboard';
+import { Skeleton } from '@taucad/ui/components/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
+import { MaterialSwatch } from '@taucad/viewer/cad/material-swatch';
+import { PartPreviewImage } from '@taucad/viewer/cad/part-preview-image';
+import { PartPropertiesPanel } from '@taucad/viewer/cad/part-properties-panel';
+import type { PartThumbnailState } from '@taucad/viewer/cad/part-thumbnail-state';
+import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
+import type { modelInteractionMachine } from '@taucad/viewer/machines/model-interaction.machine';
+import type { ActorRefFrom } from 'xstate';
+import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadata/geometry-component-reference';
+import { createModelComponentGraphicsActions } from '#component-menu/component-actions.js';
+import type {
+  ModelComponentActionTarget,
+  ModelComponentHostActions,
+  ModelComponentPreviewRequest,
+} from '#component-menu/component-actions.js';
+import type { GraphicsRef } from '#host/workbench-host.jsx';
+import { isPreviewablePart } from '#model/visible-components.js';
+
+type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
+
+/**
+ * What a part gallery asks its host's preview hook for: the shown part and its neighbours in the model's parts.
+ *
+ * @public
+ */
+export type PartGalleryPreviewRequest = Readonly<{
+  graphicsRef: GraphicsRef;
+  unitId: string;
+  /** The model's previewable parts, in the Model pane's order. */
+  parts: readonly GeometryComponentNode[];
+  /** The shown part's position in `parts`. */
+  index: number;
+}>;
+
+/**
+ * The previews a host's hook renders for a part gallery, and how to render one again.
+ *
+ * @public
+ */
+export type PartGalleryPreviews = Readonly<{
+  previews: ReadonlyMap<string, PartThumbnailState>;
+  retry: (componentId: string) => void;
+}>;
+
+/**
+ * Props for {@link PartGallery}.
+ *
+ * @public
+ */
+export type PartGalleryProps = Readonly<{
+  /** Which part the gallery opens on, and where focus returns when it closes. */
+  request: ModelComponentPreviewRequest;
+  /** The host's part verbs: "Reveal in Explorer" and "Add to chat" show only when the host has them. */
+  actions: ModelComponentHostActions;
+  /**
+   * A hook that renders the shown part and its neighbours. The gallery calls it on every render, so it must stay the
+   * same hook while the gallery is open.
+   */
+  usePreviews: (request: PartGalleryPreviewRequest) => PartGalleryPreviews;
+  onClose: () => void;
+}>;
+
+/** Previewable parts in the Model pane's preorder, hidden parts included. */
+function previewableParts(manifest: GeometryComponentManifest): GeometryComponentNode[] {
+  const parts: GeometryComponentNode[] = [];
+  const pending = [...(manifest.nodesById[manifest.rootId]?.childIds ?? [])].reverse();
+  for (let id = pending.pop(); id !== undefined; id = pending.pop()) {
+    const node = manifest.nodesById[id];
+    if (!node) {
+      continue;
+    }
+    if (isPreviewablePart(node)) {
+      parts.push(node);
+    }
+    pending.push(...[...node.childIds].reverse());
+  }
+  return parts;
+}
+
+/**
+ * The part gallery, shared by the Tau app and the agent plugin viewer: one part's render on a stage over a strip of
+ * the model's parts, its place in the model, its verbs and its Properties, with the arrow keys moving between parts.
+ * The host owns when it is open (one per workspace), its part verbs and its preview renderer.
+ *
+ * @param props - The part to open on, the host's verbs and preview hook, and what closing does.
+ * @returns The gallery dialog, or nothing until the unit's model interaction is ready.
+ * @public
+ */
+export function PartGallery({
+  request,
+  actions,
+  usePreviews,
+  onClose,
+}: PartGalleryProps): React.JSX.Element | undefined {
+  const modelRef = useSelector(
+    request.graphicsRef,
+    (state) => state.context.modelInteractionRef as ModelInteractionRef | undefined,
+  );
+  return modelRef ? (
+    <PartGalleryDialog
+      request={request}
+      modelRef={modelRef}
+      actions={actions}
+      usePreviews={usePreviews}
+      onClose={onClose}
+    />
+  ) : undefined;
+}
+
+function PartGalleryDialog({
+  request,
+  modelRef,
+  actions,
+  usePreviews,
+  onClose,
+}: PartGalleryProps & { readonly modelRef: ModelInteractionRef }): React.JSX.Element | undefined {
+  const { graphicsRef, unitId, source } = request;
+  const unit = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
+  const { manifest } = unit;
+  const parts = useMemo(() => (manifest ? previewableParts(manifest) : []), [manifest]);
+  const [componentId, setComponentId] = useState(request.componentId);
+  const index = parts.findIndex((part) => part.id === componentId);
+  const part = parts[index];
+
+  const close = useCallback(() => {
+    onClose();
+    const { origin } = request;
+    requestAnimationFrame(() => {
+      if (origin?.isConnected) {
+        origin.focus();
+      }
+    });
+  }, [onClose, request]);
+  const show = useCallback(
+    (id: string) => {
+      setComponentId(id);
+      graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: id, source });
+    },
+    [graphicsRef, source, unitId],
+  );
+  const move = useCallback(
+    (offset: number) => {
+      if (index !== -1 && parts.length > 1) {
+        show(parts[(index + offset + parts.length) % parts.length]!.id);
+      }
+    },
+    [index, parts, show],
+  );
+
+  useEffect(() => {
+    graphicsRef.send({ type: 'selectModelComponent', unitId, componentId: request.componentId, source });
+  }, [graphicsRef, request.componentId, source, unitId]);
+  useEffect(() => {
+    // The part left the model: nothing to show.
+    if (manifest && !part) {
+      close();
+    }
+  }, [close, manifest, part]);
+
+  const keybindingOptions = { scope: 'global', ignoreInputs: true, repeat: true } as const;
+  useKeybinding(
+    { key: 'ArrowLeft' },
+    () => {
+      move(-1);
+    },
+    keybindingOptions,
+  );
+  useKeybinding(
+    { key: 'ArrowRight' },
+    () => {
+      move(1);
+    },
+    keybindingOptions,
+  );
+
+  const { previews, retry } = usePreviews({ graphicsRef, unitId, parts, index });
+
+  if (!part || !manifest) {
+    return undefined;
+  }
+  return (
+    <Dialog
+      open
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          close();
+        }
+      }}
+    >
+      <PartSheet
+        manifest={manifest}
+        part={part}
+        parts={parts}
+        index={index}
+        previews={previews}
+        host={actions}
+        target={{
+          manifest,
+          node: part,
+          graphicsRef,
+          unitId,
+          source,
+          isIsolated: unit.isolatedComponentIds.includes(part.id),
+        }}
+        isHidden={unit.hiddenComponentIds.includes(part.id)}
+        onShow={show}
+        onMove={move}
+        onRetry={retry}
+        onClose={close}
+      />
+    </Dialog>
+  );
+}
+
+/** The gallery's verbs for one part: the host's, where it has them, and the graphics actor's. */
+function galleryActions(
+  host: ModelComponentHostActions,
+  target: ModelComponentActionTarget,
+): ReturnType<typeof createModelComponentGraphicsActions> &
+  Readonly<{
+    addToChat: (() => void) | undefined;
+    revealInExplorer: (() => void) | undefined;
+    revealComponent: ((componentId: string) => void) | undefined;
+  }> {
+  const { addToChat, revealInExplorer } = host;
+  const { manifest, node } = target;
+  const reveal =
+    revealInExplorer === undefined
+      ? undefined
+      : (componentId: string): void => {
+          const revealed = manifest.nodesById[componentId];
+          if (revealed) {
+            revealInExplorer({ ...target, node: revealed });
+          }
+        };
+  return {
+    ...createModelComponentGraphicsActions(target),
+    addToChat:
+      addToChat === undefined
+        ? undefined
+        : () => {
+            const reference = buildGeometryComponentReference(manifest, node);
+            if (reference) {
+              addToChat(reference, target);
+            }
+          },
+    revealInExplorer:
+      reveal === undefined
+        ? undefined
+        : () => {
+            reveal(node.id);
+          },
+    revealComponent: reveal,
+  };
+}
+
+function ancestorsOf(manifest: GeometryComponentManifest, node: GeometryComponentNode): GeometryComponentNode[] {
+  const ancestors: GeometryComponentNode[] = [];
+  for (let id = node.parentId; id !== undefined && id !== manifest.rootId; id = manifest.nodesById[id]?.parentId) {
+    const ancestor = manifest.nodesById[id];
+    if (!ancestor) {
+      break;
+    }
+    ancestors.unshift(ancestor);
+  }
+  return ancestors;
+}
+
+/** A header icon button whose tooltip names it and, when it has one, its key. */
+function SheetIconButton({
+  label,
+  shortcut,
+  children,
+  ...properties
+}: React.ComponentProps<typeof Button> & {
+  readonly label: string;
+  readonly shortcut?: string;
+}): React.JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button size='icon-sm' variant='ghost' aria-label={label} {...properties}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent className='flex items-center gap-2'>
+        {label}
+        {shortcut ? <KeyShortcut>{shortcut}</KeyShortcut> : undefined}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// A faint dot grid, so a transparent render sits on a surface rather than floating over the page.
+const stageClassName =
+  'relative min-h-0 min-w-0 flex-1 bg-muted bg-[radial-gradient(var(--color-border)_0.5px,transparent_0.5px)] bg-size-[1rem_1rem]';
+
+/**
+ * One sheet below the titlebar: the part's place in the model and every control in the header,
+ * the render on a stage over a strip of the model's parts, and the part's verbs and Properties
+ * in a rail that moves under the stage in a narrow window.
+ */
+function PartSheet({
+  manifest,
+  part,
+  parts,
+  index,
+  previews,
+  host,
+  target,
+  isHidden,
+  onShow,
+  onMove,
+  onRetry,
+  onClose,
+}: {
+  readonly manifest: GeometryComponentManifest;
+  readonly part: GeometryComponentNode;
+  readonly parts: readonly GeometryComponentNode[];
+  readonly index: number;
+  readonly previews: ReadonlyMap<string, PartThumbnailState>;
+  readonly host: ModelComponentHostActions;
+  readonly target: ModelComponentActionTarget;
+  readonly isHidden: boolean;
+  readonly onShow: (id: string) => void;
+  readonly onMove: (offset: number) => void;
+  readonly onRetry: (id: string) => void;
+  readonly onClose: () => void;
+}): React.JSX.Element {
+  const actions = galleryActions(host, target);
+  const preview = previews.get(part.id);
+  const imageUrl = usePreviewUrl(preview?.bytes);
+  const isRendering = !preview?.bytes && preview?.status !== 'failed';
+  const isFailed = preview?.status === 'failed' && !preview.bytes;
+  const hasSiblings = parts.length > 1;
+  // Each verb acts on the viewer or the Explorer behind the sheet, so the sheet makes way for it.
+  const andClose = (action: () => void) => () => {
+    action();
+    onClose();
+  };
+
+  return (
+    <DialogContent
+      aria-describedby={undefined}
+      // Focus the sheet, not its first control: a focused header button would open its tooltip unasked,
+      // and that tooltip would take the first Escape.
+      onOpenAutoFocus={(event) => {
+        event.preventDefault();
+        (event.currentTarget as HTMLElement | undefined)?.focus();
+      }}
+      // The gallery returns focus to its opener itself.
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+      }}
+      className={cn(
+        // The sheet takes focus only to receive keys; it is a surface, not a control, so it shows no focus ring.
+        '@container/sheet top-12 bottom-6 flex translate-y-0 flex-col gap-0 overflow-hidden p-0 outline-none sm:max-w-5xl',
+        // The shared close control is replaced by the header's, beside the other controls.
+        '*:data-[slot=dialog-close]:hidden',
+      )}
+    >
+      <header className='flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 border-b px-3 py-1.5'>
+        <DialogTitle className='sr-only'>{part.name}</DialogTitle>
+        <Breadcrumb aria-label='Place in the model' className='min-w-0 flex-1'>
+          <BreadcrumbList className='flex-nowrap'>
+            {ancestorsOf(manifest, part).map((ancestor) => (
+              <Fragment key={ancestor.id}>
+                <BreadcrumbItem className='min-w-0 @max-[40rem]/sheet:hidden'>
+                  <BreadcrumbLink asChild>
+                    <button
+                      type='button'
+                      className='truncate rounded-sm focus-visible:focus-outline'
+                      onClick={andClose(() => {
+                        actions.revealComponent?.(ancestor.id);
+                      })}
+                    >
+                      {ancestor.name}
+                    </button>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator className='@max-[40rem]/sheet:hidden' />
+              </Fragment>
+            ))}
+            <BreadcrumbItem className='min-w-0'>
+              <BreadcrumbPage className='truncate font-medium'>{part.name}</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+        <div className='ml-auto flex items-center gap-0.5'>
+          {hasSiblings ? (
+            <>
+              <span role='status' aria-label='Shown part' className='mr-1.5 text-xs text-muted-foreground tabular-nums'>
+                <span className='sr-only'>{part.name}, </span>
+                Part {index + 1} of {parts.length}
+              </span>
+              <SheetIconButton
+                label='Previous part'
+                shortcut='←'
+                onClick={() => {
+                  onMove(-1);
+                }}
+              >
+                <ArrowLeft />
+              </SheetIconButton>
+              <SheetIconButton
+                label='Next part'
+                shortcut='→'
+                onClick={() => {
+                  onMove(1);
+                }}
+              >
+                <ArrowRight />
+              </SheetIconButton>
+            </>
+          ) : undefined}
+          {imageUrl ? (
+            <SheetIconButton asChild label={`Download ${part.name}`}>
+              <a download={`${part.name}.webp`} href={imageUrl}>
+                <Download />
+              </a>
+            </SheetIconButton>
+          ) : undefined}
+          <SheetIconButton label='Close preview' shortcut='Esc' onClick={onClose}>
+            <X />
+          </SheetIconButton>
+        </div>
+      </header>
+      <div className='flex min-h-0 flex-1 @max-[40rem]/sheet:flex-col'>
+        <div className={stageClassName}>
+          <div className={cn('absolute inset-6 flex items-center justify-center', hasSiblings && 'bottom-24')}>
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={`Rendered ${part.name}`}
+                className={cn('max-h-full max-w-full object-contain', isHidden && 'opacity-45')}
+              />
+            ) : isFailed ? (
+              <Box aria-hidden='true' className='size-12 text-muted-foreground' />
+            ) : (
+              <Skeleton aria-hidden='true' className='aspect-4/3 h-3/5 max-w-full rounded-md bg-border/50' />
+            )}
+          </div>
+          <StageStatus
+            isRendering={isRendering}
+            isFailed={isFailed}
+            isHidden={isHidden}
+            onRetry={() => {
+              onRetry(part.id);
+            }}
+            onShow={actions.showComponent}
+          />
+
+          {hasSiblings ? <PartStrip parts={parts} index={index} previews={previews} onShow={onShow} /> : undefined}
+        </div>
+        <aside
+          aria-label='Part properties'
+          className='flex w-80 shrink-0 flex-col border-l @max-[40rem]/sheet:max-h-[45%] @max-[40rem]/sheet:w-full @max-[40rem]/sheet:border-t @max-[40rem]/sheet:border-l-0'
+        >
+          <div className='@container/actions flex flex-wrap gap-2 border-b p-3'>
+            {actions.revealInExplorer ? (
+              <ActionButton verb='Reveal in Explorer' icon={FileBox} onClick={andClose(actions.revealInExplorer)} />
+            ) : undefined}
+            <ActionButton verb='Focus on part' icon={Focus} onClick={andClose(actions.focusComponent)} />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <ActionButton verb='More' icon={Ellipsis} aria-label={`More actions for ${part.name}`} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='end'>
+                <DropdownMenuItem onSelect={andClose(actions.toggleIsolation)}>
+                  <Target aria-hidden='true' />
+                  {target.isIsolated ? 'Remove isolation' : 'Isolate'}
+                </DropdownMenuItem>
+                {actions.addToChat ? (
+                  <DropdownMenuItem onSelect={andClose(actions.addToChat)}>
+                    <AtSign aria-hidden='true' />
+                    {host.addToChatLabel ?? 'Add to chat'}
+                  </DropdownMenuItem>
+                ) : undefined}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <div className='min-h-0 flex-1 overflow-auto'>
+            <PartPropertiesPanel node={part} entryPath={manifest.sourceFile} isIdentityHidden />
+          </div>
+        </aside>
+      </div>
+    </DialogContent>
+  );
+}
+
+/** What the stage cannot show yet, or why the part looks faded, with the action that resolves it. */
+function StageStatus({
+  isRendering,
+  isFailed,
+  isHidden,
+  onRetry,
+  onShow,
+}: {
+  readonly isRendering: boolean;
+  readonly isFailed: boolean;
+  readonly isHidden: boolean;
+  readonly onRetry: () => void;
+  readonly onShow: () => void;
+}): React.JSX.Element | undefined {
+  if (!isRendering && !isFailed && !isHidden) {
+    return undefined;
+  }
+  return (
+    <div className='absolute top-3 left-3 flex flex-wrap items-center gap-2 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-xs'>
+      {isRendering ? (
+        <span role='status' aria-busy='true' className='flex items-center gap-1.5'>
+          <LoaderCircle aria-hidden='true' className='size-3.5 spin-glyph' />
+          Rendering preview
+        </span>
+      ) : undefined}
+      {isFailed ? (
+        <>
+          <span role='alert' className='flex items-center gap-1.5'>
+            <CircleAlert aria-hidden='true' className='size-3.5' />
+            Preview unavailable
+          </span>
+          <Button size='xs' variant='outline' onClick={onRetry}>
+            Retry
+          </Button>
+        </>
+      ) : undefined}
+      {isHidden ? (
+        <>
+          <span role='status' className='flex items-center gap-1.5'>
+            <EyeOff aria-hidden='true' className='size-3.5' />
+            Hidden in the viewer
+          </span>
+          <Button size='xs' variant='outline' onClick={onShow}>
+            Show
+          </Button>
+        </>
+      ) : undefined}
+    </div>
+  );
+}
+
+/**
+ * The model's previewable parts along the stage's foot, the shown one marked and kept in view. A part not
+ * yet rendered shows its material, as its Explorer row does.
+ * ponytail: renders every part's tile; virtualize when models with thousands of parts reach the gallery.
+ */
+function PartStrip({
+  parts,
+  index,
+  previews,
+  onShow,
+}: {
+  readonly parts: readonly GeometryComponentNode[];
+  readonly index: number;
+  readonly previews: ReadonlyMap<string, PartThumbnailState>;
+  readonly onShow: (id: string) => void;
+}): React.JSX.Element {
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    listRef.current?.children[index]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [index]);
+  return (
+    <ul
+      ref={listRef}
+      aria-label='Parts in this model'
+      className='absolute inset-x-0 bottom-0 flex gap-1.5 overflow-x-auto border-t bg-background/90 p-2'
+    >
+      {parts.map((node, position) => {
+        const isShown = position === index;
+        const bytes = previews.get(node.id)?.bytes;
+        const materials = node.appearance?.materials ?? [];
+        return (
+          <li key={node.id} className='shrink-0'>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type='button'
+                  aria-label={node.name}
+                  aria-current={isShown || undefined}
+                  className={cn(
+                    'flex size-14 items-center justify-center overflow-hidden rounded-xs bg-muted ring-1 ring-border focus-visible:focus-outline',
+                    isShown && 'ring-2 ring-primary',
+                  )}
+                  onClick={() => {
+                    onShow(node.id);
+                  }}
+                >
+                  {bytes ? (
+                    <PartPreviewImage bytes={bytes} className='size-full object-contain p-1' />
+                  ) : materials.length > 0 ? (
+                    <MaterialSwatch materials={materials} />
+                  ) : (
+                    <Box aria-hidden='true' className='size-4' />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{node.name}</TooltipContent>
+            </Tooltip>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Own one object URL for the shown preview's bytes. */
+function usePreviewUrl(bytes: Uint8Array<ArrayBuffer> | undefined): string | undefined {
+  const [url, setUrl] = useState<string>();
+  useEffect(() => {
+    if (!bytes) {
+      // oxlint-disable-next-line react/set-state-in-effect -- Object URL lifecycle is owned by this effect.
+      setUrl(undefined);
+      return undefined;
+    }
+    const next = URL.createObjectURL(new Blob([bytes], { type: 'image/webp' }));
+    setUrl(next);
+    return () => {
+      URL.revokeObjectURL(next);
+    };
+  }, [bytes]);
+  return url;
+}

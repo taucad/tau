@@ -1,10 +1,12 @@
 /**
- * The viewer page's camera and component display, kept in the project's `.tau/workbench` records (agent plugin UI
- * blueprint W10, Q14), so Tau opens the project with the view the person left in the page.
+ * The viewer page's view, kept in the project's `.tau/workbench` records (agent plugin UI blueprint W10, Q14), so Tau
+ * and the page open the project with the view the person left: the camera, the display, grid, field of view, up
+ * direction, section and pinned measurements (the page's `settings`), and the component display. The page reads the
+ * record back through {@link McpViewerWorkbench.state} and seeds its viewer from it, as the Tau app does.
  *
  * Only the person's own interaction is kept: until a page's `interactedAt` moves past what it was when that page first
  * reported a model, its reports of that model are ignored, so opening a model or an agent's selection writes nothing.
- * Only what changed since the page's previous report is written, the camera or the component display, so a page that
+ * Only what changed since the page's previous report is written, the camera, the settings or the component display, so a page that
  * merely keeps polling never reverts what `arrange_workbench` or Tau wrote meanwhile. Writes settle for a moment,
  * then go out view first, then the layout that names a view this writer created, then entries. Each one replaces the
  * file only if it still holds the bytes it was computed from; a record another writer changed meanwhile wins, and the
@@ -16,7 +18,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import type { TauViewerViewState } from '@taucad/mcp/viewer-protocol';
+import type { TauViewerViewState, TauViewerWorkbenchState } from '@taucad/mcp/viewer-protocol';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { ViewerNode, WorkbenchEntries, WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
 
@@ -38,6 +40,8 @@ export type McpViewerWorkbenchOptions = Readonly<{
 export type McpViewerWorkbench = Readonly<{
   /** A page reported its view of a model shown from `root`. */
   report(input: Readonly<{ root: string; pageId: string; view: TauViewerViewState }>): void;
+  /** What the records keep for one entry of the project at `root`, for a page to restore. */
+  state(input: Readonly<{ root: string; entryPath: string }>): Promise<TauViewerWorkbenchState>;
   /** Write what is waiting now. */
   flush(): Promise<void>;
   /** Write what is waiting and stop. */
@@ -50,7 +54,7 @@ type Read = Readonly<{ path: string; text: string | undefined }>;
 type Write = Read & Readonly<{ next: string }>;
 
 /** Which parts of a page's view changed since its previous report, and so are the person's to write. */
-type Changed = Readonly<{ camera: boolean; components: boolean }>;
+type Changed = Readonly<{ camera: boolean; settings: boolean; components: boolean }>;
 
 const sameList = <Item>(left: readonly Item[], right: readonly Item[]): boolean =>
   left.length === right.length && left.every((item, index) => item === right[index]);
@@ -74,6 +78,8 @@ const sameCamera = (left: TauViewerViewState['camera'], right: TauViewerViewStat
  */
 const changedBetween = (previous: TauViewerViewState, next: TauViewerViewState): Changed => ({
   camera: !sameCamera(previous.camera, next.camera),
+  /* A page older than the field reports no settings, which is no change. */
+  settings: next.settings !== undefined && JSON.stringify(previous.settings) !== JSON.stringify(next.settings),
   components: !sameList(previous.hidden, next.hidden) || !sameList(previous.isolated, next.isolated),
 });
 
@@ -119,6 +125,87 @@ const withViewTab = (node: ViewerNode, id: string): ViewerNode => {
   }
   const [first, ...rest] = node.children;
   return first === undefined ? node : { ...node, children: [withViewTab(first, id), ...rest] };
+};
+
+/** A view record as it was read. */
+type FoundView = Readonly<{ id: string; read: Read; record: WorkbenchView }>;
+
+/**
+ * The view Tau opens an entry in: the first view of it the layout shows.
+ *
+ * @param root - The project folder.
+ * @param layout - The layout record, when there is one.
+ * @param entryPath - The entry.
+ * @returns The view, or `undefined` when the layout shows none of it.
+ */
+const findView = async (
+  root: string,
+  layout: WorkbenchLayout | undefined,
+  entryPath: string,
+): Promise<FoundView | undefined> => {
+  for (const id of layout === undefined ? [] : viewIdsOf(layout.viewer)) {
+    const path = workbenchPaths.view(id);
+    // oxlint-disable-next-line eslint/no-await-in-loop -- The layout names few views, and the first match ends the search.
+    const text = await readText(root, path);
+    const record = text === undefined ? undefined : decode<WorkbenchView>(workbenchRecords.view, text);
+    if (record?.entryPath === entryPath) {
+      return { id, read: { path, text }, record };
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The camera a view opens with: the selected kernel view's, as the Tau app adopts it, or the view's own.
+ *
+ * @param record - The view record.
+ * @returns The camera instruction or pose.
+ */
+const activeCamera = (record: WorkbenchView): WorkbenchView['camera'] =>
+  record.selectedKernelView === undefined
+    ? record.camera
+    : (record.kernelViews?.find((view) => view.id === record.selectedKernelView)?.camera ?? {
+        kind: 'preset',
+        preset: 'isometric',
+      });
+
+/**
+ * A view's fields as a page restores them, with the camera it opens with.
+ *
+ * @param record - The view record.
+ * @returns The fields, without the envelope, the entry, the name and the kernel views.
+ */
+const restoredFields = (record: WorkbenchView): NonNullable<TauViewerWorkbenchState['view']> => {
+  const {
+    version: _version,
+    entryPath: _entryPath,
+    name: _name,
+    kernelViews: _kernelViews,
+    selectedKernelView: _selectedKernelView,
+    ...fields
+  } = record;
+  return { ...fields, camera: activeCamera(record) };
+};
+
+/**
+ * Read what the records keep for one entry.
+ *
+ * @param root - The project folder.
+ * @param entryPath - The entry.
+ * @returns The view and component display; a part whose record is absent, invalid or newer is left out.
+ */
+const readState = async (root: string, entryPath: string): Promise<TauViewerWorkbenchState> => {
+  const layoutText = await readText(root, workbenchPaths.layout);
+  const layout = layoutText === undefined ? undefined : decode<WorkbenchLayout>(workbenchRecords.layout, layoutText);
+  const found = await findView(root, layout, entryPath);
+  const entriesText = await readText(root, workbenchPaths.entries);
+  const entries =
+    entriesText === undefined ? undefined : decode<WorkbenchEntries>(workbenchRecords.entries, entriesText);
+  const components = entries?.entries[entryPath]?.components;
+  return {
+    ...(found === undefined ? {} : { view: restoredFields(found.record), viewId: found.id }),
+    ...(components === undefined ? {} : { components: { hidden: components.hidden, isolated: components.isolated } }),
+  };
 };
 
 /**
@@ -178,24 +265,29 @@ const plan = async (root: string, view: TauViewerViewState, changed: Changed): P
     return undefined;
   }
 
-  /* The first view of this entry the layout shows is the one Tau opens it in. */
-  let found: Readonly<{ id: string; read: Read; record: WorkbenchView }> | undefined;
-  for (const id of layout === undefined ? [] : viewIdsOf(layout.viewer)) {
-    const path = workbenchPaths.view(id);
-    // oxlint-disable-next-line eslint/no-await-in-loop -- The layout names few views, and the first match ends the search.
-    const text = await readText(root, path);
-    const record = text === undefined ? undefined : decode<WorkbenchView>(workbenchRecords.view, text);
-    if (record?.entryPath === entryPath) {
-      found = { id, read: { path, text }, record };
-      break;
-    }
-  }
+  const found = await findView(root, layout, entryPath);
   const id = found?.id ?? `v-${randomBytes(4).toString('hex')}`;
   const viewRead: Read = found?.read ?? { path: workbenchPaths.view(id), text: undefined };
   const camera = found === undefined || changed.camera ? view.camera : undefined;
+  const settings = found === undefined || changed.settings ? view.settings : undefined;
+  const base: WorkbenchView = found?.record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath });
+  const selected = base.selectedKernelView;
+  const pose = camera === undefined ? undefined : poseOf(camera);
   const nextView = workbenchRecords.view.serialize({
-    ...(found?.record ?? { version: 1, entryPath }),
-    ...(camera === undefined ? {} : { camera: poseOf(camera) }),
+    ...base,
+    ...settings,
+    /* A selected kernel view keeps its own camera, as the Tau app writes it. */
+    ...(pose === undefined
+      ? {}
+      : selected === undefined
+        ? { camera: pose }
+        : {
+            kernelViews: base.kernelViews?.some((kernelView) => kernelView.id === selected)
+              ? base.kernelViews.map((kernelView) =>
+                  kernelView.id === selected ? { ...kernelView, camera: pose } : kernelView,
+                )
+              : [...(base.kernelViews ?? []), { id: selected, camera: pose }],
+          }),
   });
 
   const entriesText = await readText(root, workbenchPaths.entries);
@@ -204,17 +296,17 @@ const plan = async (root: string, view: TauViewerViewState, changed: Changed): P
   if (entriesText !== undefined && entries === undefined) {
     return undefined;
   }
-  const settings = entries?.entries[entryPath];
+  const entrySettings = entries?.entries[entryPath];
   const nextEntries = workbenchRecords.entries.serialize({
     version: 1,
     entries: {
       ...entries?.entries,
       [entryPath]: {
-        ...settings,
+        ...entrySettings,
         components: {
           hidden: [...view.hidden],
           isolated: [...view.isolated],
-          opacity: settings?.components?.opacity ?? [],
+          opacity: entrySettings?.components?.opacity ?? [],
         },
       },
     },
@@ -323,7 +415,7 @@ export const createMcpViewerWorkbench = (options: McpViewerWorkbenchOptions = {}
       }
       pages.set(page, { baseline: seen.baseline, previous: view });
       const changed = changedBetween(seen.previous, view);
-      if (view.interactedAt <= seen.baseline || (!changed.camera && !changed.components)) {
+      if (view.interactedAt <= seen.baseline || (!changed.camera && !changed.settings && !changed.components)) {
         return;
       }
       /* A report still waiting keeps the parts it changed; this one adds its own. */
@@ -333,6 +425,7 @@ export const createMcpViewerWorkbench = (options: McpViewerWorkbenchOptions = {}
         view,
         changed: {
           camera: changed.camera || (queued?.camera ?? false),
+          settings: changed.settings || (queued?.settings ?? false),
           components: changed.components || (queued?.components ?? false),
         },
       });
@@ -342,6 +435,11 @@ export const createMcpViewerWorkbench = (options: McpViewerWorkbenchOptions = {}
       }, settle);
       // A waiting write must not keep `tau mcp` running after stdin closes; `close` writes it.
       timer.unref();
+    },
+    async state({ root, entryPath }) {
+      /* A write waiting or under way lands first, so a reload reads what the page reported last. */
+      await flush();
+      return readState(root, entryPath);
     },
     flush,
     close: flush,

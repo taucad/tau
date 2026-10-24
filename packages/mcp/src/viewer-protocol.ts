@@ -4,17 +4,16 @@
  * The page imports this module, so it holds names, shapes and pure helpers
  * only: no SDK, no zod and no Node built-ins. The runtime's issue and source revision types are imported as types only.
  */
+import type { ComponentDisplay, ViewSettings, WorkbenchView } from '@taucad/workbench';
 
 import type { KernelIssue, SourceRevision } from '@taucad/runtime/types';
 
 /** Tools the viewer page and its host entrypoints call. @public */
 export const tauViewerToolName = {
-  /** Show a project model in the viewer (the thread entrypoint). */
+  /** Show a project model in the viewer (the thread and global entrypoints). */
   showModel: 'show_model',
   /** Open one model file the host hands over (the file entrypoint). */
   openModelFile: 'open_model_file',
-  /** List the project's renderable files (the global entrypoint). */
-  browseModels: 'browse_models',
   /** Read a byte range of a shown model; only the page calls it. */
   appRead: 'app_read',
   /** What the person sees in the viewer, and optionally a capture of it (the model calls it). */
@@ -25,7 +24,39 @@ export const tauViewerToolName = {
   appCaptureReply: 'app_capture_reply',
   /** The shown model's project packed for the page's direct share link. */
   appShareLink: 'app_share_link',
+  /** The view the project's `.tau/workbench` records keep for a shown model, which the page restores. */
+  appWorkbenchState: 'app_workbench_state',
+  /** One folder of the project, or the files a search finds, for the page's Files pane. */
+  appListFiles: 'app_list_files',
+  /** Show one project file in the calling page only. */
+  appOpenFile: 'app_open_file',
+  /** Render transient parameter values on a shown source's watched document, for a drag in the Parameters pane. */
+  appPreviewParameters: 'app_preview_parameters',
+  /** Drive and read the shown model's mechanism: play, pause, seek or reset an animation, or set coordinates. */
+  poseModel: 'pose_model',
 } as const;
+
+/**
+ * Arguments of `app_preview_parameters`.
+ *
+ * @public
+ */
+export type TauViewerPreviewParametersInput = Readonly<{
+  /** The shown model; it must be a render of a watched source. */
+  modelId: string;
+  /** Partial values over the committed record's active group; omitted, the preview ends and the committed render returns. */
+  parameters?: Readonly<Record<string, unknown>> | undefined;
+}>;
+
+/**
+ * What `app_preview_parameters` answers.
+ *
+ * @public
+ */
+export type TauViewerPreviewResult = Readonly<{
+  /** `false` when a newer preview or a committed change superseded this one. */
+  accepted: boolean;
+}>;
 
 /** Name of one viewer tool. @public */
 export type TauViewerToolName = (typeof tauViewerToolName)[keyof typeof tauViewerToolName];
@@ -77,6 +108,11 @@ export type TauViewerModel = Readonly<{
   sourceRevision?: SourceRevision | undefined;
   /** What the runtime reported while rendering the source, such as warnings; absent when it reported nothing. */
   issues?: readonly TauViewerIssue[] | undefined;
+  /**
+   * An opaque key for the model's project (the first 16 hex digits of the SHA-256 of its folder), so the page keeps
+   * its own per-project state without seeing the path. An older server omits it.
+   */
+  projectKey?: string | undefined;
 }>;
 
 /** What a shown GLB carries of its source's mechanism, for the page's Kinematics pane. @public */
@@ -121,15 +157,46 @@ export type TauViewerShowResult = Readonly<{
   select?: readonly string[] | undefined;
 }>;
 
-/** One renderable file `browse_models` lists. @public */
-export type TauViewerFile = Readonly<{
+/** One file or folder `app_list_files` lists. @public */
+export type TauViewerFileEntry = Readonly<{
+  name: string;
+  /** Project-relative POSIX path. */
   path: string;
-  title: string;
+  isFolder: boolean;
+  /** Bytes, for a file. */
+  size?: number | undefined;
+  /** The viewer can show it (a source, an exchange format, GLB or SVG). */
+  renderable: boolean;
 }>;
 
-/** Structured result of `browse_models`. @public */
-export type TauViewerBrowseResult = Readonly<{
-  files: readonly TauViewerFile[];
+/** Arguments of `app_list_files`: a folder to list, or a search, never both. @public */
+export type TauViewerListFilesInput = Readonly<{
+  /** A model the page shows; its project is the one listed. Without it, the project of the call. */
+  modelId?: string | undefined;
+  /** The folder to list; `''` is the project root. */
+  path?: string | undefined;
+  /** Find the files whose path contains this text, ignoring case. */
+  query?: string | undefined;
+}>;
+
+/** Structured result of `app_list_files`; `.tau` and dependency folders are never listed. @public */
+export type TauViewerListFilesResult = Readonly<{
+  /** Folders first, then by name; search results by path. */
+  entries: readonly TauViewerFileEntry[];
+  /** Whether more entries matched than the answer carries. */
+  truncated: boolean;
+  /** Moves whenever a listed file is created, changed or removed, as `app_sync`'s `filesVersion` does. */
+  filesVersion: number;
+}>;
+
+/** Arguments of `app_open_file`; it answers a {@link TauViewerShowResult} for the calling page alone. @public */
+export type TauViewerOpenFileInput = Readonly<{
+  /** The calling page, as its `app_sync` names it. */
+  pageId: string;
+  /** A model the page shows; the file is opened in that model's project. Without it, the project of the call. */
+  modelId?: string | undefined;
+  /** Project-relative path of the file to show. */
+  path: string;
 }>;
 
 /** Content encodings a page can undo on an `app_read` slice. @public */
@@ -214,7 +281,55 @@ export type TauViewerViewState = Readonly<{
    * plain text.
    */
   sourceRevision?: Readonly<{ entry: string; files: Readonly<Record<string, string>> }> | undefined;
+  /**
+   * The view's display, grid, field of view, up direction, section and pinned measurements, which the server keeps in
+   * the view record. A page sends it only to a server whose `app_sync` lists it under
+   * {@link TauViewerSyncResult.accepts}; `view_state` leaves it out.
+   */
+  settings?: TauViewerViewSettings | undefined;
+  /** The mechanism the page's Kinematics pane loaded from the shown GLB. Sent only to a server that `accepts` it. */
+  mechanism?: TauViewerMechanism | undefined;
+  /** The animation playback. Sent only to a server that `accepts` it. */
+  playback?: TauViewerPlayback | undefined;
+  /** Every degree of freedom at the current pose, in mechanism units. Sent only to a server that `accepts` it. */
+  coordinates?: Readonly<Record<string, number>> | undefined;
 }>;
+
+/** The page's playback of one model's animation, as its Kinematics pane runs it. @public */
+export type TauViewerPlayback = Readonly<{
+  status: 'stopped' | 'playing' | 'paused';
+  /** The selected animation; absent for none. */
+  animationId?: string | undefined;
+  /** Seconds into the animation. */
+  time: number;
+  /** Playback rate; 1 is real time. */
+  speed: number;
+}>;
+
+/**
+ * A `pose_model` command for the pages that show its model: an animation action, or driver coordinates. `sequence`
+ * rises with each command, so a page applies each one once.
+ *
+ * @public
+ */
+export type TauViewerPoseCommand = Readonly<{
+  sequence: number;
+  /** The model the command poses; a page showing another model ignores it. */
+  modelId: string;
+  animation?:
+    | Readonly<{
+        id: string;
+        action: 'play' | 'pause' | 'seek' | 'reset';
+        time?: number | undefined;
+        speed?: number | undefined;
+      }>
+    | undefined;
+  /** Driver coordinates in mechanism units. */
+  coordinates?: Readonly<Record<string, number>> | undefined;
+}>;
+
+/** The fields of a `.tau/workbench` view record a viewer owns besides its camera. @public */
+export type TauViewerViewSettings = ViewSettings;
 
 /**
  * The optional {@link TauViewerViewState} fields this server's `app_sync` takes. Its schema is strict, so a page sends
@@ -222,7 +337,14 @@ export type TauViewerViewState = Readonly<{
  *
  * @public
  */
-export const tauViewerAcceptedViewFields = ['references', 'sourceRevision'] as const;
+export const tauViewerAcceptedViewFields = [
+  'references',
+  'sourceRevision',
+  'settings',
+  'mechanism',
+  'playback',
+  'coordinates',
+] as const;
 
 /** Arguments of `app_sync`. @public */
 export type TauViewerSyncInput = Readonly<{
@@ -257,11 +379,39 @@ export type TauViewerSyncResult = Readonly<{
   status?: Readonly<Record<string, TauViewerEntryStatus>> | undefined;
   /** A capture of this page's view the agent is waiting for. */
   capture?: Readonly<{ requestId: string }> | undefined;
+  /** The latest `pose_model` command for the pages of this conversation. */
+  pose?: TauViewerPoseCommand | undefined;
   /**
    * The optional view fields the server takes ({@link tauViewerAcceptedViewFields}); absent from a server older than
    * them. A page may read names it does not know.
    */
   accepts?: readonly string[] | undefined;
+  /**
+   * Bumped when the file list of this page's project changes, once a Files pane listed it; the pane lists again when it
+   * moves. Absent before then, and from an older server.
+   */
+  filesVersion?: number | undefined;
+}>;
+
+/** Arguments of `app_workbench_state`. @public */
+export type TauViewerWorkbenchStateInput = Readonly<{ modelId: string }>;
+
+/**
+ * Structured result of `app_workbench_state`: what the project's `.tau/workbench` records keep for the shown model's
+ * entry, which the page seeds its viewer from before the first frame, as the Tau app does. Each part is absent when
+ * there is no record, or the record is invalid or from a newer Tau.
+ *
+ * @public
+ */
+export type TauViewerWorkbenchState = Readonly<{
+  /** The view the entry's layout shows first, its camera the active kernel view's when one is selected. */
+  view?:
+    | Readonly<Omit<WorkbenchView, 'version' | 'entryPath' | 'name' | 'kernelViews' | 'selectedKernelView'>>
+    | undefined;
+  /** That view's id in `.tau/workbench/views`. */
+  viewId?: string | undefined;
+  /** The entry's component display in `.tau/workbench/entries.json`. */
+  components?: Readonly<Pick<ComponentDisplay, 'hidden' | 'isolated'>> | undefined;
 }>;
 
 /** One captured image of the live view. @public */
@@ -290,6 +440,26 @@ export type TauViewerViewStateResult = Readonly<{
   view: TauViewerViewState;
   /** Why the capture is missing when one was asked for. */
   captureError?: string | undefined;
+}>;
+
+/** Arguments of `pose_model`. @public */
+export type TauViewerPoseInput = Readonly<{
+  targetFile?: string | undefined;
+  animation?: TauViewerPoseCommand['animation'];
+  coordinates?: Readonly<Record<string, number>> | undefined;
+}>;
+
+/** Structured result of `pose_model`. @public */
+export type TauViewerPoseResult = Readonly<{
+  model: Readonly<{ path: string; sourceFile?: string | undefined }>;
+  mechanism: Readonly<{ joints: number; animations: readonly string[] }>;
+  playback: TauViewerPlayback;
+  /** Every degree of freedom at the pose, in mechanism units. */
+  coordinates: Readonly<Record<string, number>>;
+  /** Degrees of freedom clamped to, or outside, their limits. */
+  atLimit: readonly string[];
+  /** Open viewer pages that apply the pose. */
+  viewers: number;
 }>;
 
 /** What `initialize` told the server about its client, as far as presentation is concerned. @public */

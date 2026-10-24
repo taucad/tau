@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 const fileSelectorSource = readFileSync(fileURLToPath(new URL('file-selector.tsx', import.meta.url)), 'utf8');
 
-describe('FileSelector Virtuoso integration', () => {
+describe('FileBrowser Virtuoso integration', () => {
   it('should not use a custom Virtuoso Scroller that drops children (regression: empty popover when > virtualizationThreshold)', () => {
     expect(fileSelectorSource).toContain('<Virtuoso');
     // oxlint-disable-next-line unicorn-js/better-regex -- explicit regression guard for the dropped-`children` Scroller bug

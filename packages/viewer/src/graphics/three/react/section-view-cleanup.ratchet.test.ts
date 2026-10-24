@@ -30,6 +30,7 @@ const stencilCapOwners = [
   'utils/section-stencil-caps.ts',
   'utils/section-stencil-caps.test.ts',
   'utils/section-stencil-caps.browser.test.ts',
+  'webgpu-depth-sampling.browser.test.ts',
 ] as const;
 
 const isStencilCapOwner = (filePath: string): boolean =>
@@ -98,7 +99,12 @@ describe('Section view stencil / manifold cleanup ratchet', () => {
     /* Full-word style scan: disallow these exact identifiers appearing as tokens. */
     const bannedIdentifiers = ['clearStencil', 'stencilWrite'] as const;
     const files = listTypeScriptFilesRecursively(graphicsThreeRoot).filter(
-      (path) => !path.endsWith('section-view-cleanup.ratchet.test.ts') && !isStencilCapOwner(path),
+      (path) =>
+        !path.endsWith('section-view-cleanup.ratchet.test.ts') &&
+        !isStencilCapOwner(path) &&
+        // Frame owners clear stencil at composition boundaries; they do not draw cap proxies.
+        !path.endsWith('/post-processing-webgpu.tsx') &&
+        !path.endsWith('/surface-reuse.ts'),
     );
 
     const rxById: Record<(typeof bannedIdentifiers)[number], RegExp> = {

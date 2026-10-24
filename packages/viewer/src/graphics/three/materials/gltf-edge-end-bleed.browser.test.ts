@@ -141,8 +141,23 @@ const sampleSpine = (
   return samples;
 };
 
+// Detect geometric coverage in linear light. A half-covered red MSAA sample over
+// white encodes as [255,188,188] on native GPU, so an encoded-channel threshold
+// incorrectly reports a gap. Apparent contrast is separately gated through the
+// full production post pipeline against the unchanged classic reference.
+const linearChannel = (channel: number): number => {
+  const encoded = channel / 255;
+  return encoded <= 0.04045 ? encoded / 12.92 : ((encoded + 0.055) / 1.055) ** 2.4;
+};
 const isEdge = (pixels: Uint8ClampedArray, index: number): boolean =>
-  pixels[index]! - Math.max(pixels[index + 1]!, pixels[index + 2]!) > 90;
+  linearChannel(pixels[index]!) - Math.max(linearChannel(pixels[index + 1]!), linearChannel(pixels[index + 2]!)) >
+  90 / 255;
+
+it('should recognize half-covered linear-light red strokes without accepting neutral surfaces', () => {
+  expect(isEdge(new Uint8ClampedArray([255, 188, 188, 255]), 0)).toBe(true);
+  expect(isEdge(new Uint8ClampedArray([188, 188, 188, 255]), 0)).toBe(false);
+  expect(isEdge(new Uint8ClampedArray([159, 179, 200, 255]), 0)).toBe(false);
+});
 
 /**
  * Edge pixels farther than the stroke's half width, plus half a pixel of raster/MSAA fringe, from

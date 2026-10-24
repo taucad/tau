@@ -1,3 +1,4 @@
+import type { GraphicsEvent } from '#machines/graphics.machine.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, cleanup } from '@testing-library/react';
 import { Canvas, createRoot, _roots, flushSync as flushThreeSync } from '@react-three/fiber';
@@ -19,7 +20,11 @@ const cameraRig = {
   orthographicCamera,
   setClipPlanes: vi.fn(),
 };
-vi.mock('#hooks/use-graphics.jsx', () => ({ useCameraRig: () => cameraRig }));
+const graphicsRef = { send: vi.fn<(event: GraphicsEvent) => void>() };
+vi.mock('#hooks/use-graphics.jsx', () => ({
+  useCameraRig: () => cameraRig,
+  useGraphics: () => graphicsRef,
+}));
 vi.mock('#graphics/three/scene.jsx', () => ({
   Scene: ({ children }: { readonly children: ReactNode }): ReactNode => children,
 }));
@@ -79,6 +84,7 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
   };
 
   beforeEach(() => {
+    graphicsRef.send.mockClear();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     cleanupCallbacks = 0;
     const allocateTimeout = globalThis.setTimeout;
@@ -124,7 +130,8 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
     width = 475;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, width, 864));
     allocation.createRenderer.mockImplementation(
-      async (_preset: string, _backend: string, canvas: HTMLCanvasElement) => {
+      async (_preset: string, _backend: string, surface: HTMLCanvasElement | { canvas: HTMLCanvasElement }) => {
+        const canvas = surface instanceof HTMLCanvasElement ? surface : surface.canvas;
         const renderer = new WebGPURenderer({
           canvas,
           reversedDepthBuffer: true,
@@ -138,7 +145,10 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
           }
         });
         // Installed Three has these methods; its published Backend declaration omits them.
-        const backend = renderer.backend as typeof renderer.backend & { updateSize: () => void; dispose: () => void };
+        const backend = renderer.backend as typeof renderer.backend & {
+          updateSize: () => void;
+          dispose: () => void;
+        };
         vi.spyOn(backend, 'updateSize').mockImplementation(() => undefined);
         vi.spyOn(backend, 'dispose').mockImplementation(() => undefined);
         vi.spyOn(renderer, 'render').mockImplementation(() => undefined);
@@ -427,6 +437,7 @@ describe('ThreeCanvasInstance renderer lifetime', () => {
       expect.soft(disposeCalls[0]).toHaveBeenCalledOnce();
       expect.soft(perspectiveCamera.coordinateSystem).toBe(WebGLCoordinateSystem);
       expect(root.store.getState().internal.active).toBe(false);
+      expect(graphicsRef.send).not.toHaveBeenCalled();
     },
   );
 });

@@ -160,6 +160,7 @@ const createElectronUtilityClient = (
       ...(detail === undefined ? {} : { released: false }),
       ...(detail?.exitCode === undefined ? {} : { exitCode: detail.exitCode }),
       ...(detail?.stderrTail === undefined ? {} : { stderrTail: detail.stderrTail }),
+      ...(detail?.exceeded === undefined ? {} : { exceeded: detail.exceeded }),
       ...(wireReason === undefined ? {} : { reason: wireReason }),
     };
   };

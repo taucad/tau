@@ -41,7 +41,7 @@ describe('isFeatureEnabled', () => {
     expect(isFeatureEnabled('automaticReload', storage)).toBe(false);
   });
 
-  it.each(['webGpu', 'webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore'] as const)(
+  it.each(['webGpuShaderStacks', 'webGpuInspector', 'partsWarehouse', 'pluginsStore'] as const)(
     'should keep the hidden %s flag at its disabled default despite an override',
     (flag) => {
       const storage = createMockStorage();
@@ -50,6 +50,16 @@ describe('isFeatureEnabled', () => {
       expect(isFeatureEnabled(flag, storage)).toBe(false);
     },
   );
+
+  it('should prefer WebGPU by default and retain an explicit WebGL preference', () => {
+    const storage = createMockStorage();
+    expect(isFeatureEnabled('webGpu', storage)).toBe(true);
+    setFlagOverrides({ webGpu: false }, storage);
+    resetFlagCache();
+    expect(isFeatureEnabled('webGpu', storage)).toBe(false);
+    setFlagOverrides({ webGpu: true }, storage);
+    expect(isFeatureEnabled('webGpu', storage)).toBe(true);
+  });
 
   it('should return default value when no overrides exist', () => {
     const storage = createMockStorage();

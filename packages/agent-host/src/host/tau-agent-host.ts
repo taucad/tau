@@ -11,7 +11,7 @@ import { waitFor } from 'xstate';
 import { createTurnContextSnapshot } from '#harness/cad-middleware.js';
 import type { ClientContext } from '#harness/cad-middleware.js';
 import { codedFailureDetail } from '#harness/coded-failure.js';
-import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { createInterruptRecoveryMessage, interruptedToolOutput } from '#harness/interrupt-recovery.js';
 import { createOutputLimitRecoveryMessage } from '#harness/output-limit-recovery.js';
 import { createAgentSession, fundingPrincipal, settledInvocation, settledRowOf } from '#harness/session.js';
 import type {
@@ -718,8 +718,8 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   /**
    * Approvals a call of this host recalled, by run and interrupt: spent the moment a call recalls one, so two
-   * parallel calls under one key never both use one answer (GM.r1 L4). The output row's `approval` mark is the durable
-   * spend a later incarnation reads.
+   * parallel calls under one key never both use one answer (GM.r1 L4). The `approval.spent` row the recall writes
+   * before answering, and the output row's `approval` mark, are the durable spend a later incarnation reads (D23).
    *
    * ponytail: grows by one entry per recalled approval for the host's life; drop a run's entries when it settles if
    * a host ever serves enough approvals for that to matter.
@@ -730,8 +730,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * A tool's resolved approval under `key` in this run, until a call uses it (D5).
    *
    * The request row names the key and the tool; the answer is the `resolved` row of the same interrupt. The call that
-   * recalls an answer spends it: its output row carries the interrupt (`metadata.approval`), and this host remembers
-   * the recall, so a later call under the same key asks again rather than reusing one decision twice (GM.r1 M1).
+   * recalls an answer spends it: an `approval.spent` row (D23), then its output row (`metadata.approval`), and this
+   * host remembers the recall, so a later call under the same key asks again rather than reusing one decision twice
+   * (GM.r1 M1). A `released` row hands back an answer whose recalling call threw.
    */
   const recallApproval = async (
     { chatId, runId }: Readonly<{ chatId: string; runId: string }>,
@@ -749,6 +750,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         const approval: unknown = row.message.metadata?.['approval'];
         if (typeof approval === 'object' && approval !== null && 'interruptId' in approval) {
           spent.add(String(approval.interruptId));
+        }
+      } else if (row.type === 'approval.spent') {
+        if (row.phase === 'spent') {
+          spent.add(row.interruptId);
+        } else {
+          spent.delete(row.interruptId);
         }
       } else if (row.type === 'interrupt.recorded' && isJsonObject(row.payload)) {
         const { context } = row.payload;
@@ -845,19 +852,57 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * output row tells the model. The decision resolves the interrupt; the next attempt is told the answer and the
    * tool's `recall` finds it.
    *
+   * A recalled answer is spent durably before the tool is told it (D23, I13): the `approval.spent` row is appended
+   * through the attempt's own gated chain and persisted, so a host that dies after the tool's effect started and
+   * before its output row cannot let the next incarnation recall the same answer. A spend that cannot be written
+   * (the attempt already ended) releases the claim and fails the call before any effect.
+   *
    * @param key - The attempt the tool runs in.
    * @param invocation - The tool call asking.
-   * @returns The approval for that call, and the recalled approval it used, if any.
+   * @param append - The attempt's gated row writer.
+   * @returns The approval for that call, the recalled approval it used, if any, and how to hand it back.
    */
   const approvalFor = (
     key: TurnAttemptKey,
     invocation: Readonly<{ toolCallId: string; toolName: string; signal: AbortSignal }>,
-  ): Readonly<{ approve: HostToolApproval; spent: () => string | undefined }> => {
-    let spent: string | undefined;
+    append: (bodies: readonly LogRowBody[]) => Promise<void>,
+  ): Readonly<{ approve: HostToolApproval; spent: () => string | undefined; release: () => Promise<void> }> => {
+    let spent: Readonly<{ interruptId: string; approvalKey: string }> | undefined;
+    const spendRow = (phase: 'spent' | 'released', claim: NonNullable<typeof spent>): LogRowBody => ({
+      type: 'approval.spent',
+      phase,
+      interruptId: claim.interruptId,
+      toolCallId: invocation.toolCallId,
+      approvalKey: claim.approvalKey,
+    });
     const recall = async (approvalKey: string): Promise<HostToolApprovalRecord | undefined> => {
+      if (spent !== undefined) {
+        /* One call spends at most one answer: a second recall asks again. */
+        return undefined;
+      }
       const record = await recallApproval(key, approvalKey);
-      spent ??= record?.resolution.interruptId;
+      if (record === undefined) {
+        return undefined;
+      }
+      const claim = { interruptId: record.resolution.interruptId, approvalKey };
+      try {
+        await append([spendRow('spent', claim)]);
+      } catch (error) {
+        recalledApprovals.delete(`${key.runId}/${claim.interruptId}`);
+        throw error;
+      }
+      spent = claim;
       return record;
+    };
+    const release = async (): Promise<void> => {
+      const claim = spent;
+      if (claim === undefined) {
+        return;
+      }
+      spent = undefined;
+      /* Durable first: a crash before the release lands keeps the answer spent, never usable twice. */
+      await append([spendRow('released', claim)]);
+      recalledApprovals.delete(`${key.runId}/${claim.interruptId}`);
     };
     const approve = async (request: Parameters<HostToolApproval>[0]): Promise<InterruptResolution> => {
       if (request.key !== undefined) {
@@ -911,23 +956,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         void settleQuietly(aborted.promise);
       }
     };
-    return { approve: Object.assign(approve, { recall }), spent: () => spent };
+    return { approve: Object.assign(approve, { recall }), spent: () => spent?.interruptId, release };
   };
 
   /** A Tau attempt's tools, each call carrying its approval and marking the recalled one it used (D5). */
-  const approvingTools = (key: TurnAttemptKey, tools: ToolRegistry): ToolRegistry => ({
+  const approvingTools = (
+    key: TurnAttemptKey,
+    tools: ToolRegistry,
+    append: (bodies: readonly LogRowBody[]) => Promise<void>,
+  ): ToolRegistry => ({
     list: () => tools.list(),
     invoke: async (invocation) => {
-      const { approve, spent } = approvalFor(key, invocation);
+      const { approve, spent, release } = approvalFor(key, invocation, append);
       let result: Awaited<ReturnType<ToolRegistry['invoke']>>;
       try {
         result = await tools.invoke({ ...invocation, approve });
       } catch (error) {
-        /* The call recorded no spend, so its claim is released and a retry recalls the approval rather than asking. */
-        const claimed = spent();
-        if (claimed !== undefined) {
-          recalledApprovals.delete(`${key.runId}/${claimed}`);
-        }
+        /* The call produced no output, so its claim is released and a retry recalls the approval rather than asking. */
+        await release().catch(() => undefined);
         throw error;
       }
       const interruptId = spent();
@@ -1396,19 +1442,9 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         }
       }
       const missing = pendingToolCalls(history);
+      /* Never rerun: a call with no output row is recorded `interrupted` (D23, I13). */
       const disconnected = missing.map(
-        (call): ProviderMessage => ({
-          id: createId(),
-          role: 'tool-output',
-          toolCallId: call.toolCallId,
-          toolName: call.toolName,
-          content: {
-            errorCode: 'CLIENT_DISCONNECTED',
-            message: 'The prior host stopped before this tool returned. Verify state before retrying.',
-          },
-          isError: true,
-          metadata: { timestamp: now().getTime() },
-        }),
+        (call): ProviderMessage => interruptedToolOutput({ id: createId(), ...call, timestamp: now().getTime() }),
       );
       recovery.push(...disconnected.map((message): LogRowBody => ({ type: 'message.appended', message })));
       const reminder = await createInterruptRecoveryMessage({
@@ -1589,7 +1625,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               model,
               modelTransport: options.modelTransport,
               /* The attempt's tools, as W8 granted them over its checkout (RA-R12); the host's without placement. */
-              toolRegistry: approvingTools(key, grant?.tools ?? options.toolRegistry),
+              toolRegistry: approvingTools(key, grant?.tools ?? options.toolRegistry, append),
               eventLog: log,
               /* I2: the session's rows go through the chat's one chain, gated by its attempt (RA-R6). */
               appendEvent: async (event) => append([event as LogRowBody]),

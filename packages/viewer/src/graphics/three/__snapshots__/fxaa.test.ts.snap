@@ -1,0 +1,34 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`should preserve the resource-free FXAA graph for a caller-owned color input 1`] = `
+"{
+  "blendColor": 0,
+  "inputNodes": {
+    "fragmentNode": "<nodeRef>"
+  },
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "nodes": [
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    }
+  ],
+  "type": "NodeMaterial"
+}
+"
+`;

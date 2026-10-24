@@ -1,9 +1,11 @@
 /* oxlint-disable eslint/no-bitwise -- Stencil references and masks are bit fields. */
 import * as THREE from 'three';
+import type { Node } from 'three/webgpu';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { isSameSectionHalfSpace, resolveSectionFaces, resolveSectionTrimmingPieces } from '#graphics/section-cuts.js';
 import type { SectionFace, SectionHalfSpace, SectionPiece } from '#graphics/section-cuts.js';
 import { createSectionCapOutlineNodeMaterial } from '#graphics/three/materials/section-cap-outline.node.js';
+import { createSectionOutlineGeometryCache } from '#graphics/three/utils/section-outline-geometry.js';
 import {
   createSectionCapOutlineFaces,
   createSectionCapOutlineMaterial,
@@ -11,7 +13,12 @@ import {
   writeSectionCapOutlineFaces,
 } from '#graphics/three/materials/section-cap-outline.material.js';
 import type { SectionCapOutlineFaces } from '#graphics/three/materials/section-cap-outline.material.js';
-import { createSectionClip, installSectionClip, writeSectionClip } from '#graphics/three/materials/section-clip.js';
+import {
+  createSectionClip,
+  createSectionClipMask,
+  installSectionClip,
+  writeSectionClip,
+} from '#graphics/three/materials/section-clip.js';
 import type { SectionClip } from '#graphics/three/materials/section-clip.js';
 import {
   applySectionCapStencilPass,
@@ -417,7 +424,9 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   /** The same faces as {@link outlineFaces}, at the open chains' wider line. */
   const openChainFaces = createSectionCapOutlineFaces();
   const outlineClip = createSectionClip(backend);
+  const outlineMask = outlineClip.backend === 'webgpu' ? createSectionClipMask(outlineClip, 0.5) : undefined;
   const outlineMaterials = new Map<number, THREE.Material>();
+  const outlineGeometry = backend === 'webgpu' ? createSectionOutlineGeometryCache() : undefined;
   let openChainMaterial: THREE.Material | undefined;
   const stencilMaterials = new Map<SectionStencilPass, THREE.Material>();
   let overlapCapMaterial: THREE.Material | undefined;
@@ -487,11 +496,12 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   };
 
   const createOutlineMaterial = (faces: SectionCapOutlineFaces, color: number): THREE.Material => {
-    const material = own(
-      backend === 'webgpu'
-        ? createSectionCapOutlineNodeMaterial(faces, color)
-        : createSectionCapOutlineMaterial(faces, color),
-    );
+    if (outlineMask) {
+      const material = createSectionCapOutlineNodeMaterial(faces, color);
+      material.maskNode = (material.maskNode as Node<'bool'>).and(outlineMask);
+      return own(material);
+    }
+    const material = own(createSectionCapOutlineMaterial(faces, color));
     installSectionClip(material, outlineClip);
     return material;
   };
@@ -740,7 +750,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
         stats.outlineSourceCount++;
         const material = outlineMaterial(source.edgeHex);
         for (const mesh of source.meshes) {
-          takeMesh(mesh.geometry, material, mesh.matrixWorld, outlineOrder);
+          takeMesh(outlineGeometry?.get(mesh.geometry) ?? mesh.geometry, material, mesh.matrixWorld, outlineOrder);
         }
       }
       // Open chains over the ordinary outline, in one colour on every theme and emphasis: the cut there bounds no cap.
@@ -750,7 +760,12 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
           if (geometry.openChainCount > 0) {
             stats.openChainDrawCount++;
             openChainMaterial ??= createOutlineMaterial(openChainFaces, sectionCapOpenChainColor);
-            takeMesh(geometry.open, openChainMaterial, source.loops!.matrix, openChainOrder);
+            takeMesh(
+              outlineGeometry?.get(geometry.open) ?? geometry.open,
+              openChainMaterial,
+              source.loops!.matrix,
+              openChainOrder,
+            );
           }
         }
       }
@@ -767,6 +782,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     }
     stats.meshDrawCount = meshesUsed;
     stats.polygonDrawCount = polygonsUsed;
+    outlineGeometry?.retireUnused();
     if (meshesUsed + polygonsUsed > 0) {
       const previousAutoClear = renderer.autoClear;
       renderer.autoClear = false;
@@ -796,6 +812,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
       fillSlots.length = 0;
       capSlots.length = 0;
       outlineMaterials.clear();
+      outlineGeometry?.dispose();
       openChainMaterial = undefined;
       stencilMaterials.clear();
       overlapCapMaterial = undefined;

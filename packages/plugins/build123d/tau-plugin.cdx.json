@@ -116,40 +116,6 @@
       ]
     },
     {
-      "bom-ref": "06b8afe042694a5c75c0cda8277b1f035084a9d532c1657334e7d14c80f350d2",
-      "type": "file",
-      "name": "tau-worker/worker.py",
-      "hashes": [
-        {
-          "alg": "SHA-256",
-          "content": "06b8afe042694a5c75c0cda8277b1f035084a9d532c1657334e7d14c80f350d2"
-        }
-      ],
-      "licenses": [
-        {
-          "expression": "Apache-2.0"
-        }
-      ],
-      "properties": [
-        {
-          "name": "taucad:target",
-          "value": "darwin-arm64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "darwin-x64"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-arm64-glibc"
-        },
-        {
-          "name": "taucad:target",
-          "value": "linux-x64-glibc"
-        }
-      ]
-    },
-    {
       "bom-ref": "076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9",
       "type": "library",
       "name": "psutil",
@@ -3368,6 +3334,40 @@
         {
           "type": "distribution",
           "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl"
+        }
+      ],
+      "properties": [
+        {
+          "name": "taucad:target",
+          "value": "darwin-arm64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "darwin-x64"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-arm64-glibc"
+        },
+        {
+          "name": "taucad:target",
+          "value": "linux-x64-glibc"
+        }
+      ]
+    },
+    {
+      "bom-ref": "e2ef1cead6a92c4ee70427c680a95507c5b30c6576e0d86ec174f2b3e3dbd7fc",
+      "type": "file",
+      "name": "tau-worker/worker.py",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "e2ef1cead6a92c4ee70427c680a95507c5b30c6576e0d86ec174f2b3e3dbd7fc"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
         }
       ],
       "properties": [

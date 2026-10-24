@@ -59,6 +59,7 @@ const [
   modelInvocationBound,
   modelInvocationCharged,
   modelInvocationVoided,
+  approvalSpent,
   runLifecycle,
   historyProjectionCommitted,
 ] = projectionEffectSchemas;
@@ -78,6 +79,7 @@ const effectSchema: z.ZodType<ProjectionEffect> = z.discriminatedUnion('type', [
   modelInvocationPrepared.strict(),
   modelInvocationBound.strict(),
   z.discriminatedUnion('outcome', [modelInvocationCharged.strict(), modelInvocationVoided.strict()]),
+  approvalSpent.strict(),
   runLifecycle.strict(),
   historyProjectionCommitted.strict(),
 ]);

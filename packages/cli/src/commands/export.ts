@@ -2,6 +2,7 @@ import { defineCommand } from 'citty';
 import { resolve, basename, dirname, extname, relative, sep } from 'node:path';
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileExtensionSet } from '@taucad/runtime/types';
 import type { ExportResult } from '@taucad/runtime';
 import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
@@ -13,6 +14,9 @@ import { authorizeCliZooProxy, cliZooProxyUrl } from '#zoo-proxy.js';
 import { buildExportProfile, createPhaseLedger } from '#commands/export-profile.js';
 import type { CliProfilePhase } from '#commands/export-profile.js';
 import { cliError, createOutput, emit, exitCodes, sanitize, writeStdout } from '#output.js';
+
+/** How long a profiled export waits for its trailing telemetry batch, in milliseconds. */
+const exportTelemetryWait = 2000;
 
 /**
  * Parse a flag's JSON object, refusing anything else as a usage error.
@@ -213,6 +217,9 @@ export const exportCommand = defineCommand({
     });
     profileLedger?.checkpoint('runtime.create-client');
     const telemetryEntries: TelemetryEntry[] = [];
+    /* An operation's spans leave after its terminal reply and shutdown stops listening, so the
+     * profile waits, briefly, for the batch that carries the export's own root. */
+    const exportTelemetry = Promise.withResolvers<void>();
 
     client.on('log', (entry) => {
       const level = entry.level as 'info' | 'warn' | 'error' | 'debug';
@@ -221,7 +228,12 @@ export const exportCommand = defineCommand({
       }
     });
     if (telemetryPath) {
-      client.on('telemetry', (batch) => telemetryEntries.push(...batch.entries));
+      client.on('telemetry', (batch) => {
+        telemetryEntries.push(...batch.entries);
+        if (batch.entries.some((entry) => entry.name === 'kernel.export')) {
+          exportTelemetry.resolve();
+        }
+      });
     }
 
     let runtimeExportPhase: CliProfilePhase | undefined;
@@ -273,6 +285,9 @@ export const exportCommand = defineCommand({
       }
       const result = outcome.value;
       runtimeExportPhase = profileLedger?.checkpoint('runtime.export');
+      if (telemetryPath) {
+        await Promise.race([exportTelemetry.promise, delay(exportTelemetryWait, undefined, { ref: false })]);
+      }
 
       if (!result.success) {
         const unprepared = unpreparedKernelError(result.issues);

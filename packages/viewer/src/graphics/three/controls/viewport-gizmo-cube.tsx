@@ -120,7 +120,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     };
 
     const gizmo = new ViewportGizmo(initialCameraRef.current, gl, gizmoConfig);
-    applyViewportGizmoSurface(gizmo, style);
+    applyViewportGizmoSurface(gizmo, style, graphicsBackendThree);
     gizmoRef.current = gizmo;
 
     syncGizmoFov(gizmo, cameraRig.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView);

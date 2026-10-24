@@ -6,18 +6,31 @@ type TimerQueryExtension = {
   readonly QUERY_COUNTER_BITS_EXT: number;
 };
 
+export type GpuPassRange = {
+  readonly uid: string;
+  /** Milliseconds relative to this sampled frame's earliest pass start. */
+  readonly start: number;
+  readonly end: number;
+};
+
 export type FrameGpuTimer = {
   readonly support: { readonly extension: string; readonly counterBits: number };
   /** Returns false when another query is active or eight samples are pending. */
   begin: () => boolean;
   end: () => void;
   /** Returns completed samples without waiting; discarded count is cumulative. */
-  poll: () => { milliseconds: number[]; pending: number; disjointDiscarded: number };
+  poll: () => {
+    milliseconds: number[];
+    passRanges?: GpuPassRange[][];
+    pending: number;
+    disjointDiscarded: number;
+    failedSamples?: number;
+  };
   dispose: () => void;
 };
 
 /** Times submitted WebGL2 frame commands using the Khronos elapsed-query extension. */
-export function createFrameGpuTimer(renderer: WebGLRenderer): FrameGpuTimer | undefined {
+export function createFrameGpuTimer(renderer: Pick<WebGLRenderer, 'getContext'>): FrameGpuTimer | undefined {
   const gl = renderer.getContext();
   if (!('createQuery' in gl)) {
     return undefined;
@@ -105,4 +118,21 @@ export function createFrameGpuTimer(renderer: WebGLRenderer): FrameGpuTimer | un
       }
     },
   };
+}
+
+/**
+ * Correlate ordered results with successful query submissions; never zip across missing results.
+ * @param frames - Render callbacks in workload order, including callbacks skipped by the timer.
+ * @param results - Resolved count and cumulative failure state for the same measurement window.
+ * @returns Sample frame indices only when every accepted query completed successfully.
+ */
+export function correlateGpuFrames(
+  frames: ReadonlyArray<{ gpuQueryStarted: boolean }>,
+  results: { samples: number; pending: number; disjointDiscarded: number; failedSamples?: number },
+): number[] | undefined {
+  if (results.pending > 0 || results.disjointDiscarded > 0 || (results.failedSamples ?? 0) > 0) {
+    return undefined;
+  }
+  const indices = frames.flatMap((frame, index) => (frame.gpuQueryStarted ? [index] : []));
+  return indices.length === results.samples ? indices : undefined;
 }

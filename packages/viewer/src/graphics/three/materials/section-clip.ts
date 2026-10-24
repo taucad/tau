@@ -1,20 +1,10 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`Loop`/`Break` are shader graph factories */
+import { namedUniformArray } from '#graphics/three/materials/named-uniform-array.js';
+import { triangleWorldDerivatives } from '#graphics/three/materials/triangle-derivatives.node.js';
 import { Vector2, Vector4 } from 'three';
 import type { Material, Object3D, WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import type { Node } from 'three/webgpu';
-import {
-  bool,
-  Break,
-  cameraWorldMatrix,
-  float,
-  Fn,
-  If,
-  Loop,
-  positionView,
-  uniform,
-  uniformArray,
-  vec4,
-} from 'three/tsl';
+import { bool, Break, cameraWorldMatrix, float, Fn, If, Loop, positionView, uniform, vec4 } from 'three/tsl';
 import { maxSectionPieces } from '#graphics/section-cuts.js';
 import type { SectionPiece } from '#graphics/section-cuts.js';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
@@ -91,17 +81,31 @@ const appendAfterChunk = (source: string, anchor: string, addition: string): str
   return `${source.slice(0, end)}${addition}${source.slice(end)}`;
 };
 
-/*
+/**
  * The world position comes from the view position, not `positionWorld`: three rebuilds `positionView` from clip space
  * for a material with its own `vertexNode` (Line2), whose `positionLocal` is the unit quad every segment shares.
+ *
+ * Retained-volume mask; optional device-pixel padding preserves an analytic outline's pixel footprint.
+ * Surfaces and picking use zero padding. The outline still owns coverage and geometric depth.
+ * @internal
+ * @param storage - Per-owner section uniforms, updated in place.
+ * @param paddingPixels - Conservative pixel footprint, zero for surfaces and picking.
+ * @returns Retained-volume fragment mask.
  */
-const createSectionClipMask = ({ settings, first, second }: SectionClipStorage): Node<'bool'> => {
+export const createSectionClipMask = (
+  { settings, first, second }: SectionClipStorage,
+  paddingPixels = 0,
+): Node<'bool'> => {
   const clip = uniform(settings);
   // The arrays are read by reference each frame, so writing their vectors in place is the whole update.
-  const firstHalfSpaces = uniformArray<'vec4'>(first as Vector4[], 'vec4');
-  const secondHalfSpaces = uniformArray<'vec4'>(second as Vector4[], 'vec4');
+  const firstHalfSpaces = namedUniformArray(first as Vector4[], 'tauSectionFirst');
+  const secondHalfSpaces = namedUniformArray(second as Vector4[], 'tauSectionSecond');
   return Fn(() => {
-    const point = cameraWorldMatrix.mul(vec4(positionView, 1)).xyz;
+    const point = cameraWorldMatrix.mul(vec4(positionView, 1)).xyz.toVar();
+    // Padding is used only by cap outlines, whose geometry has triangle normals.
+    const derivatives = paddingPixels > 0 ? triangleWorldDerivatives() : undefined;
+    const dx = derivatives?.dx;
+    const dy = derivatives?.dy;
     const isKept = bool(true).toVar();
     Loop(maxSectionPieces, ({ i }) => {
       If(float(i).greaterThanEqual(clip.x), () => {
@@ -109,7 +113,9 @@ const createSectionClipMask = ({ settings, first, second }: SectionClipStorage):
       });
       const a = firstHalfSpaces.element(i);
       const b = secondHalfSpaces.element(i);
-      If(point.dot(a.xyz).sub(a.w).greaterThan(clip.y).and(point.dot(b.xyz).sub(b.w).greaterThan(clip.y)), () => {
+      const marginA = dx && dy ? dx.dot(a.xyz).abs().add(dy.dot(a.xyz).abs()).mul(paddingPixels).add(clip.y) : clip.y;
+      const marginB = dx && dy ? dx.dot(b.xyz).abs().add(dy.dot(b.xyz).abs()).mul(paddingPixels).add(clip.y) : clip.y;
+      If(point.dot(a.xyz).sub(a.w).greaterThan(marginA).and(point.dot(b.xyz).sub(b.w).greaterThan(marginB)), () => {
         isKept.assign(bool(false));
         Break();
       });

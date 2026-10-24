@@ -276,6 +276,14 @@ export type KernelDefinitionV2<
    * threshold. Omit it for a kernel without a WebAssembly heap.
    */
   heapBytes?(context: Context): number | undefined;
+  /**
+   * Bytes of WebAssembly linear memory the kernel's instance has committed, read for observation only. Unlike
+   * {@link KernelDefinitionV2.heapBytes}, it never reaches a rendering and never feeds a host's recycling decision, so
+   * a kernel can report its heap here without changing when its worker is recycled. Implement it as one property read
+   * (`memory.buffer.byteLength`) with no allocation, and return `undefined` while the kernel holds no WebAssembly heap.
+   * Omit it for a kernel without one.
+   */
+  observedHeapBytes?(context: Context): number | undefined;
   onDispose?(context: Context): Promise<void>;
 } & SnapshotHooks<Context, Handle, Serialized> &
   RenderRequirement<Views> &

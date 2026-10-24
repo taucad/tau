@@ -223,7 +223,9 @@ it.each(['webgl', 'webgpu'] as const)(
         let visible = 0;
         for (let y = Math.floor(primaryCanvas.height * 0.7); y < primaryCanvas.height; y += 1) {
           const offset = (y * primaryCanvas.width + x) * 4;
-          if (pixels[offset + 3]! > 0 && pixels[offset]! < 245) {
+          // Transparent grid strokes can be white after output encoding. Measure
+          // coverage, not a dark-RGB cutoff that rejects legitimate filtered grid pixels.
+          if (pixels[offset + 3]! > 8) {
             visible += 1;
           }
         }

@@ -23,7 +23,11 @@ import { load } from 'js-yaml';
 
 const maxUidLength = 40;
 
-type UidSource = { readonly file: string; readonly kind: 'alert rule' | 'dashboard'; readonly uids: readonly string[] };
+type UidSource = {
+  readonly file: string;
+  readonly kind: 'alert rule' | 'dashboard';
+  readonly uids: readonly string[];
+};
 
 export const grafanaUidProblems = (sources: readonly UidSource[]): string[] => {
   const problems: string[] = [];
@@ -41,6 +45,24 @@ export const grafanaUidProblems = (sources: readonly UidSource[]): string[] => {
     }
   }
   return problems;
+};
+
+/**
+ * Runtime observability T32 (FR-26): a dashboard UID names one file. Deployment keys hosted dashboards
+ * on the UID, so two files with one UID (the process dashboard `runtime.json` and the runtime operations
+ * dashboard, say) would overwrite each other.
+ */
+export const dashboardUidProblems = (sources: readonly UidSource[]): string[] => {
+  const files = Map.groupBy(
+    sources.filter(({ kind }) => kind === 'dashboard').flatMap(({ file, uids }) => uids.map((uid) => ({ file, uid }))),
+    ({ uid }) => uid,
+  );
+  return [...files]
+    .filter(([, owners]) => owners.length > 1)
+    .map(
+      ([uid, owners]) =>
+        `dashboard UID "${uid}" is used by ${owners.map(({ file }) => basename(file)).join(', ')}; each dashboard needs its own UID`,
+    );
 };
 
 type RuleGroup = {
@@ -213,7 +235,11 @@ const comparable = (rule: unknown): unknown =>
     ),
   );
 
-const durationUnits: Readonly<Record<string, number>> = { h: 3600, m: 60, s: 1 };
+const durationUnits: Readonly<Record<string, number>> = {
+  h: 3600,
+  m: 60,
+  s: 1,
+};
 
 /** Seconds in a Grafana group interval (`60`, `"60s"`, `"1m30s"`, `"1h"`), or undefined when unreadable. */
 const seconds = (groupInterval: RuleGroup['interval']): number | undefined => {
@@ -309,17 +335,31 @@ const main = (): void => {
   const grafanaRoot = resolve(import.meta.dirname, '../../infra/grafana');
   const provisionedAlerts = join(grafanaRoot, 'provisioning/alerting/alerts.yaml');
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Grafana's provisioning file shape
-  const provisioned = load(readFileSync(provisionedAlerts, 'utf8')) as { groups?: RuleGroup[] };
+  const provisioned = load(readFileSync(provisionedAlerts, 'utf8')) as {
+    groups?: RuleGroup[];
+  };
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Grafana's rule-group and dashboard JSON shapes
   const read = (file: string) => JSON.parse(readFileSync(file, 'utf8')) as RuleGroup & { uid?: string };
 
   const sources: UidSource[] = [
-    { file: provisionedAlerts, kind: 'alert rule', uids: ruleUids(provisioned.groups ?? []) },
+    {
+      file: provisionedAlerts,
+      kind: 'alert rule',
+      uids: ruleUids(provisioned.groups ?? []),
+    },
     ...jsonFiles(join(grafanaRoot, 'alerts')).map(
-      (file): UidSource => ({ file, kind: 'alert rule', uids: ruleUids([read(file)]) }),
+      (file): UidSource => ({
+        file,
+        kind: 'alert rule',
+        uids: ruleUids([read(file)]),
+      }),
     ),
     ...jsonFiles(join(grafanaRoot, 'dashboards')).map(
-      (file): UidSource => ({ file, kind: 'dashboard', uids: [read(file).uid ?? ''] }),
+      (file): UidSource => ({
+        file,
+        kind: 'dashboard',
+        uids: [read(file).uid ?? ''],
+      }),
     ),
   ];
 
@@ -348,6 +388,7 @@ const main = (): void => {
   const cloudGroups = jsonFiles(join(grafanaRoot, 'alerts')).map((file) => [file, read(file)] as const);
   const problems = [
     ...grafanaUidProblems(sources),
+    ...dashboardUidProblems(sources),
     ...alertParityProblems(
       provisioned.groups ?? [],
       cloudGroups.map(([, group]) => group),

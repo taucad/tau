@@ -1,6 +1,6 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`ElseIf`/`Else` are shader graph factories */
 
-import { Color, DoubleSide, NoBlending, Vector2 } from 'three';
+import { Color, DoubleSide, Vector2 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
 import {
   abs,
@@ -29,7 +29,6 @@ import {
   vec4,
   varying,
   varyingProperty,
-  viewportTexture,
 } from 'three/tsl';
 
 import type {
@@ -38,7 +37,6 @@ import type {
   InfiniteGridVisualOverrides,
 } from '#graphics/three/materials/infinite-grid-material.types.js';
 import { infiniteGridFadeEndRatio, infiniteGridFadeStartRatio } from '#graphics/three/utils/infinite-grid-frame.js';
-import { compositeOverViewportSrgb } from '#graphics/three/materials/line2.material.js';
 
 const mapAxesToIndex = (axes: 'xyz' | 'xzy' | 'zyx'): number => {
   if (axes === 'xyz') {
@@ -210,11 +208,7 @@ export function createInfiniteGridNodeMaterial(
     return vec4(uColor.rgb, finalAlpha);
   })();
 
-  // Blend in sRGB space like WebGL's 8-bit canvas, not in the linear half-float frame target.
-  // Its own viewport copy: sharing the fat-line singleton would snapshot the frame before
-  // whichever of grid or axes draws first, and the later one would erase it.
-  material.outputNode = compositeOverViewportSrgb(material.colorNode.rgb, material.colorNode.a, viewportTexture());
-  material.blending = NoBlending;
+  // Blend directly into retained linear color; no full-viewport snapshot per overlay.
 
   const applyVisualOverrides = (overrides: InfiniteGridVisualOverrides): void => {
     if (overrides.smallSize !== undefined) {

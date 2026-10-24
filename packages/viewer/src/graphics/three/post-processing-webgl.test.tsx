@@ -329,7 +329,7 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     expect(mocks.composers).toHaveLength(1);
     expect(mocks.aoPasses.map(({ camera }) => camera)).toEqual([mocks.perspectiveCamera]);
     expect(mocks.composers[0]!.renderedCameras).toEqual([]);
-    expect(mocks.composers[0]!.passes).toHaveLength(6);
+    expect(mocks.composers[0]!.passes).toHaveLength(5);
     expect(mocks.composers[0]!.passes[1]?.['needsDepthTexture']).toBe(true);
     expect(mocks.composers[0]!.passes.at(-1)?.['renderToScreen']).toBe(true);
     expect(mocks.setRenderTarget).not.toHaveBeenCalled();
@@ -455,14 +455,14 @@ describe('PostProcessingWebGL shared composer and retained camera AO passes', ()
     expect(mocks.aoPasses.every(({ needsSwap }) => !needsSwap)).toBe(true);
     mounted.rerender(<PostProcessingWebGl settings={{ aoCompositeStage: 'display', displayMode: 'ao' }} />);
     expect(mocks.composers[0]!.passes[2]?.['enabled']).toBe(false);
-    expect(mocks.aoPasses.every(({ needsSwap }) => needsSwap)).toBe(true);
+    expect(mocks.aoPasses.every(({ needsSwap }) => !needsSwap)).toBe(true);
     expect(mocks.toneMappingEffects.map(({ blendMode }) => blendMode.opacity.value)).toEqual([1, 0]);
     mounted.rerender(<PostProcessingWebGl settings={{ aoCompositeStage: 'scene', displayMode: 'ao' }} />);
     expect(mocks.toneMappingEffects.at(-1)?.blendMode.opacity.value).toBe(0);
     mounted.rerender(<PostProcessingWebGl settings={{ aoCompositeStage: 'scene' }} />);
     expect(mocks.composers[0]!.passes[2]?.['enabled']).toBe(false);
     expect(mocks.toneMappingEffects.at(-1)?.blendMode.opacity.value).toBe(1);
-    expect(mocks.aoPasses.every(({ needsSwap }) => needsSwap)).toBe(true);
+    expect(mocks.aoPasses.every(({ needsSwap }) => !needsSwap)).toBe(true);
     mounted.rerender(<PostProcessingWebGl settings={{ aoCompositeStage: 'display', displayMode: 'no-ao' }} />);
     expect(mocks.aoPasses.every(({ needsSwap }) => !needsSwap)).toBe(true);
     mounted.rerender(<PostProcessingWebGl settings={{ aoCompositeStage: 'display', aoEnabled: false }} />);

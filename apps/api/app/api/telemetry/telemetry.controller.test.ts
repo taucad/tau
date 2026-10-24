@@ -5,6 +5,8 @@ import { TelemetryController } from '#api/telemetry/telemetry.controller.js';
 import { IngestPayloadDto } from '#api/telemetry/telemetry.dto.js';
 import { IngestEntryName, AttributeKey } from '@taucad/telemetry';
 import type { AgentTurnContext, ClientMetricEntry } from '@taucad/telemetry';
+import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { RuntimeIngestService } from '#api/telemetry/runtime-ingest.service.js';
 
 type AgentTurnDetail = Extract<ClientMetricEntry, { name: typeof IngestEntryName.AGENT_TURN }>['detail'];
 
@@ -41,17 +43,25 @@ describe('TelemetryController', () => {
 
   beforeEach(() => {
     mockMetrics = createMockMetrics();
-    controller = new TelemetryController(mockMetrics as unknown as MetricsService);
+    controller = new TelemetryController(
+      mockMetrics as unknown as MetricsService,
+      { ingest: vi.fn() } as unknown as RuntimeIngestService,
+    );
   });
 
+  /* A legacy-only batch is recorded synchronously and answered 204 before anything is awaited. */
+  const reply = { status: vi.fn(), header: vi.fn() } as unknown as FastifyReply;
+  const request = { headers: {}, ip: '192.0.2.1' } as unknown as FastifyRequest;
   const ingestSignedIn = (body: IngestPayloadDto): void => {
-    controller.ingest(body, 'user-1');
+    void controller.ingest(body, 'user-1', request, reply);
   };
 
   it('should accept a signed-out batch without recording it', () => {
-    controller.ingest(
+    void controller.ingest(
       { entries: [{ name: IngestEntryName.KERNEL_CREATE_GEOMETRY, duration: 1500, detail: { status: 'ok' } }] },
       undefined,
+      request,
+      reply,
     );
 
     expect(mockMetrics.kernelExecutionDuration.record).not.toHaveBeenCalled();

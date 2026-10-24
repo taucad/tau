@@ -6,10 +6,13 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
-    "target": "ESNext"
+    "target": "ESNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": [
     "vitest.config.ts",
+    "scripts/**/*.mts",
     "vitest.setup.ts",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",

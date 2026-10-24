@@ -1,0 +1,41 @@
+{
+  "title": "tau-storage-seeded-bad",
+  "interval": 60,
+  "rules": [
+    {
+      "uid": "storage-no-runbook",
+      "labels": { "severity": "warning", "service": "tau-api", "component": "git" },
+      "annotations": { "summary": "No runbook at all" }
+    },
+    {
+      "uid": "storage-runbook-research",
+      "labels": { "severity": "warning", "service": "tau-api", "component": "git" },
+      "annotations": { "runbook_url": "docs/research/hosted-remote-storage-observability.md" }
+    },
+    {
+      "uid": "storage-runbook-link",
+      "labels": { "severity": "critical", "service": "tau-api", "component": "r2" },
+      "annotations": { "runbook_url": "https://grafana.example/runbooks/storage" }
+    },
+    {
+      "uid": "storage-runbook-escape",
+      "labels": { "severity": "critical", "service": "tau-api", "component": "r2" },
+      "annotations": { "runbook_url": "docs/handbooks/cloud/../../research/storage.md" }
+    },
+    {
+      "uid": "storage-page-severity",
+      "labels": { "severity": "page", "service": "tau-api", "component": "git" },
+      "annotations": { "runbook_url": "docs/handbooks/cloud/playbooks/storage-failure.md" }
+    },
+    {
+      "uid": "trigger-stage2-commit-ceiling",
+      "labels": { "severity": "info", "service": "tau-api", "component": "git", "kind": "action" },
+      "annotations": { "runbook_url": "docs/handbooks/cloud/operate/storage-triggers.md" }
+    },
+    {
+      "uid": "trigger-stage2-commit-bound-latency",
+      "labels": { "severity": "info", "kind": "trigger", "trigger": "S2-4", "package": "" },
+      "annotations": { "runbook_url": "docs/handbooks/cloud/operate/storage-triggers.md" }
+    }
+  ]
+}

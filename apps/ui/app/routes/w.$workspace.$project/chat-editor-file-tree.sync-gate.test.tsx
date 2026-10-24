@@ -166,3 +166,16 @@ describe('the Files tree while the open pull is running', () => {
     expect(screen.getByText('No files available')).toBeInTheDocument();
   });
 });
+
+describe('the empty Files tree on touch (PN-FIL-3)', () => {
+  it('offers Upload files as its one clear action, so an empty project does not depend on dropping files', async () => {
+    sync.current = facet('noRemote');
+    renderTree();
+    const picker = screen.getByLabelText<HTMLInputElement>('Upload files', { selector: 'input' });
+    const openPicker = vi.spyOn(picker, 'click');
+
+    screen.getByRole('button', { name: 'Upload files' }).click();
+
+    expect(openPicker).toHaveBeenCalledOnce();
+  });
+});

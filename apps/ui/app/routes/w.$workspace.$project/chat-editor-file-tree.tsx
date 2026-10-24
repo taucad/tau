@@ -41,7 +41,7 @@ import type { KernelConfiguration } from '@taucad/types/constants';
 import type { FileItem } from '#types/editor.types.js';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import { cn } from '@taucad/ui/utils/cn';
-import { buttonVariants } from '@taucad/ui/components/button';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import { toast } from '#components/ui/sonner.js';
@@ -1941,7 +1941,7 @@ export const ChatEditorFileTree = memo(function ({
             <SearchInput
               {...tree.getSearchInputElementProps()}
               placeholder='Filter files…'
-              className='h-7 min-w-0 flex-1 bg-background'
+              className='h-7 min-w-0 flex-1 bg-background pointer-coarse:h-10'
               onBlur={undefined}
               onClear={() => {
                 tree.setSearch('');
@@ -2128,7 +2128,15 @@ export const ChatEditorFileTree = memo(function ({
             </div>
           ) : (
             <div className='min-h-0 flex-1 p-2'>
-              <FileTreeEmptyState />
+              <FileTreeEmptyState
+                onUpload={
+                  readOnly
+                    ? undefined
+                    : () => {
+                        handleUploadClick('');
+                      }
+                }
+              />
             </div>
           )}
         </FloatingPanelContentBody>
@@ -2148,12 +2156,22 @@ export const ChatEditorFileTree = memo(function ({
  * here. The revision status is read here rather than by the tree, whose rows
  * would otherwise all re-render on every revision the project mints.
  */
-function FileTreeEmptyState(): React.JSX.Element {
+/** An empty project offers one clear action, a touch path that does not depend on dropping files (PN-FIL-3, I2). */
+function FileTreeEmptyState({ onUpload }: { readonly onUpload: (() => void) | undefined }): React.JSX.Element {
   const availability = useProjectAvailability();
   if (availability !== 'ready') {
     return <ProjectSyncPlaceholder state={availability} />;
   }
-  return <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card' />;
+  return (
+    <PanelEmptyState icon={FolderOpen} title='No files available' className='rounded-xl border bg-card'>
+      {onUpload ? (
+        <Button variant='outline' className='pointer-coarse:h-10' onClick={onUpload}>
+          <Upload aria-hidden />
+          Upload files
+        </Button>
+      ) : null}
+    </PanelEmptyState>
+  );
 }
 
 type TreeItemProps = {

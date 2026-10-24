@@ -86,6 +86,20 @@ export default function main(params = defaultParams) {
 }
 `;
 
+/** A number and a boolean parameter, for the phone pane pass (`?main=touch-parameters`): fields and a switch row. */
+const touchParametersPath = 'public/models/touch-parameters.js';
+const touchParametersModel = `import { makeBaseBox } from 'replicad';
+
+export const defaultParams = {
+  width: 20,
+  countersink: true,
+};
+
+export default function main(params = defaultParams) {
+  return makeBaseBox(params.width, 14, params.countersink ? 4 : 6);
+}
+`;
+
 const packageJson = JSON.stringify(
   {
     type: 'module',
@@ -107,13 +121,15 @@ const seedFiles = Object.fromEntries([
 
 /** Select a real main producer for the file-tree and preview probes. */
 const mainEntryPathFor = (fixture: string | undefined): string =>
-  fixture === 'box-corner'
-    ? 'public/models/box-corner.js'
-    : fixture === 'preview-secondary'
-      ? 'public/models/preview-shell.js'
-      : fixture === 'preview-mixed'
-        ? 'public/models/preview-mixed.js'
-        : 'public/models/honeycomb.js';
+  fixture === 'touch-parameters'
+    ? touchParametersPath
+    : fixture === 'box-corner'
+      ? 'public/models/box-corner.js'
+      : fixture === 'preview-secondary'
+        ? 'public/models/preview-shell.js'
+        : fixture === 'preview-mixed'
+          ? 'public/models/preview-mixed.js'
+          : 'public/models/honeycomb.js';
 
 const mebibyte = 1024 * 1024;
 
@@ -158,7 +174,8 @@ const readCount = (value: string | null, limit: number): number => {
 };
 
 const createSeedProject = (mainFixture: string | undefined): Omit<ProjectManifest, '$schema'> => ({
-  name: 'sgenoud/models file-tree e2e',
+  // The touch-parameters seed has its own name, so a spec that reopens it from the list never picks another seed.
+  name: mainFixture === 'touch-parameters' ? 'Touch parameters e2e' : 'sgenoud/models file-tree e2e',
   description: 'Deterministic local seed for the project file tree e2e surface.',
   tags: ['e2e', 'replicad'],
   assets: {
@@ -518,7 +535,13 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
             : createSeedProject(mainFixture),
           ...(metadataPair ? { chatName: 'Metadata A retained' } : {}),
           activeKernel: 'replicad',
-          files: buildSeedFiles(bulkFileCount, binaryMib),
+          files: {
+            ...buildSeedFiles(bulkFileCount, binaryMib),
+            // Only this fixture adds the file, so every other fixture URL seeds exactly what it seeded before.
+            ...(mainFixture === 'touch-parameters'
+              ? { [touchParametersPath]: { content: encode(touchParametersModel) } }
+              : {}),
+          },
           ...(seededPrompt === undefined
             ? {}
             : {

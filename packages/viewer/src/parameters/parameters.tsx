@@ -203,10 +203,16 @@ export function Parameters({
   return (
     <div
       data-slot='parameters'
-      className={cn('group flex w-full flex-col', presentation === 'catalog' && 'h-full', className)}
+      /* Fields are 24px for a mouse and the 40px touch row under a coarse pointer, so every typed
+       * value, select and boolean row is a phone-sized target (I3). Inputs take 16px type there so
+       * iOS does not zoom the page on focus. */
+      className={cn(
+        'group flex w-full flex-col [--param-field-h:1.5rem] pointer-coarse:[--param-field-h:2.5rem] pointer-coarse:[&_input]:text-base',
+        presentation === 'catalog' && 'h-full',
+        className,
+      )}
       style={
         {
-          '--param-field-h': '1.5rem',
           '--param-field-radius': 'var(--radius-md)',
           '--param-field-color': 'var(--color-muted-foreground)',
           '--param-field-color-focus': 'var(--color-foreground)',
@@ -223,7 +229,7 @@ export function Parameters({
                 aria-label={searchPlaceholder}
                 placeholder={searchPlaceholder}
                 value={localFilterTerm}
-                className='h-6 w-full bg-background text-sm'
+                className='h-6 w-full bg-background text-sm pointer-coarse:h-10'
                 onChange={handleSearchChange}
                 onClear={clearSearch}
               />

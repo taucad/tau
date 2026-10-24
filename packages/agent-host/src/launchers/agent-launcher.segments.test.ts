@@ -450,6 +450,32 @@ describe('a chat continued on a second device', () => {
         }
       });
 
+      /*
+       * A turn written after reading another device's rows merges after them, however far ahead that device's clock
+       * is: its rows are stamped after every row it read, so the merge never puts it before rows its history names.
+       */
+      it('should merge a turn after the rows it read from a device whose clock is ahead', async () => {
+        const desktop = await workspace();
+        const phone = await workspace();
+        const onDesktop = launch(
+          createNodeChatStore({ workspaceRoot: desktop }),
+          recordingModel('desktop answer').transport,
+        );
+        const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
+        await turn(onDesktop, 'run-desktop-1', 'first, on the desktop');
+        await project(phone, 'device-desktop', await readFile(ownLog(desktop), 'utf8'));
+        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+        const phoneRows = shifted(await readFile(ownLog(phone), 'utf8'), day);
+        await project(desktop, 'device-phone', phoneRows);
+
+        await turnWhenFree(onDesktop, 'run-desktop-2', 'third, back on the desktop');
+        await turnWhenFree(onDesktop, 'run-desktop-3', 'fourth, still on the desktop');
+
+        const newest = Math.max(...rowsOf(phoneRows).map((row) => Date.parse(row.recordedAt)));
+        const second = rowsOf(await readFile(ownLog(desktop), 'utf8')).filter((row) => row.runId === 'run-desktop-2');
+        expect(Math.min(...second.map((row) => Date.parse(row.recordedAt)))).toBeGreaterThan(newest);
+      });
+
       it('should keep its term when nothing new came, however far behind the other device’s clock is', async () => {
         const desktop = await workspace();
         const phone = await workspace();
@@ -1202,6 +1228,26 @@ describe('a chat continued on a second device', () => {
       });
       const after = rowsOf(await readFile(ownLog(root), 'utf8')).slice(before);
       expect(after.filter((row) => row.type !== 'run.heartbeat')).toEqual([]);
+    });
+
+    /* A chat's commands are answered in the order they arrive: a Stop sent after an Approve never overtakes it. */
+    it('should apply an Approve before the Stop sent right after it', async () => {
+      const { root, launcher } = await pausedRunOn({ runHeartbeat: 10, pausedRunHold: 60_000 });
+      await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
+      /* Past the pause's own settlement, so the Stop meets the paused run, not a settling one. */
+      await sleep(100);
+
+      const approve = launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+      const stop = launcher.execute({ type: 'cancel', commandId: key(), payload: { chatId, runId: 'run-1' } });
+      const approved = await approve;
+      await stop;
+
+      /* Had the Stop gone first, it would have cancelled the paused run and its approval with it. */
+      expect(approved, JSON.stringify(approved)).toMatchObject({ status: 'applied' });
     });
 
     /* Inside its own hold the paused run still holds the chat: a segment it cannot read does not block its approval. */

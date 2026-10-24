@@ -252,6 +252,7 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t7_file_order
 #print axioms ChatLedger.placed_sorted
 #print axioms ChatLedger.t7_device_file_order
+#print axioms ChatLedger.t7_stamped_after_read
 #print axioms ChatLedger.t8_interrupt_resolved_once
 #print axioms ChatLedger.t8_duplicate_interrupt_resolution
 #print axioms ChatLedger.t4_d2_second_running_keeps_attempt

@@ -1271,8 +1271,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /* The command that follows is answered as it would be without the check. */
     }
   };
-  /** Each chat's term check in flight: later commands for the chat wait behind it. */
-  const rehomes = new Map<string, Promise<void>>();
+  /*
+   * Each chat's commands, in the order they arrive, until each has reached the registry: whatever a command awaits
+   * first (a term check, an approval's fence) the commands behind it wait for, so a Stop never overtakes the Send or
+   * the Approve before it. The newest command's turn; a command with none ahead adds no wait.
+   */
+  const dispatchOrder = new Map<string, Promise<void>>();
   /**
    * A new term for a turn another device's turn came between (XD1). An incarnation keeps one term while it stays
    * open, and a term's rows merge together, ordered by the term's start (CL-R14): a turn written under a term that
@@ -1454,12 +1458,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const store = storeOf(chatId);
     const messageIds: string[] = [];
     try {
+      const log = await logOf(chatId);
+      /* After every row read from another device (XD1): the merge orders a term by its first row's time. */
+      const at = now().getTime();
+      const stamped = (await log.stampAfterRead?.(at)) ?? at;
       const ledger = await appendChatRows({
         chatId,
-        log: await logOf(chatId),
+        log,
         ledger: await ledgerOf(chatId),
         leaderEpoch,
-        recordedAt: now().toISOString(),
+        recordedAt: new Date(stamped).toISOString(),
         rows,
         onAppended: (row, ledger) => {
           store.ledger = ledger;
@@ -2253,38 +2261,38 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       /* Known before any row, so a legacy cancel of a reserving run finds its chat. */
       runChats.set(command.payload.runId, command.payload.chatId);
     }
-    /* A command behind a term check waits for it, so the chat's commands keep their order (a Stop after a Send). */
-    /* Until none is in flight: a command that waited may let an earlier Send install another check ahead of it. */
-    for (let checking = rehomes.get(command.payload.chatId); checking !== undefined; ) {
-      // oxlint-disable-next-line no-await-in-loop -- each check orders the commands behind it, one after another.
-      await checking;
-      checking = rehomes.get(command.payload.chatId);
-    }
     /* One dispatch of this command: what it refreshes is not refreshed again within it, and only within it. */
     const dispatch: { refreshed?: DurableEventLog } = {};
-    if (command.type === 'start' || command.type === 'resume') {
-      dispatches.set(command.commandId, dispatch);
-      /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
-      const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId);
-      if (rehoming !== undefined) {
-        const { chatId } = command.payload;
-        rehomes.set(chatId, rehoming);
-        try {
+    const ordered = command.payload.chatId;
+    const ahead = dispatchOrder.get(ordered);
+    const turn = Promise.withResolvers<void>();
+    dispatchOrder.set(ordered, turn.promise);
+    let answer: Promise<CommandAnswer>;
+    try {
+      if (ahead !== undefined) {
+        await ahead;
+      }
+      if (command.type === 'start' || command.type === 'resume') {
+        dispatches.set(command.commandId, dispatch);
+        /* Only an incarnation that already wrote under its term is checked: a first command is reserved synchronously. */
+        const rehoming = rehomeStaleTerm(command.payload.chatId, command.commandId);
+        if (rehoming !== undefined) {
           await rehoming;
-        } finally {
-          if (rehomes.get(chatId) === rehoming) {
-            rehomes.delete(chatId);
-          }
         }
       }
-    }
-    if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
-      const held = await refuseApprovalForeignRun(command.commandId, command.payload.chatId);
-      if (held !== undefined) {
-        return held;
+      if (command.type === 'resolve-interrupt' && command.payload.outcome === 'approved') {
+        const held = await refuseApprovalForeignRun(command.commandId, command.payload.chatId);
+        if (held !== undefined) {
+          return held;
+        }
+      }
+      answer = registry.execute(command);
+    } finally {
+      turn.resolve();
+      if (dispatchOrder.get(ordered) === turn.promise) {
+        dispatchOrder.delete(ordered);
       }
     }
-    const answer = registry.execute(command);
     if (command.type === 'resolve-interrupt' || command.type === 'cancel' || command.type === 'resume') {
       const { chatId, runId } = command.payload;
       const scanned = Promise.withResolvers<void>();

@@ -153,6 +153,36 @@ describe('shouldAutoOfferCloudPlacement', () => {
 });
 
 describe('listAgentHostPlacements', () => {
+  /* XD2: a "no daemon" answer stands for its reuse interval: listings inside it ask nothing again. */
+  it('should not ask the origin again inside the reuse interval of a no-daemon answer', async () => {
+    const discover = vi.fn(async () => undefined);
+    await listAgentHostPlacements({ discoverOrigin: discover, listHosts: async () => [] });
+    await listAgentHostPlacements({ discoverOrigin: discover, listHosts: async () => [] });
+
+    expect(discover).toHaveBeenCalledTimes(1);
+    expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
+  });
+
+  /* XD2: asking again keeps the last answer readable until the new one is in (stale while revalidating). */
+  it('should keep the last answer readable while the origin is asked again', async () => {
+    vi.useFakeTimers({ now: Date.parse('2026-10-23T10:00:00.000Z'), toFake: ['Date'] });
+    try {
+      await listAgentHostPlacements({ discoverOrigin: async () => undefined, listHosts: async () => [] });
+      vi.setSystemTime(Date.parse('2026-10-23T10:01:00.000Z'));
+      const answer = Promise.withResolvers<undefined>();
+      const listing = listAgentHostPlacements({
+        discoverOrigin: async () => answer.promise,
+        listHosts: async () => [],
+      });
+
+      expect(isPlacementOnThisDeviceNow('origin')).toBe(false);
+      answer.resolve(undefined);
+      await listing;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   /* XD2: a daemon is a daemon for the page's life: a later listing whose probe fails keeps it, and never re-asks. */
   it('should keep a settled origin daemon through a later listing whose probe would fail', async () => {
     resetOriginAgentHostAnswer();

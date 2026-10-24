@@ -3494,6 +3494,107 @@ theorem t7_device_file_order (segs : List (Nat × List Row)) (t1 t2 : MTerm) (h1
     have hqt := hblock q (hmemS q (by rw [hsplit]; simp [hq])) r hr
     exact hSn.2.1.1 ⟨q, hq, by rw [← hqt, hrt]; rfl⟩
 
+/-- **T7** (stamped after what it read): a writer stamps each row after every row it has read (`stampAfterRead`). A
+term that starts after every other term's start and is its writer's newest has every merged row of every other term
+before every merged row of its own, so a turn written over the rows read never merges ahead of a row it names. -/
+theorem t7_stamped_after_read (segs : List (Nat × List Row)) (t : MTerm) (ht : t ∈ mergedTerms segs)
+    (hlate : ∀ u ∈ mergedTerms segs, u.term ≠ t.term → u.started < t.started)
+    (hlast : ∀ u ∈ mergedTerms segs, u.term ≠ t.term → deviceOf u = deviceOf t → (place u).2.2 < (place t).2.2) :
+    ∃ A B, merge segs = A ++ B ∧ (∀ r ∈ A, r.term ≠ t.term) ∧ (∀ r ∈ B, r.term = t.term) := by
+  have hw := (mergedTerms_spec segs).1
+  have hn := placed_nodup segs
+  have hsort := placed_sorted segs
+  dsimp only at hsort
+  generalize hpl : (mergedTerms segs).map place = placed at hn hsort
+  have hpt : place t ∈ placed := hpl ▸ List.mem_map_of_mem ht
+  have hself : ∀ p ∈ placed, p.1.started ∈ clampSet placed p := fun p hp =>
+    List.mem_map.2 ⟨p, List.mem_filter.2 ⟨hp, by simp [keyLt_st.irrefl]⟩, rfl⟩
+  have ne : ∀ p ∈ placed, (clampSet placed p).max? ≠ none := fun p hp h => by
+    rw [List.max?_eq_none_iff] at h; have := hself p hp; rw [h] at this; simp at this
+  -- Every other term's clamped start is before the new term's.
+  have hcl : ∀ q ∈ placed, q.1.term ≠ t.term →
+      (lookup q.1.term (clampStarts placed)).getD 0 < (lookup (place t).1.term (clampStarts placed)).getD 0 := by
+    intro q hq hqt
+    rw [clamp_lookup placed hn _ hq, clamp_lookup placed hn _ hpt]
+    obtain ⟨m1, hm1⟩ := Option.ne_none_iff_exists'.1 (ne _ hq)
+    obtain ⟨m2, hm2⟩ := Option.ne_none_iff_exists'.1 (ne _ hpt)
+    rw [hm1, hm2]
+    rw [List.max?_eq_some_iff] at hm1 hm2
+    have hge : t.started ≤ m2 := hm2.2 _ (hself _ hpt)
+    obtain ⟨y, hy, rfl⟩ := List.mem_map.1 hm1.1
+    simp only [List.mem_filter, Bool.and_eq_true, decide_eq_true_eq, Bool.not_eq_true'] at hy
+    obtain ⟨hy1, hyd, hyk⟩ := hy
+    rw [← hpl] at hy1
+    obtain ⟨v, hv, rfl⟩ := List.mem_map.1 hy1
+    by_cases hvt : v.term = t.term
+    · exfalso
+      have hvteq : v = t := inj_of_nodup_map hw.1 hv ht hvt
+      subst hvteq
+      rw [← hpl] at hq
+      obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hq
+      have hd : deviceOf u = deviceOf v := by simpa [place] using hyd.symm
+      have ho := hlast u hu hqt hd
+      have : keyLt (clampKey (place u)) (clampKey (place v)) = true := by
+        simp [clampKey, keyLt, lexBy, lexLt, ho]
+      rw [this] at hyk; exact absurd hyk (by simp)
+    · exact Nat.lt_of_lt_of_le (hlate v hv hvt) hge
+  -- So the new term sorts last.
+  have hκ : ∀ q ∈ placed, q.1.term ≠ t.term →
+      keyLt (placedKey (clampStarts placed) q) (placedKey (clampStarts placed) (place t)) = true := by
+    intro q hq hqt
+    unfold placedKey
+    simp [keyLt, lexBy, lexLt, hcl q hq hqt]
+  generalize hS : keySort (placedKey (clampStarts placed)) placed = S at hsort
+  have hSn : (S.map (·.1.term)).Nodup := by
+    rw [← hS]; exact (((keySort_perm _ _).map _).nodup_iff).2 hn
+  have hmemS : ∀ q ∈ S, q ∈ placed := fun q hq => (hS ▸ keySort_perm _ placed).mem_iff.1 hq
+  obtain ⟨l1, l2, hsplit⟩ := List.append_of_mem ((hS ▸ keySort_perm _ placed).mem_iff.2 hpt)
+  have hl2 : l2 = [] := by
+    cases l2 with
+    | nil => rfl
+    | cons x xs =>
+      exfalso
+      rw [hsplit] at hsort hSn
+      have hx : x ∈ placed := hmemS x (by rw [hsplit]; simp)
+      have hxt : x.1.term ≠ t.term := by
+        intro h
+        rw [List.map_append, List.nodup_append] at hSn
+        have hn2 := hSn.2.1
+        rw [List.map_cons, List.nodup_cons] at hn2
+        apply hn2.1
+        simp only [List.map_cons, List.mem_cons]
+        exact Or.inl (by simp [place, h])
+      have h1 := (List.pairwise_cons.1 (List.pairwise_append.1 hsort).2.1).1 x List.mem_cons_self
+      rw [keyLt_st.asymm _ _ (hκ x hx hxt)] at h1
+      exact absurd h1 (by simp)
+  subst hl2
+  have hblock : ∀ q ∈ placed, ∀ r ∈ ((keySort (fun sc => [[sc.1]]) q.1.copies).map (mergeKey q)).map Prod.fst,
+      r.term = q.1.term := by
+    intro q hq r hr
+    rw [← hpl] at hq
+    obtain ⟨u, hu, rfl⟩ := List.mem_map.1 hq
+    obtain ⟨_, ⟨sc, hsc, rfl⟩, rfl⟩ := by simpa only [List.mem_map] using hr
+    have := (mergeKey_key u (hw.2 u hu) sc ((keySort_perm _ _).mem_iff.1 hsc)).1
+    simp only [Row.key, Prod.mk.injEq] at this
+    exact this.1
+  rw [hsplit, List.map_append] at hSn
+  have hdis := (List.nodup_append.1 hSn).2.2
+  refine ⟨(l1.flatMap fun p => (keySort (fun sc => [[sc.1]]) p.1.copies).map (mergeKey p)).map Prod.fst,
+    ((keySort (fun sc => [[sc.1]]) (place t).1.copies).map (mergeKey (place t))).map Prod.fst, ?_, ?_, ?_⟩
+  · unfold merge
+    rw [mergeFull_eq]
+    unfold mergeKeys
+    rw [hpl, hS, hsplit]
+    simp
+  · intro r hr hrt
+    simp only [List.map_flatMap, List.mem_flatMap] at hr
+    obtain ⟨q, hq, hr⟩ := hr
+    have hqt := hblock q (hmemS q (by rw [hsplit]; simp [hq])) r hr
+    exact hdis _ (List.mem_map_of_mem hq) _ (List.mem_map_of_mem (List.mem_singleton_self (place t)))
+      (by rw [← hqt, hrt]; rfl)
+  · intro r hr
+    exact hblock (place t) hpt r hr
+
 /-! ## S5's "Today" witnesses, rerun on the fixed code
 
 Each S5 counterexample trace, evaluated by the kernel on the W3 model: the defect it showed is gone. The D5

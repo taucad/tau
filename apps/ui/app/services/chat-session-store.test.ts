@@ -6332,6 +6332,50 @@ describe('ChatSessionStore — this device places the chat (XD2)', () => {
     store.release(chatId);
   });
 
+  /* A reach change heard while the chat loads is not lost: the held placement is checked again once it is held. */
+  it('should apply a placement whose host became reachable while the chat was loading', async () => {
+    const chatId = 'chat_reach_during_load';
+    const deps = createStubDeps();
+    seedPlacement(deps, chatId, 'origin');
+    deps.getChat.mockResolvedValue(chatRow(chatId, projectId, { activeExecution: { kind: 'tau', model } }));
+    const listeners = new Set<() => void>();
+    let asks = 0;
+    const { store, session } = await openLoaded(
+      {
+        ...deps,
+        isPlacementOnThisDeviceNow: () => undefined,
+        onPlacementReachabilityChanged: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        isPlacementOnThisDevice: async () => {
+          asks += 1;
+          if (asks === 1) {
+            /* The daemon comes up right after the first answer, before the load has held the placement. */
+            queueMicrotask(() => {
+              for (const listener of listeners) {
+                listener();
+              }
+            });
+            return false;
+          }
+          return true;
+        },
+      },
+      chatId,
+    );
+
+    await vi.waitFor(() => {
+      expect(session.persistenceActorRef.getSnapshot().context.activeExecution).toEqual({
+        kind: 'tau',
+        model,
+        hostId: 'origin',
+      });
+    });
+    expect(session.persistenceActorRef.getSnapshot().context.heldPlacement).toBeUndefined();
+    store.release(chatId);
+  });
+
   it('should not hold the load on finishing a half-done legacy adoption', async () => {
     const chatId = 'chat_adoption_slow';
     const deps = createStubDeps();

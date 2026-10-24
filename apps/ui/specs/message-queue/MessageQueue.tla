@@ -43,6 +43,7 @@
 \* A late reach answer settles a load placement only while the chat still runs on it, and placements are read
 \* and written through one path; queue paths unchanged.
 \* A chat's open reads its placement through that one shared read too; queue paths unchanged.
+\* A placement held during a load is checked against reach once it is held; queue paths unchanged.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

@@ -131,6 +131,13 @@ export type EventLogAppender = {
    */
   foreignWroteSinceTermBegan?(): Promise<boolean>;
   /**
+   * When a row written now is stamped (XD1): `now`, or one millisecond past the newest row another device's segments
+   * held at the last open or refresh, whichever is later. The merge orders terms by their first row's time, so a row
+   * stamped this way merges after every row this device has read, whatever another device's clock says; a history
+   * written over those rows never names a row that merges after it. Absent where `refresh` is.
+   */
+  stampAfterRead?(now: number): Promise<number>;
+  /**
    * Whether the history is unknown: the other devices' segments cannot be read and this device's rows do not fold
    * without them (XD1). {@link EventLogAppender.historyIntact} then answers `true`, since nothing proves the history
    * invalid, but nothing may run or continue on it. Absent where `refresh` is.
@@ -250,6 +257,38 @@ const withoutAbandonedOutput = (
     }
     return [rejoined];
   });
+};
+
+/**
+ * The runs of one segment its device settled failed before they said the person's words: admitted with them, their
+ * message never appended. Their history is a stale run's (XD3): the words rejoin from the admission and nothing else
+ * of the run does, so a history is the same whether the run is read stale or settled, on every device.
+ *
+ * @param events - One device's rows.
+ * @returns The run ids.
+ */
+const failedUnsaid = (events: readonly AgentLogEvent[]): ReadonlySet<string> => {
+  const last = new Map<string, string>();
+  const admitted = new Map<string, string>();
+  const said = new Set<string>();
+  for (const event of events) {
+    if (event.type === 'run.lifecycle') {
+      last.set(event.runId, event.state);
+      const message = event.state === 'admitted' ? admittedMessageOf(event) : undefined;
+      if (message !== undefined) {
+        admitted.set(event.runId, message.id);
+      }
+    } else if (event.type === 'message.appended') {
+      said.add(event.message.id);
+    }
+  }
+  const runs = new Set<string>();
+  for (const [runId, id] of admitted) {
+    if (last.get(runId) === 'failed' && !said.has(id)) {
+      runs.add(runId);
+    }
+  }
+  return runs;
 };
 
 /* One rejoined message per admission row, so a refold that changes nothing about it replays the same row object. */
@@ -486,11 +525,16 @@ export const createEventLogAppender = async (
         refoldAt = refoldAt === undefined ? standing.changesAt : Math.min(refoldAt, standing.changesAt);
       }
     }
+    const ownFailed = failedUnsaid(ownRows);
     const toMerge: ParsedLogSegment[] = [
-      { deviceId: ownDeviceId, events: ownRows },
+      { deviceId: ownDeviceId, events: ownFailed.size === 0 ? ownRows : withoutAbandonedOutput(ownRows, ownFailed) },
       ...foreign.map((segment) => {
         const heldIds = held.get(segment.deviceId);
-        const abandonedIds = abandoned.get(segment.deviceId);
+        const failed = failedUnsaid(segment.events);
+        const abandonedIds =
+          failed.size === 0
+            ? abandoned.get(segment.deviceId)
+            : new Set([...(abandoned.get(segment.deviceId) ?? []), ...failed]);
         return heldIds === undefined && abandonedIds === undefined
           ? segment
           : {
@@ -794,6 +838,20 @@ export const createEventLogAppender = async (
               await readSegments();
             }),
           historyUnknown: async () => enqueue(async () => historyUnknown()),
+          stampAfterRead: async (now: number) =>
+            enqueue(async () => {
+              assertOpen();
+              let newest = now - 1;
+              for (const segment of foreign) {
+                for (const event of segment.events) {
+                  const at = Date.parse(event.recordedAt);
+                  if (!Number.isNaN(at) && at > newest) {
+                    newest = at;
+                  }
+                }
+              }
+              return Math.max(now, newest + 1);
+            }),
           foreignWroteSinceTermBegan: async () =>
             enqueue(async () => {
               assertOpen();

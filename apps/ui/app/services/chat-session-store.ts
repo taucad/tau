@@ -3929,6 +3929,20 @@ export class ChatSessionStore {
         void applyHeldPlacement(held);
       }
     });
+    /*
+     * A reach change heard before a placement was held found nothing to apply: each time one becomes held, it is
+     * checked against reach as it is now, so a change during the load or its settling is never lost.
+     */
+    let lastHeld = heldNow();
+    const heldSubscription = persistenceActorRef.subscribe((snapshot) => {
+      const held = snapshot.context.heldPlacement;
+      if (held !== lastHeld) {
+        lastHeld = held;
+        if (held !== undefined) {
+          void applyHeldPlacement(held);
+        }
+      }
+    });
 
     // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
@@ -3986,6 +4000,7 @@ export class ChatSessionStore {
       turnSubscriptions: [],
       dispose: () => {
         unsubscribeReachability?.();
+        heldSubscription.unsubscribe();
         messageQueueRef.stop();
         session.presentationHold = undefined;
         session.observationRelease?.();

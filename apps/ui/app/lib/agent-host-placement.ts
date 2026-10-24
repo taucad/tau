@@ -487,8 +487,21 @@ type OriginAsk = {
   readonly askedAt: number;
   /** The answer once it is in: read without waiting by {@link isPlacementOnThisDeviceNow}. */
   settled?: boolean;
+  /** The answer before this ask, shown while this one is in flight (stale while revalidating). */
+  readonly last?: boolean;
 };
 let originHostsAgent: OriginAsk | undefined;
+
+/**
+ * Whether the recorded ask answers without asking again: a found daemon stays found for the page's life, an ask in
+ * flight is shared, and a "no daemon" answer stands for {@link originAnswerReuse}.
+ *
+ * @param asked - The recorded ask.
+ * @returns Whether to reuse it.
+ */
+const reusable = (asked: OriginAsk | undefined): asked is OriginAsk =>
+  asked !== undefined &&
+  (asked.settled === undefined || asked.settled || Date.now() - asked.askedAt < originAnswerReuse);
 
 /**
  * The origin's descriptor for a listing: a daemon already found stays found for the page's life and is not asked
@@ -500,10 +513,7 @@ let originHostsAgent: OriginAsk | undefined;
  */
 const originForListing = async (discover?: typeof discoverOriginAgentHost): Promise<TauHostDescriptor | undefined> => {
   const asked = originHostsAgent;
-  if (asked !== undefined && asked.settled !== false) {
-    return asked.descriptor;
-  }
-  return askOrigin(discover).descriptor;
+  return reusable(asked) ? asked.descriptor : askOrigin(discover).descriptor;
 };
 
 /**
@@ -515,11 +525,12 @@ const originForListing = async (discover?: typeof discoverOriginAgentHost): Prom
  * @returns The ask, recorded before it is awaited, so concurrent readers share it.
  */
 const askOrigin = (discover: typeof discoverOriginAgentHost = discoverOriginAgentHost): OriginAsk => {
-  const previous = originHostsAgent?.settled;
+  const previous = originHostsAgent?.settled ?? originHostsAgent?.last;
   const asking: OriginAsk = {
     descriptor: Promise.resolve(undefined),
     answer: Promise.resolve(false),
     askedAt: Date.now(),
+    ...(previous === undefined ? {} : { last: previous }),
   };
   const settle = (found: boolean): void => {
     asking.settled = found;
@@ -569,8 +580,9 @@ const placementReachWithoutOrigin = (hostId: TauAgentHostId): boolean | undefine
 };
 
 /**
- * {@link isPlacementOnThisDevice} as far as this tab knows without asking: `undefined` while the origin's discovery is
- * unasked, out, or its "no daemon" is stale, so a caller holds the placement instead of waiting (XD2).
+ * {@link isPlacementOnThisDevice} as far as this tab knows without asking: the origin's last answer, kept while it is
+ * asked again, and `undefined` only before its discovery has ever answered, so a caller applies the placement and lets
+ * admission wait for it instead of waiting here (XD2).
  *
  * @param hostId - The placement's host id.
  * @returns Whether this tab reaches it, or `undefined` when only the network can say.
@@ -581,11 +593,8 @@ export const isPlacementOnThisDeviceNow = (hostId: TauAgentHostId): boolean | un
   if (known !== undefined) {
     return known;
   }
-  const settled = originHostsAgent?.settled;
-  if (settled === true) {
-    return true;
-  }
-  return settled === false && Date.now() - originHostsAgent!.askedAt < originAnswerReuse ? false : undefined;
+  /* The last answer stays readable while an ask is in flight; only a page never answered reads as unknown. */
+  return originHostsAgent?.settled ?? originHostsAgent?.last;
 };
 
 /**
@@ -605,13 +614,7 @@ export const isPlacementOnThisDevice = async (hostId: TauAgentHostId): Promise<b
   }
   const asked = originHostsAgent;
   /* Decided without waiting, so callers that find a stale answer at once share the one new ask (single flight). */
-  if (
-    asked !== undefined &&
-    (asked.settled === undefined || asked.settled || Date.now() - asked.askedAt < originAnswerReuse)
-  ) {
-    return asked.answer;
-  }
-  return askOrigin().answer;
+  return reusable(asked) ? asked.answer : askOrigin().answer;
 };
 
 /**

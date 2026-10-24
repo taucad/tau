@@ -578,6 +578,7 @@ export const createAgentLauncher = (options: AgentLauncherOptions): AgentLaunche
       /* Other devices' unsettled runs, which the cross-device run fence reads (XD3). */
       ...(log.foreignRuns === undefined ? {} : { foreignRuns: log.foreignRuns.bind(log) }),
       /* When another device last wrote the chat: a turn after it opens a new term (XD1). */
+      ...(log.stampAfterRead === undefined ? {} : { stampAfterRead: log.stampAfterRead.bind(log) }),
       ...(log.foreignWroteSinceTermBegan === undefined
         ? {}
         : { foreignWroteSinceTermBegan: log.foreignWroteSinceTermBegan.bind(log) }),

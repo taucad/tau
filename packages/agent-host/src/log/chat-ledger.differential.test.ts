@@ -721,13 +721,49 @@ const layoutSegmentsOf = (random: Random, layout: 'ties' | 'overlap'): Array<{ d
   return segments;
 };
 
+/**
+ * Devices taking turns on one chat with skewed clocks, each stamping its rows after every row it has read
+ * (`stampAfterRead`): a device that writes a turn first reads every row written before it.
+ */
+const skewedSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow[] }> => {
+  const devices = 2 + below(random, 2);
+  const skew = Array.from({ length: devices }, () => below(random, 120));
+  const files: MergeRow[][] = Array.from({ length: devices }, () => []);
+  let newest = -1;
+  for (let turn = 0, turns = 2 + below(random, 4); turn < turns; turn++) {
+    const device = below(random, devices);
+    const clock = skew[device]! + turn * below(random, 5);
+    const at = Math.max(clock, newest + 1);
+    const term = turn;
+    for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+      files[device]!.push({
+        term,
+        seq,
+        run: 1,
+        kind: 'O',
+        argument: below(random, 3),
+        ms: at + seq,
+        epoch: term + 1,
+        attempt: 0,
+      });
+      newest = Math.max(newest, at + seq);
+    }
+  }
+  return files.flatMap((rows, device) => (rows.length === 0 ? [] : [{ device, rows }]));
+};
+
 const mergeTrace = (
   random: Random,
   name: string,
-  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' }>,
+  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' | 'skewed' }>,
 ): Trace => {
   const { duplicates, layout } = shape;
-  const segments = layout === undefined ? mergeSegmentsOf(random, duplicates) : layoutSegmentsOf(random, layout);
+  const segments =
+    layout === undefined
+      ? mergeSegmentsOf(random, duplicates)
+      : layout === 'skewed'
+        ? skewedSegmentsOf(random)
+        : layoutSegmentsOf(random, layout);
   const text = [`T ${name}`];
   for (const segment of segments) {
     text.push(`SEG ${segment.device}`, ...segment.rows.map((row) => `ROW ${rowLine(row)}`));
@@ -819,7 +855,7 @@ type Corpus = {
   readonly merge?: boolean;
   readonly duplicates?: boolean;
   /** Merge traces of one shape: terms tied at one millisecond across devices, or a file overlapping its old copy. */
-  readonly layout?: 'ties' | 'overlap';
+  readonly layout?: 'ties' | 'overlap' | 'skewed';
 };
 
 /** The tables, then `count` traces of the corpus's kind, from one seeded stream. */
@@ -885,6 +921,7 @@ const corpora: readonly Corpus[] = [
   { name: 'duplicate-segments', seed: 20_260_928, count: 150, merge: true, duplicates: true },
   { name: 'merge-ties', seed: 20_261_023, count: 120, merge: true, layout: 'ties' },
   { name: 'overlapping-segments', seed: 20_261_024, count: 120, merge: true, layout: 'overlap' },
+  { name: 'skewed-clocks', seed: 20_261_025, count: 120, merge: true, layout: 'skewed' },
   { name: 'legacy-epochs', seed: 20_260_929, count: 120, profile: { ...baseProfile, legacy: 0.5, attempts: 0.3 } },
   {
     name: 'opaque-rows',

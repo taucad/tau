@@ -284,6 +284,53 @@ describe('the freeze answer over HTTP (DW2)', () => {
   }, 30_000);
 });
 
+describe('the manifest-served advertisement under the route guard (DB1, DW2)', () => {
+  it('holds a frozen repository before its manifest is read, then answers the freeze 429', async () => {
+    const watched = createMemoryRepositoryStore();
+    const reads = vi.spyOn(watched, 'readManifest');
+    const service = createService(
+      watched,
+      guardOver(() => frozen, { holdMilliseconds: 200 }),
+    );
+
+    for (const service_ of ['git-upload-pack', 'git-receive-pack'] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- each service is held in turn
+      await expect(service.advertiseRefs(access, service_)).rejects.toMatchObject({
+        status: 429,
+        response: { code: 'GIT_REPOSITORY_FROZEN', retryAfterSeconds: 1 },
+      });
+    }
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('counts a served advertisement in flight until it answers, so a drain waits for it', async () => {
+    const watched = createMemoryRepositoryStore();
+    const registry = new MemoryInFlightRegistry();
+    const { promise: gate, resolve: open } = Promise.withResolvers<undefined>();
+    const { promise: reading, resolve: started } = Promise.withResolvers<undefined>();
+    const read = watched.readManifest.bind(watched);
+    vi.spyOn(watched, 'readManifest').mockImplementation(async (...args) => {
+      started(undefined);
+      await gate;
+      return read(...args);
+    });
+    const service = createService(
+      watched,
+      new RepositoryRouteGuard({
+        routes: { lookup: async () => defaultRoute, lookupAuthoritative: async () => defaultRoute },
+        registry,
+      }),
+    );
+
+    const advertised = service.advertiseRefs(access, 'git-upload-pack');
+    await reading;
+    expect(await registry.countRegisteredBefore({ projectId }, new Date(Date.now() + 1000))).toBe(1);
+    open(undefined);
+    await advertised;
+    expect(registry.size).toBe(0);
+  });
+});
+
 describe('the route guard inside the git service (DW1, DW2)', () => {
   it('holds before a lease is admitted, so a frozen repository costs no disk slot or hydrate', async () => {
     const { metrics, admissions } = recordingMetrics();

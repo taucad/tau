@@ -801,11 +801,18 @@ export class GitRepositoryService {
    * repaired by the RPC that follows this advertisement (W6 G8, review FR5),
    * until DC1 moves the comparison to every grant.
    *
+   * The route step still applies (DW1/DW2): a frozen repository is held, then
+   * answered `429 GIT_REPOSITORY_FROZEN`, before its manifest is read, and a
+   * served advertisement counts in flight until it answers, so a drain waits
+   * for it like any leased request.
+   *
    * @param access - What `authorize` resolved.
    * @param service - The service the client named.
    * @returns The advertisement bytes, without the service prefix.
+   * @throws HttpException `429 GIT_REPOSITORY_FROZEN` when the freeze hold is spent.
    */
   public async advertiseRefs(access: GitAccess, service: GitSmartService): Promise<Uint8Array<ArrayBuffer>> {
+    const routed = await this.routes.admit(access.projectId);
     try {
       const locator = await this.resolveActiveLocator(access);
       const read = await this.store.readManifest(locator);
@@ -819,6 +826,8 @@ export class GitRepositoryService {
       return advertiseReferences({ service, refs: manifest?.refs ?? {}, dialect: await installedGitDialect() });
     } catch (error) {
       throw this.refusalFor(error);
+    } finally {
+      routed();
     }
   }
 

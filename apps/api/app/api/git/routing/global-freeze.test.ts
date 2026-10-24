@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -76,15 +77,14 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('the globa
   it('waits out the route cache, and drains what a stale Machine admitted after the freeze began', async () => {
     const registry = new MemoryInFlightRegistry();
     let released = false;
-    setTimeout(() => {
-      void (async () => {
-        const release = await registry.register('proj_stale_cache');
-        setTimeout(() => {
-          released = true;
-          release();
-        }, 300);
-      })();
-    }, 100);
+    const admitLate = async (): Promise<void> => {
+      await delay(100);
+      const release = await registry.register('proj_stale_cache');
+      await delay(300);
+      released = true;
+      release();
+    };
+    const late = admitLate();
 
     const frozen = await freezeEverything({
       database,
@@ -97,6 +97,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('the globa
       expect(frozen.drained).toBe(true);
       expect(released).toBe(true);
     } finally {
+      await late;
       await thawEverything(database);
     }
   });

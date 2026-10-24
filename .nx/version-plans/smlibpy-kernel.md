@@ -1,7 +1,6 @@
 ---
 smlibpy: minor
 cli: minor
-geospec-engine: minor
 skills: minor
 ---
 

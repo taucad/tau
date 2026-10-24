@@ -76,6 +76,10 @@ DATABASE_RUNTIME_ROLE = 'tau_api_runtime'
 # The narrow `deploy-preview-*` glob is intentional — do not broaden to `*--taucad.netlify.app`,
 # which would silently allow non-PR branch deploys (currently disabled per allowed_branches).
 ADDITIONAL_CORS_ORIGINS = '["https://deploy-preview-*--taucad.netlify.app","https://taucad.netlify.app"]'
+# Staging is for Tau's own accounts. Its Stripe sandbox accepts test cards, so open sign-up would let
+# anyone buy credit that spends real supplier keys; only these domains may create an account or sign in.
+# Exact match, no subdomains. Production leaves it unset.
+TAU_AUTH_ALLOWED_EMAIL_DOMAINS = '["tau.new","fontein.co"]'
 # TAU_S3_BUCKET, TAU_S3_ENDPOINT, TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY
 # are pushed as Fly secrets by module.fly_api_secrets (repos/tau-cloud) — not set here.
 TAU_S3_PUBLIC_BASE_URL = 'https://cdn.taucad.dev'
@@ -118,12 +122,14 @@ path = "/metrics"
 processes = ['app', 'billing-operations']
 
 # The rootfs is now the capacity knob the retired volume used to be: a lease is a
-# temporary working copy under `os.tmpdir()`, and admission refuses one when
-# `concurrent leases × 2.5 GiB` (W0a's measured figure at D20's 1 GiB ceiling)
-# exceeds the free bytes `statfs` reports. On Fly's default 8 GiB rootfs, minus the
-# image and the pruned deploy tree, that is two ceiling-sized leases at once and a
-# third only if the image is smaller than it looks — admission reads the real free
-# bytes, so the number self-corrects and the figure here is not a contract. Raise
+# temporary working copy under `os.tmpdir()`, and admission refuses one when its
+# real-byte reservation does not fit in the free bytes `statfs` reports less what
+# admitted leases still have to write (DA3): a fetch reserves its packs plus a
+# 64 MiB floor, a push adds its quarantine bound (what is left of the plan or of
+# D20's 1 GiB ceiling, plus 64 MiB of slack). On Fly's default 8 GiB rootfs, about
+# 7.3 GiB free on staging, that is over a hundred fetches of a KiB repository, six
+# fetches of a 1 GiB one, or about six pushes at once. Admission reads the real free
+# bytes, so the numbers self-correct and the figures here are not a contract. Raise
 # the rootfs before raising the ceiling.
 [[vm]]
 memory = '1gb'
@@ -144,9 +150,9 @@ cpu_kind = 'shared'
 cpus = 1
 processes = ['billing-operations']
 
-# Restore hydrates a repository through a lease of its own, so this Machine wants the
-# same lease headroom an `app` Machine has; the purge and collector passes stream
-# keys and need almost none.
+# Restore copies packs from the source bucket to the primary as streams (DA4) and takes
+# no lease, so it needs no lease headroom; the purge and collector passes stream keys
+# and need almost none either.
 [[vm]]
 memory = '512mb'
 cpu_kind = 'shared'

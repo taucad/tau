@@ -13,6 +13,53 @@ import {
 } from '#ingest.js';
 
 /**
+ * `tau.sync.operation`: the client-facing request a sync series counts. `advertise` is a served
+ * `info/refs` answer (DB1); an advertisement's refusal counts against the push or fetch it opens.
+ */
+const syncOperationNames = ['push', 'fetch', 'advertise', 'lfs_upload', 'lfs_download'] as const;
+
+/** `outcome` on the sync edge. `busy` is a retryable capacity refusal; `conflict` a lost manifest race. */
+const syncOutcomes = ['ok', 'ref_rejected', 'quota_refused', 'conflict', 'busy', 'unauthorized', 'error'] as const;
+
+/** `tau.sync.refusal.code`: the typed refusals the git routes answer (W14 N1); any other code is `other`. */
+const syncRefusalCodes = [
+  'GIT_LEASE_OWNER_BUSY',
+  'GIT_LEASE_DISK_FULL',
+  'GIT_HYDRATE_BUDGET_EXHAUSTED',
+  'GIT_PUSH_RACE_LOST',
+  'GIT_SERVICE_RESTARTING',
+  'GIT_RATE_LIMITED',
+  'GIT_REPOSITORY_FROZEN',
+  'GIT_REPOSITORY_INCOMPLETE',
+  'GIT_QUOTA_EXCEEDED',
+  'GIT_REPOSITORY_CEILING_EXCEEDED',
+  'GIT_LFS_QUOTA_EXCEEDED',
+  'GIT_PUSH_NOT_COMMITTABLE',
+  'GIT_SYNC_NOT_ENTITLED',
+  'other',
+] as const;
+
+/** `tau.git.operation`: what a lease was admitted for. `remove_ref` is the audited ref-removal verb. */
+const gitOperations = [
+  'upload_pack',
+  'receive_pack',
+  'advertise',
+  'remove_ref',
+  'derive',
+  'compact',
+  'restore',
+] as const;
+
+/** Repository and hydrate sizes, 64 KiB to D20's 1 GiB ceiling in doublings. */
+const repositoryByteBuckets = Array.from({ length: 15 }, (_, step) => 65_536 * 2 ** step);
+
+/** `tau.git.route.scope`: a freeze on one repository, or the global one (DW1). */
+const routeScopes = ['repository', 'global'] as const;
+
+/** `rank` on the hot-project gauges: the top ten, never a project or owner id. */
+const hotProjectRanks = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
+
+/**
  * Canonical metric registry for Tau.
  *
  * Canonical metrics with OTEL-compliant names. Renames from legacy:
@@ -890,10 +937,10 @@ export const TauMetrics = {
     name: 'tau.sync.operations',
     unit: '{operation}',
     description:
-      'Tau Sync requests by operation and outcome. A push git refused in its report-status (HTTP 200) is ref_rejected, not ok',
+      'Tau Sync requests by operation and outcome. A push git refused in its report-status (HTTP 200) is ref_rejected, not ok; a retryable capacity refusal (lease, hydrate budget, rate limit, restart) is busy, not error',
     attributes: z.object({
-      'tau.sync.operation': z.enum(['push', 'fetch', 'lfs_upload', 'lfs_download']),
-      outcome: z.enum(['ok', 'ref_rejected', 'quota_refused', 'conflict', 'unauthorized', 'error']),
+      'tau.sync.operation': z.enum(syncOperationNames),
+      outcome: z.enum(syncOutcomes),
     }),
   }),
 
@@ -903,8 +950,23 @@ export const TauMetrics = {
     description: 'Whole Tau Sync request latency, lease hydrate and commit included',
     buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120],
     attributes: z.object({
-      'tau.sync.operation': z.enum(['push', 'fetch', 'lfs_upload', 'lfs_download']),
-      outcome: z.enum(['ok', 'ref_rejected', 'quota_refused', 'conflict', 'unauthorized', 'error']),
+      'tau.sync.operation': z.enum(syncOperationNames),
+      outcome: z.enum(syncOutcomes),
+    }),
+  }),
+
+  /**
+   * Every typed refusal a sync request answered, by code (W14 N1). `GIT_PUSH_RACE_LOST` over
+   * `tau.sync.operations{push}` is the DA5 trigger; a code outside the enum is `other`.
+   */
+  syncRefusals: defineCounter({
+    name: 'tau.sync.refusals',
+    unit: '{refusal}',
+    description: 'Tau Sync requests refused with a typed code, by operation, code and HTTP status',
+    attributes: z.object({
+      'tau.sync.operation': z.enum(syncOperationNames),
+      'tau.sync.refusal.code': z.enum(syncRefusalCodes),
+      'http.response.status_code': z.number().int(),
     }),
   }),
 
@@ -928,6 +990,7 @@ export const TauMetrics = {
     }),
   }),
 
+  /** Superseded by `tau.git.commit.attempts{outcome=lost_race}` (W14 L5); delete one release after OB2. */
   syncManifestConflicts: defineCounter({
     name: 'tau.sync.manifest_conflicts',
     unit: '{conflict}',
@@ -941,6 +1004,155 @@ export const TauMetrics = {
     description: 'Post-compaction repository sweeps by outcome',
     attributes: z.object({
       outcome: z.enum(['ok', 'error']),
+    }),
+  }),
+
+  // --- Git execution: lease admission, hydrate and the manifest commit (Hosted Remote Storage DA2) ---
+  // A name stays when its code moves from tau-api to tau-storage; `service_name` tells the two apart.
+
+  gitAdmissions: defineCounter({
+    name: 'tau.git.admissions',
+    unit: '{admission}',
+    description: 'Lease admission decisions by git operation and outcome; anything but admitted is a refusal',
+    attributes: z.object({
+      'tau.git.operation': z.enum(gitOperations),
+      outcome: z.enum(['admitted', 'owner_busy', 'disk_full', 'budget_exhausted', 'restarting', 'memory']),
+    }),
+  }),
+
+  gitLeasesActive: defineUpDownCounter({
+    name: 'tau.git.leases.active',
+    unit: '{lease}',
+    description: 'Repository leases this Machine holds now, by git operation',
+    attributes: z.object({
+      'tau.git.operation': z.enum(gitOperations),
+    }),
+  }),
+
+  gitLeaseReservedBytes: defineGauge({
+    name: 'tau.git.lease.reserved_bytes',
+    unit: 'By',
+    description: 'Lease disk this Machine has reserved for admitted leases, set on every admission and release',
+    attributes: z.object({}),
+  }),
+
+  gitDiskFreeBytes: defineGauge({
+    name: 'tau.git.disk.free_bytes',
+    unit: 'By',
+    description: 'Free bytes statfs reports for the lease filesystem, read at every admission',
+    attributes: z.object({}),
+  }),
+
+  gitHydrateBytes: defineHistogram({
+    name: 'tau.git.hydrate.bytes',
+    unit: 'By',
+    description: 'Pack bytes one lease hydrate drew, by source (object store or pack cache)',
+    buckets: repositoryByteBuckets,
+    attributes: z.object({
+      'tau.git.hydrate.source': z.enum(['object_store', 'cache']),
+    }),
+  }),
+
+  gitCommitAttempts: defineCounter({
+    name: 'tau.git.commit.attempts',
+    unit: '{attempt}',
+    description:
+      'Conditional manifest writes by outcome and commit kind; a commit refused before its manifest write is not an attempt',
+    attributes: z.object({
+      outcome: z.enum(['committed', 'merged', 'lost_race', 'throttled', 'indeterminate', 'error']),
+      'tau.git.commit.kind': z.enum(['push', 'fence', 'compaction', 'batch']),
+    }),
+  }),
+
+  gitCommitDuration: defineHistogram({
+    name: 'tau.git.commit.duration',
+    unit: 's',
+    description: 'Manifest commit latency by phase (manifest read, manifest write, or the whole commit) and kind',
+    buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30],
+    attributes: z.object({
+      'tau.git.commit.phase': z.enum(['manifest_read', 'manifest_write', 'total']),
+      'tau.git.commit.kind': z.enum(['push', 'fence', 'compaction', 'batch']),
+    }),
+  }),
+
+  gitRepositorySize: defineHistogram({
+    name: 'tau.git.repository.size',
+    unit: 'By',
+    description: 'Pack bytes of a repository after each committed write: the size distribution weighted by heat',
+    buckets: repositoryByteBuckets,
+    attributes: z.object({}),
+  }),
+
+  /**
+   * The busiest projects as a top-N labelled only by rank (W14 N11/N12). Project ids go to the
+   * `git.hot_projects` log line, never to a label.
+   */
+  gitHotProjectCommitRate: defineGauge({
+    name: 'tau.git.hot_project.commit_rate',
+    unit: '{commit}/s',
+    description: 'Committed writes per second of the rank-r project by commits, over the last full minute',
+    attributes: z.object({
+      rank: z.enum(hotProjectRanks),
+    }),
+  }),
+
+  gitHotProjectWriters: defineGauge({
+    name: 'tau.git.hot_project.writers',
+    unit: '{writer}',
+    description: 'Distinct writers that committed to the rank-r project by writers, over the last full minute',
+    attributes: z.object({
+      rank: z.enum(hotProjectRanks),
+    }),
+  }),
+
+  /*
+   * The route table and the freeze answer (Hosted Remote Storage DW1/DW2, W14 OB5 N30–N34). Every
+   * label is an enum: a repository, owner or migration id never leaves the route module.
+   */
+  gitRouteFrozen: defineGauge({
+    name: 'tau.git.route.frozen',
+    unit: '{repository}',
+    description: 'Freezes holding now, by scope: repositories frozen one by one, or 1 while the global freeze holds',
+    attributes: z.object({
+      'tau.git.route.scope': z.enum(routeScopes),
+    }),
+  }),
+
+  gitRouteFrozenOldest: defineGauge({
+    name: 'tau.git.route.frozen.oldest',
+    unit: 's',
+    description: 'Age of the oldest freeze holding now, by scope; a migration freeze is a 20 s lease',
+    attributes: z.object({
+      'tau.git.route.scope': z.enum(routeScopes),
+    }),
+  }),
+
+  gitRouteHolds: defineCounter({
+    name: 'tau.git.route.holds',
+    unit: '{request}',
+    description: 'Git requests held because their repository was frozen, by how the hold ended',
+    attributes: z.object({
+      outcome: z.enum(['released', 'timed_out']),
+    }),
+  }),
+
+  gitRouteHoldDuration: defineHistogram({
+    name: 'tau.git.route.hold.duration',
+    unit: 's',
+    description: 'How long a held git request waited for its repository to thaw, by how the hold ended',
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 6],
+    attributes: z.object({
+      outcome: z.enum(['released', 'timed_out']),
+    }),
+  }),
+
+  gitRouteLookupDuration: defineHistogram({
+    name: 'tau.git.route.lookup.duration',
+    unit: 's',
+    description: 'Route lookup latency on the git request path, from this Machine’s cache or from the database',
+    buckets: [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25],
+    attributes: z.object({
+      'tau.git.route.source': z.enum(['cache', 'database']),
     }),
   }),
 

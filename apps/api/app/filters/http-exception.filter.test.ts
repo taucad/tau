@@ -8,8 +8,12 @@ import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { ReadinessRefusalException } from '#api/health/readiness-refusal.exception.js';
 import { reportServerError } from '#telemetry/sentry.js';
+import type * as SentryModule from '#telemetry/sentry.js';
 
-vi.mock('#telemetry/sentry.js', () => ({ reportServerError: vi.fn() }));
+vi.mock('#telemetry/sentry.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof SentryModule>()),
+  reportServerError: vi.fn(),
+}));
 
 function createMockArgumentsHost(url = '/test') {
   const mockResponse = {
@@ -83,6 +87,41 @@ describe('HttpExceptionFilter OTEL integration', () => {
     const host = createMockArgumentsHost('/health/ready');
 
     filter.catch(new ServiceUnavailableException({ status: 'error' }), host as any);
+
+    expect(reportServerError).toHaveBeenCalledTimes(1);
+  });
+
+  /* X3 (DA1): a retryable git refusal is capacity working as designed and the client
+   * retries it, so it is a warning log line (and DA2's counter), not a Sentry error. */
+  it.each(['GIT_LEASE_OWNER_BUSY', 'GIT_LEASE_DISK_FULL', 'GIT_PUSH_RACE_LOST', 'GIT_SERVICE_RESTARTING'])(
+    'should answer a retryable %s with 503 as a warning without reporting it to Sentry',
+    (code) => {
+      getSpanSpy.mockReturnValue(mockSpan as unknown as otelApi.Span);
+      const errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const host = createMockArgumentsHost('/v1/git/prj_1/git-receive-pack');
+
+      filter.catch(new ServiceUnavailableException({ code, message: 'Busy; retry shortly.' }), host as any);
+
+      expect(host.response.status).toHaveBeenCalledWith(503);
+      expect(host.response.send).toHaveBeenCalledWith(expect.objectContaining({ code, statusCode: 503 }));
+      expect(reportServerError).not.toHaveBeenCalled();
+      expect(errorLog).not.toHaveBeenCalled();
+      expect(mockSpan.setStatus).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith({ code, statusCode: 503, requestId: 'req_test_123' }, 'Retryable git refusal');
+    },
+  );
+
+  it.each([
+    [HttpStatus.INTERNAL_SERVER_ERROR, 'GIT_REPOSITORY_INCOMPLETE'],
+    [HttpStatus.SERVICE_UNAVAILABLE, 'GIT_REPOSITORY_INCOMPLETE'],
+    [HttpStatus.SERVICE_UNAVAILABLE, 'GIT_SOMETHING_NEW'],
+    [HttpStatus.INTERNAL_SERVER_ERROR, 'GIT_LEASE_OWNER_BUSY'],
+  ] as const)('should still report a %i %s to Sentry', (status, code) => {
+    vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const host = createMockArgumentsHost('/v1/git/prj_1/git-upload-pack');
+
+    filter.catch(new HttpException({ code, message: 'Unavailable.' }, status), host as any);
 
     expect(reportServerError).toHaveBeenCalledTimes(1);
   });

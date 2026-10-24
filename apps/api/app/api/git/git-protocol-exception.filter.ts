@@ -3,6 +3,9 @@ import { Catch, HttpException, Logger } from '@nestjs/common';
 import type { ArgumentsHost } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
+import { httpHeader } from '#constants/http-header.constant.js';
+import { resolveRequestId } from '#middlewares/request-id.middleware.js';
+import { isRetryableGitRefusal } from '#telemetry/sentry.js';
 
 /**
  * The one refusal shape stock git reads (N6).
@@ -46,9 +49,19 @@ export class GitProtocolExceptionFilter extends HttpExceptionFilter {
 
     const status = exception.getStatus();
     const body = exception.getResponse();
-    const stated = typeof body === 'object' ? (body as { message?: unknown }).message : body;
+    const { message: stated, code } =
+      typeof body === 'object' ? (body as { message?: unknown; code?: unknown }) : { message: body, code: undefined };
     const message = typeof stated === 'string' ? stated : exception.message;
-    this.#logger.warn({ status, message }, 'Git protocol refusal');
+    if (isRetryableGitRefusal(status, code)) {
+      /* The same line a browser's refusal logs, so one query counts both (X3). */
+      this.logRetryableGitRefusal(
+        code as string,
+        status,
+        resolveRequestId(request.headers[httpHeader.requestId], request.id as string | undefined),
+      );
+    } else {
+      this.#logger.warn({ status, code, message }, 'Git protocol refusal');
+    }
     void reply.status(status).header('content-type', 'text/plain; charset=utf-8').send(`${message}\n`);
   }
 }

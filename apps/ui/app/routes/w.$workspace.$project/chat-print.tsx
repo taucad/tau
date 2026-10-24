@@ -176,10 +176,10 @@ function ConnectedPrintPanel({
   return (
     <div
       data-slot='print-panel-body'
-      className='flex size-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar'
+      /* Parameter fields take the 40px touch row under a coarse pointer, as in Parameters (I3). */
+      className='flex size-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar [--param-field-h:1.5rem] pointer-coarse:[--param-field-h:2.5rem] pointer-coarse:[&_input]:text-base'
       style={
         {
-          '--param-field-h': '1.5rem',
           '--param-field-radius': 'var(--radius-md)',
           '--param-field-color': 'var(--color-muted-foreground)',
           '--param-field-color-focus': 'var(--color-foreground)',

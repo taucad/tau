@@ -622,10 +622,9 @@ function ExportFormatSettings({
         <ChevronRight className='size-3 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none' />
       </CollapsibleTrigger>
       <CollapsibleContent
-        className='overflow-hidden border-t border-border px-0 py-0 data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none'
+        className='overflow-hidden border-t border-border px-0 py-0 [--param-field-h:1.5rem] data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down motion-reduce:animate-none pointer-coarse:[--param-field-h:2.5rem] pointer-coarse:[&_input]:text-base'
         style={
           {
-            '--param-field-h': '1.5rem',
             '--param-field-radius': 'var(--radius-md)',
             '--param-field-color': 'var(--color-muted-foreground)',
             '--param-field-color-focus': 'var(--color-foreground)',

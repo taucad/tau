@@ -147,7 +147,7 @@ export function ParameterGroupSelector({
                 autoFocus
                 autoComplete='off'
                 value={createValue}
-                className='h-6 text-xs'
+                className='h-6 text-xs pointer-coarse:text-base'
                 onChange={(event) => {
                   setCreateValue(event.target.value);
                 }}
@@ -199,7 +199,7 @@ export function ParameterGroupSelector({
               autoFocus
               autoComplete='off'
               value={renameValue}
-              className='h-6 text-xs'
+              className='h-6 text-xs pointer-coarse:text-base'
               onChange={(event) => {
                 setRenameValue(event.target.value);
               }}
@@ -246,11 +246,13 @@ export function ParameterGroupSelector({
               {item.parameterCount} {item.parameterCount === 1 ? 'override' : 'overrides'}
             </span>
           </div>
-          <div className='flex gap-1 opacity-0 group-hover:opacity-100'>
+          {/* Hover reveals these for a mouse; focus and a coarse pointer show them too (I2). */}
+          <div className='flex gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 pointer-coarse:opacity-100'>
             <Button
               variant='ghost'
               size='icon'
               className='size-6 hover:bg-neutral/20!'
+              aria-label={`Rename ${item.name}`}
               onClick={(event) => {
                 event.stopPropagation();
                 handleStartRename(item.name);

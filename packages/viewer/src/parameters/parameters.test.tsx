@@ -3885,3 +3885,52 @@ it('should keep array disclosure choices on the surviving item after removal', a
   await userEvent.click(screen.getByRole('button', { name: 'Remove Parts 1' }));
   expect(screen.getByRole('button', { name: 'Group: Config' })).toHaveAttribute('aria-expanded', 'false');
 });
+
+describe('Parameters - boolean rows on touch (canvas review R2)', () => {
+  const schema: RJSFSchema = {
+    type: 'object',
+    properties: { countersink: { type: 'boolean', title: 'Countersink', default: false } },
+  };
+
+  function ControlledBoolean({ onChange }: { readonly onChange: Mock }) {
+    const [parameters, setParameters] = useState<Record<string, unknown>>({});
+    return (
+      <TestWrapper>
+        <Parameters
+          parameters={parameters}
+          defaultParameters={{ countersink: false }}
+          jsonSchema={schema}
+          units={defaultUnits}
+          onParametersChange={(next) => {
+            onChange(next);
+            setParameters(next);
+          }}
+        />
+      </TestWrapper>
+    );
+  }
+
+  it('toggles a boolean from anywhere on its row, so the row is the target and not the small switch', async () => {
+    const onChange = vi.fn();
+    render(<ControlledBoolean onChange={onChange} />);
+    const toggle = screen.getByRole('switch', { name: 'Toggle for Countersink' });
+
+    await userEvent.click(screen.getByText('Countersink'));
+
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(onChange).toHaveBeenLastCalledWith({ countersink: true });
+  });
+
+  it('resets a changed boolean from its Reset action without toggling it again', async () => {
+    const onChange = vi.fn();
+    render(<ControlledBoolean onChange={onChange} />);
+    const toggle = screen.getByRole('switch', { name: 'Toggle for Countersink' });
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reset Countersink' }));
+
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByRole('button', { name: 'Reset Countersink' })).toBeNull();
+  });
+});

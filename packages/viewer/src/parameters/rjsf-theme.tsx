@@ -275,12 +275,22 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     }
   };
 
+  /* A boolean's whole row is its switch's label, so the row is the hit target and not only the
+   * small switch (canvas review R2). Nested buttons (reset, hint) keep their own activation. */
+  const FieldRow = schema.type === 'boolean' ? 'label' : 'div';
+
   return (
     <div
       data-slot='parameter-field'
       className='group/field @container/parameter my-1.5 flex flex-col gap-0.5 px-2.5 transition-colors'
     >
-      <div className='flex items-center gap-2 @[240px]/parameter:flex-row'>
+      <FieldRow
+        {...(schema.type === 'boolean' ? { htmlFor: id } : {})}
+        className={cn(
+          'flex items-center gap-2 @[240px]/parameter:flex-row',
+          schema.type === 'boolean' && 'min-h-(--param-field-h) cursor-pointer',
+        )}
+      >
         <div className='flex min-w-0 shrink-0 items-center gap-1.5 @[240px]/parameter:w-[40%]'>
           <div className='flex min-w-0 items-center gap-0.5'>
             <span
@@ -323,7 +333,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         <div className='flex min-w-0 flex-1 items-center justify-end gap-2'>
           <FieldLabelContext.Provider value={prettyLabel}>{children}</FieldLabelContext.Provider>
         </div>
-      </div>
+      </FieldRow>
       {descriptionText ? (
         <div className='text-xs text-muted-foreground'>
           <HighlightText text={descriptionText} searchTerm={formContext.searchTerm} />

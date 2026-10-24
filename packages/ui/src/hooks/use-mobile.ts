@@ -1,5 +1,6 @@
-import { useSyncExternalStore } from 'react';
-
+import { createElement, useContext, useSyncExternalStore } from 'react';
+import { responsiveSurfaceContext } from '#hooks/responsive-surface.js';
+import type { ReactNode } from 'react';
 const mobileBreakpoint = 768;
 const mobileQuery = `(max-width: ${mobileBreakpoint - 1}px)`;
 
@@ -25,8 +26,8 @@ const getServerSnapshot = (): boolean => false;
  * mounts the desktop layout first. Server rendering and hydration report
  * `false`; React re-renders with the client value right after hydrating.
  *
- * @public
  * @returns Whether the current viewport is mobile-sized.
+ * @public
  *
  * @example <caption>Derive a responsive layout mode</caption>
  * ```typescript
@@ -36,5 +37,24 @@ const getServerSnapshot = (): boolean => false;
  * ```
  */
 export function useIsMobile(): boolean {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const surface = useContext(responsiveSurfaceContext);
+  const viewport = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return surface?.isMobile ?? viewport;
 }
+
+/**
+ * Provide the logical viewport of an embedded UI surface. Portals remain in that surface.
+ * Normal application routes omit this provider and use the browser viewport.
+ *
+ * @param properties - Embedded viewport mode, portal element and content.
+ * @returns The scoped responsive surface.
+ * @public
+ */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- React provider exported with its hook in this non-JSX module.
+export const ResponsiveSurfaceProvider = (properties: {
+  readonly isMobile: boolean;
+  readonly container: HTMLElement | undefined;
+  readonly children?: ReactNode;
+}): ReactNode => {
+  return createElement(responsiveSurfaceContext.Provider, { value: properties }, properties.children);
+};

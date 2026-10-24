@@ -336,7 +336,23 @@ describe('the B2 copier against MinIO with Object Lock and PostgreSQL', () => {
       createdAt: deletedAt,
     });
 
-    await markTombstonedOwners(context, 1000);
+    // The CI database is shared with every other test file, whose tombstones would come first
+    // (oldest first) and could fill the page; this pass sees only this run's owner.
+    const events: Array<Record<string, unknown>> = [];
+    const { ledger } = context;
+    const own = {
+      ...context,
+      report: (event: Record<string, unknown>) => events.push(event),
+      ledger: Object.assign(Object.create(ledger) as typeof ledger, {
+        async unmarkedTombstones(limit: number) {
+          const owners = await ledger.unmarkedTombstones(limit);
+          return owners.filter((owner) => owner.ownerId === goneOwnerId);
+        },
+      }),
+    };
+
+    expect(await markTombstonedOwners(own, 100_000)).toBe(1);
+    expect(events).toStrictEqual([]);
 
     const [marked] = await ownerDatabase()
       .select({

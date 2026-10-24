@@ -11,7 +11,7 @@ import { runMigrationJob } from '#database/database-migration.js';
  * `ALTER` queued behind a long transaction would queue every later write behind
  * itself. The job waits a bounded time for each lock, then retries.
  */
-const databaseUrl = process.env['DATABASE_URL'];
+const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error('DATABASE_URL is required');
 }

@@ -5,6 +5,7 @@
   },
   "ignorePatterns": [
     "repos/**",
+    "packages/core/native-process/spikes/**",
     "**/.claude/skills/**",
     "**/.next/**",
     "**/.next-*/**",

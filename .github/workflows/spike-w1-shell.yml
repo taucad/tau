@@ -1,0 +1,163 @@
+# Spike W1 (desktop Bash/Terminal blueprint): native feasibility of a sandboxed Bash on every
+# required desktop row. Runs the dev-only harness in packages/core/native-process/spikes/shell:
+#   S0 filesystem mask + S1 isolation/network/descendants/cancellation  (fs-net-probe.mts)
+#   S2 real PTY through the same sandbox boundary, under Node             (pty-probe.mts)
+# Each job provisions a pinned Bash, runs the probes against the pinned sandbox runtime 0.0.75, and
+# uploads per-row JSON receipts. Branch-dispatchable and noncacheable: it proves the live host, so
+# an Nx/pnpm cache hit must never stand in for a run. A missing prerequisite fails the row; no skip,
+# no unsupported-platform success. Deleted when W2 lands.
+#
+# Rows this file CANNOT cover on GitHub-hosted runners, and why (blueprint D9/D15, testing.md WIN/LNX-D):
+#   - Windows 11 x64 standard-user consumer: hosted Windows is Server 2025, admin, UAC-disabled.
+#     This file runs the windows-2025 integration lane only; consumer standard-user acceptance is owed.
+#   - Debian 13 stock-security: not a hosted image. Needs the disposable VM lane
+#     (desktop-linux-vm-proof.yml) or a self-hosted runner.
+# The macOS/Linux rows here also establish whether SRT's bwrap works under *stock* Ubuntu 24.04
+# AppArmor (shipped bwrap profile) WITHOUT relaxing kernel.apparmor_restrict_unprivileged_userns.
+name: Spike W1 (sandboxed Bash feasibility)
+
+on:
+  workflow_dispatch:
+    inputs:
+      pty:
+        description: 'Run the S2 PTY probe (installs node-pty)'
+        required: false
+        type: boolean
+        default: true
+  pull_request:
+    paths:
+      - 'packages/core/native-process/spikes/shell/**'
+      - '.github/workflows/spike-w1-shell.yml'
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: spike-w1-shell-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NX_NO_CLOUD: 'true'
+  NX_DAEMON: 'false'
+  pnpm_config_verify_deps_before_run: error
+
+jobs:
+  shell:
+    name: Bash feasibility (${{ matrix.row }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - row: LNX-U
+            runs-on: ubuntu-24.04
+          - row: MAC-A
+            runs-on: macos-26
+          - row: MAC-X
+            runs-on: macos-26-intel
+          - row: WIN
+            runs-on: windows-2025
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 40
+    steps:
+      - name: Preserve source bytes on Windows
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: ./.github/actions/setup-nx
+        with:
+          save-pnpm-store: 'false'
+
+      # Stock Ubuntu 24.04 security: install the bwrap/socat the runtime needs WITHOUT relaxing
+      # the AppArmor unprivileged-userns restriction. If SRT's bwrap cannot create a user namespace
+      # under the shipped bwrap AppArmor profile, the probe fails here — that is the finding, not a
+      # reason to set kernel.apparmor_restrict_unprivileged_userns=0 (which LNX-U forbids).
+      - name: Install stock Linux sandbox prerequisites (no security relaxation)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap socat ripgrep
+          echo "stock apparmor_restrict_unprivileged_userns=$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo absent)"
+          aa-status 2>/dev/null | grep -i bwrap || true
+
+      # Pinned Bash provisioning. macOS/Linux use the system /bin/bash. Windows pins Git for Windows
+      # (MinGit does not bundle bash; the full Portable Git does) into a host-owned directory outside
+      # every sandbox grant, so a sandboxed process cannot overwrite the shell it runs under.
+      - name: Provision pinned Git Bash (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GFW_TAG: v2.51.0.windows.1
+          GFW_ASSET: PortableGit-2.51.0-64-bit.7z.exe
+          GFW_SHA256: 'a09b275d51ed3e829128e04cf4168fb54896cf6234bb30fecb8dc96a2bd321fa'
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP 'tau-git'
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $url = "https://github.com/git-for-windows/git/releases/download/$env:GFW_TAG/$env:GFW_ASSET"
+          $archive = Join-Path $env:RUNNER_TEMP $env:GFW_ASSET
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLower()
+          if ($env:GFW_SHA256 -ne '0000000000000000000000000000000000000000000000000000000000000000' -and $actual -ne $env:GFW_SHA256) {
+            throw "Git for Windows digest mismatch: $actual"
+          }
+          & $archive -y -o"$dest" | Out-Null
+          $bash = Join-Path $dest 'bin\bash.exe'
+          if (-not (Test-Path $bash)) { throw "bash.exe not found after extraction" }
+          "TAU_SPIKE_BASH=$bash"              | Out-File -FilePath $env:GITHUB_ENV -Append
+          "TAU_SPIKE_BASH_ORIGIN=$env:GFW_TAG ($actual)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      # Windows: provision the srt-sandbox user + WFP egress fence (one elevated install). Hosted
+      # Windows runners are Administrators with UAC disabled, so this is non-interactive here; on a
+      # real standard-user consumer box it is one UAC prompt (the WIN acceptance gap this lane cannot close).
+      - name: Provision Windows sandbox (srt-win install)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $srt = node packages/core/native-process/spikes/shell/srt-win-path.mts
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $srt)) { throw "vendored srt-win.exe missing at '$srt'" }
+          "TAU_SPIKE_SRT_WIN=$srt" | Out-File -FilePath $env:GITHUB_ENV -Append
+          & $srt install
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 10) { throw "srt-win install exited $LASTEXITCODE" }
+          & $srt status
+
+      - name: S0 + S1 — filesystem mask and isolation
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/shell-spike
+        run: |
+          set -o pipefail
+          node packages/core/native-process/spikes/shell/fs-net-probe.mts 2>&1 | tee "$RUNNER_TEMP/s0s1.log"
+
+      - name: Install node-pty for the S2 probe
+        if: ${{ inputs.pty != false }}
+        shell: bash
+        run: npm install --prefix packages/core/native-process/spikes/shell --no-audit --no-fund
+
+      - name: S2 — real PTY through the sandbox (direct and relay)
+        if: ${{ inputs.pty != false }}
+        shell: bash
+        env:
+          TAU_SPIKE_ROW: ${{ matrix.row }}
+          TAU_SPIKE_OUT: ${{ runner.temp }}/shell-spike
+        run: |
+          set -o pipefail
+          node packages/core/native-process/spikes/shell/run-pty.mts 2>&1 | tee "$RUNNER_TEMP/s2.log"
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        env:
+          TAU_SPIKE_OUT: ${{ runner.temp }}/shell-spike
+        run: node packages/core/native-process/spikes/shell/summarize.mts >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shell-spike-${{ matrix.row }}
+          path: ${{ runner.temp }}/shell-spike/
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,145 @@
+# Spike W2 (desktop Bash/Terminal blueprint): the consumer Windows 11 standard-user acceptance row
+# that Spike W1 cannot close. W1 runs the WIN row on windows-2025 (Server 2025, Administrators, UAC
+# disabled) — a hosted integration lane, not a consumer box. This file stands up a genuine Windows 11
+# VM on a Linux runner (QEMU/KVM, swtpm vTPM, OVMF secure-boot firmware) and runs the EXISTING,
+# UNMODIFIED harness packages/core/native-process/spikes/shell/fs-net-probe.mts (S0+S1) inside it,
+# as a real STANDARD (non-administrator) user, under stock Win11 security (Defender/SmartScreen/UAC
+# left ON — the boundary under test is @anthropic-ai/sandbox-runtime's srt-win, never Defender's).
+#
+# ─ Why this row exists (the question it settles) ────────────────────────────────────────────────
+# On the hosted windows-2025 runner the S0 out-of-root READ test succeeded (srt-sandbox could read
+# the out-of-root fixture). SRT 0.0.75's Windows backend applies NO general filesystem read-mask:
+# allowRead/denyRead are ADDITIVE explicit ACEs on named paths, and srt-sandbox is a BUILTIN\Users
+# member (see windows-sandbox-utils.ts: `in_builtin_users`, grantWindowsAcl "no inherent rights").
+# So out-of-root reads are governed entirely by the AMBIENT NTFS DACL of the file's location. The
+# hosted workspace (D:\a...) is BUILTIN\Users-readable, so srt-sandbox could read it. The crux: on a
+# genuine consumer Win11 install a SECOND standard user's %USERPROFILE% is NOT Users-readable, so if
+# the out-of-root fixture lives INSIDE the invoking user's profile the read should be DENIED by the
+# ambient profile ACL — isolating the hosted observation as a runner artifact (Users-readable
+# workspace) rather than a real SRT boundary failure. This file gets the real receipt.
+#
+# HARNESS FIXTURE PLACEMENT (the load-bearing subtlety): lib.mts fixtureRoot() resolves to
+#   process.env.RUNNER_TEMP ?? join(homedir(), '.tau-shell-spike')
+# so the harness is run inside the VM with RUNNER_TEMP UNSET — the fixture (incl. outside/secret.txt)
+# then lands in the invoking standard user's %USERPROFILE%, exactly where consumer profile isolation
+# applies. No harness edit is required; see win11-vm/run-harness.ps1. TAU_SPIKE_OUT (receipts) is set
+# separately to the host drop share and never governs the fixture root.
+#
+# ─ Image + license basis (RECORDED, no secrets, no hardcoded dynamic URL) ──────────────────────────
+# There is no stable, digest-pinnable, license-clean PUBLIC consumer (retail SKU) Win11 ISO URL:
+# Microsoft's retail ISO uses short-lived tokenized download URLs and carries no eval license for
+# unattended CI. The only CI-usable public image is the Windows 11 Enterprise EVALUATION ISO
+# (90-day eval license, registration-gated dynamic URL, not digest-stable). For the profile-isolation
+# question the SKU is immaterial — per-user %USERPROFILE% NTFS ACLs are identical across Win11 SKUs.
+# Rather than embed a dynamic URL or a secret, the ISO is supplied by an operator at dispatch time via
+# the `iso_url` input (iso_sha256 optional: when omitted, provenance is the Microsoft-host allowlist
+# + TLS and the digest is recorded observed-on-first-use; when supplied, boot is refused on mismatch).
+# With no ISO supplied (the default,
+# incl. every pull_request run) the job records a precise image-unavailable blocker receipt and fails —
+# it is NEVER green without a real VM run. See win11-vm/README.md for the full license/acquisition note.
+name: Spike W2 (consumer Win11 standard-user shell)
+
+# workflow_dispatch ONLY (no pull_request): a PR push must not enqueue or cancel this long-running VM
+# lane. The operator dispatches it with a single required input (iso_url); iso_sha256 is optional.
+on:
+  workflow_dispatch:
+    inputs:
+      iso_url:
+        description: 'HTTPS URL of a Windows 11 ISO on a Microsoft download host (Enterprise eval recommended). Required.'
+        required: true
+        type: string
+      iso_sha256:
+        description: 'Optional lowercase hex SHA-256. If omitted, provenance is the Microsoft-host allowlist + TLS and the digest is recorded observed-on-first-use. If supplied, the boot is refused on mismatch.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+# Ref-keyed, and cancel-in-progress FALSE: a running VM receipt is never killed by a later dispatch.
+concurrency:
+  group: spike-w2-win11-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NX_NO_CLOUD: 'true'
+  NX_DAEMON: 'false'
+
+jobs:
+  win11-vm:
+    name: Consumer Win11 standard-user shell (WIN11)
+    runs-on: ubuntu-24.04
+    # A Win11 unattended install + provisioning + pnpm install inside the guest is slow; give it room
+    # but never the full 6h (a hung VM must fail, not idle). boot-vm.sh enforces its own inner deadline.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Step 1: hardware-virtualization preflight. A missing /dev/kvm is a recorded BLOCKER, never a
+      # skip and never green — a Win11 guest without KVM acceleration is not CI-feasible (TCG is far
+      # too slow for an unattended install inside the job budget). Mirrors the harness's own rule 6.
+      - name: Preflight — KVM acceleration available
+        id: kvm
+        run: bash packages/core/native-process/spikes/shell/win11-vm/preflight-kvm.sh
+
+      # Step 2: host-side VM toolchain. Pinned apt packages; no third-party actions in the boot path.
+      - name: Install VM toolchain (QEMU/KVM, OVMF, swtpm, samba, mtools, xorriso)
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          # qemu-system-x86: the emulator. ovmf: UEFI secure-boot firmware (satisfies Win11 Secure Boot
+          # check). swtpm: software TPM 2.0 (satisfies Win11 TPM check WITHOUT a registry bypass).
+          # samba: slirp SMB share (host<->guest file transfer + receipt drop). mtools/xorriso: build the
+          # autounattend seed ISO. All stock Ubuntu packages; no security relaxation of the guest.
+          # `samba` (not just samba-common-bin) provides /usr/sbin/smbd, which QEMU's slirp `smb=`
+          # launches to serve the host<->guest share. ovmf ships the secure-boot firmware; swtpm the
+          # vTPM; xorriso builds the autounattend seed ISO.
+          sudo apt-get install -y --no-install-recommends \
+            qemu-system-x86 qemu-utils ovmf swtpm swtpm-tools samba xorriso
+
+      # Step 3: fetch + digest-verify the operator-supplied ISO, or record the image blocker.
+      - name: Acquire and verify Windows 11 ISO (or record image blocker)
+        id: iso
+        env:
+          ISO_URL: ${{ inputs.iso_url }}
+          ISO_SHA256: ${{ inputs.iso_sha256 }}
+          DROP: ${{ runner.temp }}/win11-drop
+        run: bash packages/core/native-process/spikes/shell/win11-vm/acquire-iso.sh
+
+      # Step 4: build the autounattend seed ISO (unattended install answer file + in-guest scripts +
+      # the pinned Git-for-Windows archive hash). No secrets; a synthetic VM-local password only.
+      - name: Build autounattend seed ISO
+        if: steps.iso.outputs.have_iso == 'true'
+        env:
+          DROP: ${{ runner.temp }}/win11-drop
+        run: bash packages/core/native-process/spikes/shell/win11-vm/make-seed-iso.sh
+
+      # Step 5: boot the Win11 VM, let it self-provision (built-in Administrator does the one elevated
+      # `srt-win install`; UAC stays ON), then run the UNMODIFIED harness as a genuine standard user
+      # with RUNNER_TEMP unset. Receipts + a DONE sentinel land on the SMB drop; the host pulls them.
+      - name: Boot Win11 VM and run the harness as a standard user
+        if: steps.iso.outputs.have_iso == 'true'
+        env:
+          DROP: ${{ runner.temp }}/win11-drop
+          REPO: ${{ github.workspace }}
+        run: bash packages/core/native-process/spikes/shell/win11-vm/boot-vm.sh
+
+      # Step 6: summarize. On the image-blocker path this prints the recorded blocker; on a real run it
+      # prints the s0/s1 verdicts collected from the guest.
+      - name: Summarize
+        if: always()
+        env:
+          DROP: ${{ runner.temp }}/win11-drop
+        run: bash packages/core/native-process/spikes/shell/win11-vm/summarize-vm.sh >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: shell-spike-WIN11
+          path: ${{ runner.temp }}/win11-drop/
+          if-no-files-found: error
+          retention-days: 14

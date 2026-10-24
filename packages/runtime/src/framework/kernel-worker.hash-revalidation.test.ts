@@ -6,9 +6,17 @@
  * the body bytes that actually cross it.
  */
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createFileSystemBridgeHello, createFileSystemBridgePort, fileSystemBridgeSchemas } from '@taucad/fs-bridge';
 import { createBridgePort } from '@taucad/rpc/bridge';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { serveNodeFsProvider } from '@taucad/filesystem/backend/node';
+import type { NodeFsPort } from '@taucad/filesystem/backend/node';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { MessagePortLike } from '@taucad/rpc';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
@@ -117,9 +125,11 @@ const createHarness = async (
     readonly legacyHost?: boolean;
     /** Paths the kernel reports as unresolved, so they are retained as absent. */
     readonly unresolved?: readonly string[];
+    /** An already-seeded filesystem to serve instead of a fresh memory one. */
+    readonly base?: RuntimeFileSystemBase;
   },
 ) => {
-  const base = await seed(files);
+  const base = options?.base ?? (await seed(files));
   const dependencies = Object.keys(files).filter((path) => path !== 'main.ts');
   const counts = { evaluations: 0, resolves: 0 };
   const kernel = defineKernelV2({
@@ -292,5 +302,108 @@ describe('retained-closure revalidation over the filesystem bridge', () => {
     await base.writeFile('lib/part-1.ts', 'PART 1');
     await evaluate(worker, request);
     expect(counts.evaluations).toBe(2);
+  });
+});
+
+/**
+ * The desktop topology: the bridge host serves the agent's composed view over a
+ * `NodeFsProviderClient`, whose provider leg crosses a real `MessageChannel` to
+ * `serveNodeFsProvider` over a `NodeFsProvider` on disk. The provider leg is
+ * tapped like the bridge is.
+ */
+const desktopFileSystem = (files: Record<string, string>) => {
+  const sandbox = mkdtempSync(join(tmpdir(), 'tau-desktop-hash-'));
+  const root = join(sandbox, 'root');
+  const write = (path: string, content: string): void => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), content);
+  };
+  mkdirSync(root);
+  for (const [path, content] of Object.entries(files)) {
+    write(path, content);
+  }
+  const { port1, port2 } = new MessageChannel();
+  const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+  const leg = { ops: [] as string[], repliedBodyBytes: 0 };
+  const tapped: NodeFsPort = {
+    postMessage(message) {
+      leg.ops.push(String((message as { op?: unknown }).op));
+      port1.postMessage(message);
+    },
+    addEventListener(type, listener) {
+      port1.addEventListener(type, (event: MessageEvent) => {
+        leg.repliedBodyBytes += bodyBytes(event.data);
+        listener(event);
+      });
+    },
+    start: () => {
+      port1.start();
+    },
+    close: () => {
+      port1.close();
+    },
+  };
+  const channel = new NodeFsChannel(tapped);
+  const view = composeView(
+    { filesystem: new NodeFsProviderClient(channel, root) },
+    { consumer: 'agent', policy: tauPathPolicy },
+  );
+  desktopCleanups.push(async () => {
+    channel.close();
+    await stop();
+    port2.close();
+    rmSync(sandbox, { recursive: true, force: true });
+  });
+  return {
+    base: view as unknown as RuntimeFileSystemBase,
+    leg,
+    root,
+    write,
+    reset() {
+      leg.ops.length = 0;
+      leg.repliedBodyBytes = 0;
+    },
+  };
+};
+
+const desktopCleanups: Array<() => Promise<void>> = [];
+afterEach(async () => {
+  await Promise.all(workers.splice(0).map(async (worker) => worker.cleanup()));
+  await Promise.all(desktopCleanups.splice(0).map(async (cleanup) => cleanup()));
+});
+
+describe('retained-closure revalidation on the desktop provider leg', () => {
+  it('revalidates a 300-file closure with one provider request and no body bytes', async () => {
+    const files = closure(300);
+    const desktop = desktopFileSystem(files);
+    const { worker, counts, tap } = await createHarness(files, { base: desktop.base });
+    const request = { documentId: randomUUID(), intent: 0 };
+    await evaluate(worker, request);
+
+    tap.reset();
+    desktop.reset();
+    await evaluate(worker, request);
+
+    expect(counts.evaluations).toBe(1);
+    expect(tap.calls).toEqual(['hashFiles']);
+    expect(desktop.leg.ops).toEqual(['hashFiles']);
+    expect(desktop.leg.repliedBodyBytes).toBe(0);
+  });
+
+  it('detects a same-length rewrite on disk that keeps the mtime', async () => {
+    const files = closure(3);
+    const desktop = desktopFileSystem(files);
+    const { worker, counts } = await createHarness(files, { base: desktop.base });
+    const request = { documentId: randomUUID(), intent: 0 };
+    const first = await evaluate(worker, request);
+
+    const file = join(desktop.root, 'lib/part-1.ts');
+    const { atime, mtime } = statSync(file);
+    desktop.write('lib/part-1.ts', 'PART 1');
+    utimesSync(file, atime, mtime);
+    const second = await evaluate(worker, request);
+
+    expect(counts.evaluations).toBe(2);
+    expect(second['lib/part-1.ts']).not.toEqual(first['lib/part-1.ts']);
   });
 });

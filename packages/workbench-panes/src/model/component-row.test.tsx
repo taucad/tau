@@ -294,3 +294,36 @@ describe('Model component rows', () => {
     });
   });
 });
+
+describe('Model tree rows on touch (PN-TREE-1, PN-TREE-2)', () => {
+  it('labels a hidden part in words, not only by dimming, and names it hidden', () => {
+    renderComponentRow(rowProperties({ node: createNode(firstComponentId, 'planetary_housing'), isHidden: true }));
+
+    const rowButton = screen.getByRole('button', { name: 'planetary_housing, hidden' });
+    expect(rowButton).toHaveTextContent('Hidden');
+  });
+
+  it('keeps a hidden part Show action in view without hover, and shows it again', () => {
+    const graphicsRef = createStaticGraphicsRef();
+    renderComponentRow(
+      rowProperties({ node: createNode(firstComponentId, 'planetary_housing'), isHidden: true, graphicsRef }),
+    );
+    const show = screen.getByRole('button', { name: 'Show planetary_housing' });
+
+    expect(show).toHaveClass('opacity-100');
+    fireEvent.click(show);
+    expect(graphicsRef.sent).toContainEqual(expect.objectContaining({ componentId: firstComponentId }));
+  });
+
+  it('shows row actions on coarse pointers as well as touch-only devices (D12)', () => {
+    renderComponentRow(rowProperties({ node: createNode(firstComponentId, 'planetary_housing') }));
+
+    expect(screen.getByRole('button', { name: 'Hide planetary_housing' })).toHaveClass('pointer-coarse:opacity-100');
+  });
+
+  it('does not label a visible part hidden', () => {
+    renderComponentRow(rowProperties({ node: createNode(firstComponentId, 'planetary_housing') }));
+
+    expect(screen.getByRole('button', { name: 'planetary_housing' })).not.toHaveTextContent('Hidden');
+  });
+});

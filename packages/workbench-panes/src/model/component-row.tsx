@@ -153,7 +153,8 @@ export const ComponentRow = memo(function ComponentRow({
     className: cn(
       'flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0',
       'focus-visible:bg-nested-action-hover focus-visible:text-foreground focus-visible:opacity-100 focus-visible:focus-outline',
-      'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100',
+      /* Hover reveals the actions for a mouse; touch and coarse-pointer tablets always show them (I2, D12). */
+      'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 pointer-coarse:opacity-100',
       (isHovered || isIsolated) && 'opacity-100',
     ),
   });
@@ -267,7 +268,7 @@ export const ComponentRow = memo(function ComponentRow({
         data-model-component-id={node.id}
         tabIndex={activeRowId === undefined || activeRowId === node.id ? 0 : -1}
         className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
-        aria-label={node.name}
+        aria-label={isHidden ? `${node.name}, hidden` : node.name}
         aria-pressed={isSelected}
         aria-busy={preview?.status === 'pending' || undefined}
         onClick={toggleSelection}
@@ -302,13 +303,16 @@ export const ComponentRow = memo(function ComponentRow({
         {materialMatchName ? (
           <span className='truncate text-xs text-muted-foreground'>· {materialMatchName}</span>
         ) : undefined}
+        {/* A hidden part is labelled, not only dimmed (PN-TREE-2). */}
+        {isHidden ? <span className='shrink-0 text-xs text-muted-foreground'>Hidden</span> : undefined}
       </button>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type='button'
             tabIndex={-1}
-            className={actionButtonClassName}
+            /* A hidden part keeps its Show action in view, so it can be brought back without hover. */
+            className={cn(actionButtonClassName, isHidden && 'opacity-100')}
             aria-label={visibilityAction.ariaLabel}
             onClick={() => {
               graphicsRef.send(visibilityAction.event);

@@ -12,6 +12,7 @@ import {
   NeutralToneMapping,
   NoToneMapping,
   SRGBColorSpace,
+  LinearSRGBColorSpace,
   RenderTarget,
   Mesh,
 } from 'three';
@@ -140,9 +141,10 @@ const mocks = vi.hoisted(() => {
   let retarget: ((camera: typeof perspectiveCamera, snapshot: MockCameraSnapshot) => void) | undefined;
   let restoreDepth: ((target?: unknown) => void) | undefined;
   let constructionCamera: unknown;
+  const createSceneTarget = vi.fn<() => RenderTarget>();
   const scenePasses: Array<{
     camera: unknown;
-    renderTarget: { camera: unknown; stencilBuffer: boolean; setSize: ReturnType<typeof vi.fn> };
+    renderTarget: RenderTarget;
     compileAsync: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
     getTexture: (name: string) => { type: number; format: number };
@@ -188,7 +190,7 @@ const mocks = vi.hoisted(() => {
     const depthTexture = { type: 0, format: 0 };
     const scenePass = {
       camera,
-      renderTarget: { camera, stencilBuffer: false, setSize: vi.fn() },
+      renderTarget: createSceneTarget(),
       compileAsync: vi.fn(async () => {
         const previousMrt = rendererState.mrt;
         const previousTarget = rendererState.target;
@@ -276,6 +278,7 @@ const mocks = vi.hoisted(() => {
     setFinalFrame: (callback: typeof frame) => {
       finalFrame = callback;
     },
+    createSceneTarget,
     getCurrentViewport,
     getRetarget: () => retarget,
     getRestoreDepth: () => restoreDepth,
@@ -493,6 +496,12 @@ const isBeautyOnly = ({ material }: { material: { fragmentNode?: unknown } }): b
 
 describe('PostProcessingWebGPU active endpoint pipeline', () => {
   beforeEach(() => {
+    mocks.createSceneTarget.mockImplementation(() => {
+      const target = new RenderTarget(1, 1, { type: HalfFloatType });
+      target.texture.colorSpace = LinearSRGBColorSpace;
+      vi.spyOn(target, 'setSize');
+      return target;
+    });
     mocks.ao.mockClear();
     mocks.denoise.mockClear();
     mocks.fxaa
@@ -568,11 +577,13 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
       try {
         const destination = mocks.gl.getRenderTarget();
         mocks.getFrame()?.(mocks.state, 0);
-        const target = mocks.gl.getRenderTarget();
         mocks.getFinalFrame()?.(mocks.state, 0);
         const before = mocks.glRender.mock.calls.length;
+        const composed = mocks.gl.initRenderTarget.mock.calls
+          .map(([value]) => value as RenderTarget)
+          .find((value) => value.texture.name === 'Tau composed surface');
         mocks.glRender.mockImplementationOnce(() => {
-          expect(mocks.gl.getRenderTarget()).toBe(target);
+          expect(mocks.gl.getRenderTarget()).toBe(composed);
           expect(mocks.scenePasses[0]!.camera).toBe(mocks.orthographicCamera);
           mocks.gl.autoClearColor = false;
           mocks.gl.autoClearDepth = false;
@@ -583,7 +594,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
           }
         });
         await act(() => vi.advanceTimersByTime(750));
-        expect(mocks.glRender.mock.calls.length).toBe(before + 1);
+        expect(mocks.glRender.mock.calls.length).toBe(before + (fails ? 1 : 2));
         expect(mocks.scenePasses[0]!.camera).toBe(mocks.perspectiveCamera);
         expect(mocks.gl.getRenderTarget()).toBe(destination);
         expect(mocks.gl.getMRT()).toBeNull();
@@ -645,12 +656,17 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     mounted.unmount();
   });
 
-  it('should halve display-frame color storage while retaining depth precision', async () => {
+  it('should reuse native scene color with compact composition and precise depth', async () => {
     const mounted = await mount();
     mocks.getFrame()?.(mocks.state, 0);
     const target = mocks.gl.getRenderTarget() as RenderTarget;
-    expect(target.texture.type).toBe(UnsignedByteType);
-    expect(target.texture.colorSpace).toBe(SRGBColorSpace);
+    expect(target.texture).toBe(mocks.scenePasses[0]!.renderTarget.texture);
+    const composed = mocks.gl.initRenderTarget.mock.calls
+      .map(([value]) => value as RenderTarget)
+      .find((value) => value.texture.name === 'Tau composed surface')!;
+    expect(composed.texture.type).toBe(UnsignedByteType);
+    expect(composed.texture.colorSpace).toBe(SRGBColorSpace);
+    expect(target.depthTexture).toBe(composed.depthTexture);
     expect(target.depthTexture?.type).toBe(UnsignedInt248Type);
     expect(target.depthTexture?.format).toBe(DepthStencilFormat);
     expect(target.samples).toBe(0);
@@ -670,7 +686,11 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     mocks.getFrame()?.(mocks.state, 0);
     const current = mocks.gl.getRenderTarget() as RenderTarget;
     expect(current).not.toBe(previous);
-    expect(current.texture.type).toBe(UnsignedByteType);
+    expect(current.texture).toBe(mocks.scenePasses.at(-1)!.renderTarget.texture);
+    const composed = mocks.gl.initRenderTarget.mock.calls
+      .map(([value]) => value as RenderTarget)
+      .findLast((value) => value.texture.name === 'Tau composed surface')!;
+    expect(composed.texture.type).toBe(UnsignedByteType);
     expect(dispose).toHaveBeenCalledOnce();
     mounted.unmount();
   });
@@ -968,7 +988,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     const target = mocks.gl.getRenderTarget() as RenderTarget;
     expect(target).toBeInstanceOf(RenderTarget);
     expect([target.width, target.height, target.samples, target.stencilBuffer]).toEqual([3000, 2000, 0, true]);
-    expect(target.texture.colorSpace).toBe(SRGBColorSpace);
+    expect(target.texture.colorSpace).toBe(LinearSRGBColorSpace);
     const dispose = vi.spyOn(target, 'dispose');
     const { material } = mocks.outputQuads[0]!;
     expect(material).toMatchObject({ depthWrite: true, depthNode: { kind: 'sampled-depth' } });
@@ -1053,7 +1073,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(mocks.antialiasTargetDispose).toHaveBeenCalledOnce();
     expect(mocks.antialiasMaterialDispose).toHaveBeenCalledOnce();
     expect(mocks.noiseDispose).toHaveBeenCalledOnce();
-    expect(mocks.postDispose).toHaveBeenCalledOnce();
+    expect(mocks.postDispose).toHaveBeenCalledTimes(2);
   });
 
   it('should release partial resources when graph construction fails', async () => {

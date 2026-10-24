@@ -30,8 +30,8 @@ export function transformRenderingAblation(source: string, id: string): string |
       '  let denoiseInput: ReturnType<typeof rtt> | undefined;\n  let surfaceInput: ReturnType<typeof rtt> | undefined;',
     );
     replace(
-      '      surfaceFiltering.reuseTarget ? composedSample(screenUV) : createViewportFxaa(scenePassColor, composedSample),',
-      `      surfaceFiltering.reuseTarget ? composedSample(screenUV) : tauAblation.get('surfaceFilter') === 'composed'
+      '      reuseSurfaceTarget ? composedSample(screenUV) : createViewportFxaa(scenePassColor, composedSample),',
+      `      reuseSurfaceTarget ? composedSample(screenUV) : tauAblation.get('surfaceFilter') === 'composed'
         ? createViewportFxaa(surfaceInput = rtt(composedSample(screenUV), null, null, {
             type: UnsignedByteType, colorSpace: SRGBColorSpace, depthBuffer: false, stencilBuffer: false, samples: 0,
           }))
@@ -63,8 +63,8 @@ export function transformRenderingAblation(source: string, id: string): string |
         scene.userData.calibrationPreparation = { milliseconds: performance.now() - preparationStart, at: performance.now() };`,
     );
     replace(
-      'const surfaceFiltering = { reuseTarget: false };',
-      "const surfaceFiltering = { reuseTarget: tauAblation.get('surfaceFilter') === 'reuse' };",
+      'const reuseSurfaceTarget = gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;',
+      "const reuseSurfaceTarget = tauAblation.has('surfaceFilter') ? tauAblation.get('surfaceFilter') === 'reuse' : gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;",
     );
     // Native sharing remains experimental; node WebGL2 shares by default.
     code = "import { FloatType } from 'three';\n" + code;

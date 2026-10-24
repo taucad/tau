@@ -89,9 +89,6 @@ type LinearFrame = {
   depthPrepared: boolean;
 };
 
-// Qualification selector; calibration builds opt in without duplicating the owner.
-const surfaceFiltering = { reuseTarget: false };
-
 // Preserve the tuned GTAO depth acceptance while making both values derive from one screen-space contract.
 const gtaoThicknessToRadiusRatio = 1 / 0.09;
 const aoDisplayModes = { combined: 0, ao: 1, 'no-ao': 2 } as const;
@@ -269,6 +266,10 @@ const createPipelineResources = ({
   // Four decoded normal taps save memory on native GPU, but cost more than
   // hardware filtering on node WebGL2 in the matched 5K comparison.
   const compactNormals = gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;
+  // Native reuse is qualified. Node WebGL2 retains fused composition until its
+  // packaged saved-section startup/resize contour difference is attributed and
+  // passes matched independent history checks (qualification-closeout.md).
+  const reuseSurfaceTarget = gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;
   const scenePass = pass(scene, camera, { samples: 0 });
   // One scene, two draw phases: CAD coverage is not input to AO or surface AA.
   // Preserve the renderer owner's depth-bias hook and restore it even after errors.
@@ -489,7 +490,7 @@ const createPipelineResources = ({
     // This avoids native-resolution depth/normal gathers; boundary halos remain a visual gate.
     const composedSample = (uv: Node<'vec2'>): Node<'vec4'> => {
       // Sample the same tone-mapped surface/AO contract at the AA search position.
-      // No intermediate color target, and no CAD line color enters this filter.
+      // CAD line color never enters surface composition or its filter.
       const color = scenePassColor.sample(uv);
       const aoFactor = select<'float'>(aoNode!.scale.greaterThan(0), denoiseInput!.sample(uv).r, float(1));
       const visibility = select<'float'>(displayMode.equal(2), float(1), aoFactor);
@@ -501,10 +502,10 @@ const createPipelineResources = ({
       return mix(beauty, vec4(vec3(aoFactor), color.a), select<'float'>(displayMode.equal(1), float(1), float(0)));
     };
     outputQuad = createOutputQuad(
-      surfaceFiltering.reuseTarget ? composedSample(screenUV) : createViewportFxaa(scenePassColor, composedSample),
+      reuseSurfaceTarget ? composedSample(screenUV) : createViewportFxaa(scenePassColor, composedSample),
       frame.sharedDepth ? undefined : depthRestoreMaterial,
     );
-    if (surfaceFiltering.reuseTarget) {
+    if (reuseSurfaceTarget) {
       const composedTarget = frame.target;
       composedTarget.texture.name = 'Tau composed surface';
       const reuse = createSurfaceReuse({

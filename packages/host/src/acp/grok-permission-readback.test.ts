@@ -45,7 +45,10 @@ const fixture = async (version = '1.0.52') => {
     cli,
     args: ['--no-auto-update', 'agent', 'stdio'],
     configEnv: ['GROK_HOME'],
-    spawnEnv: { GROK_HOME: grokHome, HOME: home },
+    /* A temporary directory on its own mount (as on CI runners) makes git stop at the
+     * filesystem boundary, which the readback deliberately leaves unqualified. Let git
+     * search across it so the fixture is a plain non-repository workspace everywhere. */
+    spawnEnv: { GROK_HOME: grokHome, HOME: home, GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' },
   };
   const pathFor = (scope: string) => join(grokHome, 'sessions', encoded(scope), 'permission.toml');
   const save = async (text: string, scope = cwd) => {

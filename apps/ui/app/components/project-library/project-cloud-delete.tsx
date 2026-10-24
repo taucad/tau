@@ -20,6 +20,7 @@ import {
 } from '@taucad/ui/components/alert-dialog';
 import { useDeleteCloudProject } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
+import { useRevisionSessionUser } from '#lib/revision-actor.js';
 
 /** One overflow owner for cloud-only, downloaded and trashed projects. */
 export function ProjectActionMenu({
@@ -111,6 +112,13 @@ function CloudDeleteDialog({
   readonly onClose: () => void;
 }): React.JSX.Element {
   const deletion = useDeleteCloudProject();
+  const account = useRevisionSessionUser()?.id;
+  const [confirmationAccount, setConfirmationAccount] = useState(account);
+  // Bind this confirmation to its first resolved account, never a later account switch.
+  if (confirmationAccount === undefined && account !== undefined) {
+    setConfirmationAccount(account);
+  }
+  const isSessionReady = account !== undefined && account === confirmationAccount;
   const isPending = project.cloudState === 'deleting' || deletion.isPending;
   const isChecking = project.isCheckingDeletion === true || deletion.data === 'checking';
   return (
@@ -149,6 +157,16 @@ function CloudDeleteDialog({
             again when you return.
           </p>
         ) : null}
+        {!isPending && account === undefined ? (
+          <p role='status' className='text-sm'>
+            Waiting for your cloud session. If this persists, refresh the page before confirming deletion.
+          </p>
+        ) : null}
+        {!isPending && account !== undefined && !isSessionReady ? (
+          <p role='alert' className='text-sm'>
+            Your cloud account changed. Close this dialog and reopen deletion to review this project’s access.
+          </p>
+        ) : null}
         {deletion.isError ? (
           <p role='alert' className='text-sm'>
             {deletion.error.message}
@@ -158,7 +176,7 @@ function CloudDeleteDialog({
           <AlertDialogCancel>{isPending ? 'Close' : 'Cancel'}</AlertDialogCancel>
           <Button
             variant='destructive'
-            disabled={isPending || project.canDeleteCloud !== true}
+            disabled={isPending || !isSessionReady || project.canDeleteCloud !== true}
             aria-busy={deletion.isPending}
             onClick={() => {
               deletion.mutate(project, {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -114,6 +114,69 @@ describe('cloud deletion menu', () => {
       'https://api.test/v1/projects/cloud-only',
     ]);
   });
+  it('should wait for revision-session readiness and require an explicit confirmation after it resolves', async () => {
+    setRevisionSessionUser(undefined);
+    const user = userEvent.setup();
+    const request = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projectId: cloud.id, state: 'deleted' }));
+    vi.stubGlobal('fetch', request);
+    renderMenu(cloud, false);
+    await user.click(screen.getByRole('button', { name: 'Actions for Bracket' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }));
+    const confirm = await screen.findByRole('button', { name: 'Delete from Tau Cloud' });
+    expect(confirm).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('Waiting for your cloud session');
+    await user.click(confirm);
+    expect(request).not.toHaveBeenCalled();
+
+    act(() => {
+      setRevisionSessionUser({ id: 'owner', name: 'Owner' });
+    });
+    expect(confirm).toBeEnabled();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(request).not.toHaveBeenCalled();
+    await user.click(confirm);
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+    expect(request).toHaveBeenCalledExactlyOnceWith(
+      'https://api.test/v1/projects/cloud-only',
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+  });
+  it.each([true, false])(
+    'should not transfer an open confirmation to another account (initially resolved: %s)',
+    async (isInitiallyResolved) => {
+      if (!isInitiallyResolved) {
+        setRevisionSessionUser(undefined);
+      }
+      const user = userEvent.setup();
+      const request = vi.fn<typeof fetch>();
+      vi.stubGlobal('fetch', request);
+      renderMenu();
+      await user.click(screen.getByRole('button', { name: 'Actions for Bracket' }));
+      await user.click(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }));
+      const confirm = await screen.findByRole('button', { name: 'Delete from Tau Cloud' });
+      if (!isInitiallyResolved) {
+        act(() => {
+          setRevisionSessionUser({ id: 'owner', name: 'Owner' });
+        });
+      }
+      expect(confirm).toBeEnabled();
+      act(() => {
+        setRevisionSessionUser(undefined);
+      });
+      expect(confirm).toBeDisabled();
+      act(() => {
+        setRevisionSessionUser({ id: 'other-owner', name: 'Other owner' });
+      });
+      expect(confirm).toBeDisabled();
+      expect(screen.getByRole('alert')).toHaveTextContent('Your cloud account changed');
+      await user.click(confirm);
+      expect(request).not.toHaveBeenCalled();
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    },
+  );
   it('should keep pending cards and table buttons from opening while retaining the status menu', async () => {
     const user = userEvent.setup();
     const open = vi.fn(async () => undefined);

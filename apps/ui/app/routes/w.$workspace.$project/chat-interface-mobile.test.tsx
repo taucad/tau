@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useSyncExternalStore } from 'react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ChatInterfaceMobile } from '#routes/w.$workspace.$project/chat-interface-mobile.js';
 import { mobileDrawerOpenSnapPoint, mobileDrawerPeekSnapPoint } from '#constants/editor.constants.js';
@@ -190,6 +190,14 @@ afterEach(() => {
   state.listeners.clear();
   state.generation += 1;
   vi.unstubAllGlobals();
+});
+
+/* Vaul returns a closed drawer to its first snap point on a 500ms timer that outlives the test that closed it. Let the
+ * last of those timers fire while the DOM environment is still up, or React's state update throws on a torn-down window. */
+afterAll(async () => {
+  await new Promise((resolve) => {
+    setTimeout(resolve, 600);
+  });
 });
 
 describe('ChatInterfaceMobile', () => {

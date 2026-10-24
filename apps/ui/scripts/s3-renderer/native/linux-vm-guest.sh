@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Guest side of linux-vm.sh: stock Ubuntu 24.04, run as the ordinary user `tau` with the Chromium sandbox on.
-# Usage: bash linux-vm-guest.sh <repo> <node-root> <drop>. Each row records its own outcome; this script fails only
+# Usage: bash linux-vm-guest.sh <repo> <node-root> <drop> [sets: all or a comma list of row labels]. Each row records its own outcome; this script fails only
 # when the guest cannot be prepared.
 set -euo pipefail
-REPO="$1" NODE_ROOT="$2" DROP="$3"
+REPO="$1" NODE_ROOT="$2" DROP="$3" SETS="${4:-all}"
 [[ "$(id -un)" == tau && "$(id -u)" != 0 ]]
 sudo mkdir -p "$REPO" "$NODE_ROOT"
 sudo mount -t 9p -o trans=virtio,version=9p2000.L,msize=524288 taurepo "$REPO"
@@ -39,6 +39,7 @@ export S3_HOST_LABEL=LNX-VM S3_GPU_LABEL='software/virtual GPU (QEMU, no GPU dev
 run() {
   local label="$1"; shift
   local status=0
+  [[ "$SETS" == all || ",$SETS," == *",$label,"* ]] || return 0
   timeout --kill-after=30s "${S3_STEP_TIMEOUT:-2400}" "$@" > "$DROP/$label.log" 2>&1 || status=$?
   printf '%s exit=%s\n' "$label" "$status" | tee -a "$DROP/rows.txt"
 }

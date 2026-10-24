@@ -13,7 +13,7 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { BinaryLike } from 'node:crypto';
-import { copyFile, cp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -258,8 +258,13 @@ const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promi
     electron.launch({
       executablePath: packagedApp?.executable ?? electronPath,
       args: arguments_,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
-      env: { ...process.env, S3_CLIENT_ROOT: packagedApp?.clientRoot ?? clientRoot },
+      env: {
+        ...process.env,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
+        S3_CLIENT_ROOT: packagedApp?.clientRoot ?? clientRoot,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Environment variable name read by the desktop fixture.
+        S3_USER_DATA: await mkdtemp(path.join(os.tmpdir(), 's3-profile-')),
+      },
       // A fresh unsigned packaged executable on Windows on Arm is scanned on first launch and has needed over 2 minutes.
       timeout: isWindows ? (packagedApp ? 300_000 : 120_000) : 60_000,
     });
@@ -498,7 +503,15 @@ const sequenceCheck = (lines: readonly string[], expectedLast: number) => {
   };
 };
 
+/** Host load around an R01 run, to tell a renderer's own slowdown from a busy or throttled runner. */
+const hostLoad = () => ({
+  loadAverage: os.loadavg(),
+  freeMemoryGiB: os.freemem() / 2 ** 30,
+  at: new Date().toISOString(),
+});
+
 const r01Run = async (kind: Kind, round: number) => {
+  const hostBefore = hostLoad();
   const session = await launch(kind);
   try {
     const mounted = await mount(session);
@@ -552,6 +565,7 @@ const r01Run = async (kind: Kind, round: number) => {
     return {
       kind,
       round,
+      host: { before: hostBefore, after: hostLoad() },
       mounted,
       idle: { ...idle, idleFramesPerSecond },
       throughput: {

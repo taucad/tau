@@ -42,6 +42,8 @@ export type Terminal = {
       readonly cursorX: number;
       readonly cursorY: number;
       readonly baseY: number;
+      /** The absolute line at the top of the viewport (baseY unless scrolled back). */
+      readonly viewportY: number;
       getLine(index: number): { translateToString(trimRight?: boolean): string } | undefined;
     };
   };
@@ -50,6 +52,8 @@ export type Terminal = {
   write(data: string | Uint8Array<ArrayBuffer>, callback?: () => void): void;
   paste(text: string): void;
   onData(listener: (data: string) => void): { dispose(): void };
+  onRender(listener: (range: { start: number; end: number }) => void): { dispose(): void };
+  onResize(listener: (size: { cols: number; rows: number }) => void): { dispose(): void };
   hasSelection(): boolean;
   getSelection(): string;
   select(column: number, row: number, length: number): void;

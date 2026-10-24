@@ -3,7 +3,8 @@
 # pinned image, KVM, loopback SSH with ephemeral keys, no credentials in the guest. The checkout (with its
 # node_modules and the harness already built on the host) and Node are shared over 9p at the same paths, and the
 # guest user has the host user's uid so its writes land as the runner's files.
-# Required env: RUNNER_TEMP, DROP (results directory, inside the checkout). Usage: bash linux-vm.sh
+# Required env: RUNNER_TEMP, DROP (results directory, inside the checkout); optional S3_SETS (row labels, default all).
+# Usage: bash linux-vm.sh
 # Exit codes: 0 guest run finished (rows record their own outcome); 1 VM or guest setup failed; 3 not a hosted x64 runner.
 set -euo pipefail
 umask 077
@@ -80,5 +81,5 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 'cat /proc/sys/kernel/random/boot_id' > "$
 # Paths are workspace/toolcache paths without spaces, passed to the guest on purpose.
 # shellcheck disable=SC2029
 timeout 7200 ssh "${ssh_options[@]}" tau@127.0.0.1 \
-  "bash -s -- '$REPO_ROOT' '$NODE_ROOT' '$DROP'" < "$REPO_ROOT/apps/ui/scripts/s3-renderer/native/linux-vm-guest.sh" \
+  "bash -s -- '$REPO_ROOT' '$NODE_ROOT' '$DROP' '${S3_SETS:-all}'" < "$REPO_ROOT/apps/ui/scripts/s3-renderer/native/linux-vm-guest.sh" \
   2>&1 | tee "$DROP/guest.log"

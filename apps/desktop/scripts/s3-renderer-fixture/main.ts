@@ -19,9 +19,18 @@ import {
 
 type MetricSample = { at: number; cpuPercent: number; workingSetKiB: number; byType: Record<string, number> };
 
-const { S3_CLIENT_ROOT: clientRoot, S3_WINDOW_WIDTH: windowWidth, S3_WINDOW_HEIGHT: windowHeight } = process.env;
+const {
+  S3_CLIENT_ROOT: clientRoot,
+  S3_USER_DATA: userData,
+  S3_WINDOW_WIDTH: windowWidth,
+  S3_WINDOW_HEIGHT: windowHeight,
+} = process.env;
 if (!clientRoot) {
   throw new Error('S3_CLIENT_ROOT is required.');
+}
+/* A fresh profile per launch: sessions sharing one never contend for its lock or inherit its caches. */
+if (userData) {
+  app.setPath('userData', userData);
 }
 const width = Number(windowWidth ?? '1280');
 const height = Number(windowHeight ?? '960');

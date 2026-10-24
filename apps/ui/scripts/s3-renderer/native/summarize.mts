@@ -3,15 +3,28 @@
  * written its suites, and every screen-reader result must have actually run. A row whose reader was unavailable
  * stays red with its typed reason; it is never reported as a pass.
  *
- * Usage: node summarize.mts <drop> <label>=<suite,suite> ...
+ * Usage: node summarize.mts <drop> [--sets <all|set,set>] <label>=<suite,suite> ...
+ * `--sets` gates only the planned labels that were dispatched; `r01-diag` selects every `r01-diag-*` label, which
+ * `all` leaves out.
  */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
-const [drop, ...plans] = process.argv.slice(2);
+const [drop, ...rest] = process.argv.slice(2);
+const setsAt = rest.indexOf('--sets');
+const sets = setsAt === -1 ? 'all' : (rest.splice(setsAt, 2)[1] ?? 'all');
+const selected = (label: string): boolean => {
+  const diagnostic = label.startsWith('r01-diag-');
+  if (sets === 'all') {
+    return !diagnostic;
+  }
+  const names = sets.split(',');
+  return names.includes(label) || (diagnostic && names.includes('r01-diag'));
+};
+const plans = rest.filter((plan) => selected(plan.split('=')[0]!));
 if (!drop || plans.length === 0) {
-  throw new Error('Usage: summarize.mts <drop> <label>=<suite,suite> ...');
+  throw new Error('Usage: summarize.mts <drop> [--sets <all|set,set>] <label>=<suite,suite> ...');
 }
 const lines: string[] = [];
 let failed = false;

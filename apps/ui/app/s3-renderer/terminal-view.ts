@@ -4,6 +4,7 @@
  * nothing under `app/routes` imports it and no production selector exists.
  */
 import type * as GhosttyWeb from 'ghostty-web';
+import type { Terminal as AurigaxTerminal } from '#s3-renderer/aurigax-ghostty-web';
 
 /** `ghostty131` is ghostty-web's own code with a WASM rebuilt on Ghostty v1.3.1 (`scripts/s3-renderer/build-ghostty-wasm.sh`). */
 export type RendererKind = 'xterm' | 'ghostty' | 'ghostty131' | 'aurigax';
@@ -237,6 +238,71 @@ const createOutputAnnouncer = (host: HTMLElement) => {
     dispose(): void {
       clearTimeout(timer);
       region.remove();
+    },
+  };
+};
+
+/** Milliseconds between screen-mirror refreshes while output or resizes arrive. */
+const mirrorDelay = 150;
+
+/**
+ * A visually hidden copy of the visible screen inside AurigaX's focusable `role=textbox` element. AurigaX draws to a
+ * canvas only, so NVDA's review cursor (which reads the focused editable's text) found nothing but "graphic". The
+ * mirror gives the textbox one text row per screen row, hides the canvas from the accessibility tree and, while the
+ * textbox itself has focus, collapses the DOM caret onto the cursor row so review starts at the prompt.
+ */
+const createScreenMirror = (
+  terminal: AurigaxTerminal,
+  container: HTMLElement,
+): { schedule: () => void; dispose: () => void } => {
+  const mirror = document.createElement('div');
+  mirror.dataset['s3ScreenMirror'] = 'true';
+  Object.assign(mirror.style, {
+    position: 'absolute',
+    left: '0',
+    top: '0',
+    width: '1px',
+    height: '1px',
+    overflow: 'hidden',
+    clipPath: 'inset(50%)',
+    whiteSpace: 'pre',
+  });
+  container.append(mirror);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const sync = (): void => {
+    timer = undefined;
+    for (const canvas of container.querySelectorAll('canvas')) {
+      canvas.setAttribute('aria-hidden', 'true');
+    }
+    const { active } = terminal.buffer;
+    const top = active.viewportY;
+    while (mirror.childElementCount > terminal.rows) {
+      mirror.lastElementChild?.remove();
+    }
+    while (mirror.childElementCount < terminal.rows) {
+      mirror.append(document.createElement('div'));
+    }
+    const rows = [...mirror.children] as HTMLElement[];
+    for (const [y, row] of rows.entries()) {
+      const text = active.getLine(top + y)?.translateToString(true) ?? '';
+      if (row.textContent !== text) {
+        row.textContent = text;
+      }
+    }
+    const cursorRow = rows[active.baseY + active.cursorY - top];
+    if (document.activeElement === container && cursorRow) {
+      const node = cursorRow.firstChild ?? cursorRow;
+      const offset = node === cursorRow ? 0 : Math.min(active.cursorX, node.textContent?.length ?? 0);
+      document.getSelection()?.collapse(node, offset);
+    }
+  };
+  return {
+    schedule: () => {
+      timer ??= setTimeout(sync, mirrorDelay);
+    },
+    dispose: () => {
+      clearTimeout(timer);
+      mirror.remove();
     },
   };
 };
@@ -531,6 +597,19 @@ const createAurigaxView = async (options: TerminalViewOptions): Promise<Terminal
     Reflect.deleteProperty(document, 'addEventListener');
   }
   const disposers: Array<() => void> = [];
+  if (options.screenReaderMode) {
+    const mirror = createScreenMirror(terminal, mount);
+    const subscriptions = [terminal.onRender(mirror.schedule), terminal.onResize(mirror.schedule)];
+    mount.addEventListener('focus', mirror.schedule);
+    mirror.schedule();
+    disposers.push(() => {
+      for (const subscription of subscriptions) {
+        subscription.dispose();
+      }
+      mount.removeEventListener('focus', mirror.schedule);
+      mirror.dispose();
+    });
+  }
   const listen = <K extends keyof DocumentEventMap>(
     target: Document | HTMLElement,
     type: K,

@@ -4619,14 +4619,15 @@ describe('mechanism export', () => {
 // kernel's serializer the way the framework does: on the native handle `createGeometry` produces.
 type ReplicadKernelContext = Parameters<NonNullable<typeof replicadDefinition.serializeHandle>>[2];
 
-const serializeHandle = (entries: NativeHandleEntry[], mechanism?: unknown) => {
+const serializeHandle = async (entries: NativeHandleEntry[], mechanism?: unknown) => {
   if (!replicadDefinition.serializeHandle) {
     throw new Error('The replicad kernel declares serializeHandle.');
   }
+  const replicad = await import('replicad');
   return replicadDefinition.serializeHandle(
     { handle: { shapes: entries, mechanism } },
     createMockKernelRuntime(),
-    mock<ReplicadKernelContext>(),
+    mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
   );
 };
 
@@ -4650,9 +4651,9 @@ describe('serializeNativeHandle', () => {
     );
   }, 60_000);
 
-  it('should serialize nativeHandle to BRep strings with metadata', async () => {
+  it('should serialize nativeHandle to binary BRep bytes with metadata', async () => {
     const { drawRoundedRectangle } = await import('replicad');
-    const { shapes: serialized } = serializeHandle(
+    const { shapes: serialized } = await serializeHandle(
       normalizeRenderShapes({
         shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10),
         name: 'TestBox',
@@ -4663,8 +4664,9 @@ describe('serializeNativeHandle', () => {
     );
 
     expect(serialized).toHaveLength(1);
-    expect(typeof serialized[0]!.brep).toBe('string');
-    expect(serialized[0]!.brep.length).toBeGreaterThan(0);
+    const [first] = serialized;
+    expect(first && 'brep' in first ? first.brep : undefined).toBeInstanceOf(Uint8Array);
+    expect(first && 'brep' in first ? first.brep.byteLength : 0).toBeGreaterThan(0);
     expect(serialized[0]!.metadata.name).toBe('TestBox');
     expect(serialized[0]!.metadata.color).toBe('#ff0000');
     expect(serialized[0]!.metadata.metalness).toBe(0.8);
@@ -4673,7 +4675,7 @@ describe('serializeNativeHandle', () => {
 
   it('should round-trip serialize/deserialize preserving shape geometry', async () => {
     const { drawRoundedRectangle, drawCircle } = await import('replicad');
-    const { shapes: serialized } = serializeHandle(
+    const { shapes: serialized } = await serializeHandle(
       normalizeRenderShapes([
         { shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10), name: 'Box', color: '#ff0000' },
         {
@@ -4694,7 +4696,7 @@ describe('serializeNativeHandle', () => {
   it('should keep the authored mechanism across a native-handle snapshot', async () => {
     const replicad = await import('replicad');
     const mechanism = { schemaVersion: 1, root: 'base', links: { base: { shapes: ['Box'] } }, joints: {} };
-    const snapshot = serializeHandle(
+    const snapshot = await serializeHandle(
       normalizeRenderShapes({ shape: replicad.makeBox([0, 0, 0], [1, 1, 1]), name: 'Box' }),
       mechanism,
     );
@@ -4708,6 +4710,90 @@ describe('serializeNativeHandle', () => {
     expect(snapshot.mechanism).toEqual(mechanism);
     expect(restored.mechanism).toEqual(mechanism);
     expect(restored.shapes.map((entry) => entry.name)).toEqual(['Box']);
+  });
+
+  it('should snapshot a rendered shape as binary BRep without its triangulation and restore the same shape', async () => {
+    const replicad = await import('replicad');
+    const shape = replicad.makeCylinder(10, 20).fillet(2);
+    // A display render leaves its triangulation on the live shape, and text snapshots carried it.
+    shape.mesh({ tolerance: 0.1, angularTolerance: 0.3 });
+    const textBytes = new TextEncoder().encode(shape.serialize()).byteLength;
+    const faces = shape.faces.length;
+    const edges = shape.edges.length;
+    const volume = replicad.measureVolume(shape);
+
+    const snapshot = await serializeHandle(normalizeRenderShapes({ shape, name: 'Rounded' }));
+    const restored = replicadDefinition.deserializeHandle!(
+      { serialized: structuredClone(snapshot) },
+      createMockKernelRuntime(),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+    );
+    const [entry] = restored.shapes;
+    try {
+      const [written] = snapshot.shapes;
+      if (!written || !('brep' in written)) {
+        throw new TypeError('Expected a binary BRep snapshot entry.');
+      }
+      const { brep } = written;
+      expect(brep).toBeInstanceOf(Uint8Array);
+      expect(brep.byteLength).toBeLessThan(textBytes / 2);
+      expect(entry!.shape.faces).toHaveLength(faces);
+      expect(entry!.shape.edges).toHaveLength(edges);
+      const solid = entry!.shape;
+      // The filleted cylinder is a compound; the restore must keep its type and volume.
+      expect(solid.constructor).toBe(shape.constructor);
+      if (!(solid instanceof replicad.Compound)) {
+        throw new TypeError('Expected the restored snapshot to be a compound.');
+      }
+      expect(replicad.measureVolume(solid)).toBeCloseTo(volume, 6);
+      // Writing the restored shape with triangles reproduces the snapshot: it carries none.
+      const oc = replicad.getOC();
+      const range = new oc.Message_ProgressRange();
+      try {
+        // oxlint-disable-next-line new-cap -- OCCT exposes callable C++ PascalCase methods.
+        oc.BinTools.Write(entry!.shape.wrapped, '/tmp/tau_replicad_restored.bin', range);
+        expect(oc.FS.readFile('/tmp/tau_replicad_restored.bin').byteLength).toBe(brep.byteLength);
+      } finally {
+        range.delete();
+        oc.FS.unlink('/tmp/tau_replicad_restored.bin');
+      }
+    } finally {
+      entry?.shape.delete();
+      shape.delete();
+    }
+  }, 30_000);
+
+  it('should snapshot a drawing as its own serialisation and restore it as a drawing', async () => {
+    const replicad = await import('replicad');
+    const drawing = replicad.drawCircle(5);
+    const snapshot = await serializeHandle([
+      { shape: drawing as unknown as NativeHandleEntry['shape'], name: 'Sketch' },
+    ]);
+    const restored = replicadDefinition.deserializeHandle!(
+      { serialized: structuredClone(snapshot) },
+      createMockKernelRuntime(),
+      mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+    );
+
+    expect(snapshot.shapes[0]).toMatchObject({ drawing: drawing.serialize() });
+    expect(restored.shapes[0]!.shape).toBeInstanceOf(replicad.Drawing);
+    expect(restored.shapes[0]!.name).toBe('Sketch');
+  });
+
+  it('should refuse a snapshot in another format instead of restoring a wrong shape', async () => {
+    const replicad = await import('replicad');
+    const foreign = structuredClone(
+      await serializeHandle(normalizeRenderShapes({ shape: replicad.makeBox([0, 0, 0], [1, 1, 1]), name: 'Box' })),
+    );
+    // A 1.4.0 text snapshot carried no format; the kernel version keys it away, and restore refuses it.
+    Reflect.deleteProperty(foreign, 'format');
+    expect(() =>
+      replicadDefinition.deserializeHandle!(
+        { serialized: foreign },
+        createMockKernelRuntime(),
+        mock<ReplicadKernelContext>({ replicadLibrary: { ...replicad } }),
+      ),
+    ).toThrow(/snapshot format/);
   });
 
   it('should have serializeNativeHandle and deserializeNativeHandle defined on the kernel', () => {

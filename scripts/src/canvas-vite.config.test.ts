@@ -263,7 +263,7 @@ describe('canvas Vite config', () => {
 
     writeFileSync(resolve(canvas, 'canvas.aliases.json'), JSON.stringify({ react: '/tmp/fixture.ts' }));
     expect(() => createCanvasConfig(root, output, artifacts)).toThrow(
-      'Canvas aliases require # imports and repository-relative fixture paths',
+      'Canvas aliases require # imports or workspace hooks and repository-relative fixture paths',
     );
   });
 

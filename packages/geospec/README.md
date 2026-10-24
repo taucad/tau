@@ -9,7 +9,7 @@ registry, and host integration. It executes no geometry on its own: every claim
 is evaluated by the compiled
 [`geospec-engine`](https://github.com/taucad/geospec/tree/main/packages/geospec-engine) core that
 the host passes to the runner. Tau's desktop/browser composition and the
-[`geospec` CLI](../geospec-engine/README.md) supply that engine. Authored tests
+[`geospec` CLI](#runner-configuration) supply that engine. Authored tests
 do not import or select an engine, and nothing registers one globally.
 
 The following is a `*.geospec.ts` module for the CLI or Tau `test_model`:

@@ -3,9 +3,14 @@
  * `geospec` CLI and holds each row to its contract: every row passes, or stays
  * undecided for exactly its pinned reason.
  *
- * The CLI comes from a consumer directory holding `@taucad/geospec-engine` in its
- * `node_modules`: by default the workspace build's consumer that
- * `scripts:prepare-geospec-test-consumer` prepares (its receipt names it).
+ * The CLI is the installed `geospec` CLI host with the installed Tau CLI's exporter
+ * (`tauExporter` from `@taucad/cli/geospec`) in every pool worker, the composition
+ * `tau test` runs, because the gate needs `geospec run`'s flags and its `--json`
+ * report with diagnostic codes. Both come from a consumer directory holding `geospec`
+ * and `@taucad/cli` in its `node_modules`: by default the workspace build's consumer
+ * that `scripts:prepare-geospec-test-consumer` prepares (its receipt names it). The
+ * two-module driver is written beside them, under `tau-examples-geospec/`, so it
+ * resolves both from that install and nothing from the workspace.
  *
  * Usage:
  *   pnpm nx run tau-examples:test-geospec
@@ -17,7 +22,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { parseArgs, promisify } from 'node:util';
@@ -46,11 +51,36 @@ const consumerRoot =
   values.consumer === undefined
     ? (JSON.parse(readFileSync(receiptPath, 'utf8')) as { consumerRoot: string }).consumerRoot
     : resolve(values.consumer);
-const cli = join(consumerRoot, 'node_modules/@taucad/geospec-engine/dist/cli/main.mjs');
-if (!existsSync(cli)) {
-  console.error(`No installed geospec CLI at ${cli}`);
-  process.exit(1);
+for (const name of ['geospec', '@taucad/cli']) {
+  const manifest = join(consumerRoot, 'node_modules', name, 'package.json');
+  if (!existsSync(manifest)) {
+    console.error(`No installed ${name} at ${manifest}`);
+    process.exit(1);
+  }
 }
+const driverRoot = join(consumerRoot, 'tau-examples-geospec');
+const cli = join(driverRoot, 'geospec.mjs');
+mkdirSync(driverRoot, { recursive: true });
+// Each pool worker imports this module by URL and gets one Tau exporter rooted at its project.
+writeFileSync(
+  join(driverRoot, 'tau-exporter.mjs'),
+  [
+    "import { tauExporter } from '@taucad/cli/geospec';",
+    '',
+    'export default async ({ projectPath }) => [await tauExporter({ projectPath })];',
+    '',
+  ].join('\n'),
+);
+writeFileSync(
+  cli,
+  [
+    "import { createNodeGeoSpecCliHost, runGeoSpecCli } from 'geospec/cli';",
+    '',
+    "const exporterModules = [new URL('./tau-exporter.mjs', import.meta.url).href];",
+    'process.exitCode = await runGeoSpecCli(process.argv.slice(2), createNodeGeoSpecCliHost({ exporterModules }));',
+    '',
+  ].join('\n'),
+);
 
 const run = async (directory: string): Promise<GeoSpecRunReport> => {
   const arguments_ = [cli, 'run', directory, '--test-timeout', '300000', '--workers', '1', '--json'];

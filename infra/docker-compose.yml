@@ -99,6 +99,7 @@ services:
         mc anonymous set download local/tau-content;
         mc mb --ignore-existing local/tau-content-private;
         mc mb --ignore-existing local/tau-content-restore;
+        mc mb --ignore-existing --with-lock local/tau-content-second-copy;
         mc admin user add local tau-api tau-api-dev-secret || true;
         mc admin policy attach local readwrite --user tau-api || true;
         mc cp /seed/default-og.png local/tau-content/defaults/og.png;

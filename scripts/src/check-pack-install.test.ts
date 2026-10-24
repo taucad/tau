@@ -97,9 +97,9 @@ describe('importableSpecifiers', () => {
   });
 
   it('enumerates every published subpath of the release train', () => {
-    expect(importableSpecifiers(publishedManifest('packages/geospec-engine'))).toStrictEqual([
-      '@taucad/geospec-engine/node-filesystem',
-      '@taucad/geospec-engine/native-pool/node',
+    expect(importableSpecifiers(publishedManifest('packages/cli'))).toStrictEqual([
+      '@taucad/cli',
+      '@taucad/cli/geospec',
     ]);
     expect(importableSpecifiers(publishedManifest('packages/runtime'))).toContain('@taucad/runtime/plugin');
     expect(importableSpecifiers(publishedManifest('packages/runtime'))).not.toContain('@taucad/runtime/presets');
@@ -127,8 +127,14 @@ describe('requiredArtifactPaths', () => {
     ).toStrictEqual(['dist', 'README.md', './dist/index.d.mts', './dist/index.mjs', './dist/index.mjs']);
   });
 
-  it('keeps the geospec-engine files entries that only prepack produces', () => {
-    expect(requiredArtifactPaths(publishedManifest('packages/geospec-engine'))).toContain('provenance.json');
+  it('keeps files entries that only prepack produces', () => {
+    expect(
+      requiredArtifactPaths({
+        name: '@taucad/example',
+        version: '1.0.0',
+        files: ['dist', 'provenance.json'],
+      }),
+    ).toContain('provenance.json');
   });
 
   it('leaves wildcard exports to concrete files entries', () => {
@@ -247,7 +253,7 @@ describe('unrewrittenSiblings', () => {
           dependencies: {
             '@taucad/units': 'https://pkg.pr.new/taucad/tau/@taucad/units@1f80f46a34135790d19f791e8c305c044d1518fd',
           },
-          peerDependencies: { '@taucad/runtime': previewVersion, '@taucad/geospec-engine': '^0.1.0-beta.0' },
+          peerDependencies: { '@taucad/runtime': previewVersion, 'geospec-engine': '^0.3.0' },
         },
         published,
       ),

@@ -212,7 +212,14 @@ async function main(): Promise<void> {
           throw new Error('Usage: migrate --environment ENVIRONMENT [--commercial-file JSON_FILE]');
         }
         // Protected one-shot DDL identity on its own `max: 1` connection; API replicas never migrate.
-        const migration = await runMigrationJob(databaseUrl);
+        // The private service apps' logins (P2.3): Terraform generates each, and only this job reads them.
+        // An unset variable leaves that role without a new login instead of failing the release.
+        const mirrorPassword = process.env['TAU_MIRROR_DATABASE_PASSWORD'];
+        const maintenancePassword = process.env['TAU_MAINTENANCE_DATABASE_PASSWORD'];
+        const migration = await runMigrationJob(databaseUrl, {
+          ...(mirrorPassword === undefined ? {} : { mirrorPassword }),
+          ...(maintenancePassword === undefined ? {} : { maintenancePassword }),
+        });
         console.log(JSON.stringify(migration));
         /* The release job owns the tariff the way it owns the schema. A cloud-off deployment still
          * migrates; it just has no tariff to derive. */

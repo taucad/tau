@@ -47,6 +47,11 @@ billing-operations = 'node /app/dist/billing-command.js billing-operations-worke
 # Each pass records durable liveness; status requires recovery within 120 seconds.
 # One connection per lane (pool cap 2); the singleton remains at 512 MiB.
 # Restore remains operator-invoked using TAU_S3_RESTORE_* secrets.
+# DC4: this group is moving to the private app in `apps/maintenance/fly.prod.toml`,
+# which holds in standby (TAU_MAINTENANCE_STANDBY) while this line exists. Do not
+# remove it here alone: the cutover scales this group to zero, deletes this line,
+# its `[[vm]]` and the standby flag there in one reviewed change, after the new
+# app is deployed and healthy (`app/maintenance-app.test.ts` enforces the pairing).
 revisions-maintenance = "node /app/dist/maintenance-command.js worker"
 
 [env]
@@ -122,12 +127,14 @@ path = "/metrics"
 processes = ['app', 'billing-operations']
 
 # The rootfs is now the capacity knob the retired volume used to be: a lease is a
-# temporary working copy under `os.tmpdir()`, and admission refuses one when
-# `concurrent leases × 2.5 GiB` (W0a's measured figure at D20's 1 GiB ceiling)
-# exceeds the free bytes `statfs` reports. On Fly's default 8 GiB rootfs, minus the
-# image and the pruned deploy tree, that is two ceiling-sized leases at once and a
-# third only if the image is smaller than it looks — admission reads the real free
-# bytes, so the number self-corrects and the figure here is not a contract. Raise
+# temporary working copy under `os.tmpdir()`, and admission refuses one when its
+# real-byte reservation does not fit in the free bytes `statfs` reports less what
+# admitted leases still have to write (DA3): a fetch reserves its packs plus a
+# 64 MiB floor, a push adds its quarantine bound (what is left of the plan or of
+# D20's 1 GiB ceiling, plus 64 MiB of slack). On Fly's default 8 GiB rootfs, about
+# 7.3 GiB free on staging, that is over a hundred fetches of a KiB repository, six
+# fetches of a 1 GiB one, or about six pushes at once. Admission reads the real free
+# bytes, so the numbers self-correct and the figures here are not a contract. Raise
 # the rootfs before raising the ceiling.
 [[vm]]
 # Match the staging API size; retain two serving Machines for rolling releases.
@@ -149,9 +156,9 @@ cpu_kind = 'shared'
 cpus = 1
 processes = ['billing-operations']
 
-# Restore hydrates a repository through a lease of its own, so this Machine wants the
-# same lease headroom an `app` Machine has; the purge and collector passes stream
-# keys and need almost none.
+# Restore copies packs from the source bucket to the primary as streams (DA4) and takes
+# no lease, so it needs no lease headroom; the purge and collector passes stream keys
+# and need almost none either.
 [[vm]]
 memory = '512mb'
 cpu_kind = 'shared'

@@ -1,0 +1,5 @@
+{"level":30,"time":1792821600000,"service":"tau-api","context":"StorageForwarder","msg":"forwarded receive-pack to tau-storage","grantKid":"k2026a","req":{"method":"POST","url":"/v1/git/own_fixture/prj_fixture.git/git-receive-pack","headers":{"x-tau-storage-grant":"**REDACTED**"}}}
+{"level":40,"time":1792821600000,"service":"tau-storage","context":"GrantVerifier","msg":"grant rejected","reason":"expired","kid":"k2026a"}
+{"level":30,"time":1792821600000,"service":"tau-api","context":"StorageReceiptController","msg":"receipt applied; signature verified","receipt":{"v":1,"kid":"r2026a","rid":"rid_fixture","generation":12}}
+{"level":30,"time":1792821600000,"service":"tau-api","context":"LfsBatchService","msg":"lfs batch answered","actions":{"upload":{"href":"https://fixture-account.r2.cloudflarestorage.com/tau-content/tenants/own_fixture/lfs/ab/cd/abcd?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20261024T060000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host&X-Amz-Signature=**REDACTED**","expires_in":900}}}
+Oct 24 06:00:00 tau-storage[worker] grant rejected reason=expired kid=k2026a

@@ -61,8 +61,10 @@ test.each([
     const surface = selectors.getByRole('region', { name: title, exact: true });
     // oxlint-disable-next-line no-await-in-loop -- one surface at a time.
     await target.expectVisible(surface, 60_000);
+    // The closing All sheet hides the nav from the accessibility tree until its exit animation ends, so the nav's
+    // buttons are found by role only after it; poll as the Model check below does.
     // oxlint-disable-next-line no-await-in-loop -- one surface at a time.
-    expect(await target.getAttribute(navButton('All'), 'aria-current')).toBe('page');
+    await expect.poll(async () => target.getAttribute(navButton('All'), 'aria-current')).toBe('page');
     // oxlint-disable-next-line no-await-in-loop -- one surface at a time.
     await target.click(navButton('Model'), { touch: true });
     // oxlint-disable-next-line no-await-in-loop -- one surface at a time.

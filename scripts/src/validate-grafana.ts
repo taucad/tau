@@ -5,7 +5,13 @@
  * alert UID fails alerting provisioning and the Grafana server exits, taking
  * every local dashboard down with it.
  *
+ * It also holds the rule contract Tau Cloud's renderer depends on (W14 OB1): a cloud-handbook
+ * runbook and a routable severity on every rule, trigger labels on every `info` rule, and rule UIDs
+ * unique within the 20 characters hosted provisioning keeps. With `--log-sample`, it instead checks
+ * captured storage logs for grant, receipt-signature and presigned-signature values.
+ *
  * Usage: pnpm nx run scripts:validate-grafana
+ *        node scripts/src/validate-grafana.ts --log-sample <file>...
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -44,8 +50,160 @@ type RuleGroup = {
   /** `"60s"` in provisioning, seconds in Cloud's JSON. */
   // oxlint-disable-next-line tau-lint/no-bare-time-identifier -- Grafana's own rule-group key
   readonly interval?: string | number;
-  readonly rules?: ReadonlyArray<{ readonly uid?: string }>;
+  readonly rules?: readonly AlertRule[];
 };
+
+type AlertRule = {
+  readonly uid?: string;
+  readonly labels?: Readonly<Record<string, string>>;
+  readonly annotations?: Readonly<Record<string, string>>;
+};
+
+/** Tau Cloud routes `critical` and `warning` to the operator contact and `info` (trigger rules) to email only. */
+const ruleSeverities = ['critical', 'warning', 'info'] as const;
+
+/** A page in the private cloud handbook; Tau Brain's CI checks that the path exists. */
+const runbookPattern = /^docs\/handbooks\/cloud\/(?:[\w-]+\/)*[\w-]+\.md$/u;
+
+/** Labels an `info` rule needs so the trigger table can name what fired and which package it charters. */
+const triggerLabels = ['trigger', 'package'] as const;
+
+/**
+ * W14 OB1 (a): every rule names a cloud-handbook runbook and a routable severity, and every `info`
+ * rule is a labelled trigger. An `info` rule without them would reach the email-only contact with
+ * nothing to say what to charter.
+ */
+export const alertRuleProblems = (file: string, groups: readonly RuleGroup[]): string[] =>
+  groups.flatMap((group) =>
+    (group.rules ?? []).flatMap((rule) => {
+      const subject = `${file}: alert rule "${rule.uid ?? ''}"`;
+      const runbook = rule.annotations?.['runbook_url'];
+      const severity = rule.labels?.['severity'];
+      const problems: string[] = [];
+      if (runbook === undefined || !runbookPattern.test(runbook)) {
+        problems.push(
+          `${subject} needs annotations.runbook_url naming a docs/handbooks/cloud/**.md page (has ${runbook === undefined ? 'none' : JSON.stringify(runbook)})`,
+        );
+      }
+      if (!ruleSeverities.some((known) => known === severity)) {
+        problems.push(
+          `${subject} needs label severity ${ruleSeverities.slice(0, -1).join(', ')} or ${ruleSeverities.at(-1)} (has ${severity === undefined ? 'none' : JSON.stringify(severity)})`,
+        );
+      }
+      if (severity === 'info') {
+        const missing = [
+          ...(rule.labels?.['kind'] === 'trigger' ? [] : ['kind=trigger']),
+          ...triggerLabels.filter((label) => (rule.labels?.[label] ?? '').trim() === ''),
+        ];
+        if (missing.length > 0) {
+          problems.push(
+            `${subject} is severity=info, so it needs kind=trigger and non-empty trigger and package labels (missing ${missing.join(', ')})`,
+          );
+        }
+      }
+      return problems;
+    }),
+  );
+
+/** Hosted provisioning keeps this many characters of a source rule UID, then appends a hash (Tau Cloud `grafana-content`). */
+const hostedUidPrefixLength = 20;
+
+/**
+ * Rules that shared a 20-character prefix before the W14 OB1 lint. Renaming a source UID recreates the
+ * hosted rule and orphans its Tau Cloud overrides, so these stay; no new rule may join a collision.
+ */
+export const legacyUidPrefixCollisions: readonly string[] = [
+  'billing-funded-operation-due-age',
+  'billing-funded-operation-limit',
+  'billing-funded-operation-occupancy',
+  'billing-funded-operation-recovery-failed',
+];
+
+/**
+ * W14 OB1 (b): rule UIDs are unique within the characters hosted provisioning keeps, so a hosted rule
+ * reads as its source rule. A collision is tolerated only when every member is a listed legacy UID.
+ */
+export const uidPrefixProblems = (
+  uids: readonly string[],
+  legacy: readonly string[] = legacyUidPrefixCollisions,
+): string[] => {
+  const prefixOf = (uid: string): string => uid.slice(0, hostedUidPrefixLength);
+  const byPrefix = Map.groupBy(new Set(uids), prefixOf);
+  const collides = (uid: string): boolean => uids.includes(uid) && (byPrefix.get(prefixOf(uid))?.length ?? 0) > 1;
+  return [
+    ...[...byPrefix]
+      .filter(([, members]) => members.length > 1 && members.some((uid) => !legacy.includes(uid)))
+      .map(
+        ([prefix, members]) =>
+          `alert rule UIDs ${members.map((uid) => `"${uid}"`).join(', ')} share their first ${hostedUidPrefixLength} characters "${prefix}"; hosted provisioning keeps only those, so each UID must differ within them`,
+      ),
+    ...legacy
+      .filter((uid) => !collides(uid))
+      .map((uid) => `legacy UID collision "${uid}" no longer collides: remove it from legacyUidPrefixCollisions`),
+  ];
+};
+
+/** Values a redacting logger leaves: pino's censor, Tau's `redactionCensor`, or nothing. */
+const redacted = /^(?:|\*\*REDACTED\*\*|\[redacted\])$/iu;
+
+/** A presigned URL's signature, raw or percent-encoded inside another URL. */
+const amzSignature = /X-Amz-Signature(?:=|%3D)(?<value>[^&\s"'\\]*)/giu;
+
+/** W9's grant and receipt header shape, `v.kid.payload.signature`, with a base64url Ed25519 signature (86 characters). */
+const storageToken = /(?<![\w.-])\d+\.[\w-]{1,64}\.[\w-]{8,}\.[\w-]{86}(?![\w-])/u;
+
+/** Keys that hold a grant, a receipt signature or a presigned signature when they carry a value. */
+const credentialKey = /grant|signature/iu;
+
+/** Shortest value under a credential key that counts as material; a `kid`, reason or boolean is shorter. */
+const minimumCredentialLength = 32;
+
+/** Every string leaf of a parsed log record with its dotted path. */
+const stringLeaves = (value: unknown, path: readonly string[] = []): Array<[path: string[], value: string]> => {
+  if (typeof value === 'string') {
+    return [[[...path], value]];
+  }
+  if (typeof value !== 'object' || value === null) {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, child]) => stringLeaves(child, [...path, key]));
+};
+
+const parsedRecord = (line: string): unknown => {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * W14 OB1 (f), review FR20: a log sample from the storage forwarder, the worker, the receipt route and
+ * the LFS batch route carries no grant header, receipt signature or `X-Amz-Signature` value. Lines are
+ * JSON (pino) or plain text; a problem names the line and field, never the value.
+ */
+export const logSecretProblems = (file: string, text: string): string[] =>
+  text.split('\n').flatMap((line, index) => {
+    const at = `${file}:${index + 1}`;
+    const record = parsedRecord(line);
+    return [
+      ...(storageToken.test(line)
+        ? [`${at}: a storage grant or receipt token (v.kid.payload.signature) appears in the line`]
+        : []),
+      ...stringLeaves(record)
+        .filter(
+          ([path, value]) =>
+            credentialKey.test(path.at(-1) ?? '') &&
+            !redacted.test(value) &&
+            value.length >= minimumCredentialLength &&
+            !/X-Amz-Signature/iu.test(value),
+        )
+        .map(([path]) => `${at}: field ${path.join('.')} carries credential material`),
+      ...([...line.matchAll(amzSignature)].some(({ groups }) => !redacted.test(groups?.['value'] ?? ''))
+        ? [`${at}: a presigned URL X-Amz-Signature value appears in the line`]
+        : []),
+    ];
+  });
 
 /** A rule with line breaks and their indentation folded to one space, so YAML line folding is not a difference. */
 const comparable = (rule: unknown): unknown =>
@@ -187,24 +345,45 @@ const main = (): void => {
     throw new Error('Grafana bundle is stale. Run pnpm nx run scripts:grafana-bundle after editing definitions.');
   }
 
+  const cloudGroups = jsonFiles(join(grafanaRoot, 'alerts')).map((file) => [file, read(file)] as const);
   const problems = [
     ...grafanaUidProblems(sources),
     ...alertParityProblems(
       provisioned.groups ?? [],
-      jsonFiles(join(grafanaRoot, 'alerts')).map((file) => read(file)),
+      cloudGroups.map(([, group]) => group),
     ),
+    // The local alerts.yaml must equal these field for field, so linting the Cloud groups covers it.
+    ...cloudGroups.flatMap(([file, group]) => alertRuleProblems(basename(file), [group])),
+    ...uidPrefixProblems(ruleUids(cloudGroups.map(([, group]) => group))),
   ];
   if (problems.length > 0) {
     throw new Error(`Invalid Grafana provisioning:\n${problems.map((problem) => `  - ${problem}`).join('\n')}`);
   }
 
-  console.log(`✓ ${sources.length} Grafana provisioning files have valid UIDs`);
+  console.log(`✓ ${sources.length} Grafana provisioning files have valid UIDs, rule labels and runbooks`);
+};
+
+/** `--log-sample <file>...`: lint captured storage log samples (W14 OB1 f) instead of the definitions. */
+const lintLogSamples = (files: readonly string[]): void => {
+  if (files.length === 0) {
+    throw new Error('--log-sample needs at least one file');
+  }
+  const problems = files.flatMap((file) => logSecretProblems(file, readFileSync(file, 'utf8')));
+  if (problems.length > 0) {
+    throw new Error(`Storage log sample leaks credentials:\n${problems.map((problem) => `  - ${problem}`).join('\n')}`);
+  }
+  console.log(`✓ ${files.length} storage log sample(s) carry no grant, receipt signature or X-Amz-Signature value`);
 };
 
 const entryPath = process.argv[1];
 if (entryPath && import.meta.url === pathToFileURL(resolve(entryPath)).href) {
   try {
-    main();
+    const sampleFlag = process.argv.indexOf('--log-sample');
+    if (sampleFlag === -1) {
+      main();
+    } else {
+      lintLogSamples(process.argv.slice(sampleFlag + 1));
+    }
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);

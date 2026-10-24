@@ -25,7 +25,7 @@ void test('should declare the complete normal consumer build closure', async () 
       .filter(({ target }) => target === 'build')
       .flatMap(({ projects }) => projects),
   );
-  const closure = publishableClosure(await workspace({ fresh: true }), ['geospec', 'geospec-engine']);
+  const closure = publishableClosure(await workspace({ fresh: true }), ['geospec', 'cli']);
   assert.deepEqual(
     closure.filter((name) => !roots.has(name)),
     [],
@@ -51,6 +51,7 @@ type Manifest = {
   exports?: Record<string, string>;
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 };
 type CommandOptions = { cwd: string; env: Record<string, string> };
 type RecordedCommand = { command: string; args: string[]; options: CommandOptions };
@@ -75,6 +76,7 @@ type Fault =
   | 'registry'
   | 'stale-build'
   | 'engine-pin'
+  | 'engine-peer'
   | 'engine-integrity'
   | 'engine-tarball';
 
@@ -150,13 +152,18 @@ const prepare = async (fault?: Fault) => {
     {
       name: 'geospec',
       root: 'packages/geospec',
-      manifest: { ...manifest('geospec'), dependencies: { '@taucad/support': '0.1.0' } },
+      manifest: {
+        ...manifest('geospec'),
+        dependencies: { '@taucad/support': '0.1.0' },
+        // A caret peer never admits the prerelease pin, so it is another engine.
+        ...(fault === 'engine-peer' ? { peerDependencies: { [engine]: '^0.1.0' } } : {}),
+      },
     },
     {
-      name: 'geospec-engine',
-      root: 'packages/geospec-engine',
+      name: 'cli',
+      root: 'packages/cli',
       manifest: {
-        ...manifest('@taucad/geospec-engine'),
+        ...manifest('@taucad/cli'),
         dependencies: { geospec: '0.1.0', [engine]: fault === 'engine-pin' ? '0.1.0-next.18' : enginePin },
       },
     },
@@ -234,8 +241,8 @@ const prepare = async (fault?: Fault) => {
     workspace: async () => ({ projects }),
     publishable: (value: { projects: typeof projects }) => value.projects,
     publishableClosure(_value: unknown, names: string[]) {
-      assert.deepEqual([...names], ['geospec', 'geospec-engine']);
-      return ['support', 'geospec', 'geospec-engine'];
+      assert.deepEqual([...names], ['geospec', 'cli']);
+      return ['support', 'geospec', 'cli'];
     },
     spawnSync(command: string, args: string[], options: CommandOptions) {
       // Normalize VM arrays before strict host-realm assertions and recording.
@@ -371,10 +378,10 @@ void test('should prepare one local-tarball closure with the pinned registry eng
   assert.equal(initial.lock.sha256, result.receipt.frameworkSuccessor.initialLock.sha256);
   assert.equal(initial.frameworkSuccessor, undefined);
 });
-void test('should install the current CLI package through the same local tarball closure', async () => {
+void test('should install the current Tau CLI, whose exporter the pool loads, through the same local tarball closure', async () => {
   const result = await prepare();
   assert.ifError(result.error);
-  assert.ok(result.receipt?.installed.some((entry) => entry.name === '@taucad/geospec-engine'));
+  assert.ok(result.receipt?.installed.some((entry) => entry.name === '@taucad/cli'));
 });
 const faultMessages: Record<Fault, RegExp> = {
   'missing-build': /Missing .*geospec\/dist\/index\.mjs/,
@@ -382,6 +389,7 @@ const faultMessages: Record<Fault, RegExp> = {
   registry: /did not install from a tarball/,
   'stale-build': /differs from current built bytes/,
   'engine-pin': /pins another geospec-engine/,
+  'engine-peer': /geospec pins another geospec-engine/,
   'engine-integrity': /integrity differs from pnpm-lock\.yaml/,
   'engine-tarball': /must come from the registry/,
 };

@@ -31,6 +31,18 @@ receivers:
               labels: { tau_process: 'billing-recovery' }
             - targets: ['host.docker.internal:9466']
               labels: { tau_process: 'billing-operations' }
+  # The database-free `tau-storage` worker app (Hosted Remote Storage DC1) on the next free port. The
+  # API's series carry no `app` label locally, which `$app = .*` matches; binding contract v2's
+  # `$storage_app = .*storage.*` needs a value, so this job sets the one Fly sets in the cloud. Until a
+  # local worker serves 9467, the target is down and its `up` series reads 0.
+  prometheus/tau-storage:
+    config:
+      scrape_configs:
+        - job_name: 'tau-storage'
+          scrape_interval: 5s
+          static_configs:
+            - targets: ['host.docker.internal:9467']
+              labels: { app: 'tau-storage' }
   # Server-side views of the local dependencies. The API's postgres.js client has no OTel metrics, so
   # pool and query health come from PostgreSQL itself. Credentials are the compose dev defaults.
   postgresql:
@@ -91,7 +103,8 @@ service:
       processors: [batch]
       exporters: [otlphttp/traces]
     metrics:
-      receivers: [otlp, prometheus/collector, prometheus/tau-api, postgresql, redis, hostmetrics]
+      receivers:
+        [otlp, prometheus/collector, prometheus/tau-api, prometheus/tau-storage, postgresql, redis, hostmetrics]
       processors: [batch]
       exporters: [otlphttp/metrics]
     logs:

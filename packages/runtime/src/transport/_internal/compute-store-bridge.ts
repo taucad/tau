@@ -37,7 +37,7 @@ export const buildComputeStoreBridge = (binding: ComputeBinding | undefined): Co
     /* The authority already serves a port: hand it to the runtime instead of relaying every call here. */
     const port = openPort();
     return {
-      memoryHandle: { computeBindingMode: 'durable', computeStorePort: port },
+      memoryHandle: { computeBindingMode: 'durable', computeStorePort: port, ...sizing },
       transfer: [port as Transferable],
       /* `close` is idempotent, and a no-op once the port has been transferred. */
       dispose: () => {

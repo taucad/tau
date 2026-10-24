@@ -135,6 +135,17 @@ describe('compute store bridge for a port-backed store', () => {
     bridge.dispose();
   });
 
+  it('carries constrained-memory sizing with the authority port', () => {
+    const authority = remoteAuthority();
+    const bridge = buildComputeStoreBridge({ mode: 'durable', store: authority.store, memoryConstrained: true });
+    expect(bridge.memoryHandle).toEqual({
+      computeBindingMode: 'durable',
+      computeStorePort: authority.served[0]!.port,
+      computeMemoryConstrained: true,
+    });
+    bridge.dispose();
+  });
+
   it('mints one fresh authority port per binding and still refuses a foreign store', () => {
     const authority = remoteAuthority();
     const first = buildComputeStoreBridge({ mode: 'durable', store: authority.store });

@@ -14,6 +14,11 @@ import { acpAdapterEnvironment } from '#acp/spawn.js';
 const execute = promisify(execFile);
 const maximumBytes = 65_536;
 const probeTimeout = 2000;
+// Git's two no-repository wordings: the second stops at a filesystem boundary (a tmpfs /tmp on Ubuntu 26.04).
+const noRepository = [
+  'not a git repository (or any of the parent directories): .git',
+  'not a git repository (or any parent up to mount point ',
+];
 const permissions = z.object({
   allowed_mcp_tools: z.array(z.string()).default([]),
   disallowed_mcp_tools: z.array(z.string()).default([]),
@@ -185,12 +190,9 @@ const resolveLocation = async (
         scope = root;
       }
     } catch (error) {
-      if (
-        !(error instanceof Error) ||
-        !('stderr' in error) ||
-        typeof error.stderr !== 'string' ||
-        !error.stderr.includes('not a git repository (or any of the parent directories): .git')
-      ) {
+      const stderr =
+        error instanceof Error && 'stderr' in error && typeof error.stderr === 'string' ? error.stderr : '';
+      if (!noRepository.some((message) => stderr.includes(message))) {
         return undefined;
       }
     }

@@ -76,6 +76,21 @@ describe('Grok provider permission settings readback', () => {
       reason: 'policy-observed',
     });
   });
+  it('should scope to the cwd when git stops at a filesystem boundary (tmpfs /tmp on Ubuntu 26.04)', async () => {
+    const f = await fixture();
+    const bin = join(f.root, 'bin');
+    await mkdir(bin);
+    await writeFile(
+      join(bin, 'git'),
+      `#!/bin/sh\nprintf 'fatal: not a git repository (or any parent up to mount point /tmp)\\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).\\n' >&2\nexit 128\n`,
+    );
+    await chmod(join(bin, 'git'), 0o700);
+    vi.stubEnv('PATH', `${bin}:${process.env['PATH'] ?? ''}`);
+    const prepared = await createGrokPermissionReadback(f)?.prepare(request());
+    expect(prepared).toBeDefined();
+    await f.save('allowed_mcp_tools = ["tau__ask_questions"]');
+    expect(await prepared?.observe()).toMatchObject({ stored: 'present', preexisting: false });
+  });
   it('should distinguish preexisting rules and exact denial', async () => {
     const f = await fixture();
     await f.save('allowed_mcp_tools = ["tau__ask_questions"]');

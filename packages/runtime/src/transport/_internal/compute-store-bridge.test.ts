@@ -80,7 +80,8 @@ const remoteAuthority = () => {
       workspace: 'trusted',
       generation: async () => {
         entry.calls += 1;
-        return (await control.inspect({})).generation;
+        const report = await control.inspect({});
+        return report.generation;
       },
     });
     server.onClose(() => {

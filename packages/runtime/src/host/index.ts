@@ -35,7 +35,11 @@ export type {
   HostCapabilityValue,
   MatchHostCapabilitiesInput,
 } from '#host/capability-matching.js';
-export { connectComputeStoreChannel, exposeComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
+export {
+  connectComputeStoreChannel,
+  exposeComputeStoreChannel,
+  fromComputeStoreChannel,
+} from '#transport/_internal/compute-store-channel.js';
 export { exposeMachineChannel } from '#machines/machine-channel.js';
 export type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 

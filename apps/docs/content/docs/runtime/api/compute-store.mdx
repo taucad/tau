@@ -27,7 +27,7 @@ A kernel's `ResidentCacheBinding` imports and exports native entries within its 
 
 `createMemoryComputeEngine` returns a `MemoryComputeEngine` for non-durable use. `createIndexedDbComputeEngine` accepts `IndexedDbComputeEngineOptions` and returns an `IndexedDbComputeEngine`; `createSqliteComputeEngine` likewise takes `SqliteComputeEngineOptions` and returns a `SqliteComputeEngine`. `fromIndexedDb` and `fromSqlite` wrap authority-owned backends as opaque store bindings.
 
-`connectComputeStoreChannel` and `exposeComputeStoreChannel` connect a session over a host-controlled channel. The Node SQLite worker path uses `connectSqliteComputeStoreWorker`, `SqliteComputeWorker`, `serveSqliteComputeStoreWorker`, `SqliteComputeWorkerConnect`, and `sqliteComputeWorkerConnectType`. These carry store requests; they do not grant filesystem authority by themselves.
+`connectComputeStoreChannel` and `exposeComputeStoreChannel` connect a session over a host-controlled channel. `fromComputeStoreChannel` wraps a function that opens a port to an authority in another realm, such as a worker that owns IndexedDB. A transport opens one port per runtime binding and hands it to the runtime, so store calls skip the composing thread. The Node SQLite worker path uses `connectSqliteComputeStoreWorker`, `SqliteComputeWorker`, `serveSqliteComputeStoreWorker`, `SqliteComputeWorkerConnect`, and `sqliteComputeWorkerConnectType`. These carry store requests; they do not grant filesystem authority by themselves.
 
 ## Related
 

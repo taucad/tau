@@ -206,7 +206,8 @@ describe('worker transport initialize filesystem bridge retries', () => {
       return channel.port2;
     });
     const transferablesOf = (callIndex: number): readonly unknown[] =>
-      (mocks.channel.call.mock.calls[callIndex]?.[1] as { transferables?: readonly unknown[] }).transferables ?? [];
+      (mocks.channel.call.mock.calls[callIndex]?.[1] as { transferables?: readonly unknown[] } | undefined)
+        ?.transferables ?? [];
 
     const web = webWorkerClient({ createWorker: createWebWorker, compute: { mode: 'durable', store } });
     mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config')).mockResolvedValueOnce({});
@@ -215,8 +216,9 @@ describe('worker transport initialize filesystem bridge retries', () => {
     await expect(web.initialize(initializePayload)).resolves.toEqual({});
     const retried = mocks.channel.call.mock.calls[1]?.[1] as InitializeCallPayload;
     expect(retried.value?.memoryHandle).toMatchObject({ computeBindingMode: 'durable' });
-    expect(retried.value?.memoryHandle?.computeStorePort).toBe(minted[1]!.runtime);
-    expect(transferablesOf(1)).toContain(minted[1]!.runtime);
+    /* Identity, not deep equality: a MessagePort is not a plain value to compare structurally. */
+    expect(retried.value?.memoryHandle?.computeStorePort === minted[1]!.runtime).toBe(true);
+    expect(transferablesOf(1).includes(minted[1]!.runtime)).toBe(true);
     await web.close();
 
     const { workerCtor } = createNodeWorkerCtor();
@@ -224,8 +226,8 @@ describe('worker transport initialize filesystem bridge retries', () => {
     mocks.channel.call.mockResolvedValueOnce({});
     await node.initialize(initializePayload);
     const nodePayload = mocks.channel.call.mock.calls[2]?.[1] as InitializeCallPayload;
-    expect(nodePayload.value?.memoryHandle?.computeStorePort).toBe(minted[2]!.runtime);
-    expect(transferablesOf(2)).toContain(minted[2]!.runtime);
+    expect(nodePayload.value?.memoryHandle?.computeStorePort === minted[2]!.runtime).toBe(true);
+    expect(transferablesOf(2).includes(minted[2]!.runtime)).toBe(true);
     await node.close();
     expect(minted).toHaveLength(3);
   });

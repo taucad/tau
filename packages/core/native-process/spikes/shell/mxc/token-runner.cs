@@ -88,6 +88,7 @@ public static class TauTokenRunner {
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadFile(IntPtr h, byte[] buf, int len, out int read, IntPtr ov);
   [DllImport("kernel32.dll", SetLastError = true)] static extern bool WriteFile(IntPtr h, byte[] buf, int len, out int written, IntPtr ov);
   static readonly IntPtr PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE = (IntPtr)0x20016;
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
 
   const uint FLAGS = 0x1u | 0x4u | 0x8u; // token.rs:500 DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED
   const uint SE_GROUP_LOGON_ID = 0xC0000000;
@@ -271,9 +272,16 @@ public static class TauTokenRunner {
     }
     IntPtr env = EnvBlock(envOverrides);
     string cmd = pwsh ? ("\"" + shell + "\" -NoLogo -NoProfile") : ("\"" + shell + "\" --noprofile --norc -i");
+    // Ctrl-C: the "ignore CTRL_C" console flag is inherited by children, and run 40045912771 showed 0x03
+    // not interrupting a foreground Start-Sleep. Clear it in the runner before the spawn
+    // (SetConsoleCtrlHandler(NULL, FALSE)). The spawn flags below carry no CREATE_NEW_PROCESS_GROUP,
+    // which would also disable Ctrl-C in the child.
+    bool ctrlCleared = SetConsoleCtrlHandler(IntPtr.Zero, false); int ctrlErr = ctrlCleared ? 0 : Marshal.GetLastWin32Error();
+    uint spawnFlags = CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT;
+    PtyInfo("s2.ctrlc.setup", "runner SetConsoleCtrlHandler(NULL,FALSE)=" + ctrlCleared + " err=" + ctrlErr + "; spawnFlags=0x" + spawnFlags.ToString("X") + " newProcessGroup=" + ((spawnFlags & 0x200u) != 0));
     PROCESS_INFORMATION pi;
     bool ok = CreateProcessAsUser(tok, null, new StringBuilder(cmd), IntPtr.Zero, IntPtr.Zero, false,
-      CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT, env, scratch, ref si, out pi);
+      spawnFlags, env, scratch, ref si, out pi);
     if (!ok) { int e = Marshal.GetLastWin32Error(); note = "CreateProcessAsUser(" + shellKind + ") err=" + e; PtyCheck("s2." + shellKind + ".start", shellKind + " spawned in the runner-owned ConPTY in the token", "CreateProcessAsUser err=" + e, false); WritePtyReceipt(spec, -2); return -2; }
 
     try { if (pwsh) DrivePwsh(scratch); else DriveBash(scratch); } catch (Exception e) { PtyCheck("s2.driver.error", "driver ran without throwing", e.Message, false); }

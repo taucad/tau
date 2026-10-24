@@ -534,7 +534,7 @@ function ParametersPanelHeader({
       <PaneviewHeaderControls data-testid='paneview-header-controls'>
         <PaneviewHeaderActionGroup
           data-testid='paneview-header-actions'
-          className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'
+          className='opacity-0 transition-opacity duration-150 group-focus-within/paneview-header:opacity-100 group-hover/paneview-header:opacity-100 motion-reduce:transition-none pointer-coarse:opacity-100 [&:has([data-state=open])]:opacity-100 [@media(hover:none)]:opacity-100'
         >
           {/* Choosing a group is an action, not status: it is revealed with the others. */}
           {groups === undefined ? null : (

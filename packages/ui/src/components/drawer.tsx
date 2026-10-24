@@ -286,10 +286,14 @@ function DrawerHandle({
   );
 }
 
+/**
+ * The grabber row. Its 44px target (D4) is the 36px row plus 8px above the sheet's edge: the row's foot belongs to the
+ * surface's header actions, and content docked above a sheet keeps 8px clear of its edge.
+ */
 function DrawerHandleIndicator({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div className='relative hidden h-(--drawer-handle-height) shrink-0 group-data-[vaul-drawer-direction=bottom]/drawer-content:block has-[:focus-visible]:focus-outline'>
-      <DrawerHandle className='absolute! inset-0! m-auto! size-full! opacity-0!' />
+      <DrawerHandle className='absolute! inset-x-0! -top-2! bottom-0! m-0! h-auto! w-full! opacity-0! [&>[data-vaul-handle-hitarea]]:size-full!' />
       <div
         data-slot='drawer-handle-indicator'
         className={cn(
@@ -378,7 +382,7 @@ function DrawerContent({
         data-keyboard={keyboard ? 'open' : undefined}
         style={frameStyle ? { ...style, ...frameStyle } : style}
         className={cn(
-          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*6)]',
+          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*9)]',
           'select-none',
           /* A field is editable text even inside an unselectable drawer: WebKit inherits
              user-select, and iOS will not place a caret in an editor under user-select: none. */

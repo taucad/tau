@@ -269,9 +269,7 @@ const ExpandedChatHistory = memo(function ({
                     tooltipContent={(isOpen) => (
                       <div className='flex items-center gap-2'>
                         {isOpen ? 'Close' : 'Open'} Chat
-                        <KeyShortcut variant='tooltip' className='pointer-coarse:hidden'>
-                          {formattedKeyCombination}
-                        </KeyShortcut>
+                        <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
                       </div>
                     )}
                   />

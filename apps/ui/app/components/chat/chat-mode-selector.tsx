@@ -118,9 +118,7 @@ export function ChatAgentModeControl({
           <Command className='bg-transparent' defaultValue={current.value} loop>
             <div className='flex items-center justify-between px-3 pt-2 pb-1'>
               <span className='text-xs font-medium text-muted-foreground'>{option.name}</span>
-              <KeyShortcut variant='ghost' className='pointer-coarse:hidden'>
-                {formatKeyCombination(toggleModeKeyCombination)}
-              </KeyShortcut>
+              <KeyShortcut variant='ghost'>{formatKeyCombination(toggleModeKeyCombination)}</KeyShortcut>
             </div>
             <CommandList>
               <CommandGroup className='pt-0'>
@@ -161,9 +159,7 @@ export function ChatAgentModeControl({
         <span className='flex items-center gap-1.5'>
           {/* The trigger's own name (I6). */}
           Mode: {current.name}
-          <KeyShortcut variant='tooltip' className='pointer-coarse:hidden'>
-            {formatKeyCombination(toggleModeKeyCombination)}
-          </KeyShortcut>
+          <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleModeKeyCombination)}</KeyShortcut>
         </span>
       </TooltipContent>
     </Tooltip>

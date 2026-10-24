@@ -41,10 +41,7 @@ const ChatStreamingStopButton = memo(function ({
         </Button>
       </TooltipTrigger>
       <TooltipContent className='flex items-center gap-2 align-baseline'>
-        Stop{' '}
-        <KeyShortcut variant='tooltip' className='pointer-coarse:hidden'>
-          {formattedCancelKeyCombination}
-        </KeyShortcut>
+        Stop <KeyShortcut variant='tooltip'>{formattedCancelKeyCombination}</KeyShortcut>
       </TooltipContent>
     </Tooltip>
   );
@@ -121,10 +118,7 @@ export const ChatTextareaSubmitButton = memo(function ({
       <TooltipContent className='flex items-center gap-2 align-baseline'>
         {refusal ?? (
           <>
-            {label}{' '}
-            <KeyShortcut variant='tooltip' className='pointer-coarse:hidden'>
-              {formatKeyCombination({ key: 'Enter' })}
-            </KeyShortcut>
+            {label} <KeyShortcut variant='tooltip'>{formatKeyCombination({ key: 'Enter' })}</KeyShortcut>
           </>
         )}
       </TooltipContent>

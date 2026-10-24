@@ -684,12 +684,14 @@ const collapsibleClassNames = (
         ),
         editor: cn(
           collapseTransition,
-          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7',
+          // Under a coarse pointer the row also clears the controls' 6px touch rings, so a tap at the
+          // editor's edge reaches the editor, not + or dictation (see `composerTouchTargetsClassName`).
+          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-8.5',
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:max-h-6 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:overflow-hidden',
           hasDictation === true
-            ? // Touch spaces dictation and Send 12px apart (see `composerTouchTargetsClassName`).
-              '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-15 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-17'
-            : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7',
+            ? // Touch also spaces dictation and Send 12px apart.
+              '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-15 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-18.5'
+            : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-8.5',
         ),
         editorContent: cn(
           collapseTransition,

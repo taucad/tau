@@ -772,6 +772,27 @@ describe('phone composer (D14, D18)', () => {
     });
   });
 
+  it('leaves a tap just inside the resting editor’s edges to the editor, clear of the touch rings', async () => {
+    render(<PhoneComposer />);
+    await screen.findByRole('button', { name: 'Dictate' });
+    await expect.poll(reachableControls).toEqual(['Add', 'Dictate', 'Send']);
+    // The row's padding eases in once dictation is offered; measure where it settles.
+    await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
+    const editor = screen.getByRole('textbox');
+    const box = editor.getBoundingClientRect();
+    const y = box.top + box.height / 2;
+
+    for (const x of [box.left + 2, box.right - 2]) {
+      const hit = document.elementFromPoint(x, y);
+      expect(hit?.closest('button'), `tap at ${x},${y}`).toBeNull();
+      expect(hit?.closest('[data-slot=composer-bar]'), `tap at ${x},${y}`).toBeNull();
+    }
+    await page.getByRole('textbox').click({ position: { x: 2, y: box.height / 2 } });
+    await expect.element(page.getByRole('textbox')).toHaveFocus();
+    expect(screen.queryByRole('menu')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Requesting microphone…' })).toBeNull();
+  });
+
   it('opens attachments from + with a tap, no hover', async () => {
     render(<PhoneComposer />);
     await page.getByRole('button', { name: 'Add' }).click();

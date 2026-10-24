@@ -25,15 +25,23 @@ const reachableControls = async (): Promise<readonly string[]> =>
     bar,
   );
 
-/** Each visible control takes a tap 5px outside its box (inside its 6px ring), and no other control does. */
+/**
+ * Touch targets (I3, T5/T6): each visible control takes a tap 5px outside each edge (inside its 6px
+ * ring) and no neighbour does, and controls in one row sit at least 12px apart, so rings never overlap.
+ */
 const touchTargetMisses = async (): Promise<readonly string[]> =>
   target.evaluateLocator(
     composer(),
-    (region, barSelector: string) => {
+    async (region, barSelector: string) => {
+      // Let the row's fold and padding settle before measuring.
+      await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
       const misses: string[] = [];
       const buttons = [...region.querySelectorAll<HTMLButtonElement>(`${barSelector} button`)].filter((button) =>
         button.checkVisibility({ visibilityProperty: true, opacityProperty: true }),
       );
+      if (buttons.length < 2) {
+        misses.push(`only ${buttons.length} reachable controls`);
+      }
       for (const button of buttons) {
         const box = button.getBoundingClientRect();
         if (box.width + 12 < 40 || box.height + 12 < 40) {
@@ -52,10 +60,37 @@ const touchTargetMisses = async (): Promise<readonly string[]> =>
           }
         }
       }
+      const rows = new Map<number, DOMRect[]>();
+      for (const button of buttons) {
+        const box = button.getBoundingClientRect();
+        const key = Math.round(box.top / 8);
+        rows.set(key, [...(rows.get(key) ?? []), box]);
+      }
+      for (const row of rows.values()) {
+        const boxes = row.toSorted((first, second) => first.left - second.left);
+        for (const [index, box] of boxes.slice(1).entries()) {
+          const gap = box.left - boxes[index]!.right;
+          if (gap < 11.5) {
+            misses.push(`gap ${gap}px before the control at ${box.left}`);
+          }
+        }
+      }
       return misses;
     },
     bar,
   );
+
+/** Taps 2px inside the resting editor's edges, which must reach the editor, not a control's ring. */
+const editorEdgeHits = async (): Promise<readonly string[]> =>
+  target.evaluateLocator(selectors.getByCss(composerSelector).first(), async (editor) => {
+    await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
+    const box = editor.getBoundingClientRect();
+    const y = box.top + box.height / 2;
+    return [box.left + 2, box.right - 2].map((x) => {
+      const hit = document.elementFromPoint(x, y);
+      return hit?.closest('button')?.ariaLabel ?? (editor.contains(hit) ? 'editor' : (hit?.tagName ?? 'nothing'));
+    });
+  });
 
 beforeEach(async () => {
   await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
@@ -65,6 +100,8 @@ beforeEach(async () => {
   await target.navigate('/__e2e/chat-attachments');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
+  // The spec guards touch rules on its own: this context must report a coarse pointer.
+  expect(await target.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
 });
 
 test('rests as + / microphone / Send and unfolds to the model selector → microphone → Send', async () => {
@@ -87,4 +124,37 @@ test('rests as + / microphone / Send and unfolds to the model selector → micro
 test('opens attachments from + with a tap', async () => {
   await target.click(composer().getByRole('button', { name: 'Add', exact: true }), { touch: true });
   await target.expectVisible(selectors.getByRole('menuitem', { name: 'Attach image or PDF' }));
+});
+
+test('leaves a tap just inside the resting editor’s edges to the editor', async () => {
+  expect(await editorEdgeHits()).toEqual(['editor', 'editor']);
+});
+
+/** The hints matching `selector`: how many render, and the text of any a person can see. */
+const hintsMatching = async (
+  selector: string,
+): Promise<{ readonly count: number; readonly shown: readonly string[] }> =>
+  target.evaluate((hintSelector: string) => {
+    const hints = [...document.querySelectorAll<HTMLElement>(hintSelector)];
+    return {
+      count: hints.length,
+      shown: hints.filter((hint) => getComputedStyle(hint).display !== 'none').map((hint) => hint.textContent),
+    };
+  }, selector);
+
+test('shows no keyboard hints on a touch screen (I7)', async () => {
+  // Focus opens Send's tooltip, which carries the Enter chip for keyboards.
+  await target.evaluateLocator(composer().getByRole('button', { name: 'Send', exact: true }), (send) => {
+    (send as HTMLElement).focus();
+  });
+  await target.expectVisible(selectors.getByCss('[data-slot="tooltip-content"]'));
+  const tooltipHints = await hintsMatching('[data-slot="tooltip-content"] span[class*="tracking-"]');
+  expect(tooltipHints.count).toBeGreaterThan(0);
+  expect(tooltipHints.shown).toEqual([]);
+
+  await target.click(composer().getByRole('button', { name: 'Add', exact: true }), { touch: true });
+  await target.expectVisible(selectors.getByRole('menuitem', { name: 'Add context' }));
+  const menuHints = await hintsMatching('[data-slot="dropdown-menu-shortcut"]');
+  expect(menuHints.count).toBeGreaterThan(0);
+  expect(menuHints.shown).toEqual([]);
 });

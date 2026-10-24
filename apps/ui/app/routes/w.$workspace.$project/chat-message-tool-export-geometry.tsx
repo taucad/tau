@@ -214,7 +214,7 @@ function ExportGeometryDownloadSplitButton({
       <Tooltip>
         <ComboBoxResponsive
           className="data-[slot='popover-content']:w-55"
-          description='Choose an export format or open the full exporter.'
+          description='Choose an export format or open the full Export panel.'
           emptyListMessage='No export formats available.'
           footer={
             <>
@@ -228,7 +228,7 @@ function ExportGeometryDownloadSplitButton({
                     onOpenExporter();
                   }}
                 >
-                  Open Exporter
+                  Open Export
                 </button>
               </div>
             </>

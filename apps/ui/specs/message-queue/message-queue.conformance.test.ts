@@ -59,6 +59,9 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'MessageQueue.early-steer.cfg',
           'MessageQueue.release-stopped.cfg',
           'MessageQueue.late-terminal-capture.cfg',
+          'QueuePlacement.target.cfg',
+          'QueuePlacement.cross-host-replay.cfg',
+          'QueuePlacement.unscoped-rebase.cfg',
         ]),
         sources: hashFiles(workspace, [
           'apps/ui/app/db/chat-message-queue-store.ts',
@@ -73,7 +76,7 @@ describe('MessageQueue.tla implementation correspondence', () => {
           'apps/ui/app/components/chat/chat-textarea.tsx',
           'apps/ui/app/hooks/use-chat.tsx',
         ]),
-        specs: hashFiles(specs, ['MessageQueue.tla']),
+        specs: hashFiles(specs, ['MessageQueue.tla', 'QueuePlacement.tla']),
       }),
     ).toEqual([]);
   });
@@ -117,21 +120,66 @@ describe('MessageQueue.tla implementation correspondence', () => {
         message: { id: one.id, role: 'user', content: 'one' },
       },
     } as const;
-    await first.update((record) => ({ ...record, items: [{ ...one, command }, two] }));
+    await first.update((record) => ({ ...record, items: [{ ...one, command, commandPlacement: 'host:a' }, two] }));
     const prepared = await first.read();
     const preparedBytes = JSON.stringify(prepared.items[0]?.command);
     // Deliver, LoseAck, Crash, Reopen, Recover: a new store sees the original command.
     const recovered = open();
     const replay = await recovered.read();
     expect(JSON.stringify(replay.items[0]?.command)).toBe(preparedBytes);
+    expect(replay.items[0]?.commandPlacement).toBe('host:a');
     await recovered.acknowledge(one.id, 'unrelated-command');
     const unacknowledged = await follower.read();
     expect(unacknowledged.items.map((entry) => entry.id)).toEqual(['one', 'two']);
     // Acknowledge: deletion and the successor's visibility barrier are one durable write.
-    await recovered.acknowledge(one.id, command.commandId);
-    expect(await follower.read()).toEqual({ version: 1, items: [two], afterRunId: command.payload.runId });
+    await recovered.acknowledge(one.id, command.commandId, 'host:a');
+    expect(await follower.read()).toEqual({
+      version: 1,
+      items: [two],
+      afterRunId: command.payload.runId,
+      afterPlacement: 'host:a',
+    });
     expect(await open().read()).toEqual(await follower.read());
     await first.acknowledge(one.id, command.commandId);
-    expect(await follower.read()).toEqual({ version: 1, items: [two], afterRunId: command.payload.runId });
+    expect(await follower.read()).toEqual({
+      version: 1,
+      items: [two],
+      afterRunId: command.payload.runId,
+      afterPlacement: 'host:a',
+    });
+  });
+  it('should persist a destination-specific legacy grant without deleting its predecessor and clear it on acknowledgement', async () => {
+    const { open } = queueFixture();
+    const queued = item('successor');
+    await open().update(() => ({ version: 1, items: [queued], afterRunId: 'legacy-run' }));
+    // Switch(B), CancelBack, CommitGrant: a late B write cannot authorize A.
+    await open().update((record) => ({ ...record, rebasedPlacement: 'host:b' }));
+    expect(await open().read()).toEqual({
+      version: 1,
+      items: [queued],
+      afterRunId: 'legacy-run',
+      rebasedPlacement: 'host:b',
+    });
+    const command = {
+      type: 'start',
+      commandId: queued.requestId,
+      payload: {
+        chatId: 'chat',
+        runId: queued.requestId,
+        trigger: 'submit',
+        message: { id: queued.id, role: 'user', content: 'successor' },
+      },
+    } as const;
+    await open().update((record) => ({
+      ...record,
+      items: [{ ...queued, command, commandPlacement: 'host:b' }],
+    }));
+    await open().acknowledge(queued.id, command.commandId, 'host:b');
+    expect(await open().read()).toEqual({
+      version: 1,
+      items: [],
+      afterRunId: queued.requestId,
+      afterPlacement: 'host:b',
+    });
   });
 });

@@ -143,9 +143,12 @@ describe('durable chat message queue', () => {
     expect(saved3.items).toHaveLength(1);
     const reopened = await f.open().read();
     expect(reopened.items[0]?.command).toEqual(command);
-    await q.acknowledge('one', one.requestId);
+    await q.acknowledge('one', one.requestId, 'host:loopback:http://127.0.0.1:50829');
     const saved4 = await q.read();
     expect(saved4.items).toEqual([]);
+    expect(saved4.afterPlacement).toBe('host:loopback:http://127.0.0.1:50829');
+    const reopenedReceipt = await f.open().read();
+    expect(reopenedReceipt.afterPlacement).toBe(saved4.afterPlacement);
   });
   it('should make duplicate enqueue idempotent and preserve attachments in the saved message', async () => {
     const f = fixture();

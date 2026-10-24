@@ -386,8 +386,10 @@ const environment = async () => {
       sha256(await readFile(path.join(root, 'apps/ui/node_modules', relative)));
     return {
       capturedAt: new Date().toISOString(),
-      tauCommit: sh('git', ['-C', root, 'rev-parse', 'HEAD']),
-      tauDirty: sh('git', ['-C', root, 'status', '--porcelain']).split('\n').filter(Boolean).length,
+      // The standard user does not own the checkout, which git otherwise refuses as a dubious owner.
+      tauCommit: sh('git', ['-c', 'safe.directory=*', '-C', root, 'rev-parse', 'HEAD']),
+      tauDirty: sh('git', ['-c', 'safe.directory=*', '-C', root, 'status', '--porcelain']).split('\n').filter(Boolean)
+        .length,
       node: process.version,
       electron: versions['electron'],
       chrome: versions['chrome'],

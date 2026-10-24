@@ -49,11 +49,12 @@ try {
   # Read access to the checkout (node_modules, the built harness; the runner's ACL admits only administrators). pnpm's
   # store files are hard links that keep the store's ACL, so the inheritable grant does not reach them (EPERM). An
   # explicit ACE on every file of the checkout ran past the step's 170 minutes, so only the store packages the harness
-  # loads at run time get one. The summary lines and one probed file's ACL go to the log.
+  # loads or digests at run time (the two renderers included) get one. The summary lines and one probed file's ACL go
+  # to the log.
   cmd /c "icacls `"$env:GITHUB_WORKSPACE`" /grant `"${user}:(OI)(CI)RX`" /C /Q" | Out-Null
   $store = Join-Path $env:GITHUB_WORKSPACE 'node_modules/.pnpm'
   $runtime = Get-ChildItem -LiteralPath $store -Directory |
-    Where-Object { $_.Name -match '^(playwright|playwright-core|electron|esbuild|@esbuild\+win32-arm64)@' }
+    Where-Object { $_.Name -match '^(playwright|playwright-core|electron|esbuild|@esbuild\+win32-arm64|@xterm\+[^@]+|ghostty-web|@aurigax-ai\+ghostty-web)@' }
   foreach ($package in $runtime) {
     $started = Get-Date
     $grant = cmd /c "icacls `"$($package.FullName)`" /grant `"${user}:RX`" /T /C /Q 2>&1"

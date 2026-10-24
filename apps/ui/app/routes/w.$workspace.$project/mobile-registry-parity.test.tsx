@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PartialDeep } from 'type-fest';
 import type * as ReactRouter from 'react-router';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -123,6 +123,10 @@ const navigation = (): HTMLElement => screen.getByRole('navigation', { name: 'Wo
 
 /** The surfaces the desktop app ships, read once the build target is set. */
 const shippedSurfaces = (): typeof workbenchSurfaces => workbenchSurfaces.filter(({ id }) => isSurfaceShipped(id));
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+});
 
 beforeEach(() => {
   vi.stubEnv('TAU_TARGET', 'desktop');

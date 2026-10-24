@@ -1244,7 +1244,6 @@ type TestPanel = {
     readonly setActive: ReturnType<typeof vi.fn>;
     readonly updateParameters: ReturnType<typeof vi.fn>;
     readonly setTitle: ReturnType<typeof vi.fn>;
-    readonly component?: string;
   };
 };
 
@@ -2012,27 +2011,6 @@ describe('Workbench file reconciliation', () => {
     expect(isWorkbenchSurfaceAllowed('jobs', 'editor')).toBe(false);
     openWorkbenchUtility(dockview.api, 'jobs');
     expect(dockview.addPanel).not.toHaveBeenCalled();
-  });
-
-  it('drops restored Browser and Jobs tabs outside the desktop app, and Jobs inside it', () => {
-    const restored = (): TestPanel[] => [
-      { ...panel('browser:pane-1'), api: { ...panel('browser:pane-1').api, component: 'browser' } },
-      { ...panel(workbenchPanels.jobs.id), api: { ...panel(workbenchPanels.jobs.id).api, component: 'jobs' } },
-      { ...panel(workbenchPanels.agents.id), api: { ...panel(workbenchPanels.agents.id).api, component: 'agents' } },
-    ];
-    const web = restored();
-    const webDockview = createTestDockview(web);
-    restoreWorkbenchLayout({ api: webDockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
-    expect(webDockview.removePanel.mock.calls.map(([removed]) => removed)).toEqual([web[0], web[1]]);
-
-    vi.stubEnv('TAU_TARGET', 'desktop');
-    onTestFinished(() => {
-      vi.unstubAllEnvs();
-    });
-    const desktop = restored();
-    const desktopDockview = createTestDockview(desktop);
-    restoreWorkbenchLayout({ api: desktopDockview.api, layout: {} as SerializedDockview, isTauDebugEnabled: true });
-    expect(desktopDockview.removePanel.mock.calls.map(([removed]) => removed)).toEqual([desktop[1]]);
   });
 
   it('opens browser pages as separate workbench tabs in the desktop app', () => {

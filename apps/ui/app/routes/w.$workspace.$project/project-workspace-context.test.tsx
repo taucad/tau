@@ -624,10 +624,16 @@ describe('ProjectWorkspaceProvider', () => {
   });
 
   it.each([
-    [false, 'browser'],
-    [false, 'jobs'],
-    [true, 'jobs'],
-  ] as const)('refuses an unshipped surface on any layout (mobile=%s, %s)', (isMobile, panel) => {
+    [undefined, false, 'browser'],
+    [undefined, false, 'jobs'],
+    [undefined, true, 'jobs'],
+    ['desktop', false, 'jobs'],
+    ['desktop', true, 'jobs'],
+  ] as const)('refuses an unshipped surface on any layout (TAU_TARGET=%s, mobile=%s, %s)', (buildTarget, isMobile, panel) => {
+    vi.stubEnv('TAU_TARGET', buildTarget);
+    onTestFinished(() => {
+      vi.unstubAllEnvs();
+    });
     state.isMobile = isMobile;
     render(
       <ProjectWorkspaceProvider>

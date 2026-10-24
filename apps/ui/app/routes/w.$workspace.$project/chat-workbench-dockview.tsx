@@ -57,7 +57,7 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
-import { isSurfaceShipped } from '#workbench-records/surface-availability.js';
+import { isSurfaceShipped, withoutUnshippedPanes } from '#workbench-records/surface-availability.js';
 import {
   languageFromExtension,
   tauFileDragMime,
@@ -950,10 +950,6 @@ export function restoreWorkbenchLayout({
       });
       api.removePanel(legacyMachinesPanel);
     }
-    // A layout saved by another build, or before Jobs was withdrawn, can hold a surface this build does not offer.
-    for (const unshipped of api.panels.filter((panel) => !isSurfaceShipped(panel.api.component))) {
-      api.removePanel(unshipped);
-    }
     if (!isTauDebugEnabled) {
       for (const panelId of [workbenchPanels.kernel.id, workbenchPanels.console.id]) {
         const debugPanel = api.panels.find((panel) => panel.id === panelId);
@@ -1831,7 +1827,7 @@ export const WorkbenchDockview = memo(function ({
       isRestoringLayout.current = true;
       try {
         api.fromJSON(
-          toDockview('workbench', node, {
+          toDockview('workbench', withoutUnshippedPanes(node), {
             dimensions: { width: Math.max(1, api.width), height: Math.max(1, api.height) },
             files,
           }),

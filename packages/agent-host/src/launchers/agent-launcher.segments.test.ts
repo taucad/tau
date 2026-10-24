@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -82,9 +82,11 @@ const launch = (
     closingWait?: number;
     approvalRefresh?: number;
     publish?: NonNullable<TurnPlacementPort['publish']>;
+    pull?: NonNullable<TurnPlacementPort['pull']>;
   }> = {},
 ): AgentLauncher => {
-  const placement = fakePlacement({ registry: emptyTools }).port;
+  const fake = fakePlacement({ registry: emptyTools }).port;
+  const placement = options.pull === undefined ? fake : { ...fake, pull: options.pull };
   const launcher = createAgentLauncher({
     chats,
     modelTransport: transport,
@@ -344,8 +346,11 @@ describe('a chat continued on a second device', () => {
         expect(termOf('run-desktop-2')).not.toBe(termOf('run-desktop-1'));
       });
 
-      /* A new term closes the old incarnation; a close that never finishes refuses the turn after a bound, never hangs. */
-      it('should refuse a turn WRITER_LOCKED, not hang, when the old term’s close never finishes', async () => {
+      /*
+       * Round 18: a new term is opened in place, never by closing the old incarnation, so nothing waits on a close: a
+       * close that would never finish holds the turn up not at all, and the turn is written under the new term.
+       */
+      it('should open a new term without closing the incarnation, so a close that never finishes holds nothing up', async () => {
         const desktop = await workspace();
         const phone = await workspace();
         const store = createNodeChatStore({ workspaceRoot: desktop });
@@ -374,24 +379,12 @@ describe('a chat continued on a second device', () => {
           await project(desktop, 'device-phone', await readFile(ownLog(phone), 'utf8'));
           hold.closes = true;
 
-          const answer = await onDesktop.execute({
-            type: 'start',
-            commandId: key(),
-            payload: {
-              chatId,
-              runId: 'run-desktop-2',
-              trigger: 'submit',
-              message: { id: 'user-run-desktop-2', role: 'user', content: 'third, back on the desktop' },
-            },
-          });
-          const stop = await onDesktop.execute({
-            type: 'cancel',
-            commandId: key(),
-            payload: { chatId, runId: 'run-desktop-2' },
-          });
+          await turnWhenFree(onDesktop, 'run-desktop-2', 'third, back on the desktop');
 
-          expect(answer).toMatchObject({ status: 'refused', code: 'WRITER_LOCKED' });
-          expect(stop).toMatchObject({ status: 'refused' });
+          const rows = rowsOf(await readFile(ownLog(desktop), 'utf8'));
+          const termOf = (runId: string): string | undefined => rows.find((row) => row.runId === runId)?.leaderEpoch;
+          expect(termOf('run-desktop-2')).toBeDefined();
+          expect(termOf('run-desktop-2')).not.toBe(termOf('run-desktop-1'));
         } finally {
           hold.closes = false;
           released.resolve();
@@ -758,6 +751,12 @@ describe('a chat continued on a second device', () => {
       await mkdir(directory, { recursive: true });
       await writeFile(join(directory, `${deviceId}.jsonl`), bytes);
     };
+    /** A pull of the remote that found nothing newer, as sync records it beside the segments (`events/pulled-at`). */
+    const pulled = async (root: string, at = Date.now()): Promise<void> => {
+      const directory = join(root, '.tau', 'chats', chatId, 'events');
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, 'pulled-at'), String(at));
+    };
     /** A model whose first call streams nothing until `release`, then answers like {@link recordingModel}. */
     const heldModel = (reply: string) => {
       const gate = Promise.withResolvers<void>();
@@ -915,10 +914,65 @@ describe('a chat continued on a second device', () => {
     });
 
     /*
+     * Round 18: quiet is evidenced, never inferred from a segment's age. The phone slept for two hours, so its copy of
+     * the desktop's segment and its last pull are two hours old, while the desktop kept its run alive. Until a pull
+     * shows the remote held nothing newer, the run holds the chat, and the refusal asks the placement for that pull.
+     * A pull that brings the run's newer rows keeps it holding; one that finds nothing newer lets the phone go on.
+     */
+    it('should hold the chat for another device’s run however old its segment is here, until a pull shows it stayed quiet', async () => {
+      const inFlight = await desktopInFlight();
+      const phone = await workspace();
+      const pulls: string[] = [];
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport, {
+        pull: async ({ requestId, chatId: pulledChat }) => {
+          pulls.push(pulledChat);
+          return { requestId, status: 'applied' };
+        },
+      });
+      try {
+        const hours = 2 * 60 * 60 * 1000;
+        const slept = new Date(Date.now() - hours);
+        await project(phone, 'device-desktop', inFlight.bytes);
+        await utimes(join(phone, '.tau', 'chats', chatId, 'events', 'device-desktop.jsonl'), slept, slept);
+        await pulled(phone, slept.getTime() + 60_000);
+
+        expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({
+          status: 'refused',
+          code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+          details: { runId: 'run-desktop-1' },
+        });
+        expect(pulls).toEqual([chatId]);
+
+        /* The pull brings the heartbeat the desktop wrote meanwhile: the run is live, and still holds the chat. */
+        const last = rowsOf(inFlight.bytes).at(-1)!;
+        const heartbeat = {
+          version: 1,
+          leaderEpoch: last.leaderEpoch,
+          sequence: last.sequence + 1,
+          recordedAt: new Date().toISOString(),
+          runId: 'run-desktop-1',
+          type: 'run.heartbeat',
+        };
+        await project(phone, 'device-desktop', `${inFlight.bytes}${JSON.stringify(heartbeat)}\n`);
+        await pulled(phone);
+        expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({
+          code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+        });
+
+        /* Two hours of quiet observed on the phone's own segment copy: a pull past the bound finds nothing newer. */
+        await utimes(join(phone, '.tau', 'chats', chatId, 'events', 'device-desktop.jsonl'), slept, slept);
+        await pulled(phone);
+        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+      } finally {
+        inFlight.release();
+      }
+    });
+
+    /*
      * Round 16: staleness is this device's own observation, never the run's `recordedAt`. The run's rows are dated
-     * past the bound, yet the phone has only just seen them: it waits the bound out on its own clock. Once it goes on, it
-     * says the person's turn of the abandoned run as data, in the batch that admits its own run, and the model is shown
-     * that turn but nothing the run left half done.
+     * past the bound, yet the phone has only just seen them: it waits the bound out on its own clock, and a pull then
+     * shows the remote held nothing newer (round 18). Once it goes on, it says the person's turn of the abandoned run as
+     * data, in the batch that admits its own run, and the model is shown that turn but nothing the run left half done.
      */
     it('should admit a run once the other device’s run has gone stale here, saying its turn as data but nothing it left half done', async () => {
       const inFlight = await desktopInFlight();
@@ -944,6 +998,7 @@ describe('a chat continued on a second device', () => {
         });
 
         vi.setSystemTime(Date.now() + foreignRunStaleMilliseconds + 1000);
+        await pulled(phone);
         await turn(onPhone, 'run-phone-1', 'second, on the phone');
       } finally {
         vi.useRealTimers();
@@ -989,6 +1044,7 @@ describe('a chat continued on a second device', () => {
       try {
         expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({ status: 'refused' });
         vi.setSystemTime(Date.now() + foreignRunStaleMilliseconds + 1000);
+        await pulled(phone);
         await turn(onPhone, 'run-phone-1', 'second, on the phone');
       } finally {
         vi.useRealTimers();
@@ -1028,6 +1084,7 @@ describe('a chat continued on a second device', () => {
       try {
         expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({ status: 'refused' });
         vi.setSystemTime(Date.now() + foreignRunStaleMilliseconds + 1000);
+        await pulled(phone);
         await turn(onPhone, 'run-phone-1', 'second, on the phone');
 
         const last = rowsOf(inFlight.bytes).at(-1)!;

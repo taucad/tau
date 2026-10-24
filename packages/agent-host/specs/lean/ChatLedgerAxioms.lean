@@ -295,3 +295,9 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t10_new_term_after_foreign_rows
 #print axioms ChatLedger.t10_resume_not_taken_over
 #print axioms ChatLedger.t10_old_term_merges_ahead
+#print axioms ChatLedger.t10_new_term_whatever_the_slot
+#print axioms ChatLedger.t11_unobserved_never_abandoned
+#print axioms ChatLedger.t11_live_run_holds
+#print axioms ChatLedger.t11_quiet_run_released
+#print axioms ChatLedger.t11_quiet_run_awaits_pull
+#print axioms ChatLedger.t11_slept_device_holds

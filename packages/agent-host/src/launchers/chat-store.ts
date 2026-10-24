@@ -131,6 +131,27 @@ export const segmentDeviceIdOf = (name: string): string | undefined =>
   /^[^/\\]+\.jsonl$/u.test(name) ? name.slice(0, -'.jsonl'.length) : undefined;
 
 /**
+ * The entry of a chat's `events/` directory that says when this device last pulled the chat, restated from
+ * `@taucad/revisions` (`chatPulledAtPath`: `events/pulled-at`): epoch milliseconds on this device's clock, as decimal
+ * text, which sync writes once a pull projected the chat (XD3, round 18). Never a segment. @public
+ */
+export const chatPulledAtFileName = 'pulled-at';
+
+const pulledAtDecoder = new TextDecoder();
+
+/**
+ * When this device last pulled a chat, from its `pulled-at` entry's bytes ({@link chatPulledAtFileName}).
+ *
+ * @param bytes - The entry's bytes, or `undefined` when it is not there.
+ * @returns Epoch milliseconds, or `undefined` before any pull or for an entry that is not a positive number.
+ * @public
+ */
+export const pulledAtOf = (bytes: Uint8Array<ArrayBuffer> | undefined): number | undefined => {
+  const at = bytes === undefined ? Number.NaN : Number(pulledAtDecoder.decode(bytes));
+  return Number.isFinite(at) && at > 0 ? at : undefined;
+};
+
+/**
  * Run a filesystem read that answers `absent` when its path is not there (`ENOENT`, `ENOTDIR`), and rethrows anything
  * else: every platform's segment source reads its directory and files this way.
  *
@@ -216,6 +237,17 @@ export const createChatSegmentsReader = (
     failing.set(name, { version, since, segment });
     return segment;
   };
+  /* Each segment as last answered with the chat's last pull, so an unchanged pair answers the very same object. */
+  const pulled = new Map<string, Readonly<{ base: ChatLogSegment; segment: ChatLogSegment }>>();
+  const withPull = (name: string, base: ChatLogSegment, pulledAt: number | undefined): ChatLogSegment => {
+    const prior = pulled.get(name);
+    if (prior?.base === base && prior.segment.pulledAt === pulledAt) {
+      return prior.segment;
+    }
+    const segment = pulledAt === undefined ? base : { ...base, pulledAt };
+    pulled.set(name, { base, segment });
+    return segment;
+  };
   return async () => {
     const listed = await source.list();
     const names = listed
@@ -223,13 +255,18 @@ export const createChatSegmentsReader = (
       .toSorted((left, right) =>
         compareSegmentDeviceIds({ deviceId: segmentDeviceIdOf(left)! }, { deviceId: segmentDeviceIdOf(right)! }),
       );
-    for (const map of [known, failing]) {
+    for (const map of [known, failing, pulled]) {
       for (const name of map.keys()) {
         if (!names.includes(name)) {
           map.delete(name);
         }
       }
     }
+    /* Read before the segments: sync records a pull only once the segments it brought are written, so the pull read
+     * here is never paired with bytes older than the ones it brought. */
+    const pulledAt = listed.includes(chatPulledAtFileName)
+      ? pulledAtOf(await source.read(chatPulledAtFileName).catch(() => undefined))
+      : undefined;
     const found = await Promise.all(
       names.map(async (name): Promise<ChatLogSegment | undefined> => {
         const deviceId = segmentDeviceIdOf(name)!;
@@ -260,7 +297,9 @@ export const createChatSegmentsReader = (
         return segment;
       }),
     );
-    return found.filter((segment) => segment !== undefined);
+    return found.flatMap((segment, index) =>
+      segment === undefined ? [] : [withPull(names[index]!, segment, pulledAt)],
+    );
   };
 };
 

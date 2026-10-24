@@ -19,8 +19,14 @@ export const tauInternal = (message: ProviderMessage | undefined): JsonObject | 
 
 export type MemoryLogFile = Readonly<{ open: () => Promise<EventLogAppender> }>;
 
-/** One log file shared by every appender a test opens: each sees the others' writes, as two hosts on one file do. */
-export const createMemoryLogFile = (): MemoryLogFile => {
+/**
+ * One log file shared by every appender a test opens: each sees the others' writes, as two hosts on one file do.
+ *
+ * @param options - `segments`: the other devices' segments beside it, read at each open and refresh (XD1).
+ */
+export const createMemoryLogFile = (
+  options: Readonly<{ segments?: EventLogStorage['segments'] }> = {},
+): MemoryLogFile => {
   let bytes = new Uint8Array(new ArrayBuffer(0));
   return {
     open: async () => {
@@ -39,6 +45,7 @@ export const createMemoryLogFile = (): MemoryLogFile => {
         /* The file's real length, so an appender that read before another writer appended is fenced (D5). */
         size: async () => bytes.byteLength,
         exclusive: async (section) => section(),
+        ...(options.segments === undefined ? {} : { segments: options.segments }),
       };
       return createEventLogAppender(storage);
     },

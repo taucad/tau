@@ -562,6 +562,12 @@ export type TurnPlacementPort = Readonly<{
   publish?:
     | ((input: TurnPublishInput) => Promise<TurnPlacementAnswer<NoResult, 'SESSION_FENCED' | 'CHAT_NOT_SHARED'>>)
     | undefined;
+  /**
+   * Pull the project's remote now (XD3, round 18): another device's run on the chat has been quiet here past the
+   * staleness bound, and only a pull shows whether it stayed quiet there (`foreignRunStanding`). Answered once asked,
+   * not once pulled. Absent on an older session, which pulls only when it opens, pushes or hears the remote move.
+   */
+  pull?: ((input: TurnPublishInput) => Promise<TurnPlacementAnswer<NoResult, 'SESSION_FENCED'>>) | undefined;
 }>;
 
 /** A launcher live delta qualified by its emitting writer incarnation. @public */

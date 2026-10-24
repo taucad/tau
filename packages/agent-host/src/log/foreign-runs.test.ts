@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   foreignRunStaleMilliseconds,
+  foreignRunStanding,
   isAbandonedForeignRun,
   liveForeignRun,
   unsettledForeignRuns,
@@ -13,6 +14,8 @@ import { abandonedTurnOf } from '#log/event-types.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const encoder = new TextEncoder();
+
+const now = Date.parse('2026-10-23T10:00:00.000Z');
 
 const lifecycle = (runId: string, sequence: number, row: Readonly<{ state: string; at: string }>): AgentLogEvent =>
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- seeded rows over a closed body union.
@@ -26,21 +29,29 @@ const lifecycle = (runId: string, sequence: number, row: Readonly<{ state: strin
     state: row.state,
   }) as AgentLogEvent;
 
-const segment = (deviceId: string, events: readonly AgentLogEvent[]) => ({
+const segment = (deviceId: string, events: readonly AgentLogEvent[], pulledAt?: number) => ({
   deviceId,
   bytes: encoder.encode(events.map((event) => serializeLogEvent(event)).join('')),
+  ...(pulledAt === undefined ? {} : { pulledAt }),
 });
 
-const run = (observedAt: number, runId = 'run-1', lastRecordedAt = observedAt): ForeignRun => ({
+/** A run this device saw change at `observedAt`, and last pulled the remote at `pulledAt` (`now` by default). */
+const run = (
+  observedAt: number,
+  {
+    runId = 'run-1',
+    lastRecordedAt = observedAt,
+    pulledAt = now,
+  }: Readonly<{ runId?: string; lastRecordedAt?: number; pulledAt?: number }> = {},
+): ForeignRun => ({
   deviceId: 'device-desktop',
   runId,
   state: 'running',
   lastRecordedAt,
   tip: { leaderEpoch: `epoch-${runId}`, sequence: 1 },
   observedAt,
+  pulledAt,
 });
-
-const now = Date.parse('2026-10-23T10:00:00.000Z');
 
 describe('the cross-device run fence (XD3)', () => {
   /* A refold reads every segment again; one whose rows did not change is not folded on its ledger again. */
@@ -126,7 +137,7 @@ describe('the cross-device run fence (XD3)', () => {
     const [held] = unsettledForeignRuns([segment('device-desktop', [...paused, heartbeat])], now);
 
     expect(held).toMatchObject({ state: 'paused', lastRecordedAt: Date.parse(heartbeat.recordedAt), observedAt: now });
-    expect(liveForeignRun(unsettledForeignRuns([segment('device-desktop', paused)], now), now)).toBeUndefined();
+    expect(liveForeignRun(unsettledForeignRuns([segment('device-desktop', paused, now)], now), now)).toBeUndefined();
     expect(liveForeignRun([held!], now)).toBe(held);
   });
 
@@ -135,18 +146,55 @@ describe('the cross-device run fence (XD3)', () => {
     expect(liveForeignRun([run(now - 60_000)], now)).toEqual(run(now - 60_000));
   });
 
-  it('should treat a run this device has not seen change for longer than the bound as abandoned', () => {
+  it('should treat a run as abandoned once a pull more than the bound after it last changed here found nothing newer', () => {
     expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds - 1), now)).toBe(true);
     expect(liveForeignRun([run(now - foreignRunStaleMilliseconds - 1)], now)).toBeUndefined();
+    expect(
+      isAbandonedForeignRun(
+        run(now - foreignRunStaleMilliseconds - 1, { lastRecordedAt: now, pulledAt: now - 1 }),
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  /*
+   * Round 18: quiet is evidenced, never inferred from this device's clock or a segment's age. A device that slept or
+   * was closed for two hours holds a two-hour-old copy of a run another device kept writing; until a pull shows the
+   * remote held nothing newer, the run holds the chat, and its reader is told to ask for that pull.
+   */
+  it('should hold the chat for a run quiet here for hours while no pull has observed the remote since', () => {
+    const hours = 2 * 60 * 60 * 1000;
+    const slept = run(now - hours, { pulledAt: now - hours + 60_000 });
+    const neverPulled: ForeignRun = { ...slept, pulledAt: undefined };
+
+    expect(isAbandonedForeignRun(slept, now)).toBe(false);
+    expect(isAbandonedForeignRun(neverPulled, now)).toBe(false);
+    expect(liveForeignRun([slept], now)).toBe(slept);
+    expect(foreignRunStanding(slept, now)).toEqual({ abandoned: false, awaitsPull: true, changesAt: undefined });
+    expect(foreignRunStanding(neverPulled, now)).toEqual({ abandoned: false, awaitsPull: true, changesAt: undefined });
+  });
+
+  it('should hold a run until the bound passes here, and say when that is', () => {
+    expect(foreignRunStanding(run(now - 60_000), now)).toEqual({
+      abandoned: false,
+      awaitsPull: false,
+      changesAt: now - 60_000 + foreignRunStaleMilliseconds + 1,
+    });
+    /* A pull dated past this clock (a clock stepped back) is read as no later than now. */
+    const ahead = run(now - 60_000, { lastRecordedAt: now, pulledAt: now + 2 * foreignRunStaleMilliseconds });
+    expect(isAbandonedForeignRun(ahead, now)).toBe(false);
+    expect(isAbandonedForeignRun(ahead, now - 60_000 + foreignRunStaleMilliseconds + 1)).toBe(true);
   });
 
   /* Round 16: one fast or corrupt clock must not decide the fence; the run's own `recordedAt` is never read for it. */
   it('should judge a run by when this device saw it change, whatever its rows’ clock says', () => {
     const day = 24 * 60 * 60 * 1000;
 
-    expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds - 1, 'run-1', now + day), now)).toBe(true);
-    expect(isAbandonedForeignRun(run(now - 60_000, 'run-1', now - day), now)).toBe(false);
-    expect(isAbandonedForeignRun(run(now, 'run-1', now + day), now)).toBe(false);
+    expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds - 1, { lastRecordedAt: now + day }), now)).toBe(
+      true,
+    );
+    expect(isAbandonedForeignRun(run(now - 60_000, { lastRecordedAt: now - day }), now)).toBe(false);
+    expect(isAbandonedForeignRun(run(now, { lastRecordedAt: now + day }), now)).toBe(false);
   });
 
   it('should keep the time a run’s newest row was first seen, and see it anew once that row changes', () => {
@@ -181,8 +229,8 @@ describe('the cross-device run fence (XD3)', () => {
   });
 
   it('should name the most recently changed of several live runs', () => {
-    const older = run(now - 120_000, 'run-older');
-    const newer = run(now - 60_000, 'run-newer');
+    const older = run(now - 120_000, { runId: 'run-older' });
+    const newer = run(now - 60_000, { runId: 'run-newer' });
 
     expect(liveForeignRun([older, newer], now)).toBe(newer);
   });
@@ -190,11 +238,17 @@ describe('the cross-device run fence (XD3)', () => {
   /*
    * Round 17: the page and the agent host's worker are two module instances on one device. Each first reads a segment
    * when it happens to, so a sighting each keeps for itself makes them disagree about the same run for up to the bound.
-   * Both read the same file's modification time here, so both measure from it.
+   * Both read the same file's modification time here, and the same record of this device's last pull (round 18), so
+   * both measure from them.
    */
   it('should measure a run from when its segment last changed on this device, whichever reader first reads it', async () => {
     const rows = [lifecycle('run-shared', 0, { state: 'admitted', at: '2026-10-23T09:00:00.000Z' })];
-    const parsed = { deviceId: 'device-desktop', events: rows, receivedAt: now - foreignRunStaleMilliseconds - 1 };
+    const parsed = {
+      deviceId: 'device-desktop',
+      events: rows,
+      receivedAt: now - foreignRunStaleMilliseconds - 1,
+      pulledAt: now,
+    };
     vi.resetModules();
     const page = await import('#log/foreign-runs.js');
     vi.resetModules();
@@ -205,7 +259,8 @@ describe('the cross-device run fence (XD3)', () => {
 
     expect(seenByPage?.observedAt).toBe(now - foreignRunStaleMilliseconds - 1);
     expect(seenByHost?.observedAt).toBe(now - foreignRunStaleMilliseconds - 1);
-    expect(host.isAbandonedForeignRun(seenByHost!, now)).toBe(page.isAbandonedForeignRun(seenByPage!, now));
+    expect(host.isAbandonedForeignRun(seenByHost!, now)).toBe(true);
+    expect(page.isAbandonedForeignRun(seenByPage!, now)).toBe(true);
   });
 
   /* Round 17: a segment with no modification time falls back to first sight; a sighting read again stays the newest. */

@@ -17,12 +17,12 @@
  *   retains nothing (`C` and `K` in merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`.
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`, `ADMIT`, `TERMOF`, `STAND`.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { appendChatRows, termAdmission } from '#host/tau-agent-host.js';
+import { appendChatRows, rowsTermOf, termAdmission } from '#host/tau-agent-host.js';
 import {
   chatRunState,
   emptyChatLedger,
@@ -43,6 +43,7 @@ import type { AgentLogEvent, RowKey } from '#log/event-types.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
 import settlementTable from '#log/run-settlement.legality.json' with { type: 'json' };
+import { foreignRunStanding } from '#log/foreign-runs.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import { mergeLogSegments, mergeSegmentsUpTo, parseLogSegments } from '#log/segments.js';
 import { serializeLogEventBytes } from '#log/serialization.js';
@@ -988,7 +989,47 @@ const admissionTrace = (): Trace => {
     for (const takenOver of [false, true]) {
       for (const foreignWrote of [false, true]) {
         text.push(`ADMIT ${verb} ${takenOver ? 1 : 0} ${foreignWrote ? 1 : 0}`);
-        expected.push(`QA ${termAdmission(verb, { takenOver, foreignWrote })}`);
+        const admitted = termAdmission(verb, { takenOver, foreignWrote });
+        expected.push(`QA ${admitted}`);
+        /* Round 18: the slot the incarnation holds is no input to the term; both are asked to show it changes nothing. */
+        for (const slotHeld of [0, 1]) {
+          text.push(`TERMOF ${admitted} ${slotHeld}`);
+          expected.push(`QT ${rowsTermOf(admitted, 'held', () => 'fresh')}`);
+        }
+      }
+    }
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
+};
+
+/**
+ * Where another device's run stands on this device, over every case of the evidence rule (T11, round 18): when its
+ * segment last changed here, this device's clock, its last pull of the remote (or none) and a takeover.
+ */
+const standingTrace = (): Trace => {
+  const text = ['T standings'];
+  const expected = ['T standings'];
+  const bound = 600;
+  for (const changed of [0, 1000]) {
+    for (const now of [changed, changed + bound, changed + bound + 1, changed + 7200]) {
+      for (const pulled of [undefined, changed, changed + bound, changed + bound + 1, now, now + 5000]) {
+        for (const takenOver of [false, true]) {
+          text.push(`STAND ${bound} ${changed} ${now} ${pulled ?? '-'} ${takenOver ? 1 : 0}`);
+          const standing = foreignRunStanding(
+            { observedAt: changed, pulledAt: pulled, ...(takenOver ? { takenOver: true } : {}) },
+            now,
+            bound,
+          );
+          expected.push(
+            standing.abandoned
+              ? 'QF abandoned'
+              : standing.awaitsPull
+                ? 'QF awaits-pull'
+                : `QF holds ${String(standing.changesAt)}`,
+          );
+        }
       }
     }
   }
@@ -1044,7 +1085,7 @@ const generate = async (corpus: Corpus, seed = corpus.seed): Promise<Trace[]> =>
     traces.push(interruptResolutionTrace());
   }
   if (corpus.name === 'base') {
-    traces.push(admissionTrace());
+    traces.push(admissionTrace(), standingTrace());
   }
   return traces;
 };

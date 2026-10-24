@@ -51,7 +51,12 @@ import {
 } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody } from '#log/chat-ledger.js';
 import { v1Batch } from '#log/event-log-appender.js';
-import { foreignRunStaleMilliseconds, isAbandonedForeignRun, liveForeignRun } from '#log/foreign-runs.js';
+import {
+  foreignRunStaleMilliseconds,
+  foreignRunStanding,
+  isAbandonedForeignRun,
+  liveForeignRun,
+} from '#log/foreign-runs.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
 import { reduceEventLog } from '#log/reducer.js';
@@ -324,6 +329,15 @@ type ChatStore = {
   sharing?: Readonly<{ shared: true } | { shared: false; until: number }> | undefined;
   /** The run whose start already asked the placement about sharing, so it is asked once per run. */
   sharingAsked?: string | undefined;
+  /**
+   * A term this host opened for the chat while its incarnation stayed open (XD1, round 18): the incarnation's own term
+   * (`replaces`), and the term every row written under it is written under from then on. A command admitted after
+   * this device read another device's rows opens it before the command's rows ({@link termAdmission}), whether or not
+   * the incarnation holds its run's slot, so nothing waits on a close and nothing falls back to the old term.
+   */
+  term?: Readonly<{ replaces: string; leaderEpoch: string }> | undefined;
+  /** When this host last asked the placement to pull, for another device's run that awaits one (XD3, round 18). */
+  pullAskedAt?: number | undefined;
 };
 
 /**
@@ -388,6 +402,20 @@ export const termAdmission = (
   }
   return facts.foreignWrote ? 'new-term' : 'same-term';
 };
+
+/**
+ * The term an admitted command's rows are written under (round 18; `rowsTerm` in ChatLedger.lean, T10): under a new
+ * term, one opened for them now, else the term the chat's incarnation holds. Whatever the incarnation holds, its run's
+ * slot included, is no input: a new term never waits on a close and never falls back to the old term.
+ *
+ * @internal
+ * @param admitted - How the command was admitted ({@link termAdmission}).
+ * @param held - The term the incarnation holds.
+ * @param open - Opens a new term.
+ * @returns The term the command's rows go under.
+ */
+export const rowsTermOf = (admitted: TermAdmission, held: string, open: () => string): string =>
+  admitted === 'new-term' ? open() : held;
 
 const liveRunStates: ReadonlySet<string> = new Set(['admitted', 'running', 'paused']);
 
@@ -689,6 +717,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const legacyConfigs = new Map<string, TauAgentAdmissionConfig>();
   let closed = false;
   let closing: Promise<void> | undefined;
+
+  const createTerm = options.createLeaderEpoch ?? createPortableId;
+  /**
+   * The term the chat's rows are written under now: the one this host opened in place of the incarnation's
+   * ({@link rehome}), else the incarnation's own.
+   */
+  const termOf = (chatId: string): string | undefined => {
+    const held = registry.termOf(chatId);
+    const term = stores.get(chatId)?.term;
+    return term !== undefined && term.replaces === held ? term.leaderEpoch : held;
+  };
 
   const storeOf = (chatId: string): ChatStore => {
     let store = stores.get(chatId);
@@ -1121,7 +1160,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   ): Readonly<{ runId: string; leaderEpoch: string }> | undefined => {
     const { ledger, wrote } = store;
     const runId = ledger?.currentRunId;
-    const leaderEpoch = registry.termOf(chatId);
+    const leaderEpoch = termOf(chatId);
     const state = ledger === undefined ? 'none' : chatRunState(ledger);
     const held = state !== 'paused' || pauseHeld(store);
     return closed ||
@@ -1257,11 +1296,31 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
+   * Ask the placement to pull the project's remote (XD3, round 18): another device's run on the chat has been quiet
+   * here past the staleness bound, and only a pull shows whether it stayed quiet there (`foreignRunStanding`). At most
+   * once a heartbeat interval per chat, and not awaited: the command it is asked for is refused `wait` either way, and
+   * the next one reads what the pull brought.
+   *
+   * @param chatId - The chat.
+   * @param at - This device's time.
+   */
+  const askPull = (chatId: string, at: number): void => {
+    const store = storeOf(chatId);
+    const pull = options.placement?.pull;
+    if (pull === undefined || (store.pullAskedAt !== undefined && at - store.pullAskedAt < heartbeatInterval)) {
+      return;
+    }
+    store.pullAskedAt = at;
+    void settleQuietly(pull({ requestId: `pull:${chatId}:${String(at)}`, chatId }));
+  };
+
+  /**
    * The cross-device run fence (XD3): another device's synced segment holds a run it has not settled, and that run is
    * not abandoned, so this host runs nothing on the chat until it settles. A run is never moved between devices while
    * it is in flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same
-   * command is admitted once sync brings that run's settlement, or once it has gone {@link foreignRunStaleMilliseconds}
-   * without a new row.
+   * command is admitted once sync brings that run's settlement, or once a pull more than
+   * {@link foreignRunStaleMilliseconds} after its rows last changed here found nothing newer. A run quiet here past the
+   * bound awaits such a pull, so the refusal asks the placement for one ({@link askPull}).
    *
    * @param chatId - The chat.
    * @param log - Its log, refreshed from sync.
@@ -1269,9 +1328,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const refuseForeignRun = async (chatId: string, log: DurableEventLog): Promise<void> => {
     /* An unread segment may hold a live run: `foreignRuns` rejects `SEGMENTS_UNREADABLE` (`wait`), never answers none. */
     const runs = (await log.foreignRuns?.()) ?? [];
-    const held = liveForeignRun(runs, now().getTime());
+    const at = now().getTime();
+    const held = liveForeignRun(runs, at);
     if (held === undefined) {
       return;
+    }
+    if (runs.some((run) => foreignRunStanding(run, at).awaitsPull)) {
+      askPull(chatId, at);
     }
     throw coded(
       'RUN_ACTIVE_ON_ANOTHER_DEVICE' satisfies RefusalCode,
@@ -1282,6 +1345,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           runId: held.runId,
           state: held.state,
           lastRecordedAt: new Date(held.lastRecordedAt).toISOString(),
+          /* The earliest a pull can show it abandoned: one that finds nothing newer after this. */
           staleAt: new Date(held.observedAt + foreignRunStaleMilliseconds).toISOString(),
         },
       },
@@ -1320,14 +1384,6 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       dispatch.refreshed = log;
     }
   };
-  /** Close the chat's incarnation, as a term check starts it: a live run or a closed log leaves it as it is. */
-  const evictQuietly = async (chatId: string): Promise<void> => {
-    try {
-      await registry.evict(chatId);
-    } catch {
-      /* The command that follows is answered as it would be without the check. */
-    }
-  };
   /*
    * Each chat's commands, in the order they arrive, until each has reached the registry: whatever a command awaits
    * first (a term check, an approval's fence) the commands behind it wait for. A Stop does not wait: it is applied at
@@ -1339,25 +1395,32 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const stops = new Map<string, number>();
   /** Whether the chat's open incarnation already wrote under the term it holds: only such a term can be stale. */
   const wroteUnderTerm = (chatId: string): boolean => {
-    const leaderEpoch = registry.termOf(chatId);
+    const leaderEpoch = termOf(chatId);
     return leaderEpoch !== undefined && stores.get(chatId)?.wrote?.leaderEpoch === leaderEpoch;
   };
   /*
-   * Close the incarnation, so the command that follows opens a new term. The close is started, not awaited: the command
-   * waits for it within the registry's bound (`WRITER_LOCKED` past it), and nothing behind this check, a Stop included,
-   * waits on a close that never ends.
+   * Admitted under a new term, open it for the chat's next rows, now and synchronously (round 18, {@link rowsTermOf}):
+   * every row written under the incarnation's term is written under it from here on (`ChatStore.term`). Nothing is
+   * closed, so it holds whatever the incarnation holds (an external agent waiting on its person keeps its slot), nothing
+   * behind it waits on a close, and the command's rows never land under the old term.
    */
-  const rehome = (chatId: string): void => {
-    void evictQuietly(chatId);
+  const rehome = (chatId: string, admitted: TermAdmission): void => {
+    const held = registry.termOf(chatId);
+    if (held === undefined) {
+      return;
+    }
+    const leaderEpoch = rowsTermOf(admitted, held, createTerm);
+    if (leaderEpoch !== held) {
+      storeOf(chatId).term = { replaces: held, leaderEpoch };
+    }
   };
   /**
    * A new term for a turn another device's turn came between (XD1). An incarnation keeps one term while it stays
    * open, and a term's rows merge together, ordered by the term's start (CL-R14): a turn written under a term that
    * began before another device's rows would merge ahead of them in every device's history. So when the chat's open
    * incarnation already wrote under its term and its log has read rows from another device since it first wrote under
-   * that term, the incarnation is closed before the turn is admitted, and the next one writes it under a new term that
-   * starts now. What "since" means is what this host read, not when the other device's clock says it wrote. An
-   * incarnation holding a live run is left alone: the command is refused as it would be anyway.
+   * that term, a new term is opened before the turn is admitted ({@link rehome}), and the turn is written under it,
+   * starting now. What "since" means is what this host read, not when the other device's clock says it wrote.
    *
    * @param chatId - The chat whose incarnation may be closed.
    * @param commandId - The command the check runs for: it shares that dispatch's refresh.
@@ -1375,9 +1438,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         const log = await opened;
         await refreshFor(log, commandId);
         const foreignWrote = (await log.foreignWroteSinceTermBegan?.()) === true;
-        if (termAdmission(verb, { takenOver: false, foreignWrote }) === 'new-term') {
-          rehome(chatId);
-        }
+        rehome(chatId, termAdmission(verb, { takenOver: false, foreignWrote }));
       } catch {
         /* A live run, a closed log or an unread segment: the command is answered as it would be without this. */
       }
@@ -1471,9 +1532,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           undefined,
         );
       }
-      if (admitted === 'new-term') {
-        rehome(chatId);
-      }
+      rehome(chatId, admitted);
       return undefined;
     } catch (error) {
       const { code, message, details } = codedFailureDetail(error);
@@ -1625,14 +1684,19 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     });
   };
 
-  /** Write one batch under `leaderEpoch`, inside the chat's chain ({@link appendChatRows}). */
+  /**
+   * Write one batch, inside the chat's chain ({@link appendChatRows}): under the incarnation's term, or under the term
+   * this host opened in its place ({@link rehome}).
+   */
   const write = async (
     chatId: string,
-    leaderEpoch: string,
+    incarnationTerm: string,
     rows: readonly ChatRunRow[],
   ): Promise<Readonly<{ ledger: ChatLedger; messageIds: readonly string[] }>> => {
     const store = storeOf(chatId);
     const messageIds: string[] = [];
+    const { term } = store;
+    const leaderEpoch = term?.replaces === incarnationTerm ? term.leaderEpoch : incarnationTerm;
     try {
       const log = await logOf(chatId);
       /* The hybrid clock (XD1): after every term start the history read, never past its bound ahead of this clock. */
@@ -2331,7 +2395,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
 
   const registry = createChatRunRegistry({
     services,
-    createTerm: options.createLeaderEpoch ?? createPortableId,
+    createTerm,
     ...(options.delays === undefined ? {} : { delays: options.delays }),
     ...(options.clock === undefined ? {} : { actorOptions: { clock: options.clock } }),
     ...(options.onChatQuiescent === undefined ? {} : { onQuiescent: options.onChatQuiescent }),

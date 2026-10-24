@@ -4053,4 +4053,87 @@ theorem t10_old_term_merges_ahead :
       (merge [(0, [mr 1 0 10, mr 3 0 30]), (1, [mr 2 0 20])]).map Row.key = [(1, 0), (2, 0), (3, 0)] := by
   decide
 
+/-- **T10** (a new term, whatever the slot): a command admitted under a new term writes its rows under the term this
+device opened, whether or not the incarnation still holds its run's slot. -/
+theorem t10_new_term_whatever_the_slot (slotHeld : Bool) (held fresh : Nat) :
+    rowsTerm .newTerm slotHeld held fresh = fresh := by
+  rfl
+
+/-! ## T11: a foreign run is abandoned only on evidence (XD3, round 18)
+
+Another device's run is abandoned when it went quiet for the staleness bound. Quiet is evidenced, never inferred from
+this device's clock or a segment's age: only a pull more than the bound after the segment last changed here shows that
+the remote held nothing newer meanwhile. -/
+
+/-- **T11** (no observation, no abandonment): a device whose last pull is no more than the bound after the run's
+segment last changed here never finds the run abandoned, however late its clock reads (it slept, or was closed). -/
+theorem t11_unobserved_never_abandoned (bound changed now : Nat) (pulled : Option Nat)
+    (h : ∀ p, pulled = some p → p ≤ changed + bound) :
+    standing bound changed now pulled false ≠ .abandoned := by
+  have hobs : ¬ observedThrough pulled now > changed + bound := by
+    cases pulled with
+    | none => simp [observedThrough]
+    | some p =>
+      have hp := h p rfl
+      have := Nat.min_le_left p now
+      simp only [observedThrough]
+      omega
+  have hf : (false || decide (observedThrough pulled now > changed + bound)) = false := by simp [hobs]
+  unfold standing
+  simp only [hf, Bool.false_eq_true, ite_false]
+  split <;> simp
+
+/-- **T11** (a live run holds): a run whose device wrote within the bound before this device's pull holds the chat
+after that pull, whatever this device's clock reads, even when this device's copy of its segment was hours old. -/
+theorem t11_live_run_holds (bound changed now p t : Nat) (remote : List Nat) (ht : t ∈ remote) (htp : t ≤ p)
+    (hpt : p ≤ t + bound) :
+    standing bound (pullAt remote changed p) now (some p) false ≠ .abandoned := by
+  apply t11_unobserved_never_abandoned
+  intro q hq
+  simp only [Option.some.injEq] at hq
+  subst hq
+  unfold pullAt
+  split
+  · omega
+  · rename_i hno
+    have : ¬ (changed < t ∧ t ≤ p) := by
+      intro hc
+      apply hno
+      exact List.any_eq_true.mpr ⟨t, ht, by simp [hc.1, hc.2]⟩
+    omega
+
+/-- **T11** (a dead device cannot lock a chat): once a pull more than the bound after the run's segment last changed
+here finds nothing newer, the run is abandoned. -/
+theorem t11_quiet_run_released (bound changed now p : Nat) (remote : List Nat)
+    (hq : ∀ t ∈ remote, ¬ (changed < t ∧ t ≤ p)) (hp : p > changed + bound) (hn : now ≥ p) :
+    standing bound (pullAt remote changed p) now (some p) false = .abandoned := by
+  have hall : remote.any (fun t => decide (changed < t ∧ t ≤ p)) = false := by
+    rw [List.any_eq_false]
+    intro t ht
+    simp only [decide_eq_true_eq]
+    exact hq t ht
+  unfold standing observedThrough pullAt
+  rw [hall]
+  simp only [Bool.false_or]
+  have : min p now = p := Nat.min_eq_left hn
+  simp [this, hp]
+
+/-- **T11** (a pull is asked for): a run quiet here past the bound that no pull has shown abandoned awaits one, so a
+reader of it asks for a pull rather than wait on a pull nobody makes. -/
+theorem t11_quiet_run_awaits_pull (bound changed now : Nat) (pulled : Option Nat) (hn : now > changed + bound)
+    (hnot : standing bound changed now pulled false ≠ .abandoned) :
+    standing bound changed now pulled false = .awaitsPull := by
+  unfold standing at *
+  split
+  · simp_all
+  · simp
+
+/-- **T11** (the finding of round 18): a device that slept two hours with its copy of a live run's segment from before
+the sleep, and whose last pull was then, finds the run holding the chat; its first pull after waking brings the rows
+the run kept writing, and the run still holds. -/
+theorem t11_slept_device_holds :
+    standing 600 0 7200 (some 60) false = .awaitsPull ∧
+      standing 600 (pullAt [0, 3600, 7140] 0 7200) 7200 (some 7200) false = .holds 7801 := by
+  decide
+
 end ChatLedger

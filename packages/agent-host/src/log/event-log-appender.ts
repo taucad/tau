@@ -222,10 +222,19 @@ const introducedBy = (event: AgentLogEvent): readonly string[] => {
 /** The own segment's device id in a merge: the empty string, which no segment file can be named. */
 const ownDeviceId = '';
 
-/* Unchanged segments come back as the same bytes (`EventLogStorage.segments`), so no byte is compared. */
+/*
+ * Unchanged segments come back as the same bytes (`EventLogStorage.segments`), so no byte is compared. A new pull of
+ * the remote with no new bytes still refolds: it can show another device's run abandoned (XD3, round 18).
+ */
 const sameSegments = (left: readonly ChatLogSegment[], right: readonly ChatLogSegment[]): boolean =>
   left.length === right.length &&
-  left.every((segment, index) => segment.deviceId === right[index]!.deviceId && segment.bytes === right[index]!.bytes);
+  left.every(
+    (segment, index) =>
+      segment.deviceId === right[index]!.deviceId &&
+      segment.bytes === right[index]!.bytes &&
+      segment.receivedAt === right[index]!.receivedAt &&
+      segment.pulledAt === right[index]!.pulledAt,
+  );
 
 const encoder = new TextEncoder();
 
@@ -514,6 +523,7 @@ export const createEventLogAppender = async (
       deviceId: segment.deviceId,
       events: parse(segment.deviceId, segment.bytes),
       receivedAt: segment.receivedAt,
+      pulledAt: segment.pulledAt,
     }));
     introduceRead();
     /*

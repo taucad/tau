@@ -209,5 +209,26 @@
     "file": "specs/lean/ChatLedger.lean",
     "find": "(e.kind = .W ∨ e.kind = .C) ∧ (id, e.run) ∈ h.copied then",
     "replace": "(e.kind = .W ∨ e.kind = .C) ∧ h.copied.any (fun x => decide (x.1 = id)) then"
+  },
+  {
+    "id": "M30",
+    "drift": "a foreign run is found abandoned from this device's clock, not from its last pull of the remote (round 17's segment-age rule; T11: t11_unobserved_never_abandoned, t11_live_run_holds)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some p => min p now\n  | none => 0",
+    "replace": "  | some _ => now\n  | none => now"
+  },
+  {
+    "id": "M31",
+    "drift": "a device that never pulled the remote finds a foreign run abandoned once its own clock passes the bound (T11: t11_unobserved_never_abandoned)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | some p => min p now\n  | none => 0",
+    "replace": "  | some p => min p now\n  | none => now"
+  },
+  {
+    "id": "M32",
+    "drift": "a new term falls back to the incarnation's old one while the incarnation holds its run's slot, so an external agent's approval lands under the old term (T10: t10_new_term_whatever_the_slot)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .newTerm => fresh\n",
+    "replace": "  | .newTerm => if _slotHeld then held else fresh\n"
   }
 ]

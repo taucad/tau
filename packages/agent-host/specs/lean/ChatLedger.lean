@@ -12,6 +12,7 @@ the code through the committed goldens `corpus/*.expected`:
                                                                              `reopens`, `gateCode`, `stamp`, tables
   host/tau-agent-host.ts     appendChatRows (M1's append) of a settlement    → `hostSettle`
   log/segments.ts            mergeLogSegments (CL-R14)                        → `merge`
+  log/foreign-runs.ts        foreignRunStanding (XD3)                         → `standing`, `pullAt`
 
 Every list is in PHYSICAL (file) order. A row is the trace's `<term> <seq> <run> <kind> <arg> <ms> <epoch>
 <attempt>`: `term` is the `leaderEpoch` `e<NN>`, `epoch`/`attempt` 0 mean absent, and `(kind, arg)` names the
@@ -817,7 +818,7 @@ inductive Verb where
   | start | resume | approve
   deriving DecidableEq, Repr
 
-/-- `TermAdmission`: refused `RUN_TAKEN_OVER`; admitted under a new term, the incarnation closed first; or admitted
+/-- `TermAdmission`: refused `RUN_TAKEN_OVER`; admitted under a new term opened before its rows (`rowsTerm`); or admitted
 under the term the incarnation holds. -/
 inductive Admission where
   | takenOver | newTerm | sameTerm
@@ -831,6 +832,49 @@ the takeover it is admitted exactly as a Resume is. -/
 def admission (v : Verb) (takenOver wrote : Bool) : Admission :=
   if v = .approve ∧ takenOver = true then .takenOver
   else if wrote then .newTerm else .sameTerm
+
+/-- The term an admitted command's rows are written under (round 18): `held` is the term the chat's incarnation holds,
+`fresh` one this device opens after what it read. A new term is opened before the command's rows whether or not the
+incarnation holds its run's slot (an external agent waiting on its person does), and never falls back to the old one;
+nothing here closes the incarnation. -/
+def rowsTerm (a : Admission) (_slotHeld : Bool) (held fresh : Nat) : Nat :=
+  match a with
+  | .newTerm => fresh
+  | _ => held
+
+/-! ## foreign-runs.ts: where another device's run stands (XD3, round 18) -/
+
+/-- `foreignRunStanding`: the run still holds the chat until a moment (`changesAt`); it holds it until a pull shows
+whether it stayed quiet (`awaitsPull`); or it is abandoned. -/
+inductive Standing where
+  | holds (changesAt : Nat)
+  | awaitsPull
+  | abandoned
+  deriving DecidableEq, Repr
+
+/-- How far this device has observed the remote: its last pull (`pulledAt`), never past its own clock; nothing before
+any pull. -/
+def observedThrough (pulled : Option Nat) (now : Nat) : Nat :=
+  match pulled with
+  | some p => min p now
+  | none => 0
+
+/-- `foreignRunStanding(run, now, bound)`. `changed`: when the run's segment last changed on this device
+(`observedAt`); `pulled`: when this device last held everything the remote held of the chat (`pulledAt`); `now`: this
+device's clock; `takenOver`: another device said the run's turn. Abandoned only on evidence: a pull more than `bound`
+after the segment last changed here, which found nothing newer. A run quiet here past the bound with no such pull
+awaits one; this device's clock alone never abandons it. -/
+def standing (bound changed now : Nat) (pulled : Option Nat) (takenOver : Bool) : Standing :=
+  if takenOver || decide (observedThrough pulled now > changed + bound) then .abandoned
+  else if now > changed + bound then .awaitsPull
+  else .holds (changed + bound + 1)
+
+/-- A pull at `p` (`projectChats`): the remote's segment changed at the times `remote`, and the local copy last changed
+at `changed`. A pull that finds a change it lacks writes the segment, which changes it here at the pull (sync writes
+at or after the time the pull read the remote's refs, which is when `pulledAt` says it pulled); one that finds none
+leaves it as it was. -/
+def pullAt (remote : List Nat) (changed p : Nat) : Nat :=
+  if remote.any (fun t => decide (changed < t ∧ t ≤ p)) then p else changed
 
 /-! ## segments.ts: `mergeLogSegments` (CL-R14) -/
 

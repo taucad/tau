@@ -1713,6 +1713,70 @@ describe('the external slot through its driver handle (RA-S14, with W10 EA-S8)',
     await host.close();
   });
 
+  /*
+   * Round 18: an approval admitted after this device read another device's rows opens a new term before its rows. An
+   * external agent waiting on its person keeps its slot, so the term cannot come from closing the incarnation: it is
+   * opened in place, and the resolution and every row the agent writes after it land under it, never the old term.
+   */
+  it('should write an external agent’s approval and what follows under a new term while it holds its slot', async () => {
+    const encoder = new TextEncoder();
+    let foreign: ReadonlyArray<{ deviceId: string; bytes: Uint8Array<ArrayBuffer> }> = [];
+    const file = createMemoryLogFile({ segments: async () => foreign });
+    const done = Promise.withResolvers<void>();
+    const port: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async (turn) => {
+        await turn.approve({ prompt: 'Write main.ts?' });
+        await turn.append([
+          {
+            type: 'message.appended',
+            message: { id: 'after-approval', role: 'assistant', content: [{ type: 'text', text: 'Written.' }] },
+          },
+        ]);
+        done.resolve();
+        return undefined;
+      },
+    };
+    const host = externalHost(file, port, 'approve-term');
+    await startExternal(host, { chatId: 'chat-approve-term', runId: 'run-1' });
+    await vi.waitFor(async () => {
+      expect(await pendingOf(file)).toHaveLength(1);
+    });
+    const [interruptId = ''] = await pendingOf(file);
+    /* Another device's whole turn arrives by sync while the agent waits on its person. */
+    const at = new Date(Date.now() + 1000).toISOString();
+    const phone = (sequence: number, body: Record<string, unknown>): string =>
+      `${JSON.stringify({ version: 1, leaderEpoch: 'phone', sequence, recordedAt: at, runId: 'run-phone', ...body })}\n`;
+    foreign = [
+      {
+        deviceId: 'device-phone',
+        bytes: encoder.encode(
+          phone(0, { type: 'run.lifecycle', state: 'admitted' }) +
+            phone(1, { type: 'message.appended', message: { id: 'phone-user', role: 'user', content: 'phone' } }) +
+            phone(2, { type: 'run.lifecycle', state: 'completed' }),
+        ),
+      },
+    ];
+
+    const answer = await host.command({
+      type: 'resolve-interrupt',
+      commandId: key(),
+      payload: { chatId: 'chat-approve-term', runId: 'run-1', interruptId, outcome: 'approved' },
+    });
+
+    expect(answer).toMatchObject({ status: 'applied', effect: 'durable' });
+    await done.promise;
+    const log = await readLog(file);
+    const requested = log.find((event) => event.type === 'interrupt.recorded' && event.phase === 'requested');
+    const resolved = log.find((event) => event.type === 'interrupt.recorded' && event.phase === 'resolved');
+    const after = log.find((event) => event.type === 'message.appended' && event.message.id === 'after-approval');
+    expect(resolved?.leaderEpoch).toBeDefined();
+    expect(resolved?.leaderEpoch).not.toBe(requested?.leaderEpoch);
+    expect(after?.leaderEpoch).toBe(resolved?.leaderEpoch);
+    expect(Date.parse(resolved!.recordedAt)).toBeGreaterThan(Date.parse(at));
+    await host.close();
+  });
+
   it('should hand the port its attempt after the admitted row precedes the user message', async () => {
     const file = createMemoryLogFile();
     const attempts: Array<number | undefined> = [];

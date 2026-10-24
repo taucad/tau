@@ -11754,15 +11754,137 @@ QB refused cursor-ahead 0 -
 X
 T admissions
 QA same-term
+QT held
+QT held
 QA new-term
+QT fresh
+QT fresh
 QA same-term
+QT held
+QT held
 QA new-term
+QT fresh
+QT fresh
 QA same-term
+QT held
+QT held
 QA new-term
+QT fresh
+QT fresh
 QA same-term
+QT held
+QT held
 QA new-term
+QT fresh
+QT fresh
 QA same-term
+QT held
+QT held
 QA new-term
+QT fresh
+QT fresh
 QA taken-over
+QT held
+QT held
 QA taken-over
+QT held
+QT held
+X
+T standings
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF holds 601
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF holds 1601
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF awaits-pull
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
+QF abandoned
 X

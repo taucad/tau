@@ -28,6 +28,9 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   TABLES                       the three legality tables                  → `TO … / TS … / TL …`
   ADMIT <verb> <takenOver> <wrote>   the host's admission of a start, resume or approval
                                                                            → `QA <admission>`
+  TERMOF <admission> <slotHeld>   the term an admitted command's rows go under → `QT held|fresh`
+  STAND <bound> <changed> <now> <pulled|-> <takenOver>   where another device's run stands
+                                                                           → `QF <standing> [changesAt]`
   X                            end the trace
 -/
 open ChatLedger
@@ -225,6 +228,13 @@ def runLine (st : St) (line : String) : St × List String :=
     let name := match admission verb (t == "1") (w == "1") with
       | .takenOver => "taken-over" | .newTerm => "new-term" | .sameTerm => "same-term"
     (st, [s!"QA {name}"])
+  | ["TERMOF", a, h] =>
+    let adm : Admission := match a with | "taken-over" => .takenOver | "new-term" => .newTerm | _ => .sameTerm
+    (st, [s!"QT {if rowsTerm adm (h == "1") 1 2 = 2 then "fresh" else "held"}"])
+  | ["STAND", b, c, n, p, t] =>
+    let text := match standing (num b) (num c) (num n) (if p == "-" then none else some (num p)) (t == "1") with
+      | .holds at_ => s!"QF holds {at_}" | .awaitsPull => "QF awaits-pull" | .abandoned => "QF abandoned"
+    (st, [text])
   | ["MH"] =>
     let text := match histOf (merge st.segs) with
       | some h => s!"MH 1 {listText (h.ids.map idText)}"

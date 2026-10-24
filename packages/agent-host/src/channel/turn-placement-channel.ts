@@ -93,6 +93,12 @@ type TurnPlacementProtocol = {
       result: Awaited<ReturnType<NonNullable<TurnPlacementPort['publish']>>>;
       wireResult: unknown;
     };
+    readonly pull: {
+      args: TurnPublishInput;
+      wireArgs: unknown;
+      result: Awaited<ReturnType<NonNullable<TurnPlacementPort['pull']>>>;
+      wireResult: unknown;
+    };
   };
   readonly notifies: Record<never, never>;
   readonly listens: {
@@ -111,6 +117,7 @@ const requests = {
   reconcile: z.strictObject({ requestId: text, chatId: text.optional() }),
   acknowledge: attemptSchema,
   publish: z.strictObject({ requestId: text, chatId: text }),
+  pull: z.strictObject({ requestId: text, chatId: text }),
 } as const;
 
 /* Answers and facts are the session's own; the client checks only what it routes on. */
@@ -124,7 +131,7 @@ const call = { args: z.unknown(), result: answerSchema };
 
 const turnPlacementProtocolSchemas = {
   hello: z.strictObject({ projectId: text }),
-  calls: { admit: call, complete: call, abandon: call, reconcile: call, acknowledge: call, publish: call },
+  calls: { admit: call, complete: call, abandon: call, reconcile: call, acknowledge: call, publish: call, pull: call },
   notifies: {},
   listens: { settlements: { args: z.unknown(), event: factSchema } },
 };
@@ -231,6 +238,11 @@ export const serveTurnPlacementChannel = (options: ServeTurnPlacementChannelOpti
             }
           );
         }
+        case 'pull': {
+          const input = parse('pull', args);
+          /* A session with no pull verb pulls only when it opens, pushes or hears the remote move. */
+          return session.pull?.(input) ?? { requestId: input.requestId, status: 'applied' };
+        }
         default: {
           throw unreadable(name, missingVerb);
         }
@@ -328,6 +340,17 @@ export const connectTurnPlacementChannel = (options: ConnectTurnPlacementChannel
             code: 'CHAT_NOT_SHARED',
             message: 'This placement session records no chat ref for other devices.',
           };
+        }
+        throw error;
+      }
+    },
+    pull: async (input) => {
+      try {
+        return await channel.call('pull', input);
+      } catch (error) {
+        /* A placement server older than round 18 has no pull verb: it pulls on its own schedule. */
+        if (isMissingVerb(error)) {
+          return { requestId: input.requestId, status: 'applied' };
         }
         throw error;
       }

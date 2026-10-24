@@ -339,6 +339,10 @@ export function countStlTriangles(bytes: Uint8Array<ArrayBuffer>): number {
 /**
  * Bounding-box diagonal of every shape entry together, in model millimetres. Reads the B-rep
  * geometry rather than any triangulation, so the result does not depend on earlier meshing.
+ * The box is OCCT's cheap one (`BRepBndLib.Add`): it bounds each surface from its definition
+ * instead of sampling it, so it is never smaller than the tight box and, on curved and B-spline
+ * models, a few percent larger. A preset only needs the model's rough size, and the tight box
+ * (`AddOptimal`) costs up to half a second on a gear assembly.
  *
  * @param oc - OpenCASCADE WASM instance
  * @param shapes - Shape entries about to be meshed.
@@ -350,7 +354,7 @@ export function measureShapesDiagonal(oc: OpenCascadeInstance, shapes: readonly 
     const box = scope.track(new oc.Bnd_Box());
     for (const entry of shapes) {
       if (!entry.shape.IsNull()) {
-        oc.BRepBndLib.AddOptimal(entry.shape, box, false, false);
+        oc.BRepBndLib.Add(entry.shape, box, false);
       }
     }
     if (box.IsVoid()) {

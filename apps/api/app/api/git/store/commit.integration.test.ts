@@ -1537,10 +1537,14 @@ describe('repository store commit protocol', () => {
       const tombstoned = await commitTombstone({ store, locator, committedBy });
 
       expect(tombstoned.manifest.tombstone?.purgeAfter).toBeDefined();
-      // The in-flight writer's token is stale: it loses rather than resurrecting the repository.
-      await expect(commitLease({ store, lease: inFlight, committedBy })).rejects.toThrow(
-        expect.objectContaining({ code: 'lost' }) as unknown as Error,
-      );
+      // A stale writer observes terminal deletion, so its caller must not retry the push.
+      await expect(commitLease({ store, lease: inFlight, committedBy })).rejects.toMatchObject({
+        name: 'RepositoryStoreError',
+        code: 'tombstoned',
+        message: 'This project has been deleted.',
+      });
+      const unchanged = await store.readManifest(locator);
+      expect(unchanged?.token).toEqual(tombstoned.token);
       await inFlight.dispose();
 
       // Delete then re-register with the same project id, before purge.

@@ -1,13 +1,16 @@
 // @vitest-environment jsdom
 import { createProjectFixture } from '#lib/project.fixture.js';
 import { createContext, useContext, useState } from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
-import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { projectToManifest, projectManifestSchemaUrl } from '@taucad/types';
 import { ProjectLibrary } from '#components/project-library/project-library.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { cookieName } from '#constants/cookie.constants.js';
+import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import type { ProjectListItem } from '#types/project-library.types.js';
 import type { PendingProjectRecovery } from '#types/pending-project-operation.types.js';
 import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
@@ -204,7 +207,8 @@ const { cloudListing, mockOpenCloudProject } = vi.hoisted(() => ({
   cloudListing: {
     isFailed: false,
     isFetching: false,
-    current: [] as Array<{ id: string; name: string; role: 'owner' | 'write' | 'read'; updatedAt?: number }>,
+    current: [] as CloudProject[],
+    openOverride: undefined as ((entry: CloudProject) => Promise<void>) | undefined,
   },
   mockOpenCloudProject: vi.fn(async () => undefined),
 }));
@@ -223,7 +227,7 @@ vi.mock('#hooks/use-cloud-projects.js', async (importOriginal) => ({
 }));
 vi.mock('#hooks/use-open-cloud-project.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
-  useOpenCloudProject: () => mockOpenCloudProject,
+  useOpenCloudProject: () => cloudListing.openOverride ?? mockOpenCloudProject,
 }));
 vi.mock('#hooks/use-resolved-auth.js', () => ({ useResolvedAuth: () => 'authed' }));
 /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
@@ -254,9 +258,105 @@ describe('ProjectLibrary', () => {
     mockCookieValues = {};
     mockUseProjectsResult = createUseProjectsResult();
     mockTrashedProjects = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json(cloudListing.current)),
+    );
     cloudListing.current = [];
     cloudListing.isFailed = false;
     cloudListing.isFetching = false;
+    cloudListing.openOverride = undefined;
+  });
+
+  describe('table dialog lifetime', () => {
+    let client: QueryClient;
+    beforeEach(() => {
+      client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+      mockCookieValues = { [cookieName.projectViewMode]: 'table' };
+      cloudListing.current = [
+        {
+          id: 'proj_ddddddddddddddddddddd',
+          name: 'Hinge Delta',
+          role: 'owner',
+          cloudState: 'active',
+          canDeleteCloud: true,
+        },
+      ];
+    });
+    afterEach(() => {
+      cleanup();
+      client.clear();
+    });
+
+    const tableView = () => (
+      <TestRouter>
+        <QueryClientProvider client={client}>
+          <TooltipProvider>
+            <ProjectLibrary />
+          </TooltipProvider>
+        </QueryClientProvider>
+      </TestRouter>
+    );
+
+    it.each(['parent rerender', 'cloud query refresh', 'search settlement'])(
+      'should retain the same dialog and Cancel focus across %s',
+      async (refresh) => {
+        const user = userEvent.setup();
+        const view = render(tableView());
+        const search = screen.getByRole('searchbox', { name: 'Search projects' });
+        const trigger = screen.getByRole('button', { name: 'Actions for Hinge Delta' });
+        await user.click(trigger);
+        await user.click(screen.getByRole('menuitem', { name: 'Delete from Tau Cloud…' }));
+        const dialog = await screen.findByRole('alertdialog', { name: 'Delete “Hinge Delta” from Tau Cloud?' });
+        const cancel = within(dialog).getByRole('button', { name: 'Cancel' });
+        expect(cancel).toHaveFocus();
+
+        if (refresh === 'search settlement') {
+          // Deliver the pending URL/search update after the dialog has opened.
+          fireEvent.change(search, { target: { value: 'Hinge' } });
+          await waitFor(() => {
+            expect(search).toHaveValue('Hinge');
+          });
+        } else {
+          if (refresh === 'cloud query refresh') {
+            cloudListing.isFetching = true;
+            view.rerender(tableView());
+            cloudListing.current = cloudListing.current.map((project) => ({ ...project, updatedAt: 42 }));
+            cloudListing.isFetching = false;
+          }
+          view.rerender(tableView());
+        }
+
+        expect(screen.queryByRole('alertdialog')).toBe(dialog);
+        expect(cancel).toHaveFocus();
+        await user.click(cancel);
+        expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+        await waitFor(() => {
+          expect(trigger).toHaveFocus();
+        });
+        expect(mockOpenCloudProject).not.toHaveBeenCalled();
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      },
+    );
+
+    it('should use the current local and cloud callbacks after their dependencies change', async () => {
+      const view = render(tableView());
+      const previousDelete = mockUseProjectsResult.deleteProject;
+      const nextDelete = vi.fn(async () => true);
+      const nextOpen = vi.fn(async () => undefined);
+      mockUseProjectsResult = { ...mockUseProjectsResult, deleteProject: nextDelete };
+      cloudListing.openOverride = nextOpen;
+      view.rerender(tableView());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Trash Gearbox Alpha' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open Hinge Delta' }));
+      await waitFor(() => {
+        expect(nextDelete).toHaveBeenCalledExactlyOnceWith(mockProjects[0]!.id);
+        expect(nextOpen).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: 'Hinge Delta' }));
+      });
+      expect(previousDelete).not.toHaveBeenCalled();
+      expect(mockOpenCloudProject).not.toHaveBeenCalled();
+    });
   });
 
   // ── D20: one list, local and Tau Cloud ──────────────────────────────────────
@@ -334,6 +434,37 @@ describe('ProjectLibrary', () => {
       expect(cloudOnly).toHaveTextContent('Tau Cloud');
       expect(cloudOnly).not.toHaveTextContent('Backed up on');
       expect(within(cloudOnly).getByRole('button', { name: 'Open Hinge Delta' })).toBeInTheDocument();
+    });
+
+    it.each(['grid', 'table'])('should carry pending cloud rows in %s without any Open action', (viewMode) => {
+      mockCookieValues = { [cookieName.projectViewMode]: viewMode };
+      cloudListing.current = [
+        {
+          id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+          name: 'Gearbox Alpha',
+          role: 'owner',
+          cloudState: 'deleting',
+          canDeleteCloud: false,
+        },
+        {
+          id: 'proj_ddddddddddddddddddddd',
+          name: 'Hinge Delta',
+          role: 'owner',
+          cloudState: 'deleting',
+          canDeleteCloud: false,
+        },
+      ];
+      renderLibrary();
+      expect(screen.queryByRole('link', { name: 'Open Gearbox Alpha' })).not.toBeInTheDocument();
+      if (viewMode === 'grid') {
+        expect(screen.getByRole('button', { name: 'Open Gearbox Alpha' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Open Hinge Delta' })).toBeDisabled();
+      } else {
+        expect(screen.getByRole('button', { name: 'Deleting from Tau Cloud… Hinge Delta' })).toBeDisabled();
+      }
+      expect(screen.getByRole('button', { name: 'Actions for Hinge Delta' })).toBeInTheDocument();
+      expect(screen.getAllByText('Deleting from Tau Cloud…').length).toBeGreaterThanOrEqual(2);
+      expect(mockOpenCloudProject).not.toHaveBeenCalled();
     });
 
     it('should never offer a project in this device’s Trash as Tau Cloud’s alone', () => {

@@ -302,7 +302,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
     await seedTombstone(locator.ownerId, { purgeAfter: new Date(0) });
     const before = await objectsWithBytes(locator.ownerId);
     const commit = vi.spyOn(store, 'commitManifest');
-    const remove = vi.spyOn(driver, 'deleteEntirePrefixForPurgeJob');
+    const remove = vi.spyOn(driver, 'deleteBlobs');
     try {
       const refused = await purgeTombstonedTenants({
         database,
@@ -390,7 +390,7 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
     expect(maxPurgeObjectsWithoutConfirmation).toBe(10_000);
   });
 
-  it('should keep the prefix delete reachable from the purge job alone', () => {
+  it('should keep prefix deletion unreachable from application callers', () => {
     // D31: exactly one caller outside the driver that defines it. Test files are
     // excluded because D32 confines them to disposable buckets by the guard.
     const apiRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -401,6 +401,6 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('tenant purge', () => {
       .map((file) => path.relative(apiRoot, file))
       .sort();
 
-    expect(callers).toStrictEqual(['api/git/maintenance/purge.ts', 'storage/object-storage.service.ts']);
+    expect(callers).toStrictEqual(['storage/object-storage.service.ts']);
   });
 });

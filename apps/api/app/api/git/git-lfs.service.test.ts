@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { GoneException } from '@nestjs/common';
 import type { SQL } from 'drizzle-orm';
 import type { DatabaseService } from '#database/database.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -48,6 +49,7 @@ describe('GitLfsService finalized-object boundary', () => {
     presignGet: vi.fn(async () => 'https://store.test/download'),
   };
   const repositories = {
+    resolveActiveLocator: vi.fn(async () => ({ ownerId: access.ownerId, projectId: access.projectId })),
     reserveLfsObjects: vi.fn(async (_args: { objects: ReadonlyArray<{ oid: string; size: number }> }) => ({
       status: 'reserved',
       /* Whether the reservation already holds finalized bytes, which is what
@@ -63,6 +65,7 @@ describe('GitLfsService finalized-object boundary', () => {
   /* Whether the reservation row still exists when the locked clear runs; false
      is the retirement that slipped in after the unlocked `headBlob`. */
   let rowSurvivesClear = true;
+  let deleting = false;
 
   /** Every statement the service ran outside a query builder, in order. */
   let executed: SQL[];
@@ -75,6 +78,7 @@ describe('GitLfsService finalized-object boundary', () => {
     storedNamespace = 'tenants';
     reservedFinalized = false;
     rowSurvivesClear = true;
+    deleting = false;
     executed = [];
     updates = [];
     repositories.finalizeLfsObject
@@ -95,6 +99,13 @@ describe('GitLfsService finalized-object boundary', () => {
       database: {
         transaction: async (run: (tx: unknown) => Promise<unknown>): Promise<unknown> =>
           run({
+            select: () => ({
+              from: () => ({
+                where: () => ({
+                  limit: async () => (deleting ? [{ projectId: access.projectId, ownerId: access.ownerId }] : []),
+                }),
+              }),
+            }),
             execute: async (statement: SQL): Promise<void> => {
               executed.push(statement);
             },
@@ -120,6 +131,29 @@ describe('GitLfsService finalized-object boundary', () => {
       repositories as unknown as GitRepositoryService,
       databaseStub(),
     );
+
+  it.each(['upload', 'download'] as const)(
+    'should refuse fresh %s URLs if deletion wins after object lookup',
+    async (operation) => {
+      reservedFinalized = true;
+      objectStorage.headBlob.mockImplementationOnce(async () => {
+        deleting = true;
+        return { contentType: 'application/octet-stream', size: bytes.byteLength, etag: 'etag', cacheControl: '' };
+      });
+      await expect(
+        service().batch({
+          access,
+          operation,
+          objects: [{ oid, size: bytes.byteLength }],
+          authorization: undefined,
+          endpoint: 'https://api.test/lfs',
+        }),
+      ).rejects.toBeInstanceOf(GoneException);
+      expect(objectStorage.presignPut).not.toHaveBeenCalled();
+      expect(objectStorage.presignGet).not.toHaveBeenCalled();
+      expect(updates).toEqual([]);
+    },
+  );
 
   it('should refuse a whole upload batch before reserving when one file exceeds 100 MiB', async () => {
     const result = await service().batch({
@@ -303,7 +337,7 @@ describe('GitLfsService finalized-object boundary', () => {
       endpoint: 'https://api.test/repo/info/lfs/objects',
     });
 
-    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(lockedOwners()).toStrictEqual([access.ownerId, access.projectId, access.projectId]);
     expect(updates).toStrictEqual([{ unreachableAt: null }]);
   });
 
@@ -322,7 +356,7 @@ describe('GitLfsService finalized-object boundary', () => {
     if (batch.status === 200) {
       expect(batch.body.objects[0]?.actions).toBeUndefined();
     }
-    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(lockedOwners()).toStrictEqual([access.ownerId, access.projectId, access.projectId]);
     expect(updates).toStrictEqual([{ unreachableAt: null }]);
   });
 
@@ -346,7 +380,7 @@ describe('GitLfsService finalized-object boundary', () => {
     if (batch.status === 200) {
       expect(batch.body.objects[0]?.actions?.['upload']?.href).toBe('https://store.test/upload');
     }
-    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(lockedOwners()).toStrictEqual([access.ownerId, access.projectId, access.projectId]);
   });
 
   it('should reserve the unconfirmed object again so the upload it just authorized can finalize', async () => {
@@ -461,7 +495,7 @@ describe('GitLfsService finalized-object boundary', () => {
       endpoint: 'https://api.test/repo/info/lfs/objects',
     });
 
-    expect(lockedOwners()).toStrictEqual([]);
+    expect(lockedOwners()).toStrictEqual([access.projectId]);
     expect(updates).toStrictEqual([]);
   });
 });

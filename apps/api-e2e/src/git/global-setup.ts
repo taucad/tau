@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import process from 'node:process';
 /* oxlint-disable no-restricted-imports -- Vitest loads global setup before test aliases exist. */
 import { apiRoot, logDirectory, startApi, stopChild } from './api-process.ts';
 import { gitE2EApiUrl, gitE2EFrontendUrl, gitE2ESecondaryApiUrl } from './config.ts';
@@ -50,7 +51,31 @@ export const setup = async (project: TestProject): Promise<() => Promise<void>> 
   /* Unconditional and cheap (~200 ms warm): a stale `dist/main.js` is the one
    * failure mode of this tier that misattributes itself to the server code
    * under test. */
-  execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
+  if (process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true') {
+    if (process.env['TAU_E2E_EXTERNAL_SERVICES'] !== 'true' || !process.env['TAU_E2E_API_CWD']) {
+      throw new Error('Completed API acceptance requires external services and an isolated API working directory.');
+    }
+    for (const [value, defaultPort] of [
+      [process.env['DATABASE_URL'], '5432'],
+      [process.env['REDIS_URL'], '6379'],
+      [process.env['TAU_S3_ENDPOINT'], '9000'],
+      [gitE2EApiUrl, '4014'],
+      [gitE2ESecondaryApiUrl, '4016'],
+    ]) {
+      const url = new URL(value ?? 'http://invalid');
+      if (!['127.0.0.1', 'localhost'].includes(url.hostname) || !url.port || url.port === defaultPort) {
+        throw new Error('Completed API acceptance requires explicit alternate-port loopback services.');
+      }
+    }
+    if (
+      !existsSync(resolve(apiRoot, 'dist/main.js')) ||
+      !existsSync(resolve(workspaceRoot, 'packages/cli/dist/bin/tau.mjs'))
+    ) {
+      throw new Error('Build the API and CLI before completed-artifact acceptance.');
+    }
+  } else {
+    execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
+  }
 
   /* Sequential, not concurrent: the second process must fail for its own
    * reasons, not because it raced the first through boot. */

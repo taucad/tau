@@ -9,12 +9,17 @@ import {
   HttpStatus,
   Inject,
   Param,
+  NotFoundException,
   Put,
 } from '@nestjs/common';
-import { and, count, desc, eq, or } from 'drizzle-orm';
+import { ConfigService } from '@nestjs/config';
+import type { Environment } from '#config/environment.config.js';
+import { assertProjectActive, assertActiveProjectLocked } from '#database/project-lifecycle.js';
+import { withOwnerLock } from '#database/owner-lock.js';
+import { and, count, desc, eq, or, isNull } from 'drizzle-orm';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { DatabaseService } from '#database/database.service.js';
-import { project, projectCollaborator } from '#database/schema.js';
+import { project, projectCollaborator, projectDeletion } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
@@ -48,6 +53,7 @@ export class ProjectsController {
     @Inject(commercialEntitlementsKey)
     private readonly entitlementsService: CommercialEntitlementsService,
     private readonly access: ProjectAccessService,
+    private readonly config: ConfigService<Environment, true>,
   ) {}
 
   /**
@@ -68,9 +74,16 @@ export class ProjectsController {
    * @returns Every project this account owns or collaborates on, most recently changed first.
    */
   @Get()
-  public async list(
-    @User('id') userId: string,
-  ): Promise<ReadonlyArray<{ id: string; name: string; updatedAt: string; role: ProjectRole }>> {
+  public async list(@User('id') userId: string): Promise<
+    ReadonlyArray<{
+      id: string;
+      name: string;
+      updatedAt: string;
+      role: ProjectRole;
+      canDeleteCloud: boolean;
+      cloudState: 'active' | 'deleting';
+    }>
+  > {
     const { database } = this.databaseService;
     const rows = await database
       .select({
@@ -79,27 +92,36 @@ export class ProjectsController {
         updatedAt: project.updatedAt,
         ownerId: project.ownerId,
         role: projectCollaborator.role,
+        deletionRequestedAt: projectDeletion.requestedAt,
       })
       .from(project)
       .leftJoin(
         projectCollaborator,
         and(eq(projectCollaborator.projectId, project.id), eq(projectCollaborator.userId, userId)),
       )
-      .where(or(eq(project.ownerId, userId), eq(projectCollaborator.userId, userId)))
+      .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
+      .where(
+        and(
+          or(eq(project.ownerId, userId), eq(projectCollaborator.userId, userId)),
+          isNull(projectDeletion.deletedAt),
+          or(isNull(projectDeletion.requestedAt), eq(project.ownerId, userId)),
+        ),
+      )
       .orderBy(desc(project.updatedAt));
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
       updatedAt: row.updatedAt.toISOString(),
       role: row.ownerId === userId ? 'owner' : row.role === 'write' ? 'write' : 'read',
+      canDeleteCloud: row.ownerId === userId && this.config.get('TAU_PROJECT_DELETION_ENABLED', false, { infer: true }),
+      cloudState: row.deletionRequestedAt ? 'deleting' : 'active',
     }));
   }
 
   /**
-   * Claim this project id for the caller and give it a bare repository.
+   * Claim an active project identity for the caller. The first push creates its manifest.
    *
-   * Idempotent: a second call from the owner is a no-op that still reconciles
-   * the repository's hooks, which is what makes *Connect* safe to retry. A
+   * Idempotent: a second call from the owner is a no-op. A
    * collaborator's call on the project is the same answer with no side effect
    * at all: no field, no plan check, no budget (FX2).
    *
@@ -140,6 +162,7 @@ export class ProjectsController {
        project lands here. Their body is ignored, their plan is not asked (a
        collaborator needs none, D27), and no budget is spent, because nothing
        was registered. The git surface enforces what their role may do next. */
+    await assertProjectActive(database, projectId, userId);
     const exists = await this.projectExists(projectId);
     if (exists) {
       const { role } = await this.access.authorize(projectId, userId, 'read');
@@ -182,11 +205,20 @@ export class ProjectsController {
       );
     }
 
-    if (!exists) {
-      const [counted] = await database
+    await withOwnerLock(database, userId, async (transaction) => {
+      await assertActiveProjectLocked(transaction, projectId, userId);
+      const [current] = await transaction.select().from(project).where(eq(project.id, projectId)).limit(1);
+      if (current) {
+        if (current.ownerId !== userId) {
+          throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
+        }
+        return;
+      }
+      const [counted] = await transaction
         .select({ value: count() })
         .from(project)
-        .where(eq(project.ownerId, userId))
+        .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
+        .where(and(eq(project.ownerId, userId), isNull(projectDeletion.deletedAt)))
         .limit(1);
       if ((counted?.value ?? 0) >= registeredProjectLimitPerOwner) {
         throw new ForbiddenException({
@@ -194,25 +226,10 @@ export class ProjectsController {
           message: `This account has reached its limit of ${String(registeredProjectLimitPerOwner)} projects on Tau Cloud.`,
         });
       }
-
-      /* `onConflictDoNothing` and then read the row back (review R6): two
-         callers racing on one id both reach this line, exactly one insert
-         lands, and the re-read is what tells the loser whose id it is. Without
-         it the loser's insert is a silent no-op and it would be answered `200`
-         for somebody else's project. */
-      await database
+      await transaction
         .insert(project)
-        .values({
-          id: projectId,
-          ownerId: userId,
-          name: body.name ?? 'Untitled project',
-          origin: 'local-mirror',
-        })
-        .onConflictDoNothing();
-      /* The loser of the race inserted nothing, and `authorize` is what tells it
-         so — with the same `404` a stranger's id gets (review R6, ruling P55). */
-      await this.access.authorize(projectId, userId, 'owner');
-    }
+        .values({ id: projectId, ownerId: userId, name: body.name ?? 'Untitled project', origin: 'local-mirror' });
+    });
 
     /* No repository is created here any more (charter D1). A repository *is*
        its manifest, and the first manifest is written by the first push's

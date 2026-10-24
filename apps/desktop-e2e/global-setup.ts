@@ -90,9 +90,24 @@ const closeLog = async (apiLog: ReturnType<typeof createWriteStream>): Promise<v
     apiLog.end(resolve);
   });
 
+/** Refuse shared service defaults before starting a completed artifact. */
+const assertExternalServices = (): void => {
+  for (const [value, defaultPort] of [
+    [process.env['DATABASE_URL'], '5432'],
+    [process.env['REDIS_URL'], '6379'],
+    [process.env['TAU_S3_ENDPOINT'], '9000'],
+  ]) {
+    const url = new URL(value ?? 'http://invalid');
+    if (!['127.0.0.1', 'localhost'].includes(url.hostname) || !url.port || url.port === defaultPort) {
+      throw new Error('Completed desktop acceptance requires explicit alternate-port loopback services.');
+    }
+  }
+};
+
 export const setup = async (): Promise<() => void> => {
   if (desktopE2ECompletedArtifact) {
     desktopE2EPackagedExecutable();
+    assertExternalServices();
     const apiUrl = new URL(desktopE2EApiUrl);
     if (
       !['127.0.0.1', '[::1]', 'localhost'].includes(apiUrl.hostname) ||
@@ -114,7 +129,9 @@ export const setup = async (): Promise<() => void> => {
    * was six days old and predated the bearer plugin. `nx build api` cannot be
    * used — its dependency chain reaches `runtime:build`, which is red on Node
    * 24 for a tsdown config-loader bug. */
-  execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
+  if (!desktopE2ECompletedArtifact) {
+    execFileSync(resolve(workspaceRoot, 'node_modules/.bin/vite'), ['build'], { cwd: apiRoot, stdio: 'ignore' });
+  }
 
   const environment = { ...process.env };
   environment['AUTH_URL'] = desktopE2EApiUrl;

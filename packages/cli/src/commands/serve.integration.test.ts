@@ -449,7 +449,8 @@ describe('tau serve native kernels (W11, W22 daemon row)', () => {
   let scratch = '';
 
   beforeAll(async () => {
-    scratch = await mkdtemp(join(tmpdir(), 'tau-serve-native-'));
+    // Nested sandbox sockets must fit macOS's 104-byte Unix socket path limit.
+    scratch = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'tsn-'));
   });
 
   afterAll(async () => {

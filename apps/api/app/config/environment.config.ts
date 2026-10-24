@@ -12,6 +12,9 @@ const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
 const environmentSchemaBase = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']),
+  TAU_PROJECT_DELETION_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Enable owner-initiated cloud project deletion',
+  ),
   TAU_CLOUD_ENABLED: strictEnvironmentBoolean(false).describe(
     'Start Tau Cloud billing and funded-admission services. Defaults false for self-hosted deployments.',
   ),

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/workbench-panes",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "description": "Tau workbench panes (parameters, model, kinematics, export, share, files) shared by the Tau app and the agent plugin viewer",
   "type": "module",
   "sideEffects": [

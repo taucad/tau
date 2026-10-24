@@ -86,7 +86,7 @@ import { PageHeader } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
-import { useCloudProjects } from '#hooks/use-cloud-projects.js';
+import { assertCloudProjectActive, useCloudProjects } from '#hooks/use-cloud-projects.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import { useOpenCloudProject } from '#hooks/use-open-cloud-project.js';
 import {
@@ -241,6 +241,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
   const handleOpenCloudProject = useCallback(
     async (entry: CloudProject): Promise<void> => {
       try {
+        await assertCloudProjectActive(entry.id);
         await openCloudProject(entry);
       } catch (error) {
         toast.error(`Could not open ${entry.name} from Tau Cloud`, {
@@ -457,13 +458,10 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
     [updateName],
   );
 
-  const actions: ProjectActions = {
-    handleDelete,
-    handlePermanentlyDelete,
-    handleDuplicate,
-    handleRename,
-    handleRestore,
-  };
+  const actions = useMemo<ProjectActions>(
+    () => ({ handleDelete, handlePermanentlyDelete, handleDuplicate, handleRename, handleRestore }),
+    [handleDelete, handlePermanentlyDelete, handleDuplicate, handleRename, handleRestore],
+  );
 
   const viewControls = (
     <div className='flex items-center gap-2'>
@@ -829,11 +827,13 @@ function UnifiedProjectList({
   const [globalFilter, setGlobalFilter] = useSearchParameter(searchParameterName.query, queryParameter);
   const [pageSize, setPageSize] = useCookie<number>(cookieName.projectPageSize, defaultPageSize);
   const [pageIndex, setPageIndex] = useState(0);
+  // TanStack flexRender treats cell functions as component types; recreating them unmounts open row dialogs.
+  const columns = useMemo(() => createColumns(actions, onOpenCloudProject), [actions, onOpenCloudProject]);
 
   // oxlint-disable-next-line react/incompatible-library -- This component is explicitly opted out because TanStack Table returns mutable functions that cannot be compiler-memoized safely.
   const table = useReactTable({
     data: rows,
-    columns: createColumns(actions, onOpenCloudProject),
+    columns,
     /* Stable across the cloud listing arriving, so a selection follows its project. */
     getRowId: (row) => row.id,
     /* A project this device does not hold has nothing here to trash (D20). */
@@ -901,7 +901,6 @@ function UnifiedProjectList({
     );
   }
 
-  const columns = createColumns(actions, onOpenCloudProject);
   return (
     <div className='space-y-4'>
       <div role='group' aria-label='Project controls' className='flex flex-wrap items-center justify-between gap-2'>
@@ -988,7 +987,7 @@ function UnifiedProjectList({
 }
 
 type ProjectLibraryCardProps = {
-  readonly project: ProjectListItem & { readonly onCloud?: boolean };
+  readonly project: ProjectListItem & { readonly onCloud?: boolean; readonly cloud?: CloudProject };
   readonly actions: ProjectActions;
   readonly isSelected?: boolean;
   readonly onSelect?: () => void;
@@ -1022,8 +1021,9 @@ export function ProjectLibraryCard({
 
   return (
     <ProjectCard
-      to={projectUrl}
-      isOpening={isOpening}
+      {...(project.cloud?.cloudState === 'deleting'
+        ? { onOpen: () => undefined, isOpening: true }
+        : { to: projectUrl, isOpening })}
       linkLabel={`${isOpening ? 'Opening…' : 'Open'} ${project.name}`}
       className={cn('flex flex-col', isSelected && 'ring-3 ring-primary')}
     >
@@ -1081,7 +1081,11 @@ export function ProjectLibraryCard({
               >
                 <LocationIcon className='size-3 shrink-0' />
                 <span className='truncate'>{slugPath}</span>
-                {project.onCloud === true ? <OnTauCloudMark /> : undefined}
+                {project.cloud?.cloudState === 'deleting' ? (
+                  <span role='status'>Deleting from Tau Cloud…</span>
+                ) : project.onCloud === true ? (
+                  <OnTauCloudMark />
+                ) : undefined}
               </div>
             </TooltipTrigger>
             <TooltipContent side='right'>{fullLocationLabel}</TooltipContent>

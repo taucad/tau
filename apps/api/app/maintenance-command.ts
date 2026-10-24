@@ -7,7 +7,7 @@ import postgres from 'postgres';
 import { getEnvironment } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import * as schema from '#database/schema.js';
-import { projectGitLfsObject, storageTombstone } from '#database/schema.js';
+import { project, projectGitLfsObject, storageTombstone } from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { StorageAccount } from '#storage/object-storage.service.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
@@ -15,6 +15,9 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 import { dueCondition, lfsRetirementWindowMilliseconds, retireDueLfsObjects } from '#api/git/lfs-retirement.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
 import { liveOwnerIds, purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
+import { assertProjectActive } from '#database/project-lifecycle.js';
+import { purgeDeletedProject, purgeDeletedProjects } from '#api/git/maintenance/project-purge.js';
+import { recoverProjectDeletions, runMaintenanceWorker } from '#api/git/maintenance/worker.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
 import { readMaintenanceLiveness, recordMaintenancePass } from '#api/git/maintenance/liveness.js';
@@ -44,6 +47,19 @@ const writeLine = async (line: string): Promise<void> =>
 
 const usage = `Usage: revisions-maintenance <command>
 
+  worker
+      Run non-overlapping 60-second project recovery ticks alongside daily heavy
+      maintenance. Project receipts are audited before tenant purges.
+
+  purge-projects [--project <id>] [--dry-run] [--confirm-owner <id> --confirm-project <id> --confirm-plan <sha256>]
+      List or purge due project receipts, retaining identity sentinels. Oversized
+      plans require the exact owner, project and inventory fingerprint. Without
+      --project the scheduled pass also audits completed receipts for late objects.
+
+  recover-projects
+      Attempt up to 100 due deletion intents within a 50-second storage budget,
+      oldest retry first. The next tick starts on the 60-second cadence.
+
   purge [--owner <id>] [--confirm <ownerId>] [--dry-run]
       Purge every tenant whose storage tombstone is due, or only --owner: plan the
       tenants/<ownerId>/repos and /lfs prefixes, tombstone each manifest, then
@@ -68,13 +84,13 @@ const usage = `Usage: revisions-maintenance <command>
       Record a verified erasure request: the owner's tombstone becomes due now.
 
   status
-      Read-only liveness check of the nightly loop. Prints one
-      revisions_maintenance.liveness JSON line and exits 1 unless purge,
-      retire-lfs and collect-blobs each completed within 30 hours or are
-      inside a 6-hour pass. Runs in any process group, so it answers from an
+      Read-only worker liveness. Recovery must complete within 120 seconds;
+      each heavy command must complete within 30 hours or be inside a 6-hour
+      pass. Prints one revisions_maintenance.liveness JSON line. Runs in any process group, so it answers from an
       app Machine when the maintenance Machine is down.
 
-Run bare, purge, retire-lfs and collect-blobs are the scheduled pass: each
+Run bare, recover-projects, purge-projects, purge, retire-lfs and collect-blobs
+are scheduled passes: each
 records its start, completion or failure for status and logs one
 revisions_maintenance.pass line. Any flag makes it an operator run, which
 records nothing.
@@ -150,7 +166,19 @@ async function main(): Promise<void> {
 
   assertSingletonProcessGroup();
 
-  const client = postgres(environment.DATABASE_URL, { max: 1, prepare: false });
+  /* eslint-disable @typescript-eslint/naming-convention -- PostgreSQL connection options */
+  const client = postgres(environment.DATABASE_URL, {
+    max: 2,
+    prepare: false,
+    connect_timeout: environment.DATABASE_CONNECT_TIMEOUT_SECONDS,
+    idle_timeout: environment.DATABASE_IDLE_TIMEOUT_SECONDS,
+    connection: {
+      statement_timeout: environment.DATABASE_STATEMENT_TIMEOUT_MS,
+      lock_timeout: environment.DATABASE_LOCK_TIMEOUT_MS,
+      idle_in_transaction_session_timeout: environment.DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS,
+    },
+  });
+  /* eslint-enable @typescript-eslint/naming-convention -- end PostgreSQL options */
   const database = drizzle(client, { schema });
   const report = (line: string): void => {
     console.log(line);
@@ -162,6 +190,136 @@ async function main(): Promise<void> {
 
   try {
     switch (command) {
+      case 'worker': {
+        const stop = new AbortController();
+        const stopWorker = (): void => {
+          stop.abort();
+        };
+        process.once('SIGTERM', stopWorker);
+        process.once('SIGINT', stopWorker);
+        try {
+          await runMaintenanceWorker({
+            signal: stop.signal,
+            reportFailure: (lane, error) => {
+              report(
+                JSON.stringify({
+                  event: 'revisions_maintenance.failure',
+                  lane,
+                  error: error instanceof Error ? error.name : 'MaintenanceError',
+                }),
+              );
+            },
+            recover: async () => {
+              let details = { pending: 0, oldestPendingAge: 0 };
+              await recordMaintenancePass({
+                store: driver,
+                command: 'recover-projects',
+                report,
+                details: () => details,
+                run: async () => {
+                  details = await recoverProjectDeletions({
+                    database,
+                    store: new S3RepositoryStore(driver),
+                    signal: stop.signal,
+                  });
+                },
+              });
+            },
+            heavy: async () => {
+              stop.signal.throwIfAborted();
+              await pass('purge-projects', async () => {
+                for await (const outcome of purgeDeletedProjects({
+                  database,
+                  driver,
+                  store: new S3RepositoryStore(driver),
+                })) {
+                  // oxlint-disable-next-line no-await-in-loop -- report with backpressure.
+                  await writeLine(JSON.stringify(outcome));
+                  stop.signal.throwIfAborted();
+                }
+              });
+              stop.signal.throwIfAborted();
+              await pass('purge', async () => {
+                for await (const outcome of purgeTombstonedTenants({ database, driver, report: writeLine })) {
+                  // oxlint-disable-next-line no-await-in-loop -- report with backpressure.
+                  await writeLine(JSON.stringify(outcome));
+                  stop.signal.throwIfAborted();
+                }
+              });
+              stop.signal.throwIfAborted();
+              await pass('retire-lfs', async () => {
+                for await (const outcome of retireDueLfsObjects(
+                  { database, store: new S3RepositoryStore(driver), storage: driver },
+                  { now: new Date() },
+                )) {
+                  // oxlint-disable-next-line no-await-in-loop -- report with backpressure.
+                  await writeLine(JSON.stringify(outcome));
+                  stop.signal.throwIfAborted();
+                }
+              });
+              stop.signal.throwIfAborted();
+              await pass('collect-blobs', async () => {
+                await collectZeroCountBlobs({ database, driver, report });
+              });
+            },
+          });
+        } finally {
+          process.removeListener('SIGTERM', stopWorker);
+          process.removeListener('SIGINT', stopWorker);
+        }
+        break;
+      }
+      case 'recover-projects': {
+        let details = { pending: 0, oldestPendingAge: 0 };
+        await recordMaintenancePass({
+          store: driver,
+          command: 'recover-projects',
+          report,
+          details: () => details,
+          run: async () => {
+            details = await recoverProjectDeletions({ database, store: new S3RepositoryStore(driver) });
+          },
+        });
+        console.log(JSON.stringify(details));
+        break;
+      }
+      case 'purge-projects': {
+        const projectId = option(args, 'project');
+        if (projectId === undefined && args.length !== 1) {
+          throw new Error('Project purge flags require --project');
+        }
+        await pass('purge-projects', async () => {
+          if (projectId === undefined) {
+            for await (const outcome of purgeDeletedProjects({
+              database,
+              driver,
+              store: new S3RepositoryStore(driver),
+            })) {
+              // oxlint-disable-next-line no-await-in-loop -- report with backpressure.
+              await writeLine(JSON.stringify(outcome));
+            }
+          } else {
+            const outcome = await purgeDeletedProject({
+              database,
+              driver,
+              store: new S3RepositoryStore(driver),
+              projectId,
+              dryRun: args.includes('--dry-run'),
+              ...(option(args, 'confirm-plan') === undefined
+                ? {}
+                : {
+                    confirmation: {
+                      ownerId: required(args, 'confirm-owner'),
+                      projectId: required(args, 'confirm-project'),
+                      fingerprint: required(args, 'confirm-plan'),
+                    },
+                  }),
+            });
+            await writeLine(JSON.stringify(outcome));
+          }
+        });
+        break;
+      }
       case 'purge': {
         await pass('purge', async () => {
           for await (const outcome of purgeTombstonedTenants({
@@ -179,12 +337,31 @@ async function main(): Promise<void> {
         break;
       }
       case 'restore': {
+        const projectId = required(args, 'project');
+        const ownerId = required(args, 'owner');
+        await assertProjectActive(database, projectId);
+        const [held] = await database
+          .select({ storageAccountId: project.storageAccountId })
+          .from(project)
+          .where(and(eq(project.id, projectId), eq(project.ownerId, ownerId)))
+          .limit(1);
+        if (held === undefined) {
+          throw new Error('Project owner not found');
+        }
+        if (held.storageAccountId !== null && held.storageAccountId !== driver.account.id) {
+          throw new Error('Restore storage account unavailable');
+        }
         const primary = new S3RepositoryStore(driver);
         const source = new S3RepositoryStore(driver.forAccount(restoreAccount()));
         const result = await restoreRepository({
           source,
           primary,
-          locator: repositoryLocator({ ownerId: required(args, 'owner'), projectId: required(args, 'project') }),
+          database,
+          locator: repositoryLocator({
+            ownerId,
+            projectId,
+            ...(held.storageAccountId === null ? {} : { accountId: held.storageAccountId }),
+          }),
           operator: option(args, 'operator') ?? 'operator',
           report,
         });

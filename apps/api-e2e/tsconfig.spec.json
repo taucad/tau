@@ -9,5 +9,5 @@
       "#*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "vitest.server-modes.config.ts", "vitest.git.config.ts"]
+  "include": ["src/**/*.ts", "vitest.server-modes.config.ts", "vitest.git.config.ts", "vitest.deletion.config.ts"]
 }

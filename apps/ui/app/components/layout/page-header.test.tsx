@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { PageHeader, PhoneTitleBarContext } from '#components/layout/page-header.js';
+import { PageHeader, PhoneTopBarContext } from '#components/layout/page-header.js';
+
+const titleInPhoneBar = { hasTitle: true, hasAction: false } as const;
 
 describe('PageHeader', () => {
   it('should render one level-one heading at the policy step with the count outside its name', () => {
@@ -36,9 +38,9 @@ describe('PageHeader', () => {
 
   it('should hide the page title group below md while the phone bar shows it, keeping the h1', () => {
     render(
-      <PhoneTitleBarContext.Provider value>
+      <PhoneTopBarContext.Provider value={titleInPhoneBar}>
         <PageHeader title='Community' count={20} />
-      </PhoneTitleBarContext.Provider>,
+      </PhoneTopBarContext.Provider>,
     );
 
     const heading = screen.getByRole('heading', { level: 1, name: 'Community' });
@@ -48,9 +50,9 @@ describe('PageHeader', () => {
 
   it('should keep an embedded section heading visible under the phone bar', () => {
     render(
-      <PhoneTitleBarContext.Provider value>
+      <PhoneTopBarContext.Provider value={titleInPhoneBar}>
         <PageHeader headingLevel={2} title='Projects' />
-      </PhoneTitleBarContext.Provider>,
+      </PhoneTopBarContext.Provider>,
     );
 
     expect(screen.getByRole('heading', { level: 2, name: 'Projects' }).parentElement).not.toHaveClass('max-md:sr-only');

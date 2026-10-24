@@ -82,7 +82,7 @@ import type { ProjectDiscoveryConflict, WorkspaceBindingRepairGroup } from '#hoo
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectGridClassName } from '#components/project-grid-layout.js';
 import { PageContent } from '#components/layout/page-content.js';
-import { PageHeader } from '#components/layout/page-header.js';
+import { PageHeader, usePhoneTopBar } from '#components/layout/page-header.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -184,6 +184,29 @@ function ManifestIssueLines({ issue }: { readonly issue: ProjectDiscoveryIssue }
  *
  * @returns The library.
  */
+/** The library's primary action: in its title row, and in the phone top bar on `/projects` at 40px. */
+export function NewProjectLink({
+  size,
+  isDeferredToPhoneBar = false,
+}: Pick<React.ComponentProps<typeof Button>, 'size'> & {
+  /** Hide below `md` while the phone top bar carries this action, so phones get one copy (I4). */
+  readonly isDeferredToPhoneBar?: boolean;
+}): React.JSX.Element {
+  const isInPhoneBar = usePhoneTopBar().hasAction && isDeferredToPhoneBar;
+  return (
+    <Button asChild size={size} className={cn(isInPhoneBar && 'max-md:hidden')}>
+      <NavLink to='/projects/new'>
+        {({ isPending }) => (
+          <>
+            New project
+            {isPending ? <Loader /> : null}
+          </>
+        )}
+      </NavLink>
+    </Button>
+  );
+}
+
 export function ProjectLibrary({
   headingLevel = 1,
   emptyComposer,
@@ -519,18 +542,8 @@ export function ProjectLibrary({
         title='Projects'
         headingLevel={headingLevel}
         className='mb-0'
-        action={
-          <Button asChild>
-            <NavLink to='/projects/new'>
-              {({ isPending }) => (
-                <>
-                  New project
-                  {isPending ? <Loader /> : null}
-                </>
-              )}
-            </NavLink>
-          </Button>
-        }
+        // Only the page that owns `/projects` defers to the phone top bar; an embedded library keeps it.
+        action={<NewProjectLink isDeferredToPhoneBar={headingLevel === 1} />}
       />
 
       {workspaceBindingRepairs.length > 0 && (

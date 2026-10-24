@@ -26,15 +26,22 @@ export type Handle = {
    * match that declares one names the page; the next title-bearing match above it, when it sits at
    * another path, becomes the back-to-parent crumb ("‹ Projects"). Use the words of the page's
    * own `PageHeader`: while the bar shows the title, that `PageHeader` hides visually below `md`
-   * and stays the page's one `<h1>` (`PhoneTitleBarContext`); the bar never renders a heading.
+   * and stays the page's one `<h1>` (`PhoneTopBarContext`); the bar never renders a heading.
    */
   title?: string | ((match: UIMatch) => string | undefined);
   /**
-   * The route's one header action, at the inline end of the shell header. Only the deepest match's
-   * actions render, and they must be a single control: a page with more actions keeps them in its
-   * own content or behind one overflow menu. The page's primary action stays in `PageHeader`.
+   * The route's one header action, at the inline end of the shell header and of the phone top bar
+   * (D11). Only the deepest match's actions render, and they must be a single control of at least
+   * 40px: a page with more actions keeps them in its own content or behind one overflow menu. A page
+   * whose primary action lives in its `PageHeader` hides that copy below `md` while the bar carries it
+   * (`usePhoneTopBar().hasAction`), so a phone has one control for it (I4).
    */
   actions?: (match: UIMatch) => ReactNode;
+  /**
+   * Where `actions` render: `'all'` (default) in the shell header at every width, `'phone'` only in
+   * the phone top bar, for a page whose `PageHeader` already holds that action from `md` up.
+   */
+  actionsScope?: 'all' | 'phone';
   /**
    * Command palette items for the current route. These are displayed in the command palette.
    */

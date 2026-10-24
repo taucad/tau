@@ -19,6 +19,7 @@ export function useTypedMatches<Selected>(
       breadcrumb: [],
       title: [],
       actions: [],
+      actionsScope: [],
       commandPalette: [],
       enablePageWrapper: [],
       enablePageHeader: [],

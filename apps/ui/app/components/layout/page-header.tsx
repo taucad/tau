@@ -2,11 +2,27 @@ import { createContext, useContext } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 
 /**
- * True while the shell's phone top bar shows the page's title (D11). The page's
- * title group then hides visually below `md` but stays in the outline, so a phone
- * reads one title and the document keeps exactly one `<h1>`.
+ * What the shell's phone top bar (D11) carries for the current route, from route
+ * facts only so the server markup already matches a phone's first paint.
  */
-export const PhoneTitleBarContext = createContext(false);
+export type PhoneTopBar = {
+  /**
+   * The bar shows the page's title. The page's title group then hides visually below
+   * `md` but stays in the outline, so a phone reads one title and the document keeps
+   * exactly one `<h1>`.
+   */
+  readonly hasTitle: boolean;
+  /**
+   * The bar shows the route's one action (`Handle.actions`). The page hides its own
+   * copy of that control below `md`, so a phone has one control per destination (I4).
+   */
+  readonly hasAction: boolean;
+};
+
+export const PhoneTopBarContext = createContext<PhoneTopBar>({ hasTitle: false, hasAction: false });
+
+/** Reads what the phone top bar carries for the current route. */
+export const usePhoneTopBar = (): PhoneTopBar => useContext(PhoneTopBarContext);
 
 type PageHeaderProps = Omit<React.ComponentProps<'div'>, 'title'> & {
   /** The page or section title. */
@@ -33,7 +49,7 @@ export function PageHeader({
 }: PageHeaderProps): React.JSX.Element {
   const Heading = headingLevel === 1 ? 'h1' : 'h2';
   // Only the page's own title row repeats the bar; an embedded section's `h2` keeps showing.
-  const isTitleInPhoneBar = useContext(PhoneTitleBarContext) && headingLevel === 1;
+  const isTitleInPhoneBar = usePhoneTopBar().hasTitle && headingLevel === 1;
   return (
     <div className={cn('flex shrink-0 flex-wrap items-center justify-between gap-4', className)} {...properties}>
       <div

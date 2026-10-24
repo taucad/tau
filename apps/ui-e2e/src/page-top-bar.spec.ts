@@ -9,9 +9,16 @@ type TopBarGeometry = {
   readonly title: string | undefined;
   readonly trigger: number | undefined;
   readonly crumb: { readonly height: number; readonly right: number } | undefined;
-  /** The page's one `h1`: its count and whether it still paints (it must not repeat the bar's title). */
+  /**
+   * The page's one `h1`: its count and whether its title group still paints. The group is
+   * `max-md:sr-only` (1px box, `clip-path: inset(50%)`); the `h1` inside keeps its nowrap width,
+   * so the group, not the heading, is what is measured.
+   */
   readonly headings: number;
   readonly headingPainted: boolean;
+  /** The bar's action: its accessible text and height; and whether the title row's copy still paints. */
+  readonly action: { readonly text: string; readonly height: number } | undefined;
+  readonly titleRowActionPainted: boolean;
 };
 
 /** The phone top bar's box, its own overflow, its title and its primary targets' sizes. */
@@ -27,7 +34,19 @@ const readTopBar = async (): Promise<TopBarGeometry> =>
       trigger: trigger?.height,
       crumb: crumb ? { height: crumb.height, right: crumb.right } : undefined,
       headings: document.querySelectorAll('h1').length,
-      headingPainted: (document.querySelector('h1')?.getBoundingClientRect().width ?? 0) > 1,
+      headingPainted: (() => {
+        const group = document.querySelector('h1')?.closest<HTMLElement>('[data-slot=page-header-title]');
+        return group
+          ? group.getBoundingClientRect().width > 1 && getComputedStyle(group).clipPath !== 'inset(50%)'
+          : true;
+      })(),
+      action: (() => {
+        const link = header?.querySelector<HTMLElement>('[data-slot=page-header-action] a');
+        return link ? { text: link.textContent.trim(), height: link.getBoundingClientRect().height } : undefined;
+      })(),
+      titleRowActionPainted: [...document.querySelectorAll<HTMLElement>('main > section a[href="/projects/new"]')].some(
+        (link) => link.checkVisibility(),
+      ),
     };
   });
 
@@ -63,6 +82,13 @@ describe.each([320, 390])('shell page top bar at %ipx', (width) => {
         return title;
       })
       .toBe('Projects');
-    expect(await readTopBar()).toMatchObject({ height: 48, overflow: 0, crumb: undefined });
+    const projects = await readTopBar();
+    expect(projects).toMatchObject({ height: 48, overflow: 0, crumb: undefined, headings: 1, headingPainted: false });
+    // PG-PROJ-1: New project is the bar's one action at 40px, and the title row's copy is gone (I4).
+    expect(projects.action?.text).toBe('New project');
+    expect(projects.action?.height).toBeGreaterThanOrEqual(40);
+    expect(projects.titleRowActionPainted).toBe(false);
+    await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
+    await target.screenshot(undefined, `page-top-bar-projects-${width}.png`);
   });
 });

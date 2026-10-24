@@ -647,7 +647,8 @@ def _edge_points(shape: Any, linear_tolerance: float, angular_tolerance: float) 
 def _mesh_arrays(
     shape: Any, located: Any, linear_tolerance: float, angular_tolerance: float, include_edges: bool = False
 ) -> dict[str, Any]:
-    """Surface arrays, plus the B-rep edge lines only when the caller asked for `includeEdges`."""
+    """Surface arrays, plus the B-rep edge lines when the caller asked for `includeEdges`. A part with
+    no surface keeps its lines regardless: they are its geometry, not an overlay."""
     # _triangulate has already meshed absolutely. Native tessellate_with_uvs
     # reuses that triangulation and supplies smooth normals and native face UVs.
     surface = tessellate_surface(located, linear_tolerance, angular_tolerance, pretriangulated=True)
@@ -655,7 +656,9 @@ def _mesh_arrays(
     lines: list[float] = []
     line_indices: list[int] = []
     edge_groups: list[dict[str, int]] = []
-    sampled = _edge_points(located, linear_tolerance, angular_tolerance) if include_edges else []
+    sampled = (
+        _edge_points(located, linear_tolerance, angular_tolerance) if include_edges or not surface["indices"] else []
+    )
     for edge_id, edge in enumerate(sampled, 1):
         points = [_point(point) for point in edge]
         start = len(line_indices)

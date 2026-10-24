@@ -15,7 +15,7 @@ PYTHON_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PYTHON_ROOT))
 
 import worker
-from build123d import Box, Cylinder
+from build123d import Box, Cylinder, Line
 from tau_kernel.glb import GLTF_LINES, write_glb
 from tau_kernel.protocol import Artifacts, WorkerContext
 
@@ -79,6 +79,17 @@ class IncludeEdgesTest(unittest.TestCase):
         self.assertEqual(line_primitives(document), [])
         self.assertEqual(len(document["materials"]), 1)
         self.assertNotIn("edgeGroups", components[0])
+
+    def test_a_part_without_faces_keeps_its_edges_as_its_geometry(self) -> None:
+        # A wire has no surface: without its lines the GLB would carry a mesh with no primitives,
+        # which glTF forbids, and the part would vanish from the view.
+        components, meshes = worker._topology((Line((0, 0, 0), (10, 0, 0)),), 0.05, math.radians(20))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.glb"
+            write_glb(path, components, meshes, generator="@taucad/build123d")
+            document = gltf_json(path.read_bytes())
+        self.assertEqual([len(mesh["primitives"]) for mesh in document["meshes"]], [1])
+        self.assertEqual(len(line_primitives(document)), 1)
 
     def test_mesh_request_writes_lines_only_when_asked(self) -> None:
         model = (

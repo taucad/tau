@@ -508,7 +508,7 @@ const limitSchema = z.union([
     origin: z.enum(['default', 'host-option', 'profile']),
   }),
   /* Any other id carries no numbers; an unknown id with numbers is dropped to `_OTHER` alone. */
-  z.object({ id: z.string() }).transform(() => ({ id: otherValue })),
+  z.object({ id: z.string() }).transform(() => ({ id: otherValue }) as const),
 ]);
 
 /**

@@ -6,8 +6,13 @@
  */
 import { z } from 'zod';
 import { defineCounter, defineGauge, defineHistogram } from '#define-metric.js';
-import { runtimeVocabulary as v } from '#runtime-ingest.js';
+import { otherValue, runtimeVocabulary as v } from '#runtime-ingest.js';
+import { machineActions, runtimeKernelIds } from '#runtime-vocabulary.js';
 
+/** The label value for a facet the entry does not carry (a `prepare` has no kernel, a `stop` no action family). @public */
+export const absentLabel = 'none';
+const kernelLabel = z.enum([...runtimeKernelIds, otherValue, absentLabel]);
+const machineActionLabel = z.enum([...machineActions, otherValue, absentLabel]);
 const failed = z.boolean();
 const releaseLabel = z.string();
 const errorTypeLabel = z.string();
@@ -33,7 +38,11 @@ export const runtimeMetrics = {
     description:
       'Duration of succeeded attempts by kernel and admitted client release (newest 32, else _OTHER), for regression comparison',
     buckets: [0.1, 0.5, 1, 5, 30, 120, 900],
-    attributes: z.object({ 'tau.runtime.operation': v.operation, 'kernel.id': v.kernel, 'tau.release': releaseLabel }),
+    attributes: z.object({
+      'tau.runtime.operation': v.operation,
+      'kernel.id': kernelLabel,
+      'tau.release': releaseLabel,
+    }),
   }),
   runtimeOperationQueue: defineHistogram({
     name: 'tau.runtime.operation.queue',
@@ -51,7 +60,7 @@ export const runtimeMetrics = {
       'tau.runtime.operation': v.operation,
       'tau.runtime.outcome': v.outcome,
       'tau.runtime.cause': z.string(),
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.population': v.population,
     }),
   }),
@@ -59,7 +68,11 @@ export const runtimeMetrics = {
     name: 'tau.runtime.operation_errors',
     unit: '{operation}',
     description: 'Non-success attempts by error type, operation and kernel (hot spots)',
-    attributes: z.object({ 'tau.runtime.operation': v.operation, 'error.type': errorTypeLabel, 'kernel.id': v.kernel }),
+    attributes: z.object({
+      'tau.runtime.operation': v.operation,
+      'error.type': errorTypeLabel,
+      'kernel.id': kernelLabel,
+    }),
   }),
   runtimeOperationsByRelease: defineCounter({
     name: 'tau.runtime.operations_by_release',
@@ -99,7 +112,7 @@ export const runtimeMetrics = {
     attributes: z.object({
       'tau.runtime.plugin': v.plugin,
       'tau.runtime.machine_kind': v.machineKind,
-      'tau.runtime.machine_action': v.machineAction,
+      'tau.runtime.machine_action': machineActionLabel,
       'tau.runtime.outcome': v.outcome,
       'tau.runtime.caller': v.caller,
       'tau.runtime.population': v.population,
@@ -110,7 +123,7 @@ export const runtimeMetrics = {
     unit: '{operation}',
     description: 'Completed attempts by kernel, route (host) and caller; entries without a kernel are not counted',
     attributes: z.object({
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.route': v.route,
       'tau.runtime.caller': v.caller,
       'tau.runtime.population': v.population,
@@ -133,7 +146,7 @@ export const runtimeMetrics = {
     unit: '{evaluation}',
     description: 'Completed evaluates by kernel and entry file format (source language or imported file type)',
     attributes: z.object({
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.entry_format': v.fileFormat,
       'tau.runtime.population': v.population,
     }),
@@ -155,7 +168,7 @@ export const runtimeMetrics = {
     unit: '{evaluation}',
     description: 'Succeeded evaluates whose manifest uses a parameter feature, by kernel and feature',
     attributes: z.object({
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.parameter_feature': v.parameterFeature,
       'tau.runtime.population': v.population,
     }),
@@ -185,7 +198,11 @@ export const runtimeMetrics = {
     name: 'tau.runtime.adaptations',
     unit: '{adaptation}',
     description: 'Warning-severity issue codes attempts adapted through, by kernel, code and operation',
-    attributes: z.object({ 'kernel.id': v.kernel, 'error.type': errorTypeLabel, 'tau.runtime.operation': v.operation }),
+    attributes: z.object({
+      'kernel.id': kernelLabel,
+      'error.type': errorTypeLabel,
+      'tau.runtime.operation': v.operation,
+    }),
   }),
   runtimePhaseDuration: defineHistogram({
     name: 'tau.runtime.phase.duration',
@@ -193,7 +210,11 @@ export const runtimeMetrics = {
     description:
       'Worker-measured time per closed phase name (prepare, resolve, compute, mesh, export, reuse, other) of succeeded attempts, by kernel',
     buckets: [0.005, 0.025, 0.1, 0.5, 1, 5, 30, 120, 900],
-    attributes: z.object({ 'tau.runtime.phase': v.phase, 'kernel.id': v.kernel, 'tau.runtime.operation': v.operation }),
+    attributes: z.object({
+      'tau.runtime.phase': v.phase,
+      'kernel.id': kernelLabel,
+      'tau.runtime.operation': v.operation,
+    }),
   }),
   runtimeMiddlewareDuration: defineHistogram({
     name: 'tau.runtime.middleware.duration',
@@ -207,7 +228,7 @@ export const runtimeMetrics = {
     unit: '{test}',
     description: 'GeoSpec tests per run by set (selected, passed, failed)',
     buckets: [1, 2, 5, 10, 20, 50, 100, 500],
-    attributes: z.object({ 'tau.runtime.set': z.enum(['selected', 'passed', 'failed']), 'kernel.id': v.kernel }),
+    attributes: z.object({ 'tau.runtime.set': z.enum(['selected', 'passed', 'failed']), 'kernel.id': kernelLabel }),
   }),
   runtimeViewerEvents: defineCounter({
     name: 'tau.runtime.viewer.events',
@@ -232,7 +253,7 @@ export const runtimeMetrics = {
     name: 'tau.runtime.reuse',
     unit: '{operation}',
     description: 'Compute reuse result per kernel (cache effectiveness)',
-    attributes: z.object({ 'kernel.id': v.kernel, 'tau.runtime.reuse': v.reuse }),
+    attributes: z.object({ 'kernel.id': kernelLabel, 'tau.runtime.reuse': v.reuse }),
   }),
   runtimeFactsMissing: defineCounter({
     name: 'tau.runtime.facts_missing',
@@ -262,7 +283,7 @@ export const runtimeMetrics = {
     attributes: z.object({
       'tau.runtime.limit': v.limitId,
       'tau.runtime.demand_kind': v.demandKind,
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.route': v.route,
     }),
   }),
@@ -292,7 +313,7 @@ export const runtimeMetrics = {
       4 * 2 ** 30,
     ],
     attributes: z.object({
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.heap_source': v.heapSource,
       'tau.runtime.failed': failed,
       'tau.runtime.route': v.route,
@@ -305,14 +326,14 @@ export const runtimeMetrics = {
     unit: '{parameter}',
     description: 'Parameter leaves a model declares, per succeeded evaluate, by kernel',
     buckets: [0, 1, 2, 5, 10, 20, 50, 100],
-    attributes: z.object({ 'kernel.id': v.kernel, 'tau.runtime.population': v.population }),
+    attributes: z.object({ 'kernel.id': kernelLabel, 'tau.runtime.population': v.population }),
   }),
   runtimeParameterEvaluations: defineCounter({
     name: 'tau.runtime.parameter_evaluations',
     unit: '{evaluation}',
     description: 'Succeeded evaluates by how much of the declared parameter set differs from its defaults',
     attributes: z.object({
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.parameter_class': v.parameterClass,
       'tau.runtime.population': v.population,
     }),
@@ -323,7 +344,7 @@ export const runtimeMetrics = {
     description: 'Succeeded render duration by kernel and delivered-triangle size class',
     buckets: [0.1, 0.5, 1, 5, 30, 120, 900],
     attributes: z.object({
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.size_class': v.sizeClass,
       'tau.runtime.population': v.population,
     }),
@@ -333,7 +354,7 @@ export const runtimeMetrics = {
     unit: '{export}',
     description: 'Export and transcode attempts by kernel, format and outcome',
     attributes: z.object({
-      'kernel.id': v.kernel,
+      'kernel.id': kernelLabel,
       'tau.runtime.format': v.format,
       'tau.runtime.outcome': v.outcome,
       'tau.runtime.population': v.population,

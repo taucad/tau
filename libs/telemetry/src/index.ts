@@ -112,4 +112,4 @@ export type {
   TelemetryPolicyAnswer,
   IngestReceipt,
 } from '#runtime-ingest.js';
-export { runtimeMetrics } from '#runtime-metrics.js';
+export { absentLabel, runtimeMetrics } from '#runtime-metrics.js';

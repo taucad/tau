@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) with tessellation presets and budgets — measured 7.42 kB brotlied on 2026-10-16",
+    "name": "total (ESM JS) with tessellation presets and budgets — measured 7.42 kB brotlied on 2026-10-16; native B-rep edges (`opencascade-edges`, the GLB edge lines and the `includeEdges` claim) about 1.44 kB (8.86 kB on 2026-10-24; limit raised from 8 kB to 9 kB with the owner's approval)",
     "path": ["dist/**/*.mjs"],
-    "limit": "8 kB"
+    "limit": "9 kB"
   }
 ]

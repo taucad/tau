@@ -264,6 +264,18 @@ describe('remoteTransportError', () => {
     ).toBeUndefined();
   });
 
+  /* Hosted Remote Storage DW2: a repository frozen past the API's hold answers 429 with
+   * `Retry-After: 1`, in the text/plain body stock git prints. That is a 1 s wait here, not the
+   * 5 s doubling a 503 gets, which is what keeps a migration's freeze invisible (W10 Finding 5). */
+  it('waits the freeze answer’s one second, as it does any 429', () => {
+    const frozen = { data: { statusCode: 429, response: 'This repository is being moved; retry in a moment.\n' } };
+
+    expect(remoteTransportError(frozen, { remote: tauRemoteName, retryAfter: '1' })).toMatchObject({
+      code: 'REMOTE_UNAVAILABLE',
+      retryAfterMilliseconds: 1000,
+    });
+  });
+
   /* D66: a repository transferred out of the App's reach answers 403 in plain
    * text; Tau replaced that with "rejected the saved credentials". */
   it('keeps GitHub’s plain-text refusal as the sentence, and ignores an HTML error page', () => {

@@ -14,10 +14,12 @@ import type { IdPrefix } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { DatabaseService } from '#database/database.service.js';
-import { storageTombstone } from '#database/schema.js';
+import { eq } from 'drizzle-orm';
+import { storageTombstone, user as userTable } from '#database/schema.js';
 import type { Environment } from '#config/environment.config.js';
 import { staticAuthConfig } from '#config/auth.js';
 import { cliDeviceAuthorization } from '#config/cli-device-authorization.js';
+import { emailDomainNotAllowed, isEmailDomainAllowed } from '#auth/email-domain-allowlist.js';
 import type { EmailService } from '#email/email.service.js';
 import {
   buildFrontendForgotPasswordUrl,
@@ -121,6 +123,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
   const { databaseService, configService, emailService } = options;
   const baseURL = configService.get('AUTH_URL', { infer: true });
   const secureCookies = new URL(baseURL).protocol === 'https:';
+  const allowedEmailDomains = configService.get('TAU_AUTH_ALLOWED_EMAIL_DOMAINS', { infer: true });
 
   /**
    * Runtime plugin configuration with custom options.
@@ -208,6 +211,42 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
             .insert(storageTombstone)
             .values({ ownerId: user.id, purgeAfter: new Date(Date.now() + storageTombstoneGrace) })
             .onConflictDoNothing();
+        },
+      },
+    },
+
+    /*
+     * The email-domain allowlist (TAU_AUTH_ALLOWED_EMAIL_DOMAINS), empty in production. Staging sets it so open
+     * sign-up plus Stripe test cards cannot buy credit that spends real supplier keys. Account creation covers
+     * every way in (email and password, magic link, first social sign-in); session creation stops an account
+     * made before the list was set, which a returning password or magic-link sign-in would not re-check.
+     */
+    databaseHooks: {
+      user: {
+        create: {
+          before: async (candidate) => {
+            if (!isEmailDomainAllowed(candidate.email, allowedEmailDomains)) {
+              logger.warn('Refused account creation outside the email-domain allowlist');
+              throw emailDomainNotAllowed();
+            }
+          },
+        },
+      },
+      session: {
+        create: {
+          before: async (session) => {
+            if (allowedEmailDomains.length === 0) {
+              return;
+            }
+            const owner = await databaseService.database.query.user.findFirst({
+              where: eq(userTable.id, session.userId),
+              columns: { email: true },
+            });
+            if (!owner || !isEmailDomainAllowed(owner.email, allowedEmailDomains)) {
+              logger.warn(`Refused session for ${session.userId} outside the email-domain allowlist`);
+              throw emailDomainNotAllowed();
+            }
+          },
         },
       },
     },

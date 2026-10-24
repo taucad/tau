@@ -1837,9 +1837,9 @@ importers:
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../libs/agent-tools
-      '@taucad/geospec-engine':
+      '@taucad/cli':
         specifier: workspace:*
-        version: link:../../packages/geospec-engine
+        version: link:../../packages/cli
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -1921,9 +1921,6 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../../packages/geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -2499,6 +2496,9 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
+      '@taucad/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -2508,9 +2508,6 @@ importers:
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:../../libs/fs-bridge
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../../packages/geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -2667,9 +2664,6 @@ importers:
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../libs/fs-client
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../../packages/geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -3683,9 +3677,6 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../plugins/gltf
@@ -4033,88 +4024,6 @@ importers:
         specifier: 'catalog:'
         version: 4.5.1
 
-  packages/geospec-engine:
-    dependencies:
-      '@taucad/assimp':
-        specifier: workspace:*
-        version: link:../plugins/assimp
-      '@taucad/brep':
-        specifier: workspace:*
-        version: link:../plugins/brep
-      '@taucad/esbuild':
-        specifier: workspace:*
-        version: link:../plugins/esbuild
-      '@taucad/gltf':
-        specifier: workspace:*
-        version: link:../plugins/gltf
-      '@taucad/image':
-        specifier: workspace:*
-        version: link:../plugins/image
-      '@taucad/jscad':
-        specifier: workspace:*
-        version: link:../plugins/jscad
-      '@taucad/manifold':
-        specifier: workspace:*
-        version: link:../plugins/manifold
-      '@taucad/middleware':
-        specifier: workspace:*
-        version: link:../plugins/middleware
-      '@taucad/opencascade':
-        specifier: workspace:*
-        version: link:../plugins/opencascade
-      '@taucad/openrscad':
-        specifier: workspace:*
-        version: link:../plugins/openrscad
-      '@taucad/picovoxel':
-        specifier: workspace:*
-        version: link:../plugins/picovoxel
-      '@taucad/replicad':
-        specifier: workspace:*
-        version: link:../plugins/replicad
-      '@taucad/rhino':
-        specifier: workspace:*
-        version: link:../plugins/rhino
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../runtime
-      '@taucad/smlib':
-        specifier: workspace:*
-        version: link:../plugins/smlib
-      '@taucad/tscircuit':
-        specifier: workspace:*
-        version: link:../plugins/tscircuit
-      geospec:
-        specifier: workspace:*
-        version: link:../geospec
-      geospec-engine:
-        specifier: 'catalog:'
-        version: 0.3.1
-    devDependencies:
-      '@taucad/agent-tools':
-        specifier: workspace:*
-        version: link:../../libs/agent-tools
-      '@taucad/build123d':
-        specifier: workspace:*
-        version: link:../plugins/build123d
-      '@taucad/native-process-core':
-        specifier: workspace:*
-        version: link:../core/native-process
-      '@taucad/picogk':
-        specifier: workspace:*
-        version: link:../plugins/picogk
-      '@taucad/runtime-testing':
-        specifier: workspace:*
-        version: link:../runtime-testing
-      '@taucad/smlibpy':
-        specifier: workspace:*
-        version: link:../plugins/smlibpy
-      '@taucad/types':
-        specifier: workspace:*
-        version: link:../../libs/types
-      vitest:
-        specifier: 4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@21.0.1)(jsdom@26.0.0(canvas@3.2.3))(vite@8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
-
   packages/host:
     dependencies:
       '@agentclientprotocol/sdk':
@@ -4208,9 +4117,6 @@ importers:
       '@taucad/formal':
         specifier: workspace:*
         version: link:../../tools/formal
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../geospec-engine
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../revisions
@@ -5791,12 +5697,12 @@ importers:
         specifier: workspace:*
         version: link:../core/project
     devDependencies:
+      '@taucad/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../plugins/esbuild
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../geospec-engine
       '@taucad/image':
         specifier: workspace:*
         version: link:../plugins/image

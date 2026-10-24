@@ -1,0 +1,78 @@
+{
+  "uid": "seeded-storage-unbound",
+  "title": "Seeded bad storage dashboard",
+  "templating": {
+    "list": [
+      { "name": "app", "type": "constant", "query": ".*" },
+      { "name": "storage_app", "type": "constant", "query": ".*storage.*" },
+      { "name": "mirror_app", "type": "constant", "query": "tau-mirror" }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "W14 draft: one combined cross-app matcher",
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(tau_git_commit_attempts_total{app=~\"tau-api.*|.*storage.*\"}[5m]))" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "FR14 A_R2: one selector over two services",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(tau_storage_attempts_total{app=~\"$app\",service_name=~\"tau-api|tau-storage\"}[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Mirror metric bound to the API app",
+      "targets": [{ "refId": "A", "expr": "max(tau_mirror_copy_lag_seconds{app=~\"$app\",destination=\"b2\"})" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "tau-storage service bound to the API app",
+      "targets": [{ "refId": "A", "expr": "sum(tau_git_rpcs_inflight{app=~\"$app\",service_name=\"tau-storage\"})" }]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Hard-coded hosted app",
+      "targets": [{ "refId": "A", "expr": "sum(tau_git_rpcs_inflight{app=\"tau-storage-staging\"})" }]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Rule placeholder in a dashboard",
+      "targets": [{ "refId": "A", "expr": "sum(tau_git_rpcs_inflight{app=~\".*storage.*\"})" }]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Unscoped mirror metric",
+      "targets": [{ "refId": "A", "expr": "sum(increase(tau_mirror_rounds_total[1h]))" }]
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Bound correctly",
+      "targets": [
+        { "refId": "A", "expr": "sum(tau_git_rpcs_inflight{app=~\"$storage_app\"})" },
+        { "refId": "B", "expr": "max(tau_mirror_copy_lag_seconds{app=~\"$mirror_app\",destination=\"b2\"})" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "logs",
+      "title": "Loki is bound by the renderer, not by app",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "{service_name=\"tau-storage\"} |= \"grant\"" }]
+    }
+  ]
+}

@@ -68,6 +68,31 @@ if (dsn) {
 }
 
 /**
+ * The git 503 codes a client is told to retry, because the condition clears by itself: another lease of the same
+ * owner finishing, disk freed by a finished lease, a lost manifest race, or a drain before restart.
+ *
+ * They are capacity working as designed, so they are logged as warnings and counted, never reported as Sentry
+ * errors (Hosted Remote Storage X3, DA1). `GIT_REPOSITORY_INCOMPLETE` is deliberately absent: retrying cannot
+ * clear it. A 503 with any other code, or none, is still reported.
+ */
+export const retryableGitRefusalCodes: ReadonlySet<string> = new Set([
+  'GIT_LEASE_OWNER_BUSY',
+  'GIT_LEASE_DISK_FULL',
+  'GIT_PUSH_RACE_LOST',
+  'GIT_SERVICE_RESTARTING',
+]);
+
+/**
+ * Whether a failed request is a retryable git refusal rather than a server error.
+ *
+ * @param statusCode - The HTTP status the request is answered with.
+ * @param code - The refusal's `code`, when it has one.
+ * @returns True only for a 503 whose code is in {@link retryableGitRefusalCodes}.
+ */
+export const isRetryableGitRefusal = (statusCode: number, code: unknown): boolean =>
+  statusCode === 503 && typeof code === 'string' && retryableGitRefusalCodes.has(code);
+
+/**
  * Report a server error. A no-op when Sentry is not configured.
  *
  * Per-event fields go in the capture context, never on a scope: a scope set* call outlives the event when no

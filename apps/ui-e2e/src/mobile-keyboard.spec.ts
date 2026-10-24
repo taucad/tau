@@ -40,6 +40,8 @@ beforeEach(async () => {
   await target.setViewport(iosViewport);
   await target.navigate('/__e2e/chat-attachments');
   await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+  // A project opens on the model stage (Option B); the composer lives on the Chat surface.
+  await target.click(navButton('Chat'), { touch: true });
   await target.expectVisible(selectors.getByCss(composerSelector).first(), 60_000);
 });
 

@@ -4,7 +4,7 @@ import { playwright } from '@vitest/browser-playwright';
 import { defineConfig } from 'vitest/config';
 import { tauRuntime } from '@taucad/runtime/vite';
 
-/** Real Dockview header acceptance at the ruled viewer widths. */
+/** Real Dockview header and viewer bar acceptance at the ruled viewer widths. */
 export default defineConfig({
   root: fileURLToPath(new URL('../../..', import.meta.url)),
   plugins: [tailwindcss(), tauRuntime()],
@@ -25,7 +25,10 @@ export default defineConfig({
     fs: { allow: [fileURLToPath(new URL('../../../../..', import.meta.url))] },
   },
   test: {
-    include: ['app/routes/w.$workspace.$project/chat-viewer.browser.test.tsx'],
+    include: [
+      'app/routes/w.$workspace.$project/chat-viewer.browser.test.tsx',
+      'app/routes/w.$workspace.$project/chat-viewer-controls.browser.test.tsx',
+    ],
     fileParallelism: false,
     browser: {
       enabled: true,

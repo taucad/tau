@@ -1,11 +1,12 @@
 import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import -- Nest decorators require metadata before service imports
 import process from 'node:process';
+import { Redis } from 'ioredis';
 import { ConfigService } from '@nestjs/config';
 import { and, asc, eq, gt, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { getEnvironment } from '#config/environment.config.js';
-import type { Environment } from '#config/environment.config.js';
+import { getMaintenanceEnvironment } from '#config/maintenance-environment.config.js';
+import type { MaintenanceEnvironment } from '#config/maintenance-environment.config.js';
 import * as schema from '#database/schema.js';
 import { project, projectGitLfsObject, storageTombstone } from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -21,12 +22,20 @@ import { recoverProjectDeletions, runMaintenanceWorker } from '#api/git/maintena
 import { restoreRepository } from '#api/git/maintenance/restore.js';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
 import { readMaintenanceLiveness, recordMaintenancePass } from '#api/git/maintenance/liveness.js';
+import { freezeEverything, parseFreezeSeconds, thawEverything } from '#api/git/routing/global-freeze.js';
+import { RedisInFlightRegistry } from '#api/git/routing/in-flight.js';
 import type { ScheduledMaintenanceCommand } from '#api/git/maintenance/liveness.js';
+import { holdInStandby } from '#api/git/maintenance/standby.js';
 
 /**
  * `revisions-maintenance`: the singleton entry for everything that must happen
- * once rather than in every API replica (charter D21, W6). It ships in the API
- * image beside `billing-command.js` and declares its own Fly process group.
+ * once rather than in every API replica (charter D21, W6). It is the whole of
+ * the private `tau-maintenance` app (north star DC4): the Dockerfile's
+ * `maintenance` target runs it, `apps/maintenance/fly.*.toml` deploys it as one
+ * Machine with no service, and its module graph opens no listener
+ * (`maintenance-app.test.ts`). Until the cutover it also still ships in the API
+ * image as that app's `revisions-maintenance` process group, and the new app
+ * holds in standby (`TAU_MAINTENANCE_STANDBY`) so only one worker runs.
  *
  * Nothing here is reachable from a request. That is the point: purge deletes
  * whole tenant prefixes and `mark-erasure` opens that window, so both exist
@@ -49,7 +58,10 @@ const usage = `Usage: revisions-maintenance <command>
 
   worker
       Run non-overlapping 60-second project recovery ticks alongside daily heavy
-      maintenance. Project receipts are audited before tenant purges.
+      maintenance. Project receipts are audited before tenant purges. With
+      TAU_MAINTENANCE_STANDBY=true it instead verifies its database login and
+      storage token, logs one revisions_maintenance.standby line and runs no
+      pass until stopped (the DC4 cutover holds the new app there).
 
   purge-projects [--project <id>] [--dry-run] [--confirm-owner <id> --confirm-project <id> --confirm-plan <sha256>]
       List or purge due project receipts, retaining identity sentinels. Oversized
@@ -83,6 +95,18 @@ const usage = `Usage: revisions-maintenance <command>
   mark-erasure --owner <id>
       Record a verified erasure request: the owner's tombstone becomes due now.
 
+  freeze-all --for <seconds> --reason <incident or restore id>
+      Freeze every repository at the API (the restore runbook's global freeze,
+      DW1): git requests are held up to 5 s, then answered 429 with
+      Retry-After: 1. Waits 5 s for every Machine's route cache to see it,
+      then up to 16 s for requests in flight, and prints whether they
+      drained. The freeze lapses on its own after --for (at most 86400); run
+      it again to extend it. Needs REDIS_URL, which only the API app holds:
+      run it from an API Machine, not from tau-maintenance.
+
+  thaw-all
+      Lift the global freeze.
+
   status
       Read-only worker liveness. Recovery must complete within 120 seconds;
       each heavy command must complete within 30 hours or be inside a 6-hour
@@ -95,10 +119,11 @@ records its start, completion or failure for status and logs one
 revisions_maintenance.pass line. Any flag makes it an operator run, which
 records nothing.
 
-Environment: the API's own configuration, plus TAU_S3_RESTORE_ENDPOINT,
+Environment: DATABASE_URL, the DATABASE_* timeouts and the TAU_S3_* storage
+settings (maintenance-environment.config.ts), plus TAU_S3_RESTORE_ENDPOINT,
 TAU_S3_RESTORE_BUCKET, TAU_S3_RESTORE_ACCESS_KEY_ID,
 TAU_S3_RESTORE_SECRET_ACCESS_KEY and the optional TAU_S3_RESTORE_REGION and
-TAU_S3_RESTORE_FORCE_PATH_STYLE for restore.`;
+TAU_S3_RESTORE_FORCE_PATH_STYLE for restore, and REDIS_URL for freeze-all.`;
 
 /** `--flag value`, with no positional arguments anywhere in this command. */
 const option = (args: readonly string[], name: string): string | undefined => {
@@ -140,7 +165,7 @@ const restoreAccount = (): StorageAccount => ({
   },
 });
 
-// oxlint-disable-next-line max-lines-per-function -- one switch over five subcommands; splitting it hides the argument contract
+// oxlint-disable-next-line max-lines-per-function -- one switch over the subcommands; splitting it hides the argument contract
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0] ?? '';
@@ -149,8 +174,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  const environment = getEnvironment();
-  const configService = new ConfigService<Environment, true>(environment);
+  const environment = getMaintenanceEnvironment();
+  const configService = new ConfigService<MaintenanceEnvironment, true>(environment);
   const driver = new ObjectStorageService(configService);
 
   if (command === 'status') {
@@ -198,6 +223,18 @@ async function main(): Promise<void> {
         process.once('SIGTERM', stopWorker);
         process.once('SIGINT', stopWorker);
         try {
+          if (environment.TAU_MAINTENANCE_STANDBY) {
+            await holdInStandby({
+              signal: stop.signal,
+              report,
+              checks: {
+                database: async () => client`select 1`,
+                privateStorage: async () => readMaintenanceLiveness(driver, new Date()),
+                publicStorage: async () => driver.headProbeObject(AbortSignal.timeout(5000)),
+              },
+            });
+            break;
+          }
           await runMaintenanceWorker({
             signal: stop.signal,
             reportFailure: (lane, error) => {
@@ -448,6 +485,28 @@ async function main(): Promise<void> {
           throw new Error(`No storage tombstone for '${ownerId}': the account must be deleted before its erasure.`);
         }
         console.log(JSON.stringify(marked));
+        break;
+      }
+      case 'freeze-all': {
+        const forSeconds = parseFreezeSeconds(option(args, 'for'));
+        const reason = required(args, 'reason');
+        if (environment.REDIS_URL === undefined) {
+          // The tau-maintenance app holds no Redis (DC4); an API Machine has the URL and this command.
+          throw new Error('freeze-all needs REDIS_URL for the in-flight registry: run it from an API Machine');
+        }
+        const redis = new Redis(environment.REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 3 });
+        await redis.connect();
+        const registry = new RedisInFlightRegistry(redis);
+        try {
+          console.log(JSON.stringify(await freezeEverything({ database, registry, reason, forSeconds })));
+        } finally {
+          registry.close();
+          await redis.quit();
+        }
+        break;
+      }
+      case 'thaw-all': {
+        console.log(JSON.stringify(await thawEverything(database)));
         break;
       }
       default: {

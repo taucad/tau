@@ -9,6 +9,8 @@ import type {
   ComputeAction,
   ComputeEvaluationInput,
   ComputeEvaluationResult,
+  ComputePublicationOutcome,
+  ComputePublicationTask,
   ComputeReuseService,
   ContentDigest,
 } from '#types.js';
@@ -38,6 +40,15 @@ export type ComputeReuseServiceOptions = {
    * required work at all, and every `required` evaluation is refused.
    */
   readonly promote?: ComputeDurablePromotion;
+  /**
+   * Defer best-effort publication past result delivery.
+   *
+   * When present, a best-effort miss returns as soon as its computation does,
+   * with publication status `deferred`, and this receives the task that encodes
+   * and publishes it. The scheduler decides when, and whether, to run it.
+   * Required evaluations always publish before they resolve.
+   */
+  readonly schedulePublication?: (task: ComputePublicationTask) => void;
 };
 
 type PendingEvaluation = {
@@ -215,11 +226,19 @@ const lookupWithPolicy = async <T>(input: {
   }
 };
 
+/** A computed result whose publication settled inline. */
+type PublishedResult<T> = {
+  readonly source: 'computed';
+  readonly value: T;
+  readonly actionDigest: ActionDigest;
+  readonly publication: ComputePublicationOutcome;
+};
+
 const skipped = <T>(input: {
   readonly value: T;
   readonly actionKey: ActionDigest;
   readonly reason: 'encode-failed' | 'content-store-failed' | 'action-store-failed';
-}): ComputeEvaluationResult<T> => ({
+}): PublishedResult<T> => ({
   source: 'computed',
   value: input.value,
   actionDigest: input.actionKey,
@@ -233,7 +252,7 @@ const publishComputed = async <T>(input: {
   readonly contentStore: ContentStore;
   readonly actionStore: ActionStore;
   readonly signal: AbortSignal;
-}): Promise<ComputeEvaluationResult<T>> => {
+}): Promise<PublishedResult<T>> => {
   const { evaluation, value, actionKey, contentStore, actionStore, signal } = input;
   let bytes: Uint8Array<ArrayBuffer>;
   let outputDigest: ContentDigest;
@@ -268,11 +287,13 @@ const publishComputed = async <T>(input: {
       throw new Error('Content store rejected the encoded result.');
     }
     throwIfAborted(signal);
+    // The store verified each digest as it wrote it, so nothing is hashed again here. A bounded
+    // store may still evict an earlier leaf during publication, and a record must never commit an
+    // incomplete closure, so each declared leaf is checked for presence only.
     for (const digest of requiredContent) {
       // oxlint-disable-next-line no-await-in-loop -- bounded stores may evict earlier leaves during publication
       const leaf = await contentStore.read({ digest, signal });
-      // oxlint-disable-next-line no-await-in-loop -- validate each declared leaf before the action commit point
-      if (leaf.status === 'miss' || (await digestContent({ bytes: leaf.bytes })) !== digest) {
+      if (leaf.status === 'miss') {
         throw new CacheCorruptionError('Encoded content closure is unavailable before publication.');
       }
       throwIfAborted(signal);
@@ -357,6 +378,7 @@ const runEvaluation = async <T>(input: {
   readonly contentStore: ContentStore;
   readonly actionStore: ActionStore;
   readonly signal: AbortSignal;
+  readonly schedulePublication: ((task: ComputePublicationTask) => void) | undefined;
 }): Promise<ComputeEvaluationResult<T>> => {
   const lookup = await lookupWithPolicy(input);
   if (lookup.status === 'hit') {
@@ -370,8 +392,37 @@ const runEvaluation = async <T>(input: {
   throwIfAborted(input.signal);
   const value = await input.evaluation.compute({ signal: input.signal });
   throwIfAborted(input.signal);
+  if (input.evaluation.policy === 'best-effort' && input.schedulePublication) {
+    const { evaluation, actionKey } = input;
+    // The encoding (and any snapshot in it) is taken once, under no interruptible signal, and an
+    // interrupted task reuses it when it runs again. Teardown bounds it with the drain deadline.
+    let encoded: ReturnType<CacheCodec<T>['encode']> | undefined;
+    const codec: CacheCodec<T> = {
+      ...evaluation.codec,
+      encode: async () => {
+        encoded ??= evaluation.codec.encode({ value, signal: defaultSignal });
+        return encoded;
+      },
+    };
+    input.schedulePublication({
+      actionDigest: actionKey,
+      signal: evaluation.signal,
+      run: async ({ signal }): Promise<ComputePublicationOutcome> => {
+        throwIfAborted(signal);
+        // A best-effort publication never throws past an abort.
+        const { publication } = await publishComputed({
+          ...input,
+          evaluation: { ...evaluation, codec },
+          value,
+          signal,
+        });
+        return publication;
+      },
+    });
+    return { source: 'computed', value, actionDigest: actionKey, publication: { status: 'deferred' } };
+  }
   const published = await publishComputed({ ...input, value });
-  if (input.evaluation.policy !== 'required' || published.source !== 'computed') {
+  if (input.evaluation.policy !== 'required') {
     return published;
   }
   if (published.publication.status !== 'stored') {
@@ -429,7 +480,11 @@ const forwardPending = async <T>(input: {
       } else if (result.publication.status === 'stored') {
         outputDigest = result.publication.contentDigest;
       } else {
-        throw requiredFailure('Required publication did not store its content.', new Error(result.publication.reason));
+        throw requiredFailure(
+          'Required publication did not store its content.',
+          // Required work is never deferred.
+          new Error(result.publication.status === 'skipped' ? result.publication.reason : 'deferred'),
+        );
       }
       const retention = await promoteRequired({
         retention: input.evaluation.retention,
@@ -489,6 +544,7 @@ export const createComputeReuseService = (options: ComputeReuseServiceOptions): 
               contentStore: options.contentStore,
               actionStore: options.actionStore,
               signal: controller.signal,
+              schedulePublication: options.schedulePublication,
             });
           } finally {
             if (pendingEvaluations.get(flightKey)?.controller === controller) {

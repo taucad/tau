@@ -198,8 +198,25 @@ itself creates its Cygwin signal pipe at startup and the write-restricted token 
 create signal pipe`, Win32 error 5), whoever owns the PTY. Since D14 makes PowerShell the Windows
 shell, S2 now drives **pwsh** in the runner-owned ConPTY (the D14 bar): the same tty/resize/Ctrl-C/
 UTF-8 checks as Linux/macOS, PSJob-mapped job control with POSIX fg/bg + Ctrl-Z recorded as info, and
-an in-PTY containment probe confirmed externally. The per-row `fallback.s2Pty.*` verdicts are recorded
-in the latest dispatch run's receipts.
+an in-PTY containment probe confirmed externally.
+
+Run 40045912771 (both rows, pwsh 7.6.7): pwsh start, tty, resize (`40 100`), PSJob control, UTF-8
+round-trip, the in-PTY own-root write and deny-root refusal (`UnauthorizedAccessException`), the
+external containment check and grant revocation all pass. **Ctrl-C failed**: `0x03` did not interrupt
+the foreground `Start-Sleep -Seconds 30`, with no `^C` in the transcript, and the typed-ahead
+marker only ran after the sleep finished (~22s). The likely cause was the "ignore CTRL_C" console
+flag, which children inherit. The runner now calls `SetConsoleCtrlHandler(NULL, FALSE)` before
+`CreateProcessAsUser`. The pwsh spawn flags are `0x80400` (`CREATE_UNICODE_ENVIRONMENT |
+EXTENDED_STARTUPINFO_PRESENT`) with no `CREATE_NEW_PROCESS_GROUP`, which would also disable Ctrl-C.
+Both facts are recorded as the `s2.ctrlc.setup` info row.
+
+Run 40046797357 (both rows, with that fix): **Ctrl-C passes**. `0x03` interrupts the foreground
+sleep and the prompt returns in about 2.0s (`elapsedMs` 2016 on windows-2025, 2047 on
+windows-11-arm). In the transcript the next prompt and `CC_DONE` follow the `Start-Sleep` line
+straight away. Every other S2 check still passes, and `fallback.s2Pty.prereq/exit/containment/
+inContainer` and the fallback receipt pass on both rows. The jobs stay red only on the
+pre-existing MXC probe gate: `mxc.psec.createClose` on both rows, and the absent base-container API
+/ isolation session on windows-2025. Those rows fail the same way as in the previous run.
 
 ## Running
 

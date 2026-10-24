@@ -11,7 +11,7 @@ import { createImportFileInventory, normalizeGltfGeometryNames, transformGltfExp
 import { createFileResolverIo } from '#file-resolver-io.utils.js';
 import { addFlatNormals } from '#flat-normals.js';
 
-import { dracoExtensionName, loadDracoDecoder, usesDracoCompression } from '#draco-backend.js';
+import { dracoDecoderHeapBytes, dracoExtensionName, loadDracoDecoder, usesDracoCompression } from '#draco-backend.js';
 
 const glbOptionsSchema = coordinateSystemSchema
   .extend(unitSchema.shape)
@@ -102,4 +102,8 @@ export const gltfKernel = defineKernel({
 
   serializeHandle: ({ handle }) => new Uint8Array(handle),
   deserializeHandle: ({ serialized }) => new Uint8Array(serialized),
+
+  // Observation only (PR-1b): the kernel's one WebAssembly heap is the worker's Draco decoder, loaded on the first
+  // Draco-compressed import; until then there is none.
+  observedHeapBytes: () => dracoDecoderHeapBytes(),
 });

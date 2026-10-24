@@ -2188,3 +2188,43 @@ describe('picovoxel host recycle threshold', () => {
     await definition.onDispose!(context);
   });
 });
+
+// T26 (PR-1b, AR-W15-01): the observation-only heap hook reads each warm runtime's linear memory and leaves the
+// recycle threshold, which reads the session's own heap, exactly as it was.
+describe('picovoxel observed heap', () => {
+  const mebibyte = 2 ** 20;
+
+  it('should observe no heap before the first render starts a runtime', async () => {
+    const context = await initialize({ wasm: 'serial' });
+
+    expect(definition.observedHeapBytes!(context)).toBeUndefined();
+    expect(definition.heapBytes).toBeUndefined();
+    await definition.onDispose!(context);
+  });
+
+  it("should observe the warm runtime's WebAssembly memory after a render, until disposal", async () => {
+    const runtime = createRuntime(sphere());
+    const context = await initialize({ wasm: 'serial' }, runtime);
+    await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+    const observed = definition.observedHeapBytes!(context);
+
+    expect(context.runtimes.size).toBe(1);
+    expect(Number.isSafeInteger(observed)).toBe(true);
+    expect(observed).toBeGreaterThan(0);
+    expect(observed).toBe(sessions.created.at(-1)!.pico.module.HEAPU8.buffer.byteLength);
+    await definition.onDispose!(context);
+    expect(definition.observedHeapBytes!(context)).toBeUndefined();
+  });
+
+  it('should drop the heap of a recycled runtime', async () => {
+    const runtime = createRuntime(sphere());
+    const context = await initialize({ wasm: 'serial', recycleHeapBytes: 512 * mebibyte }, runtime);
+    sessions.heapBytes = 600 * mebibyte;
+    await definition.evaluate({ entryPath: 'main.ts', parameters: {}, options: { lane: 'fast' } }, runtime, context);
+
+    expect(context.runtimes.size).toBe(0);
+    expect(definition.observedHeapBytes!(context)).toBeUndefined();
+    sessions.heapBytes = undefined;
+    await definition.onDispose!(context);
+  });
+});

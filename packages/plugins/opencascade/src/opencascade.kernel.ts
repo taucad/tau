@@ -947,6 +947,8 @@ export const opencascadeKernel = defineKernel({
 
   // D-RT-03: the realm's one OCCT instance; the host recycles the worker when this outgrows its device.
   heapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
+  // Observation only (PR-1b): the same linear memory, read for operation facts and never for recycling.
+  observedHeapBytes: (context) => context.occt.value.wasmMemory.buffer.byteLength,
 
   async onDispose(context) {
     context.occt.release();

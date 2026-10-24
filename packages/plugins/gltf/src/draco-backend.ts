@@ -9,6 +9,8 @@ const decoderUrl = new URL(import.meta.resolve('draco3dgltf/draco_decoder_gltf.w
 const encoderUrl = new URL(import.meta.resolve('draco3dgltf/draco_encoder.wasm')).href;
 
 let decoderPromise: Promise<DecoderModule> | undefined;
+/** The decoder once it has loaded, read synchronously for its heap. */
+let loadedDecoder: DecoderModule | undefined;
 let encoderPromise: Promise<EncoderModule> | undefined;
 
 /**
@@ -42,12 +44,21 @@ export const loadDracoDecoder = async (): Promise<DecoderModule> => {
   }
   decoderPromise = createDecoder();
   try {
-    return await decoderPromise;
+    loadedDecoder = await decoderPromise;
+    return loadedDecoder;
   } catch (error) {
     decoderPromise = undefined;
     throw error;
   }
 };
+
+/**
+ * Bytes of WebAssembly memory the loaded Draco decoder holds: the decoder module exports no `WebAssembly.Memory`, so
+ * this reads Emscripten's byte view over the whole memory, which it replaces on every growth.
+ *
+ * @returns The decoder's linear-memory size, or `undefined` before a Draco-compressed file has loaded it.
+ */
+export const dracoDecoderHeapBytes = (): number | undefined => loadedDecoder?.HEAPU8.byteLength;
 
 /**
  * Load and cache the Draco encoder for this worker.

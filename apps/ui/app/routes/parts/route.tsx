@@ -32,7 +32,7 @@ import { enumParameter, stringParameter } from '#utils/search-parameter.codecs.j
 import { isFunction } from '#utils/function.utils.js';
 import type { Handle } from '#types/matches.types.js';
 
-export const handle: Handle = { enableOverflowY: true };
+export const handle: Handle = { title: 'Parts', enableOverflowY: true };
 export const meta: MetaFunction = () => [
   { title: 'Parts · Tau' },
   { name: 'description', content: 'Browse, preview and remix reusable parametric CAD parts.' },

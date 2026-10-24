@@ -177,7 +177,7 @@ export type HostDaemonAgentOptions = {
   /** Base the model gateway hangs off, e.g. the Tau API origin. */
   readonly gatewayBaseUrl: string;
   /**
-   * Bearer session token this daemon backs its projects up with (C67).
+   * Account session token for project backup and local-only model requests.
    *
    * Absent, a served project still knows *where* its Tau Cloud repository is
    * and says so when a remote refuses it; present, *Connect Tau Cloud*
@@ -290,7 +290,8 @@ export type HostDaemonOptions = {
    * `false` is a local-first daemon (`tau serve` without `--relay`, charter D29): it serves its agent channel and any
    * UI on loopback, never pairs and never opens the control connection, and is `ready` once the agent channel is.
    * `relayUrl` stays the Tau API origin its gateway, Zoo proxy and Tau Cloud sync talk to. A credential this
-   * machine already stored still admits Tau runs; without one they are refused `HOST_NOT_PAIRED`.
+   * machine already stored or an account session in `agent.tauApiToken` admits Tau runs; without either they are
+   * refused `HOST_NOT_PAIRED`.
    */
   readonly relay?: boolean;
 };
@@ -831,6 +832,8 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @param agent - Workspace, gateway, model, admission secret, and binding.
    */
   const startAgent = async (agent: HostDaemonAgentOptions): Promise<void> => {
+    const localAccountSession =
+      options.relay === false && agent.tauCloudEnabled !== true && agent.tauApiToken ? agent.tauApiToken : undefined;
     const canonicalWorkspaceRoot = await realpath(agent.workspaceRoot);
     const authorityRoot = join(
       defaultConfigDirectory(),
@@ -970,8 +973,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
               /* No `projectId`: a `tau serve` workspace is a directory, not a
                * cloud project, so its receipts name no project by design. */
             })
-          : createGatewayModelTransport({ baseUrl: agent.gatewayBaseUrl, model: agent.model, auth: bearer }),
-      credential: () => credentialState,
+          : createGatewayModelTransport({
+              baseUrl: agent.gatewayBaseUrl,
+              model: agent.model,
+              // Local-only serving does not pair a device. Use its CLI account session;
+              // relayed hosts retain their live device credential, including revocation.
+              auth: localAccountSession === undefined ? bearer : () => localAccountSession,
+            }),
+      credential: () => (localAccountSession === undefined ? credentialState : { mode: 'session' }),
       ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */

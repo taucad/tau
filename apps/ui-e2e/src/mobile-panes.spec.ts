@@ -93,13 +93,17 @@ const measurePane = (region: Element): Measurement => {
     }
     undersized.push(nameOf(control));
   }
+  // A number field is a slider input: its text input stays transparent until it is edited, and the person sees and
+  // taps the slider's own box, so that box is the field.
+  const fieldOf = (input: Element): Element => input.closest('[data-slot=slider-input]') ?? input;
   const shortFields: string[] = [];
   // The fields the pass moved to the touch row: pane filters, and parameter and joint values.
-  for (const field of region.querySelectorAll(
+  for (const input of region.querySelectorAll(
     'input[type=search], [data-slot=parameters] input:not([type=hidden]), [data-slot=kinematics-joint] input',
   )) {
+    const field = fieldOf(input);
     if (isShown(field) && field.getBoundingClientRect().height < touchRow - 0.5) {
-      shortFields.push(nameOf(field));
+      shortFields.push(nameOf(input));
     }
   }
   // A boolean's row is its switch's target (canvas review R2), so the row takes the touch row too.
@@ -111,8 +115,8 @@ const measurePane = (region: Element): Measurement => {
   }
   const content = region.querySelector('[data-slot=floating-panel-content]') ?? region;
   return {
-    parameterFields: [...region.querySelectorAll('[data-slot=parameters] input:not([type=hidden])')].filter((field) =>
-      isShown(field),
+    parameterFields: [...region.querySelectorAll('[data-slot=parameters] input:not([type=hidden])')].filter((input) =>
+      isShown(fieldOf(input)),
     ).length,
     switchRows: switchRows.length,
     overflow: Math.max(

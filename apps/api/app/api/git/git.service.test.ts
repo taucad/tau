@@ -350,7 +350,7 @@ const pushProbe = async (service: GitRepositoryService, who: GitAccess): Promise
 /**
  * W10 defect 2: a worker killed mid-push leaves its lease directory behind, and
  * admission counts the free bytes of the disk those directories sit on — so a
- * crash used to cost this machine 2.5 GiB of headroom for good. Leases now live
+ * crash used to cost this machine that lease's headroom for good. Leases now live
  * under `tau-git-leases/<pid>/`, and a sibling is reclaimed only when its
  * process is gone: two API processes share one `tmpdir` here and must never
  * sweep each other.
@@ -633,7 +633,7 @@ describe('GitRepositoryService derived state (D19)', () => {
     /* One lease fits and a second does not, so a leaked admission is visible as
        the next request being refused. */
     const { bavail, bsize } = await statfs(tmpdir());
-    service.leaseDiskBytesPerLease = Math.floor(bavail * bsize * 0.6);
+    service.leaseReservationFloorBytes = Math.floor(bavail * bsize * 0.6);
 
     await expect(
       service.withLease(access, async (lease) => {
@@ -657,7 +657,8 @@ describe('GitRepositoryService derived state (D19)', () => {
       store,
       databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
     );
-    service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+    service.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    service.admissionWaitMilliseconds = 0;
 
     await expect(fetchOnce(service, access)).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
@@ -842,8 +843,9 @@ describe('GitRepositoryService advertisement from the manifest (DB1)', () => {
       { metrics, rateLimiter: limiter },
     );
     await service.settled();
-    /* No slot fits on this disk, so any lease would be refused `GIT_LEASE_DISK_FULL`. */
-    service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+    /* No lease fits on this disk, so any lease would be refused `GIT_LEASE_DISK_FULL`. */
+    service.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    service.admissionWaitMilliseconds = 0;
     vi.mocked(hydrateLease).mockClear();
 
     for (const service_ of ['git-upload-pack', 'git-receive-pack'] as const) {
@@ -1018,15 +1020,16 @@ describe('GitRepositoryService security floor (W9)', () => {
     return read === undefined ? {} : decodeManifest(read.manifest).refs;
   };
 
-  /* D22 / L6-F3 / RV-W9 M3: one owner holds at most half a worker's slots and
-     never its last, so with a realistic eight slots a second owner's second
-     request and a third owner are still admitted while the first owner is
-     saturating the worker. */
-  it('keeps one owner to half of eight slots, so two other owners are still admitted', async () => {
+  /* D22 / L6-F3 / RV-W9 M3, in bytes since DA3: an owner that holds a lease
+     holds at most half the worker's lease disk, so with room for eight a second
+     owner's second request and a third owner are still admitted while the
+     first owner is saturating the worker. */
+  it('keeps one owner to half the lease disk, so two other owners are still admitted', async () => {
     const service = createService(store, caughtUp());
     const { bavail, bsize } = await statfs(tmpdir());
-    /* Eight slots on this disk, whatever its size. */
-    service.leaseDiskBytesPerLease = Math.floor((bavail * bsize) / 8.5);
+    /* Room for eight leases on this disk, whatever its size. */
+    service.leaseReservationFloorBytes = Math.floor((bavail * bsize) / 8.5);
+    service.admissionWaitMilliseconds = 0;
     const ownerB: GitAccess = { ...access, ownerId: 'user-w9-b', callerId: 'user-w9-b' };
     const ownerC: GitAccess = { ...access, ownerId: 'user-w9-c', callerId: 'user-w9-c' };
     const gate = Promise.withResolvers<void>();
@@ -1149,14 +1152,16 @@ describe('GitRepositoryService security floor (W9)', () => {
   });
 
   it('answers 429 with the wait when a hydrate budget is spent, before hydrating', async () => {
+    /* The manifest is read before admission, to size the reservation (DA3); no pack is. */
     let hydrated = false;
     const watched: RepositoryStore = {
       ...store,
-      readManifest: async (at) => {
+      getObject: async (at, key, range) => {
         hydrated = true;
-        return store.readManifest(at);
+        return store.getObject(at, key, range);
       },
     };
+    vi.mocked(hydrateLease).mockClear();
     const spent = {
       consumeWindowBudget: async (args: { key: string }) => {
         expect(args.key).toBe(`git:hydrate:${ownerId}:owner`);
@@ -1169,6 +1174,7 @@ describe('GitRepositoryService security floor (W9)', () => {
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED', retryAfterSeconds: 3600 },
     });
     expect(hydrated).toBe(false);
+    expect(hydrateLease).not.toHaveBeenCalled();
   });
 
   /* L6-F8: a 500 that says so in words the client can classify, never a 503. */
@@ -1725,7 +1731,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
   it('counts an admitted lease, holds it active for its work, reserves its disk and measures its hydrate', async () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
-    service.leaseDiskBytesPerLease = 1024;
+    service.leaseReservationFloorBytes = 1024;
 
     await fetchOnce(service, telemetryAccess);
 
@@ -1737,7 +1743,11 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
       [1, { 'tau.git.operation': 'upload_pack' }],
       [-1, { 'tau.git.operation': 'upload_pack' }],
     ]);
-    expect(on('gitLeaseReservedBytes').record.mock.calls).toEqual([[1024], [0]]);
+    /* DA3: the floor plus the packs and their index allowance, not a flat figure. */
+    expect(on('gitLeaseReservedBytes').record.mock.calls).toEqual([
+      [1024 + committedBytes + Math.ceil(committedBytes / 512)],
+      [0],
+    ]);
     expect(on('gitDiskFreeBytes').record).toHaveBeenCalledOnce();
     expect(on('gitDiskFreeBytes').record.mock.calls[0]?.[0]).toBeGreaterThan(0);
     expect(on('gitHydrateBytes').record).toHaveBeenCalledExactlyOnceWith(committedBytes, {
@@ -1748,7 +1758,8 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
   it('counts a lease refused for disk as disk_full and never holds it', async () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
-    service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+    service.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    service.admissionWaitMilliseconds = 0;
 
     await expect(pushProbe(service, telemetryAccess)).rejects.toMatchObject({
       response: { code: 'GIT_LEASE_DISK_FULL' },
@@ -1766,8 +1777,9 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
     const { bavail, bsize } = await statfs(tmpdir());
-    /* Two slots on this disk, so the owner's share is one lease. */
-    service.leaseDiskBytesPerLease = Math.floor((bavail * bsize) / 2.5);
+    /* Room for two leases on this disk, so a second would take the owner past half of it. */
+    service.leaseReservationFloorBytes = Math.floor((bavail * bsize) / 2.5);
+    service.admissionWaitMilliseconds = 0;
     const gate = Promise.withResolvers<void>();
     const admitted = Promise.withResolvers<void>();
     const held = service.withLease(telemetryAccess, async () => {
@@ -1799,7 +1811,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
         consumeWindowBudget: async () => ({ allowed: false, count: 1, retryAfterSeconds: 60 }),
       } as unknown as PublicationRateLimiterService,
     });
-    service.leaseDiskBytesPerLease = 1024;
+    service.leaseReservationFloorBytes = 1024;
 
     await expect(fetchOnce(service, telemetryAccess)).rejects.toMatchObject({
       response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
@@ -1816,7 +1828,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
   it('counts a committed write, its duration and the repository size, and ranks the project by rank alone', async () => {
     const { metrics, on } = recordingMetrics();
     const service = createService(store, caughtUp(), { metrics });
-    service.leaseDiskBytesPerLease = 1024;
+    service.leaseReservationFloorBytes = 1024;
 
     await service.removeRef({
       access: telemetryAccess,
@@ -1870,7 +1882,7 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
     const { metrics, on } = recordingMetrics();
     const losing: RepositoryStore = { ...store, commitManifest: async () => 'lost' };
     const service = createService(losing, caughtUp(), { metrics });
-    service.leaseDiskBytesPerLease = 1024;
+    service.leaseReservationFloorBytes = 1024;
 
     await expect(
       service.removeRef({ access: telemetryAccess, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId }),
@@ -1881,5 +1893,257 @@ describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
       'tau.git.commit.kind': 'push',
     });
     expect(on('gitRepositorySize').record).not.toHaveBeenCalled();
+  }, 60_000);
+});
+
+/**
+ * Hosted Remote Storage DA3 (blueprint OD2, Finding 3): a lease reserves the bytes its kind can
+ * write, read from the manifest before admission, and an owner's share is half the lease disk in
+ * bytes rather than half a slot count that collapsed to one on a 7.3 GiB Machine.
+ */
+describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
+  const store = memoryStore();
+  const bytesProjectId = 'proj-da3';
+  const bytesAccess: GitAccess = { ...access, projectId: bytesProjectId };
+  const locator = repositoryLocator({ ownerId, projectId: bytesProjectId });
+  const mebibyte = 1024 ** 2;
+  const gibibyte = 1024 ** 3;
+  /** Free root disk on a staging `app` Machine (capacity report 2026-10-22; BP Finding 3). */
+  const stagingFreeBytes = Math.round(7.3 * gibibyte);
+  /** `reservationFloorBytes` and `quotaOverrunSlackBytes`, spelled out so a changed figure fails here. */
+  const floorBytes = 64 * mebibyte;
+  const slackBytes = 64 * mebibyte;
+  let committedBytes = 0;
+  const caughtUp = (): DatabaseService =>
+    databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false });
+  /** What a hydrate of this repository writes: its packs plus the 1/512 index allowance. */
+  const hydrated = (bytes: number): number => bytes + Math.ceil(bytes / 512);
+
+  /** A service whose lease filesystem reports `freeBytes`, refusing at once instead of waiting. */
+  const onDisk = (freeBytes: number, options: Parameters<typeof createService>[2] = {}): GitRepositoryService => {
+    const service = createService(store, caughtUp(), options);
+    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(freeBytes);
+    service.admissionWaitMilliseconds = 0;
+    return service;
+  };
+
+  /** Holds `count` leases for `who` open until the returned close is called. */
+  const holdLeases = async (
+    service: GitRepositoryService,
+    who: GitAccess,
+    count: number,
+  ): Promise<() => Promise<void>> => {
+    const gate = Promise.withResolvers<void>();
+    const held: Array<Promise<unknown>> = [];
+    for (let lease = 0; lease < count; lease += 1) {
+      const admitted = Promise.withResolvers<void>();
+      held.push(
+        service.withLease(who, async () => {
+          admitted.resolve();
+          await gate.promise;
+        }),
+      );
+      // oxlint-disable-next-line no-await-in-loop -- each lease is admitted before the next is asked for
+      await Promise.race([admitted.promise, held.at(-1)]);
+    }
+    return async () => {
+      gate.resolve();
+      await Promise.all(held);
+    };
+  };
+
+  beforeAll(async () => {
+    const client = scratch('da3-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'DA3');
+    git(client, 'config', 'user.email', 'da3@tau.test');
+    writeFileSync(path.join(client, 'main.scad'), 'cube(10);\n');
+    git(client, 'add', '.');
+    git(client, 'commit', '--quiet', '-m', 'first revision');
+    const lease = await hydrateLease({ store, locator, parentDirectory: scratch('da3-lease') });
+    try {
+      execFileSync('git', ['push', lease.directory, 'main'], {
+        cwd: client,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: gitEnvironment,
+      });
+      const result = await commitLease({ store, lease, committedBy: ownerId });
+      expect(result.committed).toBe(true);
+      if (result.committed) {
+        committedBytes = result.manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
+      }
+    } finally {
+      await lease.dispose();
+    }
+    /* A KiB repository, as L4's median and the capacity test's are. */
+    expect(committedBytes).toBeGreaterThan(0);
+    expect(committedBytes).toBeLessThan(64 * 1024);
+  }, 60_000);
+
+  it('admits at least sixteen concurrent leases of a KiB repository for one owner on 7.3 GiB', async () => {
+    const service = onDisk(stagingFreeBytes);
+
+    const close = await holdLeases(service, bytesAccess, 16);
+    try {
+      await expect(service.withLease(bytesAccess, async () => 'seventeenth')).resolves.toBe('seventeenth');
+    } finally {
+      await close();
+    }
+  }, 60_000);
+
+  it('gives an owner holding one lease a second when the disk is plentiful', async () => {
+    const { metrics, on } = recordingMetrics();
+    const service = onDisk(stagingFreeBytes, { metrics });
+
+    const close = await holdLeases(service, bytesAccess, 1);
+    try {
+      await expect(service.withLease(bytesAccess, async () => 'second')).resolves.toBe('second');
+    } finally {
+      await close();
+    }
+    expect(on('gitAdmissions').add.mock.calls).toEqual([
+      [1, { 'tau.git.operation': 'derive', outcome: 'admitted' }],
+      [1, { 'tau.git.operation': 'derive', outcome: 'admitted' }],
+    ]);
+  }, 60_000);
+
+  it('reserves a fetch at the repository’s real bytes, read from the manifest once, and gives them back', async () => {
+    const { metrics, on } = recordingMetrics();
+    let reads = 0;
+    const counting: RepositoryStore = {
+      ...store,
+      readManifest: async (at, signal) => {
+        reads += 1;
+        return store.readManifest(at, signal);
+      },
+    };
+    const service = createService(counting, caughtUp(), { metrics });
+    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(stagingFreeBytes);
+
+    await fetchOnce(service, bytesAccess);
+
+    expect(reads, 'admission and hydrate share one manifest read').toBe(1);
+    expect(on('gitLeaseReservedBytes').record.mock.calls).toEqual([[hydrated(committedBytes) + floorBytes], [0]]);
+  }, 60_000);
+
+  it('reserves a 1 GiB repository at its real bytes, so 7.3 GiB holds six such fetches and refuses the seventh', async () => {
+    const read = await store.readManifest(locator);
+    const manifest = decodeManifest(read?.manifest ?? new Uint8Array());
+    const [pack] = manifest.packs;
+    expect(pack).toBeDefined();
+    const large: RepositoryStore = {
+      ...store,
+      readManifest: async () =>
+        read === undefined
+          ? undefined
+          : { ...read, manifest: encodeManifest({ ...manifest, packs: [{ ...pack!, bytes: gibibyte }] }) },
+    };
+    /* No gigabyte is downloaded: the hydrate is a stand-in that writes nothing, so nothing lands
+       and the fake disk's free bytes stay true while each reservation is held in full. */
+    vi.mocked(hydrateLease).mockImplementation(async (args) => ({
+      directory: scratch('da3-large'),
+      locator: args.locator,
+      manifest: undefined,
+      token: args.preread?.token ?? 'absent',
+      hydratedPackFiles: new Set(),
+      dispose: async () => undefined,
+    }));
+    const { metrics, on } = recordingMetrics();
+    const service = createService(large, caughtUp(), { metrics });
+    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(stagingFreeBytes);
+    service.admissionWaitMilliseconds = 0;
+    const reservation = hydrated(gibibyte) + floorBytes;
+
+    try {
+      const owners = ['a', 'b', 'c', 'd', 'e', 'f'].map(
+        (name): GitAccess => ({
+          ...bytesAccess,
+          ownerId: `user-da3-${name}`,
+          callerId: `user-da3-${name}`,
+        }),
+      );
+      const closes: Array<() => Promise<void>> = [];
+      for (const owner of owners) {
+        // oxlint-disable-next-line no-await-in-loop -- in order, so each admission sees the ones before it
+        closes.push(await holdLeases(service, owner, 1));
+      }
+      expect(on('gitLeaseReservedBytes').record.mock.calls.at(-1)).toEqual([6 * reservation]);
+      await expect(
+        service.withLease({ ...bytesAccess, ownerId: 'user-da3-g', callerId: 'user-da3-g' }, async () => undefined),
+      ).rejects.toMatchObject({ response: { code: 'GIT_LEASE_DISK_FULL' } });
+      await Promise.all(closes.map(async (close) => close()));
+    } finally {
+      vi.mocked(hydrateLease).mockRestore();
+      const actual = await vi.importActual<typeof LeaseModule>('#api/git/store/lease.js');
+      vi.mocked(hydrateLease).mockImplementation(actual.hydrateLease);
+    }
+    expect(on('gitLeaseReservedBytes').record.mock.calls.at(-1)).toEqual([0]);
+  }, 60_000);
+
+  it('refuses a push at the D20 ceiling with GIT_LEASE_DISK_FULL when its bytes do not fit, while a fetch still does', async () => {
+    /* Room for the hydrate and the floor, and half the quarantine bound a push at the ceiling still needs. */
+    const service = onDisk(hydrated(committedBytes) + floorBytes + slackBytes / 2);
+    service.repositoryByteCeiling = committedBytes;
+
+    await expect(pushProbe(service, bytesAccess)).rejects.toMatchObject({
+      response: { code: 'GIT_LEASE_DISK_FULL' },
+    });
+    await expect(fetchOnce(service, bytesAccess)).resolves.toBeUndefined();
+  }, 60_000);
+
+  it('runs receive-pack with the quarantine bound it reserved as receive.maxInputSize', async () => {
+    const service = onDisk(stagingFreeBytes);
+    const ceiling = committedBytes + 10 * mebibyte;
+    service.repositoryByteCeiling = ceiling;
+    const spawned = vi.spyOn(
+      service as unknown as { spawnService: (args: { maximumInputBytes: number }) => unknown },
+      'spawnService',
+    );
+
+    await service.receivePack({
+      access: bytesAccess,
+      committedBy: ownerId,
+      body: flushBody(),
+      gzipped: false,
+      maximumInputBytes: bytesAccess.remainingBytes + slackBytes,
+    });
+
+    /* The plan has 10 GiB left and the ceiling 10 MiB: git stops reading at the ceiling plus the slack. */
+    expect(spawned.mock.calls[0]?.[0].maximumInputBytes).toBe(10 * mebibyte + slackBytes);
+  }, 60_000);
+
+  it('waits a short, bounded time for a release before answering GIT_LEASE_OWNER_BUSY', async () => {
+    let reads = 0;
+    const counting: RepositoryStore = {
+      ...store,
+      readManifest: async (at, signal) => {
+        reads += 1;
+        return store.readManifest(at, signal);
+      },
+    };
+    const service = createService(counting, caughtUp());
+    /* The first lease takes more than half the lease disk, so the owner's second waits for it. */
+    vi.spyOn(service, 'readLeaseDiskFreeBytes').mockResolvedValue(2 * (hydrated(committedBytes) + floorBytes) + 1);
+    service.admissionWaitMilliseconds = 2000;
+
+    const close = await holdLeases(service, bytesAccess, 1);
+    const second = service.withLease(bytesAccess, async () => 'after the wait');
+    setTimeout(() => {
+      void close();
+    }, 50);
+
+    await expect(second).resolves.toBe('after the wait');
+    /* One read each, and one more for the lease that waited: a push may have committed meanwhile. */
+    expect(reads).toBe(3);
+
+    service.admissionWaitMilliseconds = 50;
+    const again = await holdLeases(service, bytesAccess, 1);
+    try {
+      await expect(service.withLease(bytesAccess, async () => undefined)).rejects.toMatchObject({
+        response: { code: 'GIT_LEASE_OWNER_BUSY' },
+      });
+    } finally {
+      await again();
+    }
   }, 60_000);
 });

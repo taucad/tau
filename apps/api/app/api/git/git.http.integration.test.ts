@@ -775,13 +775,15 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
   });
 
   /**
-   * D33: admission is concurrent leases × the per-lease reservation against the
-   * worker's free disk. A worker that cannot hold another lease says so with a
+   * D33, DA3: admission is every admitted lease's real-byte reservation against
+   * the worker's free disk. A worker that cannot hold another lease says so with a
    * `Retry-After` rather than filling its own disk and failing halfway.
    */
   it('answers 503 with Retry-After when this worker has no room for another lease', async () => {
-    const reservation = repositories.leaseDiskBytesPerLease;
-    repositories.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+    const reservation = repositories.leaseReservationFloorBytes;
+    repositories.leaseReservationFloorBytes = Number.MAX_SAFE_INTEGER;
+    const wait = repositories.admissionWaitMilliseconds;
+    repositories.admissionWaitMilliseconds = 0;
     /* DB1: the advertisement takes no lease, so a full disk never refuses it (TAU-API-5). */
     const advertisement = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
       headers: { Authorization: `Bearer ${callers.owner.token}` },
@@ -794,7 +796,8 @@ describe('Tau Hosted Remote (git server) over the repository store', () => {
       },
       body: '0000',
     });
-    repositories.leaseDiskBytesPerLease = reservation;
+    repositories.leaseReservationFloorBytes = reservation;
+    repositories.admissionWaitMilliseconds = wait;
 
     expect(advertisement.status).toBe(200);
     expect(await advertisement.text()).toContain('refs/heads/main');

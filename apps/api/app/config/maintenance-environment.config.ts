@@ -10,7 +10,8 @@ import { environmentSchemaBase, withWorktreeDatabases } from '#config/environmen
  * as `TAU_S3_*`, and the restore key as `TAU_S3_RESTORE_*` (read only by
  * `restore`, in `maintenance-command.ts`). It holds none of the API's own
  * secrets — no auth secret, no OAuth client, no Redis — so it cannot parse the
- * API's schema, and must not need to. Every field here is one the command
+ * API's schema, and must not need to (`REDIS_URL` is optional here, for
+ * `freeze-all` run from an API Machine). Every field here is one the command
  * reads; the values and their defaults are the API's, picked from the same
  * schema so the two never disagree on a meaning.
  *
@@ -46,6 +47,13 @@ export const maintenanceEnvironmentSchema = environmentSchemaBase
      * this off in `apps/maintenance/fly.*.toml` in the same change that scales the
      * API's group to zero.
      */
+    /*
+     * Only `freeze-all` reads it, for the in-flight registry its drain waits on
+     * (DW1). `tau-maintenance` holds no Redis, so there it is unset and
+     * `freeze-all` refuses by name; the operator runs it from an API Machine,
+     * whose image carries this command and whose environment has the URL.
+     */
+    REDIS_URL: environmentSchemaBase.shape.REDIS_URL.optional(),
     // The API's strict boolean, default off (as `TAU_CLOUD_ENABLED` parses it).
     TAU_MAINTENANCE_STANDBY: environmentSchemaBase.shape.TAU_CLOUD_ENABLED.describe(
       'Hold the maintenance worker in standby: verify credentials, run no pass (DC4 cutover)',

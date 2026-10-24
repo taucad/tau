@@ -1,11 +1,14 @@
 # Reusable workflow for deploying API to Fly.io.
 # Supports the staging API (`tau-api-staging`, `api.taucad.dev`) and the
-# production API (`tau-api`, `api.tau.new`), and the private maintenance app
-# (`maintenance`: `tau-maintenance-staging`, north star DC4), which is staging-only
-# so far. The maintenance app is the API Dockerfile's `maintenance` target, deploys
-# with its own token (`FLY_MAINTENANCE_API_TOKEN`, from HCP tau-repo
-# `fly_maintenance_deploy_token_<env>`), serves nothing (no Sentry upload, no CORS
-# smoke) and must end with no IP address and exactly one Machine.
+# production API (`tau-api`, `api.tau.new`), and two private apps that serve
+# nothing: the B2 copier (`mirror`: `tau-mirror-staging` / `tau-mirror`, W13 DM1)
+# and the maintenance singleton (`maintenance`: `tau-maintenance-staging` /
+# `tau-maintenance`, north star DC4). Each is a target of the API Dockerfile
+# (`mirror`, `maintenance`) and deploys with its own token: `FLY_MIRROR_API_TOKEN`
+# (HCP tau-repo `fly_mirror_deploy_token_<env>`, change proposal P2.7) and
+# `FLY_MAINTENANCE_API_TOKEN` (HCP tau-repo `fly_maintenance_deploy_token_<env>`).
+# Neither uploads Sentry maps or runs the CORS smoke, and each must end with no IP
+# address and a started Machine; the maintenance app must have exactly one.
 #
 # The build pipeline:
 #   1. Authenticate Docker against `registry.fly.io` using FLY_API_TOKEN.
@@ -37,7 +40,7 @@ on:
       app:
         required: true
         type: string
-        description: 'App to deploy (api or maintenance)'
+        description: 'App to deploy (api, mirror or maintenance)'
   workflow_dispatch:
     # Manual trigger from GitHub UI
     inputs:
@@ -54,6 +57,7 @@ on:
         description: 'App to deploy'
         options:
           - api
+          - mirror
           - maintenance
 
 jobs:
@@ -86,6 +90,7 @@ jobs:
       - name: Resolve deploy targets
         id: targets
         env:
+          FLY_TOKEN_MIRROR: ${{ secrets.FLY_MIRROR_API_TOKEN }}
           FLY_TOKEN_MAINTENANCE: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
         run: |
           # Every app but the API builds a target of the API's Dockerfile and has
@@ -93,23 +98,30 @@ jobs:
           DOCKERFILE="apps/api/Dockerfile"
           DOCKER_TARGET=""
           TOKEN_SECRET="FLY_API_TOKEN"
-          if [ "${{ inputs.app }}" = "maintenance" ]; then
-            if [ "${{ inputs.environment }}" != "staging" ]; then
-              echo "::error::Only staging deploys tau-maintenance so far."
-              exit 1
-            fi
-            echo "fly_app=tau-maintenance-staging" >> "$GITHUB_OUTPUT"
-            echo "config_file=apps/maintenance/fly.staging.toml" >> "$GITHUB_OUTPUT"
-            echo "image=registry.fly.io/tau-maintenance-staging:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-            echo "cache_ref=registry.fly.io/tau-maintenance-staging:buildcache" >> "$GITHUB_OUTPUT"
-            DOCKER_TARGET="maintenance"
-            TOKEN_SECRET="FLY_MAINTENANCE_API_TOKEN"
-            [ -n "$FLY_TOKEN_MAINTENANCE" ] || {
-              echo "::error::Set fly_maintenance_deploy_token_staging in HCP tau-repo and apply its FLY_MAINTENANCE_API_TOKEN GitHub environment mapping."
+          if [ "${{ inputs.app }}" = "mirror" ] || [ "${{ inputs.app }}" = "maintenance" ]; then
+            case "${{ inputs.app }}" in
+              mirror)
+                PREFIX="tau-mirror"; TOKEN_SECRET="FLY_MIRROR_API_TOKEN"
+                TOKEN_HCP="fly_mirror_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MIRROR" ;;
+              maintenance)
+                PREFIX="tau-maintenance"; TOKEN_SECRET="FLY_MAINTENANCE_API_TOKEN"
+                TOKEN_HCP="fly_maintenance_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MAINTENANCE" ;;
+            esac
+            case "${{ inputs.environment }}" in
+              staging) FLY_APP="${PREFIX}-staging"; CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml" ;;
+              production) FLY_APP="${PREFIX}"; CONFIG_FILE="apps/${{ inputs.app }}/fly.prod.toml" ;;
+              *) echo "::error::Invalid environment: ${{ inputs.environment }}"; exit 1 ;;
+            esac
+            [ -n "$TOKEN_VALUE" ] || {
+              echo "::error::Set ${TOKEN_HCP}_${{ inputs.environment }} in HCP tau-repo and apply its ${TOKEN_SECRET} GitHub environment mapping."
               exit 1
             }
+            echo "fly_app=${FLY_APP}" >> "$GITHUB_OUTPUT"
+            echo "config_file=${CONFIG_FILE}" >> "$GITHUB_OUTPUT"
+            echo "image=registry.fly.io/${FLY_APP}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "cache_ref=registry.fly.io/${FLY_APP}:buildcache" >> "$GITHUB_OUTPUT"
             echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
-            echo "docker_target=${DOCKER_TARGET}" >> "$GITHUB_OUTPUT"
+            echo "docker_target=${{ inputs.app }}" >> "$GITHUB_OUTPUT"
             echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -195,30 +207,33 @@ jobs:
         if: steps.superseded.outputs.superseded != 'true'
         run: |
           echo "Deploying ${{ steps.targets.outputs.image }} to ${{ inputs.environment }}"
-          # `--ha=false` keeps tau-maintenance at one Machine (charter D21).
+          # `--ha=false` keeps each private app at one Machine (tau-maintenance: charter
+          # D21); `--no-public-ips` keeps a first deploy from allocating any.
           flyctl deploy \
             --app "${{ steps.targets.outputs.fly_app }}" \
             --config "${{ steps.targets.outputs.config_file }}" \
             --image "${{ steps.targets.outputs.image }}" \
-            ${{ inputs.app == 'maintenance' && '--ha=false' || '' }}
+            ${{ (inputs.app == 'mirror' || inputs.app == 'maintenance') && '--ha=false --no-public-ips' || '' }}
         env:
           FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
 
-      # DC4: the maintenance app has no service, so it must have no IP address of any
-      # kind and exactly one Machine, and that Machine must not have exited non-zero
-      # since the deploy (a missing secret or grant fails its standby checks). Names
-      # and counts only; nothing here prints a secret.
-      - name: Verify the maintenance app is private and singular
-        if: inputs.app == 'maintenance' && steps.superseded.outputs.superseded != 'true'
+      # DM1 and DC4: a private app has no service, so it must have no IP address of
+      # any kind, and its Machine must be started and must not have exited non-zero
+      # since the deploy (a missing secret or grant stops it at boot, naming the
+      # variable or the failed check). tau-maintenance must also have exactly one
+      # Machine (charter D21). Names and counts only; nothing here prints a secret.
+      - name: Verify the ${{ inputs.app }} app is private and running
+        if: (inputs.app == 'mirror' || inputs.app == 'maintenance') && steps.superseded.outputs.superseded != 'true'
         env:
           FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
           FLY_APP: ${{ steps.targets.outputs.fly_app }}
+          APP: ${{ inputs.app }}
         run: |
           set -euo pipefail
           since=$(( $(date +%s%3N) - 120000 ))
           ips=$(flyctl ips list --app "$FLY_APP" --json | jq 'length')
           if [ "$ips" != 0 ]; then
-            echo "::error::${FLY_APP} has ${ips} IP address(es); it must have none (DC4)."
+            echo "::error::${FLY_APP} has ${ips} IP address(es); it must have none."
             exit 1
           fi
           for attempt in 1 2 3 4 5 6; do
@@ -230,16 +245,16 @@ jobs:
               '[.[].events[]? | select(.type == "exit" and (.timestamp // 0) > $since and ((.request.exit_event.exit_code // 0) != 0))] | length' \
               <<< "$machines")
             echo "attempt ${attempt}: machines=${count} started=${started} failed_exits=${exits}"
-            if [ "$count" != 1 ]; then
+            if [ "$APP" = maintenance ] && [ "$count" != 1 ]; then
               echo "::error::${FLY_APP} has ${count} Machines; it must have exactly one (charter D21)."
               exit 1
             fi
             if [ "$exits" != 0 ]; then
-              echo "::error::The ${FLY_APP} Machine exited non-zero; its log names the failed revisions_maintenance.standby_failed check."
+              echo "::error::The ${FLY_APP} Machine exited non-zero; its log names the missing variable or the failed check."
               exit 1
             fi
           done
-          [ "$started" = 1 ] || { echo "::error::The ${FLY_APP} Machine is not started."; exit 1; }
+          [ "$started" -ge 1 ] || { echo "::error::No ${FLY_APP} Machine is started."; exit 1; }
 
       # The plan of the next push to `main` diffs the app against this commit.
       - name: Record this staging deploy

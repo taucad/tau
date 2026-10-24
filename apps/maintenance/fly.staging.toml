@@ -59,7 +59,8 @@ TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'
 
 # The sizing the API's `revisions-maintenance` group had (F-10: 512 MB). Restore
-# hydrates a lease of its own on the rootfs; purge and collection stream keys.
+# copies packs as streams and takes no lease (DA4); `retire-lfs` hydrates a
+# read-only lease on the rootfs; purge and collection stream keys.
 [[vm]]
 memory = '512mb'
 cpu_kind = 'shared'

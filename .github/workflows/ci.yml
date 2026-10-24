@@ -906,13 +906,38 @@ jobs:
       app: api
     secrets: inherit
 
+  # The private B2 copier (`tau-mirror-staging`, W13 DM1): the `mirror` project,
+  # whose code is `api`'s mirror command (implicit dependency), so the plan lists it
+  # whenever `api` or its Fly configs change. It waits for the API deploy when that
+  # runs: the API's release command owns migrations and the `tau_mirror` role, and
+  # the copier refuses to start against a schema it was not built for.
+  # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
+  deploy-mirror-staging:
+    name: Deploy mirror (Staging)
+    needs: [workspace, affected-lane, plan, api, deploy-api-staging]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.deploy-apps), 'mirror') &&
+      needs.workspace.result == 'success' && needs.affected-lane.result == 'success' &&
+      needs.api.result == 'success' &&
+      (needs.deploy-api-staging.result == 'success' || needs.deploy-api-staging.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+      app: mirror
+    secrets: inherit
+
   # The private maintenance app (`tau-maintenance-staging`, north star DC4): the
   # `maintenance` project, whose code is `api`'s maintenance command (implicit
   # dependency), so the plan lists it whenever `api` or its Fly configs change. It
   # waits for the API deploy when that runs: the API's release command owns
-  # migrations, and the maintenance image must not run ahead of the schema. Until
-  # the DC4 cutover it holds in standby (`TAU_MAINTENANCE_STANDBY`), so the API's own
-  # `revisions-maintenance` group stays the one worker.
+  # migrations and the `tau_maintenance` role, and the maintenance image must not
+  # run ahead of the schema. Until the DC4 cutover it holds in standby
+  # (`TAU_MAINTENANCE_STANDBY`), so the API's own `revisions-maintenance` group
+  # stays the one worker.
   # `needs.plan.result` stays before `fromJSON`; see `deploy-api-staging`.
   deploy-maintenance-staging:
     name: Deploy maintenance (Staging)

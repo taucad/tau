@@ -2,7 +2,7 @@
 
 # Multi-stage Fly.io image for the Tau NestJS API.
 #
-# Stages: base -> deps -> build -> pruned -> runtime-base -> maintenance | runtime
+# Stages: base -> deps -> build -> pruned -> runtime-base -> mirror | maintenance | runtime
 #   base         : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
 #   deps         : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
 #                  + patches); cache key independent of source edits.
@@ -10,6 +10,9 @@
 #   pruned       : `pnpm deploy --prod` to materialise a self-contained app dir.
 #   runtime-base : minimal `node:24-slim` with pinned git, running as non-root `nestjs`
 #                  (uid 1001). Exposes nothing.
+#   mirror       : the private `tau-mirror` app (W13 DM1, the B2 second copy), built with
+#                  `--target mirror`; runs `mirror-command.js worker`, metrics on 9464 only,
+#                  no health check.
 #   maintenance  : the private `tau-maintenance` app (north star DC4), built with
 #                  `--target maintenance`; runs `maintenance-command.js`, no port, no
 #                  health check (`app/maintenance-app.test.ts`).
@@ -95,7 +98,7 @@ FROM build AS pruned
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm --config.auto-install-peers=false --filter=@taucad/api --prod deploy /pruned --legacy
 
-# ── Runtime base (shared by the API and tau-maintenance) ──────────────────
+# ── Runtime base (shared by the API and the private apps) ─────────────────
 FROM node:${NODE_VERSION}-slim AS runtime-base
 WORKDIR /app
 
@@ -130,10 +133,20 @@ USER nestjs
 
 ENV NODE_ENV="production"
 
+# ── Mirror: the private `tau-mirror` copier (W13 DM1) ─────────────────────
+# Same tree as the API, a different entry: copies R2's repositories to the B2
+# second copy under Object Lock. It serves no request: the only listener is the
+# OpenTelemetry Prometheus exporter on 9464, scraped over Fly's private network
+# (`[[metrics]]` in `apps/mirror/fly.*.toml`), so there is no HEALTHCHECK.
+FROM runtime-base AS mirror
+ENV OTEL_SERVICE_NAME="tau-mirror"
+EXPOSE 9464
+CMD ["node", "/app/dist/mirror-command.js", "worker"]
+
 # ── Maintenance: the private singleton `tau-maintenance` (DC4) ────────────
 # Same tree as the API, a different entry: purge, retire-lfs, blob collection,
-# project-deletion recovery and operator restore. Restore and retire-lfs hydrate
-# leases, so it keeps the pinned git above. No EXPOSE and no HEALTHCHECK: the
+# project-deletion recovery and operator restore. `retire-lfs` hydrates a lease,
+# so it keeps the pinned git above. No EXPOSE and no HEALTHCHECK: the
 # command opens no listener, and Fly's `[processes]` entry in
 # `apps/maintenance/fly.*.toml` names the subcommand (`worker`).
 FROM runtime-base AS maintenance

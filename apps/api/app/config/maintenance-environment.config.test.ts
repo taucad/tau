@@ -27,6 +27,15 @@ describe('maintenanceEnvironmentSchema (DC4)', () => {
     expect(environment.TAU_MAINTENANCE_STANDBY).toBe(true);
     expect(environment.DATABASE_STATEMENT_TIMEOUT_MS).toBe(15_000);
     expect(environment.TAU_S3_FORCE_PATH_STYLE).toBe(false);
+    expect(environment.REDIS_URL).toBeUndefined();
+  });
+
+  it('should keep REDIS_URL for freeze-all when it runs from an API Machine', () => {
+    const environment = getMaintenanceEnvironment(
+      processEnvironment({ ...maintenanceOnly, REDIS_URL: 'rediss://redis.example:6379' }),
+    );
+
+    expect(environment.REDIS_URL).toBe('rediss://redis.example:6379');
   });
 
   it('should default to running the worker, which is what the API group parses today', () => {

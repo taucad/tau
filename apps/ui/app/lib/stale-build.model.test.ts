@@ -33,7 +33,8 @@ type Step =
   | { readonly kind: 'trackerFails'; readonly tab: 0 | 1 }
   | { readonly kind: 'query'; readonly tab: 0 | 1 }
   | { readonly kind: 'reload'; readonly tab: 0 | 1 }
-  | { readonly kind: 'leave'; readonly tab: 0 | 1 };
+  | { readonly kind: 'leave'; readonly tab: 0 | 1 }
+  | { readonly kind: 'freeze'; readonly tab: 0 | 1 };
 
 /**
  * The model's shared state: its tabs, whether the next SDK load fails, the page whose listeners are
@@ -100,14 +101,16 @@ type Tab = {
   errorReporting?: typeof ErrorReporting;
   /** Events the model error tracker sent per failure; Sentry ignores a second capture of the same value. */
   readonly tracked: Map<unknown, number>;
-  /** Values the SDK has captured (Sentry marks each, and drops a second capture of it). */
-  readonly captured: WeakSet<WeakKey>;
   /** The tag each failure of a page that left would be sent with, as that page knew it when it went. */
   readonly tagsAtLeave: Map<unknown, StaleBuildRecovery.StaleBuildTag>;
+  /** The tags a page knew for each of its failures whenever it was hidden (frozen or left). */
+  readonly tagsAtHide: Map<unknown, Set<StaleBuildRecovery.StaleBuildTag>>;
   /** This tab's `sessionStorage`: it outlives the tab's pages. */
   readonly storage: Map<string, string>;
   /** The current page's `pagehide` listeners. */
   pageHide: Array<(event: { readonly persisted: boolean }) => void>;
+  /** The current page's `pageshow` listeners. */
+  pageShow: Array<() => void>;
   /** The `stale_build` tag each tracked failure's event was sent with (`beforeSend` holds it). */
   readonly tags: Map<unknown, Promise<StaleBuildRecovery.StaleBuildTag>>;
   /** The edge once answered `none` (no build endpoint): the newer build wins and nothing is asked again. */
@@ -179,6 +182,7 @@ const loadTab = async (tab: Tab): Promise<void> => {
   });
   // The entry installs the recovery on every page; its `pagehide` listener is this page's.
   tab.pageHide = [];
+  tab.pageShow = [];
   model.installing = tab;
   tab.recovery.installStaleBuildRecovery();
   model.installing = undefined;
@@ -206,14 +210,50 @@ const ingest = async (_url: string, init: { readonly body?: unknown }): Promise<
   return new Response('{}');
 };
 
-/** The SDK captures a value once per page that holds it, as Sentry marks what it captured. */
+/**
+ * The SDK captures a value once: as Sentry's `checkOrSetAlreadyCaught` does, it skips a value marked
+ * `__sentry_captured__` (by itself, or by an event sent without it) and marks the rest.
+ */
 function captureValue(error: unknown): void {
   const owner = model.tabs.find((candidate) => candidate.failures.some((entry) => entry.failure === error));
-  if (owner !== undefined && typeof error === 'object' && error !== null && !owner.captured.has(error)) {
-    owner.captured.add(error);
-    track(owner, error);
+  if (owner === undefined || typeof error !== 'object' || error === null) {
+    return;
+  }
+  if ((error as { __sentry_captured__?: boolean }).__sentry_captured__ === true) {
+    return;
+  }
+  Object.defineProperty(error, '__sentry_captured__', { value: true, enumerable: false, configurable: true });
+  track(owner, error);
+}
+
+/** The page is hidden (`pagehide`), into the back/forward cache or for good; what it knew of each failure is noted. */
+function hidePage(tab: Tab, persisted: boolean): void {
+  const page = tab.recovery!;
+  for (const listener of tab.pageHide) {
+    listener({ persisted });
+  }
+  for (const { failure, recovery } of tab.failures) {
+    if (recovery === page) {
+      const known = tab.tagsAtHide.get(failure) ?? new Set();
+      known.add(page.readStaleBuildTag(failure));
+      tab.tagsAtHide.set(failure, known);
+    }
   }
 }
+
+/** Whether a promise has settled by the next timer turn. */
+const hasSettled = async (promise: Promise<unknown> | undefined): Promise<boolean> => {
+  if (promise === undefined) {
+    return true;
+  }
+  const pending = Symbol('pending');
+  const nextTurn = async (): Promise<typeof pending> => {
+    await vi.advanceTimersByTimeAsync(0);
+    return pending;
+  };
+  const raced = Promise.race([promise, nextTurn()]);
+  return (await raced) !== pending;
+};
 
 /**
  * The page leaves (a refresh, or its automatic reload going through): its `pagehide` listeners run,
@@ -221,9 +261,7 @@ function captureValue(error: unknown): void {
  */
 const leavePage = async (tab: Tab): Promise<void> => {
   const page = tab.recovery!;
-  for (const listener of tab.pageHide) {
-    listener({ persisted: false });
-  }
+  hidePage(tab, false);
   for (const { failure, recovery } of tab.failures) {
     if (recovery === page) {
       tab.tagsAtLeave.set(failure, page.readStaleBuildTag(failure));
@@ -241,10 +279,11 @@ const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   fetches: 0,
 
   tracked: new Map(),
-  captured: new WeakSet(),
   tagsAtLeave: new Map(),
+  tagsAtHide: new Map(),
   storage: new Map(),
   pageHide: [],
+  pageShow: [],
   tags: new Map(),
   sawNone: false,
   analytics: new Map(),
@@ -331,6 +370,22 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
       await leavePage(tabs[step.tab]);
       return 0;
     }
+    case 'freeze': {
+      // Hidden into the back/forward cache, then shown again: the page carries on.
+      const tab = tabs[step.tab];
+      hidePage(tab, true);
+      // I8: nothing the frozen page held waits past it: every event the tracker held for it has gone.
+      for (const { failure, recovery } of tab.failures) {
+        if (recovery === tab.recovery && tab.tracked.has(failure)) {
+          // oxlint-disable-next-line no-await-in-loop -- Each held tag in turn.
+          expect(await hasSettled(tab.tags.get(failure)), 'I8 held tag released on pagehide').toBe(true);
+        }
+      }
+      for (const listener of tab.pageShow) {
+        listener();
+      }
+      return 0;
+    }
     case 'leave': {
       // The page's own automatic reload goes through (without this step, it stalls as time passes).
       const tab = tabs[step.tab];
@@ -407,7 +462,7 @@ const checkStep = (
 };
 
 /**
- * I2 (and I2b: the tag sent is the settled decision's, or what a page that left knew when it went),
+ * I2 (and I2b: the tag sent is the settled decision's, or what its page knew when it was hidden),
  * across every page of a tab, once the trackers are up and every wait has passed.
  */
 const checkEnd = async (tabs: readonly [Tab, Tab]): Promise<void> => {
@@ -415,14 +470,16 @@ const checkEnd = async (tabs: readonly [Tab, Tab]): Promise<void> => {
     for (const { failure, recovery } of tab.failures) {
       const outcome = recovery.readStaleBuildOutcome(failure);
       expect(tab.tracked.get(failure) ?? 0, `I2 tracker tab ${String(index)}`).toBe(1);
-      const atLeave = tab.tagsAtLeave.get(failure);
-      if (atLeave !== undefined) {
+      // I2b: the tag sent is the settled decision's, or what the page knew when it was hidden.
+      const allowed = new Set(tab.tagsAtHide.get(failure));
+      if (!tab.tagsAtLeave.has(failure) && outcome !== undefined) {
         // oxlint-disable-next-line no-await-in-loop -- Each tag was settled during the wait already.
-        expect(await tab.tags.get(failure), `I2b tag at leave tab ${String(index)}`).toBe(atLeave);
-      } else if (outcome !== undefined) {
+        allowed.add(await recovery.classifyStaleBuildFailure(failure));
+      }
+      if (allowed.size > 0) {
         // oxlint-disable-next-line no-await-in-loop -- Each tag was settled during the wait already.
-        const [sent, settled] = await Promise.all([tab.tags.get(failure), recovery.classifyStaleBuildFailure(failure)]);
-        expect(sent, `I2b tag tab ${String(index)} (${outcome})`).toBe(settled);
+        const sent = await tab.tags.get(failure);
+        expect(allowed.has(sent!), `I2b tag tab ${String(index)} (${String(outcome)}: ${String(sent)})`).toBe(true);
       }
       expect(tab.analytics.get(failure) ?? 0, `I2 analytics tab ${String(index)} (${String(outcome)})`).toBe(
         outcome === 'current' ? 1 : 0,
@@ -444,10 +501,8 @@ const step: Arbitrary<Step> = oneof(
   { weight: 1, arbitrary: record({ kind: constant<'trackerFails'>('trackerFails'), tab: tabIndex }) },
   { weight: 1, arbitrary: record({ kind: constant<'query'>('query'), tab: tabIndex }) },
   { weight: 1, arbitrary: record({ kind: constant<'reload'>('reload'), tab: tabIndex }) },
-  {
-    weight: 1,
-    arbitrary: record({ kind: constant<'leave'>('leave'), tab: tabIndex }),
-  },
+  { weight: 1, arbitrary: record({ kind: constant<'leave'>('leave'), tab: tabIndex }) },
+  { weight: 1, arbitrary: record({ kind: constant<'freeze'>('freeze'), tab: tabIndex }) },
 );
 
 /** Sequences explored per run; the report quotes it. */
@@ -464,6 +519,9 @@ beforeEach(() => {
   vi.stubGlobal('addEventListener', (type: string, listener: (event: { readonly persisted: boolean }) => void) => {
     if (type === 'pagehide' && model.installing !== undefined) {
       model.installing.pageHide.push(listener);
+    }
+    if (type === 'pageshow' && model.installing !== undefined) {
+      model.installing.pageShow.push(listener as () => void);
     }
   });
   vi.stubGlobal('removeEventListener', () => undefined);
@@ -604,6 +662,27 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
         for (const { failure } of tab.failures) {
           expect(tab.tracked.get(failure)).toBe(1);
         }
+      },
+    );
+  }, 60_000);
+
+  it('release an event the tracker held when the page is frozen, tagged undecided, and carry on once shown again', async () => {
+    await runModel(
+      // Tab A's edge is slow, so its decision is still under way when the page is frozen.
+      ['Y', 'Y', 3500, 60_000],
+      [
+        { kind: 'tracker', tab: 0 },
+        { kind: 'failure', tab: 0, channel: 'global' },
+        { kind: 'freeze', tab: 0 },
+        { kind: 'failure', tab: 0, channel: 'boundary' },
+      ],
+      ([tab]) => {
+        const [frozen, later] = tab.failures;
+        expect([...(tab.tagsAtHide.get(frozen?.failure) ?? [])]).toStrictEqual(['undecided']);
+        expect(frozen?.recovery.readStaleBuildOutcome(frozen.failure)).toBe('superseded');
+        // The page carried on: the failure after it was shown again was decided and sent as usual.
+        expect(later?.recovery.readStaleBuildOutcome(later.failure)).toBe('superseded');
+        expect(tab.tracked.get(later?.failure)).toBe(1);
       },
     );
   }, 60_000);

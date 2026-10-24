@@ -75,12 +75,40 @@ export const sentryEnvelopeUrl = (dsn: string): string | undefined => {
   }
 };
 
+/**
+ * Bytes of `keepalive` request bodies a page may have in flight; browsers refuse a `keepalive`
+ * request past 64 KiB in total, so, as Sentry's own transport does, stay under about 60 KB and send
+ * the rest as ordinary requests (which still complete while the page lives).
+ */
+export const keepaliveBudget = 60_000;
+
+/** Longest message and stack text an event sent without the SDK carries. */
+export const directEventTextLimit = { message: 2000, stack: 6000 } as const;
+
+let keepaliveInFlight = 0;
+
+/**
+ * Mark a value as captured the way the SDK does (`__sentry_captured__`, which its
+ * `checkOrSetAlreadyCaught` reads), so the SDK, should it start later on this page, never sends it
+ * again (for example when Vite rethrows a preload failure sent here into a global handler).
+ */
+const markCaptured = (error: unknown): void => {
+  if ((typeof error === 'object' && error !== null) || typeof error === 'function') {
+    try {
+      Object.defineProperty(error, '__sentry_captured__', { value: true, enumerable: false, configurable: true });
+    } catch {
+      // A frozen value: the SDK would not be able to mark it either.
+    }
+  }
+};
+
 const randomEventId = (): string => randomUuid().replaceAll('-', '');
 
 /**
  * Report an error without the SDK, when its chunk could not be loaded: one event, stamped with this
- * page's own release and environment, scrubbed as `beforeSend` scrubs, posted once as an envelope
- * with `keepalive` so it survives the page going. Nothing is stored and nothing is retried: if the
+ * page's own release and environment, scrubbed as `beforeSend` scrubs, its message and stack
+ * capped ({@link directEventTextLimit}), posted once as an envelope, with `keepalive` (so it survives
+ * the page going) while the bodies in flight stay within {@link keepaliveBudget}. Nothing is stored and nothing is retried: if the
  * request is blocked as well (a content blocker), the error is lost.
  *
  * @param error - The value to report.
@@ -96,6 +124,7 @@ export const sendSentryEventDirectly = async (
   if (!dsn || endpoint === undefined) {
     return;
   }
+  markCaptured(error);
   const isError = error instanceof Error;
   const release = sentryRelease(readBuildId());
   const environment = sentryEnvironment();
@@ -113,26 +142,37 @@ export const sendSentryEventDirectly = async (
       values: [
         {
           type: isError ? error.name : 'Error',
-          value: isError ? error.message : String(error),
+          value: (isError ? error.message : String(error)).slice(0, directEventTextLimit.message),
           mechanism: { type: 'tau.error-reporting.without-sdk', handled: true },
         },
       ],
     },
-    ...(isError && error.stack !== undefined ? { extra: { stack: error.stack.slice(0, 8000) } } : {}),
+    ...(isError && error.stack !== undefined
+      ? { extra: { stack: error.stack.slice(0, directEventTextLimit.stack) } }
+      : {}),
     request: { url: globalThis.location.href },
   });
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's envelope header fields.
   const header = { event_id: event.event_id, sent_at: new Date().toISOString(), dsn };
   const body = `${JSON.stringify(header)}\n${JSON.stringify({ type: 'event' })}\n${JSON.stringify(event)}`;
+  const size = new TextEncoder().encode(body).length;
+  const keepalive = keepaliveInFlight + size <= keepaliveBudget;
+  if (keepalive) {
+    keepaliveInFlight += size;
+  }
   try {
     // A simple request (no preflight), as the SDK's own transport sends.
     await fetch(endpoint, {
       method: 'POST',
       body,
-      keepalive: true,
+      keepalive,
       headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
     });
   } catch {
     // Blocked or unavailable: the error is lost, and nothing reports that.
+  } finally {
+    if (keepalive) {
+      keepaliveInFlight -= size;
+    }
   }
 };

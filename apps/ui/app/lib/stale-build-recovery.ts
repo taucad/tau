@@ -145,10 +145,11 @@ export type LiveBuildSource = {
 
 /**
  * What the error tracker is told about a chunk failure, as a tag (`stale_build`): a deploy explains
- * it (`superseded`), the live build still has the failure (`current`), or the server did not say
- * (`unknown`). Operators filter on it; the page never drops the event.
+ * it (`superseded`), the live build still has the failure (`current`), the server did not say
+ * (`unknown`), or the page was hidden while its decision was still being made, so the event went
+ * before there was one (`undecided`). Operators filter on it; the page never drops the event.
  */
-export type StaleBuildTag = 'superseded' | 'current' | 'unknown';
+export type StaleBuildTag = 'superseded' | 'current' | 'unknown' | 'undecided';
 
 /**
  * The channel a failure arrived through. Whether Sentry captures that channel itself decides
@@ -229,6 +230,20 @@ export type StaleBuildRecovery = {
    * known. Passive: it starts no question, it only waits for the decision under way.
    */
   readonly classifySettled: (failure: unknown, bound?: number) => Promise<StaleBuildTag>;
+  /**
+   * The tag to send now, without waiting: `undecided` while the failure's decision is still being
+   * made (a provisional `reloading` included), else {@link StaleBuildRecovery.classify}.
+   */
+  readonly tagNow: (failure: unknown) => StaleBuildTag;
+  /**
+   * The page is hidden (every `pagehide`, kept in the back/forward cache or not): a frozen page may
+   * never run again, so every wait for a decision ends now (tagged {@link StaleBuildRecovery.tagNow})
+   * and failures only Vite's preloader reported go to the tracker now. New failures afterwards
+   * (the page shown again) are handled as usual.
+   */
+  readonly flush: () => void;
+  /** The page is shown again (`pageshow`) after {@link StaleBuildRecovery.flush}: waits work as usual again. */
+  readonly resume: () => void;
   /** The settled decision for a failure, or `undefined` while none is. */
   readonly readOutcome: (failure: unknown) => StaleBuildOutcome | undefined;
   /** Subscribe to each settled or changed decision ({@link StaleBuildRecovery.readOutcome}). */
@@ -240,9 +255,8 @@ export type StaleBuildRecovery = {
   /** Subscribe to each change of {@link StaleBuildRecovery.readReloadState}. */
   readonly subscribeReloadState: (listener: () => void) => () => void;
   /**
-   * The page is going (`pagehide`): a pending reload happened, so what it covered settles as
-   * `reloading`; failures only Vite's preloader reported go to the tracker now; and every wait for a
-   * decision ends with what is known.
+   * The page is really going (a `pagehide` not kept in the back/forward cache): a pending reload
+   * happened, so what it covered settles as `reloading`, and nothing is decided again.
    */
   readonly leave: () => void;
 };
@@ -309,6 +323,10 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   /** Failures only Vite's preloader has reported, waiting for the channel it rethrows into. */
   const awaitingFollowUp = new Set<WeakKey>();
   let hasLeft = false;
+  /** How many times the page was hidden ({@link StaleBuildRecovery.flush}); a wait across one ends. */
+  let flushes = 0;
+  /** Hidden and not shown since: nothing waits, since the page may never run again. */
+  let isHidden = false;
   let hasWarnedSdkBlocked = false;
 
   /** Hand a failure to the error tracker once, unless a channel the tracker captures itself saw it. */
@@ -516,6 +534,10 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       // Settled: no decision under way, or one made and not provisional, or the page is going.
       const isSettled = (): boolean =>
         hasLeft || record?.decision === undefined || (record.outcome !== undefined && !record.provisional);
+      const flushesBefore = flushes;
+      if (isHidden) {
+        return this.tagNow(failure);
+      }
       if (!isSettled()) {
         await new Promise<void>((resolve) => {
           const done = (): void => {
@@ -525,18 +547,43 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
           };
           const timer = setTimeout(done, bound);
           const unsubscribe = outcomeTopic.subscribe(() => {
-            if (isSettled()) {
+            if (isSettled() || flushes !== flushesBefore) {
               done();
             }
           });
         });
       }
-      return this.classify(failure);
+      // Released by the page being hidden: what it knows now, `undecided` for a decision still under way.
+      return hasLeft || flushes !== flushesBefore ? this.tagNow(failure) : this.classify(failure);
+    },
+    tagNow(failure) {
+      const record = isWeakKey(failure) ? records.get(failure) : undefined;
+      const isUndecided =
+        record?.decision !== undefined && (record.outcome === undefined || (record.provisional && !hasLeft));
+      return isUndecided ? 'undecided' : this.classify(failure);
+    },
+    flush() {
+      flushes += 1;
+      isHidden = true;
+      for (const failure of awaitingFollowUp) {
+        const record = records.get(failure);
+        awaitingFollowUp.delete(failure);
+        if (record !== undefined && !record.reportedToErrorTracker && !isCapturedBySentry(record)) {
+          clearTimeout(record.preloadWait);
+          record.preloadWait = undefined;
+          record.reportedToErrorTracker = true;
+          options.reportToErrorTracker?.(failure);
+        }
+      }
+      outcomeTopic.emit();
     },
     readOutcome: (failure) => (isWeakKey(failure) ? records.get(failure)?.outcome : undefined),
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
     readReloadState,
     subscribeReloadState: (listener) => reloadStateTopic.subscribe(listener),
+    resume() {
+      isHidden = false;
+    },
     leave() {
       if (hasLeft) {
         return;
@@ -549,16 +596,6 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
         }
       }
       coveredByReload.clear();
-      for (const failure of awaitingFollowUp) {
-        const record = records.get(failure);
-        awaitingFollowUp.delete(failure);
-        if (record !== undefined && !record.reportedToErrorTracker && !isCapturedBySentry(record)) {
-          clearTimeout(record.preloadWait);
-          record.preloadWait = undefined;
-          record.reportedToErrorTracker = true;
-          options.reportToErrorTracker?.(failure);
-        }
-      }
       outcomeTopic.emit();
     },
     confirmArrival() {
@@ -629,7 +666,7 @@ const getPageRecovery = (): StaleBuildRecovery => {
   setErrorDescriber({
     now: (failure): Readonly<Record<string, string>> =>
       // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
-      isStaleModuleError(failure) ? { stale_build: recovery.classify(failure) } : {},
+      isStaleModuleError(failure) ? { stale_build: recovery.tagNow(failure) } : {},
     settled: async (failure): Promise<Readonly<Record<string, string>>> =>
       // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
       isStaleModuleError(failure) ? { stale_build: await recovery.classifySettled(failure) } : {},
@@ -702,7 +739,7 @@ export const classifyStaleBuildFailure = async (failure: unknown): Promise<Stale
  * @param failure - The caught value.
  * @returns The `stale_build` tag from what is known.
  */
-export const readStaleBuildTag = (failure: unknown): StaleBuildTag => getPageRecovery().classify(failure);
+export const readStaleBuildTag = (failure: unknown): StaleBuildTag => getPageRecovery().tagNow(failure);
 
 /**
  * Hand a failed load of the error tracker's own SDK (`startErrorReporting`) to the recovery: its
@@ -791,17 +828,25 @@ export const installStaleBuildRecovery = (): (() => void) => {
   for (const [type, listener] of failureListeners) {
     globalThis.addEventListener(type, listener as EventListener, { capture: true });
   }
-  // The page is going: settle what a pending reload covered, and store queued errors with their decisions.
+  /* Every `pagehide` flushes: a page kept in the back/forward cache is frozen and may be evicted
+   * without running again, so nothing may wait past it. Only a page that is really going (not
+   * persisted) settles what a pending reload covered; one shown again carries on as usual. */
   const onPageHide = (event: PageTransitionEvent): void => {
-    // A page kept in the back/forward cache may come back: only a page that is really going settles.
+    const recovery = getPageRecovery();
     if (!event.persisted) {
-      getPageRecovery().leave();
+      recovery.leave();
     }
+    recovery.flush();
     sendWaitingErrors();
   };
+  const onPageShow = (): void => {
+    getPageRecovery().resume();
+  };
   globalThis.addEventListener('pagehide', onPageHide);
+  globalThis.addEventListener('pageshow', onPageShow);
   return () => {
     globalThis.removeEventListener('pagehide', onPageHide);
+    globalThis.removeEventListener('pageshow', onPageShow);
     stopWatchingInput();
     for (const [type, listener] of failureListeners) {
       globalThis.removeEventListener(type, listener as EventListener, { capture: true });

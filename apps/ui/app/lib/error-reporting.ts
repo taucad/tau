@@ -33,41 +33,44 @@ export type ErrorDescriber = {
 let started: Promise<{ readonly sentry?: typeof SentryLibrary; readonly failure?: unknown }> | undefined;
 /** The SDK once it has started on this page; captures go straight to it from then on. */
 let liveSentry: typeof SentryLibrary | undefined;
-/** Whether this page's only load failed: errors go out without the SDK from then on. */
-let hasLoadFailed = false;
+/** Whether the SDK cannot be used on this page (its load or start failed): errors go out without it. */
+let isSdkUnavailable = false;
+
+/** One call of {@link reportUiError}: the same value reported twice (a thrown string) is two reports. */
+type Report = { readonly error: unknown };
 
 /** Errors handed over (captured, waiting for the load, or sent without the SDK): a second report is a no-op. */
 const reported = new WeakSet();
-/** Errors waiting for the SDK's load, in the order reported. */
-let waitingForLoad: unknown[] = [];
-/** Errors whose event without the SDK waits for their tags to settle. */
-const waitingForTags = new Set<unknown>();
-/** Errors sent without the SDK, once per page each. */
-const sentDirectly = new WeakSet();
+/** Reports waiting for the SDK's load, in the order made. */
+let waitingForLoad: Report[] = [];
+/** Reports whose event without the SDK waits for their tags to settle. */
+const waitingForTags = new Set<Report>();
+/** Reports sent without the SDK: each is sent once. */
+const sentDirectly = new WeakSet<Report>();
 /** Errors reported beyond the limit while the SDK was loading; logged once it settles. */
 let droppedWhileLoading = 0;
+/** Whether the SDK has already thrown once on this page (logged once, never reported). */
+let hasLoggedSdkThrow = false;
 /** Tags for reported values, from whoever knows them (the stale-build recovery's `stale_build`). */
 let describer: ErrorDescriber = { now: () => ({}), settled: async () => ({}) };
 
-/** Send one error without the SDK, once per page; a value that cannot be remembered is sent each time. */
-const sendDirectly = (error: unknown, tags: Readonly<Record<string, string>>): void => {
-  waitingForTags.delete(error);
-  if (isWeakKey(error)) {
-    if (sentDirectly.has(error)) {
-      return;
-    }
-    sentDirectly.add(error);
+/** Send one report without the SDK, once. */
+const sendDirectly = (report: Report, tags: Readonly<Record<string, string>>): void => {
+  waitingForTags.delete(report);
+  if (sentDirectly.has(report)) {
+    return;
   }
+  sentDirectly.add(report);
   // async-iife: bootstrap -- the event goes on its own; a refused request is simply lost.
-  void sendSentryEventDirectly(error, tags);
+  void sendSentryEventDirectly(report.error, tags);
 };
 
-/** Send an error without the SDK once its tags settle, unless the page going sent it first. */
-const sendDirectlyWhenTagged = async (error: unknown): Promise<void> => {
-  waitingForTags.add(error);
-  const tags = await describer.settled(error);
-  if (waitingForTags.has(error)) {
-    sendDirectly(error, tags);
+/** Send a report without the SDK once its tags settle, unless the page being hidden sent it first. */
+const sendDirectlyWhenTagged = async (report: Report): Promise<void> => {
+  waitingForTags.add(report);
+  const tags = await describer.settled(report.error);
+  if (waitingForTags.has(report)) {
+    sendDirectly(report, tags);
   }
 };
 
@@ -78,28 +81,61 @@ const warnDropped = (): void => {
   }
 };
 
-/** Start the SDK once per page; hand it what waited, or send that without it when the load fails. */
+/** The SDK threw after it loaded (in its start or a capture): not a load failure; logged once, never reported. */
+const logSdkThrow = (error: unknown): void => {
+  if (!hasLoggedSdkThrow) {
+    hasLoggedSdkThrow = true;
+    console.error('[error-reporting] the error tracker threw', error);
+  }
+};
+
+/** Capture one error with the SDK; a capture that throws costs only that error. */
+const capture = (sentry: typeof SentryLibrary, reportedError: unknown): void => {
+  try {
+    sentry.captureUiError(reportedError);
+  } catch (error) {
+    logSdkThrow(error);
+  }
+};
+
+/** The SDK cannot be used: what waited for it goes without it, each once its tags settle. */
+const sendWaitingWithoutSdk = (): void => {
+  isSdkUnavailable = true;
+  warnDropped();
+  for (const report of waitingForLoad.splice(0)) {
+    // async-iife: bootstrap -- each event goes once its tags settle; the load's outcome is known now.
+    void sendDirectlyWhenTagged(report);
+  }
+};
+
+/**
+ * Start the SDK once per page and hand it what waited. Only the import failing is a load failure
+ * (`failure`); the SDK throwing as it starts leaves it unusable, logged once, and is not.
+ */
 const start = async (): Promise<{ readonly sentry?: typeof SentryLibrary; readonly failure?: unknown }> => {
   started ??= (async () => {
+    let sentry: typeof SentryLibrary | undefined;
     try {
-      const sentry = await loadSentry();
-      sentry?.initSentry();
-      liveSentry = sentry;
-      for (const error of waitingForLoad.splice(0)) {
-        sentry?.captureUiError(error);
-      }
-      warnDropped();
-      return { sentry };
+      sentry = await loadSentry();
     } catch (error) {
-      hasLoadFailed = true;
-      const waiting = waitingForLoad.splice(0);
-      warnDropped();
-      // Not awaited: the load's outcome is known now; each event goes once its tags settle.
-      for (const waited of waiting) {
-        void sendDirectlyWhenTagged(waited);
-      }
+      sendWaitingWithoutSdk();
       return { failure: error };
     }
+    try {
+      sentry?.initSentry();
+    } catch (error) {
+      logSdkThrow(error);
+      sendWaitingWithoutSdk();
+      return {};
+    }
+    liveSentry = sentry;
+    for (const report of waitingForLoad.splice(0)) {
+      if (sentry !== undefined) {
+        capture(sentry, report.error);
+      }
+    }
+    warnDropped();
+    return { sentry };
   })();
   return started;
 };
@@ -139,12 +175,14 @@ export const setErrorDescriber = (next: ErrorDescriber): void => {
 };
 
 /**
- * The page is going: send every error still waiting (for the SDK's load, or for its tags) now,
- * without the SDK and with the tags known now, since nothing on this page will send them later.
+ * The page is hidden (every `pagehide`, kept in the back/forward cache or not, since a frozen page
+ * may be evicted without running again): send every error still waiting, for the SDK's load or for
+ * its tags, now, without the SDK and with the tags known now. Each is sent once; errors reported
+ * after the page is shown again are handled as usual.
  */
 export const sendWaitingErrors = (): void => {
-  for (const error of [...waitingForLoad.splice(0), ...waitingForTags]) {
-    sendDirectly(error, describer.now(error));
+  for (const report of [...waitingForLoad.splice(0), ...waitingForTags]) {
+    sendDirectly(report, describer.now(report.error));
   }
 };
 
@@ -168,12 +206,12 @@ export const reportUiError = async (error: unknown): Promise<void> => {
   };
   if (liveSentry !== undefined) {
     markReported();
-    liveSentry.captureUiError(error);
+    capture(liveSentry, error);
     return;
   }
-  if (hasLoadFailed) {
+  if (isSdkUnavailable) {
     markReported();
-    await sendDirectlyWhenTagged(error);
+    await sendDirectlyWhenTagged({ error });
     return;
   }
   if (waitingForLoad.length >= unreportedErrorLimit) {
@@ -181,7 +219,7 @@ export const reportUiError = async (error: unknown): Promise<void> => {
     return;
   }
   markReported();
-  waitingForLoad = [...waitingForLoad, error];
+  waitingForLoad = [...waitingForLoad, { error }];
   // Starts this page's only load when nothing has; the error goes with what it does.
   await start();
 };

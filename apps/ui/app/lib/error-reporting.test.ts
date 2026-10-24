@@ -49,6 +49,9 @@ type Envelope = {
   };
 };
 
+/** An envelope's body as sent. */
+const bodyOf = (envelope: Envelope): string => (typeof envelope.init.body === 'string' ? envelope.init.body : '');
+
 /** Every envelope posted without the SDK. */
 const stubIngest = (respond: () => Promise<Response> = async () => new Response('{}')): Envelope[] => {
   const posted: Envelope[] = [];
@@ -234,5 +237,115 @@ describe('error reporting', () => {
     await page.reportUiError(dropped);
     await settle();
     expect(posted).toHaveLength(page.unreportedErrorLimit + 1);
+  });
+
+  it('should send every waiting error when the page is hidden, keeping keepalive bodies within the budget and capping each', async () => {
+    const posted = stubIngest();
+    sentry.holdNextLoad = new Promise<void>((resolve) => {
+      setTimeout(resolve, 60_000);
+    });
+    const page = await load();
+    const { keepaliveBudget, directEventTextLimit } = await import('#lib/sentry-event.lib.js');
+    void page.startErrorReporting();
+    for (let index = 0; index < 20; index += 1) {
+      const error = new Error(`${String(index)} ${'x'.repeat(50_000)}`);
+      error.stack = 'y'.repeat(50_000);
+      void page.reportUiError(error);
+    }
+
+    page.sendWaitingErrors();
+    await settle();
+
+    expect(posted).toHaveLength(20);
+    const keptAlive = posted.filter((envelope) => envelope.init.keepalive === true);
+    const keptAliveBytes = keptAlive.reduce((total, envelope) => total + bodyOf(envelope).length, 0);
+    expect(keptAlive.length).toBeGreaterThan(0);
+    expect(keptAliveBytes).toBeLessThanOrEqual(keepaliveBudget);
+    for (const envelope of posted) {
+      expect(envelope.event.exception.values[0]?.value.length).toBeLessThanOrEqual(directEventTextLimit.message);
+      expect(bodyOf(envelope).length).toBeLessThan(directEventTextLimit.message + directEventTextLimit.stack + 2000);
+    }
+  });
+
+  it('should handle errors as usual once a hidden page is shown again', async () => {
+    const posted = stubIngest();
+    let release: () => void = () => undefined;
+    sentry.holdNextLoad = new Promise((resolve) => {
+      release = resolve;
+    });
+    const page = await load();
+    const started = page.startErrorReporting();
+    void page.reportUiError(new Error('before the page was hidden'));
+
+    // Hidden into the back/forward cache, then shown again.
+    page.sendWaitingErrors();
+    const after = new Error('after the page was shown again');
+    const reported = page.reportUiError(after);
+    release();
+    await Promise.all([started, reported]);
+
+    expect(posted.map((envelope) => envelope.event.exception.values[0]?.value)).toStrictEqual([
+      'before the page was hidden',
+    ]);
+    expect(sentry.captureUiError).toHaveBeenCalledExactlyOnceWith(after);
+  });
+
+  it('should send the same thrown string twice when it is reported twice', async () => {
+    const posted = stubIngest();
+    const page = await load();
+    sentry.failNextLoad = true;
+    await page.startErrorReporting();
+
+    // Reported twice before either has gone.
+    await Promise.all([page.reportUiError('thrown string'), page.reportUiError('thrown string')]);
+    await settle();
+
+    expect(posted.map((envelope) => envelope.event.exception.values[0]?.value)).toStrictEqual([
+      'thrown string',
+      'thrown string',
+    ]);
+  });
+
+  it('should treat the SDK throwing as it starts as no load failure: logged once, and errors still sent', async () => {
+    const posted = stubIngest();
+    sentry.initSentry.mockImplementationOnce(() => {
+      throw new Error('init threw');
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const page = await load();
+    const onLoadFailure = vi.fn();
+
+    await page.startErrorReporting(onLoadFailure);
+    await page.reportUiError(new Error('caught by a boundary'));
+    await settle();
+
+    expect(onLoadFailure).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledOnce();
+    expect(posted.map((envelope) => envelope.event.exception.values[0]?.value)).toStrictEqual(['caught by a boundary']);
+  });
+
+  it('should keep capturing the other waiting errors when one capture throws', async () => {
+    stubIngest();
+    let release: () => void = () => undefined;
+    sentry.holdNextLoad = new Promise((resolve) => {
+      release = resolve;
+    });
+    sentry.captureUiError.mockImplementationOnce(() => {
+      throw new Error('capture threw');
+    });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const page = await load();
+    const onLoadFailure = vi.fn();
+    const started = page.startErrorReporting(onLoadFailure);
+    const first = new Error('first');
+    const second = new Error('second');
+    const reports = [page.reportUiError(first), page.reportUiError(second)];
+
+    release();
+    await Promise.all([started, ...reports]);
+
+    expect(sentry.captureUiError.mock.calls).toStrictEqual([[first], [second]]);
+    expect(onLoadFailure).not.toHaveBeenCalled();
+    expect(logged).toHaveBeenCalledOnce();
   });
 });

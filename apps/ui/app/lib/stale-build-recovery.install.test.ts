@@ -83,6 +83,47 @@ afterEach(() => {
 });
 
 describe('installStaleBuildRecovery', () => {
+  it("should release the tracker's held tag as undecided when the page is hidden into the back/forward cache, then carry on", async () => {
+    const { installStaleBuildRecovery, classifyStaleBuildFailure, readStaleBuildOutcome, recoverFromStaleBuild } =
+      await load();
+    const fetchMock = stubServer(ownBuildId);
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    uninstall = installStaleBuildRecovery();
+    const held = new TypeError('Importing a module script failed.');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: held }));
+    const tag = classifyStaleBuildFailure(held);
+    // The decision's lookup is still running when the page is frozen.
+    globalThis.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: true }));
+    await expect(tag).resolves.toBe('undecided');
+
+    // Shown again: the decision lands, and a new failure is decided and tagged as usual.
+    globalThis.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    await settle();
+    expect(readStaleBuildOutcome(held)).toBe('current');
+    const later = new TypeError('Importing a module script failed.');
+    const decided = recoverFromStaleBuild(later);
+    const laterTag = classifyStaleBuildFailure(later);
+    await vi.advanceTimersByTimeAsync(lookupConfirmDelay * 3);
+    await expect(decided).resolves.toBe('current');
+    await expect(laterTag).resolves.toBe('current');
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("should hand a failure only Vite's preloader reported to the tracker when the page is hidden into the back/forward cache", async () => {
+    const { installStaleBuildRecovery } = await load();
+    stubServer(deployedBuildId);
+    uninstall = installStaleBuildRecovery();
+    const failure = new TypeError('Failed to fetch dynamically imported module: /assets/a-1.js');
+
+    globalThis.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: failure }));
+    globalThis.dispatchEvent(Object.assign(new Event('pagehide'), { persisted: true }));
+
+    expect(reportUiError).toHaveBeenCalledExactlyOnceWith(failure);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(reportUiError).toHaveBeenCalledOnce();
+  });
+
   it("should hold the tracker's tag until a covered failure is decided again, even when every lookup is as slow as allowed", async () => {
     const { installStaleBuildRecovery, readStaleBuildOutcome, classifyStaleBuildFailure, staleBuildTagWait } =
       await load();

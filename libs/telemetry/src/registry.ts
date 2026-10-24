@@ -53,6 +53,11 @@ const gitOperations = [
 /** Repository and hydrate sizes, 64 KiB to D20's 1 GiB ceiling in doublings. */
 const repositoryByteBuckets = Array.from({ length: 15 }, (_, step) => 65_536 * 2 ** step);
 
+/** `destination` on every `tau.mirror.*` series: the second copy's store (W13 B1). */
+const mirrorDestinations = ['b2'] as const;
+
+/** `kind` of an object the copier writes or the reconciler finds missing (W13 Finding 8). */
+const mirrorObjectKinds = ['pack', 'idx', 'manifest', 'segment', 'retired_marker', 'lfs', 'owner_marker'] as const;
 /** `tau.git.route.scope`: a freeze on one repository, or the global one (DW1). */
 const routeScopes = ['repository', 'global'] as const;
 
@@ -1185,6 +1190,164 @@ export const TauMetrics = {
     attributes: z.object({
       'agent.placement': z.enum(['browser', 'desktop', 'daemon']),
     }),
+  }),
+
+  // --- B2 second copy: the `tau-mirror` copier and reconciler (W13 Finding 8, W14 OB6) ---
+  // W13's Prometheus names end in their unit, so the unit word is part of the OTel name. No label
+  // carries an owner or project; the busiest-lagging repositories are logged, not labelled.
+
+  mirrorCopyLag: defineGauge({
+    name: 'tau.mirror.copy_lag_seconds',
+    unit: 's',
+    description: 'now - min(copy_pending_since): the recovery point the second copy gives right now (W13 B5)',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorCopyLagGenerations: defineGauge({
+    name: 'tau.mirror.copy_lag_generations',
+    unit: '{generation}',
+    description: 'max(generation - copied_generation) over every repository the copier serves',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorBacklogRepositories: defineGauge({
+    name: 'tau.mirror.backlog_repositories',
+    unit: '{repository}',
+    description: 'Repositories behind the copy: steady (a recorded pending time) or backfill (no pending time yet)',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      phase: z.enum(['steady', 'backfill']),
+    }),
+  }),
+
+  mirrorLfsBacklogObjects: defineGauge({
+    name: 'tau.mirror.lfs_backlog_objects',
+    unit: '{object}',
+    description: 'Finalized LFS objects not yet copied',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorCopyDelay: defineHistogram({
+    name: 'tau.mirror.copy_delay_seconds',
+    unit: 's',
+    description: 'Commit of the first uncopied generation to its snapshot written, per copy round',
+    buckets: [1, 5, 10, 30, 60, 120, 300, 900, 1800, 3600, 21_600, 86_400],
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorRounds: defineCounter({
+    name: 'tau.mirror.rounds',
+    unit: '{round}',
+    description: 'Copy rounds by outcome; an idle copier counts one noop per poll, so the series exists while it lives',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      outcome: z.enum(['copied', 'noop', 'failed', 'tombstoned']),
+    }),
+  }),
+
+  mirrorObjectsCopied: defineCounter({
+    name: 'tau.mirror.objects_copied',
+    unit: '{object}',
+    description: 'Objects written to the second copy, by kind',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      kind: z.enum(mirrorObjectKinds),
+    }),
+  }),
+
+  mirrorBytesCopied: defineCounter({
+    name: 'tau.mirror.bytes_copied',
+    unit: 'By',
+    description: 'Bytes written to the second copy, by kind',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      kind: z.enum(mirrorObjectKinds),
+    }),
+  }),
+
+  mirrorCopyFailures: defineCounter({
+    name: 'tau.mirror.copy_failures',
+    unit: '{failure}',
+    description:
+      'Copy failures by stage and reason; source_missing means a manifest names an object R2 does not hold; reconcile counts a repository a reconcile pass skipped',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      stage: z.enum(['source_read', 'verify', 'dest_write', 'retention', 'watermark', 'reconcile']),
+      reason: z.enum(['source_missing', 'checksum', 'http_4xx', 'http_5xx', 'timeout', 'other']),
+    }),
+  }),
+
+  mirrorRetentionExtensions: defineCounter({
+    name: 'tau.mirror.retention_extensions',
+    unit: '{extension}',
+    description: 'Object Lock extensions of the newest snapshot and its dependencies (W13 B6), by outcome',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      outcome: z.enum(['extended', 'failed']),
+    }),
+  }),
+
+  mirrorRetentionMinRemaining: defineGauge({
+    name: 'tau.mirror.retention_min_remaining_seconds',
+    unit: 's',
+    description: 'min(copy_locked_until) - now over live repositories: the lock headroom the retention sweep keeps',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorRetentionMaxAhead: defineGauge({
+    name: 'tau.mirror.retention_max_ahead_seconds',
+    unit: 's',
+    description:
+      'The furthest retain-until the reconciler saw, minus now; above 30 days something else extended a lock',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorDestinationUp: defineGauge({
+    name: 'tau.mirror.destination_up',
+    unit: '1',
+    description: 'Whether the last probe of the second-copy destination succeeded (1) or not (0)',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorReconcileLastSuccess: defineGauge({
+    name: 'tau.mirror.reconcile_last_success_timestamp_seconds',
+    unit: 's',
+    description: 'Unix time of the last reconcile that completed, by scope (recently active or every repository)',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      scope: z.enum(['active', 'full']),
+    }),
+  }),
+
+  mirrorReconcileMissingObjects: defineGauge({
+    name: 'tau.mirror.reconcile_missing_objects',
+    unit: '{object}',
+    description: 'Objects a copied snapshot depends on, or retired objects, that R2 holds and the copy does not',
+    attributes: z.object({
+      destination: z.enum(mirrorDestinations),
+      kind: z.enum(mirrorObjectKinds),
+    }),
+  }),
+
+  mirrorReconcileHiddenVersions: defineGauge({
+    name: 'tau.mirror.reconcile_hidden_versions',
+    unit: '{marker}',
+    description: 'Hide (delete) markers in the copy at the last reconcile; the copier never hides, so this must be 0',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorDestinationStoredBytes: defineGauge({
+    name: 'tau.mirror.destination_stored_bytes',
+    unit: 'By',
+    description: 'Bytes the copy holds across every version, from the last full reconcile',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
+  }),
+
+  mirrorDestinationObjectVersions: defineGauge({
+    name: 'tau.mirror.destination_object_versions',
+    unit: '{version}',
+    description: 'Object versions the copy holds, from the last full reconcile',
+    attributes: z.object({ destination: z.enum(mirrorDestinations) }),
   }),
 
   // --- Billing workers (F-10) ---

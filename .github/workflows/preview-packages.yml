@@ -14,8 +14,7 @@ name: Preview packages
 # (--peerDeps), which no registry range would admit.
 # --no-compact keeps every URL in its long form: the npm name @taucad/replicad
 # still belongs to the retired replicad fork, whose repository field compact URLs
-# would follow. @taucad/geospec-engine is published too: @taucad/cli depends on
-# it (audit H-01). Needs the pkg.pr.new GitHub App
+# would follow. Needs the pkg.pr.new GitHub App
 # (https://github.com/apps/pkg-pr-new) installed on this repository.
 on:
   workflow_dispatch:

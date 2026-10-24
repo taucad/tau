@@ -25,12 +25,34 @@ describe('geospec package metadata', () => {
     expect(packageJson.peerDependenciesMeta?.['@taucad/runtime']).toBeUndefined();
   });
 
-  it('declares no geometry-engine runtime dependencies', async () => {
+  it('depends on the compiled engine and on no kernel', async () => {
     const packageJson = await readPackageJson();
 
-    // Kernel adapters live in @taucad/geospec-engine (DL8): the Apache-2.0
-    // substrate must stay free of them so it can be consumed on its own.
-    for (const dependency of ['manifold-3d', '@gltf-transform/core', '@taucad/geospec-engine']) {
+    expect(packageJson.dependencies?.['geospec-engine']).toBe('catalog:');
+    // Kernels reach a run through an exporter, Tau's being `tauExporter` in @taucad/cli (DL8): the
+    // Apache-2.0 substrate must stay free of them so it can be consumed on its own.
+    for (const dependency of [
+      'manifold-3d',
+      '@gltf-transform/core',
+      '@taucad/cli',
+      '@taucad/assimp',
+      '@taucad/brep',
+      '@taucad/build123d',
+      '@taucad/gltf',
+      '@taucad/image',
+      '@taucad/jscad',
+      '@taucad/manifold',
+      '@taucad/middleware',
+      '@taucad/opencascade',
+      '@taucad/openrscad',
+      '@taucad/picogk',
+      '@taucad/picovoxel',
+      '@taucad/replicad',
+      '@taucad/rhino',
+      '@taucad/smlib',
+      '@taucad/smlibpy',
+      '@taucad/tscircuit',
+    ]) {
       expect(packageJson.dependencies?.[dependency]).toBeUndefined();
     }
   });

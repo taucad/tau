@@ -170,11 +170,11 @@ describe('ChatViewerControls', () => {
       expect(screen.getByRole('button', { name: 'Fit view' })).toBeInTheDocument();
     });
 
-    it('should keep fullscreen and leave the mobile action out on desktop', () => {
+    it('should keep fullscreen and show the capability-gated host action after it on desktop (D12 tablets)', () => {
       renderBar(startGraphics(), { mobileAction: <button type='button' aria-label='View in your space' /> });
 
-      expect(controlNames()).toContain('Enter fullscreen');
-      expect(controlNames()).not.toContain('View in your space');
+      const names = controlNames();
+      expect(names[names.indexOf('Enter fullscreen') + 1]).toBe('View in your space');
     });
 
     it('should hint the S, M and F shortcuts in the tooltips', async () => {

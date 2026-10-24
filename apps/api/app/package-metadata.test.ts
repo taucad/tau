@@ -21,7 +21,7 @@ const readPackageJson = async (): Promise<PackageJson> =>
  * See docs/research/api-server-side-geometry-prune.md.
  */
 describe('@taucad/api package metadata', () => {
-  it.each(['@taucad/runtime', '@taucad/openrscad', 'geospec', '@taucad/geospec-engine', '@taucad/tau-examples'])(
+  it.each(['@taucad/runtime', '@taucad/openrscad', 'geospec', '@taucad/cli', '@taucad/tau-examples'])(
     'does not depend on %s in production',
     async (name) => {
       const packageJson = await readPackageJson();
@@ -30,15 +30,16 @@ describe('@taucad/api package metadata', () => {
     },
   );
 
-  it('keeps the runtime, substrate and engine available to tests only', async () => {
+  it('keeps the runtime, substrate and CLI runtime available to tests only', async () => {
     const packageJson = await readPackageJson();
 
     // `app/testing/**` boots headless GeoSpec against an in-memory filesystem,
     // and `main.ts` is bundled from source, so these must resolve at build and
-    // test time without shipping.
+    // test time without shipping. The CLI's runtime pins the publication
+    // kernel table (`publication-runtime.parity.test.ts`).
     expect(packageJson.devDependencies?.['@taucad/runtime']).toBe('workspace:*');
     expect(packageJson.devDependencies?.['geospec']).toBe('workspace:*');
-    expect(packageJson.devDependencies?.['@taucad/geospec-engine']).toBe('workspace:*');
+    expect(packageJson.devDependencies?.['@taucad/cli']).toBe('workspace:*');
   });
 
   it('has no reference to the dissolved @taucad/testing package', async () => {

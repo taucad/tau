@@ -29,8 +29,17 @@ const viewports = [
  * stylesheet that removes only what blocked axe (accepting a node only when axe then decides it passes), or by keyboard.
  * An adjudication is measured, never assumed, and a node undecided for any other reason still fails the sweep.
  */
-type Adjudication = Readonly<{ rule: string; message: RegExp; reason: string }> &
-  (Readonly<{ recheck: string }> | Readonly<{ keyboard: true }> | Readonly<{ measure: 'opaque-on-top' }>);
+type Adjudication = Readonly<{
+  rule: string;
+  message: RegExp;
+  reason: string;
+}> &
+  (
+    | Readonly<{ recheck: string }>
+    | Readonly<{ keyboard: true }>
+    /** Measured in the page, and only on nodes matching `only` (axe's markup excerpt is truncated, so not by text). */
+    | Readonly<{ measure: 'opaque-on-top'; only: string }>
+  );
 
 const adjudications: readonly Adjudication[] = [
   {
@@ -67,6 +76,7 @@ const adjudications: readonly Adjudication[] = [
     // (with hit testing on), its own fill is opaque, and its text meets 4.5:1 against that fill.
     reason: 'the debug FPS readout is on top, on its own opaque fill, at 4.5:1 or more',
     measure: 'opaque-on-top',
+    only: 'output[aria-label="Render-loop submission FPS"]',
   },
   {
     rule: 'aria-hidden-focus',
@@ -89,28 +99,47 @@ type Undecided = Readonly<{
 }>;
 
 /**
- * Tabs forward `presses` times and returns the first focus stop inside an aria-hidden subtree, if any, with the stops
- * before it.
+ * Tabs forward until focus wraps back to the first stop, so every control in the open modal is passed, and returns the
+ * first stop inside an aria-hidden subtree with the stops before it, or why the pass could not finish.
  */
-async function focusLandsBehindModal(presses: number): Promise<string | undefined> {
+async function focusLandsBehindModal(limit = 300): Promise<string | undefined> {
   const trail: string[] = [];
-  for (let step = 0; step < presses; step++) {
-    // oxlint-disable-next-line no-await-in-loop -- one key at a time, as a person presses.
-    await target.keyboardPress('Tab');
-    // oxlint-disable-next-line no-await-in-loop -- see above.
-    const stop = await target.evaluate(() => {
-      const focused = document.activeElement;
-      return {
-        behind: focused?.closest('[aria-hidden=true]') !== null && focused !== null,
-        html: focused?.outerHTML.slice(0, 120) ?? 'nothing',
-      };
-    });
-    if (stop.behind) {
-      return `${stop.html} after ${trail.slice(-3).join(' → ')}`;
+  try {
+    for (let step = 0; step < limit; step++) {
+      // oxlint-disable-next-line no-await-in-loop -- one key at a time, as a person presses.
+      await target.keyboardPress('Tab');
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      const stop = await target.evaluate((isFirst) => {
+        const focused = document.activeElement;
+        if (!(focused instanceof HTMLElement) || focused === document.body) {
+          return { behind: false, wrapped: false, html: 'nothing' };
+        }
+        const wrapped = focused.dataset['firstTabStop'] !== undefined;
+        if (isFirst) {
+          focused.dataset['firstTabStop'] = '';
+        }
+        return {
+          behind: focused.closest('[aria-hidden=true]') !== null,
+          wrapped,
+          html: focused.outerHTML.slice(0, 120),
+        };
+      }, step === 0);
+      if (stop.behind) {
+        return `${stop.html} after ${trail.slice(-3).join(' → ')}`;
+      }
+      if (stop.wrapped) {
+        return undefined;
+      }
+      trail.push(stop.html);
     }
-    trail.push(stop.html);
+    return `focus did not wrap within ${String(limit)} presses (last: ${trail.slice(-3).join(' → ')})`;
+  } finally {
+    await target.evaluate(() => {
+      for (const element of document.querySelectorAll<HTMLElement>('[data-first-tab-stop]')) {
+        delete element.dataset['firstTabStop'];
+      }
+    });
   }
-  return undefined;
 }
 
 /** Re-runs `rule` under `css` and returns the targets axe still flags, with their messages. */
@@ -141,49 +170,57 @@ async function recheckUnder(rule: string, css: string): Promise<Map<string, read
  * Whether the node is the topmost element at its centre, draws an opaque fill of its own, and its text meets 4.5:1
  * against that fill: the measurement axe could not make.
  */
-const isOpaqueOnTop = async (selector: string): Promise<boolean> =>
-  target.evaluate((css) => {
-    const node = document.querySelector<HTMLElement>(css);
-    if (!node) {
-      return false;
-    }
-    const canvas = document.createElement('canvas');
-    canvas.width = 1;
-    canvas.height = 1;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) {
-      return false;
-    }
-    // The canvas resolves any CSS colour (oklch included) to sRGB bytes, alpha included.
-    const rgba = (color: string): number[] => {
+const isOpaqueOnTop = async (selector: string, only: string): Promise<boolean> =>
+  target.evaluate(
+    ({ css, allowed }) => {
+      const node = document.querySelector<HTMLElement>(css);
+      if (!node?.matches(allowed)) {
+        return false;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = 1;
+      canvas.height = 1;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) {
+        return false;
+      }
+      // The canvas resolves any CSS colour (oklch included) to sRGB bytes, alpha included.
+      const rgba = (color: string): number[] => {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = '#000';
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return [...context.getImageData(0, 0, 1, 1).data];
+      };
+      const luminance = ([red = 0, green = 0, blue = 0]: number[]): number => {
+        const [r = 0, g = 0, b = 0] = [red, green, blue].map((channel) => {
+          const value = channel / 255;
+          return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const style = getComputedStyle(node);
       context.clearRect(0, 0, 1, 1);
-      context.fillStyle = '#000';
-      context.fillStyle = color;
+      context.fillStyle = style.backgroundColor;
       context.fillRect(0, 0, 1, 1);
-      return [...context.getImageData(0, 0, 1, 1).data];
-    };
-    const luminance = ([red = 0, green = 0, blue = 0]: number[]): number => {
-      const [r = 0, g = 0, b = 0] = [red, green, blue].map((channel) => {
-        const value = channel / 255;
-        return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-      });
-      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    };
-    const style = getComputedStyle(node);
-    context.clearRect(0, 0, 1, 1);
-    context.fillStyle = style.backgroundColor;
-    context.fillRect(0, 0, 1, 1);
-    const fillAlpha = context.getImageData(0, 0, 1, 1).data.at(3);
-    const [lighter = 0, darker = 0] = [luminance(rgba(style.color)), luminance(rgba(style.backgroundColor))].sort(
-      (a, b) => b - a,
-    );
-    const { pointerEvents } = node.style;
-    node.style.pointerEvents = 'auto';
-    const box = node.getBoundingClientRect();
-    const onTop = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === node;
-    node.style.pointerEvents = pointerEvents;
-    return onTop && fillAlpha === 255 && (lighter + 0.05) / (darker + 0.05) >= 4.5;
-  }, selector);
+      const fillAlpha = context.getImageData(0, 0, 1, 1).data.at(3);
+      const [lighter = 0, darker = 0] = [luminance(rgba(style.color)), luminance(rgba(style.backgroundColor))].sort(
+        (a, b) => b - a,
+      );
+      const { pointerEvents } = node.style;
+      node.style.pointerEvents = 'auto';
+      const box = node.getBoundingClientRect();
+      const onTop = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === node;
+      node.style.pointerEvents = pointerEvents;
+      // The text's own alpha too: a translucent colour would blend toward the fill and lose contrast.
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = style.color;
+      context.fillRect(0, 0, 1, 1);
+      const textAlpha = context.getImageData(0, 0, 1, 1).data.at(3);
+      return onTop && fillAlpha === 255 && textAlpha === 255 && (lighter + 0.05) / (darker + 0.05) >= 4.5;
+    },
+    { css: selector, allowed: only },
+  );
 
 /**
  * Whether the node is a one-glyph separator hidden from assistive technology (a `·` between facts): decoration, which
@@ -229,17 +266,17 @@ async function unadjudicated(incomplete: readonly AxeNodeFinding[]): Promise<Und
       }
       if ('measure' in adjudication) {
         // oxlint-disable-next-line no-await-in-loop -- one node at a time.
-        if (!(await isOpaqueOnTop(node.target))) {
+        if (!(await isOpaqueOnTop(node.target, adjudication.only))) {
           // oxlint-disable-next-line no-await-in-loop -- diagnostics for a failing node only.
           undecided.push({ rule: finding.id, ...node, note: `not measured clean: ${await coverOf(node.target)}` });
         }
         continue;
       }
       if ('keyboard' in adjudication) {
-        // Once per sweep: enough presses to pass every control in any of these sheets and wrap.
+        // Once per sweep: Tab until focus wraps, past every control in the sheet.
         if (!checked) {
           // oxlint-disable-next-line no-await-in-loop -- one keyboard pass, shared by every node.
-          keyboardEscape = await focusLandsBehindModal(40);
+          keyboardEscape = await focusLandsBehindModal();
           checked = true;
         }
         if (keyboardEscape !== undefined) {
@@ -326,31 +363,88 @@ const sheetSettled = async (): Promise<void> =>
 type StateAudit = Readonly<{ violations: readonly AxeNodeFinding[]; incomplete: readonly Undecided[] }>;
 
 /**
- * Sweeps the page in one state. Lazy pane bodies mount after their region, so the sweep re-runs until the state is
- * clean or 20s pass; every state's last findings are kept, and the test asserts them all at the end so one run reports
- * every state that fails.
+ * Waits until the state is ready to audit: the sheets have stopped moving, nothing in the open surface is busy, and the
+ * DOM has been still for 750ms (lazy pane bodies and their data mount after the region does). The debug FPS readout's
+ * own ticking is not a change of state. Throws, naming what kept changing, if the page never settles.
+ */
+async function settled(state: string): Promise<void> {
+  await sheetSettled();
+  const restless = await target.evaluate(async () => {
+    const quietFor = 750;
+    const deadline = performance.now() + 30_000;
+    const ignored = (node: Node): boolean => {
+      const element = node instanceof Element ? node : node.parentElement;
+      return element?.closest('output[aria-label="Render-loop submission FPS"]') !== null;
+    };
+    const changed: string[] = [];
+    let lastChange = performance.now();
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        if (!ignored(record.target)) {
+          lastChange = performance.now();
+          const element = record.target instanceof Element ? record.target : record.target.parentElement;
+          changed.push(`${record.type} ${element?.outerHTML.slice(0, 80) ?? ''}`);
+        }
+      }
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['class', 'hidden', 'aria-hidden', 'aria-busy', 'data-state', 'open'],
+    });
+    try {
+      while (performance.now() < deadline) {
+        const busy = document.querySelector('[data-slot=mobile-surface] [aria-busy=true]');
+        if (!busy && performance.now() - lastChange >= quietFor) {
+          return undefined;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- polls until the page is still.
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 100);
+        });
+      }
+      return changed.slice(-3).join(' | ');
+    } finally {
+      observer.disconnect();
+    }
+  });
+  if (restless !== undefined) {
+    throw new Error(`${state} never settled: ${restless}`);
+  }
+}
+
+/**
+ * Sweeps the page in one state, once it is ready, with one audit: a finding that comes and goes fails as surely as one
+ * that stays. Every state's findings are kept, and the test asserts them all at the end so one run reports every state
+ * that fails.
  */
 async function sweep(state: string, report: Map<string, StateAudit>): Promise<void> {
-  await sheetSettled();
-  const until = Date.now() + 20_000;
-  let last: StateAudit;
-  do {
-    // oxlint-disable-next-line no-await-in-loop -- one audit at a time, until the state settles clean.
-    const audit = await axeAudit();
-    // oxlint-disable-next-line no-await-in-loop -- see above.
-    last = { violations: audit.violations, incomplete: await unadjudicated(audit.incomplete) };
-    if (last.violations.length === 0 && last.incomplete.length === 0) {
-      break;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- see above.
-    await target.delay(500);
-  } while (Date.now() < until);
-  report.set(state, last);
+  await settled(state);
+  const audit = await axeAudit();
+  report.set(state, { violations: audit.violations, incomplete: await unadjudicated(audit.incomplete) });
 }
 
 /** The states whose sweep did not come back clean. */
 const failingStates = (report: ReadonlyMap<string, StateAudit>): Record<string, StateAudit> =>
   Object.fromEntries([...report].filter(([, audit]) => audit.violations.length > 0 || audit.incomplete.length > 0));
+
+/**
+ * Closes a modal sheet with Escape. A Tab pass can end on a control whose tooltip is open, and Escape dismisses the
+ * top layer first (WCAG 1.4.13), so the tooltip goes on the first press, with the sheet still open, and the sheet on
+ * the next.
+ */
+async function escapeClose(sheet: Locator): Promise<void> {
+  const tooltip = selectors.getByRole('tooltip');
+  if (await target.isVisible(tooltip)) {
+    await target.keyboardPress('Escape');
+    await target.expectCount(tooltip, 0);
+    await target.expectVisible(sheet);
+  }
+  await target.keyboardPress('Escape');
+  await target.expectCount(sheet, 0);
+}
 
 /** Opens a pane as a person does: Chat and Parameters from the nav, the rest from All. */
 async function openPane(title: string): Promise<void> {
@@ -362,6 +456,10 @@ async function openPane(title: string): Promise<void> {
   }
   await target.expectVisible(surface(title), 60_000);
   await target.expectVisible(surface(title).getByRole('button', { name: `Close ${title}`, exact: true }), 60_000);
+  if (title === 'Parameters') {
+    // The seed's number and boolean render once the model has evaluated, never an empty pane.
+    await target.expectVisible(surface(title).getByCss('[data-slot=parameters] input').first(), 60_000);
+  }
 }
 
 async function returnToStage(): Promise<void> {
@@ -408,14 +506,12 @@ describe('phone project route accessibility (T6)', () => {
       await target.click(navButton('All'), { touch: true });
       await target.expectVisible(allSheet());
       await sweep('All', report);
-      await target.keyboardPress('Escape');
-      await target.expectCount(allSheet(), 0);
+      await escapeClose(allSheet());
 
       await target.click(titleButton(), { touch: true });
       await target.expectVisible(projectSheet());
       await sweep('project sheet', report);
-      await target.keyboardPress('Escape');
-      await target.expectCount(projectSheet(), 0);
+      await escapeClose(projectSheet());
 
       for (const title of panes) {
         // oxlint-disable-next-line no-await-in-loop -- one pane at a time, as a person taps.
@@ -436,7 +532,20 @@ describe('phone project route accessibility (T6)', () => {
 
       await target.writeArtifact(
         `mobile-accessibility-axe-${String(viewport.width)}.json`,
-        JSON.stringify(Object.fromEntries(report), undefined, 2),
+        // The report keeps 50 nodes a finding; the assertions below see them all.
+        JSON.stringify(
+          Object.fromEntries(
+            [...report].map(([state, audit]) => [
+              state,
+              {
+                violations: audit.violations.map((finding) => ({ ...finding, nodes: finding.nodes.slice(0, 50) })),
+                incomplete: audit.incomplete.slice(0, 50),
+              },
+            ]),
+          ),
+          undefined,
+          2,
+        ),
       );
       expect(report.size).toBe(8 + panes.length);
       expect(failingStates(report)).toEqual({});
@@ -750,6 +859,17 @@ describe('phone project route keyboard-only completion (T6)', () => {
       await target.expectCount(projectSheet(), 0);
       await expect.poll(focusedName).toMatch(new RegExp(`^${seedProjectName}`, 'u'));
       expectFocusShown(await readFocus(), 'Project title after Close');
+
+      // The sidebar sheet: open from its trigger, focus moves in, Tab wraps inside it, Escape returns to the trigger.
+      const openSidebar = await tabTo('Open sidebar', { backwards: true, limit: 3 });
+      expectFocusShown(openSidebar, 'Open sidebar before the sheet');
+      await target.keyboardPress('Enter');
+      await target.expectVisible(sidebarSheet());
+      await expect.poll(async () => focusInside(sidebarSheet())).toBe(true);
+      expect(await focusLandsBehindModal()).toBeUndefined();
+      await escapeClose(sidebarSheet());
+      await expect.poll(focusedName).toBe('Open sidebar');
+      expectFocusShown(await readFocus(), 'Open sidebar after Escape');
     },
   );
 });

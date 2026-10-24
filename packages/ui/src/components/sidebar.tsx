@@ -194,6 +194,26 @@ function Sidebar({
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
   /* What opened the phone sheet. Its trigger is not a dialog trigger, so Radix has nowhere to return focus to. */
   const opener = React.useRef<HTMLElement | undefined>(undefined);
+  /* Whether the person last used the keyboard: only a keyboard close hands focus back to the phone sheet's opener, since
+     refocusing the trigger after a tap would raise its tooltip. */
+  const isKeyboardInput = React.useRef(false);
+  React.useEffect(() => {
+    if (!isMobile) {
+      return undefined;
+    }
+    const onKeyDown = (): void => {
+      isKeyboardInput.current = true;
+    };
+    const onPointerDown = (): void => {
+      isKeyboardInput.current = false;
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, [isMobile]);
 
   if (collapsible === 'none') {
     return (
@@ -214,9 +234,9 @@ function Sidebar({
           data-sidebar='sidebar'
           data-slot='sidebar'
           data-mobile='true'
-          // The phone sidebar is the app's chrome, as the wide-screen sidebar is: its shortcuts work inside it.
-          data-shortcut-scope='app'
-          className='z-100 w-(--sidebar-width) bg-sidebar text-sidebar-foreground [&>button]:hidden'
+          // The sidebar's own shortcuts (toggle, search) still work inside it; other app shortcuts stay off (keyboard.tsx).
+          data-shortcut-scope='sidebar'
+          className='z-100 w-(--sidebar-width) bg-sidebar text-sidebar-foreground outline-none [&>button]:hidden'
           style={{ '--sidebar-width': sidebarWidthMobile } as CssVariableProperties}
           side={side}
           onOpenAutoFocus={(event) => {
@@ -229,9 +249,13 @@ function Sidebar({
             }
           }}
           onCloseAutoFocus={(event) => {
-            // Back to what opened the sheet, while it is still on the page (a link may have navigated away from it).
+            /* Back to what opened the sheet after a keyboard close, while it is still on the page and nothing else has
+               taken focus (a link's route may have focused its own field, such as a new chat's composer). */
             event.preventDefault();
-            if (opener.current?.isConnected) {
+            const sheet = event.currentTarget instanceof HTMLElement ? event.currentTarget : undefined;
+            const focused = document.activeElement;
+            const isFocusUnclaimed = !focused || focused === document.body || sheet?.contains(focused) === true;
+            if (isKeyboardInput.current && isFocusUnclaimed && opener.current?.isConnected) {
               opener.current.focus({ preventScroll: true });
             }
             opener.current = undefined;

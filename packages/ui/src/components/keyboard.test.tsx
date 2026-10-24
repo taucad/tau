@@ -108,22 +108,36 @@ it('listens in an embedded surface document and releases its listener on unmount
   frame.remove();
 });
 
-it('suppresses app shortcuts inside a dialog unless the dialog is app chrome that opts back in', () => {
-  const onKey = vi.fn();
+function AllowedBinding({ onKey }: { readonly onKey: () => void }) {
+  useKeybinding({ key: 'b' }, onKey, { allowedScopes: ['sidebar'] });
+  return null;
+}
+
+it('suppresses app shortcuts inside a dialog, except those a sidebar dialog allows', () => {
+  const onK = vi.fn();
+  const onB = vi.fn();
   render(
     <KeyboardProvider>
-      <Binding enabled={() => true} onKey={onKey} />
+      <Binding enabled={() => true} onKey={onK} />
+      <AllowedBinding onKey={onB} />
       <div role='dialog' aria-label='Settings'>
         <button type='button'>In a dialog</button>
       </div>
-      <div role='dialog' aria-label='Sidebar' data-shortcut-scope='app'>
+      <div role='dialog' aria-label='Sidebar' data-shortcut-scope='sidebar'>
         <button type='button'>In the sidebar sheet</button>
       </div>
     </KeyboardProvider>,
   );
 
-  fireEvent.keyDown(screen.getByRole('button', { name: 'In a dialog' }), { key: 'k' });
-  expect(onKey).not.toHaveBeenCalled();
-  fireEvent.keyDown(screen.getByRole('button', { name: 'In the sidebar sheet' }), { key: 'k' });
-  expect(onKey).toHaveBeenCalledOnce();
+  const inDialog = screen.getByRole('button', { name: 'In a dialog' });
+  const inSidebar = screen.getByRole('button', { name: 'In the sidebar sheet' });
+  fireEvent.keyDown(inDialog, { key: 'k' });
+  fireEvent.keyDown(inDialog, { key: 'b' });
+  expect(onK).not.toHaveBeenCalled();
+  expect(onB).not.toHaveBeenCalled();
+  // The sidebar dialog allows only the bindings that name it.
+  fireEvent.keyDown(inSidebar, { key: 'k' });
+  expect(onK).not.toHaveBeenCalled();
+  fireEvent.keyDown(inSidebar, { key: 'b' });
+  expect(onB).toHaveBeenCalledOnce();
 });

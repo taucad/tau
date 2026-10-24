@@ -31,7 +31,7 @@ export type AxeNode = {
 };
 
 export type AxeNodeFinding = AxeFinding & {
-  /** Every flagged node (up to 50), with its markup and messages. */
+  /** Every flagged node, with its markup and messages. */
   readonly nodes: readonly AxeNode[];
 };
 
@@ -75,7 +75,7 @@ export const axeAudit = async (
         id,
         impact: impact ?? undefined,
         targets: nodes.slice(0, 5).map((node) => node.target.join(' ')),
-        nodes: nodes.slice(0, 50).map((node) => ({
+        nodes: nodes.map((node) => ({
           target: node.target.join(' '),
           html: (node.html ?? '').slice(0, 200),
           messages: [...(node.any ?? []), ...(node.all ?? []), ...(node.none ?? [])]

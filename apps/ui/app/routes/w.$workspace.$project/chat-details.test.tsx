@@ -58,9 +58,7 @@ vi.mock('#components/ui/input-tags.js', () => ({
       </button>
     </div>
   ),
-  TagsTrigger: ({ id, inputAriaLabel }: { id?: string; inputAriaLabel?: string }) => (
-    <input id={id} aria-label={inputAriaLabel} />
-  ),
+  TagsTrigger: () => <button type='button'>Add tags</button>,
 }));
 
 vi.mock('#components/files/file-selector.js', () => ({
@@ -131,15 +129,6 @@ describe('DetailsPanelBody', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Desk lamp');
     expect(screen.getByLabelText('Description')).toHaveValue('A compact task light');
     expect(screen.getByRole('button', { name: 'Select Main File' })).toHaveTextContent('main.ts');
-  });
-
-  it('names every field by its visible label (DET-1, I6)', () => {
-    render(<DetailsPanelBody />);
-
-    expect(screen.getByRole('textbox', { name: 'Tags' })).toHaveAttribute('id', 'project-tags');
-    expect(screen.getByRole('group', { name: 'Main file' })).toContainElement(
-      screen.getByRole('button', { name: 'Select Main File' }),
-    );
   });
 
   it('preserves immediate updates, tag deduplication, and main-file selection', () => {

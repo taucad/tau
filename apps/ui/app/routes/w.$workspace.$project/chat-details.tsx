@@ -225,22 +225,18 @@ export function DetailsPanelContent({
               </div>
 
               <div className='space-y-2'>
-                {/* Each field's visible label is its accessible name (I6). */}
-                {isReadOnly ? (
-                  <>
-                    <h3 className='text-sm font-medium text-foreground'>Tags</h3>
-                    <p className='text-sm text-muted-foreground'>{projectTags.join(', ') || 'No tags'}</p>
-                  </>
-                ) : (
-                  <>
-                    <label className='text-sm font-medium text-foreground' htmlFor='project-tags'>
-                      Tags
-                    </label>
-                    <Tags tags={projectTags} onTagsChange={onTagsChange}>
-                      <TagsTrigger id='project-tags' inputAriaLabel='Tags' placeholder='Add tags…' />
-                    </Tags>
-                  </>
-                )}
+                {/* Each field's visible label is its accessible name (I6); read-only disables it, as Name and Description. */}
+                <label className='text-sm font-medium text-foreground' htmlFor='project-tags'>
+                  Tags
+                </label>
+                <Tags tags={projectTags} onTagsChange={onTagsChange}>
+                  <TagsTrigger
+                    id='project-tags'
+                    inputAriaLabel='Tags'
+                    placeholder={isReadOnly ? 'No tags' : 'Add tags…'}
+                    disabled={isReadOnly}
+                  />
+                </Tags>
               </div>
 
               <div role='group' aria-labelledby='project-main-file-label' className='space-y-2'>

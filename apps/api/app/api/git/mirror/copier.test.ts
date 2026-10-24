@@ -391,6 +391,27 @@ describe('markTombstonedOwners', () => {
     expect(total(h.recorded, 'tau.mirror.copy_failures', { stage: 'dest_write', reason: 'other' })).toBe(1);
     expect(h.events).toContainEqual(expect.objectContaining({ event: 'tau_mirror.owner_marker_failed' }));
   });
+
+  it('should label a marker recorded in the copy but not in Postgres as a watermark failure, not a copy write', async () => {
+    const h = harness();
+    const deletedAt = h.time.now();
+    h.ledger.tombstones.set('user_gone', {
+      ownerId: 'user_gone',
+      deletedAt,
+      purgeAfter: deletedAt,
+      erasure: true,
+      copyMarkedAt: undefined,
+    });
+    h.ledger.markTombstone = async () => {
+      throw new Error('connection terminated');
+    };
+
+    expect(await markTombstonedOwners(h.context)).toBe(0);
+
+    expect(h.destination.keys()).toStrictEqual([ownerMarkerKey('user_gone', deletedAt)]);
+    expect(total(h.recorded, 'tau.mirror.copy_failures', { stage: 'watermark', reason: 'other' })).toBe(1);
+    expect(total(h.recorded, 'tau.mirror.copy_failures', { stage: 'dest_write' })).toBe(0);
+  });
 });
 
 describe('rolling retention', () => {
@@ -410,12 +431,15 @@ describe('rolling retention', () => {
     const h = harness();
     push(h);
     await round(h);
+    const firstLock = h.ledger.row('proj_one').copyLockedUntil;
 
+    // Above the floor, only what the round reused (the first pack and its index) is extended; the recorded lock stands.
     h.time.advance(5 * day);
     push(h);
     h.destination.calls.length = 0;
     await round(h);
-    expect(h.destination.calls).not.toContain('extendRetention');
+    expect(h.destination.calls.filter((call) => call === 'extendRetention')).toHaveLength(2);
+    expect(h.ledger.row('proj_one').copyLockedUntil).toStrictEqual(firstLock);
 
     h.time.advance(6 * day);
     const newest = push(h);
@@ -434,6 +458,65 @@ describe('rolling retention', () => {
         );
       }
     }
+  });
+
+  it('should lock a version a crashed round left, when a later snapshot reuses it, at least to the recorded lock', async () => {
+    const h = harness();
+    push(h);
+    await round(h);
+
+    // Day 1: a round uploads the new pack and its index, then crashes before the snapshot.
+    h.time.advance(day);
+    const second = push(h);
+    h.destination.failPutAt = h.destination.calls.filter((call) => call === 'put').length + 3;
+    expect(await round(h)).toMatchObject({ outcome: 'failed' });
+    const leftover = repositoryKey(alice, second.packs.at(-1)!.key);
+    expect(h.destination.latest(leftover)?.retainUntil).toStrictEqual(new Date(h.time.now().getTime() + 30 * day));
+
+    // Day 11: the sweep carries the recorded snapshot's dependencies to day 41.
+    h.time.advance(10 * day);
+    await runRetentionSweep(h.context);
+
+    // Day 12: the next round reuses the leftover pack instead of writing it again.
+    h.time.advance(day);
+    expect(await round(h)).toMatchObject({ outcome: 'copied', generation: 2 });
+
+    const recorded = h.ledger.row('proj_one').copyLockedUntil!;
+    expect(h.destination.objects.get(leftover)).toHaveLength(1);
+    const manifest = h.source.manifestOf(alice)!;
+    const dependencies = [
+      snapshotKey(alice, manifest.generation, manifest.incarnation),
+      ...manifest.packs.flatMap((pack) => [
+        repositoryKey(alice, pack.key),
+        repositoryKey(alice, `${pack.key.slice(0, -'.pack'.length)}.idx`),
+      ]),
+    ];
+    for (const key of dependencies) {
+      for (const version of h.destination.objects.get(key)!) {
+        expect(version.retainUntil.getTime(), key).toBeGreaterThanOrEqual(recorded.getTime());
+      }
+    }
+  });
+
+  it('should not extend a live repository of an owner whose storage is tombstoned', async () => {
+    const h = harness();
+    push(h);
+    await round(h);
+    h.time.advance(11 * day);
+    push(h);
+    h.ledger.tombstones.set(alice.ownerId, {
+      ownerId: alice.ownerId,
+      deletedAt: h.time.now(),
+      purgeAfter: h.time.now(),
+      erasure: true,
+      copyMarkedAt: h.time.now(),
+    });
+    h.destination.calls.length = 0;
+
+    await round(h);
+
+    expect(h.destination.calls).not.toContain('extendRetention');
+    expect(h.ledger.row('proj_one').copyLockedUntil).toBeUndefined();
   });
 
   it('should keep a repository idle for 45 days locked through the daily sweep', async () => {

@@ -1,7 +1,7 @@
 import { RepositoryStoreError } from '#api/git/store/errors.js';
 
 /** `stage` on `tau.mirror.copy_failures` (W13 Finding 8). */
-export type MirrorFailureStage = 'source_read' | 'verify' | 'dest_write' | 'retention' | 'watermark';
+export type MirrorFailureStage = 'source_read' | 'verify' | 'dest_write' | 'retention' | 'watermark' | 'reconcile';
 
 /** `reason` on `tau.mirror.copy_failures`; `other` keeps the label an enum. */
 export type MirrorFailureReason = 'source_missing' | 'checksum' | 'http_4xx' | 'http_5xx' | 'timeout' | 'other';

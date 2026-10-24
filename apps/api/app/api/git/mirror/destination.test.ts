@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { DeleteObjectCommand, DeleteObjectsCommand, PutObjectLegalHoldCommand, S3Client } from '@aws-sdk/client-s3';
 import { describe, expect, it } from 'vitest';
@@ -14,6 +15,7 @@ type Recorded = {
   path: string;
   query: Record<string, string>;
   headers: Record<string, string>;
+  body: string;
 };
 type Answer = {
   status: number;
@@ -37,6 +39,7 @@ const fakeClient = (answer: (request: Recorded) => Answer) => {
         path: string;
         query?: Record<string, string>;
         headers: Record<string, string>;
+        body?: unknown;
       }) => {
         const recorded = {
           method: request.method,
@@ -45,6 +48,10 @@ const fakeClient = (answer: (request: Recorded) => Answer) => {
           headers: Object.fromEntries(
             Object.entries(request.headers).map(([key, value]) => [key.toLowerCase(), value]),
           ),
+          body:
+            typeof request.body === 'string' || request.body instanceof Uint8Array
+              ? String(Buffer.from(request.body))
+              : '',
         };
         requests.push(recorded);
         const reply = answer(recorded);
@@ -245,6 +252,24 @@ describe('S3MirrorDestination on B2 (DT0)', () => {
       retention: '',
       versionId: '4_zv',
     });
+  });
+
+  it('should send Content-MD5 and no flexible checksum on a lock extension, the form DT0 proved on B2', async () => {
+    const { destination, requests } = fakeClient(() => ({ status: 200 }));
+
+    await destination.extendRetention(key, '4_zv', new Date('2026-12-01T00:00:00.000Z'));
+
+    const [request] = requests;
+    expect(request?.body).toContain('<Mode>COMPLIANCE</Mode>');
+    expect(request?.headers['content-md5']).toBe(
+      createHash('md5')
+        .update(request?.body ?? '')
+        .digest('base64'),
+    );
+    expect(Object.keys(request?.headers ?? {}).filter((name) => name.startsWith('x-amz-checksum-'))).toStrictEqual([]);
+    expect(request?.headers['x-amz-sdk-checksum-algorithm']).toBeUndefined();
+    // Signed with the header it carries.
+    expect(request?.headers['authorization']).toContain('content-md5');
   });
 
   /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK inputs are PascalCase */

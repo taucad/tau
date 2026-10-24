@@ -4,7 +4,7 @@ import type { RepositoryLocator } from '#api/git/store/port.js';
 import { indexVersions, retentionClock } from '#api/git/mirror/copier.js';
 import type { CopierContext, VersionIndex } from '#api/git/mirror/copier.js';
 import type { DestinationVersion } from '#api/git/mirror/destination.js';
-import { failAt } from '#api/git/mirror/failure.js';
+import { failAt, reasonOf } from '#api/git/mirror/failure.js';
 import { lfsPrefix, repositoryKey, repositoryPrefix } from '#api/git/mirror/keys.js';
 import type { MirrorObjectKind } from '#api/git/mirror/metrics.js';
 import { packNameHash, transferObject } from '#api/git/mirror/transfer.js';
@@ -38,6 +38,8 @@ export type ReconcileScope = 'active' | 'full';
 
 export type ReconcileResult = {
   readonly repositories: number;
+  /** Repositories the pass could not reconcile; each is counted and reported, and the pass goes on. */
+  readonly failed: number;
   readonly storeAhead: number;
   readonly retiredCopied: number;
   readonly missing: Readonly<Partial<Record<MirrorObjectKind, number>>>;
@@ -49,6 +51,7 @@ export type ReconcileResult = {
 
 type Tally = {
   repositories: number;
+  failed: number;
   storeAhead: number;
   retiredCopied: number;
   missing: Partial<Record<MirrorObjectKind, number>>;
@@ -238,6 +241,7 @@ export const reconcile = async (
   const { at } = retentionClock(context);
   const tally: Tally = {
     repositories: 0,
+    failed: 0,
     storeAhead: 0,
     retiredCopied: 0,
     missing: {},
@@ -254,8 +258,22 @@ export const reconcile = async (
     }
     for (const candidate of page) {
       context.signal?.throwIfAborted();
-      // oxlint-disable-next-line no-await-in-loop -- one repository at a time
-      await reconcileRepository(context, candidate, scope, tally);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one repository at a time
+        await reconcileRepository(context, candidate, scope, tally);
+      } catch (error) {
+        context.signal?.throwIfAborted();
+        tally.failed += 1;
+        const reason = reasonOf(error);
+        context.metrics.failure('reconcile', reason);
+        context.report?.({
+          event: 'tau_mirror.reconcile_repository_failed',
+          scope,
+          projectId: candidate.projectId,
+          reason,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
     after = page.at(-1)?.projectId;
   }
@@ -282,6 +300,7 @@ export const reconcile = async (
     event: 'tau_mirror.reconcile',
     scope,
     repositories: result.repositories,
+    failed: result.failed,
     storeAhead: result.storeAhead,
     retiredCopied: result.retiredCopied,
     missing: result.missing,

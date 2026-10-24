@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { copyRepository } from '#api/git/mirror/copier.js';
 import { repositoryKey } from '#api/git/mirror/keys.js';
-import { day, harness, last } from '#api/git/mirror/mirror.fixture.js';
+import { day, harness, last, total } from '#api/git/mirror/mirror.fixture.js';
 import { reconcile } from '#api/git/mirror/reconcile.js';
 
 const alice = repositoryLocator({
@@ -149,6 +149,29 @@ describe('reconcile', () => {
     await reconcile(h.context, 'active');
 
     expect(last(h.recorded, 'tau.mirror.retention_max_ahead_seconds')).toBe((90 * day) / 1000);
+  });
+
+  it('should count a repository it cannot reconcile and go on with the rest', async () => {
+    const { h } = await copied();
+    const bob = repositoryLocator({ ownerId: 'user_bob', projectId: 'proj_two' });
+    h.ledger.recordGeneration(bob, h.source.push(bob, h.time.now()).generation);
+    await copyRepository(h.context, (await h.ledger.candidate('proj_two'))!);
+    const read = h.source.readManifest.bind(h.source);
+    h.source.readManifest = async (locator) => {
+      if (locator.projectId === 'proj_one') {
+        throw Object.assign(new Error('SlowDown'), { $metadata: { httpStatusCode: 503 } });
+      }
+      return read(locator);
+    };
+
+    const result = await reconcile(h.context, 'active');
+
+    expect(result).toMatchObject({ repositories: 1, failed: 1 });
+    expect(total(h.recorded, 'tau.mirror.copy_failures', { stage: 'reconcile', reason: 'http_5xx' })).toBe(1);
+    expect(h.events).toContainEqual(
+      expect.objectContaining({ event: 'tau_mirror.reconcile_repository_failed', projectId: 'proj_one' }),
+    );
+    expect(h.events).toContainEqual(expect.objectContaining({ event: 'tau_mirror.reconcile', failed: 1 }));
   });
 
   it('should leave repositories idle for more than 48 hours to the weekly full pass', async () => {

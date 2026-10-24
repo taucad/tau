@@ -129,6 +129,7 @@ const daily = async (context: CopierContext, schedule: Schedule): Promise<void> 
         event: 'tau_mirror.pass_failed',
         pass: name,
         error: error instanceof Error ? error.name : 'Error',
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -174,6 +175,7 @@ export const runMirrorWorker = async (options: WorkerOptions): Promise<void> => 
       context.report?.({
         event: 'tau_mirror.poll_failed',
         error: error instanceof Error ? error.name : 'Error',
+        message: error instanceof Error ? error.message : String(error),
       });
     }
     try {

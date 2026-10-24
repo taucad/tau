@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import {
   GetObjectCommand,
@@ -133,6 +134,37 @@ const guardCommands = (client: S3Client): void => {
   );
 };
 
+/**
+ * Sends a lock extension with `Content-MD5` and no flexible checksum. Under
+ * `WHEN_REQUIRED` the SDK gives `PutObjectRetention` an `x-amz-checksum-crc32`;
+ * DT0 proved the extension on B2 with `Content-MD5` only (`dt0-b2-lock-trial.mjs`),
+ * so the request B2 sees is that one. Runs last in the build step, after the
+ * checksum middleware and before signing, so the header is signed.
+ */
+const retentionContentMd5 = (client: S3Client): void => {
+  client.middlewareStack.add(
+    (next, context) => async (arguments_) => {
+      const request = arguments_.request as { headers?: Record<string, string>; body?: unknown } | undefined;
+      if (context.commandName === 'PutObjectRetentionCommand' && request?.headers !== undefined) {
+        const body: unknown = request.body;
+        request.headers = {
+          ...Object.fromEntries(
+            Object.entries(request.headers).filter(([name]) => {
+              const lower = name.toLowerCase();
+              return !lower.startsWith('x-amz-checksum-') && lower !== 'x-amz-sdk-checksum-algorithm';
+            }),
+          ),
+          'content-md5': createHash('md5')
+            .update(typeof body === 'string' || body instanceof Uint8Array ? body : '')
+            .digest('base64'),
+        };
+      }
+      return next(arguments_);
+    },
+    { step: 'build', priority: 'low', name: 'tauMirrorRetentionContentMd5' },
+  );
+};
+
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK inputs are PascalCase */
 
 /** The S3 adapter: B2's S3-compatible API, or MinIO with Object Lock. */
@@ -159,6 +191,7 @@ export class S3MirrorDestination implements MirrorDestination {
         responseChecksumValidation: 'WHEN_REQUIRED',
       });
     guardCommands(this.client);
+    retentionContentMd5(this.client);
   }
 
   /**

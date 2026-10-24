@@ -1268,10 +1268,11 @@ export const TauMetrics = {
   mirrorCopyFailures: defineCounter({
     name: 'tau.mirror.copy_failures',
     unit: '{failure}',
-    description: 'Copy failures by stage and reason; source_missing means a manifest names an object R2 does not hold',
+    description:
+      'Copy failures by stage and reason; source_missing means a manifest names an object R2 does not hold; reconcile counts a repository a reconcile pass skipped',
     attributes: z.object({
       destination: z.enum(mirrorDestinations),
-      stage: z.enum(['source_read', 'verify', 'dest_write', 'retention', 'watermark']),
+      stage: z.enum(['source_read', 'verify', 'dest_write', 'retention', 'watermark', 'reconcile']),
       reason: z.enum(['source_missing', 'checksum', 'http_4xx', 'http_5xx', 'timeout', 'other']),
     }),
   }),

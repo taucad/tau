@@ -134,6 +134,14 @@ type RoundState = {
   readonly clock: RetentionClock;
   /** Version ids this round wrote, already locked until `clock.until`. */
   readonly written: Map<string, string>;
+  /**
+   * Keys this round found already held and did not write. Their versions may be a
+   * crashed round's, locked only to that round's `until`, which can be earlier than
+   * the lock the row records, so each is extended before the snapshot is recorded.
+   */
+  readonly reused: Set<string>;
+  /** The LFS listing, when this round made one. */
+  lfsIndex?: VersionIndex;
   objects: number;
 };
 
@@ -180,7 +188,9 @@ const copyPacks = async (state: RoundState, manifest: Manifest, index: VersionIn
       throw new MirrorFailure('verify', 'checksum', `pack key '${pack.key}' carries no hash`);
     }
     const key = repositoryKey(state.locator, pack.key);
-    if (!holds(index, key, pack.bytes)) {
+    if (holds(index, key, pack.bytes)) {
+      state.reused.add(key);
+    } else {
       // oxlint-disable-next-line no-await-in-loop -- one object in flight per repository, as hydration does
       await copyOne(state, {
         key,
@@ -191,7 +201,9 @@ const copyPacks = async (state: RoundState, manifest: Manifest, index: VersionIn
       });
     }
     const indexKey = indexKeyFor(pack.key);
-    if (pack.indexStored && !holds(index, repositoryKey(state.locator, indexKey))) {
+    if (pack.indexStored && holds(index, repositoryKey(state.locator, indexKey))) {
+      state.reused.add(repositoryKey(state.locator, indexKey));
+    } else if (pack.indexStored) {
       // oxlint-disable-next-line no-await-in-loop -- same
       await copyOne(state, {
         key: repositoryKey(state.locator, indexKey),
@@ -235,6 +247,9 @@ const copySegments = async (state: RoundState, manifest: Manifest, index: Versio
     });
     next = segmentPrevious(bytes);
   }
+  if (next !== undefined && holds(index, repositoryKey(state.locator, next))) {
+    state.reused.add(repositoryKey(state.locator, next));
+  }
 };
 
 /**
@@ -256,10 +271,13 @@ const copyLfs = async (state: RoundState, manifest: Manifest): Promise<void> => 
     }
     // oxlint-disable-next-line no-await-in-loop -- listed once, only when there is something to copy
     index ??= await indexVersions(context.destination, lfsPrefix(locator), context.signal);
+    state.lfsIndex = index;
     const copied: string[] = [];
     for (const object of pending) {
       const key = lfsKey(locator, object.oid);
-      if (!holds(index, key, object.sizeBytes)) {
+      if (holds(index, key, object.sizeBytes)) {
+        state.reused.add(key);
+      } else {
         // oxlint-disable-next-line no-await-in-loop -- one object in flight per repository
         await copyOne(state, {
           key,
@@ -312,6 +330,7 @@ const writeSnapshot = async (
       .head(key, version.versionId, state.context.signal)
       .catch(() => undefined);
     if (head?.sha256 === base64) {
+      state.reused.add(key);
       return { key, sha256Hex: digest };
     }
   }
@@ -425,6 +444,7 @@ export const ensureOwnerMarker = async (context: CopierContext, owner: Tombstone
     locator: repositoryLocator({ ownerId: owner.ownerId, projectId: 'marker' }),
     clock: retentionClock(context),
     written: new Map(),
+    reused: new Set(),
     objects: 0,
   };
   await copyOne(state, {
@@ -435,6 +455,16 @@ export const ensureOwnerMarker = async (context: CopierContext, owner: Tombstone
     expectedBytes: bytes.byteLength,
   });
   return true;
+};
+
+const reportMarkerFailure = (context: CopierContext, failure: MirrorFailure): void => {
+  context.metrics.failure(failure.stage, failure.reason);
+  context.report?.({
+    event: 'tau_mirror.owner_marker_failed',
+    stage: failure.stage,
+    reason: failure.reason,
+    error: failure.message,
+  });
 };
 
 /**
@@ -450,21 +480,27 @@ export const markTombstonedOwners = async (context: CopierContext, limit = 100):
     try {
       // oxlint-disable-next-line no-await-in-loop -- few rows, each one marker
       await ensureOwnerMarker(context, owner);
+    } catch (error) {
+      reportMarkerFailure(context, failAt('dest_write', error));
+      continue;
+    }
+    try {
       // oxlint-disable-next-line no-await-in-loop -- recorded only after the marker is verified
       await context.ledger.markTombstone(owner.ownerId, retentionClock(context).at);
       marked += 1;
     } catch (error) {
-      const failure = failAt('dest_write', error);
-      context.metrics.failure(failure.stage, failure.reason);
-      context.report?.({
-        event: 'tau_mirror.owner_marker_failed',
-        stage: failure.stage,
-        reason: failure.reason,
-        error: failure.message,
-      });
+      reportMarkerFailure(context, failAt('watermark', error));
     }
   }
   return marked;
+};
+
+const ownerTombstoned = async (context: CopierContext, ownerId: string): Promise<boolean> => {
+  try {
+    return (await context.ledger.tombstone(ownerId)) !== undefined;
+  } catch (error) {
+    throw failAt('watermark', error);
+  }
 };
 
 const runRound = async (context: CopierContext, candidate: CopyCandidate): Promise<RoundResult> => {
@@ -497,6 +533,7 @@ const runRound = async (context: CopierContext, candidate: CopyCandidate): Promi
     locator,
     clock,
     written: new Map(),
+    reused: new Set(),
     objects: 0,
   };
   const repository = await indexVersions(context.destination, repositoryPrefix(locator), context.signal);
@@ -533,7 +570,10 @@ const runRound = async (context: CopierContext, candidate: CopyCandidate): Promi
   const snapshot = await writeSnapshot(state, manifest, bytes, repository);
 
   let lockedUntil = candidate.copyLockedUntil;
-  if (lockedUntil === undefined || lockedUntil < clock.floor) {
+  if (await ownerTombstoned(context, candidate.ownerId)) {
+    // An erased owner's copy is left to lapse (B6): nothing is extended and no lock is recorded.
+    lockedUntil = undefined;
+  } else if (lockedUntil === undefined || lockedUntil < clock.floor) {
     const lfsIndex = await indexVersions(context.destination, lfsPrefix(locator), context.signal);
     const lfs = await context.ledger.copiedLfs(candidate.projectId);
     // The listing predates this round's segment uploads; they are already locked to `until`.
@@ -541,6 +581,15 @@ const runRound = async (context: CopierContext, candidate: CopyCandidate): Promi
     lockedUntil = await extendDependencies(context, {
       keys: [...new Set(keys)],
       indexes: [repository, lfsIndex],
+      written: state.written,
+      clock,
+    });
+  } else if (state.reused.size > 0) {
+    // The recorded lock stands only if every dependency holds at least it; a reused
+    // version may be a crashed round's with an earlier lock. Bring each to `until`.
+    await extendDependencies(context, {
+      keys: [...state.reused],
+      indexes: state.lfsIndex === undefined ? [repository] : [repository, state.lfsIndex],
       written: state.written,
       clock,
     });

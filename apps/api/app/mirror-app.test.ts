@@ -28,6 +28,10 @@ describe.each([
     expect(config).not.toMatch(/^release_command/mu);
   });
 
+  it('should run on the 1 GB shared VM the W13 design sizes it for', () => {
+    expect(config).toMatch(/^\[\[vm\]\]\nmemory = '1gb'\ncpu_kind = 'shared'\ncpus = 1$/mu);
+  });
+
   it('should be scraped on the exporter port it sets', () => {
     expect(config).toMatch(/^\[\[metrics\]\]\nport = 9464\npath = '\/metrics'$/mu);
     expect(config).toMatch(/^OTEL_METRICS_PORT = '9464'$/mu);

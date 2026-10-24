@@ -60,9 +60,9 @@ DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
 port = 9464
 path = '/metrics'
 
-# Change proposal P2.8. Objects up to 8 MiB are held in memory once; larger ones
+# Change proposal P2.8 and the W13 design (1 GB). Objects up to 8 MiB are held in memory once; larger ones
 # stream twice, so memory stays flat at four rounds in flight.
 [[vm]]
-memory = '512mb'
+memory = '1gb'
 cpu_kind = 'shared'
 cpus = 1

@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
+import { setTimeout } from 'node:timers/promises';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
@@ -114,22 +115,42 @@ export async function installApiRuntimeRole(client: postgres.Sql): Promise<void>
  * fresh database is never left without its financial triggers or runtime roles.
  * Re-running it applies nothing: the migrator's own bookkeeping table is the fence.
  */
-export async function runMigrationJob(
+/** SQLSTATE `lock_not_available`: a statement waited longer than `lock_timeout`. */
+const lockNotAvailable = '55P03';
+
+const isLockTimeout = (error: unknown): boolean => (error as { code?: unknown } | undefined)?.code === lockNotAvailable;
+
+export type MigrationJobOptions = {
+  readonly mirrorPassword?: string;
+  readonly maintenancePassword?: string;
+  /**
+   * How long one statement may wait for a lock before the attempt is abandoned
+   * (`lock_timeout`). Default 5 s: a DDL statement queued behind a long transaction
+   * holds every later write to that table behind itself, so it must give way fast.
+   */
+  readonly lockTimeoutMilliseconds?: number;
+  /** Attempts in all, each on a fresh connection. Default 5. */
+  readonly attempts?: number;
+  /** Wait before attempt n + 1 is n times this. Default 2 s. */
+  readonly retryDelayMilliseconds?: number;
+};
+
+const migrateOnce = async (
   databaseUrl: string,
-  options: {
-    readonly mirrorPassword?: string;
-    readonly maintenancePassword?: string;
-  } = {},
-): Promise<{ applied: number; head: MigrationHead }> {
+  options: MigrationJobOptions,
+): Promise<{ count: number; head: MigrationHead }> => {
   const client = postgres(databaseUrl, {
     max: 1,
     prepare: false,
+    connection: {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- PostgreSQL startup parameter name
+      lock_timeout: options.lockTimeoutMilliseconds ?? 5000,
+    },
     onnotice() {
       /* Expected idempotent GRANT/REVOKE notices are not diagnostics. */
     },
   });
   try {
-    const before = await readAppliedMigrations(client);
     await migrate(drizzle(client), { migrationsFolder });
     await installBillingProtections(client);
     await installApiRuntimeRole(client);
@@ -137,8 +158,56 @@ export async function runMigrationJob(
     await installMaintenanceRole(client, options.maintenancePassword);
     await assertSchemaCompatibility(client);
     const after = await readAppliedMigrations(client);
-    return { applied: after.count - before.count, head: await readMigrationHead() };
+    return { count: after.count, head: await readMigrationHead() };
   } finally {
     await client.end();
+  }
+};
+
+const countApplied = async (databaseUrl: string): Promise<number> => {
+  const client = postgres(databaseUrl, { max: 1, prepare: false });
+  try {
+    const applied = await readAppliedMigrations(client);
+    return applied.count;
+  } finally {
+    await client.end();
+  }
+};
+
+/**
+ * Protected one-shot migration job: the only identity permitted to run DDL.
+ *
+ * Runs on its own `max: 1` connection under the migration identity, then reinstalls the
+ * billing protections and refreshes the runtime role grants (`GRANT … ON ALL TABLES` is a
+ * snapshot and the trigger list is explicit, so new tables need both after every migration)
+ * and the private service apps' logins (`tau_mirror`'s column grants, W13 B4, and
+ * `tau_maintenance`, DC4; each password is optional), and proves the result matches the
+ * build's journal head. This is the release command, so a
+ * fresh database is never left without its financial triggers or runtime roles.
+ * Re-running it applies nothing: the migrator's own bookkeeping table is the fence.
+ *
+ * Every statement waits at most `lockTimeoutMilliseconds` for a lock. An attempt that
+ * times out has rolled back its statement (the migrator applies all pending migrations
+ * in one transaction, and each install is its own transaction), so it is retried on a
+ * fresh connection, a bounded number of times, and then the deploy fails.
+ */
+export async function runMigrationJob(
+  databaseUrl: string,
+  options: MigrationJobOptions = {},
+): Promise<{ applied: number; head: MigrationHead }> {
+  const attempts = Math.max(1, options.attempts ?? 5);
+  const before = await countApplied(databaseUrl);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- attempts are sequential by design
+      const after = await migrateOnce(databaseUrl, options);
+      return { applied: after.count - before, head: after.head };
+    } catch (error) {
+      if (!isLockTimeout(error) || attempt >= attempts) {
+        throw error;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- the backoff between attempts
+      await setTimeout(attempt * (options.retryDelayMilliseconds ?? 2000));
+    }
   }
 }

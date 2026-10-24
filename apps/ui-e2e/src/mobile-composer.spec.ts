@@ -33,8 +33,15 @@ const touchTargetMisses = async (): Promise<readonly string[]> =>
   target.evaluateLocator(
     composer(),
     async (region, barSelector: string) => {
-      // Let the row's fold and padding settle before measuring.
-      await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
+      // Let the row's fold and padding settle before measuring. Scroll-driven animations (the scroll shadows) follow
+      // their scroller and never finish, so wait only on those that run in time; one cancelled as its element leaves
+      // (a loading spinner) has settled too.
+      await Promise.all(
+        document
+          .getAnimations()
+          .filter((animation) => animation.timeline === document.timeline)
+          .map(async (animation) => animation.finished.catch(() => undefined)),
+      );
       const misses: string[] = [];
       const buttons = [...region.querySelectorAll<HTMLButtonElement>(`${barSelector} button`)].filter((button) =>
         button.checkVisibility({ visibilityProperty: true, opacityProperty: true }),
@@ -83,7 +90,13 @@ const touchTargetMisses = async (): Promise<readonly string[]> =>
 /** Taps 2px inside the resting editor's edges, which must reach the editor, not a control's ring. */
 const editorEdgeHits = async (): Promise<readonly string[]> =>
   target.evaluateLocator(selectors.getByCss(composerSelector).first(), async (editor) => {
-    await Promise.all(document.getAnimations().map(async (animation) => animation.finished));
+    // Scroll-driven animations never finish, so wait only on those that run in time; a cancelled one has settled.
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => animation.timeline === document.timeline)
+        .map(async (animation) => animation.finished.catch(() => undefined)),
+    );
     const box = editor.getBoundingClientRect();
     const y = box.top + box.height / 2;
     return [box.left + 2, box.right - 2].map((x) => {

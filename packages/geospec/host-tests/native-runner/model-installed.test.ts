@@ -392,7 +392,7 @@ describe('canonical authoring admission', () => {
     try {
       const source = new Uint8Array(
         await readFile(
-          resolve(root, 'packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/model.step'),
+          resolve(root, 'packages/geospec/fixtures/containment/filter-inside-housing-positive/model.step'),
         ),
       );
       const subject = await loader({ source, format: 'step', mesh: false });

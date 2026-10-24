@@ -297,37 +297,37 @@
       "sha256": "c2990b3414ada63e504b3a8c8c6b729cc9bc3b8abd905dd96f04ccddca6ba0b2"
     },
     "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step": {
-      "path": "packages/geospec-engine/fixtures/clearance/bolt-clearance-hole-positive/model.step",
+      "path": "packages/geospec/fixtures/clearance/bolt-clearance-hole-positive/model.step",
       "byteLength": 33203,
       "sha256": "cb7e827571bb7ca65e5aa48f8467b850bc4ea66ef07eb5b389ebd20005339de4"
     },
     "packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/model.step": {
-      "path": "packages/geospec-engine/fixtures/clearance/piston-bore-skirt-positive/model.step",
+      "path": "packages/geospec/fixtures/clearance/piston-bore-skirt-positive/model.step",
       "byteLength": 29398,
       "sha256": "7d6df372ed51176efa557bcc43f584f26baa3e22c5db0fa245c0489a6cfff61d"
     },
     "packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/model.step": {
-      "path": "packages/geospec-engine/fixtures/clearance/shaft-bore-offset-negative/model.step",
+      "path": "packages/geospec/fixtures/clearance/shaft-bore-offset-negative/model.step",
       "byteLength": 29412,
       "sha256": "e73421aa962c386f9d23585cd43652cba27b8f84f83bc1311975d8cb3a9c2b33"
     },
     "packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/model.step": {
-      "path": "packages/geospec-engine/fixtures/clearance/shaft-bore-radial-positive/model.step",
+      "path": "packages/geospec/fixtures/clearance/shaft-bore-radial-positive/model.step",
       "byteLength": 29403,
       "sha256": "ffe53f214590564a092d6c4a3e4dfc168fe622a3d4e5ff505cae157e9de07a4c"
     },
     "packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/model.step": {
-      "path": "packages/geospec-engine/fixtures/clearance/shaft-bore-tilted-negative/model.step",
+      "path": "packages/geospec/fixtures/clearance/shaft-bore-tilted-negative/model.step",
       "byteLength": 29459,
       "sha256": "517ef38c956c9083f0aa5cde03658a0f35fa453517180d404ac0699db5deb959"
     },
     "packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/model.step": {
-      "path": "packages/geospec-engine/fixtures/clearance/shaft-bore-too-loose-negative/model.step",
+      "path": "packages/geospec/fixtures/clearance/shaft-bore-too-loose-negative/model.step",
       "byteLength": 29410,
       "sha256": "b1fbdb3433f95a395c922c7d411a46a56cce75cdc85255d170cf2f59dc25844e"
     },
     "packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/model.step": {
-      "path": "packages/geospec-engine/fixtures/clearance/shaft-bore-too-tight-negative/model.step",
+      "path": "packages/geospec/fixtures/clearance/shaft-bore-too-tight-negative/model.step",
       "byteLength": 29426,
       "sha256": "889b44b1626932b6dc8c66ffeed0962f5f2dc9deea279518a7d24a7d3a83f72b"
     },
@@ -377,27 +377,27 @@
       "sha256": "03daaf6ac5524806b48d005ab6b49c3250d6abbd8c39ef5710ac40ee32704fb1"
     },
     "packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/model.step": {
-      "path": "packages/geospec-engine/fixtures/containment/aabb-inside-false-positive/model.step",
+      "path": "packages/geospec/fixtures/containment/aabb-inside-false-positive/model.step",
       "byteLength": 18601,
       "sha256": "b83ab817fb509eb49a354a7bd8c5b2d0d65c9a50ab98d82720f54fa5658fb28e"
     },
     "packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/model.step": {
-      "path": "packages/geospec-engine/fixtures/containment/filter-inside-housing-positive/model.step",
+      "path": "packages/geospec/fixtures/containment/filter-inside-housing-positive/model.step",
       "byteLength": 18639,
       "sha256": "71203b91fbbf16d346ce9d6e9f1d5cd5b66310a4dd5bc9483ad966cef2ae5df3"
     },
     "packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/model.step": {
-      "path": "packages/geospec-engine/fixtures/containment/pin-partial-insertion-negative/model.step",
+      "path": "packages/geospec/fixtures/containment/pin-partial-insertion-negative/model.step",
       "byteLength": 71447,
       "sha256": "6878a09534b45533346ac388aacb51bde78b92a87fcd7c3fa5713874efae7bc9"
     },
     "packages/geospec-engine/fixtures/containment/pin-through-boss-positive/model.step": {
-      "path": "packages/geospec-engine/fixtures/containment/pin-through-boss-positive/model.step",
+      "path": "packages/geospec/fixtures/containment/pin-through-boss-positive/model.step",
       "byteLength": 71444,
       "sha256": "c6d923164cc472210e67abb8edc1b4e872bcd00b093db8b3cd4bfb15eccb80d8"
     },
     "packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/model.step": {
-      "path": "packages/geospec-engine/fixtures/containment/sidewall-intersection-negative/model.step",
+      "path": "packages/geospec/fixtures/containment/sidewall-intersection-negative/model.step",
       "byteLength": 18639,
       "sha256": "ffad4790821fdd64895653d0ffa71fd226e5b4d8bf9fd1e4f9e5c72a04d9454e"
     },
@@ -447,27 +447,27 @@
       "sha256": "126354deac9bb10658b5f49d76665975e893f80c352ee94c4da63c3b9059f944"
     },
     "packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/model.step": {
-      "path": "packages/geospec-engine/fixtures/selector/bolt-circle-drift-negative/model.step",
+      "path": "packages/geospec/fixtures/selector/bolt-circle-drift-negative/model.step",
       "byteLength": 52607,
       "sha256": "d69f2098f65ac87b51038a7c036a9e73401590b1aa60849ccafdbda0b5e790e7"
     },
     "packages/geospec-engine/fixtures/selector/bolt-circle-positive/model.step": {
-      "path": "packages/geospec-engine/fixtures/selector/bolt-circle-positive/model.step",
+      "path": "packages/geospec/fixtures/selector/bolt-circle-positive/model.step",
       "byteLength": 57885,
       "sha256": "d07227235fc60ef3988cd802a1913d345a5bcb018da086f1ff77c2f5cc44d0b1"
     },
     "packages/geospec-engine/fixtures/selector/second-producer-transformed/model.step": {
-      "path": "packages/geospec-engine/fixtures/selector/second-producer-transformed/model.step",
+      "path": "packages/geospec/fixtures/selector/second-producer-transformed/model.step",
       "byteLength": 11583,
       "sha256": "3514902985482242076f17e72aefc2ffb5ae4101bb4b4705d5aaa872b0f4c0c0"
     },
     "packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/model.step": {
-      "path": "packages/geospec-engine/fixtures/selector/twin-bosses-ambiguous/model.step",
+      "path": "packages/geospec/fixtures/selector/twin-bosses-ambiguous/model.step",
       "byteLength": 26885,
       "sha256": "9db31f05aa1144258d92a2180efa5e467de9131eb58d26a5036378e9edc64f24"
     },
     "packages/geospec-engine/fixtures/selector/unnamed-import/model.step": {
-      "path": "packages/geospec-engine/fixtures/selector/unnamed-import/model.step",
+      "path": "packages/geospec/fixtures/selector/unnamed-import/model.step",
       "byteLength": 34413,
       "sha256": "9327a306b7bd4130d7a1b083de62e2ee7d78d01935cc4c4a173e9c1933afa856"
     },

@@ -414,7 +414,7 @@ const config = [
       // GeoSpec fixture generation scripts are verbatim-normative model-code
       // inputs run through the runtime VM (see fixtures/README.md), not
       // library sources — same class as prompt examples and experiments.
-      'packages/geospec-engine/fixtures/scripts/**',
+      'packages/geospec/fixtures/scripts/**',
       // Registry-gate fixtures are inert artifact inputs the gate parses as
       // text: their imports deliberately name packages that do not resolve,
       // and they live in no tsconfig project.

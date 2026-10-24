@@ -80,6 +80,14 @@ export type PutBlobArgs = {
 };
 
 /**
+ * A put whose body is a stream (DA4). The stream has no length of its own, so
+ * `contentLength` is required, and the AWS SDK never retries a streamed
+ * request because it cannot rewind the body: a caller that streams owns its
+ * own retry (see `S3RepositoryStore`).
+ */
+export type PutBlobStreamArgs = Omit<PutBlobArgs, 'body'> & { body: Readable; contentLength: number };
+
+/**
  * The outcome of a put, discriminated on `lost` so a caller cannot read an
  * ETag that a refused write never produced.
  *
@@ -375,41 +383,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   }
 
   public async putBlob(args: PutBlobArgs): Promise<PutBlobResult> {
-    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    return this.put(args);
+  }
 
-    try {
-      const client = args.singleAttempt === true ? this.singleAttempt() : this.client;
-      const response = await client.send(
-        new PutObjectCommand({
-          Bucket: this.resolveBucket(args.tier),
-          Key: resolvedKey,
-          Body: args.body,
-          ContentType: args.contentType,
-          ...(args.cacheControl ? { CacheControl: args.cacheControl } : {}),
-          ...(args.ifNoneMatch === undefined ? {} : { IfNoneMatch: args.ifNoneMatch }),
-          ...(args.ifMatch === undefined ? {} : { IfMatch: args.ifMatch }),
-          ...(args.checksumSha256 === undefined ? {} : { ChecksumSHA256: args.checksumSha256 }),
-        }),
-        { abortSignal: args.signal },
-      );
-
-      const etag = response.ETag?.replaceAll('"', '') ?? '';
-
-      return { lost: false, etag, alreadyExisted: false };
-    } catch (error) {
-      const conditional = args.ifNoneMatch !== undefined || args.ifMatch !== undefined;
-
-      // A conditional write that loses is an outcome, not a fault. MinIO and R2
-      // answer `404 NoSuchKey` rather than `412` when an `If-Match` names an
-      // absent key (AR-A E7); that is a lost race, never a create.
-      const absentTarget = args.ifMatch !== undefined && isNoSuchKey(error);
-
-      if (conditional && (isPreconditionFailed(error) || absentTarget)) {
-        return { lost: true, alreadyExisted: args.ifNoneMatch === '*' };
-      }
-
-      throw error;
-    }
+  /** {@link putBlob} with a streamed body: memory is the stream's chunks, never the object. */
+  public async putBlobStream(args: PutBlobStreamArgs): Promise<PutBlobResult> {
+    return this.put(args);
   }
 
   public async getBlob(args: {
@@ -875,6 +854,46 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     } catch (error) {
       if (isS3ObjectMissing(error)) {
         return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private async put(args: PutBlobArgs | PutBlobStreamArgs): Promise<PutBlobResult> {
+    const { resolvedKey } = this.resolveKey(args.namespace, args.key);
+    const contentLength = 'contentLength' in args ? args.contentLength : undefined;
+
+    try {
+      const client = args.singleAttempt === true ? this.singleAttempt() : this.client;
+      const response = await client.send(
+        new PutObjectCommand({
+          Bucket: this.resolveBucket(args.tier),
+          Key: resolvedKey,
+          Body: args.body,
+          ...(contentLength === undefined ? {} : { ContentLength: contentLength }),
+          ContentType: args.contentType,
+          ...(args.cacheControl ? { CacheControl: args.cacheControl } : {}),
+          ...(args.ifNoneMatch === undefined ? {} : { IfNoneMatch: args.ifNoneMatch }),
+          ...(args.ifMatch === undefined ? {} : { IfMatch: args.ifMatch }),
+          ...(args.checksumSha256 === undefined ? {} : { ChecksumSHA256: args.checksumSha256 }),
+        }),
+        { abortSignal: args.signal },
+      );
+
+      const etag = response.ETag?.replaceAll('"', '') ?? '';
+
+      return { lost: false, etag, alreadyExisted: false };
+    } catch (error) {
+      const conditional = args.ifNoneMatch !== undefined || args.ifMatch !== undefined;
+
+      // A conditional write that loses is an outcome, not a fault. MinIO and R2
+      // answer `404 NoSuchKey` rather than `412` when an `If-Match` names an
+      // absent key (AR-A E7); that is a lost race, never a create.
+      const absentTarget = args.ifMatch !== undefined && isNoSuchKey(error);
+
+      if (conditional && (isPreconditionFailed(error) || absentTarget)) {
+        return { lost: true, alreadyExisted: args.ifNoneMatch === '*' };
       }
 
       throw error;

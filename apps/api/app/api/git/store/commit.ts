@@ -1,7 +1,8 @@
 /* oxlint-disable new-cap -- NestJS's Logger is a class the module instantiates once */
 import { createHash, randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
-import { readFile, readdir, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { open, readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { CommitToken, ManifestBytes, RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
@@ -426,21 +427,54 @@ const uploadPack = async (
   return { key, bytes: upload.bytes, indexStored: true };
 };
 
+/** Read size for hashing a lease file: one buffer, reused for every read. */
+const hashReadBytes = 1024 * 1024;
+
+/**
+ * The base64 SHA-256 of a file, read through one reused buffer: the file is
+ * never in memory whole, and the pass leaves no chunk garbage behind for the
+ * upload pass to pile onto.
+ */
+const sha256OfFile = async (file: string): Promise<string> => {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(hashReadBytes);
+  const handle = await open(file, 'r');
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- one buffer, so reads are sequential by construction
+      const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, null);
+      if (bytesRead === 0) {
+        return hash.digest('base64');
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    await handle.close();
+  }
+};
+
+/**
+ * Uploads one lease file in two streamed passes (DA4): hash it, then send it
+ * with that digest. Memory is a read chunk, not the file: a pack at the D20
+ * ceiling is a gigabyte, and the 1 GB API VM cannot hold one beside the push
+ * that produced it.
+ *
+ * The digest still guards the bytes. The adapter sends it as
+ * `x-amz-checksum-sha256` and the backend refuses a body that does not match
+ * it, so a file that changed between the passes is never stored under a
+ * digest it does not have; above the single-part ceiling the adapter checks
+ * the same digest itself before it completes the upload.
+ */
 const putFile = async (args: {
   store: RepositoryStore;
   locator: RepositoryLocator;
   key: string;
   file: string;
 }): Promise<void> => {
-  const { store, locator, key } = args;
-  const contents = await readFile(args.file);
-  // A view over the read buffer rather than a copy of it: a pack at the D20
-  // ceiling is a gigabyte, and it is already in memory once.
-  const body = new Uint8Array(contents.buffer, contents.byteOffset, contents.length) as Uint8Array<ArrayBuffer>;
-  await store.putObject(locator, key, body, {
-    contentLength: body.byteLength,
-    sha256: createHash('sha256').update(body).digest('base64'),
-  });
+  const { store, locator, key, file } = args;
+  const { size } = await stat(file);
+  const sha256 = await sha256OfFile(file);
+  await store.putObject(locator, key, async () => createReadStream(file), { contentLength: size, sha256 });
 };
 
 /**

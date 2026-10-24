@@ -5,6 +5,7 @@ import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { buffer } from 'node:stream/consumers';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { GoneException, Logger, NotFoundException, ServiceUnavailableException, VersioningType } from '@nestjs/common';
@@ -125,7 +126,11 @@ const memoryStore = (): RepositoryStore => {
     },
     // oxlint-disable-next-line max-params -- the port's own signature
     putObject: async (locator, key, body, _options: PutObjectOptions) => {
-      objects.set(`${prefix(locator)}${key}`, body);
+      // The committer streams lease files (DA4); a memory store keeps their bytes.
+      objects.set(
+        `${prefix(locator)}${key}`,
+        typeof body === 'function' ? new Uint8Array(await buffer(await body())) : body,
+      );
     },
     getObject: async (locator, key) => {
       const body = objects.get(`${prefix(locator)}${key}`);

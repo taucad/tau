@@ -1,10 +1,12 @@
 import { execFileSync } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { Readable } from 'node:stream';
 import { ConfigService } from '@nestjs/config';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Environment } from '#config/environment.config.js';
@@ -137,6 +139,27 @@ const leaseWithOnePush = async (store: S3RepositoryStore): Promise<RepositoryLea
 const manifestPuts = (requests: readonly Received[]): Received[] =>
   requests.filter((request) => request.method === 'PUT' && request.path.endsWith('/manifest.json'));
 
+const sha256Base64 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('base64');
+
+/** A source that opens a fresh stream over `bytes` in `chunk`-byte pieces, counting how often it was opened. */
+const countedSource = (
+  bytes: Uint8Array<ArrayBuffer>,
+  chunk = 64 * 1024,
+): { open: () => Promise<Readable>; opened: () => number } => {
+  let opened = 0;
+  return {
+    open: async () => {
+      opened += 1;
+      const pieces: Array<Uint8Array<ArrayBuffer>> = [];
+      for (let offset = 0; offset < bytes.byteLength; offset += chunk) {
+        pieces.push(bytes.subarray(offset, Math.min(offset + chunk, bytes.byteLength)));
+      }
+      return Readable.from(pieces, { objectMode: false });
+    },
+    opened: () => opened,
+  };
+};
+
 describe('S3RepositoryStore over a loopback endpoint', () => {
   describe('manifest writes make one request per call (FR21)', () => {
     it.each([
@@ -191,5 +214,91 @@ describe('S3RepositoryStore over a loopback endpoint', () => {
 
       expect(manifestPuts(requests)).toHaveLength(3);
     }, 30_000);
+  });
+
+  describe('streamed object writes', () => {
+    it('should stream a source to a single-part PUT carrying the declared length and SHA-256', async () => {
+      const { store, requests } = await loopbackStore((_request, response) => {
+        ok(response);
+      });
+      const bytes = new Uint8Array(randomBytes(300 * 1024));
+      const source = countedSource(bytes);
+
+      await store.putObject(locator, 'packs/streamed.pack', source.open, {
+        contentLength: bytes.byteLength,
+        sha256: sha256Base64(bytes),
+      });
+
+      const puts = requests.filter((request) => request.method === 'PUT');
+      expect(puts).toHaveLength(1);
+      expect(puts[0]?.path).toBe(
+        '/loopback-test-only/tenants/loopback-owner/repos/loopback-project/packs/streamed.pack',
+      );
+      expect(puts[0]?.headers['content-length']).toBe(String(bytes.byteLength));
+      expect(puts[0]?.headers['x-amz-checksum-sha256']).toBe(sha256Base64(bytes));
+      expect(puts[0]?.body).toStrictEqual(bytes);
+      expect(source.opened()).toBe(1);
+    });
+
+    it('should reopen the source and send the whole object again when a streamed PUT fails with a 5xx', async () => {
+      let attempts = 0;
+      const { store, requests } = await loopbackStore((_request, response) => {
+        attempts += 1;
+        if (attempts === 1) {
+          s3Error(response, 503, 'ServiceUnavailable');
+          return;
+        }
+        ok(response);
+      });
+      const bytes = new Uint8Array(randomBytes(200 * 1024));
+      const source = countedSource(bytes);
+
+      await store.putObject(locator, 'packs/retried.pack', source.open, {
+        contentLength: bytes.byteLength,
+        sha256: sha256Base64(bytes),
+      });
+
+      const puts = requests.filter((request) => request.method === 'PUT');
+      expect(puts).toHaveLength(2);
+      expect(puts[1]?.body).toStrictEqual(bytes);
+      expect(source.opened()).toBe(2);
+    });
+
+    it('should not retry a streamed PUT the backend refuses with a 4xx such as a bad digest', async () => {
+      const { store, requests } = await loopbackStore((_request, response) => {
+        s3Error(response, 400, 'BadDigest');
+      });
+      const bytes = new Uint8Array(randomBytes(1024));
+      const source = countedSource(bytes);
+
+      await expect(
+        store.putObject(locator, 'packs/refused.pack', source.open, {
+          contentLength: bytes.byteLength,
+          sha256: sha256Base64(bytes),
+        }),
+      ).rejects.toMatchObject({ $metadata: { httpStatusCode: 400 } });
+
+      expect(requests.filter((request) => request.method === 'PUT')).toHaveLength(1);
+      expect(source.opened()).toBe(1);
+    });
+
+    it.each([
+      ['longer', -1],
+      ['shorter', 1],
+    ])('should refuse a streamed source %s than its declared length', async (_label, delta) => {
+      const { store } = await loopbackStore((_request, response) => {
+        ok(response);
+      });
+      const bytes = new Uint8Array(randomBytes(4096));
+      const source = countedSource(bytes);
+
+      await expect(
+        store.putObject(locator, 'packs/mislabelled.pack', source.open, {
+          contentLength: bytes.byteLength + delta,
+          sha256: sha256Base64(bytes),
+        }),
+      ).rejects.toThrow(RangeError);
+      expect(source.opened()).toBe(1);
+    });
   });
 });

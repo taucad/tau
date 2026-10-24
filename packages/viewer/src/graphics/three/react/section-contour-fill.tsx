@@ -210,6 +210,14 @@ export function SectionContourFills({
     },
     [backFaces],
   );
+  // The stage's store outlives these caps, which unmount while the section view is off. Left committed, it would match
+  // the same cut when they mount again, so they would never commit and so never draw.
+  React.useEffect(() => {
+    const store = snapshotRef.current;
+    return () => {
+      resetSectionViewSafeSnapshot(store);
+    };
+  }, [snapshotRef]);
 
   // A layout effect, so a cut step, restyle or emphasis change asks for its frame before the browser paints.
   React.useLayoutEffect(() => {

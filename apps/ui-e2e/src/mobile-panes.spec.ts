@@ -2,21 +2,30 @@ import { expect, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
 import type { Locator } from 'vitest/browser';
 import * as target from '#support/external-target.js';
-import { prepareComposerPage } from '#support/chat-attachments.js';
 
 /**
- * The phone pane pass (charter W6, T6) on the production route at 320px: each pane the pass changed opens in the
- * sheet without horizontal overflow, no control in it is smaller than the 24px floor (I3), and its filter and
- * typed fields take the 40px touch row under a coarse pointer. Unit tests prove each pane's behavior; this proves
- * the real layout at the narrowest width.
+ * The phone pane pass (charter W6, T6) on the production route at 320px. Each listed pane opens in the sheet with
+ * its named Close, without horizontal overflow, with no control under the 24px floor (I3), and with its filter on
+ * the 40px touch row under a coarse pointer.
+ *
+ * The seed (`/__e2e/project-file-tree?main=touch-parameters`) renders one number and one boolean parameter, so the
+ * Parameters check is not vacuous: it requires a typed field and a switch row, both 40px tall. The seed has no
+ * mechanism, so Kinematics is checked for fit, targets and its filter only. Telemetry and Console also changed but
+ * are behind debug mode, which this route does not turn on; unit tests cover them.
  */
+
+const seedRoute = '/__e2e/project-file-tree?main=touch-parameters';
+const seedProjectName = 'sgenoud/models file-tree e2e';
 
 const navigation = (): Locator => selectors.getByRole('navigation', { name: 'Workbench' });
 const navButton = (name: string): Locator => navigation().getByRole('button', { name, exact: true });
 const allSheet = (): Locator => selectors.getByRole('dialog', { name: 'All surfaces' });
 const surface = (title: string): Locator => selectors.getByRole('region', { name: title, exact: true });
 
-/** Panes the pass changed, opened as a person would: Parameters from the nav, the rest from All. */
+/**
+ * Opened as a person would: Parameters from the nav, the rest from All. Revisions, Jobs and Agents needed no change
+ * in the pass; they stay here as a 320px regression guard.
+ */
 const panes = [
   'Parameters',
   'Files',
@@ -34,6 +43,9 @@ type Measurement = Readonly<{
   overflow: number;
   undersized: readonly string[];
   shortFields: readonly string[];
+  /** Parameter value fields and switch rows measured, so the Parameters check can require data. */
+  parameterFields: number;
+  switchRows: number;
 }>;
 
 /**
@@ -85,8 +97,19 @@ const measurePane = (region: Element): Measurement => {
       shortFields.push(nameOf(field));
     }
   }
+  // A boolean's row is its switch's target (canvas review R2), so the row takes the touch row too.
+  const switchRows = [...region.querySelectorAll('[data-switch-row]')].filter((row) => isShown(row));
+  for (const row of switchRows) {
+    if (row.getBoundingClientRect().height < touchRow - 0.5) {
+      shortFields.push(`switch row[${row.textContent.trim().slice(0, 40)}]`);
+    }
+  }
   const content = region.querySelector('[data-slot=floating-panel-content]') ?? region;
   return {
+    parameterFields: [...region.querySelectorAll('[data-slot=parameters] input:not([type=hidden])')].filter((field) =>
+      isShown(field),
+    ).length,
+    switchRows: switchRows.length,
     overflow: Math.max(
       region.scrollWidth - region.clientWidth,
       content.scrollWidth - content.clientWidth,
@@ -99,10 +122,21 @@ const measurePane = (region: Element): Measurement => {
 
 test('opens every changed pane at 320×640 with no horizontal overflow and no target under 24px', async () => {
   await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
-  await prepareComposerPage();
   await target.setViewport({ width: 320, height: 640 });
-  await target.navigate('/__e2e/chat-attachments');
-  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?/u, 60_000);
+  await target.navigate(seedRoute);
+  try {
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 10_000);
+  } catch {
+    // A reused browser already holds the seeded project; open it from the list, as the other seed specs do.
+    const project = selectors.getByRole('link', { name: seedProjectName }).first();
+    await target.expectVisible(project, 60_000);
+    const href = await target.getAttribute(project, 'href');
+    if (!href) {
+      throw new Error('Seeded project link did not include an href.');
+    }
+    await target.navigate(href);
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+/u, 60_000);
+  }
   await target.expectVisible(navigation(), 60_000);
   // The touch rows below are coarse-pointer rules; the emulated phone must report a coarse pointer (D12).
   expect(await target.evaluate(() => globalThis.matchMedia('(pointer: coarse)').matches)).toBe(true);
@@ -126,11 +160,24 @@ test('opens every changed pane at 320×640 with no horizontal overflow and no ta
     // Lazy bodies settle after the region mounts; poll until the measurement is clean or the poll times out.
     // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
     await expect
-      .poll(async () => target.evaluateLocator(surface(title), measurePane), { timeout: 15_000 })
-      .toEqual({ overflow: expect.any(Number) as number, undersized: [], shortFields: [] });
+      .poll(
+        async () => {
+          const measured = await target.evaluateLocator(surface(title), measurePane);
+          // Parameters is measured once the seeded number and boolean have rendered, never on an empty pane.
+          return title === 'Parameters' && (measured.parameterFields === 0 || measured.switchRows === 0)
+            ? { ...measured, undersized: ['parameters not rendered yet'] }
+            : measured;
+        },
+        { timeout: 60_000 },
+      )
+      .toMatchObject({ undersized: [], shortFields: [] });
     // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
-    const { overflow } = await target.evaluateLocator(surface(title), measurePane);
-    expect(overflow, `${title} scrolls sideways at 320px`).toBeLessThanOrEqual(0);
+    const measured = await target.evaluateLocator(surface(title), measurePane);
+    expect(measured.overflow, `${title} scrolls sideways at 320px`).toBeLessThanOrEqual(0);
+    if (title === 'Parameters') {
+      expect(measured.parameterFields).toBeGreaterThan(0);
+      expect(measured.switchRows).toBeGreaterThan(0);
+    }
 
     // oxlint-disable-next-line no-await-in-loop -- one pane at a time.
     await target.click(navButton('Model'), { touch: true });

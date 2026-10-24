@@ -339,3 +339,51 @@ describe('RecordIssuesAction inline (the phone project sheet, D2)', () => {
     expect(editorSend).toHaveBeenCalledWith({ type: 'openFile', path: '.tau/workbench/entries.json', source: 'user' });
   });
 });
+
+it.each(['cancel', 'escape', 'settled'] as const)(
+  'should return focus inline to the row’s More actions after a %s Reset, or the fallback once the row is gone',
+  async (mode) => {
+    const fallback = createRef<HTMLButtonElement>();
+    render(
+      <TooltipProvider>
+        <RecordIssuesAction variant='inline' fallbackFocus={() => fallback.current?.focus()} />
+        <button ref={fallback} type='button'>
+          Close project sheet
+        </button>
+      </TooltipProvider>,
+    );
+    const reset = vi.fn(async () => {
+      publishRecordIssue('radial', 'entries', undefined);
+      return true;
+    });
+    publish('entries', issue({ bytes: encoder.encode('{broken'), reset }));
+    const user = userEvent.setup();
+    const more = screen.getByRole('button', { name: 'More actions for Model display settings' });
+    act(() => {
+      more.focus();
+    });
+    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
+    const dialog = await screen.findByRole('alertdialog');
+    if (mode === 'escape') {
+      await user.keyboard('{Escape}');
+    } else {
+      act(() => {
+        within(dialog)
+          .getByRole('button', { name: mode === 'cancel' ? 'Cancel' : 'Reset settings' })
+          .focus();
+      });
+      await user.keyboard('{Enter}');
+    }
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        mode === 'settled'
+          ? fallback.current
+          : screen.getByRole('button', { name: 'More actions for Model display settings' }),
+      );
+    });
+  },
+);

@@ -27,17 +27,29 @@ import type { RevisionWhere } from '#routes/w.$workspace.$project/revision-vocab
 
 let focusedChatId: string | undefined = 'chat-1';
 let projectName = 'Planetary gearbox';
+let isProjectError = false;
 const editorRef = {
   getSnapshot: () => ({ context: { focusedChatId } }),
   subscribe: () => ({ unsubscribe: () => undefined }),
   send: vi.fn(),
 };
 const projectRef = {
-  getSnapshot: () => ({ context: { project: { name: projectName } } }),
+  getSnapshot: () => ({
+    context: { project: { name: projectName } },
+    matches: (state: string) => state === 'error' && isProjectError,
+  }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: 'p', editorRef, projectRef }),
+}));
+let unavailableReason: string | undefined;
+const fileManagerRef = {
+  getSnapshot: () => ({ context: {}, matches: () => false }),
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => ({ fileManagerRef, unavailableReason }),
 }));
 
 const openPanel = vi.fn();
@@ -164,6 +176,9 @@ beforeEach(() => {
   openPanel.mockClear();
   focusedChatId = 'chat-1';
   projectName = 'Planetary gearbox';
+  isProjectError = false;
+  unavailableReason = undefined;
+  document.querySelector('[data-slot=mobile-surface]')?.remove();
   chats = [{ id: 'chat-1', name: 'Initial design', checkoutId: 'live' }];
 });
 
@@ -248,6 +263,28 @@ describe('selectProjectStatusLine', () => {
     expect(line(status(), onMain, { issues: { state: 'unconfirmed', count: 2 } }).text).toBe(
       'Save not confirmed · 2 issues',
     );
+  });
+
+  it('lets a revision conflict win the word over a settings record’s unconfirmed write, keeping its count', () => {
+    const result = line(status({ attention: 1, conflicts: [conflict] }), onMain, {
+      issues: { state: 'unconfirmed', count: 1 },
+    });
+    expect(result.text).toBe('Conflict · 1 issue');
+    expect(result.icon).toBe(GitMerge);
+    expect(result.tone).toBe('text-warning');
+    /* A revision's own unconfirmed write still outranks its conflict, as the shared facts rank them. */
+    expect(line(status({ attention: 2, conflicts: [conflict] })).text).toBe('Save not confirmed');
+  });
+
+  it('keeps the turning glyph while saving even when a settings record needs a person', () => {
+    const result = line(
+      status({ minting: true }),
+      { ...onMain, isDirty: true },
+      { issues: { state: 'invalid', count: 1 } },
+    );
+    expect(result.text).toBe('Saving… · 1 issue');
+    expect(result.icon).toBe(CircleDashed);
+    expect(result.isBusy).toBe(true);
   });
 
   it('raises a settings record that needs a person on the glyph without renaming the save state', () => {
@@ -442,5 +479,80 @@ describe('MobileProjectTopBar', () => {
     for (const chip of chips) {
       expect(chip).toHaveClass('pointer-coarse:hidden');
     }
+  });
+  it('draws a 20px sidebar glyph, the same size as Share’s', () => {
+    render(<MobileProjectTopBar />, { wrapper });
+
+    const sidebarIcon = within(topBar()).getByRole('button', { name: 'Open sidebar' }).querySelector('svg');
+    const shareIcon = within(topBar()).getByRole('button', { name: 'Share' }).querySelector('svg');
+    expect(sidebarIcon).toHaveClass('size-5');
+    expect(shareIcon).toHaveClass('size-5');
+  });
+
+  it('hands focus to the surface a destination opened, not back to the title', async () => {
+    openPanel.mockImplementationOnce(() => {
+      // The phone shell names its sheet section after the surface it opens (the nav's chooseSurface path).
+      const section = document.createElement('section');
+      section.dataset['slot'] = 'mobile-surface';
+      section.tabIndex = -1;
+      section.setAttribute('aria-label', 'Export');
+      document.body.append(section);
+    });
+    render(<MobileProjectTopBar />, { wrapper });
+
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Export' }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(document.querySelector('[data-slot=mobile-surface]'));
+    });
+    expect(document.activeElement).not.toBe(titleButton());
+  });
+
+  it.each(['Close', 'Escape'])('returns focus to the title when the sheet is dismissed with %s', async (how) => {
+    render(<MobileProjectTopBar />, { wrapper });
+
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    if (how === 'Close') {
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Close project sheet' }));
+    } else {
+      fireEvent.keyDown(sheet, { key: 'Escape' });
+    }
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: projectName })).toBeNull();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(titleButton());
+    });
+    expect(openPanel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'the project failed to load',
+      () => {
+        isProjectError = true;
+      },
+    ],
+    [
+      'the workspace is unavailable',
+      () => {
+        unavailableReason = 'permission';
+      },
+    ],
+  ])('stands its project actions down while %s, keeping the sidebar', (_name, makeUnavailable) => {
+    makeUnavailable();
+    render(<MobileProjectTopBar />, { wrapper });
+
+    expect(titleButton()).toBeDisabled();
+    expect(within(topBar()).getByRole('button', { name: 'Share' })).toBeDisabled();
+    expect(within(topBar()).getByRole('button', { name: 'Open sidebar' })).toBeEnabled();
+    fireEvent.click(titleButton());
+    fireEvent.click(within(topBar()).getByRole('button', { name: 'Share' }));
+    expect(screen.queryByRole('dialog', { name: projectName })).toBeNull();
+    expect(openPanel).not.toHaveBeenCalled();
   });
 });

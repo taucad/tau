@@ -146,6 +146,17 @@ export function RecordIssuesAction({
     [fallbackFocus],
   );
   const [resetting, setResetting] = useState<RecordIssue>();
+  /* Inline, the reset opens from a row's own menu, so focus goes back to that row's trigger while it exists. */
+  const inlineList = useRef<HTMLDivElement>(null);
+  const resetPath = useRef<string | undefined>(undefined);
+  const resetFrom = (issue: RecordIssue): void => {
+    resetPath.current = issue.path;
+    setResetting(issue);
+  };
+  const rowTrigger = (): HTMLElement | undefined =>
+    [...(inlineList.current?.querySelectorAll<HTMLElement>('[data-record-actions]') ?? [])].find(
+      (candidate) => candidate.dataset['recordActions'] === resetPath.current,
+    );
   const projectName = projectRef.getSnapshot().context.project?.name ?? 'this project';
   const name = summary
     ? `${summary.label} · ${String(summary.count)} ${summary.count === 1 ? 'record' : 'records'}`
@@ -164,14 +175,16 @@ export function RecordIssuesAction({
         </span>
       )}
       {summary && variant === 'inline' ? (
-        <RecordIssuesList
-          summary={summary}
-          issues={issues}
-          projectName={projectName}
-          isDebug={debug}
-          onOpenFile={openFile}
-          onReset={setResetting}
-        />
+        <div ref={inlineList}>
+          <RecordIssuesList
+            summary={summary}
+            issues={issues}
+            projectName={projectName}
+            isDebug={debug}
+            onOpenFile={openFile}
+            onReset={resetFrom}
+          />
+        </div>
       ) : null}
       {summary && variant === 'trigger' ? (
         <RecordIssuesPopover
@@ -196,7 +209,10 @@ export function RecordIssuesAction({
         <AlertDialogContent
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            if (trigger.current?.isConnected) {
+            const row = variant === 'inline' ? rowTrigger() : undefined;
+            if (row?.isConnected) {
+              row.focus();
+            } else if (trigger.current?.isConnected) {
               trigger.current.focus();
             } else {
               fallbackFocus();
@@ -429,7 +445,12 @@ function RecordIssueRow({
         {issue.state === 'invalid' && issue.reset ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button size='sm' variant='ghost' aria-label={`More actions for ${name}`}>
+              <Button
+                size='sm'
+                variant='ghost'
+                aria-label={`More actions for ${name}`}
+                data-record-actions={issue.path}
+              >
                 <Ellipsis aria-hidden />
               </Button>
             </DropdownMenuTrigger>

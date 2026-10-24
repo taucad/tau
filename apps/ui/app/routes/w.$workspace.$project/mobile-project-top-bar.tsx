@@ -10,7 +10,7 @@
  * the desktop cannot disagree about save state (one owner, RA11).
  */
 import { useCallback, useId, useRef, useState } from 'react';
-import { Check, ChevronDown, CircleAlert, GitBranch, GitMerge, History, Info, X } from 'lucide-react';
+import { Check, ChevronDown, CircleAlert, GitBranch, GitMerge, History, Info, PanelLeft, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Button } from '@taucad/ui/components/button';
@@ -24,6 +24,7 @@ import { summarizeRecordIssues, useRecordIssues } from '#workbench-records/recor
 import type { RecordIssueState } from '#workbench-records/record-issues.js';
 import { paneTitle } from '#workbench-records/pane-titles.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { useIsProjectUnavailable } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { useFollowChat } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { RecordIssuesAction } from '#routes/w.$workspace.$project/record-issues-action.js';
 import { cloudUnavailable, revisionName, useRevisionFacts } from '#routes/w.$workspace.$project/revision-vocabulary.js';
@@ -77,11 +78,16 @@ export const selectProjectStatusLine = ({
   followBranch?: string | undefined;
 }>): ProjectStatusLine => {
   const status = ((): Omit<ProjectStatusLine, 'text'> => {
-    if (facts.sentence === saveNotConfirmed || issues?.state === 'unconfirmed') {
+    /* The shared facts already rank a revision's unconfirmed write above its conflict; a conflict then outranks a
+     * settings record's unconfirmed write, which the issue count still carries. */
+    if (facts.sentence === saveNotConfirmed) {
       return { icon: CircleAlert, tone: 'text-feature', isBusy: false, word: saveNotConfirmed };
     }
     if (facts.icon === GitMerge) {
       return { icon: GitMerge, tone: facts.tone, isBusy: false, word: 'Conflict' };
+    }
+    if (issues?.state === 'unconfirmed') {
+      return { icon: CircleAlert, tone: 'text-feature', isBusy: false, word: saveNotConfirmed };
     }
     if (facts.mark === 'failed' || facts.mark === 'attention') {
       return { icon: facts.icon, tone: facts.tone, isBusy: false, word: facts.sentence };
@@ -94,11 +100,12 @@ export const selectProjectStatusLine = ({
       !facts.sentence.endsWith(viewOnly) &&
       !facts.sentence.endsWith(cloudUnavailable);
     const word = isSavedFamily ? 'Saved' : facts.sentence;
-    if (issues !== undefined) {
-      return { icon: CircleAlert, tone: 'text-warning', isBusy: false, word };
-    }
+    /* Work in flight keeps its turning glyph; a settings record's count is still in the line. */
     if (facts.mark === 'running') {
       return { icon: facts.icon, tone: facts.tone, isBusy: true, word };
+    }
+    if (issues !== undefined) {
+      return { icon: CircleAlert, tone: 'text-warning', isBusy: false, word };
     }
     return word === 'Saved'
       ? { icon: Check, tone: '', isBusy: false, word }
@@ -165,6 +172,48 @@ export function ProjectStatusLineView({ line }: { readonly line: ProjectStatusLi
   );
 }
 
+/**
+ * Hand focus to the phone surface a destination opened once the sheet section names it, as choosing it from the
+ * nav does. Focus the person moved elsewhere in the meantime is left alone; nothing waits past a few seconds.
+ *
+ * @param title - The surface's title, which names its section.
+ */
+function focusSurfaceWhenOpen(title: string): void {
+  const take = (): boolean => {
+    const section = [...document.querySelectorAll<HTMLElement>('[data-slot=mobile-surface]')].find(
+      (candidate) => candidate.getAttribute('aria-label') === title,
+    );
+    if (!section) {
+      return false;
+    }
+    if (document.activeElement === document.body || document.activeElement === null) {
+      section.focus({ preventScroll: true });
+    }
+    return true;
+  };
+  if (take()) {
+    return;
+  }
+  const observer = new MutationObserver(() => {
+    if (take()) {
+      stop();
+    }
+  });
+  const surfaceWaitTimer = setTimeout(() => {
+    stop();
+  }, 5000);
+  function stop(): void {
+    observer.disconnect();
+    clearTimeout(surfaceWaitTimer);
+  }
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['aria-label'],
+  });
+}
+
 /** A destination row in the project sheet: its workbench title is its label and its name (I6). */
 function SheetRow({
   icon: Icon,
@@ -226,7 +275,10 @@ function ProjectSheet({
 }): React.JSX.Element {
   const { openPanel } = useProjectWorkspace();
   const closeRef = useRef<HTMLButtonElement>(null);
+  /* The surface a destination opened, which takes focus instead of the title. */
+  const chosenSurface = useRef<string | undefined>(undefined);
   const open = (panel: 'revisions' | 'export' | 'details'): void => {
+    chosenSurface.current = paneTitle(panel);
     onOpenChange(false);
     openPanel(panel);
   };
@@ -240,7 +292,15 @@ function ProjectSheet({
       <DrawerContent
         data-slot='project-sheet'
         onCloseAutoFocus={(event) => {
-          // The title that opened the sheet takes focus back.
+          const surface = chosenSurface.current;
+          chosenSurface.current = undefined;
+          if (surface !== undefined) {
+            // A chosen destination's surface takes focus, as it does from the nav.
+            event.preventDefault();
+            focusSurfaceWhenOpen(surface);
+            return;
+          }
+          // Dismissed (Close, Escape, a swipe): the title that opened the sheet takes focus back.
           if (returnFocus()) {
             event.preventDefault();
           }
@@ -329,7 +389,11 @@ export function MobileProjectTopBar(): React.JSX.Element {
   const { openPanel, registerRecordRecoveryFocus } = useProjectWorkspace();
   const projectName = useSelector(projectRef, (snapshot) => snapshot.context.project?.name) ?? 'Project';
   const status = useProjectStatus();
-  const [isSheetOpen, setSheetOpen] = useState(false);
+  /* While the unavailable overlay covers the project, its actions stand down as the dock strip did under it; the
+   * sidebar stays live so the person can leave. */
+  const isUnavailable = useIsProjectUnavailable();
+  const [isSheetRequested, setSheetOpen] = useState(false);
+  const isSheetOpen = isSheetRequested && !isUnavailable;
   const titleRef = useRef<HTMLButtonElement>(null);
   const returnFocus = useCallback((): boolean => {
     const title = titleRef.current;
@@ -351,14 +415,17 @@ export function MobileProjectTopBar(): React.JSX.Element {
         {status.issuesName}
       </span>
       {/* I3: the bar's three controls are 40px, as the shell pages' phone bar (D11). */}
-      <SidebarTrigger className='size-10' />
+      <SidebarTrigger className='size-10'>
+        <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-5' />
+      </SidebarTrigger>
       <button
         ref={titleRef}
         type='button'
         data-slot='project-title-button'
         aria-haspopup='dialog'
         aria-expanded={isSheetOpen}
-        className='flex h-10 min-w-0 flex-1 cursor-action flex-col items-start justify-center rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:focus-outline'
+        disabled={isUnavailable}
+        className='flex h-10 min-w-0 flex-1 cursor-action flex-col items-start justify-center rounded-md px-2 text-left outline-none hover:bg-accent focus-visible:focus-outline disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent'
         onClick={() => {
           setSheetOpen(true);
         }}
@@ -377,6 +444,7 @@ export function MobileProjectTopBar(): React.JSX.Element {
             size='icon-lg'
             aria-label={shareLabel}
             data-slot='project-share-button'
+            disabled={isUnavailable}
             onClick={() => {
               openPanel('share');
             }}

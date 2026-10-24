@@ -147,7 +147,7 @@ export function ParameterGroupSelector({
                 autoFocus
                 autoComplete='off'
                 value={createValue}
-                className='h-6 text-xs pointer-coarse:text-base'
+                className='h-6 text-xs pointer-coarse:h-10'
                 onChange={(event) => {
                   setCreateValue(event.target.value);
                 }}
@@ -176,7 +176,12 @@ export function ParameterGroupSelector({
                   event.stopPropagation();
                 }}
               />
-              <Button type='submit' size='xs' disabled={!createValue.trim() || Boolean(groups[createValue.trim()])}>
+              <Button
+                type='submit'
+                size='xs'
+                className='pointer-coarse:h-10'
+                disabled={!createValue.trim() || Boolean(groups[createValue.trim()])}
+              >
                 Save
               </Button>
             </form>
@@ -199,7 +204,7 @@ export function ParameterGroupSelector({
               autoFocus
               autoComplete='off'
               value={renameValue}
-              className='h-6 text-xs pointer-coarse:text-base'
+              className='h-6 text-xs pointer-coarse:h-10'
               onChange={(event) => {
                 setRenameValue(event.target.value);
               }}
@@ -229,7 +234,7 @@ export function ParameterGroupSelector({
             <Button
               type='submit'
               size='sm'
-              className='h-6 px-2 text-xs'
+              className='h-6 px-2 text-xs pointer-coarse:h-10'
               disabled={!renameValue.trim() || renameValue === item.name}
             >
               Save

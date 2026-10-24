@@ -5,7 +5,9 @@ retained bytes. Original paths inside the documents remain unchanged: they ident
 the historical source, not a requirement for a local Brain or build cache.
 
 The closure contains 137 original paths. Seventeen reuse byte-identical tracked
-fixtures under `packages/geospec-engine/fixtures`; the other 120 resolve to 95 loose
+fixtures under `packages/geospec/fixtures`, where the fixture corpus moved from
+`packages/geospec-engine/fixtures` when that package was removed; their original
+paths still name the old location. The other 120 resolve to 95 loose
 files under `data/` totalling 22,770,732 bytes. The 27 inputs that lived in the
 compiled engine's source tree (its conformance corpora and OCCT test STEP files)
 moved into `data/` byte for byte when the engine left this repository for

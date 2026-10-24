@@ -53,17 +53,24 @@ test.each([
   // From the peek up: the chat's composer must clear the nav at the lowest detent too (R4).
   await target.press(grabber(), 'Home');
   await expect.poll(async () => target.getAttribute(grabber(), 'aria-valuenow')).toBe('1');
-  // Chat fits the peek at rest: after a frame the sheet has not raised itself (I5) and nothing in it is clipped.
-  await target.evaluate(async () => {
-    await new Promise<void>((resolve) => {
-      requestAnimationFrame(() => {
+  // Chat fits the peek at rest: across a 1s window, sampled every frame, the sheet never raises itself (I5), and
+  // nothing in it is clipped. A raise lands within a frame or two of the resize, well inside the window.
+  const heldDetents = await target.evaluateLocator(grabber(), async (handle) => {
+    const seen = new Set<string>();
+    const until = performance.now() + 1000;
+    while (performance.now() < until) {
+      seen.add(String(handle.getAttribute('aria-valuenow')));
+      // oxlint-disable-next-line no-await-in-loop -- one sample per frame.
+      await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
           resolve();
         });
       });
-    });
+    }
+    seen.add(String(handle.getAttribute('aria-valuenow')));
+    return [...seen];
   });
-  expect(await target.getAttribute(grabber(), 'aria-valuenow')).toBe('1');
+  expect(heldDetents).toEqual(['1']);
   expect(await target.getAttribute(grabber(), 'aria-valuetext')).toBe('Peek');
   const clipped = await target.evaluateLocator(
     selectors.getByRole('region', { name: 'Chat', exact: true }),

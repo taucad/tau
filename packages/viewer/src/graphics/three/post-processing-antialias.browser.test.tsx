@@ -2633,15 +2633,15 @@ it.each([
         });
       });
       state!.advance(performance.now(), true);
+      // Observe the saved frame before optional preparation can change renderer history.
+      const before = await capture();
+      const firstMatrices = [...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements];
       await vi.waitFor(() => {
         state!.advance(performance.now(), true);
         for (const prepare of referenceMode.preparations) {
           expect(prepare()).toBe(true);
         }
       });
-      // Do not set the camera or inspect/compile shaders before the startup capture.
-      const before = await capture();
-      const firstMatrices = [...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements];
       for (let frame = 0; frame < 32; frame++) {
         // oxlint-disable-next-line no-await-in-loop -- Each captured frame must complete before advancing the same renderer.
         const repeat = await capture();

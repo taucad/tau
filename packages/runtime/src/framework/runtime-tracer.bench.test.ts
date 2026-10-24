@@ -21,11 +21,12 @@ import { describe, expect, it } from 'vitest';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import type { TelemetryEntry } from '#types/runtime-wire.types.js';
-// oxlint-disable-next-line no-restricted-imports -- The frozen reference stays outside the package build graph.
+/* oxlint-disable no-restricted-imports -- The frozen reference stays outside the package build graph. */
 import {
   ReferenceRuntimeTracer,
   ReferenceWorkerTelemetryCollector,
 } from '../../test/support/reference-span-path.fixture.js';
+/* oxlint-enable no-restricted-imports */
 
 /** Nanoseconds per span the live path may add over the reference, corrected by the A/A noise floor. */
 const perSpanBound = 70;

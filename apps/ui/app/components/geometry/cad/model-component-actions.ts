@@ -67,7 +67,7 @@ export function useModelComponentProjectActions(): ModelComponentProjectActions 
         return;
       }
       workspace?.openPanel('kinematics');
-      // The pane listens once mounted; a frame lets a newly opened pane subscribe, as Reveal in Explorer does.
+      // A pane this opens subscribes after the emit and takes it held (workbench-reveal.ts).
       requestAnimationFrame(() => {
         project.editorRef.send({
           type: 'revealModelComponentInKinematics',

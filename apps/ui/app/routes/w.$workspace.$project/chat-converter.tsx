@@ -695,6 +695,7 @@ export const ChatConverter = memo(function (properties: {
           <FloatingPanelContentTitle>Exporter</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Exporter'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>

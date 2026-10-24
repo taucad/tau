@@ -221,8 +221,27 @@ function DrawerClose({ ...properties }: React.ComponentProps<typeof DrawerPrimit
 }
 
 /**
+ * The spoken name of a detent, by its place: the lowest is the peek, the tallest is full, and the one between three is
+ * half. Names, not percentages, so the same detent reads the same at every viewport height.
+ *
+ * @param index - The detent's place, from the lowest.
+ * @param count - How many detents the drawer has.
+ * @returns The detent's name.
+ */
+function detentName(index: number, count: number): string {
+  if (index === 0) {
+    return 'Peek';
+  }
+  if (index === count - 1) {
+    return 'Full';
+  }
+  return count === 3 ? 'Half' : `Detent ${index + 1} of ${count}`;
+}
+
+/**
  * Supplies Vaul's draggable drawer handle. For multiple snap points it implements the APG slider pattern:
- * arrows step, Home/End select the extremes, and Enter/Space cycle without dismissing. The current height is announced.
+ * arrows step, Home/End select the extremes, and Enter/Space cycle without dismissing. The current detent is announced
+ * by name (Peek, Half, Full).
  *
  * @public
  * @example <caption>Render a drawer handle.</caption>
@@ -240,7 +259,6 @@ function DrawerHandle({
   const snaps = React.useContext(DrawerSnapContext);
   const adjustable = snaps !== undefined && snaps.points.length > 1;
   const index = adjustable ? Math.max(0, snaps.points.indexOf(snaps.active ?? snaps.points[0]!)) : 0;
-  const value = snaps?.points[index];
   return (
     <DrawerPrimitive.Handle
       data-slot='drawer-handle'
@@ -254,7 +272,7 @@ function DrawerHandle({
             'aria-valuemin': 1,
             'aria-valuemax': snaps.points.length,
             'aria-valuenow': index + 1,
-            'aria-valuetext': typeof value === 'number' ? `${Math.round(value * 100)}% height` : `${value} height`,
+            'aria-valuetext': detentName(index, snaps.points.length),
           }
         : {})}
       {...properties}
@@ -286,10 +304,14 @@ function DrawerHandle({
   );
 }
 
+/**
+ * The grabber row. Its 44px target (D4) is the 36px row plus 8px above the sheet's edge: the row's foot belongs to the
+ * surface's header actions, and content docked above a sheet keeps 8px clear of its edge.
+ */
 function DrawerHandleIndicator({ className, ...properties }: React.ComponentProps<'div'>): React.JSX.Element {
   return (
     <div className='relative hidden h-(--drawer-handle-height) shrink-0 group-data-[vaul-drawer-direction=bottom]/drawer-content:block has-[:focus-visible]:focus-outline'>
-      <DrawerHandle className='absolute! inset-0! m-auto! size-full! opacity-0!' />
+      <DrawerHandle className='absolute! inset-x-0! -top-2! bottom-0! m-0! h-auto! w-full! opacity-0! [&>[data-vaul-handle-hitarea]]:size-full!' />
       <div
         data-slot='drawer-handle-indicator'
         className={cn(
@@ -378,7 +400,7 @@ function DrawerContent({
         data-keyboard={keyboard ? 'open' : undefined}
         style={frameStyle ? { ...style, ...frameStyle } : style}
         className={cn(
-          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*6)]',
+          'group/drawer-content fixed z-50 flex h-auto flex-col bg-background [--drawer-handle-height:calc(var(--spacing)*9)]',
           'select-none',
           /* A field is editable text even inside an unselectable drawer: WebKit inherits
              user-select, and iOS will not place a caret in an editor under user-select: none. */

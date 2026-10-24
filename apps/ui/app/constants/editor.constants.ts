@@ -13,13 +13,25 @@ export const panelMinSizeViewer = 416;
 /** Minimum width for the mixed file/utility Workbench lane at narrow desktop widths. */
 export const panelMinSizeWorkbench = 320;
 
-/** Mobile drawer snap points for the projects interface */
-export const mobileDrawerSnapPoints: Array<number | string> = [0.7, 1];
+/**
+ * The phone sheet's lowest detent (peek). A height rather than a fraction, so the surface's title row and the chat
+ * composer fit above the workbench nav on the shortest phone (320×640) as on the tallest.
+ */
+export const mobileDrawerPeekSnapPoint = '240px';
+
+/** The detent a surface opens at from the model (half). */
+export const mobileDrawerOpenSnapPoint = 0.7;
+
+/** Mobile drawer snap points for the projects interface: peek, half and full (D4). */
+export const mobileDrawerSnapPoints: Array<number | string> = [mobileDrawerPeekSnapPoint, mobileDrawerOpenSnapPoint, 1];
 
 /** Default runtime operation timeout. Milliseconds. */
 export const defaultOperationTimeout = 180_000;
 
-/** Existing mobile drawer surfaces; desktop utilities are Workbench tabs. */
+/**
+ * Every phone surface: the model stage (`viewer`), the chat, the editor, and one per desktop Workbench surface, so
+ * each registry pane opens on a phone (I1). `model-tree` is the Workbench `model` pane; the stage keeps "Model".
+ */
 export const mobilePanelIds = [
   'chat',
   'files',
@@ -30,6 +42,14 @@ export const mobilePanelIds = [
   'details',
   'share',
   'revisions',
+  'model-tree',
+  'kinematics',
+  'print',
+  'browser',
+  'agents',
+  'jobs',
+  'kernel',
+  'console',
 ] as const;
 
 // ============================================================================

@@ -265,6 +265,7 @@ const ExpandedChatHistory = memo(function ({
               <ChatTitleBar
                 closeButton={
                   <FloatingPanelClose
+                    label='Close Chat'
                     icon={XIcon}
                     tooltipContent={(isOpen) => (
                       <div className='flex items-center gap-2'>

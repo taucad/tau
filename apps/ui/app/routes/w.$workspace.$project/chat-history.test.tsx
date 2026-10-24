@@ -175,7 +175,9 @@ vi.mock('#routes/w.$workspace.$project/chat-error.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-title-bar.js', () => ({
-  ChatTitleBar: () => <span data-testid='chat-title-bar' />,
+  ChatTitleBar: ({ closeButton }: { readonly closeButton?: React.ReactNode }) => (
+    <span data-testid='chat-title-bar'>{closeButton}</span>
+  ),
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-history-empty.js', () => ({
@@ -184,7 +186,7 @@ vi.mock('#routes/w.$workspace.$project/chat-history-empty.js', () => ({
 
 vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanel: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
-  FloatingPanelClose: () => null,
+  FloatingPanelClose: ({ label }: { readonly label?: string }) => <button type='button' aria-label={label} />,
   FloatingPanelContent: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeader: ({
     children,
@@ -317,6 +319,12 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(skillsCatalogReads).toHaveBeenCalledOnce();
     expect(screen.getAllByTestId('chat-message')).toHaveLength(2);
     expect(screen.getByTestId('chat-textarea')).toBeInTheDocument();
+  });
+
+  it('names its Close after the panel, as its tooltip does (I6)', () => {
+    render(<ChatHistory />);
+
+    expect(screen.getByRole('button', { name: 'Close Chat' })).toBeInTheDocument();
   });
 
   it('opens with one header row that holds the title bar, and no status row under it', () => {

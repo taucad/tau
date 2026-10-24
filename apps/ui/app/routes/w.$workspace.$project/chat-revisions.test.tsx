@@ -15,7 +15,11 @@ import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
+import {
+  ChatRevisions,
+  RevisionsPanelBody,
+  groupRevisionHistory,
+} from '#routes/w.$workspace.$project/chat-revisions.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { refuseCreateBranch, revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
@@ -149,6 +153,17 @@ describe('Revisions pane', () => {
 
     expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
     expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
+  });
+
+  it('names its Close after the panel, as its tooltip does (I6)', () => {
+    render(
+      <TooltipProvider>
+        <ChatRevisions />
+      </TooltipProvider>,
+      { wrapper },
+    );
+
+    expect(screen.getByRole('button', { name: 'Close Revisions' })).toBeInTheDocument();
   });
 
   it('renders exactly one "Current" for a projection with two branches', async () => {

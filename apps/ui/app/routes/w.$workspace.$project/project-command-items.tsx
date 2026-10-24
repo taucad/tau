@@ -332,7 +332,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       },
       {
         id: 'open-model',
-        label: 'Open model structure',
+        label: 'Open model tree',
         group: 'Workbench',
         icon: <FileBox />,
         action: () => {

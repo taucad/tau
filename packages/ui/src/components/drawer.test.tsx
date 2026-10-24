@@ -120,6 +120,28 @@ describe('DrawerContent', () => {
   });
 });
 
+describe('drawer grabber target', () => {
+  it('should give the grabber a 36px row and a 44px target that reaches 8px above the sheet edge only (D4, I3)', () => {
+    render(
+      <Drawer open snapPoints={[0.25, 1]}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    const row = handle.parentElement!;
+    const content = handle.closest('[data-slot=drawer-content]')!;
+    // 9 × 4px spacing: the row is the grabber box, which the surface below starts after.
+    expect(content).toHaveClass('[--drawer-handle-height:calc(var(--spacing)*9)]');
+    expect(row).toHaveClass('h-(--drawer-handle-height)', 'relative');
+    // The target spans the row's width, starts 8px (2 × 4px) above it and ends at its foot, never over the header.
+    expect(handle).toHaveClass('absolute!', 'inset-x-0!', '-top-2!', 'bottom-0!', 'h-auto!', 'w-full!');
+    expect(handle).not.toHaveClass('inset-0!', 'size-full!');
+  });
+});
+
 describe('drawer height keyboard controls', () => {
   it('should expose its current snap point and clamp arrow navigation without dismissing', () => {
     const onOpenChange = vi.fn<(open: boolean) => void>();
@@ -132,9 +154,9 @@ describe('drawer height keyboard controls', () => {
       </Drawer>,
     );
     const handle = screen.getByRole('slider', { name: 'Drawer height' });
-    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
     fireEvent.keyDown(handle, { key: 'ArrowUp' });
-    expect(handle).toHaveAttribute('aria-valuetext', '58% height');
+    expect(handle).toHaveAttribute('aria-valuetext', 'Half');
     fireEvent.keyDown(handle, { key: 'End' });
     fireEvent.keyDown(handle, { key: 'ArrowUp' });
     expect(handle).toHaveAttribute('aria-valuenow', '3');
@@ -142,6 +164,21 @@ describe('drawer height keyboard controls', () => {
     fireEvent.keyDown(handle, { key: 'ArrowDown' });
     expect(handle).toHaveAttribute('aria-valuenow', '1');
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('should name the detents of a two-detent drawer Peek and Full', () => {
+    render(
+      <Drawer open snapPoints={['240px', 1]}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Full');
   });
 
   it('should cycle through its detents with Enter and Space, wrapping from the tallest to the first', () => {
@@ -155,14 +192,14 @@ describe('drawer height keyboard controls', () => {
       </Drawer>,
     );
     const handle = screen.getByRole('slider', { name: 'Drawer height' });
-    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
     expect(fireEvent.keyDown(handle, { key: 'Enter' })).toBe(false);
-    expect(handle).toHaveAttribute('aria-valuetext', '58% height');
+    expect(handle).toHaveAttribute('aria-valuetext', 'Half');
     // Handled, so Space neither scrolls the page nor reaches a parent's key handler.
     expect(fireEvent.keyDown(handle, { key: ' ' })).toBe(false);
-    expect(handle).toHaveAttribute('aria-valuetext', '100% height');
+    expect(handle).toHaveAttribute('aria-valuetext', 'Full');
     fireEvent.keyDown(handle, { key: 'Enter' });
-    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 

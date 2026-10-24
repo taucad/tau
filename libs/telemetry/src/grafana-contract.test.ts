@@ -334,6 +334,12 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_mirror_reconcile_hidden_versions: 'OB9',
   tau_mirror_destination_stored_bytes: 'OB9',
   tau_mirror_destination_object_versions: 'OB9',
+  // DR2-lite ships the verify drill's series; OB9's B2 row adds the drill freshness and failure panels.
+  tau_mirror_drill_runs_total: 'OB9',
+  tau_mirror_drill_check_failures_total: 'OB9',
+  tau_mirror_drill_last_success_timestamp_seconds: 'OB9',
+  tau_mirror_drill_duration_seconds: 'OB9',
+  tau_mirror_drill_verified_bytes_total: 'OB9',
   // DW1/DW2 ship the route table and freeze series; OB5's migration panels read them.
   tau_git_route_frozen: 'OB5',
   tau_git_route_frozen_oldest: 'OB5',

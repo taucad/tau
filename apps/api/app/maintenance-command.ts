@@ -20,6 +20,8 @@ import { assertProjectActive } from '#database/project-lifecycle.js';
 import { purgeDeletedProject, purgeDeletedProjects } from '#api/git/maintenance/project-purge.js';
 import { recoverProjectDeletions, runMaintenanceWorker } from '#api/git/maintenance/worker.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
+import { copiedProjects, listCopySnapshots, restoreFromCopy } from '#api/git/maintenance/restore-copy.js';
+import { S3MirrorDestination } from '#api/git/mirror/destination.js';
 import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
 import { readMaintenanceLiveness, recordMaintenancePass } from '#api/git/maintenance/liveness.js';
 import { freezeEverything, parseFreezeSeconds, thawEverything } from '#api/git/routing/global-freeze.js';
@@ -78,10 +80,29 @@ const usage = `Usage: revisions-maintenance <command>
       delete. Above 10 000 objects an owner is skipped unless --confirm names it.
       An owner whose user row still exists is reported and skipped, never purged.
 
-  restore --project <id> --owner <id> [--operator <name>]
-      Rebuild a repository in the primary store from the manifest and packs held
-      by the restore source (TAU_S3_RESTORE_*), with a fresh incarnation and a
-      higher generation. Nothing in the primary is deleted.
+  restore --project <id> --owner <id> [--operator <name>] [--dry-run]
+          [--generation <G> [--confirm-snapshot <sha256>]] [--generation-floor <N>]
+  restore --project <id> --owner <id> --list
+      Rebuild a repository in the primary from the B2 second copy alone (DR1),
+      through the read-only restore key (TAU_S3_RESTORE_*). The snapshot is
+      found by version listing; by default only the one whose SHA-256 is
+      project_git.copied_manifest_sha256 is restored. Another generation needs
+      --generation and --confirm-snapshot with the SHA-256 --list prints. Every
+      pack, index and LFS object is the version that verifies against its name;
+      into an empty prefix the push-log chain comes too. It commits a fresh
+      incarnation above the primary's, the snapshot's, Postgres's and any
+      --generation-floor generation. Nothing in the primary is deleted or
+      overwritten. Refuses an owner with a storage_tombstone row or a tombstone
+      marker in the copy. --dry-run prints the plan and writes nothing.
+
+  restore-owner --owner <id> [--operator <name>] [--dry-run]
+      restore, with defaults, for every repository of the owner the copy holds
+      and Postgres still has as an active project. Prints one line per
+      repository; exits 1 when any was refused or failed.
+
+  restore-store --project <id> --owner <id> [--operator <name>]
+      The pre-DR1 restore from a bucket in Tau's own layout (a manifest.json and
+      the packs it names) at TAU_S3_RESTORE_*: for a store move's copy, not B2.
 
   retire-lfs [--dry-run]
       Retire every LFS object whose unreachable mark is older than the 30-day
@@ -165,6 +186,46 @@ const restoreAccount = (): StorageAccount => ({
   },
 });
 
+/** A whole-number `--flag`, or `undefined` when absent. */
+const optionalInteger = (args: readonly string[], name: string): number | undefined => {
+  const value = option(args, name);
+  if (value === undefined) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`--${name} must be a whole number\n\n${usage}`);
+  }
+  return parsed;
+};
+
+/** The B2 copy through the restore key, guarded to list, head and get. */
+const copyReader = (): S3MirrorDestination => {
+  const account = restoreAccount();
+  return new S3MirrorDestination(
+    {
+      endpoint: account.endpoint,
+      region: account.region,
+      bucket: account.bucket,
+      forcePathStyle: account.forcePathStyle,
+      credentials: account.credentials,
+    },
+    undefined,
+    { readOnly: true },
+  );
+};
+
+/** What a restore prints: the plan and what it wrote, never object bytes. */
+const summary = (result: Awaited<ReturnType<typeof restoreFromCopy>>) => ({
+  dryRun: result.manifest === undefined,
+  plan: result.plan,
+  committedGeneration: result.manifest?.generation,
+  incarnation: result.manifest?.incarnation,
+  packs: result.packs.length,
+  segments: result.segments.length,
+  lfs: result.lfs,
+});
+
 // oxlint-disable-next-line max-lines-per-function -- one switch over the subcommands; splitting it hides the argument contract
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -207,6 +268,48 @@ async function main(): Promise<void> {
   const database = drizzle(client, { schema });
   const report = (line: string): void => {
     console.log(line);
+  };
+  /** The project of `ownerId`, active and in Tau's own account: the only repositories the copy holds (D26). */
+  const copiedLocator = async (projectId: string, ownerId: string) => {
+    await assertProjectActive(database, projectId);
+    const [held] = await database
+      .select({ storageAccountId: project.storageAccountId })
+      .from(project)
+      .where(and(eq(project.id, projectId), eq(project.ownerId, ownerId)))
+      .limit(1);
+    if (held === undefined) {
+      throw new Error('Project owner not found');
+    }
+    if (held.storageAccountId !== null) {
+      throw new Error('The second copy holds only repositories in the Tau default account');
+    }
+    return repositoryLocator({ ownerId, projectId });
+  };
+  /** `restore-owner`'s step: one repository, reported as one line; false when it was refused or failed. */
+  const restoreOneOfOwner = async (copy: S3MirrorDestination, ownerId: string, projectId: string): Promise<boolean> => {
+    try {
+      const result = await restoreFromCopy({
+        database,
+        copy,
+        primary: new S3RepositoryStore(driver),
+        lfs: driver,
+        locator: await copiedLocator(projectId, ownerId),
+        operator: option(args, 'operator') ?? 'operator',
+        dryRun: args.includes('--dry-run'),
+        report,
+      });
+      await writeLine(JSON.stringify({ event: 'revisions_maintenance.restore', projectId, ...summary(result) }));
+      return true;
+    } catch (error) {
+      await writeLine(
+        JSON.stringify({
+          event: 'revisions_maintenance.restore_refused',
+          projectId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return false;
+    }
   };
   /* The loop runs each subcommand bare; that form alone is the scheduled pass
      `status` judges. A flagged run is an operator's and leaves no record. */
@@ -374,6 +477,58 @@ async function main(): Promise<void> {
         break;
       }
       case 'restore': {
+        const projectId = required(args, 'project');
+        const ownerId = required(args, 'owner');
+        const locator = await copiedLocator(projectId, ownerId);
+        const copy = copyReader();
+        try {
+          if (args.includes('--list')) {
+            for (const snapshot of await listCopySnapshots({ database, copy, locator })) {
+              // oxlint-disable-next-line no-await-in-loop -- backpressure bounds operator output
+              await writeLine(JSON.stringify({ event: 'revisions_maintenance.restore_snapshot', ...snapshot }));
+            }
+            break;
+          }
+          const generation = optionalInteger(args, 'generation');
+          const generationFloor = optionalInteger(args, 'generation-floor');
+          const confirmSnapshot = option(args, 'confirm-snapshot');
+          const result = await restoreFromCopy({
+            database,
+            copy,
+            primary: new S3RepositoryStore(driver),
+            lfs: driver,
+            locator,
+            operator: option(args, 'operator') ?? 'operator',
+            dryRun: args.includes('--dry-run'),
+            ...(generation === undefined ? {} : { generation }),
+            ...(generationFloor === undefined ? {} : { generationFloor }),
+            ...(confirmSnapshot === undefined ? {} : { confirmSnapshot }),
+            report,
+          });
+          console.log(JSON.stringify({ event: 'revisions_maintenance.restore', projectId, ...summary(result) }));
+        } finally {
+          copy.destroy();
+        }
+        break;
+      }
+      case 'restore-owner': {
+        const ownerId = required(args, 'owner');
+        const copy = copyReader();
+        let failed = 0;
+        try {
+          for (const projectId of await copiedProjects(copy, ownerId)) {
+            // oxlint-disable-next-line no-await-in-loop -- one repository at a time
+            failed += (await restoreOneOfOwner(copy, ownerId, projectId)) ? 0 : 1;
+          }
+        } finally {
+          copy.destroy();
+        }
+        if (failed > 0) {
+          process.exitCode = 1;
+        }
+        break;
+      }
+      case 'restore-store': {
         const projectId = required(args, 'project');
         const ownerId = required(args, 'owner');
         await assertProjectActive(database, projectId);

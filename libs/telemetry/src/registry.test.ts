@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(110);
+    expect(metrics).toHaveLength(115);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -66,10 +66,19 @@ describe('TauMetrics', () => {
       tau_mirror_reconcile_hidden_versions: 'gauge',
       tau_mirror_destination_stored_bytes: 'gauge',
       tau_mirror_destination_object_versions: 'gauge',
+      tau_mirror_drill_runs_total: 'counter',
+      tau_mirror_drill_check_failures_total: 'counter',
+      tau_mirror_drill_last_success_timestamp_seconds: 'gauge',
+      tau_mirror_drill_duration_seconds: 'histogram',
+      tau_mirror_drill_verified_bytes_total: 'counter',
     });
+    // The copy's series name the destination; the drill's name the environment it read (W13 Finding 8).
     for (const metric of mirror) {
-      expect(Object.keys(metric.attributes.shape)).toContain('destination');
+      expect(Object.keys(metric.attributes.shape)).toContain(
+        metric.name.startsWith('tau.mirror.drill_') ? 'environment' : 'destination',
+      );
     }
+    expect(TauMetrics.mirrorDrillRuns.attributes.shape.outcome.options).toEqual(['pass', 'fail']);
     expect(TauMetrics.mirrorRounds.attributes.shape.outcome.options).toEqual([
       'copied',
       'noop',

@@ -14,6 +14,9 @@ import type { MirrorEnvironment } from '#api/git/mirror/config.js';
 import { copyRepository, markTombstonedOwners } from '#api/git/mirror/copier.js';
 import type { CopierContext } from '#api/git/mirror/copier.js';
 import { S3MirrorDestination } from '#api/git/mirror/destination.js';
+import type { DestinationAccount } from '#api/git/mirror/destination.js';
+import { PostgresDrillLedger, exportLastDrillPass, removeDrillScratch, runVerifyDrill } from '#api/git/mirror/drill.js';
+import type { DrillContext } from '#api/git/mirror/drill.js';
 import { MirrorMetrics } from '#api/git/mirror/metrics.js';
 import { reconcile } from '#api/git/mirror/reconcile.js';
 import { runRetentionSweep } from '#api/git/mirror/retention.js';
@@ -53,10 +56,19 @@ const usage = `Usage: mirror-command <command>
       Print the lag and backlog as one tau_mirror.status JSON line; exit 1 when
       the copy lag is above 15 minutes.
 
+  drill [--sample <n>]
+      One verify drill (DR2-lite) now: read TAU_MIRROR_DRILL_SAMPLE (3) random
+      copied repositories back from the copy with read calls only, prove each
+      snapshot against copied_manifest_sha256 and every object it names (packs
+      through git index-pack), its LFS objects and their locks; record it in
+      mirror_drill_run and print one tau_mirror.drill line. Exit 1 on fail. The
+      worker runs the same drill 5 minutes after start and then daily.
+
 Environment: DATABASE_URL (the tau_mirror login); TAU_S3_ENDPOINT,
 TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY, TAU_S3_PRIVATE_BUCKET (R2,
 read-only); TAU_S3_COPY_ENDPOINT, TAU_S3_COPY_BUCKET, TAU_S3_COPY_REGION,
-TAU_S3_COPY_ACCESS_KEY_ID, TAU_S3_COPY_SECRET_ACCESS_KEY (B2 copy key).`;
+TAU_S3_COPY_ACCESS_KEY_ID, TAU_S3_COPY_SECRET_ACCESS_KEY (B2 copy key);
+TAU_MIRROR_ENVIRONMENT and TAU_MIRROR_DRILL_SAMPLE for the drill.`;
 
 const report = (event: Readonly<Record<string, unknown>>): void => {
   console.log(JSON.stringify(event));
@@ -100,7 +112,7 @@ const option = (args: readonly string[], name: string): string | undefined => {
   return value === undefined || value.startsWith('--') ? undefined : value;
 };
 
-// oxlint-disable-next-line max-lines-per-function -- one switch over six subcommands keeps the argument contract in one place
+// oxlint-disable-next-line max-lines-per-function -- one switch over seven subcommands keeps the argument contract in one place
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0] ?? '';
@@ -108,7 +120,7 @@ async function main(): Promise<void> {
     console.log(usage);
     return;
   }
-  if (!['worker', 'copy', 'sweep', 'reconcile', 'mark-owners', 'status'].includes(command)) {
+  if (!['worker', 'copy', 'sweep', 'reconcile', 'mark-owners', 'status', 'drill'].includes(command)) {
     throw new Error(`Unknown command '${command}'\n\n${usage}`);
   }
 
@@ -128,7 +140,7 @@ async function main(): Promise<void> {
     },
   });
   /* eslint-enable @typescript-eslint/naming-convention -- end PostgreSQL options */
-  const destination = new S3MirrorDestination({
+  const copyAccount: DestinationAccount = {
     endpoint: environment.TAU_S3_COPY_ENDPOINT,
     region: environment.TAU_S3_COPY_REGION,
     bucket: environment.TAU_S3_COPY_BUCKET,
@@ -137,7 +149,10 @@ async function main(): Promise<void> {
       accessKeyId: environment.TAU_S3_COPY_ACCESS_KEY_ID,
       secretAccessKey: environment.TAU_S3_COPY_SECRET_ACCESS_KEY,
     },
-  });
+  };
+  const destination = new S3MirrorDestination(copyAccount);
+  // The drill reads through its own client, guarded to list, head and get: it can never write or extend.
+  const reader = new S3MirrorDestination(copyAccount, undefined, { readOnly: true });
   const stop = new AbortController();
   const abort = (): void => {
     stop.abort();
@@ -158,19 +173,60 @@ async function main(): Promise<void> {
       signal: stop.signal,
     };
 
+    const drill = (sample: number): DrillContext => ({
+      copy: reader,
+      ledger: new PostgresDrillLedger(drizzle(client, { schema })),
+      metrics: context.metrics,
+      environment: environment.TAU_MIRROR_ENVIRONMENT,
+      sample,
+      report,
+      signal: stop.signal,
+    });
+
     switch (command) {
       case 'worker': {
         report({
           event: 'tau_mirror.start',
           pollMilliseconds: environment.TAU_MIRROR_POLL_MILLISECONDS,
+          drillSample: environment.TAU_MIRROR_DRILL_SAMPLE,
         });
+        const drilling = drill(environment.TAU_MIRROR_DRILL_SAMPLE);
+        // A drill killed mid-check (a deploy, an OOM) leaves its scratch repository behind.
+        await removeDrillScratch().catch((error: unknown) => {
+          report({
+            event: 'tau_mirror.pass_failed',
+            pass: 'drill_scratch',
+            error: error instanceof Error ? error.name : 'Error',
+          });
+        });
+        if (environment.TAU_MIRROR_DRILL_SAMPLE > 0) {
+          await exportLastDrillPass(drilling).catch((error: unknown) => {
+            report({
+              event: 'tau_mirror.pass_failed',
+              pass: 'drill_seed',
+              error: error instanceof Error ? error.name : 'Error',
+            });
+          });
+        }
         await runMirrorWorker({
           context,
           signal: stop.signal,
           pollMilliseconds: environment.TAU_MIRROR_POLL_MILLISECONDS,
           concurrency: environment.TAU_MIRROR_CONCURRENCY,
           backfillShare: environment.TAU_MIRROR_BACKFILL_SHARE,
+          ...(environment.TAU_MIRROR_DRILL_SAMPLE > 0 ? { drill: { run: async () => runVerifyDrill(drilling) } } : {}),
         });
+        break;
+      }
+      case 'drill': {
+        const sample = Number(option(args, 'sample') ?? environment.TAU_MIRROR_DRILL_SAMPLE);
+        if (!Number.isInteger(sample) || sample < 1) {
+          throw new Error(`--sample must be a positive integer\n\n${usage}`);
+        }
+        const result = await runVerifyDrill(drill(sample));
+        if (result.outcome === 'fail') {
+          process.exitCode = 1;
+        }
         break;
       }
       case 'copy': {
@@ -241,6 +297,7 @@ async function main(): Promise<void> {
     process.removeListener('SIGTERM', abort);
     process.removeListener('SIGINT', abort);
     destination.destroy();
+    reader.destroy();
     await client.end();
     await sdk.shutdown();
   }

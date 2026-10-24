@@ -13,6 +13,7 @@ import { addSurfaceCoordinates } from '#utils/surface-coordinates.js';
 import { normalizeColor } from '#utils/normalize-color.js';
 import type { GeometryReplicad } from '#replicad.types.js';
 import { resolveShapeName, uniqueShapeName } from '@taucad/geometry-core';
+import { getOC } from 'replicad';
 
 import {
   extractInstanceEdgeIds,
@@ -750,34 +751,43 @@ export type ReplicadTessellationRequest = Readonly<{
   explicitDefaults: OcctTessellationTolerances;
 }>;
 
+/* oxlint-disable eslint/new-cap -- OCCT methods retain their native C++ names. */
 /**
  * Bounding-box diagonal of every meshable shape together, in model millimetres. Reads the
- * B-rep geometry (not a triangulation), so it does not depend on any earlier meshing.
+ * B-rep geometry (not a triangulation), so it does not depend on any earlier meshing. The box is
+ * OCCT's cheap one (`BRepBndLib.Add`): it bounds each surface from its definition instead of
+ * sampling it, so it is never smaller than the tight box and, on curved and B-spline models, a few
+ * percent larger. A preset only needs the model's rough size, and replicad's tight
+ * `shape.boundingBox` (`AddOptimal`) costs up to half a second on a gear assembly.
  *
  * @param shapes - Shapes about to be meshed; drawings are ignored.
  * @returns The diagonal, or `NaN` when no meshable shape has extent.
  */
 export function measureShapesDiagonal(shapes: readonly InputShape[]): number {
-  const boxes = shapes.filter((config) => hasMeshableShape(config)).map(({ shape }) => shape.boundingBox);
-  const [combined, ...rest] = boxes;
-  if (combined === undefined) {
+  const meshable = shapes.filter((config) => hasMeshableShape(config));
+  if (meshable.length === 0) {
     return Number.NaN;
   }
+  const oc = getOC();
+  const box = new oc.Bnd_Box();
   try {
-    for (const box of rest) {
-      combined.add(box);
+    for (const { shape } of meshable) {
+      oc.BRepBndLib.Add(shape.wrapped, box, false);
     }
-    const [min, max] = combined.bounds;
-    return Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
-  } catch {
-    // A void box (an empty compound) has no corners.
-    return Number.NaN;
+    if (box.IsVoid()) {
+      return Number.NaN;
+    }
+    const low = box.CornerMin();
+    const high = box.CornerMax();
+    const diagonal = Math.hypot(high.X() - low.X(), high.Y() - low.Y(), high.Z() - low.Z());
+    low.delete();
+    high.delete();
+    return diagonal;
   } finally {
-    for (const box of boxes) {
-      box.delete();
-    }
+    box.delete();
   }
 }
+/* oxlint-enable eslint/new-cap */
 
 /**
  * Resolve a request into absolute tolerances. Explicit tolerances never measure the shapes.

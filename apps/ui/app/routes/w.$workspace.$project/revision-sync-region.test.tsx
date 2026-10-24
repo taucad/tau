@@ -1534,13 +1534,35 @@ describe('RevisionSyncRegion collaborators', () => {
   it('says so when access was revoked while the project was open', () => {
     renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'revoked', projectId: 'proj_1' });
 
-    /* HQ3: calm, owner-directed, and nothing lost. */
+    /* A missing listing proves neither deletion nor an owner revocation. */
     const backup = screen.getByRole('status', { name: 'Backup status' });
-    expect(backup).toHaveTextContent('Access removed');
+    expect(backup).toHaveTextContent('Cloud copy unavailable');
     expect(backup).toHaveTextContent(
-      'The owner removed your access to this project’s cloud copy. Ask them to add you again',
+      'The cloud copy may have been deleted or your access may have changed. Every revision stays on this device.',
     );
     expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Backup settings' })).toBeNull();
+  });
+
+  it('should preserve the deletion refusal when the cloud listing no longer names the project', () => {
+    renderRegion(
+      connected,
+      syncFacet({
+        state: 'failed',
+        reason: 'notFound',
+        error: 'This project has been deleted from Tau Cloud.',
+        pendingCount: 1,
+      }),
+      { role: 'revoked', projectId: 'proj_1' },
+    );
+
+    const backup = screen.getByRole('status', { name: 'Backup status' });
+    expect(backup).toHaveTextContent('Cloud copy unavailable');
+    expect(backup).toHaveTextContent('This project has been deleted from Tau Cloud.');
+    expect(backup).toHaveTextContent('Every revision stays on this device.');
+    expect(backup).not.toHaveTextContent('The owner removed');
+    expect(backup).not.toHaveTextContent('Ask them to add you again');
     expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Backup settings' })).toBeNull();
   });

@@ -66,7 +66,6 @@ const createViewer = (): TauMcpViewer => ({
     ...(options.presentation === 'text' ? { viewerUrl: 'http://127.0.0.1:4100/?model=model-1' } : {}),
   })),
   open: vi.fn<TauMcpViewer['open']>(async () => ({ model })),
-  browse: vi.fn<TauMcpViewer['browse']>(async () => ({ files: [{ path: 'src/bracket.ts', title: 'bracket' }] })),
   read: vi.fn<TauMcpViewer['read']>(async (input) => ({
     offset: input.offset,
     byteLength: 2,
@@ -79,6 +78,15 @@ const createViewer = (): TauMcpViewer => ({
     ...(input.capture === true ? ({ image: { mimeType: 'image/png', data: 'cG5n' } } as const) : {}),
   })),
   captureReply: vi.fn<TauMcpViewer['captureReply']>(async () => ({ accepted: true })),
+  listFiles: vi.fn<NonNullable<TauMcpViewer['listFiles']>>(async () => ({
+    entries: [
+      { name: 'exports', path: 'exports', isFolder: true, renderable: false },
+      { name: 'bracket.ts', path: 'bracket.ts', isFolder: false, size: 120, renderable: true },
+    ],
+    truncated: false,
+    filesVersion: 3,
+  })),
+  openFile: vi.fn<NonNullable<TauMcpViewer['openFile']>>(async () => ({ model })),
 });
 
 const connect = async (
@@ -103,11 +111,13 @@ const viewerTools = async (client: Client) => {
         [
           'show_model',
           'open_model_file',
-          'browse_models',
           'app_read',
           'view_state',
           'app_sync',
           'app_capture_reply',
+          'app_list_files',
+          'app_open_file',
+          'app_preview_parameters',
         ].includes(tool.name),
       )
       .map((tool) => [tool.name, tool._meta]),
@@ -174,7 +184,7 @@ describe('Tau MCP viewer', () => {
     expect(instructions.slice(instructions.indexOf('Tau CLI 0.1.0-')).length).toBeLessThanOrEqual(250);
     expect(instructions.length).toBeLessThan(2048);
     expect(instructions.slice(0, instructions.indexOf(' Tau CLI 0.1.0-'))).toMatchInlineSnapshot(
-      `"Use your native filesystem and shell tools to inspect and edit the current Tau project. Use your native skill loader for the Tau skills available in this session. For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools. Before editing geometry, create or update executable GeoSpec tests for the requested requirements. After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view. A static part is done when evaluate_model is ready, its summary bounds and componentCount fit the brief, and the whole test_model suite reports runStatus passed; inconclusive, unsupported and not-run requirements are undecided, not passed. A moving assembly also needs evaluate_model mechanism declared and admitted, and a file the person asked for its export_model validation (a watertight mesh, the expected STEP solids); name the case you met when reporting done. For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request. When the person should look at a model, call show_model on its source after evaluate_model succeeds: the Tau viewer shows the source with its parameters and mechanism, or returns a link to share; showing an exported file shows that file only. A reference like @cad[main.ts#component:node-1] names a part: the model file before # and the component id after it; when no reference reaches you, view_state lists the parts the person selected and added to chat with those ids, which show_model select and arrange_workbench also take."`,
+      `"Use your native filesystem and shell tools to inspect and edit the current Tau project. Use your native skill loader for the Tau skills available in this session. For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools. Before editing geometry, create or update executable GeoSpec tests for the requested requirements. After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view. A static part is done when evaluate_model is ready, its summary bounds and componentCount fit the brief, and the whole test_model suite reports runStatus passed; inconclusive, unsupported and not-run requirements are undecided, not passed. A moving assembly also needs evaluate_model mechanism declared and admitted, and a file the person asked for its export_model validation (a watertight mesh, the expected STEP solids); name the case you met when reporting done. For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request. When the person should look at a model, call show_model on its source after evaluate_model succeeds: the Tau viewer shows the source with its parameters and mechanism and follows its file and parameter changes, or returns a link to share; showing an exported file shows that file only. A reference like @cad[main.ts#component:node-1] names a part: the model file before # and the component id after it; when no reference reaches you, view_state lists the parts the person selected and added to chat with those ids, which show_model select and arrange_workbench also take."`,
     );
   });
 
@@ -234,6 +244,41 @@ describe('Tau MCP viewer', () => {
     await client.close();
   });
 
+  it("should offer app_preview_parameters to the page only, when the viewer previews, and pass the drag's values", async () => {
+    const previewParameters = vi.fn<NonNullable<TauMcpViewer['previewParameters']>>(async () => ({ accepted: true }));
+    const client = await connect(clients.claudeDesktop, { ...createViewer(), previewParameters });
+
+    const tools = await viewerTools(client);
+    expect(tools[tauViewerToolName.appPreviewParameters]).toEqual({
+      'anthropic/alwaysLoad': true,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    const result = await client.callTool({
+      name: tauViewerToolName.appPreviewParameters,
+      arguments: { modelId: 'model-1', parameters: { faceWidth: 16 } },
+    });
+    expect(result.structuredContent).toEqual({ accepted: true });
+    expect(previewParameters).toHaveBeenCalledWith(
+      { modelId: 'model-1', parameters: { faceWidth: 16 } },
+      expect.anything(),
+    );
+    const ended = await client.callTool({
+      name: tauViewerToolName.appPreviewParameters,
+      arguments: { modelId: 'model-1' },
+    });
+    expect(ended.isError).toBeFalsy();
+    const extra = await client.callTool({
+      name: tauViewerToolName.appPreviewParameters,
+      arguments: { modelId: 'model-1', commit: true },
+    });
+    expect(extra.isError).toBe(true);
+    await client.close();
+
+    const text = await connect(clients.codexCli, { ...createViewer(), previewParameters });
+    expect(Object.keys(await viewerTools(text))).not.toContain(tauViewerToolName.appPreviewParameters);
+    await text.close();
+  });
+
   it('should treat the Codex CLI as a text host', async () => {
     const client = await connect(clients.codexCli);
 
@@ -254,6 +299,8 @@ describe('Tau MCP viewer', () => {
       [tauViewerToolName.viewState]: { 'anthropic/alwaysLoad': true },
       [tauViewerToolName.appSync]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
       [tauViewerToolName.appCaptureReply]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appListFiles]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appOpenFile]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
     });
     /* The live link's tools are classified, so a host neither prompts for nor treats them as open-world calls. */
     const { tools } = await client.listTools();
@@ -279,7 +326,7 @@ describe('Tau MCP viewer', () => {
       [tauViewerToolName.showModel]: {
         'anthropic/alwaysLoad': true,
         ...openai,
-        'openai/ui': { entrypoints: [{ type: 'thread' }] },
+        'openai/ui': { entrypoints: [{ type: 'thread' }, { type: 'global' }] },
       },
       [tauViewerToolName.openModelFile]: {
         'anthropic/alwaysLoad': true,
@@ -288,15 +335,12 @@ describe('Tau MCP viewer', () => {
           entrypoints: [{ type: 'file', extensions: ['glb', 'svg', 'step', 'stp', 'stl', '3mf', 'obj'] }],
         },
       },
-      [tauViewerToolName.browseModels]: {
-        'anthropic/alwaysLoad': true,
-        ...openai,
-        'openai/ui': { entrypoints: [{ type: 'global' }] },
-      },
       [tauViewerToolName.appRead]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
       [tauViewerToolName.viewState]: { 'anthropic/alwaysLoad': true },
       [tauViewerToolName.appSync]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
       [tauViewerToolName.appCaptureReply]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appListFiles]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
+      [tauViewerToolName.appOpenFile]: { 'anthropic/alwaysLoad': true, ui: { resourceUri, visibility: ['app'] } },
     });
     await client.close();
   });
@@ -428,6 +472,26 @@ describe('Tau MCP viewer', () => {
 
     const values: Readonly<Record<(typeof tauViewerAcceptedViewFields)[number], unknown>> = {
       references: [{ componentId: 'component:arm', label: 'Arm', kind: 'part' }],
+      sourceRevision: { entry: 'main.ts', files: { 'main.ts': `sha256:${'a'.repeat(64)}` } },
+      settings: {
+        fieldOfView: 45,
+        upDirection: 'z',
+        display: {
+          surfaces: true,
+          lines: true,
+          gizmo: true,
+          grid: false,
+          axes: true,
+          matcap: false,
+          postProcessing: false,
+        },
+        grid: { unit: 'mm' },
+        section: { active: false, cuts: [] },
+        measurements: [],
+      },
+      mechanism: { preserved: true, joints: 2, animations: ['four-sun-turns'] },
+      playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
+      coordinates: { sun: 360, carrier: 90 },
     };
     for (const field of tauViewerAcceptedViewFields) {
       // oxlint-disable-next-line no-await-in-loop -- one field at a time.
@@ -435,9 +499,57 @@ describe('Tau MCP viewer', () => {
       expect(taken.isError).toBeFalsy();
     }
     /* What an older server does with a field it does not take: the whole sync fails, hence the guard. */
-    const rejected = await sync({ playback: { playing: true } });
+    const rejected = await sync({ explodedView: { factor: 2 } });
     expect(rejected.isError).toBe(true);
     await client.close();
+  });
+
+  it("should leave the page's view settings out of what view_state tells the model", async () => {
+    const settings: NonNullable<TauViewerViewState['settings']> = {
+      fieldOfView: 45,
+      upDirection: 'z',
+      display: {
+        surfaces: true,
+        lines: true,
+        gizmo: true,
+        grid: false,
+        axes: true,
+        matcap: false,
+        postProcessing: false,
+      },
+      grid: { unit: 'mm' },
+      section: { active: false, cuts: [] },
+      measurements: [],
+    };
+    const viewer = { ...createViewer(), viewState: async () => ({ view: { ...view, settings } }) };
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const result = await client.callTool({ name: 'view_state', arguments: {} });
+    expect(result.structuredContent).toEqual({ view });
+    await client.close();
+  });
+
+  it('should serve the saved view to the page alone, only from a host that keeps one', async () => {
+    const saved = { viewId: 'front', components: { hidden: ['component:bolt'], isolated: [] } };
+    const workbenchState = vi.fn<NonNullable<TauMcpViewer['workbenchState']>>(async () => saved);
+    const client = await connect(clients.claudeDesktop, { ...createViewer(), workbenchState });
+
+    const { tools } = await client.listTools();
+    expect(tools.find((tool) => tool.name === tauViewerToolName.appWorkbenchState)?._meta).toEqual({
+      'anthropic/alwaysLoad': true,
+      ui: { resourceUri, visibility: ['app'] },
+    });
+    const result = await client.callTool({ name: 'app_workbench_state', arguments: { modelId: 'model-1' } });
+    expect(result.structuredContent).toEqual(saved);
+    expect(workbenchState).toHaveBeenCalledWith({ modelId: 'model-1' }, expect.anything());
+    const malformed = await client.callTool({ name: 'app_workbench_state', arguments: {} });
+    expect(malformed.isError).toBe(true);
+    await client.close();
+
+    const without = await connect(clients.claudeDesktop);
+    const listed = await without.listTools();
+    expect(listed.tools.map((tool) => tool.name)).not.toContain(tauViewerToolName.appWorkbenchState);
+    await without.close();
   });
 
   it('should check what the page sends to app_sync and app_capture_reply', async () => {
@@ -459,12 +571,120 @@ describe('Tau MCP viewer', () => {
     await client.close();
   });
 
+  it("should list the project's files and open one for the asking page only", async () => {
+    const viewer = createViewer();
+    const client = await connect(clients.claudeDesktop, viewer);
+
+    const listed = await client.callTool({
+      name: 'app_list_files',
+      arguments: { modelId: 'model-1', path: '' },
+    });
+    expect(listed.structuredContent).toMatchObject({ truncated: false, filesVersion: 3 });
+    expect(listed.content).toEqual([{ type: 'text', text: '2 entries.' }]);
+    expect(viewer.listFiles).toHaveBeenCalledWith(
+      { modelId: 'model-1', path: '' },
+      expect.objectContaining({ presentation: 'inline' }),
+    );
+    /* A listing names a folder or a search, never both and never neither. */
+    const both = await client.callTool({ name: 'app_list_files', arguments: { path: '', query: 'bracket' } });
+    expect(both.isError).toBe(true);
+    const neither = await client.callTool({ name: 'app_list_files', arguments: {} });
+    expect(neither.isError).toBe(true);
+    expect(viewer.listFiles).toHaveBeenCalledTimes(1);
+
+    const opened = await client.callTool({
+      name: 'app_open_file',
+      arguments: { pageId: 'page-0001', path: 'exports/bracket.stl', modelId: 'model-1' },
+    });
+    expect(opened.structuredContent).toEqual({ model });
+    expect(viewer.openFile).toHaveBeenCalledWith(
+      { pageId: 'page-0001', path: 'exports/bracket.stl', modelId: 'model-1' },
+      expect.anything(),
+    );
+    expect(viewer.show).not.toHaveBeenCalled();
+    const unnamed = await client.callTool({ name: 'app_open_file', arguments: { path: 'src/bracket.ts' } });
+    expect(unnamed.isError).toBe(true);
+    await client.close();
+  });
+
   it('should report a host failure as an error result', async () => {
     const viewer = { ...createViewer(), show: async () => ({ errorCode: 'NOT_FOUND', message: 'No such file.' }) };
     const client = await connect(clients.claudeDesktop, viewer);
 
     const result = await client.callTool({ name: 'show_model', arguments: { targetFile: 'missing.ts' } });
     expect(result).toEqual({ isError: true, content: [{ type: 'text', text: 'NOT_FOUND: No such file.' }] });
+    await client.close();
+  });
+});
+
+describe('pose_model', () => {
+  const posed = {
+    model: { path: '.tau/artifacts/bracket.glb', sourceFile: 'src/bracket.ts' },
+    mechanism: { joints: 2, animations: ['four-sun-turns'] },
+    playback: { status: 'paused', animationId: 'four-sun-turns', time: 2, speed: 1 },
+    coordinates: { sun: 360, carrier: 90 },
+    atLimit: [],
+    viewers: 1,
+  } as const;
+
+  it('should be listed only for a viewer that poses, and forward the command', async () => {
+    const pose = vi.fn<NonNullable<TauMcpViewer['pose']>>(async () => posed);
+    const client = await connect(clients.claudeCode, { ...createViewer(), pose });
+    const without = await connect(clients.claudeCode);
+
+    const unlisted = await without.listTools();
+    expect(unlisted.tools.map((tool) => tool.name)).not.toContain('pose_model');
+    const tools = await client.listTools();
+    const listed = tools.tools.find((tool) => tool.name === 'pose_model');
+    expect(listed?.annotations?.readOnlyHint).toBe(false);
+    const result = await client.callTool({
+      name: 'pose_model',
+      arguments: { animation: { id: 'four-sun-turns', action: 'seek', time: 2 } },
+    });
+
+    expect(pose).toHaveBeenCalledWith(
+      { animation: { id: 'four-sun-turns', action: 'seek', time: 2 } },
+      expect.objectContaining({ presentation: 'text' }),
+    );
+    expect(result.structuredContent).toEqual(posed);
+    expect((result.content as Array<{ text: string }>)[0]?.text).toBe(
+      [
+        'Posed src/bracket.ts (2 joints; animations four-sun-turns).',
+        'Motion: animation four-sun-turns paused at 2 s (speed 1); coordinates sun 360, carrier 90.',
+        '1 viewer page applies it.',
+      ].join('\n'),
+    );
+    await client.close();
+    await without.close();
+  });
+
+  it('should refuse a seek without time before calling the viewer', async () => {
+    const pose = vi.fn<NonNullable<TauMcpViewer['pose']>>(async () => posed);
+    const client = await connect(clients.claudeCode, { ...createViewer(), pose });
+
+    const result = await client.callTool({
+      name: 'pose_model',
+      arguments: { animation: { id: 'four-sun-turns', action: 'seek' } },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(pose).not.toHaveBeenCalled();
+    await client.close();
+  });
+
+  it('should report the page playback in view_state', async () => {
+    const viewer = createViewer();
+    const moving = { ...view, playback: posed.playback, coordinates: posed.coordinates };
+    const client = await connect(clients.claudeCode, {
+      ...viewer,
+      viewState: vi.fn<TauMcpViewer['viewState']>(async () => ({ view: moving })),
+    });
+
+    const result = await client.callTool({ name: 'view_state', arguments: {} });
+
+    expect((result.content as Array<{ text: string }>)[0]?.text).toContain(
+      'Motion: animation four-sun-turns paused at 2 s (speed 1); coordinates sun 360, carrier 90.',
+    );
     await client.close();
   });
 });

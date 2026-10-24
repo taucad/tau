@@ -46,6 +46,7 @@ import { getErrno } from '@taucad/utils/error';
 import { sendHostCommand } from '#chat-clients/_internal/host-command.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
 import { waitUnlessGone } from '#lib/xstate.lib.js';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import type {
   ChatRequest,
@@ -599,10 +600,16 @@ export type ChatRevisionFacts = Readonly<{
   branch?: string;
 }>;
 
+/** A connection identity, distinct from an unknown connection or implicit browser placement. */
+const connectionPlacement = (placement: { hostId?: string } | undefined): string | undefined =>
+  placement === undefined ? undefined : placement.hostId === undefined ? 'browser' : `host:${placement.hostId}`;
+
 type ObservedChat = {
   projectId: string;
   refs: number;
   attachment?: Actor<typeof hostAttachment>;
+  /** Placement of that live connection, not the chat's desired execution. */
+  placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
   status: 'unknown' | 'attached' | 'lost' | 'refused';
   retry?: ReturnType<typeof setTimeout>;
   attempts: number;
@@ -623,9 +630,11 @@ export type ProjectClosePlan = Readonly<{
 }>;
 
 type ProjectHostConnector = Readonly<{
-  connect: (
-    chatId: string,
-  ) => Promise<Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'>>;
+  connect: (chatId: string) => Promise<
+    Pick<AgentHostClient, 'read' | 'catchUp' | 'subscribe' | 'hostCommand' | 'close'> & {
+      placement?: { hostId: ReturnType<typeof daemonPlacementOf> };
+    }
+  >;
   stoppability?: (chatId: string) => Promise<'stoppable' | 'other-build' | 'background-window'>;
 }>;
 
@@ -2032,6 +2041,44 @@ export class ChatSessionStore {
     }
   }
 
+  /** Pin a prepared message before transmission so a lost acknowledgement cannot replay on another host. */
+  async #connectQueuedCommand(
+    session: InternalSession,
+    connector: ProjectHostConnector,
+    { queueId, signal }: { queueId: string; signal: AbortSignal },
+  ): ReturnType<ProjectHostConnector['connect']> {
+    const client = await connector.connect(session.chatId);
+    try {
+      signal.throwIfAborted();
+      const destination = connectionPlacement(client.placement);
+      await session.messageQueueStore.update((record) => {
+        const item = record.items.find((entry) => entry.id === queueId);
+        if (item?.command === undefined) {
+          throw new Error('Queued message is no longer awaiting delivery.');
+        }
+        if (item.commandPlacement !== undefined && item.commandPlacement !== destination) {
+          throw new Error(
+            'This message may already have been sent on another host. Return to its original host to confirm delivery.',
+          );
+        }
+        if (destination === undefined || item.commandPlacement === destination) {
+          return record;
+        }
+        return {
+          ...record,
+          items: record.items.map((entry) =>
+            entry.id === queueId ? { ...entry, commandPlacement: destination } : entry,
+          ),
+        };
+      });
+      signal.throwIfAborted();
+      return client;
+    } catch (error) {
+      await client.close();
+      throw error;
+    }
+  }
+
   /** One serial outbox advancement; the session machine still owns turn admission. */
   async #advanceMessageQueue(
     session: InternalSession,
@@ -2047,10 +2094,13 @@ export class ChatSessionStore {
       if (projection === undefined || projection.fault !== undefined || !selectCaughtUp(projection)) {
         return { items: record.items, status: 'waiting' };
       }
+      const observation = this.#observed.get(session.chatId);
+      const placement = observation?.status === 'attached' ? observation.placement : undefined;
+      const observedPlacement = connectionPlacement(placement);
       for (const entry of record.items) {
         if (entry.command !== undefined && projection.ledger.applied[entry.command.commandId] !== undefined) {
           // oxlint-disable-next-line no-await-in-loop -- each acknowledgement reads the preceding durable queue state.
-          record = await session.messageQueueStore.acknowledge(entry.id, entry.command.commandId);
+          record = await session.messageQueueStore.acknowledge(entry.id, entry.command.commandId, observedPlacement);
         }
       }
       if (!canDeliver) {
@@ -2075,18 +2125,38 @@ export class ChatSessionStore {
           return { items: record.items, status: 'waiting' };
         }
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
-        const answer = await sendHostCommand(async () => connector.connect(session.chatId), item.command, { signal });
+        let acceptingPlacement: string | undefined;
+        const answer = await sendHostCommand(
+          async () => {
+            const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
+            acceptingPlacement = connectionPlacement(client.placement);
+            return client;
+          },
+          item.command,
+          { signal },
+        );
         if (answer.status === 'refused') {
           throw new Error(`Delivery could not be confirmed: ${answer.message}`);
         }
         if (answer.effect !== 'durable') {
           throw new Error('Message saved. The host has not confirmed durable acceptance.');
         }
-        const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId);
+        const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId, acceptingPlacement);
         return { items: after.items, status: 'changed' };
       }
       {
-        if (record.afterRunId !== undefined && projection.ledger.runs[record.afterRunId] === undefined) {
+        if (
+          record.afterRunId !== undefined &&
+          projection.ledger.runs[record.afterRunId] === undefined &&
+          (record.afterPlacement === undefined ||
+            observedPlacement === undefined ||
+            record.afterPlacement === observedPlacement) &&
+          !(
+            record.afterPlacement === undefined &&
+            observedPlacement !== undefined &&
+            record.rebasedPlacement === observedPlacement
+          )
+        ) {
           return { items: record.items, status: 'waiting' };
         }
         if (isLive(session.stateActorRef.getSnapshot()) && !retainsLiveRun(phase)) {
@@ -2300,6 +2370,7 @@ export class ChatSessionStore {
     observed.retry = undefined;
     observed.attachment?.stop();
     observed.attachment = undefined;
+    observed.placement = undefined;
     observed.status = 'unknown';
   }
 
@@ -2311,7 +2382,13 @@ export class ChatSessionStore {
     const attachment = createActor(hostAttachment, {
       input: {
         chatId,
-        connect: async () => connector.connect(chatId),
+        connect: async () => {
+          const client = await connector.connect(chatId);
+          if (observed.attachment === attachment) {
+            observed.placement = client.placement;
+          }
+          return client;
+        },
         projection: {
           getSnapshot: () => this.#projectionOf(chatId).getSnapshot(),
           send: (event) => {
@@ -2656,9 +2733,22 @@ export class ChatSessionStore {
         });
         abort.signal.throwIfAborted();
       }
-      const answer = await sendHostCommand(async () => connector.connect(session.chatId), command, {
-        signal: abort.signal,
-      });
+      let acceptingPlacement: string | undefined;
+      const answer = await sendHostCommand(
+        async () => {
+          const client =
+            request.queueId === undefined
+              ? await connector.connect(session.chatId)
+              : await this.#connectQueuedCommand(session, connector, {
+                  queueId: request.queueId,
+                  signal: abort.signal,
+                });
+          acceptingPlacement = connectionPlacement(client.placement);
+          return client;
+        },
+        command,
+        { signal: abort.signal },
+      );
       if (session.commandAbort !== abort || abort.signal.aborted) {
         return;
       }
@@ -2670,7 +2760,7 @@ export class ChatSessionStore {
         return;
       }
       if (request.queueId !== undefined) {
-        await session.messageQueueStore.acknowledge(request.queueId, command.commandId);
+        await session.messageQueueStore.acknowledge(request.queueId, command.commandId, acceptingPlacement);
         if (session.commandAbort !== abort) {
           return;
         }
@@ -3648,8 +3738,52 @@ export class ChatSessionStore {
             },
           }),
           persistActiveExecutionActor: createAsyncLogic({
-            run: async ({ input }) => {
+            run: async ({ input, signal }) => {
               await depsRef().patchChat(input.chatId, 'activeExecution', input.activeExecution);
+              signal.throwIfAborted();
+              if (this.#sessions.get(input.chatId) !== session) {
+                return;
+              }
+              // Commands resolve the persisted placement for each turn. Its
+              // long-lived log subscription must follow the same host change.
+              const observed = this.#observed.get(input.chatId);
+              if (
+                observed?.placement !== undefined &&
+                input.activeExecution !== undefined &&
+                observed.placement.hostId === daemonPlacementOf(input.activeExecution)
+              ) {
+                return;
+              }
+              // A destination-specific grant keeps a cancelled switch from
+              // releasing the old host's fence. Unknown prepared commands remain
+              // blocked even if the initial attachment has not connected yet.
+              const destination =
+                observed?.placement === undefined || input.activeExecution === undefined
+                  ? undefined
+                  : connectionPlacement({ hostId: daemonPlacementOf(input.activeExecution) });
+              await session.messageQueueStore.update((record) => {
+                const items = record.items.map((item) =>
+                  item.command !== undefined && item.commandPlacement === undefined
+                    ? { ...item, commandPlacement: 'unconfirmed' }
+                    : item,
+                );
+                if (
+                  destination === undefined ||
+                  record.afterRunId === undefined ||
+                  record.afterPlacement !== undefined ||
+                  items.some((item) => item.command !== undefined || item.steer !== undefined)
+                ) {
+                  return items.every((item, index) => item === record.items[index]) ? record : { ...record, items };
+                }
+                return { ...record, rebasedPlacement: destination };
+              });
+              signal.throwIfAborted();
+              if (observed !== undefined) {
+                this.#stopObservedAttachment(input.chatId, observed);
+                this.#projectionTopics.get(input.chatId)?.emit();
+                observed.attempts = 0;
+                this.#startObservedAttachment(input.chatId, observed);
+              }
             },
           }),
           persistActiveKernelActor: createAsyncLogic({

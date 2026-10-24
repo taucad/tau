@@ -560,4 +560,101 @@ describe('PluginsRoute', () => {
     expect(screen.getByRole('button', { name: 'Create Skill installed' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Install Create Skill' })).not.toBeInTheDocument();
   });
+  it('should filter by kind only while a kind is pressed, and list plugins and skills together otherwise', async () => {
+    const user = userEvent.setup();
+    renderRoute();
+    const sections = (): string[] => screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+    const plugins = screen.getByRole('button', { name: 'Plugins', pressed: false });
+    const skills = screen.getByRole('button', { name: 'Skills', pressed: false });
+    expect(sections()).toEqual(['Featured', 'System', 'Skills']);
+
+    await user.click(plugins);
+    expect(plugins).toHaveAttribute('aria-pressed', 'true');
+    expect(sections()).toEqual(['Featured']);
+
+    await user.click(skills);
+    expect(plugins).toHaveAttribute('aria-pressed', 'false');
+    expect(skills).toHaveAttribute('aria-pressed', 'true');
+    expect(sections()).toEqual(['System', 'Skills']);
+
+    await user.click(skills);
+    expect(skills).toHaveAttribute('aria-pressed', 'false');
+    expect(sections()).toEqual(['Featured', 'System', 'Skills']);
+  });
+
+  it('should keep only what Tau builds while Built by Tau is pressed', async () => {
+    const user = userEvent.setup();
+    renderRoute();
+    expect(screen.getByText('GitHub')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Built by Tau' }));
+
+    expect(screen.getByRole('button', { name: 'Built by Tau' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
+    expect(screen.getByText('Tau Plugin Store')).toBeInTheDocument();
+    expect(screen.getByText('Create Skill')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Install Woodworking' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.getByText('GitHub')).toBeInTheDocument();
+  });
+
+  it('should show no-match instead of empty sections and restore every section from Clear filters', async () => {
+    const user = userEvent.setup();
+    renderRoute();
+    const search = screen.getByRole('textbox', { name: 'Search plugins' });
+
+    await user.type(search, 'github');
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(['Featured']);
+    expect(screen.getByRole('status')).toHaveTextContent(/^1 of \d+ match$/);
+
+    await user.clear(search);
+    await user.type(search, 'no such plugin');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Featured' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Skills' })).not.toBeInTheDocument();
+    expect(screen.getByText('No plugins match “no such plugin”')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/^0 of \d+ match$/);
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(search).toHaveValue('');
+    expect(search).toHaveFocus();
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      'Featured',
+      'System',
+      'Skills',
+    ]);
+    expect(screen.getByRole('status')).toHaveTextContent(/^\d+ plugins and skills$/);
+  });
+
+  it('should name and title each row by its true state, a shadowed skill included', async () => {
+    mockReadFile.mockResolvedValue(
+      encoder.encode(
+        JSON.stringify({
+          skills: {
+            woodworking: {
+              status: 'shadowed',
+              source: 'tau-store',
+              installedPath: '.agents/skills/woodworking/SKILL.md',
+              shadowPath: '.agents/plugins/tau-store/shadowed/woodworking/SKILL.md',
+              version: '1.0.0',
+              updatedAt: '2026-06-02T00:00:00.000Z',
+            },
+          },
+        }),
+      ),
+    );
+    renderRoute();
+
+    const shadowed = await screen.findByRole('button', { name: 'Woodworking installed, shadowed by your own skill' });
+    expect(shadowed).toHaveAttribute('title', 'Woodworking installed, shadowed by your own skill');
+    expect(screen.getByRole('button', { name: 'GitHub is not available yet' })).toHaveAttribute(
+      'title',
+      'GitHub is not available yet',
+    );
+    expect(screen.getByRole('button', { name: 'Create Skill installed' })).toHaveAttribute(
+      'title',
+      'Create Skill installed',
+    );
+  });
 });

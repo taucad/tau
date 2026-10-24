@@ -5,7 +5,7 @@
  * and its digest. The file is pinned when it is shown by its size, modification time and inode; a range from a file
  * that no longer matches is refused, and the page shows the model again. A slice is gzipped when the page can undo it
  * and the result is at least a tenth smaller: mesh buffers of repeated or quantised values shrink, float noise does
- * not, and the page then pays nothing for trying.
+ * not, and the page then pays nothing for trying. A watched source's render is read from memory the same way.
  */
 
 import { open } from 'node:fs/promises';
@@ -59,6 +59,31 @@ export const snapshotModelFile = async (absolutePath: string): Promise<ModelFile
   }
 };
 
+/**
+ * One slice as `app_read` returns it, gzipped when the page can undo it and that pays.
+ *
+ * @param input - The bytes, where they start in the model, the model's size and the encodings the page can undo.
+ * @returns The reply.
+ */
+const encodeSlice = async (
+  input: Readonly<{
+    slice: Uint8Array<ArrayBuffer>;
+    offset: number;
+    totalBytes: number;
+    encodings: readonly TauViewerReadEncoding[] | undefined;
+  }>,
+): Promise<TauViewerReadResult> => {
+  const { slice, offset, totalBytes, encodings } = input;
+  const base = { offset, byteLength: slice.length, totalBytes };
+  if (encodings?.includes('gzip') === true && slice.length > 0) {
+    const packed = await gzipped(slice);
+    if (packed.length <= slice.length * worthwhile) {
+      return { ...base, encoding: 'gzip', data: packed.toString('base64') };
+    }
+  }
+  return { ...base, data: Buffer.from(slice.buffer, slice.byteOffset, slice.length).toString('base64') };
+};
+
 /** Why a range was refused. */
 export type ModelRangeRefusal = Readonly<{ refused: 'missing' | 'changed' }>;
 
@@ -96,13 +121,29 @@ export const readModelRange = async (
   } finally {
     await handle.close();
   }
-  const offset = Math.min(input.offset, input.identity.size);
-  const base = { offset, byteLength: slice.length, totalBytes: input.identity.size };
-  if (input.encodings?.includes('gzip') === true && slice.length > 0) {
-    const packed = await gzipped(slice);
-    if (packed.length <= slice.length * worthwhile) {
-      return { ...base, encoding: 'gzip', data: packed.toString('base64') };
-    }
-  }
-  return { ...base, data: Buffer.from(slice.buffer, slice.byteOffset, slice.length).toString('base64') };
+  return encodeSlice({
+    slice,
+    offset: Math.min(input.offset, input.identity.size),
+    totalBytes: input.identity.size,
+    encodings: input.encodings,
+  });
+};
+
+/**
+ * Read one range of a model held in memory: a watched source's render, which is never written to the project.
+ *
+ * @param input - The bytes, the range and the encodings the page can undo.
+ * @returns The slice as `app_read` returns it.
+ */
+export const readBytesRange = async (
+  input: Readonly<{
+    bytes: Uint8Array<ArrayBuffer>;
+    offset: number;
+    length: number;
+    encodings?: readonly TauViewerReadEncoding[] | undefined;
+  }>,
+): Promise<TauViewerReadResult> => {
+  const offset = Math.min(input.offset, input.bytes.length);
+  const slice = input.bytes.subarray(offset, Math.min(offset + input.length, input.bytes.length));
+  return encodeSlice({ slice, offset, totalBytes: input.bytes.length, encodings: input.encodings });
 };

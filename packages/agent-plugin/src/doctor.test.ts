@@ -150,7 +150,7 @@ describe.skipIf(process.platform === 'win32')('doctor', () => {
     expect(line(stdout, 'claude')).toBe(`ok    claude    2.1.303; tau@taucad ${version} enabled (user scope)`);
     expect(line(stdout, 'cli')).toBe(`ok    cli       installed tau ${version} at ${join(tools, 'tau')}`);
     expect(line(stdout, 'server')).toMatch(
-      /^ok {4}server {4}initialize \d+\.\d s; @taucad\/mcp 0\.0\.0-doctor-test; 9 tools; viewer resource ui:\/\/tau\/viewer\.html$/u,
+      /^ok {4}server {4}initialize \d+\.\d s; @taucad\/mcp 0\.0\.0-doctor-test; 10 tools; viewer resource ui:\/\/tau\/viewer\.html$/u,
     );
   });
 

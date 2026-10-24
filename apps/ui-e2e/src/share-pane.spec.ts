@@ -127,20 +127,23 @@ test('uses the same Share body in the mobile drawer without clipping its navigat
   await openSeededProject();
   await openShare();
 
-  const mobileShareTab = selectors.getByRole('tab', { name: 'Share', exact: true });
-  await target.expectVisible(mobileShareTab);
-  await target.expectAttribute(mobileShareTab, 'data-state', 'active');
+  // Share is a secondary surface: All carries the selection in the nav, and the sheet is named Share.
+  const mobileNavigation = selectors.getByRole('navigation', { name: 'Workbench' });
+  const allButton = mobileNavigation.getByRole('button', { name: 'All', exact: true });
+  await target.expectVisible(allButton);
+  await target.expectAttribute(allButton, 'aria-current', 'page');
+  await target.expectVisible(selectors.getByRole('region', { name: 'Share', exact: true }));
   await target.expectVisible(shareRegion().getByRole('button', { name: 'Copy direct link' }));
-  const navigationBounds = await target.boundingBox(mobileShareTab);
+  const navigationBounds = await target.boundingBox(allButton);
   if (!navigationBounds) {
-    throw new Error('Mobile Share navigation action did not have layout bounds.');
+    throw new Error('Mobile All navigation action did not have layout bounds.');
   }
   expect(navigationBounds.x).toBeGreaterThanOrEqual(0);
   expect(navigationBounds.x + navigationBounds.width).toBeLessThanOrEqual(390);
 
   await target.click(shareRegion().getByRole('tab', { name: 'GitHub Gist' }));
   await target.expectVisible(shareRegion().getByText(/Tau sends the compressed project to GitHub/u));
-  await target.click(selectors.getByRole('tab', { name: 'Model', exact: true }));
+  await target.click(mobileNavigation.getByRole('button', { name: 'Model', exact: true }));
   await target.expectHidden(shareRegion());
   await target.screenshot(selectors.getByCss('body'), 'share-pane-mobile.png');
 });

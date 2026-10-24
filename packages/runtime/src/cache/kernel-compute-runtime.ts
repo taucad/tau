@@ -24,6 +24,8 @@ import type {
   CacheRetention,
   ComputeAction,
   ComputeActionRecord,
+  ComputePublicationOutcome,
+  ComputePublicationTask,
   ComputeReuseService,
   ContentDigest,
   ContentStore,
@@ -66,6 +68,11 @@ const defaultWarmEntries = 4096;
 const defaultWarmBytes = 64 * 1024 * 1024;
 /** Bound on the read cache `evaluate` keeps in front of the store session. */
 const readCacheBytes = 64 * 1024 * 1024;
+/**
+ * Best-effort whole-action publications held for idle: the build and mesh of two edits. Each
+ * holds its computed value until it runs, so the bound is on held results, not on bytes.
+ */
+const maxDeferredPublications = 4;
 
 /** What `evaluate` knows about a publication that its action record does not carry. */
 type PublicationSource = {
@@ -177,7 +184,9 @@ const adaptSession = (
   liveGeneration: () => Promise<ComputeGeneration>,
 ): { readonly contentStore: ContentStore; readonly actionStore: ActionStore } => {
   // The bounded LRU tiers are a read cache only: the session is the one writer.
-  const contentCache = createMemoryContentStore({ maxBytes: readCacheBytes });
+  // Its only writer is this realm's publication, which already owns and hashed each leaf (one
+  // producer hash); the store session's authority verifies them again on put (U20).
+  const contentCache = createMemoryContentStore({ maxBytes: readCacheBytes, ownsProducerWrites: true });
   const actionCache = createMemoryActionStore({ maxBytes: readCacheBytes });
   let { generation } = session;
   const refreshGeneration = async (): Promise<ComputeGeneration> => {
@@ -402,6 +411,13 @@ export type ComputeCapabilityHost = {
    * not this barrier (D2, I2, U9, U35).
    */
   readonly permitPublication: () => void;
+  /**
+   * Stop the running deferred publication at its next await: an operation was admitted.
+   * It stays first in the queue and runs again at the next idle.
+   */
+  readonly interruptPublication: () => void;
+  /** The worker's operation lane drained: run eligible deferred publications. */
+  readonly notifyIdle: () => void;
   /** Await every settled receipt within a budget, then abandon the rest (U11, U36). */
   readonly drain: (input?: { readonly deadline?: number }) => Promise<void>;
   readonly dispose: () => Promise<void>;
@@ -420,6 +436,8 @@ const noAsyncOperation = async (): Promise<void> => {
 const offHost: ComputeCapabilityHost = {
   capability: () => ({ status: 'off' }),
   permitPublication: noOperation,
+  interruptPublication: noOperation,
+  notifyIdle: noOperation,
   drain: noAsyncOperation,
   dispose: noAsyncOperation,
   control: undefined,
@@ -444,6 +462,20 @@ export const createComputeCapabilityHost = (input: {
     readonly operationId: string;
     readonly generation: ComputeGeneration;
     readonly settlement: ComputeScopeSettlement;
+  }) => void;
+  /**
+   * Whether the worker has no operation admitted to its lane. Deferred publications run only
+   * then; absent means always idle (a host with no lane of its own).
+   */
+  readonly isIdle?: () => boolean;
+  /** One deferred publication settled: stored, skipped, or dropped without running. */
+  readonly onPublicationSettled?: (summary: {
+    readonly actionDigest: ActionDigest;
+    readonly operationId: string;
+    readonly status: ComputePublicationOutcome['status'] | 'dropped';
+    readonly reason?: string;
+    /** Milliseconds from its first run to settlement; 0 when dropped before running. */
+    readonly duration: number;
   }) => void;
 }): ComputeCapabilityHost => {
   if (input.binding.mode === 'off') {
@@ -476,8 +508,185 @@ export const createComputeCapabilityHost = (input: {
     }
   };
 
-  /** Bounded by actions in flight: each entry remains until its last caller settles. */
+  /**
+   * Bounded by actions in flight: each entry remains until its last caller settles. A deferred
+   * publication is a caller too, until it settles, so the store adapter can still accept it.
+   */
   const publications = new Map<ActionDigest, PublicationSource>();
+  const releasePublication = (digest: ActionDigest): void => {
+    const source = publications.get(digest);
+    if (source && --source.callers === 0) {
+      publications.delete(digest);
+    }
+  };
+
+  /** Which operation each capability signal belongs to, for settlement telemetry. */
+  const operations = new WeakMap<AbortSignal, string>();
+  type DeferredPublication = {
+    readonly task: ComputePublicationTask;
+    readonly operationId: string;
+    permitted: boolean;
+    startedAt: number | undefined;
+  };
+  /** Best-effort publications waiting for delivery and idle, oldest first (D1). */
+  const deferred: DeferredPublication[] = [];
+  let running: { readonly entry: DeferredPublication; readonly controller: AbortController } | undefined;
+  let pumpPromise: Promise<void> | undefined;
+  let pumpTimer: ReturnType<typeof setTimeout> | undefined;
+  let draining = false;
+
+  const settleDeferred = (
+    entry: DeferredPublication,
+    status: ComputePublicationOutcome['status'] | 'dropped',
+    reason?: string,
+  ): void => {
+    const index = deferred.indexOf(entry);
+    if (index !== -1) {
+      deferred.splice(index, 1);
+    }
+    releasePublication(entry.task.actionDigest);
+    input.onPublicationSettled?.({
+      actionDigest: entry.task.actionDigest,
+      operationId: entry.operationId,
+      status,
+      ...(reason === undefined ? {} : { reason }),
+      duration: entry.startedAt === undefined ? 0 : Date.now() - entry.startedAt,
+    });
+  };
+
+  const schedulePublication = (task: ComputePublicationTask): void => {
+    const source = publications.get(task.actionDigest);
+    if (!source) {
+      // The evaluation that computed it has already settled; nothing can accept it any more.
+      return;
+    }
+    source.callers += 1;
+    const entry: DeferredPublication = {
+      task,
+      operationId: (task.signal && operations.get(task.signal)) ?? 'unobserved',
+      permitted: false,
+      startedAt: undefined,
+    };
+    // Results of one action stay queued side by side: a repeated evaluation may reuse the first
+    // one's native handle and dispose its own, so either may be the one that can still encode.
+    deferred.push(entry);
+    const active = running?.entry;
+    while (deferred.length > maxDeferredPublications) {
+      // A full queue drops the oldest disposable work; it never backpressures a render.
+      const oldest = deferred.find((queued) => queued !== active);
+      if (!oldest) {
+        break;
+      }
+      settleDeferred(oldest, 'dropped', 'queue-full');
+    }
+  };
+
+  /**
+   * Run one permitted publication to its settlement, or until an admitted operation interrupts it.
+   * @param entry - The queued publication.
+   * @returns Whether it was interrupted and stays queued.
+   */
+  const runEntry = async (entry: DeferredPublication): Promise<'settled' | 'interrupted'> => {
+    const controller = new AbortController();
+    running = { entry, controller };
+    entry.startedAt ??= Date.now();
+    try {
+      const outcome = await entry.task.run({ signal: controller.signal });
+      settleDeferred(entry, outcome.status, outcome.status === 'skipped' ? outcome.reason : undefined);
+      if (outcome.status === 'stored') {
+        // oxlint-disable-next-line unicorn/no-useless-spread -- settleDeferred mutates the queue.
+        for (const queued of [...deferred]) {
+          if (queued.task.actionDigest === entry.task.actionDigest) {
+            settleDeferred(queued, 'dropped', 'duplicate');
+          }
+        }
+      }
+      return 'settled';
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        settleDeferred(entry, 'skipped', error instanceof Error ? error.message : String(error));
+        return 'settled';
+      }
+      if (controller.signal.reason !== 'interrupted') {
+        settleDeferred(entry, 'dropped', 'aborted');
+        return 'settled';
+      }
+      // Interrupted by an admitted operation: it stays first and runs again at the next idle.
+      return 'interrupted';
+    } finally {
+      running = undefined;
+    }
+  };
+
+  const runDeferred = async (options: { readonly ignoreIdle: boolean }): Promise<void> => {
+    for (;;) {
+      if (!options.ignoreIdle && !(input.isIdle?.() ?? true)) {
+        return;
+      }
+      const entry = deferred.find((queued) => queued.permitted);
+      // oxlint-disable-next-line no-await-in-loop -- deferred publications run one at a time, in order.
+      if (!entry || (await runEntry(entry)) === 'interrupted') {
+        return;
+      }
+    }
+  };
+
+  /**
+   * Publish a delivered, still queued result of this action now, so a revisit before the worker
+   * was idle hits instead of recomputing. Other queued work waits for idle as before.
+   * @param digest - The action the operation is about to look up.
+   */
+  const publishBeforeLookup = async (digest: ActionDigest): Promise<void> => {
+    await pumpPromise;
+    const entry = deferred.find((queued) => queued.permitted && queued.task.actionDigest === digest);
+    if (entry && running === undefined) {
+      await runEntry(entry);
+    }
+  };
+
+  /** Run eligible publications on a later macrotask, so the delivery that permitted them goes first. */
+  const pump = (): void => {
+    if (pumpTimer !== undefined || pumpPromise !== undefined || draining) {
+      return;
+    }
+    pumpTimer = setTimeout(() => {
+      pumpTimer = undefined;
+      pumpPromise = (async () => {
+        try {
+          await runDeferred({ ignoreIdle: false });
+        } catch {
+          // Each task settles its own failure; only a throwing settlement observer can land here.
+        } finally {
+          pumpPromise = undefined;
+          // An idle notification that arrived while this pump ran was skipped; honour it now.
+          if (deferred.some((queued) => queued.permitted) && (input.isIdle?.() ?? true)) {
+            pump();
+          }
+        }
+      })();
+    }, 0);
+  };
+
+  const permitDeferred = (): void => {
+    // oxlint-disable-next-line unicorn/no-useless-spread -- settleDeferred mutates the queue.
+    for (const entry of [...deferred]) {
+      if (entry.permitted) {
+        continue;
+      }
+      if (entry.task.signal?.aborted) {
+        // Superseded or cancelled before its result was delivered: it never publishes (D24).
+        settleDeferred(entry, 'dropped', 'cancelled');
+        continue;
+      }
+      entry.permitted = true;
+    }
+    pump();
+  };
+
+  const interruptPublication = (): void => {
+    running?.controller.abort('interrupted');
+  };
+
   let servicePromise: Promise<ComputeReuseService> | undefined;
   const openService = async (): Promise<ComputeReuseService> => {
     servicePromise ??= (async () => {
@@ -485,6 +694,7 @@ export const createComputeCapabilityHost = (input: {
       const stores = adaptSession(session, publications, liveGeneration);
       return createComputeReuseService({
         ...stores,
+        schedulePublication,
         promote: async ({ actionDigest: action, retention, signal }) => {
           const generation = await liveGeneration();
           const outcome = await session.pin({
@@ -656,6 +866,7 @@ export const createComputeCapabilityHost = (input: {
     for (const scope of [...scopes]) {
       activate(scope);
     }
+    permitDeferred();
   };
 
   const openScope = (
@@ -816,6 +1027,14 @@ export const createComputeCapabilityHost = (input: {
     try {
       const settleAll = async (): Promise<'done'> => {
         await Promise.allSettled(inFlight);
+        // Teardown does not wait for idle: run what was delivered, after any pump in progress.
+        draining = true;
+        if (pumpTimer !== undefined) {
+          clearTimeout(pumpTimer);
+          pumpTimer = undefined;
+        }
+        await pumpPromise;
+        await runDeferred({ ignoreIdle: true });
         return 'done';
       };
       const outcome = await Promise.race([settleAll(), expired]);
@@ -824,8 +1043,16 @@ export const createComputeCapabilityHost = (input: {
         for (const scope of [...scopes]) {
           settleOnce(scope, emptySettlement('abandoned', 'drain-deadline'));
         }
+        running?.controller.abort('drain-deadline');
+      }
+      // oxlint-disable-next-line unicorn/no-useless-spread -- settleDeferred mutates the queue.
+      for (const entry of [...deferred]) {
+        if (entry !== running?.entry) {
+          settleDeferred(entry, 'dropped', outcome === 'timeout' ? 'drain-deadline' : 'undelivered');
+        }
       }
     } finally {
+      draining = false;
       // Cancel the timer rather than leaving dispose awaiting the same tail.
       if (timer) {
         clearTimeout(timer);
@@ -864,6 +1091,9 @@ export const createComputeCapabilityHost = (input: {
             });
           }
           try {
+            await publishBeforeLookup(digest);
+            const evaluationSignal = evaluation.signal ?? signal;
+            operations.set(evaluationSignal, operationId);
             return await service.evaluate({
               ...evaluation,
               codec: {
@@ -879,13 +1109,10 @@ export const createComputeCapabilityHost = (input: {
                   return value;
                 },
               },
-              signal: evaluation.signal ?? signal,
+              signal: evaluationSignal,
             });
           } finally {
-            const source = publications.get(digest);
-            if (source && --source.callers === 0) {
-              publications.delete(digest);
-            }
+            releasePublication(digest);
           }
         },
         openScope: (open) => {
@@ -897,6 +1124,8 @@ export const createComputeCapabilityHost = (input: {
       };
     },
     permitPublication,
+    interruptPublication,
+    notifyIdle: pump,
     drain,
     dispose: async () => {
       await drain({ deadline: defaultDrainBudget });

@@ -113,20 +113,10 @@ const exportGlbToProject = async (page: Page, projectRoot: string): Promise<Uint
   if (await exportButton.isVisible().catch(() => false)) {
     await exportButton.click();
   }
-  const formats = page.getByRole('region', { name: 'Formats' });
+  const formats = page.getByRole('region', { name: 'Format' });
   await expectVisible(formats, 30_000);
-  const glb = formats.getByRole('button', { name: 'glb', exact: true });
-  for (const selected of await formats.locator('button[aria-pressed="true"]').all()) {
-    // oxlint-disable-next-line no-await-in-loop -- The format toggles update sequential React state.
-    const selectedFormat = await selected.textContent();
-    if (selectedFormat?.trim().toLowerCase() !== 'glb') {
-      // oxlint-disable-next-line no-await-in-loop -- Each toggle must settle before export.
-      await selected.click();
-    }
-  }
-  if ((await glb.getAttribute('aria-pressed')) !== 'true') {
-    await glb.click();
-  }
+  await formats.getByRole('button', { name: 'Export format' }).click();
+  await page.locator('[cmdk-item][data-value="glb"]').click();
   const download = page.getByLabel('Download to disk');
   if (await download.isChecked()) {
     await download.click();

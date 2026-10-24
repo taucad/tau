@@ -76,3 +76,35 @@ export const renderedGlb = (artifact: RenderedArtifact | undefined): GlbChunks |
   }
   return parsedArtifacts.get(content);
 };
+
+const pad4 = (length: number): number => Math.ceil(length / 4) * 4;
+
+/**
+ * A GLB with its JSON chunk replaced and its binary chunk kept byte for byte.
+ *
+ * @param chunks - The GLB's chunks; `bin` is written back unchanged.
+ * @param json - The new glTF JSON.
+ * @returns The new GLB 2 container.
+ */
+export const writeGlb = (chunks: GlbChunks, json: JsonObject): Uint8Array<ArrayBuffer> => {
+  const text = new TextEncoder().encode(JSON.stringify(json));
+  const jsonLength = pad4(text.byteLength);
+  const binLength = chunks.bin === undefined ? 0 : pad4(chunks.bin.byteLength);
+  const bytes = new Uint8Array(12 + 8 + jsonLength + (chunks.bin === undefined ? 0 : 8 + binLength));
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, glbMagic, true);
+  view.setUint32(4, 2, true);
+  view.setUint32(8, bytes.byteLength, true);
+  view.setUint32(12, jsonLength, true);
+  view.setUint32(16, jsonChunkType, true);
+  /* The JSON chunk pads with spaces, the binary chunk with zeros (glTF 2.0, 4.4.3). */
+  bytes.fill(0x20, 20, 20 + jsonLength);
+  bytes.set(text, 20);
+  if (chunks.bin !== undefined) {
+    const binStart = 20 + jsonLength;
+    view.setUint32(binStart, binLength, true);
+    view.setUint32(binStart + 4, binChunkType, true);
+    bytes.set(chunks.bin, binStart + 8);
+  }
+  return bytes;
+};

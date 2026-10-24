@@ -51,6 +51,8 @@ type BrowserRow = {
     bytes?: ExpectedBytes;
     error: null | { message: string | null; name: string };
     independent: null | IndependentBytes;
+    /** The typed reason a refused verdict reports: its first diagnostic's code. */
+    refusalCode?: string;
     status: string;
   };
   id: string;
@@ -115,6 +117,7 @@ type CellResult = {
     independent: null | IndependentComparison;
     publicDirect: Record<keyof ExpectedBytes, boolean>;
     publicFrozen: ExpectedComparison;
+    reason: boolean | null;
     unavailableFields: string[];
     status: boolean;
   };
@@ -162,6 +165,7 @@ const queryCapabilities = new Set<GeoSpecQueryCapability>([
   'queryPmi',
 ]);
 const directOnlyNegativeCapabilities = new Set(['analyzeMesh', 'analyzeBrep', 'inspectGeometry', 'analyzeMeshOverlap']);
+const typedRefusalCode = /^GEOSPEC_[A-Z][\dA-Z_]*$/;
 
 const sha256 = async (bytes: ByteArray): Promise<string> =>
   [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
@@ -224,6 +228,12 @@ const firstResult = (canonicalResultUtf8: string): { diagnostics: unknown[]; sta
   }
   // oxlint-disable-next-line dot-notation -- TypeScript requires bracket access to unknown JSON index-signature fields.
   return { diagnostics: result['diagnostics'], status: result['status'] };
+};
+
+// A refusal reports its typed reason as its first diagnostic's code.
+const refusalCode = (diagnostics: readonly unknown[]): unknown => {
+  const [first] = diagnostics;
+  return typeof first === 'object' && first !== null && !Array.isArray(first) ? Reflect.get(first, 'code') : undefined;
 };
 
 const canonicalClaim = (canonicalPlanUtf8: string): ByteArray => {
@@ -395,6 +405,15 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
       ...(row.expected.independent?.canonicalResultUtf8 === null ? ['independent.canonicalResultUtf8'] : []),
       ...(row.expected.error?.message === null ? ['error.message'] : []),
     ];
+    const expectedReason = row.expected.refusalCode;
+    if (
+      expectedReason !== undefined &&
+      (row.expected.status !== 'refused' ||
+        typeof expectedReason !== 'string' ||
+        !typedRefusalCode.test(expectedReason))
+    ) {
+      throw new Error(`M2 refusal reason authority must name a typed code for a refused verdict: ${row.id}.`);
+    }
     if (
       unavailableFields.length > 0 &&
       (!supplemental ||
@@ -402,7 +421,10 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
         !(
           (row.expected.status === 'passed' && row.expected.error === null) ||
           (queryCapabilities.has(row.invocation.capability as GeoSpecQueryCapability)
-            ? row.expected.status === 'refused' && row.invocation.polarity === 'positive' && row.expected.error === null
+            ? row.expected.status === 'refused' &&
+              row.invocation.polarity === 'positive' &&
+              row.expected.error === null &&
+              expectedReason !== undefined
             : row.expected.status === 'failed' && row.expected.error?.name === 'GeoSpecAssertionError')
         ) ||
         !/^[\da-f]{64}$/.test(row.subjectHash) ||
@@ -555,6 +577,14 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
     const publicDirect = exactMap(publicBytes, directBytes);
     const independent =
       row.expected.independent === null ? null : independentMap(directBytes, row.expected.independent);
+    const publicResult = firstResult(publicBytes.canonicalResultUtf8);
+    // Without result-byte authority, a refused verdict also needs its typed reason on every route.
+    const reason =
+      expectedReason === undefined
+        ? null
+        : [directResult.diagnostics, publicReport.diagnostics, publicResult.diagnostics].every(
+            (diagnostics) => refusalCode(diagnostics) === expectedReason,
+          );
     const errorClass =
       row.expected.error === null
         ? publicError === null
@@ -565,11 +595,12 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
       independent,
       publicDirect,
       publicFrozen,
+      reason,
       unavailableFields,
       status:
         directResult.status === row.expected.status &&
         publicReport.status === row.expected.status &&
-        firstResult(publicBytes.canonicalResultUtf8).status === row.expected.status,
+        publicResult.status === row.expected.status,
     };
     cell.passed =
       (cell.admission.equal === true || (supplemental && row.expected.admissionUtf8 === null)) &&
@@ -579,6 +610,7 @@ const runCell = async (row: BrowserRow, supplemental = false): Promise<CellResul
       allExact(publicDirect) &&
       (independent === null || allIndependent(independent)) &&
       cell.comparison.status &&
+      reason !== false &&
       errorClass;
   } catch (error) {
     cell.runtimeFailure = { ...errorRecord(error), phase };

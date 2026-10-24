@@ -44,6 +44,8 @@ const buttonVariants = cva(
         'icon-xs': "size-6 rounded-md [&_svg:not([class*='size-'])]:size-3",
         'icon-sm': 'size-7',
         'icon-lg': 'size-10',
+        'icon-touch': 'size-11 min-h-11 min-w-11',
+        touch: 'h-11 min-h-11 min-w-11 px-2',
       },
     },
     defaultVariants: {

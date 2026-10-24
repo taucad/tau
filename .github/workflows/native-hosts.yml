@@ -7,6 +7,10 @@
 #   Alpine refusal (`blocked`, axis `libc`), each in a container, and the runner with libGL moved aside
 #   (`blocked`, `missing-system-library`, ruling X6). These run on every pull request that affects Build123d,
 #   PicoGK or the CLI (Nx affected), and on every push to `main`.
+# - Linux x64 (glibc) also runs the projects with a `test:native-linux` target, as `native-darwin.yml`
+#   runs `test:native-darwin`: PicoGK's pinned closure, prepared from the checked-in manifest's origins,
+#   must equal its golden receipt's `linux-x64-glibc` entry, and the native suites run on it. Selected
+#   through Nx: every such project outside a pull request, the affected ones on a pull request.
 # - macOS Intel (darwin-x64): the same prepare and suites, PicoGK's typed refusal on the `arch` axis
 #   and a refused `TAU_PAYLOAD_TARGET`. Only on push to `main`, nightly and on dispatch, so a pull
 #   request keeps one macOS job (ruling X40); `macos-26-intel`, GitHub-hosted (ruling X39).
@@ -52,6 +56,7 @@ jobs:
     outputs:
       linux: ${{ steps.plan.outputs.linux }}
       intel: ${{ steps.plan.outputs.intel }}
+      native-linux: ${{ steps.plan.outputs.native-linux }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -65,19 +70,27 @@ jobs:
           save-pnpm-store: 'false'
 
       # Every row outside a pull request; on a pull request the Linux rows when it affects a project
-      # the rows exercise, and never the Intel row.
+      # the rows exercise, and never the Intel row. `native-linux` lists the projects whose
+      # `test:native-linux` target the x64 row runs: all of them outside a pull request, the affected
+      # ones on a pull request. `tail -1` drops Nx's log lines.
       - name: Select the rows
         id: plan
         run: |
           set -o pipefail
           if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            native=$(pnpm nx show projects --with-target test:native-linux --json | tail -1)
+            echo "Native linux-x64 rows: $native"
+            echo "native-linux=$(jq -r 'join(",")' <<< "$native")" >> "$GITHUB_OUTPUT"
             echo "linux=true" >> "$GITHUB_OUTPUT"
             echo "intel=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           projects=$(pnpm nx show projects --affected --projects build123d,picogk,cli --json | tail -1)
           echo "Affected native host projects: $projects"
-          echo "linux=$(jq -r 'length > 0' <<< "$projects")" >> "$GITHUB_OUTPUT"
+          native=$(pnpm nx show projects --affected --with-target test:native-linux --json | tail -1)
+          echo "Native linux-x64 rows: $native"
+          echo "native-linux=$(jq -r 'join(",")' <<< "$native")" >> "$GITHUB_OUTPUT"
+          echo "linux=$(jq -r --argjson native "$native" 'length > 0 or ($native | length > 0)' <<< "$projects")" >> "$GITHUB_OUTPUT"
           echo "intel=false" >> "$GITHUB_OUTPUT"
 
   linux:
@@ -85,7 +98,7 @@ jobs:
     needs: [plan]
     if: needs.plan.outputs.linux == 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -111,6 +124,7 @@ jobs:
           save-pnpm-store: ${{ github.event_name == 'push' }}
 
       - name: Setup Linux sandbox prerequisites
+        id: sandbox
         uses: ./.github/actions/setup-linux-sandbox
 
       # The seed holds archive bytes only, so it is keyed by this target's pins alone.
@@ -257,6 +271,36 @@ jobs:
             jq '{ code, detail: .details.detail, message: .details.message }' "$RUNNER_TEMP/nogl.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The linux-x64 native rows (charter D27, D30), the counterpart of `native-darwin.yml`. Each
+      # closure test appends its golden comparison to TAU_GOLDEN_SUMMARY_FILE and fails on a mismatch
+      # or a missing entry, with the observed entry (`closureIntegrity`, `treeIntegrity`, `fileCount`)
+      # in its failure message, which is what `tau-plugin.golden.json` records. They run after the
+      # Build123d steps, whatever those concluded, so each row reports on its own.
+      - name: Run the linux-x64 native rows
+        id: rows
+        if: ${{ !cancelled() && matrix.arch == 'x64' && needs.plan.outputs.native-linux != '' && steps.sandbox.outcome == 'success' }}
+        env:
+          PROJECTS: ${{ needs.plan.outputs.native-linux }}
+          TAU_GOLDEN_SUMMARY_FILE: ${{ runner.temp }}/golden-receipts.md
+        run: |
+          printf '%s\n' '| Closure | Target | treeIntegrity | Golden | Files | Result |' '| --- | --- | --- | --- | ---: | --- |' \
+            > "$TAU_GOLDEN_SUMMARY_FILE"
+          pnpm nx run-many -t test:native-linux --projects "$PROJECTS" --parallel=1 --outputStyle=static
+
+      - name: Publish the golden receipts
+        if: ${{ always() && steps.rows.outcome != 'skipped' }}
+        env:
+          TAU_GOLDEN_SUMMARY_FILE: ${{ runner.temp }}/golden-receipts.md
+        run: |
+          if [ -f "$TAU_GOLDEN_SUMMARY_FILE" ] && [ "$(wc -l < "$TAU_GOLDEN_SUMMARY_FILE")" -gt 2 ]; then
+            { echo '### Golden receipts'; echo; cat "$TAU_GOLDEN_SUMMARY_FILE"; echo; } >> "$GITHUB_STEP_SUMMARY"
+            grep -E '^\| @' "$TAU_GOLDEN_SUMMARY_FILE" | while IFS='|' read -r _ closure target tree _ _ result _; do
+              echo "::notice title=golden ${closure// /}::${target// /} ${tree// /} (${result// /})"
+            done
+          else
+            echo 'No closure test ran: the selected rows prepare no plugin closure.' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   intel:
     name: Native kernels on darwin-x64

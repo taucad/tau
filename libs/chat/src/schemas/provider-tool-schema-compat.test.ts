@@ -373,9 +373,11 @@ describe('provider-facing tool schema compatibility', () => {
       'mode',
       'options',
       'parameters',
+      'pose',
       'section',
       'targetFile',
       'view',
+      'workbenchView',
     ]);
     expect(Object.keys(providerSchemaFor(toolName.useSkill).properties ?? {}).sort()).toEqual(['reason', 'skillName']);
   });

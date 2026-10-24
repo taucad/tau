@@ -136,6 +136,8 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-voice.spec.ts',
       // Native projection scenarios and the launch-helper test stay inside the Electron driver boundary.
       'apps/desktop-e2e/src/filesystem-projection-observation.spec.ts',
+      // Deletion qualification drives a completed Electron package beside disposable browser contexts.
+      'apps/desktop-e2e/src/project-deletion.spec.ts',
       'apps/desktop-e2e/src/support/desktop-app.test.ts',
       'apps/desktop-e2e/src/support/desktop-app.ts',
       'apps/desktop-e2e/src/support/filesystem-projection-delivery.ts',
@@ -157,6 +159,8 @@ describe('Vitest Browser test-runner ownership', () => {
       // The TAU-UI-6 deploy-skew check serves two deploys from Node and switches them under one page across a
       // document reload, which Browser Mode's iframe cannot host.
       'apps/ui-e2e/src/stale-deploy-recovery.test.ts',
+      // Composer and pane-resize acceptance emulate a coarse pointer through the browser session.
+      'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       // Production SSR audits own isolated no-JavaScript contexts and graphics failure injection.
       // The story harness imports only the Page type; tooling owns the runtime driver import.
@@ -264,6 +268,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/panes/editor-layout.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
+        'apps/ui/app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',

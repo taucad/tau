@@ -12,18 +12,21 @@ function FlagRow({ flag }: { readonly flag: FeatureFlagName }): React.JSX.Elemen
   const definition = flagRegistry[flag];
 
   return (
-    <SettingsItem settingId={`flag-${flag}`} className='flex items-center justify-between gap-4'>
-      <div className='flex flex-col gap-0.5'>
-        <span className='text-sm font-medium'>{definition.label}</span>
-        <span className='text-xs text-muted-foreground'>{definition.description}</span>
-      </div>
-      <Switch
-        aria-label={definition.label}
-        checked={flags[flag]}
-        onCheckedChange={(checked) => {
-          setFlag(flag, checked);
-        }}
-      />
+    <SettingsItem settingId={`flag-${flag}`}>
+      {/* The whole row is the switch's target: the bare switch alone is too small to tap. */}
+      <label className='flex items-center justify-between gap-4'>
+        <span className='flex flex-col gap-0.5'>
+          <span className='text-sm font-medium'>{definition.label}</span>
+          <span className='text-xs text-muted-foreground'>{definition.description}</span>
+        </span>
+        <Switch
+          aria-label={definition.label}
+          checked={flags[flag]}
+          onCheckedChange={(checked) => {
+            setFlag(flag, checked);
+          }}
+        />
+      </label>
     </SettingsItem>
   );
 }

@@ -1,6 +1,6 @@
 # geospec — Types (3)
 
-31 top-level symbols. Signatures are verbatim typescript.
+33 top-level symbols. Signatures are verbatim typescript.
 
 // One positive-only ancillary query
 // Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports without assertion errors. A query asserts nothing, so it never fails: one whose evidence is missing or cannot decide returns a refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`.
@@ -466,6 +466,66 @@ GeoSpecVitestAdapter: {
 
   // GeoSpecVitestAdapter.flush (method)
   flush(): Promise<void>;
+
+// The installed matchers plus the project's model loader
+GeoSpecVitestProject: GeoSpecVitestAdapter & {
+    /** Load a model through the config's exporters; its subjects are released after the file. */
+    readonly loadModel: (options: LoadModelOptions) => Promise<GeoSpecSubject>;
+    /** The config file that was read, when the project has one. */
+    readonly configPath: string | undefined;
+    /** The build the created engine runs on; absent for a caller-owned engine. */
+    readonly binding: GeoSpecEngineBinding | undefined;
+}
+
+  readonly matchers: GeoSpecVitestMatcherMap
+
+  // GeoSpecVitestProject.flush (method)
+  flush(): Promise<void>;
+
+  // Load a model through the config's exporters
+  readonly loadModel: (options: LoadModelOptions) => Promise<GeoSpecSubject>
+
+  // The config file that was read, when the project has one
+  readonly configPath: string | undefined
+
+  // The build the created engine runs on
+  readonly binding: GeoSpecEngineBinding | undefined
+
+// Options for {@link setupGeoSpecVitestProject}
+SetupGeoSpecVitestProjectOptions: Omit<GeoSpecAssertionClientOptions, 'engine' | 'maximumWorkUnitLimit'> & {
+    /** Absolute project root: `loadModel({ file })` resolves against it and its `geospec.config.*` is read. */
+    readonly projectPath: string;
+    /** Explicit config file, resolved relative to the project unless absolute. */
+    readonly configPath?: string;
+    /** Fields that replace the config's whole, as a CLI flag does: `exporters` and `testTimeout` apply here. */
+    readonly overrides?: Pick<GeoSpecConfig, 'exporters' | 'testTimeout'>;
+    /**
+     * A caller-owned engine, kept open after the file. Omitted creates this process's engine (the native addon, else
+     * the WASM build) and closes it after the file.
+     */
+    readonly engine?: GeoSpecNativeModelEngine;
+}
+
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
+
+  // Success-evidence profile of every claim and query
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
+
+  readonly subjectSlot?: string
+
+  readonly workUnitLimit?: number
+
+  // Absolute project root
+  readonly projectPath: string
+
+  // Explicit config file, resolved relative to the project unless absolute
+  readonly configPath?: string
+
+  // Fields that replace the config's whole, as a CLI flag does
+  readonly overrides?: Pick<GeoSpecConfig, 'exporters' | 'testTimeout'>
+
+  // A caller-owned engine, kept open after the file
+  readonly engine?: GeoSpecNativeModelEngine
 
 // Options for {@link readGeoSpecConfig}
 ReadGeoSpecConfigOptions: {

@@ -1,6 +1,6 @@
 {
   "name": "@taucad/carvera",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "description": "Makera Carvera C1 LAN machine plugin, with a simulated Carvera",
   "type": "module",
   "sideEffects": false,

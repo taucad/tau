@@ -1,7 +1,7 @@
 import { File as FileIcon } from 'lucide-react';
 import type { FileExtension } from '@taucad/types';
 import { fileExtensionSet } from '@taucad/types/constants';
-import { Format3D } from '#components/icons/format-3d.js';
+import { FormatBadge } from '@taucad/workbench-panes/components/format-badge';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import type { SvgIcons } from '#components/icons/generated/svg-icons.js';
 import { getFileExtension } from '#utils/filesystem.utils.js';
@@ -191,7 +191,7 @@ export function FileExtensionIcon({
     return <SvgIcon id={config.id} className={className} />;
   }
 
-  return <Format3D extension={config.id} className={className} />;
+  return <FormatBadge extension={config.id} className={className} />;
 }
 
 /**

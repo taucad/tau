@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import React from 'react';
 import type { ClassValue } from 'clsx';
+import { ChevronLeft } from 'lucide-react';
 import { Virtuoso } from 'react-virtuoso';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '#components/command.js';
@@ -11,7 +12,9 @@ import {
   DrawerDescription,
   DrawerTitle,
   DrawerTrigger,
+  useIsInsideDrawer,
 } from '#components/drawer.js';
+import { Button } from '#components/button.js';
 import { Popover, PopoverContent, PopoverTrigger } from '#components/popover.js';
 import { cn } from '#utils/cn.js';
 import { menuGroupHeadingClass } from '#components/menu.variants.js';
@@ -59,8 +62,8 @@ type ComboBoxResponsiveProperties<T> = Omit<
   readonly isLoadingMore?: boolean;
   readonly onLoadMore?: () => void;
   /**
-   * Use DrawerNestedRoot instead of Drawer when inside another drawer.
-   * This enables proper nested drawer behavior with Vaul.
+   * Stack the mobile drawer on the drawer it opens from, with a Back control above the list.
+   * Defaults to whether the combobox renders inside a drawer.
    */
   readonly isNested?: boolean;
   /**
@@ -75,6 +78,7 @@ type ComboBoxResponsiveProperties<T> = Omit<
 
 /**
  * A searchable single-choice list: a popover above the trigger on wide screens and a drawer on mobile.
+ * Opened from inside another drawer, the drawer stacks on it and offers a Back control.
  *
  * @param props - Items, the selected value, labels and the trigger.
  * @returns The responsive combobox.
@@ -108,7 +112,7 @@ export function ComboBoxResponsive<T>({
   virtualizationHeight = 300,
   isLoadingMore = false,
   onLoadMore,
-  isNested = false,
+  isNested: isNestedProperty,
   shouldCloseOnSelect,
   footer,
   ...properties
@@ -117,6 +121,8 @@ export function ComboBoxResponsive<T>({
   const isControlled = isOpenProperty !== undefined;
   const open = isControlled ? isOpenProperty : uncontrolledOpen;
   const isMobile = useIsMobile();
+  const isInsideDrawer = useIsInsideDrawer();
+  const isNested = isNestedProperty ?? isInsideDrawer;
   const selectionMadeReference = React.useRef(false);
   const pointerDismissedReference = React.useRef(false);
   const closeFocusReference = React.useRef(false);
@@ -181,15 +187,47 @@ export function ComboBoxResponsive<T>({
           {...properties}
           {...drawerProperties}
           /* A caller's width is for the popover; the drawer spans the screen. */
-          className={cn('[&_[data-slot=command]]:bg-transparent', className, 'w-auto', drawerProperties?.className)}
+          className={cn(
+            'command-item-dividers [&_[data-slot=command]]:bg-transparent',
+            className,
+            'w-auto',
+            drawerProperties?.className,
+          )}
           onCloseAutoFocus={(event) => {
             drawerProperties?.onCloseAutoFocus?.(event);
             handleCloseAutoFocus(event);
           }}
         >
-          <DrawerTitle className='sr-only' id='drawer-title'>
-            {title}
-          </DrawerTitle>
+          {isNested ? (
+            <div
+              data-slot='combobox-drawer-header'
+              className='grid grid-cols-[var(--spacing-touch-row)_minmax(0,1fr)_var(--spacing-touch-row)] items-center gap-2 px-3 py-1'
+            >
+              {/* A fixed square with a full radius and an even border stays a circle at every scale; the
+                  matching empty column keeps the title on the drawer's centre line. */}
+              <Button
+                type='button'
+                variant='ghost'
+                aria-label='Back'
+                className='flex size-touch-row shrink-0 items-center justify-center rounded-full border border-border p-0 has-[>svg]:p-0'
+                onClick={() => {
+                  handleOpenChange(false);
+                }}
+              >
+                {/* Optically centred: the open side's two stroke ends outweigh the point, so a box-centred
+                    chevron reads as sitting right; a half-pixel nudge left and a lighter stroke settle it. */}
+                <ChevronLeft className='size-6 -translate-x-[0.5px]' strokeWidth={1.25} />
+              </Button>
+              <DrawerTitle className='truncate text-center text-sm font-medium' id='drawer-title'>
+                {title}
+              </DrawerTitle>
+              <span aria-hidden />
+            </div>
+          ) : (
+            <DrawerTitle className='sr-only' id='drawer-title'>
+              {title}
+            </DrawerTitle>
+          )}
           <DrawerDescription className='sr-only' id='drawer-description'>
             {description}
           </DrawerDescription>

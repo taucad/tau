@@ -1,7 +1,11 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 @import '../../packages/ui/src/styles/tokens.css';
+@import '../../packages/ui/src/styles/base.css';
 @import '../../apps/ui/app/styles/scroll-shadows.css';
 @source '../../packages/ui/src';
+@source '../../packages/viewer/src';
+@source '../../packages/workbench-panes/src';
 
 @font-face {
   font-family: 'Geist Sans';
@@ -18,15 +22,6 @@
 }
 
 @layer base {
-  * {
-    @apply border-border focus-visible:outline-primary;
-  }
-
-  html,
-  body {
-    @apply bg-background font-sans text-foreground antialiased;
-  }
-
   code,
   pre {
     @apply font-mono;

@@ -23,14 +23,15 @@
     "apps/ui/app/components/chat/chat-message-queue-view.tsx": "b8f44fc22b6aaf6ebe4d3dd6e367fa5c5cc846dc452c45d1c0621fb86e403b36",
     "apps/ui/app/components/chat/chat-message-queue.tsx": "8c2e364f91a13539bde640b8f9aaab4c833f36050db0548a38497de8e2fef747",
     "apps/ui/app/components/chat/chat-textarea.tsx": "522e8d59d25b97c14dc8feb2d8a31f59062c0b86afd6222a72fb3044f766adfc",
-    "apps/ui/app/db/chat-message-queue-store.ts": "8f679f892f769c4e1118ef9ff13bcec3c276cb1ef45658d1ce10e3b547ee79c7",
+    "apps/ui/app/db/chat-message-queue-store.ts": "ab89825172dbc3da1a4acf792f7ef8591e2eefda49a3a89fe26c58a01116f6cb",
     "apps/ui/app/hooks/use-chat.tsx": "6de4bf1438424a5c885cd0df851ed1656ab66d877f2903d2ef0da0fb22768fff",
     "apps/ui/app/machines/chat-message-queue.machine.ts": "1f1dd988a54ff2f94974c5b0b68cd993f74c4b5a04c470489a8d1910003e0b62",
     "apps/ui/app/machines/chat-session.machine.ts": "9d3180fe7082223fddcc7ff798bad3cd522c0d1b70cf77d91cd34ba7cffa221d",
-    "apps/ui/app/services/chat-session-store.ts": "c25a0b9fba7748340f124243462d11cff79ddcb566e7017d3e853d200851e926"
+    "apps/ui/app/services/chat-session-store.ts": "eb59cf4992eceae2e0e7714b88c3455968e74eac9d9c201a9faa771622908ed6"
   },
   "specs": {
-    "MessageQueue.tla": "71cde7dd2363a4fba5b92d7b66d452182fb2ebe9b03367220986cfc3d5125127"
+    "MessageQueue.tla": "d8af4d559c819d0809d6917ccf807fecf2de1c466a13ad594d1b01040043d3f3",
+    "QueuePlacement.tla": "3a011f652b45db0c54c6bf8a86bf6130a9fea1c66f982f85f0ae15fa50f37d30"
   },
   "tables": {
     "MessageQueue.duplicate.cfg": "9d566ac1a0f357cd7744cdf8594fbaa4554d7c262a0fadf921c45b66b9ffb9da",
@@ -42,7 +43,10 @@
     "MessageQueue.target.cfg": "681dc3b351dc087568c31dbc5c487d124323485706fb94483bbb67c19b4a28e3",
     "MessageQueue.today.cfg": "f185e5b96916ae1a6ffc9e93296bf3bf70f0474617a782f86a1866e46bd9078f",
     "MessageQueue.wrong-cancel.cfg": "821eae120126639dc7baa965d46abc6cd06880964a2f16debfa4415521de4c65",
-    "expected.json": "ee254f6ec45e0e79b9683c27c8fc8c475e56aa2d3f2b59fa3a5f5774fa567a35"
+    "QueuePlacement.cross-host-replay.cfg": "507e578d96b08b85d0ee49b168dc7a8675482dba6106c6cda5453feb4ad0c2c0",
+    "QueuePlacement.target.cfg": "91bb01fafd3d18d06472fe06f008c177e9b428d59e5e61f0709256035b37c92b",
+    "QueuePlacement.unscoped-rebase.cfg": "487bb85bad45f03a17631de6afcad8b44ac933198f40824630da3048dc5f22a8",
+    "expected.json": "48b4bb6a9bdce61e209c4bead739d14e0111d47291acac7803b0147b2a525974"
   },
   "versions": {
     "chat-message-queue": "1",

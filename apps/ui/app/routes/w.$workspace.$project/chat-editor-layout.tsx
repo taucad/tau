@@ -38,6 +38,7 @@ export function ChatEditorLayout({
           <FloatingPanelContentTitle>Editor</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Editor'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>

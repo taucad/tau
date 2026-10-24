@@ -28,6 +28,8 @@ const paths: Record<string, string[]> = {
   '@taucad/ui/*': [resolve(repoRoot, 'packages/ui/src/*')],
   // Packages the app imports whose exports map to source; the Vite runner resolves them from the app root.
   '@taucad/types': [resolve(repoRoot, 'libs/types/src/types/index.ts')],
+  '@taucad/parameters': [resolve(repoRoot, 'packages/parameters/src/index.ts')],
+  '@taucad/workbench-panes/*': [resolve(repoRoot, 'packages/workbench-panes/src/*')],
   '@taucad/viewer/*': [resolve(repoRoot, 'packages/viewer/src/*')],
   '@taucad/grammars': [resolve(repoRoot, 'libs/grammars/src/index.ts')],
   '@tau/api-guide': [resolve(repoRoot, 'scripts/canvas/api-guide.tsx')],

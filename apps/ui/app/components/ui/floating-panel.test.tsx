@@ -102,6 +102,17 @@ describe('FloatingPanelClose', () => {
 
     expect(screen.getByTestId('drawer-close')).toContainElement(screen.getByRole('button', { name: 'Close panel' }));
   });
+
+  it('should name the button with its label, the panel it closes', () => {
+    renderInPanel(
+      <TooltipProvider>
+        <FloatingPanelClose label='Close Files' icon={<span />} tooltipContent={() => 'Close Files'} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Close Files' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close panel' })).not.toBeInTheDocument();
+  });
 });
 
 describe('FloatingPanelContentHeaderActions', () => {

@@ -4,8 +4,10 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
-import { localDatabaseName } from '@taucad/utils/worktree-database';
-import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
+import { tauDatabaseCommand } from '#support/tau-account.js';
+import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } from '#support/config.js';
+import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
+import type { DesktopSession } from '#support/desktop-app.js';
 
 /**
  * What one Tau Cloud owner needs before a project can sync at all (charter W18).
@@ -25,27 +27,25 @@ import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
 const execFileAsync = promisify(execFile);
 const workspaceRoot = resolve(import.meta.dirname, '../../../../..');
 
-/** Run one statement against the development Postgres and return its trimmed output. */
+/** Run one statement against the same run-owned database as account seeding. */
 const psql = async (statement: string): Promise<string> => {
-  const { stdout } = await execFileAsync(
-    'docker',
-    [
-      'exec',
-      'tau-postgres',
-      'psql',
-      '-qtAX',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-U',
-      'dev_user',
-      '-d',
-      localDatabaseName(),
-      '-c',
-      statement,
-    ],
-    { encoding: 'utf8' },
-  );
+  const { file, args } = tauDatabaseCommand(statement);
+  const { stdout } = await execFileAsync(file, [...args, '-qtAX'], { encoding: 'utf8' });
   return stdout.trim();
+};
+
+/** Launch an authenticated client using the production handoff for packaged acceptance. */
+export const launchTauCloudDesktop = async (bearer: string): Promise<DesktopSession> => {
+  const session = await launchDesktopApp({ token: bearer, env: { TAU_DESKTOP_UPDATES: 'off' } });
+  try {
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, bearer);
+    }
+    return session;
+  } catch (error) {
+    await session.close();
+    throw error;
+  }
 };
 
 /** The identifiers a seeded owner is addressed by on the billing side. */

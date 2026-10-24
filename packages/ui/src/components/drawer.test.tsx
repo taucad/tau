@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '#components/drawer.js';
 
@@ -23,7 +23,10 @@ beforeEach(() => {
   scrollIntoView.mockClear();
   // Jsdom does no layout, so it has no scrollIntoView.
   HTMLElement.prototype.scrollIntoView = scrollIntoView;
-  Object.defineProperty(globalThis, 'visualViewport', { configurable: true, value: viewport });
+  Object.defineProperty(globalThis, 'visualViewport', {
+    configurable: true,
+    value: viewport,
+  });
 });
 
 afterEach(() => {
@@ -45,10 +48,14 @@ const renderDrawer = (field: React.ReactNode): HTMLElement => {
 };
 
 describe('DrawerContent', () => {
-  it('should give list rows a 44px touch height and keep the caller className', () => {
+  it('should give list rows and their filter field the touch row height and keep the caller className', () => {
     const content = renderDrawer(undefined);
 
-    expect(content).toHaveClass('[&_[data-slot=command-item]]:min-h-10', 'custom-drawer');
+    expect(content).toHaveClass(
+      '[&_[data-slot=command-item]]:min-h-touch-row',
+      '[&_[data-slot=command-input]]:h-touch-row',
+      'custom-drawer',
+    );
   });
 
   it('should keep fields selectable inside the unselectable drawer', () => {
@@ -110,5 +117,105 @@ describe('DrawerContent', () => {
       viewport.showKeyboard(400);
     });
     expect(content).not.toHaveAttribute('data-keyboard');
+  });
+});
+
+describe('drawer grabber target', () => {
+  it('should give the grabber a 36px row and a 44px target that reaches 8px above the sheet edge only (D4, I3)', () => {
+    render(
+      <Drawer open snapPoints={[0.25, 1]}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    const row = handle.parentElement!;
+    const content = handle.closest('[data-slot=drawer-content]')!;
+    // 9 × 4px spacing: the row is the grabber box, which the surface below starts after.
+    expect(content).toHaveClass('[--drawer-handle-height:calc(var(--spacing)*9)]');
+    expect(row).toHaveClass('h-(--drawer-handle-height)', 'relative');
+    // The target spans the row's width, starts 8px (2 × 4px) above it and ends at its foot, never over the header.
+    expect(handle).toHaveClass('absolute!', 'inset-x-0!', '-top-2!', 'bottom-0!', 'h-auto!', 'w-full!');
+    expect(handle).not.toHaveClass('inset-0!', 'size-full!');
+  });
+});
+
+describe('drawer height keyboard controls', () => {
+  it('should expose its current snap point and clamp arrow navigation without dismissing', () => {
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    render(
+      <Drawer open snapPoints={[0.25, 0.58, 1]} onOpenChange={onOpenChange}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Half');
+    fireEvent.keyDown(handle, { key: 'End' });
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuenow', '3');
+    fireEvent.keyDown(handle, { key: 'Home' });
+    fireEvent.keyDown(handle, { key: 'ArrowDown' });
+    expect(handle).toHaveAttribute('aria-valuenow', '1');
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('should name the detents of a two-detent drawer Peek and Full', () => {
+    render(
+      <Drawer open snapPoints={['240px', 1]}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Full');
+  });
+
+  it('should cycle through its detents with Enter and Space, wrapping from the tallest to the first', () => {
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    render(
+      <Drawer open snapPoints={[0.25, 0.58, 1]} onOpenChange={onOpenChange}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
+    expect(fireEvent.keyDown(handle, { key: 'Enter' })).toBe(false);
+    expect(handle).toHaveAttribute('aria-valuetext', 'Half');
+    // Handled, so Space neither scrolls the page nor reaches a parent's key handler.
+    expect(fireEvent.keyDown(handle, { key: ' ' })).toBe(false);
+    expect(handle).toHaveAttribute('aria-valuetext', 'Full');
+    fireEvent.keyDown(handle, { key: 'Enter' });
+    expect(handle).toHaveAttribute('aria-valuetext', 'Peek');
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('should send keyboard snap changes to a controlled host', () => {
+    const setActiveSnapPoint = vi.fn<NonNullable<React.ComponentProps<typeof Drawer>['setActiveSnapPoint']>>();
+    render(
+      <Drawer open snapPoints={[0.25, 0.58, 1]} activeSnapPoint={0.58} setActiveSnapPoint={setActiveSnapPoint}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Drawer height' }), {
+      key: 'ArrowDown',
+    });
+    expect(setActiveSnapPoint).toHaveBeenCalledWith(0.25);
   });
 });

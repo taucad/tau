@@ -3,7 +3,7 @@ import type * as FsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import type { TauViewerViewState } from '@taucad/mcp/viewer-protocol';
+import type { TauViewerViewSettings, TauViewerViewState } from '@taucad/mcp/viewer-protocol';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -38,6 +38,26 @@ const viewOf = (overrides: Partial<TauViewerViewState> = {}): TauViewerViewState
   interactedAt: 0,
   ...overrides,
 });
+
+/** The settings a page reports after the person turned the grid off and cut a section. */
+const settingsOf = (overrides: Partial<TauViewerViewSettings> = {}): TauViewerViewSettings => ({
+  fieldOfView: 45,
+  upDirection: 'z',
+  display: { surfaces: true, lines: true, gizmo: true, grid: false, axes: true, matcap: false, postProcessing: false },
+  grid: { unit: 'cm' },
+  section: { active: true, cuts: [{ kind: 'plane', plane: 'xy', offset: 0.01, isFlipped: false }] },
+  measurements: [{ id: 'm-1', frameId: 'tau:root', startPoint: [0, 0, 0], endPoint: [0.1, 0, 0], distance: 0.1 }],
+  ...overrides,
+});
+
+/** A layout that shows one view, `front`. */
+const layoutShowing = (view: string): string =>
+  workbenchRecords.layout.serialize({
+    version: 1,
+    lanes: { chat: true, workbench: false },
+    viewer: { kind: 'group', tabs: [{ kind: 'view', view }] },
+    workbench: { kind: 'group', tabs: [] },
+  });
 
 const readRecord = async (root: string, path: string): Promise<unknown> =>
   JSON.parse(await readFile(join(root, path), 'utf8')) as unknown;
@@ -223,5 +243,133 @@ describe('createMcpViewerWorkbench', () => {
     await keeper.close();
 
     expect(await readdir(join(root, '.tau/workbench/views'))).toEqual([]);
+  });
+
+  it("should keep the page's display, grid, field of view, section and measurements in the view", async () => {
+    const keeper = createMcpViewerWorkbench({ settle: 10 });
+    keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: settingsOf({ grid: { unit: 'mm' } }) }) });
+    keeper.report({ root, pageId: 'page-1', view: viewOf({ interactedAt: 4, settings: settingsOf() }) });
+    await keeper.close();
+
+    const views = await readdir(join(root, '.tau/workbench/views'));
+    expect(await readRecord(root, `.tau/workbench/views/${views[0]}`)).toMatchObject({
+      entryPath: 'plate.ts',
+      ...settingsOf(),
+      camera: { kind: 'pose', direction: [1, 0, 0] },
+    });
+    await expect(readFile(join(root, workbenchPaths.entries))).rejects.toThrow();
+  });
+
+  it('should write only the settings when the person changes them, keeping an arranged camera', async () => {
+    await mkdir(join(root, '.tau/workbench/views'), { recursive: true });
+    await writeFile(
+      join(root, workbenchPaths.view('front')),
+      workbenchRecords.view.serialize({
+        version: 1,
+        entryPath: 'plate.ts',
+        camera: { kind: 'preset', preset: 'front' },
+      }),
+    );
+    await writeFile(join(root, workbenchPaths.layout), layoutShowing('front'));
+
+    const keeper = createMcpViewerWorkbench({ settle: 10 });
+    keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: settingsOf({ fieldOfView: 60 }) }) });
+    keeper.report({ root, pageId: 'page-1', view: viewOf({ interactedAt: 4, settings: settingsOf() }) });
+    await keeper.close();
+
+    expect(await readRecord(root, workbenchPaths.view('front'))).toMatchObject({
+      camera: { kind: 'preset', preset: 'front' },
+      fieldOfView: 45,
+      section: { active: true },
+    });
+  });
+
+  it("should write the camera into the selected kernel view's camera, as the Tau app does", async () => {
+    await mkdir(join(root, '.tau/workbench/views'), { recursive: true });
+    await writeFile(
+      join(root, workbenchPaths.view('front')),
+      workbenchRecords.view.serialize({
+        version: 1,
+        entryPath: 'plate.ts',
+        selectedKernelView: 'top-view',
+        kernelViews: [{ id: 'top-view' }],
+      }),
+    );
+    await writeFile(join(root, workbenchPaths.layout), layoutShowing('front'));
+
+    const keeper = createMcpViewerWorkbench({ settle: 10 });
+    keeper.report({ root, pageId: 'page-1', view: viewOf() });
+    keeper.report({
+      root,
+      pageId: 'page-1',
+      view: viewOf({ interactedAt: 4, camera: { ...viewOf().camera!, verticalSpan: 3 } }),
+    });
+    await keeper.close();
+
+    expect(await readRecord(root, workbenchPaths.view('front'))).toMatchObject({
+      camera: { kind: 'preset', preset: 'isometric' },
+      kernelViews: [{ id: 'top-view', camera: { kind: 'pose', verticalSpan: 3 } }],
+    });
+    await expect(keeper.state({ root, entryPath: 'plate.ts' })).resolves.toMatchObject({
+      view: { camera: { kind: 'pose', verticalSpan: 3 } },
+    });
+  });
+
+  describe('state', () => {
+    it("should read the view the layout shows for the entry and the entry's component display", async () => {
+      await mkdir(join(root, '.tau/workbench/views'), { recursive: true });
+      /* A record as the Tau app writes it. */
+      const desktop = workbenchRecords.view.serialize({
+        version: 1,
+        entryPath: 'plate.ts',
+        name: 'Front',
+        camera: { kind: 'look', direction: [0, -1, 1] },
+        ...settingsOf(),
+      });
+      await writeFile(join(root, workbenchPaths.view('front')), desktop);
+      await writeFile(join(root, workbenchPaths.layout), layoutShowing('front'));
+      await writeFile(
+        join(root, workbenchPaths.entries),
+        workbenchRecords.entries.serialize({
+          version: 1,
+          entries: { 'plate.ts': { components: { hidden: ['gear'], isolated: ['arm'], opacity: [] } } },
+        }),
+      );
+
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      await expect(keeper.state({ root, entryPath: 'plate.ts' })).resolves.toEqual({
+        viewId: 'front',
+        view: { camera: { kind: 'look', direction: [0, -1, 1] }, ...settingsOf() },
+        components: { hidden: ['gear'], isolated: ['arm'] },
+      });
+      await expect(keeper.state({ root, entryPath: 'other.ts' })).resolves.toEqual({});
+      await keeper.close();
+    });
+
+    it('should leave out a record that is invalid or from a newer Tau', async () => {
+      await mkdir(join(root, '.tau/workbench'), { recursive: true });
+      await writeFile(join(root, workbenchPaths.layout), '{"version":2}');
+      await writeFile(join(root, workbenchPaths.entries), '{"version":1,"entries":3}');
+
+      const keeper = createMcpViewerWorkbench({ settle: 10 });
+      await expect(keeper.state({ root, entryPath: 'plate.ts' })).resolves.toEqual({});
+      await keeper.close();
+    });
+
+    it('should read what a page reported last, writing it first', async () => {
+      const keeper = createMcpViewerWorkbench({ settle: 60_000 });
+      keeper.report({ root, pageId: 'page-1', view: viewOf({ settings: settingsOf({ fieldOfView: 60 }) }) });
+      keeper.report({
+        root,
+        pageId: 'page-1',
+        view: viewOf({ interactedAt: 4, hidden: ['gear'], settings: settingsOf() }),
+      });
+
+      await expect(keeper.state({ root, entryPath: 'plate.ts' })).resolves.toMatchObject({
+        view: { fieldOfView: 45, camera: { kind: 'pose', direction: [1, 0, 0] } },
+        components: { hidden: ['gear'], isolated: [] },
+      });
+      await keeper.close();
+    });
   });
 });

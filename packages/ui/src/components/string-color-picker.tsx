@@ -114,8 +114,7 @@ const getColorFormat = (color: string): string => {
   }
 };
 
-const baseIndicatorClass =
-  'flex h-(--param-field-h) w-6 items-center justify-center text-muted-foreground/60 select-none';
+const baseIndicatorClass = 'flex h-(--param-field-h) w-6 items-center justify-center text-muted-foreground select-none';
 
 /**
  * String Color Picker Component

@@ -76,7 +76,7 @@ export type ModelComponentActionMenuData = {
   readonly onRetryPreview?: () => void;
   readonly onPreviewDecodeError?: () => void;
   readonly onPreviewDecoded?: () => void;
-  /** The host's verbs. The menu leaves out "Add to chat", "Reveal in Explorer", "Show kinematics" and "Open preview" when the matching verb is absent. */
+  /** The host's verbs. The menu leaves out "Add to chat", "Reveal in model tree", "Show kinematics" and "Open preview" when the matching verb is absent. */
   readonly actions?: ModelComponentHostActions;
 };
 
@@ -431,7 +431,7 @@ function buildModelComponentActionDescriptors(
           {
             type: 'item',
             id: 'revealInExplorer',
-            label: 'Reveal in Explorer',
+            label: 'Reveal in model tree',
             icon: <FileBox className='size-3.5' />,
             onSelect: () => {
               revealInExplorer(data);

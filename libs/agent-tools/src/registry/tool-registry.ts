@@ -281,7 +281,7 @@ export type ChatToolRegistryOptions = {
    * the agent's own view. Without it those writes go through `fileSystemFor`.
    */
   readonly recordFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
-  /** Live project root for workbench records, including candidate runs. */
+  /** Live project root for workbench records (`arrange_workbench`, and `screenshot`'s `workbenchView`), including candidate runs. */
   readonly workbenchFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Backs `evaluate_model`. */
   readonly kernelClient?: RpcRuntimeClient | undefined;
@@ -406,7 +406,9 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     const preserveMutatingOutcome = mutatingRpcNames.has(mapped.rpc);
     try {
       const fileSystemFor =
-        mapped.rpc === rpcName.arrangeWorkbench && options.workbenchFileSystemFor !== undefined
+        /* The screenshot tool reads only a saved view through it: the live record arrange_workbench wrote. */
+        (mapped.rpc === rpcName.arrangeWorkbench || mapped.rpc === rpcName.captureImages) &&
+        options.workbenchFileSystemFor !== undefined
           ? options.workbenchFileSystemFor
           : recordRpcNames.has(mapped.rpc) && options.recordFileSystemFor !== undefined
             ? options.recordFileSystemFor

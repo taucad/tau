@@ -1,6 +1,7 @@
 /**
  * The page's live link to `tau mcp` (agent plugin UI blueprint W6): a long poll of `app_sync` that reports what the
- * person sees and hears of models `show_model` handed over and of captures the agent waits for.
+ * person sees and hears of models `show_model` handed over, of newer renders of the source it shows (the server
+ * watches it, PAR-1) with their build status, and of captures the agent waits for.
  */
 
 import { tauViewerAcceptedViewFields, tauViewerToolName } from '@taucad/mcp/viewer-protocol';
@@ -8,8 +9,12 @@ import type {
   TauViewerCamera,
   TauViewerComponent,
   TauViewerImage,
+  TauViewerMechanism,
   TauViewerModel,
+  TauViewerPlayback,
+  TauViewerPoseCommand,
   TauViewerShowResult,
+  TauViewerEntryStatus,
   TauViewerSyncResult,
   TauViewerViewState,
 } from '@taucad/mcp/viewer-protocol';
@@ -51,6 +56,14 @@ export const viewStateOf = (
     composition: 'inline' | 'tab';
     interactedAt: number;
     references: readonly GeometryComponentReference[];
+    /** The shown unit's mechanism, playback and coordinates, when its Kinematics actor loaded one. */
+    motion?:
+      | Readonly<{
+          mechanism: TauViewerMechanism;
+          playback: TauViewerPlayback;
+          coordinates: Readonly<Record<string, number>>;
+        }>
+      | undefined;
   }>,
 ): TauViewerViewState => {
   const { model, unit, camera } = input;
@@ -73,6 +86,7 @@ export const viewStateOf = (
     measurementCount: input.measurementCount,
     composition: input.composition,
     interactedAt: input.interactedAt,
+    ...(model.sourceRevision === undefined ? {} : { sourceRevision: model.sourceRevision }),
     references: input.references.slice(0, 64).map((reference) =>
       componentOf(reference.componentId, {
         name: reference.label,
@@ -80,6 +94,9 @@ export const viewStateOf = (
         selector: reference.selector,
       }),
     ),
+    ...(input.motion === undefined
+      ? {}
+      : { mechanism: input.motion.mechanism, playback: input.motion.playback, coordinates: input.motion.coordinates }),
   };
 };
 
@@ -182,10 +199,16 @@ export type LiveLinkPage = Readonly<{
   linked(): boolean;
   /** The `tools/call` whose result opened the page, which tells the server the page's conversation. */
   toolCallId(): string | undefined;
-  /** A model `show_model` handed over that this page has not seen. */
+  /** A model this page has not seen: one `show_model` handed over, or a newer render of the source it shows. */
   show(result: TauViewerShowResult): void;
+  /** The live state of the sources the page shows, by project-relative path, as the server last reported it. */
+  status(status: Readonly<Record<string, TauViewerEntryStatus>>): void;
   /** Capture the live view once its model is drawn. */
   capture(): Promise<TauViewerImage | Readonly<{ error: string }>>;
+  /** The project's file list moved to this version (`app_sync`'s `filesVersion`); the Files pane lists again. */
+  filesVersion?(filesVersion: number): void;
+  /** Apply a `pose_model` command to the shown model's Kinematics actor. */
+  pose(command: TauViewerPoseCommand): void;
 }>;
 
 /** Timing of the live link; tests shorten it. */
@@ -199,6 +222,8 @@ export type LiveLinkOptions = Readonly<{
 
 /** The running link. */
 export type LiveLink = Readonly<{
+  /** The page's id on the server, as its syncs name it; `app_open_file` names the page with it. */
+  pageId: string;
   /** Report the view now, outside the poll (after the person changed it). */
   nudge(): void;
   stop(): void;
@@ -242,6 +267,7 @@ export const startLiveLink = (
   const control: { stopped: boolean; resume?: (() => void) | undefined } = { stopped: false };
   let retry = retryFloor;
   const answered = new Set<string>();
+  let posed = 0;
   let activeUntil = Date.now() + activeFor;
   /* A page that opened on its link's model first takes the server's version without following, so a show made before
    * it opened never replaces that model; it follows every show after. */
@@ -275,8 +301,19 @@ export const startLiveLink = (
   const handle = (result: TauViewerSyncResult): void => {
     version = Math.max(version, result.version);
     accepts = new Set(result.accepts ?? []);
-    if (result.show !== undefined && page.follows()) {
+    /* The server hands a card only newer renders of its own source, and a following page whatever was shown last. */
+    if (result.show !== undefined) {
       page.show(result.show);
+    }
+    if (result.status !== undefined) {
+      page.status(result.status);
+    }
+    if (result.filesVersion !== undefined) {
+      page.filesVersion?.(result.filesVersion);
+    }
+    if (result.pose !== undefined && result.pose.sequence > posed) {
+      posed = result.pose.sequence;
+      page.pose(result.pose);
     }
     const requestId = result.capture?.requestId;
     if (requestId !== undefined && !answered.has(requestId)) {
@@ -330,6 +367,7 @@ export const startLiveLink = (
   void loop();
 
   return {
+    pageId,
     nudge() {
       if (!control.stopped) {
         keepActive();

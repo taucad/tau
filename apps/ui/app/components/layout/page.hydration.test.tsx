@@ -18,6 +18,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
   useTypedMatches: (selector: (handles: Record<string, unknown[]>) => unknown) =>
     selector({
       breadcrumb: [],
+      title: [],
       actions: [],
       commandPalette: [],
       enablePageWrapper: [],

@@ -1,0 +1,50 @@
+{
+  "configs": {
+    "ProjectDeletion.target.cfg": {
+      "tier": "pr",
+      "expect": "pass",
+      "ref": "CPD-01 cloud-project-deletion-blueprint R2\u2013R6"
+    },
+    "ProjectDeletion.today.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "DeletionSettles"
+      },
+      "ref": "CPD-01 cloud-project-deletion-blueprint R2\u2013R6",
+      "kind": "defect",
+      "fixedBy": "CPD-02\u2013CPD-05 (current API has no cloud deletion operation)"
+    },
+    "ProjectDeletion.unfenced.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "CompletionFenced"
+      },
+      "ref": "CPD-01 cloud-project-deletion-blueprint R2\u2013R6",
+      "kind": "witness"
+    },
+    "ProjectDeletion.stale-database.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoPostIntentPublication"
+      },
+      "ref": "CPD-01 cloud-project-deletion-blueprint R2\u2013R6",
+      "kind": "witness"
+    },
+    "ProjectDeletion.replayed-release.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "SharedForkSurvives"
+      },
+      "ref": "CPD-01 cloud-project-deletion-blueprint R2\u2013R6",
+      "kind": "witness"
+    },
+    "ProjectDeletion.recreated.cfg": {
+      "tier": "pr",
+      "expect": {
+        "violated": "NoResurrection"
+      },
+      "ref": "CPD-01 cloud-project-deletion-blueprint R2\u2013R6",
+      "kind": "witness"
+    }
+  }
+}

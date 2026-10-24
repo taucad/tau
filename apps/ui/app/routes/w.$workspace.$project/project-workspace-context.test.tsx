@@ -573,7 +573,19 @@ describe('ProjectWorkspaceProvider', () => {
     });
   });
 
-  it('does not mutate desktop state for unsupported mobile-only actions', () => {
+  it.each([
+    ['model', 'model-tree'],
+    ['kinematics', 'kinematics'],
+    ['print', 'print'],
+    ['browser', 'browser'],
+    ['agents', 'agents'],
+    ['jobs', 'jobs'],
+    ['kernel', 'kernel'],
+    ['console', 'console'],
+    ['parameters', 'parameters'],
+    ['files', 'files'],
+    ['details', 'details'],
+  ] as const)('opens %s as the %s phone surface without touching the desktop lanes (I1)', (panel, surface) => {
     state.isMobile = true;
     render(
       <ProjectWorkspaceProvider>
@@ -582,11 +594,13 @@ describe('ProjectWorkspaceProvider', () => {
     );
 
     act(() => {
-      workspace.openPanel('model');
-      workspace.openPanel('kernel');
+      workspace.openPanel(panel);
     });
 
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith({
+      type: 'setPanelState',
+      panelState: { mobileActiveTab: surface },
+    });
   });
 
   it('selects Workbench only for user-origin file opens on desktop', () => {

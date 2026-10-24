@@ -918,12 +918,20 @@
       "owner": "agent-plugin-ui-blueprint W10"
     },
     {
-      "id": "D29",
-      "bound": "Viewer Share pane's direct link: each git call that lists the project's files, 10 s",
-      "site": "packages/host/src/mcp-viewer-share.ts",
-      "token": "timeout: gitTimeout",
+      "id": "D30",
+      "bound": "Viewer Files pane: a project's file changes settle 100 ms before a held app_sync answers with the new filesVersion",
+      "site": "packages/host/src/mcp-viewer-files.ts",
+      "token": "}, settle);",
+      "class": "Debounce",
+      "owner": "agent-plugin-workbench-parity-closeout-blueprint PAR-9"
+    },
+    {
+      "id": "D31",
+      "bound": "show_model on a watched source waits at most the entry's render timeout (Viewer settings, .tau/workbench/entries.json) before RENDER_TIMEOUT",
+      "site": "packages/host/src/mcp-viewer.ts",
+      "token": "AbortSignal.timeout(renderTimeout)",
       "class": "External edge",
-      "owner": "agent-plugin-viewer-parity-blueprint V10"
+      "owner": "agent-plugin-workbench-parity-closeout-blueprint PAR-8"
     },
     {
       "id": "M11",

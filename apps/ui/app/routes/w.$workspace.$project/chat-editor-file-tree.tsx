@@ -1949,17 +1949,18 @@ export const ChatEditorFileTree = memo(function ({
             />
           </div>
 
+          <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
           {tree.getItems().length > 0 || pendingFolder !== undefined || pendingFile !== undefined ? (
             <div
               data-tree-container
               {...tree.getContainerProps()}
+              aria-label='Project files'
               ref={setTreeContainerElement}
               className={cn(
                 'flex min-h-full flex-1 flex-col gap-0 outline-none',
                 borderless && 'gap-0.5 px-1.5 pb-1.5',
               )}
             >
-              <AssistiveTreeDescription tree={tree} getLabel={getFileTreeAssistiveDndLabel} />
               {/* Pending folder at root level */}
               {pendingFolder?.parentPath === '' ? (
                 <PendingFolderInput
@@ -2117,6 +2118,8 @@ export const ChatEditorFileTree = memo(function ({
                     {/* Root item as spacer to capture empty space drops */}
                     <div
                       {...rootItem.getProps()}
+                      aria-hidden='true'
+                      tabIndex={-1}
                       className={cn('min-h-4 flex-1', highlightAllItems && 'bg-primary/20')}
                     />
                   </>

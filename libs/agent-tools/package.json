@@ -48,11 +48,13 @@
     "@taucad/bambu": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/parameters": "workspace:*",
     "@taucad/slicer": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/units": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/workbench": "workspace:*",
     "geospec": "workspace:*"
   },
   "imports": {

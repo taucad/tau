@@ -448,16 +448,24 @@ export const writeSpilledPushLog = async (args: {
   locator: RepositoryLocator;
   base: Manifest | undefined;
   next: Manifest;
+  signal?: AbortSignal;
 }): Promise<void> => {
   const { store, locator } = args;
+  args.signal?.throwIfAborted();
   const segment = spilledPushLog(args.base, args.next);
   if (segment === undefined) {
     return;
   }
-  await store.putObject(locator, segment.key, segment.bytes, {
-    contentLength: segment.bytes.byteLength,
-    sha256: createHash('sha256').update(segment.bytes).digest('base64'),
-  });
+  await store.putObject(
+    locator,
+    segment.key,
+    segment.bytes,
+    {
+      contentLength: segment.bytes.byteLength,
+      sha256: createHash('sha256').update(segment.bytes).digest('base64'),
+    },
+    args.signal,
+  );
 };
 
 /** The file name a manifest key has inside a lease. */
@@ -532,6 +540,9 @@ const reconcile = async (args: {
   if (current !== undefined && Buffer.from(current.manifest).equals(Buffer.from(bytes))) {
     return current.token;
   }
+  if (current !== undefined && isTombstoned(decodeManifest(current.manifest))) {
+    throw new RepositoryStoreError('tombstoned', 'This project has been deleted.');
+  }
   if (current !== undefined && hydrated !== undefined) {
     try {
       assertSameIncarnation(hydrated, decodeManifest(current.manifest));
@@ -556,15 +567,19 @@ const reconcile = async (args: {
  * cannot be deleted and re-registered onto the bytes that are about to be
  * purged. Only after this does W6's purge job touch a byte.
  */
-export const commitTombstone = async (args: {
-  store: RepositoryStore;
-  locator: RepositoryLocator;
-  committedBy: string;
-  erasureVerified?: boolean;
-  at?: Date;
-}): Promise<{ manifest: Manifest; token: CommitToken }> => {
+export const commitTombstone = async (
+  args: {
+    store: RepositoryStore;
+    locator: RepositoryLocator;
+    committedBy: string;
+    erasureVerified?: boolean;
+    at?: Date;
+  },
+  signal?: AbortSignal,
+): Promise<{ manifest: Manifest; token: CommitToken }> => {
+  signal?.throwIfAborted();
   const at = args.at ?? new Date();
-  const read = await args.store.readManifest(args.locator);
+  const read = await args.store.readManifest(args.locator, signal);
   const current = read === undefined ? undefined : decodeManifest(read.manifest);
 
   if (current !== undefined && isTombstoned(current)) {
@@ -594,8 +609,15 @@ export const commitTombstone = async (args: {
           ...(args.erasureVerified === undefined ? {} : { erasureVerified: args.erasureVerified }),
         });
 
-  await writeSpilledPushLog({ store: args.store, locator: args.locator, base: current, next });
-  const token = await args.store.commitManifest(args.locator, encodeManifest(next), read?.token ?? 'absent');
+  await writeSpilledPushLog({
+    store: args.store,
+    locator: args.locator,
+    base: current,
+    next,
+    ...(signal === undefined ? {} : { signal }),
+  });
+  signal?.throwIfAborted();
+  const token = await args.store.commitManifest(args.locator, encodeManifest(next), read?.token ?? 'absent', signal);
   if (token === 'lost') {
     throw new RepositoryStoreError('lost', `another writer changed ${args.locator.projectId} before the tombstone`);
   }

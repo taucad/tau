@@ -5,7 +5,7 @@ type PaneId = Extract<WorkbenchLaneTab, { kind: 'pane' }>['pane'];
 const titles = {
   browser: 'Browser',
   parameters: 'Parameters',
-  model: 'Model',
+  model: 'Model tree',
   print: 'Print',
   kinematics: 'Kinematics',
   revisions: 'Revisions',

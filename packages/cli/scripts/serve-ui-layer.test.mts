@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -56,17 +57,31 @@ describe('buildLayer', () => {
       excludedSourceMaps: { fileCount: 2, byteLength: 15 },
     });
     expect(JSON.parse(await readFile(join(root, 'first', 'tau-layer.json'), 'utf8'))).toEqual(first);
-    /* Sorted members, no map, mtime 0, owner 0, and the two modes; the preparation host's own reader unpacks it in
-     * `src/serve-ui.test.ts`. */
-    const listing = execFileSync('tar', ['-tvzf', join(root, 'first', layerAsset)], { encoding: 'utf8' });
-    expect(
-      listing
-        .trim()
-        .split('\n')
-        .map((line) => line.split(/\s+/u).at(-1)),
-    ).toEqual(['assets/entry.client-a.js', 'assets/nested/kernel.wasm', 'index.html', 'run.sh']);
-    expect(listing).toMatch(/^-rw-r--r-- 0\/0 +16 1970-01-01 00:00 assets\/entry\.client-a\.js$/mu);
-    expect(listing).toMatch(/^-rwxr-xr-x 0\/0 +10 1970-01-01 00:00 run\.sh$/mu);
+    // Native tar validates the archive and its sorted members without depending on GNU/BSD verbose formatting.
+    const listing = execFileSync('tar', ['-tzf', join(root, 'first', layerAsset)], { encoding: 'utf8' });
+    expect(listing.trim().split('\n')).toEqual([
+      'assets/entry.client-a.js',
+      'assets/nested/kernel.wasm',
+      'index.html',
+      'run.sh',
+    ]);
+    // Read the actual ustar metadata, independent of the host's locale, timezone and tar display conventions.
+    const archive = gunzipSync(bytes);
+    const members: Array<{ mode: number; uid: number; gid: number; size: number; mtime: number }> = [];
+    for (let offset = 0; offset < archive.byteLength && archive[offset] !== 0; ) {
+      expect(archive.toString('ascii', offset + 156, offset + 157)).toBe('0'); // Regular-file typeflag.
+      const octal = (start: number, end: number): number =>
+        Number.parseInt(archive.toString('ascii', offset + start, offset + end), 8);
+      const size = octal(124, 136);
+      members.push({ mode: octal(100, 108), uid: octal(108, 116), gid: octal(116, 124), size, mtime: octal(136, 148) });
+      offset += 512 + Math.ceil(size / 512) * 512;
+    }
+    expect(members).toEqual([
+      { mode: 0o644, uid: 0, gid: 0, size: 16, mtime: 0 },
+      { mode: 0o644, uid: 0, gid: 0, size: 1500, mtime: 0 },
+      { mode: 0o644, uid: 0, gid: 0, size: 64, mtime: 0 },
+      { mode: 0o755, uid: 0, gid: 0, size: 10, mtime: 0 },
+    ]);
   });
 
   it('should refuse a layer over the size line', async () => {

@@ -498,23 +498,26 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
     captureRendering,
     leading,
     aboveControls,
+    mobileAction,
   }: {
     captureRendering: () => Promise<Rendering>;
     leading?: React.ReactNode;
     aboveControls?: React.ReactNode;
+    mobileAction?: React.ReactNode;
   }) => {
     mockCaptureRendering = captureRendering;
     return (
       <div role='group' aria-label='Viewer controls'>
         {aboveControls}
         {leading}
+        {mobileAction}
       </div>
     );
   },
 }));
 
 vi.mock('#components/cad/ar-button.js', () => ({
-  ArButton: () => <button type='button' aria-label='View in AR' />,
+  ArButton: () => <button type='button' aria-label='View in your space' />,
 }));
 
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
@@ -1308,15 +1311,14 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(strip.lastElementChild).toBe(bar);
   });
 
-  it('should keep the AR button on the line above the bar and the issues inside the bar', () => {
+  it('should hand AR to the bar as its mobile action, with no line above it, and keep the issues inside the bar', () => {
     mockGeometryUnits.set(helperEntryPath, createMockCadActor());
 
     renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    const line = screen.getByRole('button', { name: 'View in AR' }).parentElement!;
     const bar = screen.getByRole('group', { name: 'Viewer controls' });
-    expect(line).toHaveClass('[&>*]:pointer-events-auto');
-    expect(line.nextElementSibling).toBe(bar);
+    expect(screen.getAllByRole('button', { name: 'View in your space' })).toHaveLength(1);
+    expect(bar).toContainElement(screen.getByRole('button', { name: 'View in your space' }));
     expect(bar).toContainElement(screen.getByTestId('chat-stack-trace'));
   });
 
@@ -1519,13 +1521,13 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(await screen.findByRole('menuitem', { name: 'Focus on part' })).toBeInTheDocument();
     expect(screen.getByText('Add to chat')).toBeInTheDocument();
-    expect(screen.getByText('Reveal in Explorer')).toBeInTheDocument();
+    expect(screen.getByText('Reveal in model tree')).toBeInTheDocument();
     expect(screen.getByText('Hide')).toBeInTheDocument();
     expect(screen.getByText('Isolate')).toBeInTheDocument();
     expect(screen.getByText('Opacity')).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: 'Opacity' })).toHaveValue('100');
 
-    fireEvent.click(screen.getByText('Reveal in Explorer'));
+    fireEvent.click(screen.getByText('Reveal in model tree'));
 
     expect(mockGraphicsSend).toHaveBeenCalledWith({
       type: 'selectModelComponent',

@@ -8,7 +8,11 @@
  * directly on the main thread, so the two outcomes are directly comparable.
  */
 
-import { buildCaptureExportOptions, captureFilesToDataUrls } from '@taucad/agent-tools/capture';
+import {
+  buildCaptureExportOptions,
+  captureFilesToDataUrls,
+  materializeCaptureCamera,
+} from '@taucad/agent-tools/capture';
 import { HeadlessImageService } from '#services/headless-image.service.js';
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
 
@@ -41,11 +45,7 @@ const captureOptions = (recipe: { readonly mode: 'single' | 'multi_angle'; reado
       }
     : {
         ...options,
-        camera: {
-          ...options.camera,
-          direction: copyVector(options.camera.direction),
-          up: copyVector(options.camera.up),
-        },
+        camera: materializeCaptureCamera(options.camera),
       };
 };
 

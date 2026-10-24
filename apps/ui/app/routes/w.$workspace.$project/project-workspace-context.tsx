@@ -10,6 +10,7 @@ import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/wo
 import type { WorkbenchLaneNode } from '@taucad/workbench';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { flagParameter } from '#utils/search-parameter.codecs.js';
+import { holdUnheardReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 
 export const projectWorkspaceKeyCombinations = {
   files: { key: 'f', ctrlKey: true },
@@ -141,14 +142,28 @@ const addPane = (node: WorkbenchLaneNode, pane: WorkbenchUtilityPanelId): Workbe
   };
 };
 
-const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelId>> = {
+/**
+ * The phone surface each Workbench surface opens as. Total over `WorkbenchPanelId`, so a pane added to the desktop
+ * registry does not compile until it has a phone surface, and `openPanel` never no-ops on a phone (I1). A surface the
+ * desktop gates (Print behind Machines, Telemetry and Console behind debug mode) still opens: its body shows the same
+ * refusal the desktop pane does.
+ */
+export const mobilePanelByWorkbenchPanel = {
+  browser: 'browser',
   parameters: 'parameters',
+  kinematics: 'kinematics',
   files: 'files',
+  model: 'model-tree',
+  print: 'print',
+  revisions: 'revisions',
+  agents: 'agents',
+  jobs: 'jobs',
   export: 'converter',
   share: 'share',
   details: 'details',
-  revisions: 'revisions',
-};
+  kernel: 'kernel',
+  console: 'console',
+} as const satisfies Record<WorkbenchPanelId, MobilePanelId>;
 
 export function ProjectWorkspaceProvider({
   children,
@@ -330,10 +345,10 @@ export function ProjectWorkspaceProvider({
         return;
       }
       if (isMobile) {
-        const mobilePanel = mobilePanelByWorkbenchPanel[panelId];
-        if (mobilePanel) {
-          editorRef.send({ type: 'setPanelState', panelState: { mobileActiveTab: mobilePanel } });
-        }
+        editorRef.send({
+          type: 'setPanelState',
+          panelState: { mobileActiveTab: mobilePanelByWorkbenchPanel[panelId] },
+        });
         return;
       }
       setWorkbenchOpen(true);
@@ -465,10 +480,13 @@ export function ProjectWorkspaceProvider({
   }, [editorRef, isMobile, setWorkbenchOpen]);
 
   useEffect(() => {
-    const modelSubscription = editorRef.on('modelComponentRevealRequested', () => {
+    // The pane may mount only because of this reveal, after the emit: hold it for that pane's first subscribe.
+    const modelSubscription = editorRef.on('modelComponentRevealRequested', (event) => {
+      holdUnheardReveal(editorRef, 'model', event);
       openPanel('model');
     });
-    const kinematicsSubscription = editorRef.on('kinematicsRevealRequested', () => {
+    const kinematicsSubscription = editorRef.on('kinematicsRevealRequested', (event) => {
+      holdUnheardReveal(editorRef, 'kinematics', event);
       openPanel('kinematics');
     });
     return () => {

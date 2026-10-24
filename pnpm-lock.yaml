@@ -1837,9 +1837,9 @@ importers:
       '@taucad/agent-tools':
         specifier: workspace:*
         version: link:../../libs/agent-tools
-      '@taucad/geospec-engine':
+      '@taucad/cli':
         specifier: workspace:*
-        version: link:../../packages/geospec-engine
+        version: link:../../packages/cli
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -1921,9 +1921,6 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../../packages/geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -2499,6 +2496,9 @@ importers:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
+      '@taucad/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
@@ -2508,9 +2508,6 @@ importers:
       '@taucad/fs-bridge':
         specifier: workspace:*
         version: link:../../libs/fs-bridge
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../../packages/geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -2667,9 +2664,6 @@ importers:
       '@taucad/fs-client':
         specifier: workspace:*
         version: link:../libs/fs-client
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../../packages/geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -3206,6 +3200,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../../packages/kinematics
       '@taucad/parameters':
         specifier: workspace:*
         version: link:../../packages/parameters
@@ -3221,6 +3218,9 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../utils
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../../packages/workbench
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
@@ -3590,6 +3590,9 @@ importers:
       '@taucad/viewer':
         specifier: workspace:*
         version: link:../viewer
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
       '@taucad/workbench-panes':
         specifier: workspace:*
         version: link:../workbench-panes
@@ -3620,6 +3623,9 @@ importers:
       three:
         specifier: 'catalog:'
         version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
+      uint8array-extras:
+        specifier: 'catalog:'
+        version: 1.6.0
       vite:
         specifier: 'catalog:'
         version: 8.0.16(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(less@4.5.1)(sass-embedded@1.105.1)(sass@1.105.1)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
@@ -3671,9 +3677,6 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../plugins/gltf
@@ -4132,6 +4135,9 @@ importers:
       '@taucad/jobs':
         specifier: workspace:*
         version: link:../jobs
+      '@taucad/kinematics':
+        specifier: workspace:*
+        version: link:../kinematics
       '@taucad/mcp':
         specifier: workspace:*
         version: link:../mcp
@@ -4193,9 +4199,6 @@ importers:
       '@taucad/formal':
         specifier: workspace:*
         version: link:../../tools/formal
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../geospec-engine
       '@taucad/revisions':
         specifier: workspace:*
         version: link:../revisions
@@ -4263,10 +4266,16 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.32.1(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
     devDependencies:
       '@taucad/chat':
         specifier: workspace:*
         version: link:../../libs/chat
+      '@taucad/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -5770,12 +5779,12 @@ importers:
         specifier: workspace:*
         version: link:../core/project
     devDependencies:
+      '@taucad/cli':
+        specifier: workspace:*
+        version: link:../cli
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../plugins/esbuild
-      '@taucad/geospec-engine':
-        specifier: workspace:*
-        version: link:../geospec-engine
       '@taucad/image':
         specifier: workspace:*
         version: link:../plugins/image
@@ -5830,6 +5839,9 @@ importers:
       '@taucad/units':
         specifier: workspace:*
         version: link:../units
+      '@taucad/workbench':
+        specifier: workspace:*
+        version: link:../workbench
       class-variance-authority:
         specifier: 'catalog:'
         version: 0.7.1
@@ -5842,6 +5854,9 @@ importers:
       radix-ui:
         specifier: 'catalog:'
         version: 1.8.0(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react-virtuoso:
+        specifier: ^4.18.7
+        version: 4.18.16(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
     devDependencies:
       '@taucad/nx':
         specifier: workspace:*
@@ -5885,6 +5900,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.7(react@19.2.7)
+      three:
+        specifier: ^0.184.0
+        version: 0.184.0(patch_hash=3c20101d3afa0207d47a6471b88b65e3b20b9063349c0ffd9838cb9e87ba19f5)
       xstate:
         specifier: 'catalog:'
         version: 6.0.0-alpha.59

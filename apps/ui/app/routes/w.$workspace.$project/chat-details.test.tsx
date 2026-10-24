@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { KeyboardProvider } from '@taucad/ui/components/keyboard';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ChatDetailsUsage } from '#routes/w.$workspace.$project/chat-details-usage.js';
 
 const mocks = vi.hoisted(() => ({
@@ -93,11 +95,23 @@ vi.mock('#routes/w.$workspace.$project/packages-panel.js', () => ({
   PackagesPanel: () => <section aria-label='Packages' />,
 }));
 
-const { DetailsPanelBody } = await import('#routes/w.$workspace.$project/chat-details.js');
+const { ChatDetails, DetailsPanelBody } = await import('#routes/w.$workspace.$project/chat-details.js');
 
 describe('DetailsPanelBody', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('names its Close after the panel, as its tooltip does (I6)', () => {
+    render(
+      <KeyboardProvider>
+        <TooltipProvider>
+          <ChatDetails />
+        </TooltipProvider>
+      </KeyboardProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Close Details' })).toBeInTheDocument();
   });
 
   it('passes hidden-panel visibility to transcript usage', () => {

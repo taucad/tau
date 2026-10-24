@@ -103,7 +103,8 @@ describe('OpenCascade tessellation presets (P2)', () => {
   it('keeps the triangle count of a preset within 20 % across a hundredfold scale', async () => {
     const small = reportOf(await renderModel(sphere(5), { tessellation: 'medium' }));
     const large = reportOf(await renderModel(sphere(500), { tessellation: 'medium' }));
-    expect(large.linearTolerance! / small.linearTolerance!).toBeCloseTo(100, 6);
+    // The box grows by each shape's absolute tolerance (1e-7 mm), so the ratio is 100 to within 1e-6.
+    expect(large.linearTolerance! / small.linearTolerance! / 100).toBeCloseTo(1, 6);
     expect(Math.abs(large.triangles - small.triangles) / small.triangles).toBeLessThanOrEqual(0.2);
   });
 
@@ -181,6 +182,59 @@ describe('OpenCascade preview budget (P4)', () => {
     expect(measureShapesDiagonal(oc, [])).toBeNaN();
     expect(measureShapesDiagonal(oc, [{ name: 'null', shape: empty }])).toBeNaN();
     for (const handle of [near, nearMaker, far, farMaker, corner, empty]) {
+      handle.delete();
+    }
+  });
+
+  it('measures a preset from the cheap B-rep box: never finer than the tight box, at most 10 % coarser', () => {
+    const torusMaker = new oc.BRepPrimAPI_MakeTorus(40, 8);
+    const origin = new oc.gp_Pnt(30, -20, 5);
+    const oblique = new oc.gp_Dir(1, 2, 3);
+    const axes = new oc.gp_Ax2(origin, oblique);
+    const cylinderMaker = new oc.BRepPrimAPI_MakeCylinder(axes, 6, 70);
+    const shapes = [
+      { name: 'torus', shape: torusMaker.Shape() },
+      { name: 'cylinder', shape: cylinderMaker.Shape() },
+    ];
+    const boxDiagonal = (
+      add: (shape: (typeof shapes)[number]['shape'], box: InstanceType<typeof oc.Bnd_Box>) => void,
+    ) => {
+      const box = new oc.Bnd_Box();
+      for (const { shape } of shapes) {
+        add(shape, box);
+      }
+      const diagonal = Math.hypot(
+        box.GetXMax() - box.GetXMin(),
+        box.GetYMax() - box.GetYMin(),
+        box.GetZMax() - box.GetZMin(),
+      );
+      box.delete();
+      return diagonal;
+    };
+    const tight = boxDiagonal((shape, box) => {
+      oc.BRepBndLib.AddOptimal(shape, box, false, false);
+    });
+    const cheap = boxDiagonal((shape, box) => {
+      oc.BRepBndLib.Add(shape, box, false);
+    });
+
+    const measured = measureShapesDiagonal(oc, shapes);
+    expect(measured).toBe(cheap);
+    expect(measured).toBeGreaterThanOrEqual(tight);
+    expect(measured / tight).toBeLessThanOrEqual(1.1);
+
+    // A triangulation left by an earlier mesh does not change the measurement.
+    const meshes = shapes.map(({ shape }) => new oc.BRepMesh_IncrementalMesh(shape, 5, false, 0.5, false));
+    expect(measureShapesDiagonal(oc, shapes)).toBe(measured);
+    for (const handle of [
+      ...meshes,
+      ...shapes.map(({ shape }) => shape),
+      torusMaker,
+      cylinderMaker,
+      axes,
+      oblique,
+      origin,
+    ]) {
       handle.delete();
     }
   });

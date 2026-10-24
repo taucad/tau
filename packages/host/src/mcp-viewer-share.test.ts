@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,15 +9,7 @@ import { shareArtifactCodec } from '@taucad/project-core/share-artifact';
 import type { TauMcpViewerFailure } from '@taucad/mcp';
 
 import { createDirectShare } from '#mcp-viewer-share.js';
-import type { GitRunner, McpViewerDirectShare, SourceSnapshotter } from '#mcp-viewer-share.js';
-
-const run = promisify(execFile);
-
-const git = async (cwd: string, ...args: string[]): Promise<void> => {
-  await run('git', ['-c', 'user.name=Tau', '-c', 'user.email=tau@example.com', '-c', 'commit.gpgsign=false', ...args], {
-    cwd,
-  });
-};
+import type { McpViewerDirectShare, SourceSnapshotter, SourceSnapshotFile } from '#mcp-viewer-share.js';
 
 describe('createDirectShare', () => {
   let project: string;
@@ -31,7 +21,9 @@ describe('createDirectShare', () => {
     assets: { main: { entryPath: 'main.ts' } },
   };
   const write = async (path: string, content: string): Promise<void> => {
-    await mkdir(join(project, ...path.split('/').slice(0, -1)), { recursive: true });
+    await mkdir(join(project, ...path.split('/').slice(0, -1)), {
+      recursive: true,
+    });
     await writeFile(join(project, ...path.split('/')), content);
   };
   const expectDirect = (answer: McpViewerDirectShare | TauMcpViewerFailure): McpViewerDirectShare => {
@@ -59,25 +51,37 @@ describe('createDirectShare', () => {
     await write('.tau/parameters/parts/lid.ts.json', '{"activeGroup":"default","groups":{}}');
     await write('.tau/artifacts/lid.glb', 'glb');
     await write('node_modules/x/index.js', 'module');
-    await write('secret.log', 'ignored');
-    await write('.gitignore', '*.log\n');
-    await git(project, 'init', '--quiet', '--initial-branch=main');
   });
 
   afterEach(async () => {
     await rm(project, { recursive: true, force: true });
   });
 
-  it('should pack every file git does not ignore, with tau.json naming the shown entry and its parameters', async () => {
+  /** The runtime's closure of an entry: the entry's own file, as `snapshotSource` reads it from the project. */
+  const closureOf = (paths: readonly string[] = []): SourceSnapshotter =>
+    vi.fn<SourceSnapshotter>(async ({ entryPath }) => ({
+      entryPath,
+      files: [entryPath, ...paths].map(
+        (path): SourceSnapshotFile => ({
+          path,
+          content: new TextEncoder().encode(path),
+          sha256: path,
+          role: path === entryPath ? 'entry' : 'kernel-dependency',
+        }),
+      ),
+      unresolvedPaths: [],
+    }));
+
+  it("should pack the closure with tau.json naming the shown entry, and the entry's parameters", async () => {
     const answer = await createDirectShare({
       root: project,
       entryPath: 'parts/lid.ts',
       origin: 'https://tau.example/x',
+      snapshotSource: closureOf(['main.ts', 'node_modules/x/index.js', '.tau/artifacts/lid.glb']),
     });
     const files = await opened(answer);
 
     expect(Object.keys(files).sort()).toEqual([
-      '.gitignore',
       '.tau/parameters/parts/lid.ts.json',
       'main.ts',
       'parts/lid.ts',
@@ -88,69 +92,100 @@ describe('createDirectShare', () => {
       kind: 'direct',
       origin: 'https://tau.example',
       entryPath: 'parts/lid.ts',
-      closure: 'project-files',
-      fileCount: 5,
+      closure: 'runtime',
+      fileCount: 4,
       warnings: [],
     });
   });
 
-  it('should walk the folder outside git and carry a new tau.json when it has none', async () => {
+  it('should carry a new tau.json when the folder has none', async () => {
     await rm(join(project, 'tau.json'));
-    const outsideGit: GitRunner = async () => undefined;
 
-    const answer = await createDirectShare({ root: project, entryPath: 'main.ts', git: outsideGit });
-    const files = await opened(answer);
+    const answer = await createDirectShare({
+      root: project,
+      entryPath: 'main.ts',
+      snapshotSource: closureOf(),
+    });
 
-    expect(Object.keys(files)).toContain('secret.log');
-    expect(Object.keys(files)).not.toContain('node_modules/x/index.js');
-    expect(mainOf(files)).toBe('main.ts');
+    expect(mainOf(await opened(answer))).toBe('main.ts');
     expect(expectDirect(answer).warnings).toEqual([expect.objectContaining({ code: 'MANIFEST_MISSING' })]);
   });
 
-  it('should pack the runtime closure when the host has one', async () => {
+  it('should leave out the files the collector writes, and report what the runtime could not resolve', async () => {
     const content = new TextEncoder().encode('export default 1;\n');
     const snapshotSource = vi.fn<SourceSnapshotter>(async () => ({
       entryPath: 'main.ts',
       files: [
         { path: 'main.ts', content, sha256: 'main', role: 'entry' },
-        { path: 'tau.json', content: new TextEncoder().encode('{}'), sha256: 'stale', role: 'additional' },
+        {
+          path: 'tau.json',
+          content: new TextEncoder().encode('{}'),
+          sha256: 'stale',
+          role: 'additional',
+        },
       ],
       unresolvedPaths: ['missing.ts'],
     }));
 
-    const answer = await createDirectShare({ root: project, entryPath: 'main.ts', snapshotSource });
+    const answer = await createDirectShare({
+      root: project,
+      entryPath: 'main.ts',
+      snapshotSource,
+    });
     const files = await opened(answer);
 
     expect(Object.keys(files).sort()).toEqual(['main.ts', 'tau.json']);
     expect(mainOf(files)).toBe('main.ts');
     expect(expectDirect(answer)).toMatchObject({
-      closure: 'runtime',
-      warnings: [{ code: 'UNRESOLVED_DEPENDENCY', message: 'The runtime could not resolve missing.ts.' }],
+      warnings: [
+        {
+          code: 'UNRESOLVED_DEPENDENCY',
+          message: 'The runtime could not resolve missing.ts.',
+        },
+      ],
     });
     const [call] = snapshotSource.mock.calls[0] ?? [];
     expect(call).toMatchObject({ root: project, entryPath: 'main.ts' });
-    expect(call?.additionalPaths).toContainEqual({ path: 'tau.json', required: false });
+    expect(call?.additionalPaths).toContainEqual({
+      path: 'tau.json',
+      required: false,
+    });
   });
 
   it('should pass on a closure the runtime could not collect', async () => {
-    const snapshotSource: SourceSnapshotter = async () => ({ errorCode: 'SNAPSHOT_FAILED', message: 'No kernel.' });
+    const snapshotSource: SourceSnapshotter = async () => ({
+      errorCode: 'SNAPSHOT_FAILED',
+      message: 'No kernel.',
+    });
 
-    await expect(createDirectShare({ root: project, entryPath: 'main.ts', snapshotSource })).resolves.toEqual({
+    await expect(
+      createDirectShare({
+        root: project,
+        entryPath: 'main.ts',
+        snapshotSource,
+      }),
+    ).resolves.toEqual({
       errorCode: 'SNAPSHOT_FAILED',
       message: 'No kernel.',
     });
   });
 
-  it('should refuse an entry that is not a project file, and a project with too many files', async () => {
-    await expect(createDirectShare({ root: project, entryPath: 'gone.ts' })).resolves.toMatchObject({
-      errorCode: 'NOT_FOUND',
-    });
-    await expect(createDirectShare({ root: project, entryPath: '../outside.ts' })).resolves.toMatchObject({
-      errorCode: 'SHARE_ARTIFACT_INVALID',
-    });
-    await Promise.all(Array.from({ length: 200 }, async (_, index) => write(`many/${String(index)}.ts`, '1')));
-    await expect(createDirectShare({ root: project, entryPath: 'main.ts' })).resolves.toMatchObject({
-      errorCode: 'SHARE_ARTIFACT_LIMIT',
-    });
+  it('should refuse an entry a shared project cannot start from', async () => {
+    const snapshotSource = closureOf();
+    await expect(
+      createDirectShare({
+        root: project,
+        entryPath: '../outside.ts',
+        snapshotSource,
+      }),
+    ).resolves.toMatchObject({ errorCode: 'SHARE_ARTIFACT_INVALID' });
+    await expect(
+      createDirectShare({
+        root: project,
+        entryPath: '.tau/artifacts/lid.glb',
+        snapshotSource,
+      }),
+    ).resolves.toMatchObject({ errorCode: 'SHARE_ARTIFACT_INVALID' });
+    expect(snapshotSource).not.toHaveBeenCalled();
   });
 });

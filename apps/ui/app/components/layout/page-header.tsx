@@ -7,9 +7,9 @@ import { cn } from '@taucad/ui/utils/cn';
  */
 export type PhoneTopBar = {
   /**
-   * The bar shows the page's title. The page's title group then hides visually below
-   * `md` but stays in the outline, so a phone reads one title and the document keeps
-   * exactly one `<h1>`.
+   * The bar shows the page's title. The page's heading then hides visually below `md`
+   * but stays in the outline (its count stays visible), so a phone reads one title and
+   * the document keeps exactly one `<h1>`.
    */
   readonly hasTitle: boolean;
   /**
@@ -52,11 +52,13 @@ export function PageHeader({
   const isTitleInPhoneBar = usePhoneTopBar().hasTitle && headingLevel === 1;
   return (
     <div className={cn('flex shrink-0 flex-wrap items-center justify-between gap-4', className)} {...properties}>
-      <div
-        data-slot='page-header-title'
-        className={cn('flex items-baseline gap-3', isTitleInPhoneBar && 'max-md:sr-only')}
-      >
-        <Heading className='text-4xl leading-[1.1] font-medium tracking-tight'>{title}</Heading>
+      <div data-slot='page-header-title' className='flex items-baseline gap-3'>
+        {/* Below `md` the bar shows the title; the heading stays in the outline and the count stays visible. */}
+        <Heading
+          className={cn('text-4xl leading-[1.1] font-medium tracking-tight', isTitleInPhoneBar && 'max-md:sr-only')}
+        >
+          {title}
+        </Heading>
         {count === undefined ? null : <span className='text-muted-foreground tabular-nums'>{count}</span>}
       </div>
       {action}

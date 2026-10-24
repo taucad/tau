@@ -179,8 +179,8 @@ function PhonePageTitle({
           </Link>
         </Button>
       ) : null}
-      {/* Not a heading: the page's `PageHeader` keeps the document's one `<h1>`. */}
-      <p data-slot='page-title' className='min-w-0 flex-1 truncate px-1 text-sm font-medium md:hidden'>
+      {/* Not a heading, and hidden from assistive tech: the page's `PageHeader` keeps the one `<h1>` that names the page. */}
+      <p aria-hidden data-slot='page-title' className='min-w-0 flex-1 truncate px-1 text-sm font-medium md:hidden'>
         {title}
       </p>
     </>

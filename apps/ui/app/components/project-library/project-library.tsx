@@ -194,7 +194,7 @@ export function NewProjectLink({
 }): React.JSX.Element {
   const isInPhoneBar = usePhoneTopBar().hasAction && isDeferredToPhoneBar;
   return (
-    <Button asChild size={size} className={cn(isInPhoneBar && 'max-md:hidden')}>
+    <Button asChild size={size} className={cn(isInPhoneBar && 'max-md:hidden')} data-slot='new-project-link'>
       <NavLink to='/projects/new'>
         {({ isPending }) => (
           <>

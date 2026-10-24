@@ -36,7 +36,7 @@ describe('PageHeader', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).toBeInTheDocument();
   });
 
-  it('should hide the page title group below md while the phone bar shows it, keeping the h1', () => {
+  it('should hide only the heading below md while the phone bar shows it, keeping the h1 and count', () => {
     render(
       <PhoneTopBarContext.Provider value={titleInPhoneBar}>
         <PageHeader title='Community' count={20} />
@@ -44,8 +44,9 @@ describe('PageHeader', () => {
     );
 
     const heading = screen.getByRole('heading', { level: 1, name: 'Community' });
-    expect(heading.parentElement).toHaveClass('max-md:sr-only');
-    expect(screen.getByText('20').parentElement).toHaveClass('max-md:sr-only');
+    expect(heading).toHaveClass('max-md:sr-only');
+    // The count stays on screen at every width (I1); only the repeated title hides.
+    expect(screen.getByText('20').closest('[class*="sr-only"]')).toBeNull();
   });
 
   it('should keep an embedded section heading visible under the phone bar', () => {
@@ -55,6 +56,6 @@ describe('PageHeader', () => {
       </PhoneTopBarContext.Provider>,
     );
 
-    expect(screen.getByRole('heading', { level: 2, name: 'Projects' }).parentElement).not.toHaveClass('max-md:sr-only');
+    expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).not.toHaveClass('max-md:sr-only');
   });
 });

@@ -10,9 +10,8 @@ type TopBarGeometry = {
   readonly trigger: number | undefined;
   readonly crumb: { readonly height: number; readonly right: number } | undefined;
   /**
-   * The page's one `h1`: its count and whether its title group still paints. The group is
-   * `max-md:sr-only` (1px box, `clip-path: inset(50%)`); the `h1` inside keeps its nowrap width,
-   * so the group, not the heading, is what is measured.
+   * The page's one `h1`: how many there are and whether it still paints. Below `md` the heading
+   * itself is `max-md:sr-only` (absolute 1px box, `clip-path: inset(50%)`), while its count stays.
    */
   readonly headings: number;
   readonly headingPainted: boolean;
@@ -35,18 +34,18 @@ const readTopBar = async (): Promise<TopBarGeometry> =>
       crumb: crumb ? { height: crumb.height, right: crumb.right } : undefined,
       headings: document.querySelectorAll('h1').length,
       headingPainted: (() => {
-        const group = document.querySelector('h1')?.closest<HTMLElement>('[data-slot=page-header-title]');
-        return group
-          ? group.getBoundingClientRect().width > 1 && getComputedStyle(group).clipPath !== 'inset(50%)'
+        const heading = document.querySelector('h1');
+        return heading
+          ? heading.getBoundingClientRect().width > 1 && getComputedStyle(heading).clipPath !== 'inset(50%)'
           : true;
       })(),
       action: (() => {
         const link = header?.querySelector<HTMLElement>('[data-slot=page-header-action] a');
         return link ? { text: link.textContent.trim(), height: link.getBoundingClientRect().height } : undefined;
       })(),
-      titleRowActionPainted: [...document.querySelectorAll<HTMLElement>('main > section a[href="/projects/new"]')].some(
-        (link) => link.checkVisibility(),
-      ),
+      // The title row's own New project link only: the empty library's "Build from code" shares its href.
+      titleRowActionPainted:
+        document.querySelector<HTMLElement>('main > section [data-slot=new-project-link]')?.checkVisibility() ?? false,
     };
   });
 
@@ -90,5 +89,21 @@ describe.each([320, 390])('shell page top bar at %ipx', (width) => {
     expect(projects.titleRowActionPainted).toBe(false);
     await expect.poll(measureHorizontalOverflow).toEqual({ document: 0, scroller: 0, offenders: [] });
     await target.screenshot(undefined, `page-top-bar-projects-${width}.png`);
+  });
+});
+
+// D11: from `md` up the phone bar takes no room and New project stays in the title row.
+describe('shell page header at 1280px', () => {
+  test('should keep /projects headerless with New project in its title row', async () => {
+    await target.setViewport({ width: 1280, height: 720 });
+    await target.navigate('/projects');
+    await target.expectVisible(selectors.getByRole('heading', { level: 1, name: 'Projects' }), 60_000);
+    const desktop = await target.evaluate(() => ({
+      headerPainted: document.querySelector<HTMLElement>('main > header')?.checkVisibility() ?? false,
+      titleRowLinkPainted:
+        document.querySelector<HTMLElement>('main > section [data-slot=new-project-link]')?.checkVisibility() ?? false,
+      sectionTop: document.querySelector('main > section')?.getBoundingClientRect().top,
+    }));
+    expect(desktop).toEqual({ headerPainted: false, titleRowLinkPainted: true, sectionTop: 0 });
   });
 });

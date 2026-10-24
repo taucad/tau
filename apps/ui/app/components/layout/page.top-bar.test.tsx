@@ -88,7 +88,7 @@ const routes: RouteObject[] = [
       {
         path: 'community',
         handle: { title: 'Community' } satisfies Handle,
-        Component: () => <PageHeader title='Community' />,
+        Component: () => <PageHeader title='Community' count={20} />,
       },
       {
         path: 'trail',
@@ -175,8 +175,30 @@ describe('Page phone top bar', () => {
     const { header } = renderAt('/community');
 
     const heading = screen.getByRole('heading', { level: 1, name: 'Community' });
-    expect(heading.closest('[data-slot=page-header-title]')).toHaveClass('max-md:sr-only');
-    expect(within(header()).getByText('Community')).toHaveClass('md:hidden');
+    expect(heading).toHaveClass('max-md:sr-only');
+    const barTitle = within(header()).getByText('Community');
+    expect(barTitle).toHaveClass('md:hidden');
+    // One title for assistive tech: the bar's copy is hidden from it, the h1 names the page.
+    expect(barTitle).toHaveAttribute('aria-hidden', 'true');
+    const exposedTitles = screen
+      .getAllByText('Community')
+      .filter((element) => element.closest('[aria-hidden="true"]') === null);
+    expect(exposedTitles).toEqual([heading]);
+  });
+
+  it('keeps the collection count visible on phones beside the hidden heading', () => {
+    renderAt('/community');
+
+    // No ancestor hides it at any width: no `hidden` or `sr-only` utility, prefixed or not.
+    const hidingClasses: string[] = [];
+    for (
+      let element: Element | undefined = screen.getByText('20');
+      element;
+      element = element.parentElement ?? undefined
+    ) {
+      hidingClasses.push(...[...element.classList].filter((token) => /(?:^|:)(?:hidden|sr-only)$/u.test(token)));
+    }
+    expect(hidingClasses).toEqual([]);
   });
 
   it('renders one header action, from the deepest route that declares one', () => {
@@ -211,7 +233,7 @@ describe('Page phone top bar', () => {
     renderAt('/parts');
 
     const heading = screen.getByRole('heading', { level: 1, name: 'Parts' });
-    expect(heading.closest('[data-slot=page-header-title]')).toHaveClass('max-md:sr-only');
+    expect(heading).toHaveClass('max-md:sr-only');
     const explanation = screen.getByText('Parts is turned off');
     expect(explanation.closest('.sr-only, [class*="sr-only"]')).toBeNull();
   });
@@ -252,9 +274,7 @@ describe('Page header on wide viewports', () => {
   });
 
   it('keeps the page h1 visible in the desktop build, which has no phone bar', () => {
-    const group = (): Element | undefined =>
-      screen.getByRole('heading', { level: 1, name: 'Community' }).closest('[data-slot=page-header-title]') ??
-      undefined;
+    const group = (): Element | undefined => screen.getByRole('heading', { level: 1, name: 'Community' });
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { container } = renderAt('/community');
     expect(container.querySelector('[data-slot=page-title]')).not.toBeInTheDocument();
@@ -290,20 +310,33 @@ describe('Page phone top bar in server markup', () => {
     expect(header).toHaveClass('md:hidden', 'max-md:border-b');
     expect(header?.querySelector('[data-slot=page-title]')).toHaveTextContent('Community');
     expect(container.querySelector('main')).toHaveClass('[--header-height:calc(var(--spacing)*12)]');
-    expect(container.querySelector('h1')?.closest('[data-slot=page-header-title]')).toHaveClass('max-md:sr-only');
+    expect(container.querySelector('h1')).toHaveClass('max-md:sr-only');
 
     document.body.append(container);
     const recoverableError = vi.fn();
-    const root = hydrateRoot(container, app(createMemoryRouter(routes, { initialEntries: ['/community'] })), {
-      onRecoverableError: recoverableError,
-    });
+    const router = createMemoryRouter(routes, { initialEntries: ['/community'] });
+    const root = hydrateRoot(container, app(router), { onRecoverableError: recoverableError });
     await act(async () => {
       await Promise.resolve();
     });
 
     expect(recoverableError).not.toHaveBeenCalled();
     expect(container.querySelector('main > header')).toBe(header);
-    expect(container.querySelector('h1')?.closest('[data-slot=page-header-title]')).toHaveClass('max-md:sr-only');
+    expect(container.querySelector('h1')).toHaveClass('max-md:sr-only');
+
+    // The client then learns it is a phone: the bar's placement must not move.
+    const layoutClasses = (): Array<string | undefined> =>
+      ['main > header', 'main', 'main > section'].map((selector) => container.querySelector(selector)?.className);
+    const hydratedClasses = layoutClasses();
+    viewport.isMobile = true;
+    await act(async () => {
+      root.render(app(router));
+      await Promise.resolve();
+    });
+
+    expect(layoutClasses()).toEqual(hydratedClasses);
+    expect(container.querySelector('main > header')).toBe(header);
+    expect(recoverableError).not.toHaveBeenCalled();
     root.unmount();
     container.remove();
   });

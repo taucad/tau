@@ -7,6 +7,7 @@ import { ChevronLeft } from 'lucide-react';
 import { Allotment } from '#components/panes/allotment.js';
 import type { AllotmentHandle } from 'allotment';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
+import { PhoneTitleBarContext } from '#components/layout/page-header.js';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -176,6 +177,92 @@ function PhonePageTitle({
         {title}
       </p>
     </>
+  );
+}
+
+/**
+ * The shell's route header. From `md` up it holds the breadcrumb trail and the route
+ * action; on phones (D11) it is the 48px top bar: sidebar trigger, back-to-parent
+ * crumb, page title and at most one action.
+ */
+function PageShellHeader({
+  isDesktopTarget,
+  hasPageHeaderChrome,
+  breadcrumbItems,
+  titles,
+  actionMatch,
+}: {
+  readonly isDesktopTarget: boolean;
+  readonly hasPageHeaderChrome: boolean;
+  readonly breadcrumbItems: readonly TypedUiMatchWithHandle[];
+  readonly titles: PageTitles;
+  /** D11/I4: the deepest route that declares `actions`; only its one action renders. */
+  readonly actionMatch: TypedUiMatchWithHandle | undefined;
+}): React.JSX.Element {
+  const hasBreadcrumbItems = breadcrumbItems.length > 0;
+  const phoneBar = phoneBarClasses(titles.title !== undefined);
+  return (
+    <header
+      className={cn(
+        'pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2',
+        hasPageHeaderChrome && 'border-b bg-sidebar',
+        phoneBar.header,
+      )}
+    >
+      <div
+        className={cn(
+          'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
+          !hasBreadcrumbItems && 'md:hidden',
+          phoneBar.cluster,
+          isDesktopTarget && '[app-region:no-drag]',
+        )}
+      >
+        {/* I3: the phone bar's primary controls are 40px (`icon-lg`, `lg`). */}
+        {isDesktopTarget ? null : <SidebarTrigger className='size-10 md:hidden' />}
+        {titles.title === undefined ? null : <PhonePageTitle title={titles.title} parent={titles.parent} />}
+        {hasBreadcrumbItems && !isDesktopTarget && titles.title === undefined ? (
+          <span className='h-4 md:hidden'>
+            <Separator orientation='vertical' />
+          </span>
+        ) : null}
+        <Breadcrumb className='hidden [&:has(>:not(:empty))]:block'>
+          <BreadcrumbList
+            className={cn(
+              'sm:gap-0',
+              '[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:rounded-sm [&_[data-slot=button]]:p-2',
+              "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:rounded-sm [&_[data-slot='tooltip-trigger']]:p-2",
+              "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:rounded-sm [&_[data-slot='breadcrumb-link']]:p-2",
+              '[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm',
+            )}
+          >
+            {breadcrumbItems.map((match) => {
+              const breadcrumb = match.handle.breadcrumb?.(match);
+              const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
+
+              return (
+                <Fragment key={match.id}>
+                  {breadcrumbArray.map((item, index) => (
+                    // oxlint-disable-next-line react/no-array-index-key -- these are stable.
+                    <Fragment key={`${match.id}-${index}`}>
+                      <BreadcrumbSeparator className='hidden first:hidden lg:block' />
+                      <BreadcrumbItem className={cn('hidden hover:text-foreground lg:block', phoneBar.breadcrumbItem)}>
+                        <BreadcrumbLink asChild>{item}</BreadcrumbLink>
+                      </BreadcrumbItem>
+                    </Fragment>
+                  ))}
+                </Fragment>
+              );
+            })}
+          </BreadcrumbList>
+        </Breadcrumb>
+      </div>
+
+      <div
+        className={cn('pointer-events-auto flex items-center gap-2 px-2', isDesktopTarget && '[app-region:no-drag]')}
+      >
+        {actionMatch ? actionMatch.handle.actions?.(actionMatch) : null}
+      </div>
+    </header>
   );
 }
 
@@ -371,11 +458,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     [locationKey],
   );
   // The phone top bar (web build below `md`): sidebar, back-to-parent crumb, title.
-  const { title: phoneTitle, parent: parentCrumb } = useMemo(
-    () => resolvePageTitles(titleItems, desktopTarget),
-    [desktopTarget, titleItems],
-  );
-  const phoneBar = phoneBarClasses(phoneTitle !== undefined);
+  const pageTitles = useMemo(() => resolvePageTitles(titleItems, desktopTarget), [desktopTarget, titleItems]);
   // D11/I4: one header action, from the deepest route that declares one.
   const actionMatch = actionItems.at(-1);
   const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
@@ -456,72 +539,13 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
         <ApplicationShell isDesktopTarget={desktopTarget}>
           <SidebarInset className={cn('size-full min-w-0', headerHeightClass)}>
             {reserveHeader ? (
-              <header
-                className={cn(
-                  'pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2',
-                  hasPageHeaderChrome && 'border-b bg-sidebar',
-                  phoneBar.header,
-                )}
-              >
-                <div
-                  className={cn(
-                    'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
-                    !hasBreadcrumbItems && 'md:hidden',
-                    phoneBar.cluster,
-                    desktopTarget && '[app-region:no-drag]',
-                  )}
-                >
-                  {/* I3: the phone bar's primary controls are 40px (`icon-lg`, `lg`). */}
-                  {desktopTarget ? null : <SidebarTrigger className='size-10 md:hidden' />}
-                  {phoneTitle === undefined ? null : <PhonePageTitle title={phoneTitle} parent={parentCrumb} />}
-                  {hasBreadcrumbItems && !desktopTarget && phoneTitle === undefined ? (
-                    <span className='h-4 md:hidden'>
-                      <Separator orientation='vertical' />
-                    </span>
-                  ) : null}
-                  <Breadcrumb className='hidden [&:has(>:not(:empty))]:block'>
-                    <BreadcrumbList
-                      className={cn(
-                        'sm:gap-0',
-                        '[&_[data-slot=button]]:h-7 [&_[data-slot=button]]:rounded-sm [&_[data-slot=button]]:p-2',
-                        "[&_[data-slot='tooltip-trigger']]:h-7 [&_[data-slot='tooltip-trigger']]:rounded-sm [&_[data-slot='tooltip-trigger']]:p-2",
-                        "[&_[data-slot='breadcrumb-link']]:h-7 [&_[data-slot='breadcrumb-link']]:rounded-sm [&_[data-slot='breadcrumb-link']]:p-2",
-                        '[&_[data-slot=input]]:h-7 [&_[data-slot=input]]:rounded-sm',
-                      )}
-                    >
-                      {breadcrumbItems.map((match) => {
-                        const breadcrumb = match.handle.breadcrumb?.(match);
-                        const breadcrumbArray = Array.isArray(breadcrumb) ? breadcrumb : [breadcrumb];
-
-                        return (
-                          <Fragment key={match.id}>
-                            {breadcrumbArray.map((item, index) => (
-                              // oxlint-disable-next-line react/no-array-index-key -- these are stable.
-                              <Fragment key={`${match.id}-${index}`}>
-                                <BreadcrumbSeparator className='hidden first:hidden lg:block' />
-                                <BreadcrumbItem
-                                  className={cn('hidden hover:text-foreground lg:block', phoneBar.breadcrumbItem)}
-                                >
-                                  <BreadcrumbLink asChild>{item}</BreadcrumbLink>
-                                </BreadcrumbItem>
-                              </Fragment>
-                            ))}
-                          </Fragment>
-                        );
-                      })}
-                    </BreadcrumbList>
-                  </Breadcrumb>
-                </div>
-
-                <div
-                  className={cn(
-                    'pointer-events-auto flex items-center gap-2 px-2',
-                    desktopTarget && '[app-region:no-drag]',
-                  )}
-                >
-                  {actionMatch ? actionMatch.handle.actions?.(actionMatch) : null}
-                </div>
-              </header>
+              <PageShellHeader
+                isDesktopTarget={desktopTarget}
+                hasPageHeaderChrome={hasPageHeaderChrome}
+                breadcrumbItems={breadcrumbItems}
+                titles={pageTitles}
+                actionMatch={actionMatch}
+              />
             ) : null}
             <section
               ref={pageScrollRef}
@@ -533,13 +557,15 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               )}
               onScroll={enableOverflowY ? handlePageScroll : undefined}
             >
-              <Compose components={Providers}>
-                <RouteCommandPaletteItems />
-                {/* Its compute section reads the active project; the dialog is a
-                    portal, so only its place in the React tree matters. */}
-                <SettingsDialog />
-                <SectionContent error={error} />
-              </Compose>
+              <PhoneTitleBarContext.Provider value={reserveHeader && pageTitles.title !== undefined}>
+                <Compose components={Providers}>
+                  <RouteCommandPaletteItems />
+                  {/* Its compute section reads the active project; the dialog is a
+                      portal, so only its place in the React tree matters. */}
+                  <SettingsDialog />
+                  <SectionContent error={error} />
+                </Compose>
+              </PhoneTitleBarContext.Provider>
             </section>
           </SidebarInset>
         </ApplicationShell>

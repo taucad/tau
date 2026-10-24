@@ -25,7 +25,8 @@ export type Handle = {
    * The page's short title, shown in the phone top bar beside the sidebar trigger. The deepest
    * match that declares one names the page; the next title-bearing match above it, when it sits at
    * another path, becomes the back-to-parent crumb ("‹ Projects"). Use the words of the page's
-   * own `PageHeader`; the bar never renders a heading, so the page keeps its one `<h1>`.
+   * own `PageHeader`: while the bar shows the title, that `PageHeader` hides visually below `md`
+   * and stays the page's one `<h1>` (`PhoneTitleBarContext`); the bar never renders a heading.
    */
   title?: string | ((match: UIMatch) => string | undefined);
   /**

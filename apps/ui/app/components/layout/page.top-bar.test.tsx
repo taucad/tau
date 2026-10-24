@@ -37,6 +37,7 @@ vi.mock('#components/layout/command-palette.js', () => ({
 vi.mock('#components/settings/settings-dialog.js', () => ({ SettingsDialog: () => null }));
 
 const { Page } = await import('#components/layout/page.js');
+const { PageHeader } = await import('#components/layout/page-header.js');
 
 const projectsHandle: Handle = {
   title: 'Projects',
@@ -63,7 +64,11 @@ const routes: RouteObject[] = [
         ),
         children: [{ path: 'new', handle: newProjectHandle, Component: () => <p>New project form</p> }],
       },
-      { path: 'community', handle: { title: 'Community' } satisfies Handle, Component: () => <h1>Community</h1> },
+      {
+        path: 'community',
+        handle: { title: 'Community' } satisfies Handle,
+        Component: () => <PageHeader title='Community' />,
+      },
       {
         path: 'trail',
         handle: {
@@ -138,6 +143,14 @@ describe('Page phone top bar', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 
+  it('shows the title once: the page h1 stays in the outline but hides visually below md', () => {
+    const { header } = renderAt('/community');
+
+    const heading = screen.getByRole('heading', { level: 1, name: 'Community' });
+    expect(heading.closest('[data-slot=page-header-title]')).toHaveClass('max-md:sr-only');
+    expect(within(header()).getByText('Community')).toHaveClass('md:hidden');
+  });
+
   it('renders one header action, from the deepest route that declares one', () => {
     const { header } = renderAt('/projects/new');
 
@@ -164,6 +177,13 @@ describe('Page header on wide viewports', () => {
 
     expect(container.querySelector('header')).not.toBeInTheDocument();
     expect(container.querySelector('main')).toHaveClass('[--header-height:0px]');
+  });
+
+  it('keeps the page h1 visible when no phone bar carries the title', () => {
+    renderAt('/community');
+
+    const heading = screen.getByRole('heading', { level: 1, name: 'Community' });
+    expect(heading.closest('[data-slot=page-header-title]')).not.toHaveClass('max-md:sr-only');
   });
 
   it('keeps the breadcrumb trail, last item below lg and all from lg', () => {

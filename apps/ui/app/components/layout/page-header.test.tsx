@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { PageHeader } from '#components/layout/page-header.js';
+import { PageHeader, PhoneTitleBarContext } from '#components/layout/page-header.js';
 
 describe('PageHeader', () => {
   it('should render one level-one heading at the policy step with the count outside its name', () => {
@@ -32,5 +32,27 @@ describe('PageHeader', () => {
 
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
     expect(screen.getByRole('heading', { level: 2, name: 'Projects' })).toBeInTheDocument();
+  });
+
+  it('should hide the page title group below md while the phone bar shows it, keeping the h1', () => {
+    render(
+      <PhoneTitleBarContext.Provider value>
+        <PageHeader title='Community' count={20} />
+      </PhoneTitleBarContext.Provider>,
+    );
+
+    const heading = screen.getByRole('heading', { level: 1, name: 'Community' });
+    expect(heading.parentElement).toHaveClass('max-md:sr-only');
+    expect(screen.getByText('20').parentElement).toHaveClass('max-md:sr-only');
+  });
+
+  it('should keep an embedded section heading visible under the phone bar', () => {
+    render(
+      <PhoneTitleBarContext.Provider value>
+        <PageHeader headingLevel={2} title='Projects' />
+      </PhoneTitleBarContext.Provider>,
+    );
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Projects' }).parentElement).not.toHaveClass('max-md:sr-only');
   });
 });

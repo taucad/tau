@@ -9,6 +9,9 @@ type TopBarGeometry = {
   readonly title: string | undefined;
   readonly trigger: number | undefined;
   readonly crumb: { readonly height: number; readonly right: number } | undefined;
+  /** The page's one `h1`: its count and whether it still paints (it must not repeat the bar's title). */
+  readonly headings: number;
+  readonly headingPainted: boolean;
 };
 
 /** The phone top bar's box, its own overflow, its title and its primary targets' sizes. */
@@ -23,6 +26,8 @@ const readTopBar = async (): Promise<TopBarGeometry> =>
       title: header?.querySelector('[data-slot=page-title]')?.textContent ?? undefined,
       trigger: trigger?.height,
       crumb: crumb ? { height: crumb.height, right: crumb.right } : undefined,
+      headings: document.querySelectorAll('h1').length,
+      headingPainted: (document.querySelector('h1')?.getBoundingClientRect().width ?? 0) > 1,
     };
   });
 
@@ -35,7 +40,13 @@ describe.each([320, 390])('shell page top bar at %ipx', (width) => {
     await target.expectVisible(crumb, 60_000);
 
     const nested = await readTopBar();
-    expect(nested).toMatchObject({ height: 48, overflow: 0, title: 'New project' });
+    expect(nested).toMatchObject({
+      height: 48,
+      overflow: 0,
+      title: 'New project',
+      headings: 1,
+      headingPainted: false,
+    });
     expect(nested.trigger).toBeGreaterThanOrEqual(40);
     expect(nested.crumb?.height).toBeGreaterThanOrEqual(40);
     expect(nested.crumb?.right).toBeLessThanOrEqual(width);

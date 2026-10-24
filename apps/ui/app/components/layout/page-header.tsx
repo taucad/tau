@@ -1,4 +1,12 @@
+import { createContext, useContext } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
+
+/**
+ * True while the shell's phone top bar shows the page's title (D11). The page's
+ * title group then hides visually below `md` but stays in the outline, so a phone
+ * reads one title and the document keeps exactly one `<h1>`.
+ */
+export const PhoneTitleBarContext = createContext(false);
 
 type PageHeaderProps = Omit<React.ComponentProps<'div'>, 'title'> & {
   /** The page or section title. */
@@ -24,9 +32,14 @@ export function PageHeader({
   ...properties
 }: PageHeaderProps): React.JSX.Element {
   const Heading = headingLevel === 1 ? 'h1' : 'h2';
+  // Only the page's own title row repeats the bar; an embedded section's `h2` keeps showing.
+  const isTitleInPhoneBar = useContext(PhoneTitleBarContext) && headingLevel === 1;
   return (
     <div className={cn('flex shrink-0 flex-wrap items-center justify-between gap-4', className)} {...properties}>
-      <div className='flex items-baseline gap-3'>
+      <div
+        data-slot='page-header-title'
+        className={cn('flex items-baseline gap-3', isTitleInPhoneBar && 'max-md:sr-only')}
+      >
         <Heading className='text-4xl leading-[1.1] font-medium tracking-tight'>{title}</Heading>
         {count === undefined ? null : <span className='text-muted-foreground tabular-nums'>{count}</span>}
       </div>

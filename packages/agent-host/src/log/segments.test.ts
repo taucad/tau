@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeLogSegments } from '#log/segments.js';
+import { mergeLogSegments, mergeSegmentsUpTo, parseLogSegments } from '#log/segments.js';
 import { serializeLogEvent } from '#log/serialization.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
@@ -157,6 +157,27 @@ describe('mergeLogSegments', () => {
       record({ leaderEpoch: 'epoch-2', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'second' }),
     ]);
     expect(ids(mergeLogSegments([jumped]))).toEqual(['epoch-1-0', 'epoch-2-0']);
+  });
+
+  /* Round 16 (`t7_bounded_prefix`): the terms a reader keeps at a bound are a prefix of the whole merge. */
+  it('should keep, at a bound, the prefix of the merge whose terms start by then, and name the rest', () => {
+    const early = record({ leaderEpoch: 'epoch-1', sequence: 0, recordedAt: '2026-09-13T06:00:00.000Z', text: 'a' });
+    const late = record({ leaderEpoch: 'epoch-2', sequence: 0, recordedAt: '2026-09-14T06:00:00.000Z', text: 'b' });
+    /* The same device's next term in file order, clamped to the late term's start though its own clock reads earlier. */
+    const after = record({ leaderEpoch: 'epoch-3', sequence: 0, recordedAt: '2026-09-13T07:00:00.000Z', text: 'c' });
+    const other = record({ leaderEpoch: 'epoch-o', sequence: 0, recordedAt: '2026-09-13T06:30:00.000Z', text: 'o' });
+    const segments = parseLogSegments([segment('device-1', [early, late, after]), segment('device-o', [other])]);
+
+    const bounded = mergeSegmentsUpTo(segments, Date.parse('2026-09-13T12:00:00.000Z'));
+    const whole = mergeLogSegments([segment('device-1', [early, late, after]), segment('device-o', [other])]);
+
+    expect(ids(bounded.rows)).toEqual(['epoch-1-0', 'epoch-o-0']);
+    expect(ids(whole).slice(0, bounded.rows.length)).toEqual(ids(bounded.rows));
+    expect(bounded.newestStart).toBe(Date.parse('2026-09-13T06:30:00.000Z'));
+    expect(bounded.later).toEqual([
+      { leaderEpoch: 'epoch-2', startedAt: Date.parse('2026-09-14T06:00:00.000Z') },
+      { leaderEpoch: 'epoch-3', startedAt: Date.parse('2026-09-14T06:00:00.000Z') },
+    ]);
   });
 
   it('reads a chat no device has written yet as no records', () => {

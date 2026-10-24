@@ -23,6 +23,7 @@ import type { ChatStore } from '#launchers/chat-store.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
+import { foreignClockAheadMilliseconds } from '#log/segments.js';
 import { createNodeChatStore } from '#node.js';
 import type {
   HostRunSnapshot,
@@ -181,6 +182,20 @@ const rowsOf = (bytes: Uint8Array<ArrayBuffer> | string): AgentLogEvent[] => {
     .split('\n')
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as AgentLogEvent);
+};
+
+/** Wait until a log holds a `running` row. */
+const runningIn = async (path: string): Promise<void> => {
+  for (let attempt = 0; attempt < 300; attempt++) {
+    // oxlint-disable-next-line no-await-in-loop -- polling a durable file is sequential by nature.
+    const rows = rowsOf(await readFile(path, 'utf8').catch(() => ''));
+    if (rows.some((row) => row.type === 'run.lifecycle' && row.state === 'running')) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above.
+    await sleep(10);
+  }
+  throw new Error(`No run started in ${path}.`);
 };
 
 describe('a chat continued on a second device', () => {
@@ -445,8 +460,14 @@ describe('a chat continued on a second device', () => {
           await first;
 
           await expect(send).resolves.toMatchObject({ status: 'refused', code: 'COMMAND_SUPERSEDED' });
-          /* Nothing ran, so there is nothing to stop. */
-          await expect(stop).resolves.toMatchObject({ status: 'refused', code: 'NO_RUN_ADMITTED' });
+          /*
+           * Nothing ran, so there is nothing to stop: the Stop is answered at once, by whatever the chat holds then
+           * (no run, or the first turn's incarnation still settling), and the superseded Send wrote nothing.
+           */
+          await expect(stop).resolves.toMatchObject({ status: 'refused' });
+          expect(rowsOf(await readFile(ownLog(desktop), 'utf8')).some((row) => row.runId === 'run-desktop-2')).toBe(
+            false,
+          );
         } finally {
           gate.resolve();
         }
@@ -456,26 +477,112 @@ describe('a chat continued on a second device', () => {
        * A turn written after reading another device's rows merges after them, however far ahead that device's clock
        * is: its rows are stamped after every row it read, so the merge never puts it before rows its history names.
        */
-      it('should merge a turn after the rows it read from a device whose clock is ahead', async () => {
+      it('should merge a turn after the rows it read from a device whose clock is ahead within the bound', async () => {
         const desktop = await workspace();
         const phone = await workspace();
-        const onDesktop = launch(
-          createNodeChatStore({ workspaceRoot: desktop }),
-          recordingModel('desktop answer').transport,
-        );
+        const desktopModel = recordingModel('desktop answer');
+        const onDesktop = launch(createNodeChatStore({ workspaceRoot: desktop }), desktopModel.transport);
         const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
         await turn(onDesktop, 'run-desktop-1', 'first, on the desktop');
         await project(phone, 'device-desktop', await readFile(ownLog(desktop), 'utf8'));
         await turn(onPhone, 'run-phone-1', 'second, on the phone');
-        const phoneRows = shifted(await readFile(ownLog(phone), 'utf8'), day);
+        const phoneRows = shifted(await readFile(ownLog(phone), 'utf8'), foreignClockAheadMilliseconds / 2);
         await project(desktop, 'device-phone', phoneRows);
 
         await turnWhenFree(onDesktop, 'run-desktop-2', 'third, back on the desktop');
         await turnWhenFree(onDesktop, 'run-desktop-3', 'fourth, still on the desktop');
 
-        const newest = Math.max(...rowsOf(phoneRows).map((row) => Date.parse(row.recordedAt)));
+        /* Terms merge by their start: the new term starts after the phone's, so its turn merges after the phone's. */
+        const phoneStart = Math.min(...rowsOf(phoneRows).map((row) => Date.parse(row.recordedAt)));
         const second = rowsOf(await readFile(ownLog(desktop), 'utf8')).filter((row) => row.runId === 'run-desktop-2');
-        expect(Math.min(...second.map((row) => Date.parse(row.recordedAt)))).toBeGreaterThan(newest);
+        expect(Math.min(...second.map((row) => Date.parse(row.recordedAt)))).toBeGreaterThan(phoneStart);
+        expect(transcriptOf(desktopModel.requests.at(-1))).toEqual([
+          'user: first, on the desktop',
+          'assistant: desktop answer',
+          'user: second, on the phone',
+          'assistant: phone answer',
+          'user: third, back on the desktop',
+          'assistant: desktop answer',
+          'user: fourth, still on the desktop',
+        ]);
+      });
+
+      /*
+       * Round 16: one fast or corrupt clock must not carry every device's rows into the future. A term dated further
+       * ahead than the bound waits out of the history, so nothing written here names it, and this device's stamps stay
+       * on its own clock.
+       */
+      it('should not follow a clock further ahead than the bound: its rows wait, and stamps stay on this clock', async () => {
+        const desktop = await workspace();
+        const phone = await workspace();
+        const desktopModel = recordingModel('desktop answer');
+        const onDesktop = launch(createNodeChatStore({ workspaceRoot: desktop }), desktopModel.transport);
+        const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), recordingModel('phone answer').transport);
+        await turn(onDesktop, 'run-desktop-1', 'first, on the desktop');
+        await project(phone, 'device-desktop', await readFile(ownLog(desktop), 'utf8'));
+        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+        await project(desktop, 'device-phone', shifted(await readFile(ownLog(phone), 'utf8'), day));
+
+        const before = Date.now();
+        await turnWhenFree(onDesktop, 'run-desktop-2', 'third, back on the desktop');
+        const after = Date.now();
+
+        const second = rowsOf(await readFile(ownLog(desktop), 'utf8')).filter((row) => row.runId === 'run-desktop-2');
+        for (const row of second) {
+          expect(Date.parse(row.recordedAt)).toBeGreaterThanOrEqual(before);
+          expect(Date.parse(row.recordedAt)).toBeLessThanOrEqual(after);
+        }
+        expect(transcriptOf(desktopModel.requests.at(-1))).toEqual([
+          'user: first, on the desktop',
+          'assistant: desktop answer',
+          'user: third, back on the desktop',
+        ]);
+      });
+
+      /* Round 16: a run whose rows are dated a day ahead still holds the chat here, from when this device saw it. */
+      it('should hold the chat for another device’s live run however far ahead its clock is', async () => {
+        const desktop = await workspace();
+        const phone = await workspace();
+        const gate = Promise.withResolvers<void>();
+        const recorded = recordingModel('phone answer');
+        const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), {
+          ...recorded.transport,
+          async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+            await gate.promise;
+            yield* recorded.transport.stream(request);
+          },
+        });
+        const onDesktop = launch(createNodeChatStore({ workspaceRoot: desktop }), recordingModel('desktop').transport);
+        try {
+          const started = await onPhone.execute({
+            type: 'start',
+            commandId: key(),
+            payload: {
+              chatId,
+              runId: 'run-phone-1',
+              trigger: 'submit',
+              message: { id: 'user-run-phone-1', role: 'user', content: 'on the phone' },
+            },
+          });
+          expect(started.status).toBe('applied');
+          await runningIn(ownLog(phone));
+          await project(desktop, 'device-phone', shifted(await readFile(ownLog(phone), 'utf8'), day));
+
+          const refused = await onDesktop.execute({
+            type: 'start',
+            commandId: key(),
+            payload: {
+              chatId,
+              runId: 'run-desktop-1',
+              trigger: 'submit',
+              message: { id: 'user-run-desktop-1', role: 'user', content: 'on the desktop' },
+            },
+          });
+
+          expect(refused).toMatchObject({ status: 'refused', code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE' });
+        } finally {
+          gate.resolve();
+        }
       });
 
       it('should keep its term when nothing new came, however far behind the other device’s clock is', async () => {
@@ -741,33 +848,143 @@ describe('a chat continued on a second device', () => {
       await settleRun(onPhone, 'run-phone-1');
     });
 
-    it('should admit a run once the other device’s run has gone stale, with its user turn but nothing it left half done', async () => {
+    /*
+     * Round 16: staleness is this device's own observation, never the run's `recordedAt`. The run's rows are dated
+     * past the bound, yet the phone has only just seen them: it waits the bound out on its own clock. Once it goes on, it
+     * says the person's turn of the abandoned run as data, in the batch that admits its own run, and the model is shown
+     * that turn but nothing the run left half done.
+     */
+    it('should admit a run once the other device’s run has gone stale here, saying its turn as data but nothing it left half done', async () => {
       const inFlight = await desktopInFlight();
       inFlight.release();
       const phone = await workspace();
       const phoneModel = recordingModel('phone answer');
       const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
-      /*
-       * The same in-flight run, last written longer ago than the bound: a device that went away mid-run. Only its
-       * lifecycle rows, which every snapshot of a running run holds whatever else it has written by then: the person's
-       * message is then in its admission alone.
-       */
-      const stale = new Date(Date.now() - foreignRunStaleMilliseconds - 60_000).toISOString();
+      /* Only its lifecycle rows, which every snapshot of a running run holds: the person's message is in its admission. */
+      const longAgo = new Date(Date.now() - foreignRunStaleMilliseconds - 60_000).toISOString();
       await project(
         phone,
         'device-desktop',
         rowsOf(inFlight.bytes)
           .filter((row) => row.type === 'run.lifecycle')
-          .map((row) => `${JSON.stringify({ ...row, recordedAt: stale })}\n`)
+          .map((row) => `${JSON.stringify({ ...row, recordedAt: longAgo })}\n`)
           .join(''),
       );
+      vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+      try {
+        expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({
+          status: 'refused',
+          code: 'RUN_ACTIVE_ON_ANOTHER_DEVICE',
+        });
 
-      await turn(onPhone, 'run-phone-1', 'second, on the phone');
+        vi.setSystemTime(Date.now() + foreignRunStaleMilliseconds + 1000);
+        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+      } finally {
+        vi.useRealTimers();
+      }
 
-      /* The person's turn on the desktop rejoins; the call it left open there does not. */
       expect(transcriptOf(phoneModel.requests.at(-1))).toEqual([
         'user: in flight on the desktop',
         'user: second, on the phone',
+      ]);
+      const rows = rowsOf(await readFile(ownLog(phone), 'utf8'));
+      const said = rows.findIndex((row) => row.type === 'message.appended' && row.runId === 'run-desktop-1');
+      expect(rows[said]).toMatchObject({
+        message: { id: 'user-run-desktop-1', metadata: { tauInternal: { kind: 'abandoned-turn' } } },
+      });
+      expect(rows[said + 1]).toMatchObject({
+        type: 'run.lifecycle',
+        state: 'admitted',
+        runId: 'run-phone-1',
+        leaderEpoch: rows[said]!.leaderEpoch,
+      });
+    });
+
+    /*
+     * Round 16 (read-back lag): the phone read the desktop's run before its turn and answer synced, found it abandoned
+     * and said its turn. The desktop's own rows arrive afterwards: its committed turn and the phone's copy merge as one.
+     */
+    it('should merge the turn it said for an abandoned run with that run’s own rows once they arrive', async () => {
+      const inFlight = await desktopInFlight();
+      inFlight.release();
+      await settle(inFlight.launcher, 'run-desktop-1');
+      const phone = await workspace();
+      const phoneModel = recordingModel('phone answer');
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
+      await project(
+        phone,
+        'device-desktop',
+        rowsOf(inFlight.bytes)
+          .filter((row) => row.type === 'run.lifecycle')
+          .map((row) => `${JSON.stringify(row)}\n`)
+          .join(''),
+      );
+      vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+      try {
+        expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({ status: 'refused' });
+        vi.setSystemTime(Date.now() + foreignRunStaleMilliseconds + 1000);
+        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+      } finally {
+        vi.useRealTimers();
+      }
+
+      await project(phone, 'device-desktop', await readFile(ownLog(inFlight.desktop), 'utf8'));
+      await turn(onPhone, 'run-phone-2', 'third, on the phone');
+
+      /* The desktop's turn once; its answer, which the phone's turn was not built on, stays out of what it retained. */
+      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual([
+        'user: in flight on the desktop',
+        'user: second, on the phone',
+        'assistant: phone answer',
+        'user: third, on the phone',
+      ]);
+    });
+
+    /*
+     * Round 16 (read-back lag): the phone's read lagged behind a desktop run that was still going, so it looked
+     * abandoned and the phone went on, saying its turn. The run's newer rows arrive afterwards: the turn the phone
+     * said is data and stays, once, whatever those rows say; a turn derived from the read would vanish with it.
+     */
+    it('should keep the turn it said for a run whose newer rows arrive after it went on', async () => {
+      const inFlight = await desktopInFlight();
+      const phone = await workspace();
+      const phoneModel = recordingModel('phone answer');
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport);
+      await project(
+        phone,
+        'device-desktop',
+        rowsOf(inFlight.bytes)
+          .filter((row) => row.type === 'run.lifecycle')
+          .map((row) => `${JSON.stringify(row)}\n`)
+          .join(''),
+      );
+      vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+      try {
+        expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({ status: 'refused' });
+        vi.setSystemTime(Date.now() + foreignRunStaleMilliseconds + 1000);
+        await turn(onPhone, 'run-phone-1', 'second, on the phone');
+
+        const last = rowsOf(inFlight.bytes).at(-1)!;
+        const heartbeat = {
+          version: 1,
+          leaderEpoch: last.leaderEpoch,
+          sequence: last.sequence + 1,
+          recordedAt: new Date().toISOString(),
+          runId: 'run-desktop-1',
+          type: 'run.heartbeat',
+        };
+        await project(phone, 'device-desktop', `${inFlight.bytes}${JSON.stringify(heartbeat)}\n`);
+        await turn(onPhone, 'run-phone-2', 'third, on the phone');
+      } finally {
+        vi.useRealTimers();
+        inFlight.release();
+      }
+
+      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual([
+        'user: in flight on the desktop',
+        'user: second, on the phone',
+        'assistant: phone answer',
+        'user: third, on the phone',
       ]);
     });
   });

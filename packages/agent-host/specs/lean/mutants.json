@@ -139,5 +139,26 @@
     "file": "specs/lean/ChatLedger.lean",
     "find": "  | some .paused => !en.external\n",
     "replace": "  | some .paused => true\n"
+  },
+  {
+    "id": "M20",
+    "drift": "a person's turn said by two devices breaks the history instead of merging as one (T9: t9_words_merge_once)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "(if e.kind = .W then some h else none)",
+    "replace": "none"
+  },
+  {
+    "id": "M21",
+    "drift": "a person's turn said as its run settled does not commit the run's turn, so a Resume commits it again (T9: t9_words_commit)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "  | .W => let en := L.entry e.run; L.put e.run { en with committed := true }\n",
+    "replace": "  | .W => L\n"
+  },
+  {
+    "id": "M22",
+    "drift": "a reader keeps terms by their own start, not their clamped start, so what it keeps is no longer a prefix of the merge (T7: t7_bounded_prefix)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "filter (fun p => decide ((lookup p.1.term cl).getD 0 ≤ B))",
+    "replace": "filter (fun p => decide (p.1.started ≤ B))"
   }
 ]

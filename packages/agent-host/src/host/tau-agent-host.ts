@@ -51,7 +51,8 @@ import {
 } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody } from '#log/chat-ledger.js';
 import { v1Batch } from '#log/event-log-appender.js';
-import { foreignRunStaleMilliseconds, liveForeignRun } from '#log/foreign-runs.js';
+import { foreignRunStaleMilliseconds, isAbandonedForeignRun, liveForeignRun } from '#log/foreign-runs.js';
+import type { ForeignRun } from '#log/foreign-runs.js';
 import type { EventLogBatch } from '#log/event-log-appender.js';
 import { reduceEventLog } from '#log/reducer.js';
 import type {
@@ -64,6 +65,7 @@ import type {
   TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
+import { abandonedTurnOf } from '#log/event-types.js';
 import type {
   AgentLiveEvent,
   DurableEventLog,
@@ -1251,7 +1253,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           runId: held.runId,
           state: held.state,
           lastRecordedAt: new Date(held.lastRecordedAt).toISOString(),
-          staleAt: new Date(held.lastRecordedAt + foreignRunStaleMilliseconds).toISOString(),
+          staleAt: new Date(held.observedAt + foreignRunStaleMilliseconds).toISOString(),
         },
       },
     );
@@ -1485,6 +1487,60 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
   };
 
+  /**
+   * The person's turns a batch says as data (XD3). A run that settles `failed` before it committed its turn appends
+   * the message it was admitted with in the same batch, just before its `failed` row, whichever incarnation settles it:
+   * its own driver, or the next one abandoning it as an orphan. A batch that admits a run here first appends the turn
+   * of each other device's run it goes on past as abandoned. The ledger then reads that turn as committed, so a Resume
+   * does not commit it again, and every copy of it merges as one in the history (`abandonedTurnOf`). A run another
+   * device already said the turn of holds the chat nowhere, and its turn is not said again.
+   */
+  const withPersonsTurns = async (
+    log: DurableEventLog,
+    ledger: ChatLedger,
+    rows: readonly ChatRunRow[],
+  ): Promise<readonly ChatRunRow[]> => {
+    const said = new Set<string>();
+    for (const row of rows) {
+      if (row.body.type === 'turn.history-projection-committed') {
+        said.add(row.runId);
+      }
+    }
+    const unsaid = (row: ChatRunRow): boolean =>
+      row.body.type === 'run.lifecycle' &&
+      row.body.state === 'failed' &&
+      ledger.runs[row.runId]?.kind === 'tau' &&
+      ledger.runs[row.runId]?.committed === false &&
+      !said.has(row.runId);
+    const admits = rows.some((row) => row.body.type === 'run.lifecycle' && row.body.state === 'admitted');
+    const failing = rows.some((row) => unsaid(row));
+    if (!admits && !failing) {
+      return rows;
+    }
+    const events = failing ? await log.read() : [];
+    const at = now().getTime();
+    const abandoned = admits
+      ? ((await log.foreignRuns?.().catch((): readonly ForeignRun[] => [])) ?? []).filter(
+          (run) => run.words !== undefined && run.takenOver !== true && isAbandonedForeignRun(run, at),
+        )
+      : [];
+    const saying = (runId: string, message: UserProviderMessage): ChatRunRow => ({
+      runId,
+      body: { type: 'message.appended', message: abandonedTurnOf(message) },
+    });
+    return rows.flatMap((row): ChatRunRow[] => {
+      if (row.body.type === 'run.lifecycle' && row.body.state === 'admitted') {
+        return [...abandoned.map((run) => saying(run.runId, run.words!)), row];
+      }
+      const message = unsaid(row) ? admittedRowOf(events, row.runId)?.admission?.message : undefined;
+      if (message === undefined) {
+        return [row];
+      }
+      said.add(row.runId);
+      return [saying(row.runId, message), row];
+    });
+  };
+
   /** Write one batch under `leaderEpoch`, inside the chat's chain ({@link appendChatRows}). */
   const write = async (
     chatId: string,
@@ -1495,16 +1551,17 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const messageIds: string[] = [];
     try {
       const log = await logOf(chatId);
-      /* After every row read from another device (XD1): the merge orders a term by its first row's time. */
+      /* The hybrid clock (XD1): after every term start the history read, never past its bound ahead of this clock. */
       const at = now().getTime();
       const stamped = (await log.stampAfterRead?.(at)) ?? at;
+      const prior = await ledgerOf(chatId);
       const ledger = await appendChatRows({
         chatId,
         log,
-        ledger: await ledgerOf(chatId),
+        ledger: prior,
         leaderEpoch,
         recordedAt: new Date(stamped).toISOString(),
-        rows,
+        rows: await withPersonsTurns(log, prior, rows),
         onAppended: (row, ledger) => {
           store.ledger = ledger;
           store.wrote = { leaderEpoch, at: now().getTime() };

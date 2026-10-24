@@ -5,7 +5,7 @@ Executable oracle over a line-based trace file, line format v2 (no `Lean.Json` i
 generator is `src/log/chat-ledger.differential.test.ts`; its output for each corpus must equal this oracle's.
 
 A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`attempt` 0: absent); kinds
-`L S H O R P V M U`. Commands (`#` comments and blank lines ignored):
+`L S H O R P V M U W`. Commands (`#` comments and blank lines ignored):
   T <name>                     start a trace: an empty file, an appender open on it, an empty reader
   E <row>                      append through the appender              → `A <i> <outcome>`
   W <row> / WJ / TEAR          another writer's row, a junk line, a torn fragment (no output)
@@ -22,6 +22,9 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   DELIVER1 <requested> <limit> a version-1 clamp of the writer's view     → `D <fold>`
   RLEDGER                      the reader's ledger, each line prefixed `r`
   SEG <device> / ROW <row> / MERGE   segments                             → `M …`, `MC …`
+  MERGEB <bound>               the merge's terms started by `bound`        → `MB <keys>`
+  MH                           the history the merge folds to (rows that only append messages: no `H`)
+                                                                           → `MH <intact> <message ids>`
   TABLES                       the three legality tables                  → `TO … / TS … / TL …`
   X                            end the trace
 -/
@@ -31,7 +34,7 @@ def num (s : String) : Nat := s.toNat?.getD 0
 
 def kindOf : String → Kind
   | "L" => .L | "S" => .S | "H" => .H | "O" => .O | "R" => .R
-  | "P" => .P | "V" => .V | "M" => .M | _ => .U
+  | "P" => .P | "V" => .V | "M" => .M | "W" => .W | _ => .U
 
 def rowOf (ws : List String) : Row :=
   match ws with
@@ -85,6 +88,12 @@ def anomalyName : AnomalyKind → String
   | .opaqueRow => "opaque" | .quarantined => "quarantined" | .order => "order" | .conflict => "conflict"
 
 def bit (b : Bool) : String := if b then "1" else "0"
+
+/-- A message id as the generator spells it: `m-<term>-<seq>`, `u-<term>-<seq>-<arg>`, `w-<arg>`. -/
+def idText : Nat × Nat × Nat × Nat → String
+  | (0, t, q, _) => s!"m-{t}-{q}"
+  | (1, t, q, a) => s!"u-{t}-{q}-{a}"
+  | (_, a, _, _) => s!"w-{a}"
 
 def ledgerLines (L : Ledger) (prefix_ : String := "") : List String :=
   let runs := L.runs.map fun (r, en) =>
@@ -207,6 +216,13 @@ def runLine (st : St) (line : String) : St × List String :=
     let (rows, conflicts) := mergeFull st.segs
     (st, [s!"M {",".intercalate (rows.map fun e => s!"{e.term}:{e.seq}:{e.run}:O{e.arg}:{e.ms}")}",
           s!"MC {listText (conflicts.map fun ((t, q), k, d) => s!"{t}:{q}:{k}:{d}")}"])
+  | ["MERGEB", b] =>
+    (st, [s!"MB {listText ((mergeUpTo (num b) st.segs).map fun e => s!"{e.term}:{e.seq}")}"])
+  | ["MH"] =>
+    let text := match histOf (merge st.segs) with
+      | some h => s!"MH 1 {listText (h.ids.map idText)}"
+      | none => "MH 0 -"
+    (st, [text])
   | _ => (st, [s!"ERROR {line}"])
 
 def main (args : List String) : IO Unit := do

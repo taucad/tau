@@ -167,8 +167,39 @@ export const isPersonsMessage = (message: ProviderMessage): boolean => {
     return false;
   }
   const kind = message.metadata?.tauInternal?.['kind'];
-  return kind === undefined || kind === 'external-agent';
+  return kind === undefined || kind === 'external-agent' || kind === abandonedTurnKind;
 };
+
+/**
+ * The Tau-internal kind of a person's message that joins the history as data because its run settled before it
+ * committed the turn (XD3): the run failed, or another device found it abandoned. The ledger reads the run's turn as
+ * committed, and the history keeps one copy however many devices append it.
+ *
+ * @internal
+ */
+export const abandonedTurnKind = 'abandoned-turn';
+
+/**
+ * The person's message of a run that settles before committing its turn, as the row that says it (XD3).
+ *
+ * @param message - The message the run was admitted with.
+ * @returns The same message, marked {@link abandonedTurnKind}.
+ * @internal
+ */
+export const abandonedTurnOf = (message: UserProviderMessage): UserProviderMessage => ({
+  ...message,
+  metadata: { ...message.metadata, tauInternal: { ...message.metadata?.tauInternal, kind: abandonedTurnKind } },
+});
+
+/**
+ * Whether a message is a person's turn appended as its run settled ({@link abandonedTurnOf}).
+ *
+ * @param message - One message of a transcript.
+ * @returns Whether it is marked {@link abandonedTurnKind}.
+ * @internal
+ */
+export const isAbandonedTurn = (message: ProviderMessage): boolean =>
+  message.role === 'user' && message.metadata?.tauInternal?.['kind'] === abandonedTurnKind;
 
 /** Catalog provider identities accepted by the portable host. @public */
 export const modelProviderKinds = [

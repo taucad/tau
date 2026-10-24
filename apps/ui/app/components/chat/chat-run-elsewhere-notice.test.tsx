@@ -23,6 +23,7 @@ const running: ForeignRun = {
   state: 'running',
   lastRecordedAt: Date.parse('2026-10-23T10:00:00.000Z'),
   tip: { leaderEpoch: 'epoch-desktop', sequence: 2 },
+  observedAt: Date.parse('2026-10-23T10:00:00.000Z'),
 };
 
 beforeEach(() => {

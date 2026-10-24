@@ -9,6 +9,7 @@ import {
 } from '#log/foreign-runs.js';
 import type { ForeignRun } from '#log/foreign-runs.js';
 import { serializeLogEvent } from '#log/serialization.js';
+import { abandonedTurnOf } from '#log/event-types.js';
 import type { AgentLogEvent } from '#log/event-types.js';
 
 const encoder = new TextEncoder();
@@ -30,12 +31,13 @@ const segment = (deviceId: string, events: readonly AgentLogEvent[]) => ({
   bytes: encoder.encode(events.map((event) => serializeLogEvent(event)).join('')),
 });
 
-const run = (lastRecordedAt: number, runId = 'run-1'): ForeignRun => ({
+const run = (observedAt: number, runId = 'run-1', lastRecordedAt = observedAt): ForeignRun => ({
   deviceId: 'device-desktop',
   runId,
   state: 'running',
   lastRecordedAt,
   tip: { leaderEpoch: `epoch-${runId}`, sequence: 1 },
+  observedAt,
 });
 
 const now = Date.parse('2026-10-23T10:00:00.000Z');
@@ -53,32 +55,35 @@ describe('the cross-device run fence (XD3)', () => {
   });
 
   it('should read each segment on its own ledger and keep only runs that have not settled', () => {
-    const runs = unsettledForeignRuns([
-      segment('device-desktop', [
-        lifecycle('run-done', 0, {
-          state: 'admitted',
-          at: '2026-10-23T09:00:00.000Z',
-        }),
-        lifecycle('run-done', 1, {
-          state: 'completed',
-          at: '2026-10-23T09:01:00.000Z',
-        }),
-        lifecycle('run-live', 0, {
-          state: 'admitted',
-          at: '2026-10-23T09:58:00.000Z',
-        }),
-        lifecycle('run-live', 1, {
-          state: 'running',
-          at: '2026-10-23T09:59:00.000Z',
-        }),
-      ]),
-      segment('device-laptop', [
-        lifecycle('run-admitted', 0, {
-          state: 'admitted',
-          at: '2026-10-23T09:30:00.000Z',
-        }),
-      ]),
-    ]);
+    const runs = unsettledForeignRuns(
+      [
+        segment('device-desktop', [
+          lifecycle('run-done', 0, {
+            state: 'admitted',
+            at: '2026-10-23T09:00:00.000Z',
+          }),
+          lifecycle('run-done', 1, {
+            state: 'completed',
+            at: '2026-10-23T09:01:00.000Z',
+          }),
+          lifecycle('run-live', 0, {
+            state: 'admitted',
+            at: '2026-10-23T09:58:00.000Z',
+          }),
+          lifecycle('run-live', 1, {
+            state: 'running',
+            at: '2026-10-23T09:59:00.000Z',
+          }),
+        ]),
+        segment('device-laptop', [
+          lifecycle('run-admitted', 0, {
+            state: 'admitted',
+            at: '2026-10-23T09:30:00.000Z',
+          }),
+        ]),
+      ],
+      now,
+    );
 
     expect(runs).toEqual([
       {
@@ -87,6 +92,7 @@ describe('the cross-device run fence (XD3)', () => {
         state: 'running',
         lastRecordedAt: Date.parse('2026-10-23T09:59:00.000Z'),
         tip: { leaderEpoch: 'epoch-run-live', sequence: 1 },
+        observedAt: now,
       },
       {
         deviceId: 'device-laptop',
@@ -94,6 +100,7 @@ describe('the cross-device run fence (XD3)', () => {
         state: 'admitted',
         lastRecordedAt: Date.parse('2026-10-23T09:30:00.000Z'),
         tip: { leaderEpoch: 'epoch-run-admitted', sequence: 0 },
+        observedAt: now,
       },
     ]);
   });
@@ -113,30 +120,67 @@ describe('the cross-device run fence (XD3)', () => {
       runId: 'run-paused',
       type: 'run.heartbeat',
     } as const satisfies AgentLogEvent;
+    const seenAt = now - foreignRunStaleMilliseconds - 1;
+    unsettledForeignRuns([segment('device-desktop', paused)], seenAt);
 
-    const [held] = unsettledForeignRuns([segment('device-desktop', [...paused, heartbeat])]);
+    const [held] = unsettledForeignRuns([segment('device-desktop', [...paused, heartbeat])], now);
 
-    expect(held).toMatchObject({ state: 'paused', lastRecordedAt: Date.parse(heartbeat.recordedAt) });
-    expect(liveForeignRun(unsettledForeignRuns([segment('device-desktop', paused)]), now)).toBeUndefined();
+    expect(held).toMatchObject({ state: 'paused', lastRecordedAt: Date.parse(heartbeat.recordedAt), observedAt: now });
+    expect(liveForeignRun(unsettledForeignRuns([segment('device-desktop', paused)], now), now)).toBeUndefined();
     expect(liveForeignRun([held!], now)).toBe(held);
   });
 
-  it('should hold the chat for a run whose newest row is inside the bound', () => {
+  it('should hold the chat for a run this device saw change inside the bound', () => {
     expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds), now)).toBe(false);
     expect(liveForeignRun([run(now - 60_000)], now)).toEqual(run(now - 60_000));
   });
 
-  it('should treat a run with no new row past the bound as abandoned', () => {
+  it('should treat a run this device has not seen change for longer than the bound as abandoned', () => {
     expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds - 1), now)).toBe(true);
     expect(liveForeignRun([run(now - foreignRunStaleMilliseconds - 1)], now)).toBeUndefined();
   });
 
-  it('should hold the chat for a device whose clock runs ahead by less than the bound, and not past it', () => {
-    expect(isAbandonedForeignRun(run(now + 5 * 60_000), now)).toBe(false);
-    expect(isAbandonedForeignRun(run(now + foreignRunStaleMilliseconds + 1), now)).toBe(true);
+  /* Round 16: one fast or corrupt clock must not decide the fence; the run's own `recordedAt` is never read for it. */
+  it('should judge a run by when this device saw it change, whatever its rows’ clock says', () => {
+    const day = 24 * 60 * 60 * 1000;
+
+    expect(isAbandonedForeignRun(run(now - foreignRunStaleMilliseconds - 1, 'run-1', now + day), now)).toBe(true);
+    expect(isAbandonedForeignRun(run(now - 60_000, 'run-1', now - day), now)).toBe(false);
+    expect(isAbandonedForeignRun(run(now, 'run-1', now + day), now)).toBe(false);
   });
 
-  it('should name the newest of several live runs', () => {
+  it('should keep the time a run’s newest row was first seen, and see it anew once that row changes', () => {
+    const rows = [lifecycle('run-seen', 0, { state: 'admitted', at: '2026-10-23T09:00:00.000Z' })];
+    const later = [...rows, lifecycle('run-seen', 1, { state: 'running', at: '2026-10-23T09:00:01.000Z' })];
+
+    expect(unsettledForeignRuns([segment('device-desktop', rows)], now - 5000)[0]?.observedAt).toBe(now - 5000);
+    expect(unsettledForeignRuns([segment('device-desktop', rows)], now)[0]?.observedAt).toBe(now - 5000);
+    expect(unsettledForeignRuns([segment('device-desktop', later)], now)[0]?.observedAt).toBe(now);
+  });
+
+  /* Round 16: a device that went on past a run says its turn; every other device then reads the run as let go. */
+  it('should read a run another device said the turn of as abandoned, though its own segment still holds it open', () => {
+    const open = [lifecycle('run-taken', 0, { state: 'admitted', at: '2026-10-23T09:59:00.000Z' })];
+    const said = {
+      version: 1,
+      leaderEpoch: 'epoch-phone',
+      sequence: 0,
+      recordedAt: '2026-10-23T10:00:00.000Z',
+      runId: 'run-taken',
+      type: 'message.appended',
+      message: abandonedTurnOf({ id: 'user-taken', role: 'user', content: 'taken over' }),
+    } as const satisfies AgentLogEvent;
+
+    const [alone] = unsettledForeignRuns([segment('device-desktop', open)], now);
+    const [taken] = unsettledForeignRuns([segment('device-desktop', open), segment('device-phone', [said])], now);
+
+    expect(alone).not.toHaveProperty('takenOver');
+    expect(liveForeignRun([alone!], now)).toBe(alone);
+    expect(taken).toMatchObject({ runId: 'run-taken', takenOver: true });
+    expect(liveForeignRun([taken!], now)).toBeUndefined();
+  });
+
+  it('should name the most recently changed of several live runs', () => {
     const older = run(now - 120_000, 'run-older');
     const newer = run(now - 60_000, 'run-newer');
 

@@ -132,6 +132,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       expect(actor.getSnapshot().context.ledger.position.cursor).toBe(0);
       actor.send({
         type: 'remote',
+        at: 0,
         segments: [
           {
             deviceId: 'other-device',
@@ -479,10 +480,12 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const steady = { deviceId: 'device-a', bytes: encode([lifecycleRow(0, 'admitted', 'run_a')]) };
     const first = reduceChatProjection(initialChatProjection, {
       type: 'remote',
+      at: 0,
       segments: [steady, { deviceId: 'device-b', bytes: encode([lifecycleRow(0, 'admitted', 'run_b')]) }],
     }).state;
     const second = reduceChatProjection(first, {
       type: 'remote',
+      at: 0,
       segments: [
         { deviceId: 'device-a', bytes: Uint8Array.from(steady.bytes) },
         {
@@ -517,8 +520,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const before = segment(remote.slice(0, 3));
     const after = segment(remote);
     const ownProjection = project(own.slice(0, 10), 7);
-    const first = reduceChatProjection(ownProjection, { type: 'remote', segments: before }).state;
-    const second = reduceChatProjection(first, { type: 'remote', segments: after }).state;
+    const first = reduceChatProjection(ownProjection, { type: 'remote', at: 0, segments: before }).state;
+    const second = reduceChatProjection(first, { type: 'remote', at: 0, segments: after }).state;
     const completed = project(own, 7, second);
 
     expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
@@ -527,7 +530,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       ...(await materializeTranscript(project(remote, 1))),
       ...(await materializeTranscript(project(own, 1))),
     ]);
-    expect(reduceChatProjection(second, { type: 'remote', segments: after }).state).toBe(second);
+    expect(reduceChatProjection(second, { type: 'remote', at: 0, segments: after }).state).toBe(second);
     expect(completed.remote).toBe(second.remote);
   });
 
@@ -544,6 +547,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     it('names the run while it is unsettled and inside the bound', () => {
       const remote = reduceChatProjection(initialChatProjection, {
         type: 'remote',
+        at,
         segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
       }).state;
 
@@ -552,12 +556,14 @@ describe('chatProjectionLogic (PV-S7)', () => {
         runId: 'run_other',
         state: 'running',
         lastRecordedAt: at,
+        observedAt: at,
       });
     });
 
     it('names none once the run settles, or once it has gone stale', () => {
       const settled = reduceChatProjection(initialChatProjection, {
         type: 'remote',
+        at,
         segments: remoteOf([
           lifecycleRow(0, 'admitted', 'run_other'),
           lifecycleRow(1, 'running', 'run_other'),
@@ -566,6 +572,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       }).state;
       const running = reduceChatProjection(initialChatProjection, {
         type: 'remote',
+        at,
         segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
       }).state;
 
@@ -576,10 +583,12 @@ describe('chatProjectionLogic (PV-S7)', () => {
     it('names the moment the answer next changes with the clock, and none once nothing is unsettled', () => {
       const running = reduceChatProjection(initialChatProjection, {
         type: 'remote',
+        at,
         segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'running', 'run_other')]),
       }).state;
       const settled = reduceChatProjection(initialChatProjection, {
         type: 'remote',
+        at,
         segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other'), lifecycleRow(1, 'completed', 'run_other')]),
       }).state;
       const changesAt = selectRunElsewhereChangesAt(running, at + 60_000);
@@ -592,18 +601,20 @@ describe('chatProjectionLogic (PV-S7)', () => {
       expect(selectRunElsewhereChangesAt(initialChatProjection, at)).toBeUndefined();
     });
 
-    /* A timer longer than 2^31 - 1 ms fires at once: a far-future foreign clock must not spin the reader. */
-    it('waits for the next change no longer than one timer can, and not at all when nothing can change', () => {
+    /* Round 16: a far-future foreign clock decides nothing; the reader waits the bound from when it saw the run. */
+    it('waits for the next change the bound from when it saw the run, whatever its clock, and not at all when nothing can change', () => {
       const farAhead = reduceChatProjection(initialChatProjection, {
         type: 'remote',
+        at,
         segments: remoteOf([{ ...lifecycleRow(0, 'admitted', 'run_other'), recordedAt: '2027-09-28T00:00:00.000Z' }]),
       }).state;
       const running = reduceChatProjection(initialChatProjection, {
         type: 'remote',
+        at,
         segments: remoteOf([lifecycleRow(0, 'admitted', 'run_other')]),
       }).state;
 
-      expect(selectRunElsewhereRecheckDelay(farAhead, at)).toBe(2_147_483_647);
+      expect(selectRunElsewhereRecheckDelay(farAhead, at)).toBe(foreignRunStaleMilliseconds + 1);
       expect(selectRunElsewhereRecheckDelay(running, at)).toBe(foreignRunStaleMilliseconds + 1);
       expect(selectRunElsewhereRecheckDelay(running, at + foreignRunStaleMilliseconds + 5)).toBeUndefined();
       expect(selectRunElsewhereRecheckDelay(initialChatProjection, at)).toBeUndefined();
@@ -613,6 +624,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       const own = project(runningRows('run_own'), 2);
       const remote = reduceChatProjection(own, {
         type: 'remote',
+        at,
         segments: remoteOf(runningRows('run_own')),
       }).state;
 
@@ -629,7 +641,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
       deviceId: 'other-device',
       bytes: new TextEncoder().encode(rows.map((row) => JSON.stringify(row)).join('\n')),
     };
-    const remote = reduceChatProjection(initialChatProjection, { type: 'remote', segments: [segment] }).state;
+    const remote = reduceChatProjection(initialChatProjection, { type: 'remote', at: 0, segments: [segment] }).state;
 
     expect(selectTranscriptSource(remote).map((view) => view.runId)).toEqual(['run_z', 'run_a']);
   });
@@ -652,8 +664,8 @@ describe('chatProjectionLogic (PV-S7)', () => {
     );
     expect(digestLogSegments(after)).not.toBe(digestLogSegments(before));
 
-    const first = reduceChatProjection(initialChatProjection, { type: 'remote', segments: before }).state;
-    const second = reduceChatProjection(first, { type: 'remote', segments: after }).state;
+    const first = reduceChatProjection(initialChatProjection, { type: 'remote', at: 0, segments: before }).state;
+    const second = reduceChatProjection(first, { type: 'remote', at: 0, segments: after }).state;
     expect(second.remote?.views).not.toEqual(first.remote?.views);
     expect(await materializeTranscript(second)).not.toEqual(await materializeTranscript(first));
     expect(JSON.stringify(await materializeTranscript(second))).toContain('40mm');

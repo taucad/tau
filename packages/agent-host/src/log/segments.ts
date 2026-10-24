@@ -162,7 +162,45 @@ export const parseLogSegments = (segments: readonly ChatLogSegment[]): readonly 
 export const mergeSegmentRows = (
   segments: readonly ParsedLogSegment[],
   options: MergeLogSegmentsOptions = {},
-): readonly AgentLogEvent[] => {
+): readonly AgentLogEvent[] => mergeSegmentsUpTo(segments, Number.POSITIVE_INFINITY, options).rows;
+
+/**
+ * How far ahead of this device's clock another device's term may start and still join the history it reads (XD1): ten
+ * minutes. A term dated further ahead is left out until this clock comes within the bound, and said so; the clock a
+ * writer stamps its rows by (`stampAfterRead`) never follows it there, so one fast or corrupt clock cannot carry every
+ * device's rows into the future.
+ *
+ * @internal
+ */
+export const foreignClockAheadMilliseconds = 10 * 60 * 1000;
+
+/** {@link mergeSegmentsUpTo}'s answer. @internal */
+export type BoundedMerge = Readonly<{
+  /** The merge's rows of every term whose clamped start is at most the bound: a prefix of the whole merge. */
+  rows: readonly AgentLogEvent[];
+  /** The latest clamped start among those terms, or `undefined` when there are none. */
+  newestStart: number | undefined;
+  /** The terms left out, each by its clamped start, in merge order. */
+  later: ReadonlyArray<Readonly<{ leaderEpoch: string; startedAt: number }>>;
+}>;
+
+/**
+ * The merge a reader folds at a bound (`mergeUpTo` in ChatLedger.lean): the terms of {@link mergeSegmentRows} whose
+ * clamped start is at most `notAfter`. The merge orders terms by clamped start first, so these are a prefix of it, the
+ * same on every device for the same rows and bound (`t7_bounded_same_rows`, `t7_bounded_prefix`), and a term stamped
+ * after their newest start merges after every one of them (`t7_projection_after_visible`).
+ *
+ * @param segments - One entry per segment.
+ * @param notAfter - The latest clamped start a term may have and be kept.
+ * @param options - `onConflict` hears about each conflicting copy dropped.
+ * @returns The kept rows, the newest kept start, and the terms left out.
+ * @internal
+ */
+export const mergeSegmentsUpTo = (
+  segments: readonly ParsedLogSegment[],
+  notAfter: number,
+  options: MergeLogSegmentsOptions = {},
+): BoundedMerge => {
   const terms = new Map<string, Term>();
   for (const segment of segments) {
     const introduced = new Set<string>();
@@ -207,36 +245,43 @@ export const mergeSegmentRows = (
   }
 
   /* Clamped start, then writer, then file order, then term: no segment id, so every machine merges one order. */
-  return placed
-    .toSorted(
-      (left, right) =>
-        clamped.get(left.term)! - clamped.get(right.term)! ||
-        compare(left.writer, right.writer) ||
-        left.order - right.order ||
-        compare(left.term.leaderEpoch, right.term.leaderEpoch),
-    )
-    .flatMap(({ term }) =>
-      [...term.copies.entries()]
-        .toSorted(([left], [right]) => left - right)
-        .map(([sequence, copies]) => {
-          /* The smallest canonical copy, whichever segment holds it; the device id only names the copy reported kept. */
-          const kept = copies.toSorted(
-            (left, right) => compare(left.canonical, right.canonical) || compare(left.deviceId, right.deviceId),
-          )[0]!;
-          const dropped = new Map<string, string>();
-          for (const copy of copies.toSorted((left, right) => compare(left.deviceId, right.deviceId))) {
-            if (copy.canonical !== kept.canonical && !dropped.has(copy.canonical)) {
-              dropped.set(copy.canonical, copy.deviceId);
-            }
+  const ordered = placed.toSorted(
+    (left, right) =>
+      clamped.get(left.term)! - clamped.get(right.term)! ||
+      compare(left.writer, right.writer) ||
+      left.order - right.order ||
+      compare(left.term.leaderEpoch, right.term.leaderEpoch),
+  );
+  const visible = ordered.filter(({ term }) => clamped.get(term)! <= notAfter);
+  const rows = visible.flatMap(({ term }) =>
+    [...term.copies.entries()]
+      .toSorted(([left], [right]) => left - right)
+      .map(([sequence, copies]) => {
+        /* The smallest canonical copy, whichever segment holds it; the device id only names the copy reported kept. */
+        const kept = copies.toSorted(
+          (left, right) => compare(left.canonical, right.canonical) || compare(left.deviceId, right.deviceId),
+        )[0]!;
+        const dropped = new Map<string, string>();
+        for (const copy of copies.toSorted((left, right) => compare(left.deviceId, right.deviceId))) {
+          if (copy.canonical !== kept.canonical && !dropped.has(copy.canonical)) {
+            dropped.set(copy.canonical, copy.deviceId);
           }
-          for (const droppedDeviceId of dropped.values()) {
-            options.onConflict?.({
-              key: { leaderEpoch: term.leaderEpoch, sequence },
-              keptDeviceId: kept.deviceId,
-              droppedDeviceId,
-            });
-          }
-          return kept.event;
-        }),
-    );
+        }
+        for (const droppedDeviceId of dropped.values()) {
+          options.onConflict?.({
+            key: { leaderEpoch: term.leaderEpoch, sequence },
+            keptDeviceId: kept.deviceId,
+            droppedDeviceId,
+          });
+        }
+        return kept.event;
+      }),
+  );
+  return {
+    rows,
+    newestStart: visible.length === 0 ? undefined : clamped.get(visible.at(-1)!.term),
+    later: ordered
+      .filter(({ term }) => clamped.get(term)! > notAfter)
+      .map(({ term }) => ({ leaderEpoch: term.leaderEpoch, startedAt: clamped.get(term)! })),
+  };
 };

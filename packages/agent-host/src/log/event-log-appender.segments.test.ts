@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import { pendingToolCalls } from '#host/run-history.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
-import { foreignRunStaleMilliseconds, foreignRunStanding } from '#log/foreign-runs.js';
+import { foreignRunStaleMilliseconds } from '#log/foreign-runs.js';
+import { abandonedTurnOf } from '#log/event-types.js';
+import { foreignClockAheadMilliseconds } from '#log/segments.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import type { ChatLogSegment } from '#log/segments.js';
 import { serializeLogEvent } from '#log/serialization.js';
@@ -174,6 +176,46 @@ describe('an event log with other devices’ segments (XD1)', () => {
     expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
   });
 
+  /*
+   * Round 16: a clock is bounded by this device's. A term dated past the bound waits out of the history, said so, and
+   * the stamp this device writes by follows only what the history kept: one fast clock carries nobody's rows ahead.
+   */
+  describe('with another device’s clock far ahead', () => {
+    const ahead = said({ leaderEpoch: 'epoch-ahead', sequence: 0, at: '2026-10-24T10:05:00.000Z', text: 'from ahead' });
+
+    it('should leave the term out of the history and the stamp until this clock comes within the bound', async () => {
+      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+      const log = await openLog(phoneTurn, { current: [segment('device-desktop', [...desktopTurn, ahead])] });
+
+      expect(ids(await log.messages())).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0']);
+      expect(await log.stampAfterRead?.(clock.now)).toBe(clock.now);
+      expect(await log.anomalies()).toContainEqual({
+        kind: 'history',
+        message: expect.stringContaining('Leader epoch "epoch-ahead" starts at 2026-10-24T10:05:00.000Z') as unknown,
+      });
+
+      clock.now = Date.parse('2026-10-24T10:05:00.000Z') - foreignClockAheadMilliseconds;
+      await log.refresh?.();
+
+      expect(ids(await log.messages())).toEqual([
+        'epoch-desktop-0',
+        'epoch-desktop-1',
+        'epoch-phone-0',
+        'epoch-ahead-0',
+      ]);
+      expect(await log.stampAfterRead?.(clock.now)).toBe(Date.parse('2026-10-24T10:05:00.000Z') + 1);
+      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+    });
+
+    it('should stamp after the newest term start the history kept, within the bound', async () => {
+      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+      const near = said({ leaderEpoch: 'epoch-near', sequence: 0, at: '2026-10-23T10:09:00.000Z', text: 'near' });
+      const log = await openLog(phoneTurn, { current: [segment('device-desktop', [...desktopTurn, near])] });
+
+      expect(await log.stampAfterRead?.(clock.now)).toBe(Date.parse('2026-10-23T10:09:00.000Z') + 1);
+    });
+  });
+
   it('should keep this device’s history and report the divergence when the segments do not fold onto it', async () => {
     /* The desktop retried later keeping a message the phone never saw: the merge cannot fold that, the phone's rows
      * alone still can. */
@@ -209,6 +251,16 @@ describe('an event log with other devices’ segments (XD1)', () => {
         runId: 'run-desktop-2',
         ...body,
       }) as AgentLogEvent;
+    /* The person's turn of the desktop's run, appended here under this device's own term (`abandonedTurnOf`). */
+    const takeover = (sequence: number, id: string, content: string): AgentLogEvent => ({
+      version: 1,
+      leaderEpoch: 'epoch-phone',
+      sequence,
+      recordedAt: '2026-10-23T10:30:00.000Z',
+      runId: 'run-desktop-2',
+      type: 'message.appended',
+      message: abandonedTurnOf({ id, role: 'user', content }),
+    });
     /* The desktop's second run: admitted, its user turn and a tool call recorded, the tool still running. */
     const inFlight = [
       row(0, { type: 'run.lifecycle', state: 'admitted' }),
@@ -289,6 +341,7 @@ describe('an event log with other devices’ segments (XD1)', () => {
           state: 'running',
           lastRecordedAt: Date.parse(at(3)),
           tip: { leaderEpoch: 'epoch-desktop-2', sequence: 3 },
+          observedAt: clock.now,
         },
       ]);
 
@@ -307,86 +360,75 @@ describe('an event log with other devices’ segments (XD1)', () => {
       expect(ids(await log.messages())).toEqual(['desktop-2-user']);
     });
 
-    /* Its device went away mid-run: the person's turn rejoins, and nothing the run left half done does. */
-    it('should take the user turn of a run gone stale into the history, without its dangling call', async () => {
+    /*
+     * Round 16: the history is a function of the rows, never of when they are read. A run gone stale stays out of it
+     * until a row says otherwise: the device that goes on past it appends the person's turn (`abandonedTurnOf`), and
+     * nothing the run left half done joins.
+     */
+    it('should keep a run gone stale out of the history until a device appends its person’s turn', async () => {
       clock.now = Date.parse('2026-10-23T10:05:00.000Z');
       const log = await openLog(phoneTurn, { current: [segment('device-desktop', [...desktopTurn, ...inFlight])] });
-      expect(ids(await log.messages())).not.toContain('desktop-2-user');
+      const before = ids(await log.messages());
+      expect(before).not.toContain('desktop-2-user');
 
-      /* No new row arrives; only the time passes the bound, and the next admission's refresh sees it. */
-      clock.now = Date.parse(at(3)) + foreignRunStaleMilliseconds + 1;
+      clock.now += foreignRunStaleMilliseconds + 1;
       await log.refresh?.();
+      expect(ids(await log.messages())).toEqual(before);
+
+      await log.append(takeover(1, 'desktop-2-user', 'desktop asks again'));
       const history = await log.messages();
 
       expect(ids(history)).toEqual(['epoch-desktop-0', 'epoch-desktop-1', 'epoch-phone-0', 'desktop-2-user']);
       expect(pendingToolCalls(history)).toEqual([]);
+      expect(await log.foreignRuns?.()).toEqual([]);
       expect(await log.historyIntact()).toBe(true);
       clock.now = Date.parse('2026-10-23T10:05:00.000Z');
     });
 
     /*
-     * A run its device admitted and then lost before it said the person's words: those words join the history from the
-     * admission while the run is stale, and they stay once its device comes back and settles it failed. The history is
-     * a function of the rows, not of when they are read; else a turn written over it names a message that vanishes.
+     * A run its device admitted and then lost before it said the person's words: whichever device settles it appends
+     * them as data, and every copy of them merges as one.
      */
     describe('an admitted run that never said the person’s words', () => {
+      const words = { id: 'desktop-2-user', role: 'user', content: 'desktop asks again' } as const;
       const admitted = row(0, {
         type: 'run.lifecycle',
         state: 'admitted',
-        admission: {
-          kind: 'tau',
-          turnId: 'desktop-2-user',
-          message: { id: 'desktop-2-user', role: 'user', content: 'desktop asks again' },
-        },
+        admission: { kind: 'tau', turnId: 'desktop-2-user', message: words },
       });
-      const failed = row(1, {
-        type: 'run.lifecycle',
-        state: 'failed',
-        detail: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
-        executed: false,
-      });
+      const failed = [
+        row(1, { type: 'message.appended', message: abandonedTurnOf(words) }),
+        row(2, {
+          type: 'run.lifecycle',
+          state: 'failed',
+          detail: { code: 'RUN_ABANDONED', message: 'The host executing this run is gone.' },
+          executed: false,
+        }),
+      ];
 
-      it('should keep its words in the history whether the run is stale or settled failed', async () => {
-        clock.now = Date.parse(at(0)) + foreignRunStaleMilliseconds + 1;
-        const segments = { current: [segment('device-desktop', [...desktopTurn, admitted])] };
-        const log = await openLog(phoneTurn, segments);
-        const stale = ids(await log.messages());
-        expect(stale).toContain('desktop-2-user');
-
-        segments.current = [segment('device-desktop', [...desktopTurn, admitted, failed])];
-        await log.refresh?.();
-
-        expect(ids(await log.messages())).toEqual(stale);
-        expect(await log.historyIntact()).toBe(true);
-        clock.now = Date.parse('2026-10-23T10:05:00.000Z');
-      });
-
-      it('should keep its words in the history of the device that settled it', async () => {
-        const log = await openLog([...desktopTurn, admitted, failed], {
+      it('should keep its words, said by its own device as it settled, on every device', async () => {
+        const settledHere = await openLog([...desktopTurn, admitted, ...failed], {
           current: [segment('device-phone', phoneTurn)],
         });
+        const readElsewhere = await openLog(phoneTurn, {
+          current: [segment('device-desktop', [...desktopTurn, admitted, ...failed])],
+        });
 
-        expect(ids(await log.messages())).toContain('desktop-2-user');
+        expect(ids(await settledHere.messages())).toEqual(ids(await readElsewhere.messages()));
+        expect(ids(await readElsewhere.messages())).toContain('desktop-2-user');
+        expect(await readElsewhere.historyIntact()).toBe(true);
+      });
+
+      it('should merge the words two devices said as one', async () => {
+        const log = await openLog([...phoneTurn, takeover(1, 'desktop-2-user', 'desktop asks again')], {
+          current: [segment('device-desktop', [...desktopTurn, admitted, ...failed])],
+        });
+        const history = ids(await log.messages());
+
+        expect(history.filter((id) => id === 'desktop-2-user')).toHaveLength(1);
         expect(await log.historyIntact()).toBe(true);
       });
     });
-
-    /* A run dated past the bound in this device's future is out of the history and the fence alike, and both take it
-     * up together once this clock comes within the bound: the history refolds then, with no new row. */
-    it('should take a future-dated run into the fence and the history at the same moment', async () => {
-      const future = Date.parse(at(3));
-      clock.now = future - foreignRunStaleMilliseconds - 60_000;
-      const log = await openLog(phoneTurn, { current: [segment('device-desktop', [...desktopTurn, ...inFlight])] });
-      expect(ids(await log.messages())).toContain('desktop-2-user');
-
-      clock.now = future - foreignRunStaleMilliseconds + 1;
-      await log.refresh?.();
-
-      expect(ids(await log.messages())).not.toContain('desktop-2-user');
-      expect(foreignRunStanding({ lastRecordedAt: future }, clock.now).abandoned).toBe(false);
-      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
-    });
-
     /* A segment that is there but cannot be read may hold a live run: the fence never reads that as none. */
     it('should refuse to answer the fence while the other devices’ segments cannot be read', async () => {
       const { storage } = memoryEventLogStorage(bytesOf(phoneTurn));

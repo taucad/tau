@@ -211,8 +211,11 @@ export type ChatProjectionEvent =
   | Readonly<{ type: 'live'; event: AgentLiveEvent }>
   /** Retire only the named ephemeral overlay after terminal delivery or reader loss. */
   | Readonly<{ type: 'clear-live'; runId: string }>
-  /** Other devices' projected segment files; no own-log cursor applies to them. */
-  | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[] }>;
+  /**
+   * Other devices' projected segment files; no own-log cursor applies to them. `at` is when this device read them, on
+   * its own clock: a foreign run's staleness counts from when this device first saw its rows change.
+   */
+  | Readonly<{ type: 'remote'; segments: readonly ChatLogSegment[]; at: number }>;
 
 /** What the projection tells its reader. @public */
 export type ChatProjectionEmitted =
@@ -1095,7 +1098,7 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       return { deviceId, events: parse.events };
     });
     const { views } = foldRunViews(mergeSegmentRows(parsed), {}, {});
-    const unsettled = unsettledParsedRuns(parsed);
+    const unsettled = unsettledParsedRuns(parsed, event.at);
     const remote = { digest, views, ...(unsettled.length === 0 ? {} : { unsettled }) };
     segmentParses.set(remote, parses);
     return { state: { ...state, remote } };

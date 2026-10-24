@@ -54,6 +54,7 @@ describe('a growing segment’s runs', () => {
         state: 'running',
         lastRecordedAt: Date.UTC(2026, 9, 23, 10, 0, 2),
         tip: { leaderEpoch: 'epoch-phone', sequence: 2 },
+        observedAt: expect.any(Number) as unknown,
       },
     ]);
   });

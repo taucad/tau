@@ -10,6 +10,7 @@ const at = Date.parse('2026-10-23T10:00:00.000Z');
 const withForeignRun = (): ChatProjection =>
   reduceChatProjection(initialChatProjection, {
     type: 'remote',
+    at,
     segments: [
       {
         deviceId: 'device-phone',

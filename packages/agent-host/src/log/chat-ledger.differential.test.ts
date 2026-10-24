@@ -12,10 +12,11 @@
  *
  * - A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>`; `epoch` and `attempt` 0 mean absent.
  * - Kinds: `L` lifecycle, `S` settlement, `H` turn commit, `O`/`R` interrupt requested/resolved, `P` invocation
- *   prepared, `V` invocation settled, `M` assistant reply, `U` opaque (only written raw).
+ *   prepared, `V` invocation settled, `M` assistant reply, `U` opaque (only written raw), `W` a person's turn said as its
+ *   run settled (`abandonedTurnOf`, id `w-<arg>`).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
- *   `ROW`, `MERGE`, `TABLES`.
+ *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -36,11 +37,13 @@ import { createEventLogAppender } from '#log/event-log-appender.js';
 import type { EventLogAppender } from '#log/event-log-appender.js';
 import { memoryEventLogStorage } from '#log/event-log-storage.fixture.js';
 import { classifyLogRow } from '#log/event-schema.js';
+import { abandonedTurnOf } from '#log/event-types.js';
 import type { AgentLogEvent, RowKey } from '#log/event-types.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
 import settlementTable from '#log/run-settlement.legality.json' with { type: 'json' };
-import { mergeLogSegments } from '#log/segments.js';
+import { createEventLogReducer } from '#log/reducer.js';
+import { mergeLogSegments, mergeSegmentsUpTo, parseLogSegments } from '#log/segments.js';
 import { serializeLogEventBytes } from '#log/serialization.js';
 
 const corpusDirectory = fileURLToPath(new URL('../../specs/lean/corpus/', import.meta.url));
@@ -78,7 +81,7 @@ type Random = ReturnType<typeof randomOf>;
 const below = (random: Random, bound: number) => Math.floor(random() * bound);
 const pick = <T>(random: Random, items: readonly T[]): T => items[below(random, items.length)]!;
 
-type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U';
+type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U' | 'W';
 /** `undefinedKeys`: the row object carries optional keys set to `undefined`, invisible to the oracle and to the bytes. */
 type Row = {
   term: number;
@@ -218,6 +221,12 @@ const bodyOf = (row: Pick<Row, 'term' | 'seq' | 'run' | 'kind' | 'argument'>): R
         },
       };
     }
+    case 'W': {
+      return {
+        type: 'message.appended',
+        message: abandonedTurnOf({ id: `w-${argument}`, role: 'user', content: 'x' }),
+      };
+    }
     case 'U': {
       // A newer build's rows: an unknown type, a history row of a newer version, an unknown lifecycle state.
       return argument === 0
@@ -250,10 +259,13 @@ const keyText = (key: RowKey | undefined) => (key === undefined ? '-' : `${termO
 const listText = (items: readonly string[]) => (items.length === 0 ? '-' : items.join(','));
 const runOf = (runId: string) => runId.slice(1);
 
-/** Merge rows print as `<term>:<seq>:<run>:O<arg>:<ms>`. */
+/** Merge rows print as `<term>:<seq>:<run>:O<arg>:<ms>`, whatever their kind: an interrupt's `i<arg>`, a turn's `w-<arg>`. */
 const mergedText = (event: AgentLogEvent) => {
-  const interrupt = event as Extract<AgentLogEvent, { type: 'interrupt.recorded' }>;
-  return `${termOf(event.leaderEpoch)}:${event.sequence}:${runOf(event.runId)}:O${interrupt.interruptId.slice(1)}:${Date.parse(event.recordedAt) - base}`;
+  const argument =
+    event.type === 'message.appended'
+      ? event.message.id.slice('w-'.length)
+      : (event as Extract<AgentLogEvent, { type: 'interrupt.recorded' }>).interruptId.slice(1);
+  return `${termOf(event.leaderEpoch)}:${event.sequence}:${runOf(event.runId)}:O${argument}:${Date.parse(event.recordedAt) - base}`;
 };
 
 /** The ledger, projected onto what the Lean model keeps. */
@@ -631,7 +643,7 @@ const logTrace = async (random: Random, name: string, profile: Profile): Promise
   return { text, expected };
 };
 
-type MergeRow = Omit<Row, 'kind'> & { kind: 'O' };
+type MergeRow = Omit<Row, 'kind'> & { kind: 'O' | 'W' };
 const segmentBytes = (rows: readonly MergeRow[]): Uint8Array<ArrayBuffer> =>
   encoder.encode(rows.map((row) => `${JSON.stringify(eventOf(row))}\n`).join(''));
 
@@ -722,8 +734,9 @@ const layoutSegmentsOf = (random: Random, layout: 'ties' | 'overlap'): Array<{ d
 };
 
 /**
- * Devices taking turns on one chat with skewed clocks, each stamping its rows after every row it has read
- * (`stampAfterRead`): a device that writes a turn first reads every row written before it.
+ * Devices taking turns on one chat with skewed clocks, each stamping its rows after every row it has read (the
+ * clock `stampAfterRead` keeps when no term is dated past its bound): a device that writes a turn first reads every row
+ * written before it.
  */
 const skewedSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow[] }> => {
   const devices = 2 + below(random, 2);
@@ -752,18 +765,102 @@ const skewedSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRo
   return files.flatMap((rows, device) => (rows.length === 0 ? [] : [{ device, rows }]));
 };
 
+/**
+ * Devices that each say people's turns as runs settle (`W`, round 16): the same turn, said under different terms by
+ * different devices, between interrupt rows. The history folds every copy of one turn as one message.
+ */
+const wordsSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow[] }> => {
+  const devices = 2 + below(random, 2);
+  let nextTerm = 0;
+  return Array.from({ length: devices }, (_unused, device) => {
+    const rows: MergeRow[] = [];
+    let clock = below(random, 60);
+    for (let index = 0, terms = 1 + below(random, 3); index < terms; index++) {
+      const term = nextTerm++;
+      clock += below(random, 20);
+      for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+        const kind = random() < 0.6 ? 'W' : 'O';
+        rows.push({ term, seq, run: 1, kind, argument: below(random, 4), ms: clock, epoch: term + 1, attempt: 0 });
+        clock += below(random, 4);
+      }
+    }
+    return { device, rows };
+  });
+};
+
+/** `foreignClockAheadMilliseconds`, in the model's milliseconds. */
+const clockAhead = 100;
+
+/**
+ * Devices taking turns with skewed clocks, one of them sometimes far ahead (a future-dated row) and sometimes put right
+ * again (its next term clamped up to the future one), each stamping by the bounded hybrid clock (`stampAfterRead`, round 16): after the newest start among the terms it keeps, never following
+ * one dated more than {@link clockAhead} past its own wall clock. Readers at several walls fold `mergeUpTo`.
+ */
+const boundedSegmentsOf = (
+  random: Random,
+): Readonly<{ segments: Array<{ device: number; rows: MergeRow[] }>; bounds: number[] }> => {
+  const devices = 2 + below(random, 2);
+  const skew = Array.from({ length: devices }, () => 200 + below(random, 60));
+  const fast = random() < 0.7 ? below(random, devices) : undefined;
+  if (fast !== undefined) {
+    skew[fast] = 600 + below(random, 3000);
+  }
+  const files: MergeRow[][] = Array.from({ length: devices }, () => []);
+  const starts: number[] = [];
+  const walls: number[] = [];
+  for (let turn = 0, turns = 2 + below(random, 5); turn < turns; turn++) {
+    const device = below(random, devices);
+    /* The fast clock is sometimes put right: its next term starts before its last, and the merge clamps it there. */
+    if (device === fast && random() < 0.4) {
+      skew[device] = 200 + below(random, 60);
+    }
+    const wall = skew[device]! + turn * below(random, 5);
+    walls.push(wall);
+    const kept = starts.filter((start) => start <= wall + clockAhead);
+    const at = Math.max(wall, kept.length === 0 ? 0 : Math.max(...kept) + 1);
+    starts.push(at);
+    for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
+      files[device]!.push({
+        term: turn,
+        seq,
+        run: 1,
+        kind: 'O',
+        argument: below(random, 3),
+        ms: at + seq,
+        epoch: turn + 1,
+        attempt: 0,
+      });
+    }
+  }
+  const bounds = [...new Set([...walls.map((wall) => wall + clockAhead), Math.min(...skew) + clockAhead])].toSorted(
+    (left, right) => left - right,
+  );
+  return { segments: files.flatMap((rows, device) => (rows.length === 0 ? [] : [{ device, rows }])), bounds };
+};
+
+/** The segments of every merge shape but `bounded`, which also draws the bounds its readers fold at. */
+const unboundedSegmentsOf = (
+  random: Random,
+  layout: 'ties' | 'overlap' | 'skewed' | 'words' | undefined,
+  duplicates: boolean,
+): Array<{ device: number; rows: MergeRow[] }> => {
+  if (layout === undefined) {
+    return mergeSegmentsOf(random, duplicates);
+  }
+  if (layout === 'skewed') {
+    return skewedSegmentsOf(random);
+  }
+  return layout === 'words' ? wordsSegmentsOf(random) : layoutSegmentsOf(random, layout);
+};
+
 const mergeTrace = (
   random: Random,
   name: string,
-  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' | 'skewed' }>,
+  shape: Readonly<{ duplicates: boolean; layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'bounded' }>,
 ): Trace => {
   const { duplicates, layout } = shape;
-  const segments =
-    layout === undefined
-      ? mergeSegmentsOf(random, duplicates)
-      : layout === 'skewed'
-        ? skewedSegmentsOf(random)
-        : layoutSegmentsOf(random, layout);
+  const bounded = layout === 'bounded' ? boundedSegmentsOf(random) : undefined;
+  const segments = bounded?.segments ?? (layout === 'bounded' ? [] : unboundedSegmentsOf(random, layout, duplicates));
   const text = [`T ${name}`];
   for (const segment of segments) {
     text.push(`SEG ${segment.device}`, ...segment.rows.map((row) => `ROW ${rowLine(row)}`));
@@ -777,16 +874,31 @@ const mergeTrace = (
       },
     },
   );
-  text.push('MERGE', 'X');
-  return {
-    text,
-    expected: [
-      `T ${name}`,
-      `M ${merged.map((event) => mergedText(event)).join(',')}`,
-      `MC ${listText(conflicts)}`,
-      'X',
-    ],
-  };
+  text.push('MERGE');
+  const expected = [
+    `T ${name}`,
+    `M ${merged.map((event) => mergedText(event)).join(',')}`,
+    `MC ${listText(conflicts)}`,
+  ];
+  for (const bound of bounded?.bounds ?? []) {
+    const parsed = parseLogSegments(
+      segments.map((segment) => ({ deviceId: `d${segment.device}`, bytes: segmentBytes(segment.rows) })),
+    );
+    text.push(`MERGEB ${bound}`);
+    expected.push(`MB ${listText(mergeSegmentsUpTo(parsed, base + bound).rows.map((event) => keyText(event)))}`);
+  }
+  if (layout === 'words') {
+    const history = createEventLogReducer('history');
+    for (const event of merged) {
+      history.replay(event);
+    }
+    const intact = history.historyIntact();
+    text.push('MH');
+    expected.push(`MH ${intact ? 1 : 0} ${intact ? listText(history.messages().map((message) => message.id)) : '-'}`);
+  }
+  text.push('X');
+  expected.push('X');
+  return { text, expected };
 };
 
 /** The three legality tables, every cell (T8). */
@@ -854,8 +966,11 @@ type Corpus = {
   /** Merge traces instead of log traces; `true` draws duplicated and conflicting segments. */
   readonly merge?: boolean;
   readonly duplicates?: boolean;
-  /** Merge traces of one shape: terms tied at one millisecond across devices, or a file overlapping its old copy. */
-  readonly layout?: 'ties' | 'overlap' | 'skewed';
+  /**
+   * Merge traces of one shape: terms tied at one millisecond across devices, a file overlapping its old copy, devices
+   * with skewed clocks, people's turns said by more than one device, or a clock far ahead read at a bound.
+   */
+  readonly layout?: 'ties' | 'overlap' | 'skewed' | 'words' | 'bounded';
 };
 
 /** The tables, then `count` traces of the corpus's kind, from one seeded stream. */
@@ -922,6 +1037,14 @@ const corpora: readonly Corpus[] = [
   { name: 'merge-ties', seed: 20_261_023, count: 120, merge: true, layout: 'ties' },
   { name: 'overlapping-segments', seed: 20_261_024, count: 120, merge: true, layout: 'overlap' },
   { name: 'skewed-clocks', seed: 20_261_025, count: 120, merge: true, layout: 'skewed' },
+  { name: 'shared-turns', seed: 20_261_026, count: 120, merge: true, layout: 'words' },
+  { name: 'future-rows', seed: 20_261_027, count: 120, merge: true, layout: 'bounded' },
+  {
+    name: 'abandoned-turns',
+    seed: 20_261_028,
+    count: 120,
+    profile: { ...baseProfile, appendKinds: [...historyKinds, 'W', 'W'], rawKinds: [...historyKinds, 'W'], raw: 0.15 },
+  },
   { name: 'legacy-epochs', seed: 20_260_929, count: 120, profile: { ...baseProfile, legacy: 0.5, attempts: 0.3 } },
   {
     name: 'opaque-rows',

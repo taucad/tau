@@ -2,13 +2,12 @@ import { EventLogError } from '#log/event-log-error.js';
 import { parseLogEvent } from '#log/event-schema.js';
 import { createEventLogReducer } from '#log/reducer.js';
 import type { ReplayAnomaly } from '#log/reducer.js';
-import { foreignRunStanding, parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
+import { parseSegmentFrom, unsettledParsedRuns } from '#log/foreign-runs.js';
 import type { ForeignRun, SegmentParse } from '#log/foreign-runs.js';
-import { mergeSegmentRows } from '#log/segments.js';
+import { foreignClockAheadMilliseconds, mergeSegmentsUpTo } from '#log/segments.js';
 import type { ChatLogSegment, ParsedLogSegment } from '#log/segments.js';
 import { parseEventLogBytes, serializeLogEventBytes } from '#log/serialization.js';
-import { isPersonsMessage } from '#log/event-types.js';
-import type { AgentLogEvent, ProviderMessage, RowKey, UserProviderMessage } from '#log/event-types.js';
+import type { AgentLogEvent, ProviderMessage, RowKey } from '#log/event-types.js';
 
 /**
  * Result of an idempotent event-log append: whether a row was written, and the log's end cursor after it, so a
@@ -131,10 +130,12 @@ export type EventLogAppender = {
    */
   foreignWroteSinceTermBegan?(): Promise<boolean>;
   /**
-   * When a row written now is stamped (XD1): `now`, or one millisecond past the newest row another device's segments
-   * held at the last open or refresh, whichever is later. The merge orders terms by their first row's time, so a row
-   * stamped this way merges after every row this device has read, whatever another device's clock says; a history
-   * written over those rows never names a row that merges after it. Absent where `refresh` is.
+   * When a row written now is stamped (XD1, a hybrid logical clock): `now`, or one millisecond past the newest term
+   * start in the history the last open or refresh folded, whichever is later. The merge orders terms by their start, so
+   * a turn stamped this way merges after every term its history read (`t7_projection_after_visible` in
+   * ChatLedger.lean); and since that history leaves out a term dated more than `foreignClockAheadMilliseconds` past
+   * this clock, the stamp never runs further ahead than that bound, whatever another device's clock says. The floor is
+   * computed once per fold, never per write. Absent where `refresh` is.
    */
   stampAfterRead?(now: number): Promise<number>;
   /**
@@ -191,120 +192,6 @@ const ownDeviceId = '';
 const sameSegments = (left: readonly ChatLogSegment[], right: readonly ChatLogSegment[]): boolean =>
   left.length === right.length &&
   left.every((segment, index) => segment.deviceId === right[index]!.deviceId && segment.bytes === right[index]!.bytes);
-
-/**
- * Whether a row of a run its device abandoned mid-flight joins this device's history (XD3): the person's own words do
- * — the committed user turn, a steer, an external turn's message, and the rewind an edit or retry asked for — and
- * nothing the run produced does. Its partial reply, its tool calls with no output and the host's own reminders about
- * them stay out, so the model is never shown a call it must answer or an answer cut short.
- *
- * @param event - One row of the abandoned run.
- * @returns Whether the row is kept.
- */
-const keptOfAbandonedRun = (event: AgentLogEvent): boolean => {
-  if (event.type === 'turn.history-projection-committed' || event.type === 'history.rewound') {
-    return true;
-  }
-  return event.type === 'message.appended' && isPersonsMessage(event.message);
-};
-
-/**
- * The rows of one segment the history keeps while some of its runs are abandoned (XD3): every row of a run that is
- * not, and {@link keptOfAbandonedRun} of each that is. A run abandoned before it committed its turn holds the person's
- * message only in its admission; that message joins as the run's user turn, under the admission row's own key.
- *
- * @param events - One device's rows.
- * @param abandoned - The run ids its device abandoned.
- * @returns The rows the merge folds.
- */
-const withoutAbandonedOutput = (
-  events: readonly AgentLogEvent[],
-  abandoned: ReadonlySet<string>,
-): readonly AgentLogEvent[] => {
-  const said = new Set<string>();
-  for (const event of events) {
-    if (abandoned.has(event.runId) && keptOfAbandonedRun(event) && 'message' in event) {
-      said.add(event.message.id);
-    }
-  }
-  return events.flatMap((event): AgentLogEvent[] => {
-    if (!abandoned.has(event.runId)) {
-      return [event];
-    }
-    if (keptOfAbandonedRun(event)) {
-      return [event];
-    }
-    const admitted =
-      event.type === 'run.lifecycle' && event.state === 'admitted' ? admittedMessageOf(event) : undefined;
-    if (admitted === undefined || said.has(admitted.id)) {
-      return [];
-    }
-    said.add(admitted.id);
-    let rejoined = rejoinedAdmissions.get(event);
-    if (rejoined === undefined) {
-      const { version, leaderEpoch, sequence, recordedAt, runId, epoch } = event;
-      rejoined = {
-        version,
-        leaderEpoch,
-        sequence,
-        recordedAt,
-        runId,
-        ...(epoch === undefined ? {} : { epoch }),
-        type: 'message.appended',
-        message: admitted,
-      };
-      rejoinedAdmissions.set(event, rejoined);
-    }
-    return [rejoined];
-  });
-};
-
-/**
- * The runs of one segment its device settled failed before they said the person's words: admitted with them, their
- * message never appended. Their history is a stale run's (XD3): the words rejoin from the admission and nothing else
- * of the run does, so a history is the same whether the run is read stale or settled, on every device.
- *
- * @param events - One device's rows.
- * @returns The run ids.
- */
-const failedUnsaid = (events: readonly AgentLogEvent[]): ReadonlySet<string> => {
-  const last = new Map<string, string>();
-  const admitted = new Map<string, string>();
-  const said = new Set<string>();
-  for (const event of events) {
-    if (event.type === 'run.lifecycle') {
-      last.set(event.runId, event.state);
-      const message = event.state === 'admitted' ? admittedMessageOf(event) : undefined;
-      if (message !== undefined) {
-        admitted.set(event.runId, message.id);
-      }
-    } else if (event.type === 'message.appended') {
-      said.add(event.message.id);
-    }
-  }
-  const runs = new Set<string>();
-  for (const [runId, id] of admitted) {
-    if (last.get(runId) === 'failed' && !said.has(id)) {
-      runs.add(runId);
-    }
-  }
-  return runs;
-};
-
-/* One rejoined message per admission row, so a refold that changes nothing about it replays the same row object. */
-const rejoinedAdmissions = new WeakMap<AgentLogEvent, AgentLogEvent>();
-
-/**
- * The person's message an admission row carries, when it carries one.
- *
- * @param event - A `run.lifecycle` `admitted` row.
- * @returns The user message, or `undefined`.
- */
-const admittedMessageOf = (event: AgentLogEvent): UserProviderMessage | undefined => {
-  const { admission } = event as { readonly admission?: { readonly message?: unknown } };
-  const message = admission?.message as { readonly role?: unknown; readonly id?: unknown } | undefined;
-  return message?.role === 'user' && typeof message.id === 'string' ? (message as UserProviderMessage) : undefined;
-};
 
 const encoder = new TextEncoder();
 
@@ -410,8 +297,25 @@ export const createEventLogAppender = async (
   const opaqueRows = new Set<AgentLogEvent>();
   /** This device's rows a merge folds, in file order: each key once, as the term rules kept it. */
   const ownRows: AgentLogEvent[] = [];
-  /** The run ids this device's own rows name: never another device's runs (XD3). */
+  /**
+   * The run ids this device's own rows name (XD3): the runs it ran, and another device's run whose person's turn it
+   * appended on finding the run abandoned, which no longer holds the chat here.
+   */
   const ownRunIds = new Set<string>();
+  /** The runs this device ran: its rows hold their lifecycle, so their rows read back from a segment are its own. */
+  const ranHere = new Set<string>();
+  /** The latest `recordedAt` among this device's own rows: its own terms always join the history it reads. */
+  let ownNewest = Number.NEGATIVE_INFINITY;
+  const noteOwn = (event: AgentLogEvent): void => {
+    const at = Date.parse(event.recordedAt);
+    if (!Number.isNaN(at) && at > ownNewest) {
+      ownNewest = at;
+    }
+    ownRunIds.add(event.runId);
+    if (event.type === 'run.lifecycle') {
+      ranHere.add(event.runId);
+    }
+  };
   const cursorOf = new Map<AgentLogEvent, number>();
   for (const [cursor, row] of parsed.rows.entries()) {
     if (row.opaque) {
@@ -420,7 +324,7 @@ export const createEventLogAppender = async (
     const kept = terms.replay(row.event);
     if (!kept.duplicate && kept.anomaly?.kind !== 'conflict') {
       ownRows.push(row.event);
-      ownRunIds.add(row.event.runId);
+      noteOwn(row.event);
       cursorOf.set(row.event, cursor);
     }
     const replayed: { readonly anomaly?: ReplayAnomaly } = own.replay(row.event);
@@ -434,10 +338,7 @@ export const createEventLogAppender = async (
   /** How many rows each other device's segment held, not counting this device's runs read back. */
   const foreignFrontier = (): ReadonlyMap<string, number> =>
     new Map(
-      foreign.map((segment) => [
-        segment.deviceId,
-        segment.events.filter((event) => !ownRunIds.has(event.runId)).length,
-      ]),
+      foreign.map((segment) => [segment.deviceId, segment.events.filter((event) => !ranHere.has(event.runId)).length]),
     );
   /** The term this log last wrote under, and the other devices' rows as read when it first wrote under it. */
   let termFrontier: Readonly<{ leaderEpoch: string; rows: ReadonlyMap<string, number> }> | undefined;
@@ -477,11 +378,17 @@ export const createEventLogAppender = async (
   let merged: ReturnType<typeof createEventLogReducer> | undefined;
   let mergedAnomalies: EventLogAnomaly[] = [];
   let segmentFailure: EventLogAnomaly | undefined;
-  /** When the fence would next answer differently about a foreign run this fold read, so the history follows it (XD3). */
+  /** When a term this fold left out as dated past the bound comes within it, so the history takes it up then. */
   let refoldAt: number | undefined;
+  /**
+   * The earliest time this device may stamp a row with (round 16, a hybrid logical clock): one past the newest start
+   * among the terms the last fold kept. Computed once per fold, never per write.
+   */
+  let stampFloor = Number.NEGATIVE_INFINITY;
   const fold = (): void => {
     refoldAt = undefined;
     if (segments.length === 0) {
+      stampFloor = Number.NEGATIVE_INFINITY;
       foreign = [];
       foreignUnsettled = [];
       merged = undefined;
@@ -502,51 +409,38 @@ export const createEventLogAppender = async (
       events: parse(segment.deviceId, segment.bytes),
     }));
     /*
-     * XD3: a run another device has not settled stays out of the history while it holds the chat, unless it is this
-     * device's own run read back from a segment: its dangling turn would otherwise be answered here, or its open tool
-     * calls closed here as disconnected, while that device still runs it. Once it is past the fence's staleness bound
-     * its device is gone, and the person's turn joins the history without what the run left half done.
+     * XD3: a run another device has not settled stays out of the history, live or not, unless this device ran it (its
+     * own rows read back from a segment): its dangling turn would otherwise be answered here, or its open tool calls
+     * closed here as disconnected, while that device may still run it. The person's words of a run that settles before
+     * committing its turn reach the history as data: the device that settles it, or the one that finds it abandoned
+     * and goes on, appends them (`abandonedTurnOf`), and every copy merges as one.
      */
-    const at = now();
     const held = new Map<string, Set<string>>();
-    const abandoned = new Map<string, Set<string>>();
-    foreignUnsettled = unsettledParsedRuns(foreign);
+    foreignUnsettled = unsettledParsedRuns(foreign, now());
     for (const run of foreignUnsettled) {
-      if (ownRunIds.has(run.runId)) {
+      if (ranHere.has(run.runId)) {
         continue;
       }
-      /* The fence's own rule (`foreignRunStanding`): the history refolds whenever the fence's answer would change. */
-      const standing = foreignRunStanding(run, at);
-      const into = standing.abandoned ? abandoned : held;
-      const ids = into.get(run.deviceId) ?? new Set<string>();
+      const ids = held.get(run.deviceId) ?? new Set<string>();
       ids.add(run.runId);
-      into.set(run.deviceId, ids);
-      if (standing.changesAt !== undefined) {
-        refoldAt = refoldAt === undefined ? standing.changesAt : Math.min(refoldAt, standing.changesAt);
-      }
+      held.set(run.deviceId, ids);
     }
-    const ownFailed = failedUnsaid(ownRows);
     const toMerge: ParsedLogSegment[] = [
-      { deviceId: ownDeviceId, events: ownFailed.size === 0 ? ownRows : withoutAbandonedOutput(ownRows, ownFailed) },
+      { deviceId: ownDeviceId, events: ownRows },
       ...foreign.map((segment) => {
         const heldIds = held.get(segment.deviceId);
-        const failed = failedUnsaid(segment.events);
-        const abandonedIds =
-          failed.size === 0
-            ? abandoned.get(segment.deviceId)
-            : new Set([...(abandoned.get(segment.deviceId) ?? []), ...failed]);
-        return heldIds === undefined && abandonedIds === undefined
+        return heldIds === undefined
           ? segment
-          : {
-              deviceId: segment.deviceId,
-              events: withoutAbandonedOutput(
-                heldIds === undefined ? segment.events : segment.events.filter((event) => !heldIds.has(event.runId)),
-                abandonedIds ?? new Set(),
-              ),
-            };
+          : { deviceId: segment.deviceId, events: segment.events.filter((event) => !heldIds.has(event.runId)) };
       }),
     ];
-    const rows = mergeSegmentRows(toMerge, {
+    /*
+     * A term another device dated more than the bound past this clock is left out until this clock comes within it,
+     * and said so; this device's own terms always join. The rows kept are a prefix of the whole merge, and the clock
+     * this device stamps by is after their newest start and never further ahead than the bound (round 16).
+     */
+    const at = now();
+    const bounded = mergeSegmentsUpTo(toMerge, Math.max(at + foreignClockAheadMilliseconds, ownNewest), {
       onConflict: ({ key, keptDeviceId, droppedDeviceId }) => {
         conflicts.push({
           kind: 'conflict',
@@ -556,6 +450,18 @@ export const createEventLogAppender = async (
         });
       },
     });
+    const { rows } = bounded;
+    stampFloor = bounded.newestStart === undefined ? Number.NEGATIVE_INFINITY : bounded.newestStart + 1;
+    for (const later of bounded.later) {
+      conflicts.push({
+        kind: 'history',
+        message: `Leader epoch "${later.leaderEpoch}" starts at ${new Date(later.startedAt).toISOString()}, more than ${String(
+          foreignClockAheadMilliseconds / 60_000,
+        )} minutes ahead of this device's clock; the history leaves its rows out until this clock comes within that.`,
+      });
+      const within = later.startedAt - foreignClockAheadMilliseconds;
+      refoldAt = refoldAt === undefined ? within : Math.min(refoldAt, within);
+    }
     /* Only what the rows add past those already replayed, when they extend them; otherwise the whole merge again. */
     const extends_ = merged !== undefined && extendsMerged(rows);
     const next = extends_ ? merged! : createEventLogReducer('history');
@@ -785,7 +691,7 @@ export const createEventLogAppender = async (
         }
         events.push(transition.event);
         ownRows.push(transition.event);
-        ownRunIds.add(transition.event.runId);
+        noteOwn(transition.event);
         cursorOf.set(transition.event, events.length - 1);
         byteLength += bytes.byteLength;
         needsSeparator = false;
@@ -838,19 +744,10 @@ export const createEventLogAppender = async (
               await readSegments();
             }),
           historyUnknown: async () => enqueue(async () => historyUnknown()),
-          stampAfterRead: async (now: number) =>
+          stampAfterRead: async (wall: number) =>
             enqueue(async () => {
               assertOpen();
-              let newest = now - 1;
-              for (const segment of foreign) {
-                for (const event of segment.events) {
-                  const at = Date.parse(event.recordedAt);
-                  if (!Number.isNaN(at) && at > newest) {
-                    newest = at;
-                  }
-                }
-              }
-              return Math.max(now, newest + 1);
+              return Math.max(wall, stampFloor);
             }),
           foreignWroteSinceTermBegan: async () =>
             enqueue(async () => {

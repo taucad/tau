@@ -4,6 +4,7 @@ import type { ReadRow, ReplayReadRow } from '#log/serialization.js';
 import { createEventSequence } from '#log/event-sequence.js';
 import type { SequenceAnomaly } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
+import { isAbandonedTurn } from '#log/event-types.js';
 
 type ReducerRow = { readonly event: AgentLogEvent; readonly opaque: boolean };
 
@@ -165,6 +166,11 @@ export const createEventLogReducer = (
     let apply: () => void;
     switch (event.type) {
       case 'message.appended': {
+        /* A person's turn appended as its run settled is the same message from every device that appends it (XD3). */
+        if (isAbandonedTurn(event.message) && knownMessageIds.has(event.message.id)) {
+          apply = () => undefined;
+          break;
+        }
         assertNewMessageId(knownMessageIds, event.message);
         apply = () => {
           knownMessageIds.add(event.message.id);

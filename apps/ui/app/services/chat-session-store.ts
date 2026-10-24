@@ -4262,7 +4262,7 @@ export class ChatSessionStore {
     ) {
       this.#remoteReadCompletedVersions.set(chatId, version);
       const before = this.#projectionContext(chatId);
-      this.#projectionOf(chatId).send({ type: 'remote', segments });
+      this.#projectionOf(chatId).send({ type: 'remote', segments, at: Date.now() });
       // A rescan that finds the same foreign history leaves the reducer unchanged, yet it is what makes the local
       // log displayable again: a turn logged while it was out was held back, and nothing else would present it.
       if (this.#projectionContext(chatId) === before) {

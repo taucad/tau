@@ -36,6 +36,8 @@ const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ k
 export const meta: MetaFunction = () => [{ title: 'New project · Tau' }];
 
 export const handle: Handle = {
+  // Nested under `/projects`, so the phone bar shows "‹ Projects".
+  title: 'New project',
   // Mobile: section scrolls as one page. Desktop: route uses h-full flex + inner list scroll (see layout).
   enableOverflowY: true,
 };

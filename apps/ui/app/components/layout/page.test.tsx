@@ -73,6 +73,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
       breadcrumb: state.hasBreadcrumb
         ? [{ id: 'breadcrumb', handle: { breadcrumb: () => <span>Projects</span> } }]
         : [],
+      title: [],
       actions: [],
       commandPalette: state.commandPalette,
       enablePageWrapper:

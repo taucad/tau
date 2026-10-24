@@ -22,7 +22,16 @@ export type Handle = {
    */
   breadcrumb?: (match: UIMatch) => ReactNode | ReactNode[];
   /**
-   * Actions for the current route. These are displayed in the top right corner of the page.
+   * The page's short title, shown in the phone top bar beside the sidebar trigger. The deepest
+   * match that declares one names the page; the next title-bearing match above it, when it sits at
+   * another path, becomes the back-to-parent crumb ("‹ Projects"). Use the words of the page's
+   * own `PageHeader`; the bar never renders a heading, so the page keeps its one `<h1>`.
+   */
+  title?: string | ((match: UIMatch) => string | undefined);
+  /**
+   * The route's one header action, at the inline end of the shell header. Only the deepest match's
+   * actions render, and they must be a single control: a page with more actions keeps them in its
+   * own content or behind one overflow menu. The page's primary action stays in `PageHeader`.
    */
   actions?: (match: UIMatch) => ReactNode;
   /**

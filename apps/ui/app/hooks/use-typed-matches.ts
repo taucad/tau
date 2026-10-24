@@ -17,6 +17,7 @@ export function useTypedMatches<Selected>(
   const handleMap = useMemo(() => {
     const result: Record<keyof Handle, TypedUiMatchWithHandle[]> = {
       breadcrumb: [],
+      title: [],
       actions: [],
       commandPalette: [],
       enablePageWrapper: [],

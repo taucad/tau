@@ -39,6 +39,7 @@ import type { TauStoreSkill } from '#lib/tau-plugin-store-catalog.js';
 export const meta: MetaFunction = () => [{ title: 'Plugins · Tau' }];
 
 export const handle: Handle = {
+  title: 'Plugins',
   enableOverflowY: true,
 };
 

@@ -1,8 +1,9 @@
-import { NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
+import { Link, NavigationType, Outlet, useLocation, useNavigationType } from 'react-router';
 import { Fragment } from 'react/jsx-runtime';
 import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import type { CSSProperties, ReactNode, UIEvent } from 'react';
 import { LayoutPriority } from 'allotment';
+import { ChevronLeft } from 'lucide-react';
 import { Allotment } from '#components/panes/allotment.js';
 import type { AllotmentHandle } from 'allotment';
 import { AppSidebar } from '#components/layout/app-sidebar.js';
@@ -13,9 +14,11 @@ import {
   BreadcrumbList,
   BreadcrumbSeparator,
 } from '@taucad/ui/components/breadcrumb';
+import { Button } from '@taucad/ui/components/button';
 import { Separator } from '@taucad/ui/components/separator';
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '#components/ui/sidebar.js';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
+import type { TypedUiMatchWithHandle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Compose } from '#components/ui/utils/compose.js';
 import { CommandPaletteProvider, RouteCommandPaletteItems } from '#components/layout/command-palette.js';
@@ -101,6 +104,80 @@ const saveScroll = (locationKey: string, scrollTop: number): void => {
     // Persistence is best-effort.
   }
 };
+
+type PageTitles = {
+  /** The deepest `Handle.title`: what the phone top bar calls this page. */
+  readonly title: string | undefined;
+  /** The next titled match above it at another path: the back-to-parent crumb. */
+  readonly parent: { readonly to: string; readonly label: string } | undefined;
+};
+
+/**
+ * The page's own title and its parent, read from the matched routes (D11). A nested
+ * route (`/projects/new` under `/projects`) gets its parent's title and path as the
+ * crumb; a top-level route, or a child that names no title of its own, gets none.
+ * The desktop build keeps its titlebar and has no phone bar, so it gets neither.
+ */
+const resolvePageTitles = (matches: readonly TypedUiMatchWithHandle[], isDesktopTarget: boolean): PageTitles => {
+  if (isDesktopTarget) {
+    return { title: undefined, parent: undefined };
+  }
+  const titled = matches.flatMap((match) => {
+    const title = typeof match.handle.title === 'function' ? match.handle.title(match) : match.handle.title;
+    return title ? [{ to: match.pathname, label: title }] : [];
+  });
+  const page = titled.at(-1);
+  const parent = titled.slice(0, -1).findLast((entry) => entry.to !== page?.to);
+  return { title: page?.label, parent };
+};
+
+/** Header classes that change when the phone bar carries a title; `md` and up keep today's header. */
+const phoneBarClasses = (
+  hasPhoneTitle: boolean,
+): { readonly header: string | undefined; readonly cluster: string | undefined; readonly breadcrumbItem: string } =>
+  hasPhoneTitle
+    ? {
+        header: 'max-md:border-b max-md:bg-sidebar',
+        cluster: 'min-w-0 max-md:ml-1 max-md:flex-1',
+        // Phones show the title instead of the trail's last item.
+        breadcrumbItem: 'md:last:block',
+      }
+    : { header: undefined, cluster: undefined, breadcrumbItem: 'last:block' };
+
+/**
+ * The phone top bar's back-to-parent crumb ("‹ Projects", named "Back to Projects")
+ * and page title. From `md` up the breadcrumb trail orients instead.
+ */
+function PhonePageTitle({
+  title,
+  parent,
+}: {
+  readonly title: string;
+  readonly parent: PageTitles['parent'];
+}): React.JSX.Element {
+  return (
+    <>
+      {parent ? (
+        <Button
+          asChild
+          variant='ghost'
+          size='lg'
+          className='min-w-0 shrink-0 gap-0.5 md:hidden'
+          data-slot='page-parent-crumb'
+        >
+          <Link to={parent.to} aria-label={`Back to ${parent.label}`}>
+            <ChevronLeft aria-hidden />
+            <span className='max-w-28 truncate'>{parent.label}</span>
+          </Link>
+        </Button>
+      ) : null}
+      {/* Not a heading: the page's `PageHeader` keeps the document's one `<h1>`. */}
+      <p data-slot='page-title' className='min-w-0 flex-1 truncate px-1 text-sm font-medium md:hidden'>
+        {title}
+      </p>
+    </>
+  );
+}
 
 /** Renders the main content area of the page: the route outlet, or the error content. */
 function SectionContent({ error }: { readonly error: ReactNode | undefined }): React.JSX.Element {
@@ -231,6 +308,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   const {
     breadcrumbItems,
     hasBreadcrumbItems,
+    titleItems,
     actionItems,
     hasActionItems,
     pageWrapperMatches,
@@ -240,6 +318,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
   } = useTypedMatches((handles) => ({
     breadcrumbItems: handles.breadcrumb,
     hasBreadcrumbItems: handles.breadcrumb.length > 0,
+    titleItems: handles.title,
     actionItems: handles.actions,
     hasActionItems: handles.actions.length > 0,
     pageWrapperMatches: handles.enablePageWrapper,
@@ -291,6 +370,14 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     },
     [locationKey],
   );
+  // The phone top bar (web build below `md`): sidebar, back-to-parent crumb, title.
+  const { title: phoneTitle, parent: parentCrumb } = useMemo(
+    () => resolvePageTitles(titleItems, desktopTarget),
+    [desktopTarget, titleItems],
+  );
+  const phoneBar = phoneBarClasses(phoneTitle !== undefined);
+  // D11/I4: one header action, from the deepest route that declares one.
+  const actionMatch = actionItems.at(-1);
   const enablePageHeader = !enablePageHeaderMatches.some((match) => match.handle.enablePageHeader === false);
   const hasPageHeaderChrome = [hasBreadcrumbItems, hasActionItems].includes(true);
   const isMobile = useIsMobile();
@@ -373,17 +460,21 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                 className={cn(
                   'pointer-events-none absolute top-0 z-20 flex h-(--header-height) w-full shrink-0 items-center justify-between gap-2',
                   hasPageHeaderChrome && 'border-b bg-sidebar',
+                  phoneBar.header,
                 )}
               >
                 <div
                   className={cn(
                     'pointer-events-auto ml-2 flex h-full items-center gap-1 md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
                     !hasBreadcrumbItems && 'md:hidden',
+                    phoneBar.cluster,
                     desktopTarget && '[app-region:no-drag]',
                   )}
                 >
-                  {desktopTarget ? null : <SidebarTrigger className='md:hidden' />}
-                  {hasBreadcrumbItems && !desktopTarget ? (
+                  {/* I3: the phone bar's primary controls are 40px (`icon-lg`, `lg`). */}
+                  {desktopTarget ? null : <SidebarTrigger className='size-10 md:hidden' />}
+                  {phoneTitle === undefined ? null : <PhonePageTitle title={phoneTitle} parent={parentCrumb} />}
+                  {hasBreadcrumbItems && !desktopTarget && phoneTitle === undefined ? (
                     <span className='h-4 md:hidden'>
                       <Separator orientation='vertical' />
                     </span>
@@ -408,7 +499,9 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                               // oxlint-disable-next-line react/no-array-index-key -- these are stable.
                               <Fragment key={`${match.id}-${index}`}>
                                 <BreadcrumbSeparator className='hidden first:hidden lg:block' />
-                                <BreadcrumbItem className='hidden last:block hover:text-foreground lg:block'>
+                                <BreadcrumbItem
+                                  className={cn('hidden hover:text-foreground lg:block', phoneBar.breadcrumbItem)}
+                                >
                                   <BreadcrumbLink asChild>{item}</BreadcrumbLink>
                                 </BreadcrumbItem>
                               </Fragment>
@@ -426,9 +519,7 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
                     desktopTarget && '[app-region:no-drag]',
                   )}
                 >
-                  {hasActionItems
-                    ? actionItems.map((match) => <Fragment key={match.id}>{match.handle.actions?.(match)}</Fragment>)
-                    : null}
+                  {actionMatch ? actionMatch.handle.actions?.(actionMatch) : null}
                 </div>
               </header>
             ) : null}

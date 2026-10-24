@@ -11,6 +11,7 @@ import type { Handle } from '#types/matches.types.js';
 export const meta: MetaFunction = () => [{ title: 'Projects · Tau' }];
 
 export const handle: Handle = {
+  title: 'Projects',
   enableOverflowY: true,
 };
 

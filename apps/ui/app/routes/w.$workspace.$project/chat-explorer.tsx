@@ -265,13 +265,14 @@ export function ChatExplorerTree({
     <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelContent className='text-sm'>
         <FloatingPanelContentHeader>
-          <FloatingPanelContentTitle>Model</FloatingPanelContentTitle>
+          <FloatingPanelContentTitle>Model tree</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Model tree'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>
-                  {isOpen ? 'Close' : 'Open'} Model
+                  {isOpen ? 'Close' : 'Open'} Model tree
                   <KeyShortcut variant='tooltip'>{formattedEditorKeyCombination}</KeyShortcut>
                 </div>
               )}

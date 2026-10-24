@@ -97,7 +97,11 @@ export const ChatAgents = ({
       <FloatingPanelContentHeader>
         <FloatingPanelContentTitle>Agents</FloatingPanelContentTitle>
         <FloatingPanelContentHeaderActions>
-          <FloatingPanelClose icon={XIcon} tooltipContent={(isOpen) => <div>{isOpen ? 'Close' : 'Open'} Agents</div>} />
+          <FloatingPanelClose
+            label='Close Agents'
+            icon={XIcon}
+            tooltipContent={(isOpen) => <div>{isOpen ? 'Close' : 'Open'} Agents</div>}
+          />
         </FloatingPanelContentHeaderActions>
       </FloatingPanelContentHeader>
       <FloatingPanelContentBody className='p-0'>

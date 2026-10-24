@@ -64,9 +64,12 @@ export default defineConfig(() => {
             void serveFixture();
           });
           server.middlewares.use('/calibration-capture', (request, response) => {
+            // HTTP/2 carries the request authority in a pseudo-header instead of Host.
+            const authority = request.headers[':authority'] ?? request.headers.host;
             if (
               request.method !== 'POST' ||
-              request.headers.origin !== `${isHttps ? 'https' : 'http'}://${request.headers.host}`
+              typeof authority !== 'string' ||
+              request.headers.origin !== `${isHttps ? 'https' : 'http'}://${authority}`
             ) {
               response.statusCode = 403;
               response.end('Same-origin POST required.');

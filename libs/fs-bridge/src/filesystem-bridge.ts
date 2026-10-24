@@ -46,6 +46,7 @@ import type {
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
 import { nextFileSystemBridgeConnectionId, timeFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';
+import { answersHashFiles, withHostHashFiles } from '#filesystem-bridge-hash-files.js';
 
 /** @public */
 export const filesystemBridgeConnectMessageType = 'tau:filesystem-bridge:connect';
@@ -1005,7 +1006,7 @@ function exposeFileSystemHandlers(
         return { portHandlers: createUnavailableHandlers(unavailableError), unavailableError };
       }
       scopedPorts.set(port, { root: rooted.data.root, consumer: rooted.data.consumer });
-      return { portHandlers: serializeRootedResults(rootedHandlers) };
+      return { portHandlers: withHostHashFiles(serializeRootedResults(rootedHandlers)) };
     } catch (error) {
       /* The refusal the hello states is the refusal the caller gets: a
        * `VirtualPathError` from a non-canonical root used to reach the client as
@@ -1090,6 +1091,7 @@ function exposeFileSystemHandlers(
               state: 'ready',
               capabilities: handlerRecord.capabilities!,
               watchable: typeof handlerRecord.watch === 'function',
+              hashable: answersHashFiles(portHandlers),
             })
           : createFileSystemBridgeHello({
               state: 'unavailable',
@@ -1338,6 +1340,7 @@ const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService
     state: 'ready',
     capabilities: handlers.capabilities,
     watchable: typeof handlers.watch === 'function',
+    hashable: answersHashFiles(handlers),
   }),
   protocolSchemas: fileSystemBridgeSchemas,
 });
@@ -1354,7 +1357,8 @@ export function serveFileSystemBridgePort(
   handlers: FileSystemBridgeRuntimeService,
   port: Port<unknown>,
 ): BridgeServerHandle {
-  return createBridgeServer(handlers, port, runtimeFileSystemBridgeOptions(handlers));
+  const served = withHostHashFiles(handlers);
+  return createBridgeServer(served, port, runtimeFileSystemBridgeOptions(served));
 }
 
 /**
@@ -1365,7 +1369,8 @@ export function serveFileSystemBridgePort(
  * @public
  */
 export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
-  const bridge = createBridgePort(handlers, runtimeFileSystemBridgeOptions(handlers));
+  const served = withHostHashFiles(handlers);
+  const bridge = createBridgePort(served, runtimeFileSystemBridgeOptions(served));
   return {
     port: asFileSystemBridgePort(bridge.port),
     dispose: bridge.dispose,

@@ -30,7 +30,8 @@ export type ProjectRole = 'owner' | 'write' | 'read';
  * What a client surface knows about this account's access, losing it included.
  *
  * `revoked` is a *settled* answer: the listing was read and this project was not
- * in it, which is what an owner's revoke looks like to a tab that is still open.
+ * in it. Deletion and removed access both produce this result; it does not
+ * prove that the owner revoked access or that a cloud copy still exists.
  * `undefined` is "nothing known" — signed out, offline, a failed listing, or a
  * project with no Tau remote to hold a role at all. The two must never collapse,
  * because one folds a surface away and the other says access is gone.
@@ -504,8 +505,8 @@ export const useProjectAccessRole = (projectId: string, isTauRemote: boolean): P
   if (listed !== undefined) {
     return listed.cloudState === 'deleting' ? 'revoked' : listed.role;
   }
-  /* Settled and absent is the owner's revoke arriving at an open tab. Unsettled
-     and absent is a listing nobody has read yet — or one being re-read right
+  /* Settled and absent fences writes after either deletion or removed access.
+     Unsettled and absent is a listing nobody has read yet — or one being re-read right
      now — which says nothing. */
   return isSettled && !isFetching ? 'revoked' : undefined;
 };

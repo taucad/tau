@@ -26,6 +26,7 @@ import process from 'node:process';
 import { build } from 'esbuild';
 import { chromium, firefox, webkit } from 'playwright';
 import type { BrowserType } from 'playwright';
+import { sri } from '#scripts/subresource-integrity.mts';
 
 type Receipt = {
   readonly schema: string;
@@ -74,7 +75,6 @@ const record = (pass: boolean, line: string): void => {
     failures += 1;
   }
 };
-const sri = (bytes: Uint8Array<ArrayBuffer>): string => `sha384-${createHash('sha384').update(bytes).digest('base64')}`;
 const read = (file: string): Uint8Array<ArrayBuffer> => Uint8Array.from(readFileSync(path.join(clientDirectory, file)));
 
 /* 1. The receipt and the registrations. */

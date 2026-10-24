@@ -1,7 +1,7 @@
 import type { Database } from '#database/owner-lock.js';
 import { assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { createHash, randomBytes } from 'node:crypto';
-import { buffer } from 'node:stream/consumers';
+import type { Readable } from 'node:stream';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { writeSpilledPushLog } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
@@ -42,6 +42,15 @@ import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
  *   git put in its own name before a byte reaches the primary, so a corrupted
  *   or truncated source object fails the restore instead of becoming the
  *   repository.
+ *
+ * It streams (DA4): each object is read twice and held never. The first read
+ * verifies it and takes its SHA-256; the second is uploaded under that digest,
+ * which the primary checks against what it receives (above the single-part
+ * ceiling the adapter checks it before completing). A source that answers the
+ * second read with different bytes is therefore refused, not restored, and
+ * memory does not grow with the pack: the maintenance VM is 512 MB and a pack
+ * at the D20 ceiling is a gigabyte. The price is reading every object twice
+ * from the source, which doubles a restore's source egress.
  */
 
 export type RestoreArguments = {
@@ -69,13 +78,43 @@ const packHashPattern = /^packs\/pack-([\da-f]{40})-/u;
 /** Bytes of a pack's trailing checksum, which is its name. SHA-1, as every Tau repository is. */
 const packTrailerBytes = 20;
 
-const readAll = async (
-  store: RepositoryStore,
-  locator: RepositoryLocator,
-  key: string,
-): Promise<Uint8Array<ArrayBuffer>> => {
-  const bytes = await buffer(await store.getObject(locator, key));
-  return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength) as Uint8Array<ArrayBuffer>;
+/**
+ * One streamed read of a stored object: its length, its SHA-256 for the
+ * upload, and git's pack checksum — the SHA-1 of everything before the last
+ * 20 bytes, and those 20 bytes. The trailer is held back a chunk at a time, so
+ * the read never holds more than one chunk and 20 bytes.
+ */
+type Scanned = { bytes: number; sha256: string; packDigest: string; packTrailer: string };
+
+const scan = async (body: Readable): Promise<Scanned> => {
+  const sha256 = createHash('sha256');
+  const sha1 = createHash('sha1');
+  let held = Buffer.alloc(0);
+  let bytes = 0;
+  for await (const chunk of body) {
+    if (!(chunk instanceof Uint8Array)) {
+      throw new TypeError('unexpected readable chunk');
+    }
+    sha256.update(chunk);
+    bytes += chunk.byteLength;
+    if (chunk.byteLength >= packTrailerBytes) {
+      sha1.update(held);
+      sha1.update(chunk.subarray(0, chunk.byteLength - packTrailerBytes));
+      // A copy, so the 20 held bytes do not keep the whole chunk alive.
+      held = Buffer.from(chunk.subarray(chunk.byteLength - packTrailerBytes));
+      continue;
+    }
+    const pending = Buffer.concat([held, chunk]);
+    const release = Math.max(0, pending.byteLength - packTrailerBytes);
+    sha1.update(pending.subarray(0, release));
+    held = pending.subarray(release);
+  }
+  return {
+    bytes,
+    sha256: sha256.digest('base64'),
+    packDigest: sha1.digest('hex'),
+    packTrailer: held.byteLength === packTrailerBytes ? held.toString('hex') : '',
+  };
 };
 
 /**
@@ -85,18 +124,13 @@ const readAll = async (
  * the object is intact and that it is the object the manifest asked for —
  * without trusting the store, the transport or the copier.
  */
-const assertPackMatchesKey = (key: string, bytes: Uint8Array<ArrayBuffer>): void => {
+const assertPackMatchesKey = (key: string, scanned: Scanned): void => {
   const named = packHashPattern.exec(key)?.[1];
   if (named === undefined) {
     throw new RepositoryStoreError('missing-pack', `pack key '${key}' does not carry the hash git named it with`);
   }
 
-  const digest = createHash('sha1')
-    .update(bytes.subarray(0, bytes.length - packTrailerBytes))
-    .digest('hex');
-  const declared = Buffer.from(bytes.subarray(bytes.length - packTrailerBytes)).toString('hex');
-
-  if (digest !== named || declared !== named) {
+  if (scanned.packDigest !== named || scanned.packTrailer !== named) {
     throw new RepositoryStoreError('missing-pack', `pack '${key}' does not hash to the name it is stored under`);
   }
 };
@@ -127,26 +161,38 @@ const readSourceManifest = async (args: RestoreArguments): Promise<Manifest> => 
   return decodeManifest(read.manifest);
 };
 
+/**
+ * Copies one source object to `target` in the primary in two streamed reads,
+ * the second pinned to the first's SHA-256. `verify` sees the first read
+ * before anything is written.
+ */
+const copyObject = async (
+  args: RestoreArguments,
+  copy: { from: string; to: string; verify?: (scanned: Scanned) => void },
+): Promise<Scanned> => {
+  const read = async (): Promise<Readable> => args.source.getObject(sourceLocator(args), copy.from);
+  const scanned = await scan(await read());
+  copy.verify?.(scanned);
+  await args.primary.putObject(args.locator, copy.to, read, { contentLength: scanned.bytes, sha256: scanned.sha256 });
+  return scanned;
+};
+
 /** Copies one pack, and its stored index when the source kept one, into the primary. */
 const restorePack = async (args: RestoreArguments, pack: ManifestPack): Promise<ManifestPack> => {
-  const body = await readAll(args.source, sourceLocator(args), pack.key);
-  assertPackMatchesKey(pack.key, body);
-
   const key = restoredKey(pack.key);
-  await args.primary.putObject(args.locator, key, body, {
-    contentLength: body.byteLength,
-    sha256: createHash('sha256').update(body).digest('base64'),
+  const scanned = await copyObject(args, {
+    from: pack.key,
+    to: key,
+    verify: (first) => {
+      assertPackMatchesKey(pack.key, first);
+    },
   });
 
   if (pack.indexStored) {
-    const index = await readAll(args.source, sourceLocator(args), indexKeyOf(pack.key));
-    await args.primary.putObject(args.locator, indexKeyOf(key), index, {
-      contentLength: index.byteLength,
-      sha256: createHash('sha256').update(index).digest('base64'),
-    });
+    await copyObject(args, { from: indexKeyOf(pack.key), to: indexKeyOf(key) });
   }
 
-  args.report?.(`restored ${pack.key} -> ${key} (${String(body.byteLength)} bytes)`);
+  args.report?.(`restored ${pack.key} -> ${key} (${String(scanned.bytes)} bytes)`);
   return { key, bytes: pack.bytes, indexStored: pack.indexStored };
 };
 
@@ -180,7 +226,7 @@ const restoreActiveRepository = async (args: RestoreArguments): Promise<RestoreR
 
   const packs: ManifestPack[] = [];
   for (const pack of source.packs) {
-    // oxlint-disable-next-line no-await-in-loop -- one pack in memory at a time, as hydration does
+    // oxlint-disable-next-line no-await-in-loop -- one pack in flight at a time, as hydration does
     packs.push(await restorePack(args, pack));
   }
 

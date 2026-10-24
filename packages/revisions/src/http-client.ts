@@ -20,7 +20,14 @@
  *   headers resolved by the host at request time, never query strings, never
  *   written under a project (I8).
  *
- * Nothing here knows what a revision is: it is a `fetch` with three rules.
+ * - **Waits the server names.** A `429`, or a `503` that carries
+ *   `Retry-After`, is the Tau API saying "not now": an owner over its
+ *   in-flight cap (DA6), a frozen repository (DW2), a lost manifest race or a
+ *   full worker (D4, DA3). The request is sent again after that wait plus
+ *   jitter, a bounded number of times ({@link revisionHttpRetryPolicy}), so a
+ *   device that briefly exceeds its cap never shows its user an error.
+ *
+ * Nothing here knows what a revision is: it is a `fetch` with four rules.
  */
 
 /*
@@ -84,7 +91,138 @@ export type RevisionHttpClientOptions = Readonly<{
   maximumResponseBytes?: number | ((url: string) => number | undefined);
   /** Injected in tests and on hosts whose `fetch` is not the global one. */
   fetch?: typeof globalThis.fetch;
+  /**
+   * How a `429` or a retryable `503` is retried; {@link revisionHttpRetryPolicy}
+   * by default. `false` sends every request once.
+   */
+  retry?: RevisionHttpRetryOptions | false;
 }>;
+
+/**
+ * Overrides of {@link revisionHttpRetryPolicy} for one client.
+ *
+ * @public
+ */
+export type RevisionHttpRetryOptions = Readonly<{
+  /** Attempts in all, the first included. */
+  maxAttempts?: number;
+  /** Injected in tests: waits, ending early with the signal's reason when it aborts. */
+  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+  /** Injected in tests: a uniform draw in [0, 1). */
+  random?: () => number;
+}>;
+
+/**
+ * When the Tau git client sends a request again (Hosted Remote Storage DA6,
+ * charter D8).
+ *
+ * - **What is retried:** a `429`, and a `503` that carries `Retry-After`. The
+ *   API names a wait on every refusal a retry can clear (owner over its
+ *   in-flight cap, frozen repository, lost manifest race, full worker,
+ *   restarting process); a `503` without one is a proxy or an outage, and is
+ *   left to the sync scheduler's backoff. No other status is retried.
+ * - **How long it waits:** `Retry-After` plus a uniform jitter of up to
+ *   `jitterMilliseconds`; a `429` without one waits
+ *   `backoffBaseMilliseconds × 2^(n−1)`, between half and all of it.
+ * - **When it stops:** after `maxAttempts` in all, or at once when the wait
+ *   would exceed `maximumWaitMilliseconds` (a spent daily budget, a third
+ *   party's minute-long limit): that response goes back to the caller, whose
+ *   classifier reads its `Retry-After`. An aborted request stops waiting.
+ * - **What it replays:** the body this client already read whole into one
+ *   buffer, so a push is replayed byte for byte, and only because it can be. A
+ *   `keepalive` request is never retried: its page is going away.
+ *
+ * @public
+ */
+export const revisionHttpRetryPolicy = Object.freeze({
+  maxAttempts: 4,
+  jitterMilliseconds: 1000,
+  maximumWaitMilliseconds: 10_000,
+  backoffBaseMilliseconds: 1000,
+});
+
+/* `Retry-After` in milliseconds: delta-seconds or an HTTP date; `undefined` when absent or unreadable. */
+const retryAfterMilliseconds = (header: string | undefined): number | undefined => {
+  if (header === undefined || header.trim() === '') {
+    return undefined;
+  }
+  const seconds = Number(header);
+  const wait = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now();
+  return Number.isFinite(wait) ? Math.max(0, wait) : undefined;
+};
+
+/**
+ * How long to wait before attempt `attempt + 1`, or `undefined` not to retry.
+ *
+ * @param response - The refusal.
+ * @param attempt - The attempt that was refused, from 1.
+ * @param random - The jitter's draw.
+ * @returns The wait in milliseconds, or `undefined`.
+ */
+const retryWait = (response: Response, attempt: number, random: () => number): number | undefined => {
+  const named = retryAfterMilliseconds(response.headers.get('retry-after') ?? undefined);
+  const { jitterMilliseconds, backoffBaseMilliseconds, maximumWaitMilliseconds } = revisionHttpRetryPolicy;
+  let wait: number;
+  if ((response.status === 429 || response.status === 503) && named !== undefined) {
+    wait = named + random() * jitterMilliseconds;
+  } else if (response.status === 429) {
+    const backoff = backoffBaseMilliseconds * 2 ** (attempt - 1);
+    wait = backoff / 2 + (random() * backoff) / 2;
+  } else {
+    return undefined;
+  }
+  return wait > maximumWaitMilliseconds ? undefined : wait;
+};
+
+/* Waits, or ends early with the signal's reason, as `fetch` itself would. */
+const sleepUnlessAborted = async (milliseconds: number, signal?: AbortSignal): Promise<void> => {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const abort = (): void => {
+      clearTimeout(timer);
+      reject(
+        signal?.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
+      );
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+};
+
+/**
+ * Sends a request, and again after each wait the server names, per {@link revisionHttpRetryPolicy}.
+ *
+ * @param send - One attempt, replaying the buffered body.
+ * @param retry - The client's overrides, or `undefined` to send once.
+ * @param signal - The request's bound, which ends a wait.
+ * @returns The first response that is not a wait, or the last one.
+ */
+const sendWithRetry = async (
+  send: () => Promise<Response>,
+  retry: RevisionHttpRetryOptions | undefined,
+  signal: AbortSignal | undefined,
+): Promise<Response> => {
+  const maxAttempts = retry === undefined ? 1 : (retry.maxAttempts ?? revisionHttpRetryPolicy.maxAttempts);
+  const sleep = retry?.sleep ?? sleepUnlessAborted;
+  let response = await send();
+  for (let attempt = 1; attempt < maxAttempts; attempt += 1) {
+    const wait = retryWait(response, attempt, retry?.random ?? Math.random);
+    if (wait === undefined) {
+      break;
+    }
+    /* The refusal's body is a sentence nobody will read; give its socket back. */
+    // oxlint-disable-next-line no-await-in-loop -- each attempt follows the last one's wait
+    await response.body?.cancel().catch(() => undefined);
+    // oxlint-disable-next-line no-await-in-loop -- same reason
+    await sleep(wait, signal);
+    // oxlint-disable-next-line no-await-in-loop -- same reason
+    response = await send();
+  }
+  return response;
+};
 
 /**
  * One request, in `isomorphic-git`'s own shape.
@@ -266,16 +404,20 @@ export const createRevisionHttpClient = (options: RevisionHttpClientOptions = {}
       if (maximumBytes !== undefined && (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0)) {
         throw new TypeError('maximumResponseBytes must be a positive safe integer.');
       }
-      const response = await call(request.url, {
-        method,
-        headers,
-        ...(body === undefined || method === 'GET' || method === 'HEAD' ? {} : { body }),
-        ...(options.keepalive === true ? { keepalive: true } : {}),
-        ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
-        /* Either bound ends the request: `AbortSignal.any` is the platform's own
-         * answer to "whichever fires first". */
-        ...(signal === undefined ? {} : { signal }),
-      });
+      const send = async (): Promise<Response> =>
+        call(request.url, {
+          method,
+          headers,
+          ...(body === undefined || method === 'GET' || method === 'HEAD' ? {} : { body }),
+          ...(options.keepalive === true ? { keepalive: true } : {}),
+          ...(options.credentials === undefined ? {} : { credentials: options.credentials }),
+          /* Either bound ends the request: `AbortSignal.any` is the platform's own
+           * answer to "whichever fires first". */
+          ...(signal === undefined ? {} : { signal }),
+        });
+      /* A keepalive request is the page's last word: nothing would be left to wait for a retry. */
+      const retry = options.retry === false || options.keepalive === true ? undefined : (options.retry ?? {});
+      const response = await sendWithRetry(send, retry, signal);
       const declaredLength = Number(response.headers.get('content-length'));
       if (maximumBytes !== undefined && Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
         await response.body?.cancel();

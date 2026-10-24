@@ -4,9 +4,10 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
+import { setTimeout as wait } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright';
-import type { BrowserContext, Page } from 'playwright';
+import type { BrowserContext, Page, Response } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
@@ -22,6 +23,39 @@ let token: string;
 let userId: string;
 let ownerEmail: string;
 let ui: UiServer | undefined;
+const sessionReadiness: Array<{ status: number; retryAfter: string | undefined; attempt: number; path: string }> = [];
+
+/** Refresh only fixture navigation after a session rate limit, before any destructive gesture. */
+const openSignedInNativeLibrary = async (page: Page, path = '/projects', attempt = 0): Promise<void> => {
+  // Ignore an auth callback's response from the document being replaced.
+  const observeSession = async (): Promise<Response> => {
+    await page.waitForEvent('framenavigated', { predicate: (frame) => frame === page.mainFrame() });
+    return page.waitForResponse((response) => new URL(response.url()).pathname === '/v1/auth/get-session');
+  };
+  const [response] = await Promise.all([observeSession(), page.goto(`app://tau${path}`)]);
+  const retryAfter =
+    (await response.headerValue('retry-after')) ?? (await response.headerValue('x-retry-after')) ?? undefined;
+  sessionReadiness.push({ status: response.status(), retryAfter, attempt, path });
+  if (response.status() === 429) {
+    const retrySeconds = Number(retryAfter);
+    if (
+      attempt >= 2 ||
+      retryAfter === undefined ||
+      !Number.isFinite(retrySeconds) ||
+      retrySeconds <= 0 ||
+      retrySeconds > 30
+    ) {
+      throw new Error('Renderer session remains rate limited or has no bounded retry estimate.');
+    }
+    await wait(Math.ceil(retrySeconds * 1000));
+    await openSignedInNativeLibrary(page, path, attempt + 1);
+    return;
+  }
+  expect(response.status()).toBe(200);
+  expect(await response.json()).toMatchObject({ user: { id: userId } });
+  // Token exchange alone is insufficient: the renderer must publish its signed-in user.
+  await page.getByRole('button').filter({ hasText: ownerEmail }).waitFor();
+};
 
 /** SQL is allowed only after the exact owned container and database URL agree. */
 const sql = async (statement: string): Promise<string> => {
@@ -308,7 +342,13 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
   });
 
   afterAll(async () => {
-    await ui?.close();
+    try {
+      if (artifacts) {
+        await writeFile(join(artifacts, 'renderer-session-readiness.json'), JSON.stringify(sessionReadiness, null, 2));
+      }
+    } finally {
+      await ui?.close();
+    }
   });
 
   it.each(['Grid', 'Table'] as const)(
@@ -447,7 +487,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         env: { TAU_DESKTOP_UPDATES: 'off' },
       });
       await authenticatePackagedDesktop(session, token);
-      await session.page.goto('app://tau/projects');
+      await openSignedInNativeLibrary(session.page);
       await session.page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
       context = await browser('browser-retained', false, collaborator.token);
       let page = context.pages()[0] ?? (await context.newPage());
@@ -525,7 +565,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         preparedKernels: false,
         env: { TAU_DESKTOP_UPDATES: 'off' },
       });
-      await session.page.goto('app://tau/projects');
+      await openSignedInNativeLibrary(session.page);
       await session.page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
       expect(await nativeSnapshot(root)).toEqual(nativeBefore);
       context = await browser('browser-retained', false, collaborator.token);
@@ -570,11 +610,11 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
       await session.page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
       await session.page.getByRole('menuitem', { name: 'Move to Trash', exact: true }).click();
       await session.page.getByText(`Moved ${name} to Trash`, { exact: true }).waitFor();
-      await session.page.goto('app://tau/projects?trash=1');
+      await openSignedInNativeLibrary(session.page, '/projects?trash=1');
       await session.page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
       await session.page.getByRole('menuitem', { name: 'Restore', exact: true }).click();
       await session.page.getByText(`Restored ${name}`, { exact: true }).waitFor();
-      await session.page.goto('app://tau/projects');
+      await openSignedInNativeLibrary(session.page);
       await session.page.getByRole('link', { name: `Open ${name}`, exact: true }).waitFor();
       expect(await nativeSnapshot(root)).toEqual(nativeBefore);
       expect(await state(id)).toBe('deleted');
@@ -618,6 +658,9 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
           2,
         ),
       );
+    } catch (error) {
+      await session?.capture(`cloud-deletion-preservation-${id}`).catch(() => undefined);
+      throw error;
     } finally {
       await context?.close();
       await session?.close();
@@ -651,11 +694,11 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         env: { TAU_DESKTOP_UPDATES: 'off' },
       });
       await authenticatePackagedDesktop(session, token);
-      await session.page.goto('app://tau/projects');
+      await openSignedInNativeLibrary(session.page);
       await session.page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
       await session.page.getByRole('menuitem', { name: 'Move to Trash', exact: true }).click();
       await session.page.getByText(`Moved ${name} to Trash`, { exact: true }).waitFor();
-      await session.page.goto('app://tau/projects?trash=1');
+      await openSignedInNativeLibrary(session.page, '/projects?trash=1');
       const before = await nativeSnapshot(root);
       const localTombstone = await readFile(join(root, '.tau/library.json'), 'utf8');
       expect(JSON.parse(localTombstone)).toHaveProperty('deletedAt');
@@ -681,7 +724,7 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         preparedKernels: false,
         env: { TAU_DESKTOP_UPDATES: 'off' },
       });
-      await session.page.goto('app://tau/projects?trash=1');
+      await openSignedInNativeLibrary(session.page, '/projects?trash=1');
       await session.page.getByRole('button', { name: `Actions for ${name}`, exact: true }).click();
       expect(await readFile(join(root, '.tau/library.json'), 'utf8')).toBe(localTombstone);
       expect(await nativeSnapshot(root)).toEqual(before);
@@ -693,6 +736,9 @@ describe('completed artifact cloud deletion in native and browser libraries', ()
         join(artifacts, 'trash-preservation.json'),
         JSON.stringify({ projectId: id, before, localTombstone }, null, 2),
       );
+    } catch (error) {
+      await session?.capture(`cloud-deletion-trash-${id}`).catch(() => undefined);
+      throw error;
     } finally {
       await session?.close();
     }

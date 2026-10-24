@@ -161,7 +161,9 @@ const hintsMatching = async (
   }, selector);
 
 test('shows no keyboard hints on a touch screen (I7)', async () => {
-  // Focus opens Send's tooltip, which carries the Enter chip for keyboards.
+  // Focus opens Send's tooltip, which carries the Enter chip for keyboards once there is a draft to send; an empty
+  // composer's Send names its refusal instead, with no chip.
+  await target.type(selectors.getByCss(composerSelector).first(), 'A bracket');
   await target.evaluateLocator(composer().getByRole('button', { name: 'Send', exact: true }), (send) => {
     (send as HTMLElement).focus();
   });

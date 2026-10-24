@@ -9,7 +9,10 @@
  * guard and budget) across its pages. An error reported once the SDK failed to load is sent without
  * it, as an envelope the model ingest counts alongside the SDK's own captures. A page is hidden by
  * `pagehide` (into the back/forward cache) or by its document turning hidden (switching tabs or
- * apps), and the SDK's own chunk can fail through the real loader as Vite's preload helper reports
+ * apps), and may stay hidden for several steps; a refreshed page may boot hidden (a background
+ * tab), its first `pageshow` coming while it is still hidden. Each tab has its own document, so one
+ * tab being hidden never hides the other. While a page is hidden nothing it reported may wait (I8).
+ * The SDK's own chunk can fail through the real loader as Vite's preload helper reports
  * it: `vite:preloadError` first, then the import rejecting into the loader, whose hand-over to the
  * recovery comes at once or only after the failure's verdict (a fast verdict: no build id, a quick
  * answer), so whose failure it is cannot depend on which arrives first (I9).
@@ -40,7 +43,10 @@ type Step =
   | { readonly kind: 'reload'; readonly tab: 0 | 1 }
   | { readonly kind: 'leave'; readonly tab: 0 | 1 }
   | { readonly kind: 'sdkFails'; readonly tab: 0 | 1; readonly handOver: 'prompt' | 'late' }
-  | { readonly kind: 'freeze'; readonly tab: 0 | 1; readonly via: 'pagehide' | 'hidden' };
+  | { readonly kind: 'freeze'; readonly tab: 0 | 1; readonly via: 'pagehide' | 'hidden' }
+  | { readonly kind: 'hide'; readonly tab: 0 | 1; readonly via: 'pagehide' | 'hidden' }
+  | { readonly kind: 'show'; readonly tab: 0 | 1 }
+  | { readonly kind: 'bootHidden'; readonly tab: 0 | 1 };
 
 /**
  * The model's shared state: its tabs, whether the next SDK load fails, the page whose listeners are
@@ -54,7 +60,6 @@ const model = {
   sdkLoadFailure: undefined as { readonly tab: Tab; readonly failure: TypeError } | undefined,
   installing: undefined as Tab | undefined,
   failures: 0,
-  visibility: 'visible' as 'visible' | 'hidden',
 };
 
 /** The tabs' shared BroadcastChannel, delivering only when the model says so. */
@@ -122,6 +127,10 @@ type Tab = {
   pageShow: Array<() => void>;
   /** The current page's `visibilitychange` listeners. */
   visibility: Array<() => void>;
+  /** This tab's document's `visibilityState`, which outlives its pages (a background tab stays one). */
+  visibilityState: 'visible' | 'hidden';
+  /** Whether the current page had a `pagehide` (into the back/forward cache) and no `pageshow` since. */
+  inPageHide: boolean;
   /** The `stale_build` tag each tracked failure's event was sent with (`beforeSend` holds it). */
   readonly tags: Map<unknown, Promise<StaleBuildRecovery.StaleBuildTag>>;
   /** The edge once answered `none` (no build endpoint): the newer build wins and nothing is asked again. */
@@ -135,6 +144,8 @@ type Tab = {
     readonly failure: unknown;
     readonly recovery: typeof StaleBuildRecovery;
     readonly sdk?: true;
+    /** The channels it was sighted through. */
+    readonly channels: Set<Channel>;
   }>;
   everStopped: boolean;
   wasWriting: boolean;
@@ -149,6 +160,19 @@ type Tab = {
 
 const loadTab = async (tab: Tab): Promise<void> => {
   vi.resetModules();
+  // The page's own document: its modules read it, so one tab's visibility is never the other's.
+  vi.stubGlobal('document', {
+    get visibilityState() {
+      return tab.visibilityState;
+    },
+    addEventListener: (type: string, listener: () => void) => {
+      if (type === 'visibilitychange' && model.installing === tab) {
+        tab.visibility.push(listener);
+      }
+    },
+    removeEventListener: () => undefined,
+  });
+  tab.inPageHide = false;
   vi.doMock('#lib/build-identity.js', async (importOriginal) => ({
     ...(await importOriginal<typeof BuildIdentity>()),
     readBuildId: () => tab.build,
@@ -189,7 +213,12 @@ const loadTab = async (tab: Tab): Promise<void> => {
     if (sdkLoad !== undefined) {
       model.sdkLoadFailure = undefined;
       // Vite's preload helper wraps the SDK's import: it dispatches the failure, then rethrows it into the loader.
-      sdkLoad.tab.failures.push({ failure: sdkLoad.failure, recovery: sdkLoad.tab.recovery!, sdk: true });
+      sdkLoad.tab.failures.push({
+        failure: sdkLoad.failure,
+        recovery: sdkLoad.tab.recovery!,
+        sdk: true,
+        channels: new Set(),
+      });
       sight(sdkLoad.tab, sdkLoad.failure, 'preload');
       throw sdkLoad.failure;
     }
@@ -264,17 +293,27 @@ function captureValue(error: unknown): void {
  * turning hidden (`visibilitychange`). What it knew of each failure is noted.
  */
 function hidePage(tab: Tab, how: { readonly persisted: boolean } | 'hidden'): void {
-  const page = tab.recovery!;
   if (how === 'hidden') {
-    model.visibility = 'hidden';
+    tab.visibilityState = 'hidden';
     for (const listener of tab.visibility) {
       listener();
     }
   } else {
+    // As Safari may: the `pagehide` comes, the document's own state does not say hidden yet.
+    tab.inPageHide = how.persisted;
     for (const listener of tab.pageHide) {
       listener(how);
     }
   }
+  noteHiddenTags(tab);
+}
+
+/** Whether the tab's current page is hidden: its document is, or a `pagehide` has not been undone. */
+const isHidden = (tab: Tab): boolean => tab.visibilityState === 'hidden' || tab.inPageHide;
+
+/** What the current page knows of each of its failures while it is hidden: what it may send them with. */
+function noteHiddenTags(tab: Tab): void {
+  const page = tab.recovery!;
   for (const { failure, recovery } of tab.failures) {
     if (recovery === page) {
       const known = tab.tagsAtHide.get(failure) ?? new Set();
@@ -283,6 +322,22 @@ function hidePage(tab: Tab, how: { readonly persisted: boolean } | 'hidden'): vo
     }
   }
 }
+
+/** The page is shown again: a `pagehide` is undone by `pageshow`, a hidden document turns visible. */
+const showPage = (tab: Tab): void => {
+  if (tab.inPageHide) {
+    tab.inPageHide = false;
+    for (const listener of tab.pageShow) {
+      listener();
+    }
+  }
+  if (tab.visibilityState === 'hidden') {
+    tab.visibilityState = 'visible';
+    for (const listener of tab.visibility) {
+      listener();
+    }
+  }
+};
 
 /** Whether a promise has settled by the next timer turn. */
 const hasSettled = async (promise: Promise<unknown> | undefined): Promise<boolean> => {
@@ -302,7 +357,7 @@ const hasSettled = async (promise: Promise<unknown> | undefined): Promise<boolea
  * The page leaves (a refresh, or its automatic reload going through): its `pagehide` listeners run,
  * what each of its failures would be sent with is fixed, and the next page loads on the same storage.
  */
-const leavePage = async (tab: Tab): Promise<void> => {
+const leavePage = async (tab: Tab, { bootHidden = false }: { readonly bootHidden?: boolean } = {}): Promise<void> => {
   const page = tab.recovery!;
   hidePage(tab, { persisted: false });
   for (const { failure, recovery } of tab.failures) {
@@ -311,7 +366,17 @@ const leavePage = async (tab: Tab): Promise<void> => {
     }
   }
   tab.skew?.closeBuildSkewChannel();
+  if (bootHidden) {
+    // The next page boots in a background tab: hidden from the start, no `visibilitychange` until shown.
+    tab.visibilityState = 'hidden';
+  }
   await loadTab(tab);
+  if (bootHidden) {
+    // Its first `pageshow` (not persisted) comes while the document is still hidden.
+    for (const listener of tab.pageShow) {
+      listener();
+    }
+  }
 };
 
 const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
@@ -328,6 +393,8 @@ const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   pageHide: [],
   pageShow: [],
   visibility: [],
+  visibilityState: 'visible',
+  inPageHide: false,
   tags: new Map(),
   sawNone: false,
   analytics: new Map(),
@@ -369,8 +436,13 @@ const startTracker = async (tab: Tab): Promise<void> => {
 };
 
 const sight = (tab: Tab, failure: unknown, channel: Channel): void => {
+  tab.failures.find((entry) => entry.failure === failure)?.channels.add(channel);
   // async-iife: bootstrap -- the decision lands on its own, as from a listener.
   void tab.recovery?.recoverFromStaleBuild(failure, channel);
+  if (isHidden(tab)) {
+    // A failure on a hidden page goes at once, with what its page knows now.
+    noteHiddenTags(tab);
+  }
   /* Sentry's own global handlers capture what reaches `window`, once installed, and after the
    * recovery's capture-phase listener (`installStaleBuildRecovery`), which has started the decision. */
   if (channel === 'global' && tab.errorReporting?.isErrorTrackerListening() === true) {
@@ -400,25 +472,74 @@ const failSdkLoad = async (tab: Tab, handOver: 'prompt' | 'late'): Promise<void>
   model.sdkLoadFailure = undefined;
 };
 
+/**
+ * I8: while a page is hidden, nothing it reported waits, since it may be frozen or discarded and
+ * never run again: every failure it saw has gone to the tracker, and every event the tracker held
+ * for one (`beforeSend`) has been released. The one exception is a failure only Vite's preloader
+ * reported while the SDK's load is under way, which may be the SDK's own (never reported, I9): it
+ * goes as soon as the loader answers.
+ */
+const checkNothingWaitsWhileHidden = async (tab: Tab, label: string): Promise<void> => {
+  if (!isHidden(tab)) {
+    return;
+  }
+  for (const { failure, recovery, sdk, channels } of tab.failures) {
+    if (recovery !== tab.recovery || sdk) {
+      continue;
+    }
+    if (tab.tracked.has(failure)) {
+      // oxlint-disable-next-line no-await-in-loop -- Each held tag in turn.
+      expect(await hasSettled(tab.tags.get(failure)), `I8 held tag released (${label})`).toBe(true);
+      continue;
+    }
+    const mayBeSdkLoad =
+      channels.size === 1 &&
+      channels.has('preload') &&
+      typeof tab.errorReporting?.isSdkLoadFailure(failure) !== 'boolean';
+    expect(mayBeSdkLoad, `I8 failure sent while hidden (${label})`).toBe(true);
+  }
+};
+
 /** Hidden (into the back/forward cache, or by switching away), then shown again: the page carries on. */
 const hideAndShow = async (tab: Tab, via: 'pagehide' | 'hidden'): Promise<void> => {
   hidePage(tab, via === 'hidden' ? 'hidden' : { persisted: true });
-  // I8: nothing the hidden page held waits past it: every event the tracker held for it has gone.
-  for (const { failure, recovery } of tab.failures) {
-    if (recovery === tab.recovery && tab.tracked.has(failure)) {
-      // oxlint-disable-next-line no-await-in-loop -- Each held tag in turn.
-      expect(await hasSettled(tab.tags.get(failure)), `I8 held tag released on ${via}`).toBe(true);
+  await checkNothingWaitsWhileHidden(tab, `freeze ${via}`);
+  showPage(tab);
+};
+
+/** A step that hides or shows a page. */
+type VisibilityStep = Extract<Step, { readonly kind: 'freeze' | 'hide' | 'show' | 'bootHidden' }>;
+
+const visibilityKinds: ReadonlySet<Step['kind']> = new Set(['freeze', 'hide', 'show', 'bootHidden']);
+
+const isVisibilityStep = (step: Step): step is VisibilityStep => visibilityKinds.has(step.kind);
+
+const runVisibility = async (tab: Tab, step: VisibilityStep): Promise<void> => {
+  switch (step.kind) {
+    case 'freeze': {
+      await hideAndShow(tab, step.via);
+      return;
     }
-  }
-  if (via === 'hidden') {
-    model.visibility = 'visible';
-  }
-  for (const listener of via === 'hidden' ? tab.visibility : tab.pageShow) {
-    listener();
+    case 'hide': {
+      hidePage(tab, step.via === 'hidden' ? 'hidden' : { persisted: true });
+      return;
+    }
+    case 'show': {
+      showPage(tab);
+      return;
+    }
+    case 'bootHidden': {
+      // A refresh while the tab is in the background (a restored session, say): the next page boots hidden.
+      await leavePage(tab, { bootHidden: true });
+    }
   }
 };
 
 const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
+  if (isVisibilityStep(step)) {
+    await runVisibility(tabs[step.tab], step);
+    return 0;
+  }
   switch (step.kind) {
     case 'deliver': {
       return deliverAll();
@@ -430,7 +551,7 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
     case 'failure': {
       model.failures += 1;
       const failure = new TypeError(`Importing a module script failed. (${String(model.failures)})`);
-      tabs[step.tab].failures.push({ failure, recovery: tabs[step.tab].recovery! });
+      tabs[step.tab].failures.push({ failure, recovery: tabs[step.tab].recovery!, channels: new Set() });
       sight(tabs[step.tab], failure, step.channel);
       return 0;
     }
@@ -469,10 +590,6 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
     }
     case 'sdkFails': {
       await failSdkLoad(tabs[step.tab], step.handOver);
-      return 0;
-    }
-    case 'freeze': {
-      await hideAndShow(tabs[step.tab], step.via);
       return 0;
     }
     case 'leave': {
@@ -609,6 +726,12 @@ const step: Arbitrary<Step> = oneof(
     weight: 1,
     arbitrary: record({ kind: constant<'freeze'>('freeze'), tab: tabIndex, via: constantFrom('pagehide', 'hidden') }),
   },
+  {
+    weight: 1,
+    arbitrary: record({ kind: constant<'hide'>('hide'), tab: tabIndex, via: constantFrom('pagehide', 'hidden') }),
+  },
+  { weight: 1, arbitrary: record({ kind: constant<'show'>('show'), tab: tabIndex }) },
+  { weight: 1, arbitrary: record({ kind: constant<'bootHidden'>('bootHidden'), tab: tabIndex }) },
 );
 
 /** Sequences explored per run; the report quotes it. */
@@ -631,18 +754,6 @@ beforeEach(() => {
     }
   });
   vi.stubGlobal('removeEventListener', () => undefined);
-  model.visibility = 'visible';
-  vi.stubGlobal('document', {
-    get visibilityState() {
-      return model.visibility;
-    },
-    addEventListener: (type: string, listener: () => void) => {
-      if (type === 'visibilitychange' && model.installing !== undefined) {
-        model.installing.visibility.push(listener);
-      }
-    },
-    removeEventListener: () => undefined,
-  });
 });
 
 afterEach(() => {
@@ -685,6 +796,17 @@ const runModel = async (
       // oxlint-disable-next-line no-await-in-loop -- The model runs one step at a time.
       await flush();
       checkStep(tabs, next, { fetchesBefore, delivered });
+      for (const tab of tabs) {
+        if (isHidden(tab)) {
+          noteHiddenTags(tab);
+          // oxlint-disable-next-line no-await-in-loop -- Each hidden tab in turn.
+          await checkNothingWaitsWhileHidden(tab, next.kind);
+        }
+      }
+    }
+    // The tabs are shown again, so what the end checks wait for runs as on a visible page.
+    for (const tab of tabs) {
+      showPage(tab);
     }
     // A failing load the steps asked for that no page made does not carry into the end.
     model.failNextTrackerLoad = false;
@@ -804,6 +926,51 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
           // The page carried on: the failure after it was shown again was decided and sent as usual.
           expect(later?.recovery.readStaleBuildOutcome(later.failure)).toBe('superseded');
           expect(tab.tracked.get(later?.failure)).toBe(1);
+        },
+      );
+    },
+    60_000,
+  );
+
+  it('send at once what a page that boots hidden reports, through its first pageshow, until it is shown', async () => {
+    await runModel(
+      // A slow edge: the decision is still under way when each failure is reported.
+      ['Y', 'Y', 3500, 60_000],
+      [
+        { kind: 'bootHidden', tab: 0 },
+        { kind: 'failure', tab: 0, channel: 'boundary' },
+        { kind: 'tracker', tab: 0 },
+        { kind: 'failure', tab: 0, channel: 'global' },
+        { kind: 'show', tab: 0 },
+        { kind: 'failure', tab: 0, channel: 'boundary' },
+      ],
+      ([tab]) => {
+        const [first, second, later] = tab.failures;
+        expect([...(tab.tagsAtHide.get(first?.failure) ?? [])]).toContain('undecided');
+        expect([...(tab.tagsAtHide.get(second?.failure) ?? [])]).toContain('undecided');
+        // Shown: the failure after it was decided and sent as usual.
+        expect(tab.tagsAtHide.has(later?.failure)).toBe(false);
+        expect(tab.tracked.get(later?.failure)).toBe(1);
+      },
+    );
+  }, 60_000);
+
+  it.each(['pagehide', 'hidden'] as const)(
+    'send at once an error reported while the page is hidden (%s) after the SDK failed to load',
+    async (via) => {
+      await runModel(
+        ['Y', 'Y', 3500, 60_000],
+        [
+          { kind: 'trackerFails', tab: 0 },
+          { kind: 'hide', tab: 0, via },
+          { kind: 'failure', tab: 0, channel: 'boundary' },
+          { kind: 'failure', tab: 0, channel: 'preload' },
+        ],
+        ([tab]) => {
+          for (const { failure } of tab.failures) {
+            expect([...(tab.tagsAtHide.get(failure) ?? [])]).toContain('undecided');
+            expect(tab.tracked.get(failure)).toBe(1);
+          }
         },
       );
     },

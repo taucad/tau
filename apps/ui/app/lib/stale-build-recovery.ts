@@ -56,10 +56,10 @@ import {
   isErrorTrackerListening,
   isSdkLoadFailure,
   reportUiError,
-  resumeErrorReporting,
   sendWaitingErrors,
   setErrorDescriber,
 } from '#lib/error-reporting.js';
+import { isPageHidden, notePageHide, notePageShow } from '#lib/page-visibility.js';
 import { readSessionStorage } from '#lib/session-storage.js';
 import { isWeakKey } from '#lib/weak-key.js';
 
@@ -260,16 +260,14 @@ export type StaleBuildRecovery = {
    */
   readonly tagNow: (failure: unknown) => StaleBuildTag;
   /**
-   * The page is hidden (the document turning hidden, and every `pagehide`, kept in the back/forward
-   * cache or not): a hidden page may be frozen or discarded and never run again, so every wait for
-   * a decision ends now (tagged {@link StaleBuildRecovery.tagNow}), while hidden none starts, and
-   * failures only Vite's preloader reported go to the tracker now, except one that may still be the
-   * tracker's own load (its follow-up reports it once the loader answers). New failures after the
-   * page is shown again are handled as usual.
+   * The page has just been hidden (the document turning hidden, and every `pagehide`, kept in the
+   * back/forward cache or not): a hidden page may be frozen or discarded and never run again, so
+   * every wait for a decision ends now (tagged {@link StaleBuildRecovery.tagNow}), and failures only
+   * Vite's preloader reported go to the tracker now, or, one that may still be the tracker's own
+   * load, as soon as the loader answers. While the page is hidden (`isPageHidden`, the page's one
+   * answer, which error reporting reads too) no wait starts; once it is visible, waits work as usual.
    */
   readonly flush: () => void;
-  /** The page is shown again (`pageshow`, the document visible) after a flush: waits work as usual again. */
-  readonly resume: () => void;
   /** The settled decision for a failure, or `undefined` while none is. */
   readonly readOutcome: (failure: unknown) => StaleBuildOutcome | undefined;
   /** Subscribe to each settled or changed decision ({@link StaleBuildRecovery.readOutcome}). */
@@ -362,9 +360,32 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
   let hasLeft = false;
   /** How many times the page was hidden ({@link StaleBuildRecovery.flush}); a wait across one ends. */
   let flushes = 0;
-  /** Hidden and not shown since: nothing waits, since the page may never run again. */
-  let isHidden = false;
   let hasWarnedSdkBlocked = false;
+
+  /**
+   * Hand a failure only Vite's preloader reported to the tracker without waiting for its follow-up:
+   * at once, or, while it may still be the tracker's own load, as soon as the loader answers.
+   */
+  const reportFollowUpNow = (failure: WeakKey, record: FailureRecord): void => {
+    clearTimeout(record.preloadWait);
+    record.preloadWait = undefined;
+    const handOver = (): void => {
+      awaitingFollowUp.delete(failure);
+      if (isOwedToTracker(record)) {
+        record.reportedToErrorTracker = true;
+        options.reportToErrorTracker?.(failure);
+      }
+    };
+    if (!record.isSdkLoadPending) {
+      handOver();
+      return;
+    }
+    // async-iife: bootstrap -- it goes once the loader has said whose failure it is (bounded).
+    void (async () => {
+      await record.sdkLoadKnown;
+      handOver();
+    })();
+  };
 
   /** Hand a failure to the error tracker once, unless a channel the tracker captures itself saw it. */
   const reportToErrorTracker = (failure: WeakKey): void => {
@@ -377,19 +398,15 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       return;
     }
     if (record.sources.size === 1 && record.sources.has('preload')) {
-      // Only Vite's preloader saw it so far: give the channel it rethrows into the chance first.
       awaitingFollowUp.add(failure);
+      if (isPageHidden()) {
+        // Nothing waits on a hidden page for the channel Vite rethrows into.
+        reportFollowUpNow(failure, record);
+        return;
+      }
+      // Only Vite's preloader saw it so far: give the channel it rethrows into the chance first.
       record.preloadWait ??= setTimeout(() => {
-        record.preloadWait = undefined;
-        // async-iife: bootstrap -- a timer cannot await; it reports once the loader's answer is in.
-        void (async () => {
-          await record.sdkLoadKnown;
-          awaitingFollowUp.delete(failure);
-          if (isOwedToTracker(record)) {
-            record.reportedToErrorTracker = true;
-            options.reportToErrorTracker?.(failure);
-          }
-        })();
+        reportFollowUpNow(failure, record);
       }, preloadFollowUpDelay);
       return;
     }
@@ -639,7 +656,7 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
       const isSettled = (): boolean =>
         hasLeft || record?.decision === undefined || (record.outcome !== undefined && !record.provisional);
       const flushesBefore = flushes;
-      if (isHidden) {
+      if (isPageHidden()) {
         return this.tagNow(failure);
       }
       if (!isSettled()) {
@@ -668,19 +685,12 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     },
     flush() {
       flushes += 1;
-      isHidden = true;
       for (const failure of awaitingFollowUp) {
         const record = records.get(failure);
-        if (record?.isSdkLoadPending === true) {
-          // It may be the error tracker's own load: its follow-up reports it once the loader answers.
-          continue;
-        }
-        awaitingFollowUp.delete(failure);
-        if (record !== undefined && isOwedToTracker(record)) {
-          clearTimeout(record.preloadWait);
-          record.preloadWait = undefined;
-          record.reportedToErrorTracker = true;
-          options.reportToErrorTracker?.(failure);
+        if (record === undefined) {
+          awaitingFollowUp.delete(failure);
+        } else {
+          reportFollowUpNow(failure, record);
         }
       }
       outcomeTopic.emit();
@@ -689,9 +699,6 @@ export const createStaleBuildRecovery = (options: StaleBuildRecoveryOptions): St
     subscribeOutcomes: (listener) => outcomeTopic.subscribe(listener),
     readReloadState,
     subscribeReloadState: (listener) => reloadStateTopic.subscribe(listener),
-    resume() {
-      isHidden = false;
-    },
     leave() {
       if (hasLeft) {
         return;
@@ -938,38 +945,38 @@ export const installStaleBuildRecovery = (): (() => void) => {
   for (const [type, listener] of failureListeners) {
     globalThis.addEventListener(type, listener as EventListener, { capture: true });
   }
-  /* Every hide flushes: the document turning hidden (`visibilitychange`, the last event a mobile
-   * browser reliably fires before it freezes or discards a background tab without a `pagehide`) and
-   * every `pagehide` (a page kept in the back/forward cache is frozen and may be evicted without
-   * running again), so nothing may wait past either. Chrome freezes only a page already hidden one
-   * of these ways, so `freeze` adds nothing. Hidden is not gone: what waited goes as far as the
-   * keepalive budget allows and the rest keeps waiting. Only a page that is really going
-   * (`pagehide`, not persisted) settles what a pending reload covered and gives up what is left
-   * (counted in one summary event); one shown again carries on as usual. A document that starts
-   * hidden (opened in a background tab) gets no `visibilitychange` until it is shown, so it is
-   * hidden from the start. */
+  /* Whether the page is hidden is derived in one place (`isPageHidden`: the document's own state,
+   * plus a `pagehide` not yet undone by a `pageshow`), and every point where a report could start
+   * waiting reads it, so a page that is hidden never waits. These listeners only end the waits
+   * already under way when it becomes hidden: the document turning hidden (`visibilitychange`, the
+   * last event a mobile browser reliably fires before it freezes or discards a background tab
+   * without a `pagehide`) and every `pagehide` (a page kept in the back/forward cache is frozen and
+   * may be evicted without running again). Chrome freezes only a page already hidden one of these
+   * ways, so `freeze` adds nothing. Hidden is not gone: what waited goes as far as the keepalive
+   * budget allows and the rest keeps waiting. Only a page that is really going (`pagehide`, not
+   * persisted) settles what a pending reload covered and gives up what is left (counted in one
+   * summary event). A `pageshow` only undoes a `pagehide`: a document that boots hidden (opened in a
+   * background tab) is hidden from the start and stays hidden through its first `pageshow`. */
   const hide = (phase: 'hidden' | 'exit'): void => {
     getPageRecovery().flush();
     sendWaitingErrors(phase);
   };
   const onPageHide = (event: PageTransitionEvent): void => {
+    notePageHide(event.persisted);
     if (!event.persisted) {
       getPageRecovery().leave();
     }
     hide(event.persisted ? 'hidden' : 'exit');
   };
   const onPageShow = (): void => {
-    getPageRecovery().resume();
-    resumeErrorReporting();
+    notePageShow();
   };
   const onVisibilityChange = (): void => {
-    if (globalThis.document.visibilityState === 'hidden') {
+    if (isPageHidden()) {
       hide('hidden');
-    } else {
-      onPageShow();
     }
   };
-  if (globalThis.document.visibilityState === 'hidden') {
+  if (isPageHidden()) {
     hide('hidden');
   }
   globalThis.addEventListener('pagehide', onPageHide);

@@ -9,7 +9,6 @@ vi.mock('#lib/error-reporting.js', () => ({
   isErrorTrackerListening: () => true,
   setErrorDescriber: () => undefined,
   sendWaitingErrors,
-  resumeErrorReporting: () => undefined,
   // No SDK load is under way in these tests: nothing is its failure.
   isSdkLoadFailure: () => false,
 }));
@@ -165,6 +164,47 @@ describe('installStaleBuildRecovery', () => {
 
     // Settled already, with what is known: nothing waits on a page that may never be shown.
     await expect(Promise.race([tag, Promise.resolve('still waiting')])).resolves.toBe('undecided');
+  });
+
+  it('should keep a document that boots hidden hidden through its first pageshow, until the document itself is visible', async () => {
+    const { installStaleBuildRecovery, classifyStaleBuildFailure } = await load();
+    stubServer(ownBuildId);
+    vi.spyOn(performance, 'now').mockReturnValue(60_000);
+    // Opened in a background tab: the first `pageshow` (not persisted) fires while the document is still hidden.
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    uninstall = installStaleBuildRecovery();
+    globalThis.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+    const held = new TypeError('Importing a module script failed.');
+
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: held }));
+    const tag = classifyStaleBuildFailure(held);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Still hidden: nothing waits.
+    await expect(Promise.race([tag, Promise.resolve('still waiting')])).resolves.toBe('undecided');
+
+    // Shown: a new failure is decided and tagged as usual.
+    setVisibility('visible');
+    const later = new TypeError('Importing a module script failed.');
+    globalThis.dispatchEvent(Object.assign(new Event('unhandledrejection'), { reason: later }));
+    const laterTag = classifyStaleBuildFailure(later);
+    await settle();
+    await expect(laterTag).resolves.toBe('current');
+  });
+
+  it("should hand a failure only Vite's preloader reported to the tracker at once while the page is hidden", async () => {
+    const { installStaleBuildRecovery } = await load();
+    stubServer(deployedBuildId);
+    uninstall = installStaleBuildRecovery();
+    setVisibility('hidden');
+    const failure = new TypeError('Failed to fetch dynamically imported module: /assets/a-1.js');
+
+    globalThis.dispatchEvent(Object.assign(new Event('vite:preloadError'), { payload: failure }));
+
+    // No follow-up wait on a hidden page, which may never run again.
+    expect(reportUiError).toHaveBeenCalledExactlyOnceWith(failure);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(reportUiError).toHaveBeenCalledOnce();
   });
 
   it("should hand a failure only Vite's preloader reported to the tracker when the page is hidden into the back/forward cache", async () => {

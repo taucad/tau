@@ -330,7 +330,6 @@ describe('error reporting', () => {
 
     // Hidden into the back/forward cache, then shown again.
     page.sendWaitingErrors('hidden');
-    page.resumeErrorReporting();
     const after = new Error('after the page was shown again');
     const reported = page.reportUiError(after);
     release();
@@ -379,7 +378,6 @@ describe('error reporting', () => {
         void page.reportUiError(error);
       }
       page.sendWaitingErrors('hidden');
-      page.resumeErrorReporting();
       // oxlint-disable-next-line no-await-in-loop -- The page is shown again before the next switch.
       await settle();
     }
@@ -406,7 +404,6 @@ describe('error reporting', () => {
 
     // A short tab switch: the page lives on, and the SDK arrives right after.
     page.sendWaitingErrors('hidden');
-    page.resumeErrorReporting();
     release();
     await started;
     await settle();
@@ -420,6 +417,51 @@ describe('error reporting', () => {
     expect([...sent, ...captured].toSorted(byText)).toStrictEqual(
       errors.map((error) => error.message).toSorted(byText),
     );
+  });
+
+  it('should send an error reported after a failed load while the page is hidden at once, without waiting for its tags', async () => {
+    const posted = stubIngest();
+    const page = await load();
+    page.setErrorDescriber({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name.
+      now: () => ({ stale_build: 'undecided' }),
+      // A decision still under way, as it stays for as long as the page is frozen.
+      settled: async () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve({});
+          }, 60_000);
+        }),
+    });
+    sentry.failNextLoad = true;
+    await page.startErrorReporting();
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+
+    void page.reportUiError(new Error('caught while hidden'));
+    await settle();
+
+    expect(posted.map((envelope) => envelope.event.exception.values[0]?.value)).toStrictEqual(['caught while hidden']);
+    expect(posted[0]?.init.keepalive).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name.
+    expect(posted[0]?.event.tags).toMatchObject({ stale_build: 'undecided' });
+  });
+
+  it('should send an error reported while the SDK loads on a document that boots hidden at once, with no event saying so', async () => {
+    const posted = stubIngest();
+    sentry.holdNextLoad = new Promise<void>((resolve) => {
+      setTimeout(resolve, 60_000);
+    });
+    // Opened in a background tab: no `visibilitychange` comes until the user looks at it.
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    const page = await load();
+    void page.startErrorReporting();
+
+    void page.reportUiError(new Error('caught at boot in the background'));
+    await settle();
+
+    expect(posted.map((envelope) => envelope.event.exception.values[0]?.value)).toStrictEqual([
+      'caught at boot in the background',
+    ]);
   });
 
   it('should send the same thrown string twice when it is reported twice', async () => {

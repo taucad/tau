@@ -1,5 +1,6 @@
 import { ENV } from '#environment.config.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
+import { hasPageExited, isPageHidden } from '#lib/page-visibility.js';
 import { sendSentryEventDirectly, sendSentryEventsOnHide } from '#lib/sentry-event.lib.js';
 import { isWeakKey } from '#lib/weak-key.js';
 
@@ -66,8 +67,6 @@ let droppedWhileLoading = 0;
 let directReports = 0;
 /** Whether this page has said it dropped errors beyond {@link directErrorLimit} (said once). */
 let hasWarnedDirectLimit = false;
-/** Whether the page is hidden and not shown since: a report that would wait for the load goes now. */
-let isPageHidden = false;
 /** Whether the SDK has already thrown once on this page (logged once, never reported). */
 let hasLoggedSdkThrow = false;
 /** Tags for reported values, from whoever knows them (the stale-build recovery's `stale_build`). */
@@ -82,15 +81,6 @@ const sendDirectly = (report: Report, tags: Readonly<Record<string, string>>): v
   sentDirectly.add(report);
   // async-iife: bootstrap -- the event goes on its own; a refused request is simply lost.
   void sendSentryEventDirectly(report.error, tags);
-};
-
-/** Send a report without the SDK once its tags settle, unless the page being hidden sent it first. */
-const sendDirectlyWhenTagged = async (report: Report): Promise<void> => {
-  waitingForTags.add(report);
-  const tags = await describer.settled(report.error);
-  if (waitingForTags.has(report)) {
-    sendDirectly(report, tags);
-  }
 };
 
 const warnDropped = (): void => {
@@ -140,7 +130,71 @@ const releaseDirect = (): void => {
   directReports -= 1;
 };
 
-/** The SDK cannot be used: what waited for it goes without it, each once its tags settle. */
+/**
+ * The page is hidden (the document turning hidden, and every `pagehide`, kept in the back/forward
+ * cache or not, since a hidden page may be frozen or discarded without running again): the errors
+ * still waiting, for the SDK's load or for their tags, go now without the SDK, with the tags known
+ * now, as far as the keepalive budget allows (`sendSentryEventsOnHide`: newest first, stacks
+ * trimmed). Each is admitted ({@link admitDirect}) as it goes, so tab switches during a stalled load
+ * never pass {@link directErrorLimit}.
+ *
+ * Hidden is not gone: what does not fit stays waiting, for the SDK or the next hide, and while the
+ * page stays hidden ({@link isPageHidden}) a report that would wait, for the load or for its tags,
+ * goes the same way at once ({@link sendNowIfHidden}). Only at exit
+ * (`exit`: a `pagehide` the page does not come back from) is the rest counted in one summary event
+ * and given up.
+ *
+ * @param phase - `hidden` while the page may still be shown again; `exit` when it is going for good.
+ */
+export const sendWaitingErrors = (phase: 'hidden' | 'exit'): void => {
+  const isExit = phase === 'exit';
+  const forLoad = waitingForLoad.filter((report) => !sentDirectly.has(report));
+  const forTags = [...waitingForTags].filter((report) => !sentDirectly.has(report));
+  /* What waited for the load is admitted here, newest first as the budget sends, so the errors the
+   * limit leaves room for are the ones that can go; what waited for its tags was admitted already. */
+  const admitted = new Set(forLoad.toReversed().filter(() => admitDirect()));
+  const offered = [...forLoad.filter((report) => admitted.has(report)), ...forTags];
+  const done = sendSentryEventsOnHide(
+    offered.map((report) => ({ report, error: report.error, tags: describer.now(report.error) })),
+    { isExit },
+  );
+  const gone = new Set([...done].map(({ report }) => report));
+  for (const report of isExit ? [...forLoad, ...forTags] : gone) {
+    sentDirectly.add(report);
+    waitingForTags.delete(report);
+  }
+  for (const report of admitted) {
+    if (!gone.has(report) && !isExit) {
+      releaseDirect();
+    }
+  }
+  waitingForLoad = isExit ? [] : waitingForLoad.filter((report) => !gone.has(report));
+};
+
+/**
+ * The one rule wherever a report could start waiting (for the SDK's load, or for its tags): a
+ * hidden page ({@link isPageHidden}) may be frozen or discarded and never run again, so nothing
+ * waits on it; what waits goes now, as far as the keepalive budget allows ({@link sendWaitingErrors}).
+ */
+const sendNowIfHidden = (): void => {
+  if (isPageHidden()) {
+    sendWaitingErrors(hasPageExited() ? 'exit' : 'hidden');
+  }
+};
+
+/**
+ * Send a report without the SDK once its tags settle, unless the page being hidden sent it first.
+ * It is waiting from the call on, so a caller's {@link sendNowIfHidden} right after sends it at once.
+ */
+const sendDirectlyWhenTagged = async (report: Report): Promise<void> => {
+  waitingForTags.add(report);
+  const tags = await describer.settled(report.error);
+  if (waitingForTags.has(report)) {
+    sendDirectly(report, tags);
+  }
+};
+
+/** The SDK cannot be used: what waited for it goes without it, each once its tags settle (at once on a hidden page). */
 const sendWaitingWithoutSdk = (): void => {
   isSdkUnavailable = true;
   warnDropped();
@@ -149,6 +203,7 @@ const sendWaitingWithoutSdk = (): void => {
     // async-iife: bootstrap -- each event goes once its tags settle; the load's outcome is known now.
     void sendDirectlyWhenTagged(report);
   }
+  sendNowIfHidden();
 };
 
 /**
@@ -257,57 +312,13 @@ export const isSdkLoadFailure = (value: unknown): boolean | Promise<boolean> => 
 };
 
 /**
- * The page is hidden (the document turning hidden, and every `pagehide`, kept in the back/forward
- * cache or not, since a hidden page may be frozen or discarded without running again): the errors
- * still waiting, for the SDK's load or for their tags, go now without the SDK, with the tags known
- * now, as far as the keepalive budget allows (`sendSentryEventsOnHide`: newest first, stacks
- * trimmed). Each is admitted ({@link admitDirect}) as it goes, so tab switches during a stalled load
- * never pass {@link directErrorLimit}.
- *
- * Hidden is not gone: what does not fit stays waiting, for the SDK or the next hide, and while the
- * page stays hidden a report that would wait for the load goes the same way at once. Only at exit
- * (`exit`: a `pagehide` the page does not come back from) is the rest counted in one summary event
- * and given up.
- *
- * @param phase - `hidden` while the page may still be shown again; `exit` when it is going for good.
- */
-export const sendWaitingErrors = (phase: 'hidden' | 'exit'): void => {
-  isPageHidden = true;
-  const isExit = phase === 'exit';
-  const forLoad = waitingForLoad.filter((report) => !sentDirectly.has(report));
-  const forTags = [...waitingForTags].filter((report) => !sentDirectly.has(report));
-  /* What waited for the load is admitted here, newest first as the budget sends, so the errors the
-   * limit leaves room for are the ones that can go; what waited for its tags was admitted already. */
-  const admitted = new Set(forLoad.toReversed().filter(() => admitDirect()));
-  const offered = [...forLoad.filter((report) => admitted.has(report)), ...forTags];
-  const done = sendSentryEventsOnHide(
-    offered.map((report) => ({ report, error: report.error, tags: describer.now(report.error) })),
-    { isExit },
-  );
-  const gone = new Set([...done].map(({ report }) => report));
-  for (const report of isExit ? [...forLoad, ...forTags] : gone) {
-    sentDirectly.add(report);
-    waitingForTags.delete(report);
-  }
-  for (const report of admitted) {
-    if (!gone.has(report) && !isExit) {
-      releaseDirect();
-    }
-  }
-  waitingForLoad = isExit ? [] : waitingForLoad.filter((report) => !gone.has(report));
-};
-
-/** The page is shown again (`pageshow`, the document visible): reports wait for the SDK as usual. */
-export const resumeErrorReporting = (): void => {
-  isPageHidden = false;
-};
-
-/**
  * Report an error a React or route boundary caught, which never reaches the global handlers, once
  * per page. Captured by the SDK when it is up; kept for it while it loads (at most
  * {@link unreportedErrorLimit}); sent without it once its load failed (at most
- * {@link directErrorLimit} per page), or when the page goes before it loads. Nothing is stored on the device. An error is marked reported only once it is captured,
- * kept or sent, so one dropped while the SDK loads can be reported again. Never rejects.
+ * {@link directErrorLimit} per page), or when the page goes before it loads. On a hidden page it
+ * waits for nothing: it goes at once, within the keepalive budget. Nothing is stored on the device.
+ * An error is marked reported only once it is captured, kept or sent, so one dropped while the SDK
+ * loads can be reported again. Never rejects.
  *
  * @param error - The caught value.
  */
@@ -330,7 +341,9 @@ export const reportUiError = async (error: unknown): Promise<void> => {
       return;
     }
     markReported();
-    await sendDirectlyWhenTagged({ error });
+    const sent = sendDirectlyWhenTagged({ error });
+    sendNowIfHidden();
+    await sent;
     return;
   }
   if (waitingForLoad.length >= unreportedErrorLimit) {
@@ -339,10 +352,7 @@ export const reportUiError = async (error: unknown): Promise<void> => {
   }
   markReported();
   waitingForLoad = [...waitingForLoad, { error }];
-  if (isPageHidden) {
-    // Nothing may wait on a hidden page, which may never run again: it goes now, within the budget.
-    sendWaitingErrors('hidden');
-  }
+  sendNowIfHidden();
   // Starts this page's only load when nothing has; the error goes with what it does.
   await start();
 };

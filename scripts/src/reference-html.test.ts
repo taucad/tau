@@ -316,6 +316,22 @@ const startFixtureServer = async (): Promise<{
 }> => {
   const requestedPaths: string[] = [];
   const server = createServer((request, response) => {
+    if (request.url === '/shifted-body') {
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(`<!doctype html><style>
+        body { margin: -50px 0 0; overflow-y: auto; }
+        main { padding-top: 50px; } .spacer { height: 2400px; }
+      </style><main><h1>Shifted reading surface</h1><p id="dimensions"></p>
+        <div class="spacer"></div><p id="bottom">Final evidence.</p><p id="lazy"></p>
+      </main><script>
+        document.querySelector('#dimensions').textContent = 'Body exceeds root: ' +
+          (document.body.scrollHeight > document.documentElement.scrollHeight);
+        document.addEventListener('scroll', () => {
+          document.querySelector('#lazy').textContent = 'Scrolled evidence.';
+        }, { once: true });
+      </script>`);
+      return;
+    }
     if (request.url?.startsWith('/oversized-')) {
       response.writeHead(200, { 'content-type': 'application/octet-stream' });
       response.end(oversizedBody);
@@ -658,6 +674,29 @@ describe('HTML browser capture', () => {
     ).rejects.toThrow('browser launch failed');
     expect(readdirSync(dirname(paths.artifact))).toEqual([]);
   });
+
+  it('should finish scrolling when the body extends beyond the document scroll range', async () => {
+    const fixture = await startFixtureServer();
+    const paths = temporaryHtmlPaths();
+    await captureHtmlReference({
+      id: 'shifted-body',
+      url: 'https://fixture.test/shifted-body',
+      paths,
+      dependencies: { request: fixture.request },
+    });
+    const snapshot = readHtmlSnapshot(paths.snapshot);
+    expect(snapshot.report.completeness).toBe('standards-complete');
+    expect(snapshot.html).toContain('Body exceeds root: true');
+    expect(snapshot.html).toContain('Final evidence.');
+    expect(snapshot.html).toContain('Scrolled evidence.');
+    const parser = new PDFParse({ data: readFileSync(paths.artifact) });
+    try {
+      const text = await parser.getText();
+      expect(text.text).toContain('Final evidence.');
+    } finally {
+      await parser.destroy();
+    }
+  }, 120_000);
 
   it('should capture visual pixels, standardized interaction states, and legible Markdown', async () => {
     const fixture = await startFixtureServer();

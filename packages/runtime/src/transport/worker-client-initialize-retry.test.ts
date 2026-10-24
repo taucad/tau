@@ -10,6 +10,7 @@ import { resolveRuntimeFileSystem, wrapAsRuntimeFileSystem } from '#transport/_i
 import { inProcessClient } from '#transport/in-process-client.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
+import { fromComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
 import type { ComputeGeneration, ComputeStore, ComputeStoreControl } from '#types/runtime-compute.types.js';
 
 const mocks = vi.hoisted(() => {
@@ -190,6 +191,43 @@ describe('worker transport initialize filesystem bridge retries', () => {
     const client = webWorkerClient({ createWorker: createWebWorker, compute: { mode: 'durable', store: forged } });
     await expect(client.initialize(initializePayload)).rejects.toThrow(/unregistered or foreign/);
     await client.close();
+  });
+
+  it('hands a port-backed durable store its own authority port and closes it when initialize fails', async () => {
+    const minted: Array<{ readonly runtime: MessagePort; readonly closed: Promise<void> }> = [];
+    const store = fromComputeStoreChannel(() => {
+      const channel = new MessageChannel();
+      const closed = new Promise<void>((resolve) => {
+        channel.port1.addEventListener('close', () => {
+          resolve();
+        });
+      });
+      minted.push({ runtime: channel.port2, closed });
+      return channel.port2;
+    });
+    const transferablesOf = (callIndex: number): readonly unknown[] =>
+      (mocks.channel.call.mock.calls[callIndex]?.[1] as { transferables?: readonly unknown[] }).transferables ?? [];
+
+    const web = webWorkerClient({ createWorker: createWebWorker, compute: { mode: 'durable', store } });
+    mocks.channel.call.mockRejectedValueOnce(new Error('Invalid runtime config')).mockResolvedValueOnce({});
+    await expect(web.initialize(initializePayload)).rejects.toThrow('Invalid runtime config');
+    await expect(minted[0]!.closed).resolves.toBeUndefined();
+    await expect(web.initialize(initializePayload)).resolves.toEqual({});
+    const retried = mocks.channel.call.mock.calls[1]?.[1] as InitializeCallPayload;
+    expect(retried.value?.memoryHandle).toMatchObject({ computeBindingMode: 'durable' });
+    expect(retried.value?.memoryHandle?.computeStorePort).toBe(minted[1]!.runtime);
+    expect(transferablesOf(1)).toContain(minted[1]!.runtime);
+    await web.close();
+
+    const { workerCtor } = createNodeWorkerCtor();
+    const node = nodeWorkerClient({ url: new URL('about:blank'), workerCtor, compute: { mode: 'durable', store } });
+    mocks.channel.call.mockResolvedValueOnce({});
+    await node.initialize(initializePayload);
+    const nodePayload = mocks.channel.call.mock.calls[2]?.[1] as InitializeCallPayload;
+    expect(nodePayload.value?.memoryHandle?.computeStorePort).toBe(minted[2]!.runtime);
+    expect(transferablesOf(2)).toContain(minted[2]!.runtime);
+    await node.close();
+    expect(minted).toHaveLength(3);
   });
 
   it('should rebuild inline web-worker filesystem bridges after failed initialize', async () => {

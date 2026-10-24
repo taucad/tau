@@ -5,7 +5,8 @@ import type { ParameterManifest } from '@taucad/parameters';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ParameterGroupSelector } from '#parameters/parameter-group-selector.jsx';
 
-const manifest = {} as ParameterManifest;
+// The selector only passes the manifest through to the host's group operations.
+const manifest = {} as unknown as ParameterManifest;
 
 const renderSelector = () => {
   const operations = { select: vi.fn(), create: vi.fn(), rename: vi.fn(), delete: vi.fn() };
@@ -49,7 +50,8 @@ describe('ParameterGroupSelector', () => {
     const { user } = renderSelector();
 
     await user.click(screen.getByRole('button', { name: 'Parameter groups' }));
-    const actions = (await screen.findByRole('button', { name: 'Rename wide' })).parentElement;
+    const rename = await screen.findByRole('button', { name: 'Rename wide' });
+    const actions = rename.parentElement;
 
     expect(actions?.className).toContain('pointer-coarse:opacity-100');
     expect(actions?.className).toContain('group-focus-within:opacity-100');

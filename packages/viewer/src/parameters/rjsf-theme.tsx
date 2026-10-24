@@ -288,7 +288,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         {...(schema.type === 'boolean' ? { htmlFor: id } : {})}
         className={cn(
           'flex items-center gap-2 @[240px]/parameter:flex-row',
-          schema.type === 'boolean' && 'min-h-(--param-field-h) cursor-pointer',
+          schema.type === 'boolean' && 'min-h-(--param-field-h) cursor-action',
         )}
       >
         <div className='flex min-w-0 shrink-0 items-center gap-1.5 @[240px]/parameter:w-[40%]'>

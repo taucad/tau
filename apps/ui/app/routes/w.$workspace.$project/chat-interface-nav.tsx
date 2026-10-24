@@ -114,6 +114,9 @@ export function ChatInterfaceNav({
   const [isAllOpen, setAllOpen] = useState(false);
   // Choosing a surface hands focus to that surface; All must not take it back as it closes.
   const hasChosenSurface = useRef(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  // All has no dialog trigger, so Radix has nowhere to return focus; it goes back to what opened All.
+  const opener = useRef<HTMLElement | undefined>(undefined);
   const groups = useVisibleSurfaceGroups();
   const active =
     activeTab === 'viewer' ? 'model' : activeTab === 'chat' || activeTab === 'parameters' ? activeTab : 'all';
@@ -126,6 +129,7 @@ export function ChatInterfaceNav({
         onSelect={(id) => {
           if (id === 'all') {
             hasChosenSurface.current = false;
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
             setAllOpen(true);
           } else {
             onTabChange(id === 'model' ? 'viewer' : id);
@@ -134,9 +138,17 @@ export function ChatInterfaceNav({
       />
       <Drawer open={isAllOpen} onOpenChange={setAllOpen}>
         <DrawerContent
+          ref={sheetRef}
+          className='outline-none'
+          onOpenAutoFocus={(event) => {
+            // Vaul leaves focus on the opener, outside the modal the page is hidden behind; the sheet takes it (T6).
+            event.preventDefault();
+            sheetRef.current?.focus({ preventScroll: true });
+          }}
           onCloseAutoFocus={(event) => {
-            if (hasChosenSurface.current) {
-              event.preventDefault();
+            event.preventDefault();
+            if (!hasChosenSurface.current && opener.current?.isConnected) {
+              opener.current.focus({ preventScroll: true });
             }
           }}
         >

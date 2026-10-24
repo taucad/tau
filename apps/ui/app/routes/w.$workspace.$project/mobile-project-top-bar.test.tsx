@@ -510,6 +510,17 @@ describe('MobileProjectTopBar', () => {
     expect(document.activeElement).not.toBe(titleButton());
   });
 
+  it('moves focus into the project sheet as it opens, so a keyboard user is inside the modal sheet', async () => {
+    render(<MobileProjectTopBar />, { wrapper });
+
+    titleButton().focus();
+    fireEvent.click(titleButton());
+    const sheet = await screen.findByRole('dialog', { name: projectName });
+    await waitFor(() => {
+      expect(sheet).toContainElement(document.activeElement as HTMLElement);
+    });
+  });
+
   it.each(['Close', 'Escape'])('returns focus to the title when the sheet is dismissed with %s', async (how) => {
     render(<MobileProjectTopBar />, { wrapper });
 

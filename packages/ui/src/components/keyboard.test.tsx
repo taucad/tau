@@ -107,3 +107,23 @@ it('listens in an embedded surface document and releases its listener on unmount
   expect(onKey).toHaveBeenCalledOnce();
   frame.remove();
 });
+
+it('suppresses app shortcuts inside a dialog unless the dialog is app chrome that opts back in', () => {
+  const onKey = vi.fn();
+  render(
+    <KeyboardProvider>
+      <Binding enabled={() => true} onKey={onKey} />
+      <div role='dialog' aria-label='Settings'>
+        <button type='button'>In a dialog</button>
+      </div>
+      <div role='dialog' aria-label='Sidebar' data-shortcut-scope='app'>
+        <button type='button'>In the sidebar sheet</button>
+      </div>
+    </KeyboardProvider>,
+  );
+
+  fireEvent.keyDown(screen.getByRole('button', { name: 'In a dialog' }), { key: 'k' });
+  expect(onKey).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByRole('button', { name: 'In the sidebar sheet' }), { key: 'k' });
+  expect(onKey).toHaveBeenCalledOnce();
+});

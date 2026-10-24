@@ -85,9 +85,11 @@ const defaultOptions: Required<KeybindingOptions> = {
 const nonEditableInputTypes = new Set(['button', 'submit', 'reset', 'checkbox', 'radio']);
 
 /**
- * Selector for scoped containers where 'app'-scoped shortcuts are suppressed.
+ * Selector for scoped containers where 'app'-scoped shortcuts are suppressed. A dialog that is the app's own chrome
+ * (the phone sidebar sheet, which is a plain sidebar on wide screens) opts back in with `data-shortcut-scope="app"`.
  */
-const scopedContainerSelector = '[role="dialog"], [role="alertdialog"], [data-slot="command-dialog"]';
+const scopedContainerSelector =
+  '[role="dialog"]:not([data-shortcut-scope="app"]), [role="alertdialog"], [data-slot="command-dialog"]';
 
 // ---------------------------------------------------------------------------
 // Context

@@ -142,6 +142,59 @@ test.each([
   await target.expectCount(selectors.getByRole('group', { name: 'Section view options' }), 0);
 });
 
+test.each([
+  { width: 320, height: 640 },
+  { width: 390, height: 844 },
+])('bounds running tool rows to the stage the sheet leaves at each detent at $width×$height', async (viewport) => {
+  await openStage(viewport);
+  // A surface opens the sheet at half, leaving a short stage above it.
+  await target.click(navButton('Chat'), { touch: true });
+  const grabber = selectors.getByRole('slider', { name: 'Drawer height' });
+  await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('2');
+  await target.click(controls().getByRole('button', { name: 'Section view', exact: true }), { touch: true });
+  await target.click(controls().getByRole('button', { name: 'Measure', exact: true }), { touch: true });
+  await target.expectVisible(selectors.getByRole('group', { name: 'Section view options' }));
+  await target.expectVisible(selectors.getByRole('group', { name: 'Measuring options' }));
+
+  const expectBounded = async (detent: string): Promise<void> => {
+    // The bar settles once the sheet's move ends and the stage resizes.
+    await expect
+      .poll(
+        async () => {
+          const { bar, frame } = await readLayout();
+          return bar.top >= frame.top + 7.5 && bar.bottom <= frame.bottom;
+        },
+        { timeout: 5000, message: `the bar should stay inside the stage at ${detent}` },
+      )
+      .toBe(true);
+    const layout = await readLayout();
+    const handle = await target.boundingBox(grabber);
+    if (!handle) {
+      throw new Error('The grabber has no layout box.');
+    }
+    // The controls line is whole, on the stage and above the sheet; the rows scroll rather than spill sideways.
+    expect(layout.group.top, detent).toBeGreaterThanOrEqual(layout.frame.top);
+    expect(layout.group.bottom, detent).toBeLessThanOrEqual(Math.min(layout.frame.bottom, handle.y) + 0.5);
+    for (const button of layout.buttons.filter(({ name }) => name === 'Fit view' || name === 'Viewer settings')) {
+      expect([detent, button.name, button.box.height]).toEqual([detent, button.name, 28]);
+    }
+    expect(layout.rows, `the tool rows should render in the bar at ${detent}`).toBeDefined();
+    expect(layout.rows!.box.top).toBeGreaterThanOrEqual(layout.frame.top);
+    expect(layout.rows!.scrollWidth).toBeLessThanOrEqual(layout.rows!.clientWidth);
+    expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+  };
+
+  await expectBounded('Half');
+  // Down to the peek: the stage grows, and the bound follows it.
+  await target.press(grabber, 'Home');
+  await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('1');
+  await expectBounded('Peek');
+  // Back up to half: the stage shrinks again, and the rows still fit inside it.
+  await target.press(grabber, 'Enter');
+  await expect.poll(async () => target.getAttribute(grabber, 'aria-valuenow')).toBe('2');
+  await expectBounded('Half again');
+});
+
 test('keeps the real fullscreen and no AR on desktop', async () => {
   await target.commands.uiOpenTarget();
   await prepareComposerPage();

@@ -63,9 +63,11 @@ const startGraphics = (): GraphicsActor => {
 const renderStage = ({
   height,
   mobileAction,
+  aboveControls,
 }: {
   readonly height: number;
   readonly mobileAction?: React.ReactNode;
+  readonly aboveControls?: React.ReactNode;
 }): GraphicsActor => {
   const actor = startGraphics();
   render(
@@ -77,7 +79,7 @@ const renderStage = ({
               graphicsRef={actor}
               regionId='browser-viewer-canvas'
               renderCanvas={() => <div role='img' aria-label='3D model preview' className='size-full' />}
-              controls={<ChatViewerControls mobileAction={mobileAction} />}
+              controls={<ChatViewerControls mobileAction={mobileAction} aboveControls={aboveControls} />}
             />
           </div>
         </GraphicsProvider>
@@ -242,6 +244,50 @@ describe('Viewer controls on phones in Chromium', () => {
       expect(screen.queryByRole('group', { name: 'Section view options' })).not.toBeInTheDocument();
     },
   );
+});
+
+/** An open issues list as `ViewerIssues` hands it to the bar: a region whose list scrolls past its own cap. */
+const issuesList = (
+  <div role='region' aria-label='Issues' className='flex w-full flex-col border-b pb-1'>
+    <ul className='max-h-[min(16rem,40svh)] divide-y overflow-y-auto'>
+      {Array.from({ length: 12 }, (_, index) => (
+        <li key={index} className='py-1.5 pl-2 text-xs'>
+          Issue {index + 1}
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
+describe('Viewer controls with the issues list on phones in Chromium', () => {
+  it('shares a short stage between the issues list and the tool rows, keeping both and the controls line', async () => {
+    await page.viewport(320, 640);
+    renderStage({ height: 260, aboveControls: issuesList });
+    await userEvent.click(screen.getByRole('button', { name: 'Section view' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Measure' }));
+    const rows = screen
+      .getByRole('group', { name: 'Section view options' })
+      .closest<HTMLElement>('[data-slot="viewer-tool-rows"]')!;
+    const issues = screen.getByRole('region', { name: 'Issues' });
+
+    const stage = box(frame());
+    await expect.poll(() => box(bar()).top).toBeGreaterThanOrEqual(stage.top + 8 - 0.5);
+    // Nothing spills out of the bar: its sections end inside it, and the controls line is whole below them.
+    const barBox = box(bar());
+    const group = box(controlsGroup());
+    expect(group.bottom).toBeLessThanOrEqual(barBox.bottom);
+    expect(box(issues).top).toBeGreaterThanOrEqual(barBox.top);
+    expect(box(rows).top).toBeGreaterThanOrEqual(barBox.top);
+    for (const button of controlButtons()) {
+      expect(box(button).height).toBe(28);
+    }
+    // Both shrink and scroll; neither is squeezed out.
+    expect(rows.clientHeight).toBeGreaterThanOrEqual(28);
+    expect(issues.querySelector('ul')!.clientHeight).toBeGreaterThanOrEqual(28);
+    expect(rows.scrollHeight + issues.querySelector('ul')!.scrollHeight).toBeGreaterThan(
+      rows.clientHeight + issues.querySelector('ul')!.clientHeight,
+    );
+  });
 });
 
 describe('Viewer controls on desktop in Chromium', () => {

@@ -244,7 +244,10 @@ function barLayout(isMobile: boolean, isTouch: boolean): { bar: string; toolRows
   return {
     bar: cn(
       'pointer-events-auto flex max-w-full flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs',
-      isMobile ? 'max-h-full min-h-0 min-w-0' : 'min-w-min',
+      // `max-h-full` is the fallback for a phone bar outside a viewer frame, in a parent of bounded height; inside a
+      // frame the measured max height replaces it. Every section may shrink, so the issues list scrolls beside the tool
+      // rows instead of squeezing them out; the controls line holds its height (`shrink-0`).
+      isMobile ? 'max-h-full min-h-0 min-w-0 *:min-h-0' : 'min-w-min',
     ),
     toolRows: cn('flex flex-col gap-1', isMobile && 'min-h-0 overflow-y-auto'),
     controls: cn(

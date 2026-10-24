@@ -57,9 +57,7 @@ describe('OpenCascade observed heap', { timeout: 120_000 }, () => {
   it('reports its WebAssembly memory after initialize, equal to the recycling hook', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', opencascadeKernel());
     const runtime = createMockKernelRuntime();
-    const context = (await definition.initialize(opencascadeOptionsSchema.parse({}), runtime)) as {
-      occt: { value: { wasmMemory: WebAssembly.Memory } };
-    };
+    const context = await definition.initialize(opencascadeOptionsSchema.parse({}), runtime);
     try {
       const observed = definition.observedHeapBytes?.(context);
 

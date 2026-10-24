@@ -210,9 +210,7 @@ export function SettingsSurface({
   /** Where focus last was before the host opened settings, for when the opener has since unmounted. */
   readonly lastFocus?: React.RefObject<HTMLElement | undefined>;
 }): React.JSX.Element {
-  const Content = isEmbedded ? EmbeddedSettingsContent : DialogContent;
-  const Title: SettingsTitle = isEmbedded ? EmbeddedTitle : DialogTitle;
-  const Description = isEmbedded ? EmbeddedDescription : DialogDescription;
+  const { Content, Title, Description } = isEmbedded ? embeddedParts : dialogParts;
   const isMobile = useIsMobile();
   const [query, setQuery] = useState('');
   const [searchDestination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
@@ -414,7 +412,6 @@ export function SettingsSurface({
         }
       }}
     >
-      {/* Radix titles throw outside a Dialog root, so embedded hosts get plain landmarks. */}
       {showsList ? null : <Title className='sr-only'>Settings</Title>}
       <Description className='sr-only'>Application settings and preferences</Description>
       <div className={cn('flex min-h-0 min-w-0 flex-col', !isMobile && 'md:flex-row')}>
@@ -650,10 +647,18 @@ function EmbeddedSettingsContent({
 
 type SettingsTitle = React.ComponentType<{ readonly className?: string; readonly children: React.ReactNode }>;
 
-function EmbeddedTitle(props: React.ComponentProps<'h2'>): React.JSX.Element {
-  return <h2 {...props} />;
+function EmbeddedTitle({ children, ...props }: React.ComponentProps<'h2'>): React.JSX.Element {
+  return <h2 {...props}>{children}</h2>;
 }
 
 function EmbeddedDescription(props: React.ComponentProps<'p'>): React.JSX.Element {
   return <p {...props} />;
 }
+
+/** Radix titles throw outside a Dialog root, so embedded hosts get plain landmarks. */
+const embeddedParts = {
+  Content: EmbeddedSettingsContent,
+  Title: EmbeddedTitle as SettingsTitle,
+  Description: EmbeddedDescription,
+};
+const dialogParts = { Content: DialogContent, Title: DialogTitle as SettingsTitle, Description: DialogDescription };

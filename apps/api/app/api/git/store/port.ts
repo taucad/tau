@@ -18,13 +18,14 @@ import type { Readable } from 'node:stream';
  * - **No `headObject`.** To learn whether a pack exists and how large it is,
  *   list its prefix. One primitive, one round trip, and the answer a committer
  *   needs is "which keys are there", not "is this one key there".
- * - **No whole-object integrity check on the multipart path.** `putObject`
- *   passes `sha256` straight through for a single-part write, where the
- *   backend verifies it, but an object above the single-part ceiling is
- *   uploaded as parts, each verified by its own part checksum. Nothing
- *   re-checks the assembled object against the whole-object digest. For packs
- *   this is acceptable because git's own `index-pack`/`fsck` verify pack bytes
- *   on the way out.
+ * - **No server-side whole-object integrity check on the multipart path.**
+ *   `putObject` passes `sha256` straight through for a single-part write,
+ *   where the backend verifies it. An object above the single-part ceiling is
+ *   uploaded as parts; the adapter hashes the bytes it sends and refuses to
+ *   complete the upload unless they match `sha256`, but nothing on the backend
+ *   re-checks the assembled object, and R2 verifies no part checksum at all
+ *   (W0b §2b). For packs this is acceptable because git's own
+ *   `index-pack`/`fsck` verify pack bytes on the way out.
  */
 
 /**
@@ -69,10 +70,30 @@ export type StoreCapabilities = {
 export type StoredObject = { readonly key: string; readonly bytes: number; readonly modifiedAt: Date | undefined };
 
 /**
+ * Bytes the adapter reads as a stream rather than holding in memory (DA4).
+ * Each call opens a **fresh** stream from the first byte of the same bytes,
+ * so the adapter can send the object again after a transport error: the AWS
+ * SDK never retries a request whose body is a stream, because it cannot
+ * rewind one. A pack in a lease is a file, so this is `createReadStream`.
+ *
+ * The writer computes `PutObjectOptions.sha256` over the same bytes first
+ * (one hashing pass, then one upload pass). The backend verifies the digest
+ * against what it received on a single-part write, so bytes that changed
+ * between the two passes are refused rather than stored under a digest they
+ * do not have.
+ */
+export type ObjectSource = () => Promise<Readable>;
+
+/** An object body: bytes already in memory, or a source the adapter streams from. */
+export type ObjectBody = Uint8Array<ArrayBuffer> | ObjectSource;
+
+/**
  * Integrity and length a writer already knows. `contentLength` is not a hint:
  * the adapter refuses a call whose declared length disagrees with the body, so
  * a caller that computed its digest over different bytes than it is uploading
- * fails here rather than storing a mislabelled object.
+ * fails here rather than storing a mislabelled object. For a streamed body
+ * the adapter counts the bytes as they pass and fails the upload on the first
+ * byte past the declared length, or at the end of a stream that fell short.
  */
 export type PutObjectOptions = {
   readonly contentLength: number;
@@ -108,11 +129,15 @@ export type RepositoryStore = {
     signal?: AbortSignal,
   ): Promise<CommitToken | 'lost'>;
 
-  /** Writes an immutable object. `key` is unique per upload, so this never overwrites (charter I3). */
+  /**
+   * Writes an immutable object. `key` is unique per upload, so this never
+   * overwrites (charter I3), which is also what makes resending a streamed
+   * body after a transport error safe.
+   */
   putObject(
     locator: RepositoryLocator,
     key: string,
-    body: Uint8Array<ArrayBuffer>,
+    body: ObjectBody,
     options: PutObjectOptions,
     signal?: AbortSignal,
   ): Promise<void>;

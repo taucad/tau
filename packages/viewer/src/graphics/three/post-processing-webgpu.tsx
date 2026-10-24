@@ -266,10 +266,6 @@ const createPipelineResources = ({
   // Four decoded normal taps save memory on native GPU, but cost more than
   // hardware filtering on node WebGL2 in the matched 5K comparison.
   const compactNormals = gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;
-  // Native reuse is qualified. Node WebGL2 retains fused composition until its
-  // packaged saved-section startup/resize contour difference is attributed and
-  // passes matched independent history checks (qualification-closeout.md).
-  const reuseSurfaceTarget = gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;
   const scenePass = pass(scene, camera, { samples: 0 });
   // One scene, two draw phases: CAD coverage is not input to AO or surface AA.
   // Preserve the renderer owner's depth-bias hook and restore it even after errors.
@@ -489,7 +485,7 @@ const createPipelineResources = ({
     // Performance candidate: filter at the AO budget, then bilinearly reconstruct.
     // This avoids native-resolution depth/normal gathers; boundary halos remain a visual gate.
     const composedSample = (uv: Node<'vec2'>): Node<'vec4'> => {
-      // Sample the same tone-mapped surface/AO contract at the AA search position.
+      // Materialize tone-mapped surface/AO once before filtering the stored color.
       // CAD line color never enters surface composition or its filter.
       const color = scenePassColor.sample(uv);
       const aoFactor = select<'float'>(aoNode!.scale.greaterThan(0), denoiseInput!.sample(uv).r, float(1));
@@ -501,50 +497,45 @@ const createPipelineResources = ({
       );
       return mix(beauty, vec4(vec3(aoFactor), color.a), select<'float'>(displayMode.equal(1), float(1), float(0)));
     };
-    outputQuad = createOutputQuad(
-      reuseSurfaceTarget ? composedSample(screenUV) : createViewportFxaa(scenePassColor, composedSample),
-      frame.sharedDepth ? undefined : depthRestoreMaterial,
+    outputQuad = createOutputQuad(composedSample(screenUV), frame.sharedDepth ? undefined : depthRestoreMaterial);
+    const composedTarget = frame.target;
+    composedTarget.texture.name = 'Tau composed surface';
+    const reuse = createSurfaceReuse({
+      renderer: gpuRenderer,
+      scene: scenePass.renderTarget,
+      composed: composedTarget,
+    });
+    const reuseTarget = reuse.target;
+    frame.target = reuseTarget;
+    (frame.output.material as NodeMaterial).fragmentNode = renderOutput(
+      texture(reuseTarget.texture),
+      NoToneMapping,
+      gpuRenderer.outputColorSpace,
     );
-    if (reuseSurfaceTarget) {
-      const composedTarget = frame.target;
-      composedTarget.texture.name = 'Tau composed surface';
-      const reuse = createSurfaceReuse({
-        renderer: gpuRenderer,
-        scene: scenePass.renderTarget,
-        composed: composedTarget,
-      });
-      const reuseTarget = reuse.target;
-      frame.target = reuseTarget;
-      (frame.output.material as NodeMaterial).fragmentNode = renderOutput(
-        texture(reuseTarget.texture),
-        NoToneMapping,
-        gpuRenderer.outputColorSpace,
+    const filtered = createOutputQuad(createViewportFxaa(texture(composedTarget.texture)));
+    filtered.name = 'Tau reused surface FXAA';
+    const compose = outputQuad.render.bind(outputQuad);
+    outputQuad.render = (renderer) => {
+      reuse.render(
+        () => {
+          compose(renderer);
+        },
+        () => {
+          filtered.render(renderer);
+        },
       );
-      const filtered = createOutputQuad(createViewportFxaa(texture(composedTarget.texture)));
-      filtered.name = 'Tau reused surface FXAA';
-      const compose = outputQuad.render.bind(outputQuad);
-      outputQuad.render = (renderer) => {
-        reuse.render(
-          () => {
-            compose(renderer);
-          },
-          () => {
-            filtered.render(renderer);
-          },
-        );
-      };
-      prepareSurfaceReuse = (width, height) => {
-        reuse.prepare(width, height);
-        frame!.depthPrepared = true;
-      };
-      disposeSurfaceReuse = () => {
-        composedTarget.dispose();
-        (filtered.material as NodeMaterial).dispose();
-      };
-    }
+    };
+    prepareSurfaceReuse = (width, height) => {
+      reuse.prepare(width, height);
+      frame!.depthPrepared = true;
+    };
+    disposeSurfaceReuse = () => {
+      composedTarget.dispose();
+      (filtered.material as NodeMaterial).dispose();
+    };
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
     // Camera preparation can reuse this graph within Three's current animation
-    // frame. Both fused and reused output need fresh inputs for the next camera;
+    // frame. Reused scene color needs fresh inputs for the next camera;
     // nested AO/filter draws still share a single scene acquisition.
     updatePerComposition(outputQuad, [scenePass, aoNode]);
 

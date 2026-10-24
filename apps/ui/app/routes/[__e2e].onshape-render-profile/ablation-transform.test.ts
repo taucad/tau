@@ -35,14 +35,6 @@ describe('calibration-only rendering ablation', () => {
     expect(transformed).not.toContain('current.frame === 330) resetAllocationCosts(false)');
   });
 
-  it('preserves backend production defaults unless a composition override is explicit', () => {
-    const file = 'packages/viewer/src/graphics/three/post-processing-webgpu.tsx';
-    const transformed = transformRenderingAblation(readFileSync(resolve(root, file), 'utf8'), `/${file}`);
-    expect(transformed).toContain(
-      "const reuseSurfaceTarget = tauAblation.has('surfaceFilter') ? tauAblation.get('surfaceFilter') === 'reuse' : gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;",
-    );
-  });
-
   it('does not alter unrelated product modules', () => {
     expect(transformRenderingAblation('unchanged', '/graphics/three/unrelated.tsx')).toBeUndefined();
   });

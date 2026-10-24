@@ -12,39 +12,14 @@ export function transformRenderingAblation(source: string, id: string): string |
     }
     code = code.replace(before, after);
   };
-  const prelude = `const tauAblation = new URLSearchParams(globalThis.location.search);\n`;
+  const prelude = `const tauAblation = new URLSearchParams(globalThis.location.search);
+if (tauAblation.has('surfaceFilter')) throw new Error('surfaceFilter is retired: node composition always reuses scene color. Use source 44fd8d3acb for historical variants.');
+`;
   if (file.endsWith('/graphics/three/post-processing-webgpu.tsx')) {
     code = "import { ivec2, screenCoordinate } from 'three/tsl';\n" + code;
     replace(
       "import { createViewportFxaa } from '#graphics/three/fxaa.js';",
-      "import { createViewportFxaa as tauSurfaceFxaa } from '#graphics/three/fxaa.js';\nconst createViewportFxaa: typeof tauSurfaceFxaa = (input, sampleColor) => tauAblation.get('surfaceAa') === 'off' && sampleColor ? sampleColor(screenUV) : tauSurfaceFxaa(input, sampleColor, tauAblation.get('surfaceFilter') === 'reference' ? 12 : 6);",
-    );
-    // Compose-once experiment uses the same filter and linear-light input contract.
-    // Its one sRGB color attachment is owned/disposed with the active endpoint.
-    replace(
-      '  denoiseInput?: ReturnType<typeof rtt>;',
-      '  denoiseInput?: ReturnType<typeof rtt>;\n  surfaceInput?: ReturnType<typeof rtt>;',
-    );
-    replace(
-      '  let denoiseInput: ReturnType<typeof rtt> | undefined;',
-      '  let denoiseInput: ReturnType<typeof rtt> | undefined;\n  let surfaceInput: ReturnType<typeof rtt> | undefined;',
-    );
-    replace(
-      '      reuseSurfaceTarget ? composedSample(screenUV) : createViewportFxaa(scenePassColor, composedSample),',
-      `      reuseSurfaceTarget ? composedSample(screenUV) : tauAblation.get('surfaceFilter') === 'composed'
-        ? createViewportFxaa(surfaceInput = rtt(composedSample(screenUV), null, null, {
-            type: UnsignedByteType, colorSpace: SRGBColorSpace, depthBuffer: false, stencilBuffer: false, samples: 0,
-          }))
-        : createViewportFxaa(scenePassColor, composedSample),`,
-    );
-    replace('      denoiseInput,', '      denoiseInput,\n      surfaceInput,');
-    replace(
-      '    disposeOwnedRtt(denoiseInput);',
-      '    disposeOwnedRtt(denoiseInput);\n    disposeOwnedRtt(surfaceInput);',
-    );
-    replace(
-      '    disposeOwnedRtt(resource.denoiseInput);',
-      '    disposeOwnedRtt(resource.denoiseInput);\n    disposeOwnedRtt(resource.surfaceInput);',
+      "import { createViewportFxaa as tauSurfaceFxaa } from '#graphics/three/fxaa.js';\nconst createViewportFxaa: typeof tauSurfaceFxaa = (input, sampleColor) => tauAblation.get('surfaceAa') === 'off' ? (sampleColor ? sampleColor(screenUV) : input) : tauSurfaceFxaa(input, sampleColor);",
     );
     replace(
       '    const preparation = scheduleCameraPreparation(renderer.domElement, () => {',
@@ -61,10 +36,6 @@ export function transformRenderingAblation(source: string, id: string): string |
       `        const preparationStart = performance.now();
         selected.outputQuad.render(renderer);
         scene.userData.calibrationPreparation = { milliseconds: performance.now() - preparationStart, at: performance.now() };`,
-    );
-    replace(
-      'const reuseSurfaceTarget = gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;',
-      "const reuseSurfaceTarget = tauAblation.has('surfaceFilter') ? tauAblation.get('surfaceFilter') === 'reuse' : gpuRenderer.coordinateSystem !== WebGLCoordinateSystem;",
     );
     // Native sharing remains experimental; node WebGL2 shares by default.
     code = "import { FloatType } from 'three';\n" + code;

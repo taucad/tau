@@ -656,24 +656,28 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     mounted.unmount();
   });
 
-  it('should reuse native scene color with compact composition and precise depth', async () => {
-    const mounted = await mount();
-    mocks.getFrame()?.(mocks.state, 0);
-    const target = mocks.gl.getRenderTarget() as RenderTarget;
-    expect(target.texture).toBe(mocks.scenePasses[0]!.renderTarget.texture);
-    const composed = mocks.gl.initRenderTarget.mock.calls
-      .map(([value]) => value as RenderTarget)
-      .find((value) => value.texture.name === 'Tau composed surface')!;
-    expect(composed.texture.type).toBe(UnsignedByteType);
-    expect(composed.texture.colorSpace).toBe(SRGBColorSpace);
-    expect(target.depthTexture).toBe(composed.depthTexture);
-    expect(target.depthTexture?.type).toBe(UnsignedInt248Type);
-    expect(target.depthTexture?.format).toBe(DepthStencilFormat);
-    expect(target.samples).toBe(0);
-    expect(target.width).toBe(3000);
-    expect(target.height).toBe(2000);
-    mounted.unmount();
-  });
+  it.each([2000, 2001])(
+    'should reuse scene color with compact composition and precise depth on %s',
+    async (coordinates) => {
+      mocks.gl.coordinateSystem = coordinates;
+      const mounted = await mount();
+      mocks.getFrame()?.(mocks.state, 0);
+      const target = mocks.gl.getRenderTarget() as RenderTarget;
+      expect(target.texture).toBe(mocks.scenePasses[0]!.renderTarget.texture);
+      const composed = mocks.gl.initRenderTarget.mock.calls
+        .map(([value]) => value as RenderTarget)
+        .find((value) => value.texture.name === 'Tau composed surface')!;
+      expect(composed.texture.type).toBe(UnsignedByteType);
+      expect(composed.texture.colorSpace).toBe(SRGBColorSpace);
+      expect(target.depthTexture).toBe(composed.depthTexture);
+      expect(target.depthTexture?.type).toBe(UnsignedInt248Type);
+      expect(target.depthTexture?.format).toBe(DepthStencilFormat);
+      expect(target.samples).toBe(0);
+      expect(target.width).toBe(3000);
+      expect(target.height).toBe(2000);
+      mounted.unmount();
+    },
+  );
 
   it('should retain HDR frame storage for unbounded output and retire it on tone-map changes', async () => {
     const mounted = await mount({ toneMapping: NoToneMapping });
@@ -942,7 +946,7 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     );
   });
 
-  it('should share D24S8 only on node WebGL2 and prepare both users before drawing', async () => {
+  it('should share D24S8 on node WebGL2 and prepare all three views before drawing', async () => {
     mocks.gl.coordinateSystem = 2000;
     const mounted = await mount();
     const scenePass = mocks.scenePasses[0]!;
@@ -960,15 +964,18 @@ describe('PostProcessingWebGPU active endpoint pipeline', () => {
     expect(target.depthTexture).toMatchObject({ type: UnsignedInt248Type, format: DepthStencilFormat });
     expect(scenePass.renderTarget.stencilBuffer).toBe(true);
     expect(mocks.outputQuads[0]!.material.depthWrite).toBe(false);
-    expect(mocks.gl.initRenderTarget.mock.calls).toEqual([[scenePass.renderTarget], [target]]);
+    const composed = mocks.gl.initRenderTarget.mock.calls[1]![0] as RenderTarget;
+    expect(composed.texture.name).toBe('Tau composed surface');
+    expect(composed.depthTexture).toBe(target.depthTexture);
+    expect(mocks.gl.initRenderTarget.mock.calls).toEqual([[scenePass.renderTarget], [composed], [target]]);
     expect(scenePass.renderTarget.setSize).toHaveBeenCalledWith(3000, 2000);
     expect(mocks.gl.autoClearDepth).toBe(true);
     expect(mocks.gl.autoClearStencil).toBe(true);
     mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.gl.initRenderTarget).toHaveBeenCalledTimes(2);
+    expect(mocks.gl.initRenderTarget).toHaveBeenCalledTimes(3);
     const dimensions = vi.spyOn(mocks.gl, 'getDrawingBufferSize').mockImplementation((size) => size.set(5120, 2880));
     mocks.getFrame()?.(mocks.state, 0);
-    expect(mocks.gl.initRenderTarget).toHaveBeenCalledTimes(4);
+    expect(mocks.gl.initRenderTarget).toHaveBeenCalledTimes(6);
     expect(scenePass.renderTarget.setSize).toHaveBeenLastCalledWith(5120, 2880);
     expect(target.depthTexture).toBe(scenePass.getTexture('depth'));
     dimensions.mockRestore();

@@ -4,9 +4,8 @@ import viewer from '../../packages/viewer/src/graphics/three/viewer-resize.vites
 // oxlint-disable-next-line eslint/no-restricted-imports -- Calibration configuration is outside the app alias root.
 import { transformRenderingAblation } from './app/routes/[__e2e].onshape-render-profile/ablation-transform.js';
 
-const surfaceFilter = process.env['TAU_E2E_SURFACE_FILTER'] ?? 'production';
-if (!['production', 'short', 'reference', 'composed', 'reuse'].includes(surfaceFilter)) {
-  throw new Error('Unknown surface filter experiment');
+if (process.env['TAU_E2E_SURFACE_FILTER'] !== undefined) {
+  throw new Error('TAU_E2E_SURFACE_FILTER is retired; use source 44fd8d3acb for historical composition comparisons.');
 }
 
 const frameStorage = process.env['TAU_E2E_FRAME_STORAGE'] ?? 'compact';
@@ -30,7 +29,7 @@ export default mergeConfig(
           }
           return transformRenderingAblation(source, id)?.replace(
             'new URLSearchParams(globalThis.location.search)',
-            `new URLSearchParams('${surfaceFilter === 'production' ? '' : `surfaceFilter=${surfaceFilter}&`}frameStorage=${frameStorage}')`,
+            `new URLSearchParams('frameStorage=${frameStorage}')`,
           );
         },
       },

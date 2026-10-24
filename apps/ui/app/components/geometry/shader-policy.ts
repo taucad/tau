@@ -82,7 +82,7 @@ export const shaderSites = [
     ],
     authoring: ['glsl', 'tsl', 'fixed-function', 'render-pass'],
     backends: ['webgl', 'webgpu'],
-    risks: ['camera', 'depth', 'clipping', 'lifecycle', 'hot-path'],
+    risks: ['camera', 'derivatives', 'depth', 'clipping', 'lifecycle', 'hot-path'],
   },
   {
     id: 'surface-depth-bias',
@@ -547,8 +547,8 @@ export const shaderEvidence = {
       'packages/viewer/src/graphics/three/canvas-three-gl.test.ts::should configure both native camera projections before the first WebGPU scene pass',
     ],
     'structural-perf': [
-      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should share D24S8 only on node WebGL2 and prepare both users before drawing',
-      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should reuse native scene color with compact composition and precise depth',
+      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should share D24S8 on node WebGL2 and prepare all three views before drawing',
+      'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should reuse scene color with compact composition and precise depth on %s',
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should occlude grid and hidden outlines through actual stencil caps',
       'packages/viewer/src/graphics/three/post-processing-webgpu.test.tsx::should retain one linear stencil frame through overlays and encode only at frame completion',
       'packages/viewer/src/graphics/three/canvas-three-gl.test.ts::should leave canvas depth to the composed frame without changing standalone renderers',

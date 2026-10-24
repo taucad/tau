@@ -85,7 +85,11 @@ vi.mock('#graphics/three/fxaa.js', async (importOriginal) => {
           ),
         );
       }
-      return inject('surfaceAa') === 'off' && args[1] ? args[1](screenUV) : actual.createViewportFxaa(...args);
+      return inject('surfaceAa') === 'off'
+        ? args[1]
+          ? args[1](screenUV)
+          : args[0].sample(screenUV)
+        : actual.createViewportFxaa(...args);
     },
   };
 });
@@ -2323,9 +2327,11 @@ it.each(['webgpu', 'node-webgl2'] as const)(
     ).start();
     let state: RootState | undefined;
     let rig: ReturnType<typeof useCameraRig> | undefined;
+    let framing: ReturnType<typeof useViewCameraFraming> | undefined;
     const Probe = (): undefined => {
       state = useThree();
       rig = useCameraRig();
+      framing = useViewCameraFraming();
       return undefined;
     };
     // Crop only empty margins after a complete native 5K render/readback.
@@ -2370,6 +2376,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
         () => {
           expect(state?.scene.getObjectByName('Internal_Ring_Gear')).toBeDefined();
           expect(referenceMode.surfaceQuality).toBeDefined();
+          expect(framing?.initialized).toBe(true);
         },
         { timeout: 45_000 },
       );
@@ -2383,6 +2390,7 @@ it.each(['webgpu', 'node-webgl2'] as const)(
       const originalRotation = gear.rotation.z;
       let previous: { reference: Uint8ClampedArray; candidate: Uint8ClampedArray } | undefined;
       let initial: Uint8ClampedArray | undefined;
+      let initialCameraPose: number[] | undefined;
       let completedPhases = 0;
       for (const phase of [0, 0.25, 0.5, 0.75, 0]) {
         gear.rotation.z = originalRotation + phase * 0.002;
@@ -2398,6 +2406,15 @@ it.each(['webgpu', 'node-webgl2'] as const)(
           await capture(6);
         }
         const cameraPose = [...state!.camera.matrixWorld.elements, ...state!.camera.projectionMatrix.elements];
+        if (phase === 0 && initialCameraPose) {
+          for (const [index, value] of cameraPose.entries()) {
+            expect(
+              value,
+              'Return-pose comparison requires the same camera, within floating-point roundoff',
+            ).toBeCloseTo(initialCameraPose[index]!, 12);
+          }
+        }
+        initialCameraPose ??= cameraPose;
         // Ordered samples share a pose and the same live composition/attachments.
         // eslint-disable-next-line no-await-in-loop -- Drain each GPU capture before changing the quality uniform.
         const raw = await capture(0);

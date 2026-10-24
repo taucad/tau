@@ -126,7 +126,7 @@ function Drawer({
       {/* DrawerContent keeps a focused field above the keyboard. Vaul's own repositioning moves the
           drawer a second time on top of iOS's pan, and with snap points it counts the snap offset
           twice, so it pushes the field off screen. */}
-      <DrawerSnapContext value={snaps}>
+      <DrawerSnapContext.Provider value={snaps}>
         <DrawerPrimitive.Root
           data-slot='drawer'
           container={container}
@@ -135,7 +135,7 @@ function Drawer({
           activeSnapPoint={snaps.active ?? null}
           setActiveSnapPoint={snaps.setActive}
         />
-      </DrawerSnapContext>
+      </DrawerSnapContext.Provider>
     </DrawerContext.Provider>
   );
 }
@@ -159,7 +159,7 @@ function DrawerNestedRoot({
   const container = useResponsiveSurfaceContainer();
   const snaps = useDrawerSnapState(properties);
   return (
-    <DrawerSnapContext value={snaps}>
+    <DrawerSnapContext.Provider value={snaps}>
       <DrawerPrimitive.NestedRoot
         data-slot='drawer-nested-root'
         container={container}
@@ -168,7 +168,7 @@ function DrawerNestedRoot({
         activeSnapPoint={snaps.active ?? null}
         setActiveSnapPoint={snaps.setActive}
       />
-    </DrawerSnapContext>
+    </DrawerSnapContext.Provider>
   );
 }
 

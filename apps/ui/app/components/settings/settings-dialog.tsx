@@ -257,8 +257,18 @@ export function SettingsSurface({
         }
       }}
     >
-      <DialogTitle className='sr-only'>Settings</DialogTitle>
-      <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
+      {/* Radix titles throw outside a Dialog root, so embedded hosts get plain landmarks. */}
+      {isEmbedded ? (
+        <>
+          <h2 className='sr-only'>Settings</h2>
+          <p className='sr-only'>Application settings and preferences</p>
+        </>
+      ) : (
+        <>
+          <DialogTitle className='sr-only'>Settings</DialogTitle>
+          <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
+        </>
+      )}
       <div className='flex min-h-0 min-w-0 flex-col md:flex-row'>
         <aside className='flex shrink-0 flex-col gap-4 border-b bg-sidebar p-4 max-md:max-h-[45%] md:w-64 md:border-r md:border-b-0'>
           <Button variant='ghost' className='w-full justify-start' onClick={close}>
@@ -383,10 +393,28 @@ export function SettingsSurface({
   );
 }
 
-/** Embedded hosts already own their focus boundary. */
+/** Embedded hosts already own their focus boundary; Escape that clears search stays inside. */
 function EmbeddedSettingsContent({
   children,
   className,
+  onEscapeKeyDown,
 }: React.ComponentProps<typeof DialogContent>): React.JSX.Element {
-  return <div className={cn(className, 'grid h-full w-full max-w-none sm:max-w-none')}>{children}</div>;
+  return (
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- delegates Escape from the focused search field.
+    <div
+      className={cn(className, 'grid h-full w-full max-w-none sm:max-w-none')}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') {
+          return;
+        }
+
+        onEscapeKeyDown?.(event.nativeEvent);
+        if (event.nativeEvent.defaultPrevented) {
+          event.stopPropagation();
+        }
+      }}
+    >
+      {children}
+    </div>
+  );
 }

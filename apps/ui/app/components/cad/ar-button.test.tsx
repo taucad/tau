@@ -1,61 +1,430 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Artifact, RuntimeDocument } from '@taucad/runtime';
+import { mimeTypes } from '@taucad/types/constants';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ArButton } from '#components/cad/ar-button.js';
 
-const mobileMocks = vi.hoisted(() => ({ isMobile: true }));
-
-vi.mock('@taucad/ui/hooks/use-mobile', () => ({
-  useIsMobile: () => mobileMocks.isMobile,
+// WebGL is unavailable in jsdom, so the Three.js scene is the one simulated boundary; the session, overlay, capability
+// detection and recovery all run for real against faked platform globals.
+const sceneMocks = vi.hoisted(() => ({
+  present: vi.fn<(session: unknown, glb: Uint8Array<ArrayBuffer>) => Promise<() => void>>(async () => () => undefined),
 }));
 
-const arMocks = vi.hoisted(() => ({
-  canActivateAr: true,
-  isConverting: false,
-  activateAr: vi.fn(async () => undefined),
+vi.mock('#components/cad/ar-webxr-scene.js', () => ({
+  presentGlbInArSession: sceneMocks.present,
 }));
 
-vi.mock('#components/cad/use-ar.js', () => ({
-  useAr: () => ({
-    isQuickLookSupported: arMocks.canActivateAr,
-    canActivateAr: arMocks.canActivateAr,
-    isConverting: arMocks.isConverting,
-    activateAr: arMocks.activateAr,
-  }),
-}));
+const ua = {
+  iPhoneSafari:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+  iPadDesktopSafari:
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
+  androidChrome:
+    'Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
+  desktopChrome:
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+} as const;
+
+class FakeXrSession extends EventTarget {
+  public readonly end = vi.fn(async () => {
+    this.dispatchEvent(new Event('end'));
+  });
+}
+
+type Platform = Readonly<{
+  userAgent: string;
+  platform: string;
+  maxTouchPoints: number;
+  /** What `a.relList.supports('ar')` answers. */
+  relListAr: boolean;
+  /** Whether `navigator.xr` exists and what `isSessionSupported('immersive-ar')` answers. */
+  xr?: { immersiveAr: boolean };
+}>;
+
+const platforms = {
+  iPhoneSafari: { userAgent: ua.iPhoneSafari, platform: 'iPhone', maxTouchPoints: 5, relListAr: true },
+  iPadOsDesktopUa: { userAgent: ua.iPadDesktopSafari, platform: 'MacIntel', maxTouchPoints: 5, relListAr: true },
+  macSafari: { userAgent: ua.iPadDesktopSafari, platform: 'MacIntel', maxTouchPoints: 0, relListAr: true },
+  androidChromeWebXr: {
+    userAgent: ua.androidChrome,
+    platform: 'Linux armv8l',
+    maxTouchPoints: 5,
+    relListAr: false,
+    xr: { immersiveAr: true },
+  },
+  androidChromeNoWebXr: { userAgent: ua.androidChrome, platform: 'Linux armv8l', maxTouchPoints: 5, relListAr: false },
+  androidChromeNoArSession: {
+    userAgent: ua.androidChrome,
+    platform: 'Linux armv8l',
+    maxTouchPoints: 5,
+    relListAr: false,
+    xr: { immersiveAr: false },
+  },
+  desktopChrome: {
+    userAgent: ua.desktopChrome,
+    platform: 'Win32',
+    maxTouchPoints: 0,
+    relListAr: false,
+    xr: { immersiveAr: false },
+  },
+} satisfies Record<string, Platform>;
+
+const xr = {
+  isSessionSupported: vi.fn<(mode: string) => Promise<boolean>>(),
+  requestSession: vi.fn<(mode: string, init: XRSessionInit) => Promise<FakeXrSession>>(),
+};
+let session: FakeXrSession;
+const overriddenNavigatorKeys = ['userAgent', 'platform', 'maxTouchPoints', 'xr', 'sendBeacon'] as const;
+
+function installPlatform(platform: Platform): void {
+  const define = (key: (typeof overriddenNavigatorKeys)[number], value: unknown): void => {
+    Object.defineProperty(navigator, key, { value, configurable: true });
+  };
+  define('userAgent', platform.userAgent);
+  define('platform', platform.platform);
+  define('maxTouchPoints', platform.maxTouchPoints);
+  vi.spyOn(DOMTokenList.prototype, 'supports').mockImplementation((token) => token === 'ar' && platform.relListAr);
+  if (platform.xr) {
+    const { immersiveAr } = platform.xr;
+    xr.isSessionSupported.mockImplementation(async (mode) => mode === 'immersive-ar' && immersiveAr);
+    define('xr', xr);
+    // WebXR's session constructor, probed for hit testing.
+    vi.stubGlobal(
+      'XRSession',
+      class {
+        public requestHitTestSource(): undefined {
+          return undefined;
+        }
+      },
+    );
+  }
+}
+
+/** Every channel that could carry geometry off the device. */
+const network = {
+  fetch: vi.fn<typeof fetch>(),
+  xhrOpen: vi.fn(),
+  sendBeacon: vi.fn(),
+  windowOpen: vi.fn(),
+};
+/** The links the launch clicked, as rel and href. */
+let clickedLinks: Array<{ rel: string; href: string }> = [];
 
 beforeEach(() => {
-  mobileMocks.isMobile = true;
-  arMocks.canActivateAr = true;
-  arMocks.isConverting = false;
-  arMocks.activateAr.mockClear();
+  session = new FakeXrSession();
+  xr.isSessionSupported.mockReset();
+  xr.requestSession.mockReset().mockImplementation(async () => session);
+  sceneMocks.present.mockReset().mockImplementation(async () => () => undefined);
+  clickedLinks = [];
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+    clickedLinks.push({ rel: this.rel, href: this.getAttribute('href') ?? '' });
+  });
+  URL.createObjectURL = vi.fn(() => 'blob:http://localhost/0f6b6a52');
+  URL.revokeObjectURL = vi.fn();
+  vi.stubGlobal('fetch', network.fetch);
+  vi.spyOn(XMLHttpRequest.prototype, 'open').mockImplementation(network.xhrOpen);
+  Object.defineProperty(navigator, 'sendBeacon', { value: network.sendBeacon, configurable: true });
+  vi.spyOn(globalThis, 'open').mockImplementation(network.windowOpen);
 });
 
-describe('ArButton', () => {
-  it('returns nothing when not mobile', () => {
-    mobileMocks.isMobile = false;
-    const { container } = render(<ArButton artifact={undefined} />);
-    expect(container.firstChild).toBeNull();
+afterEach(() => {
+  for (const key of overriddenNavigatorKeys) {
+    Reflect.deleteProperty(navigator, key);
+  }
+
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  for (const channel of Object.values(network)) {
+    channel.mockReset();
+  }
+});
+
+const glbBytes = new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0]);
+const glbArtifact: Artifact = { mimeType: 'model/gltf-binary', content: glbBytes };
+
+type ExportResult = Awaited<ReturnType<RuntimeDocument['export']>>;
+
+function createRuntimeDocument(result?: () => Promise<unknown>): {
+  readonly document: RuntimeDocument;
+  readonly exportModel: ReturnType<typeof vi.fn>;
+} {
+  const exportModel = vi.fn(
+    result ??
+      (async () => ({
+        success: true,
+        files: [{ name: 'model.usdz', mimeType: mimeTypes.usdz, bytes: new Uint8Array([1, 2, 3]) }],
+      })),
+  );
+  return { document: { export: exportModel } as unknown as RuntimeDocument, exportModel };
+}
+
+/** Let client-side capability detection settle. */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
+}
+
+function renderAr(artifact: Artifact | undefined = glbArtifact, runtimeDocument?: RuntimeDocument): void {
+  render(
+    <>
+      <button type='button'>Before</button>
+      <ArButton artifact={artifact} runtimeDocument={runtimeDocument ?? createRuntimeDocument().document} />
+    </>,
+    { wrapper: TooltipProvider },
+  );
+}
+
+const arButton = (): HTMLElement => screen.getByRole('button', { name: 'View in your space' });
+
+function expectNoGeometryLeftTheDevice(): void {
+  expect(network.fetch).not.toHaveBeenCalled();
+  expect(network.xhrOpen).not.toHaveBeenCalled();
+  expect(network.sendBeacon).not.toHaveBeenCalled();
+  expect(network.windowOpen).not.toHaveBeenCalled();
+  // No Scene Viewer intent or remote model URL: only a same-origin blob may be handed to an AR viewer.
+  for (const link of clickedLinks) {
+    expect(link.href).toMatch(/^blob:http:\/\/localhost\//);
+  }
+}
+
+describe('ArButton capability detection', () => {
+  it.each([
+    { name: 'iPhone Safari (Quick Look)', platform: platforms.iPhoneSafari, isShown: true },
+    {
+      name: 'iPadOS Safari with a desktop user agent (Quick Look)',
+      platform: platforms.iPadOsDesktopUa,
+      isShown: true,
+    },
+    { name: 'macOS Safari without touch', platform: platforms.macSafari, isShown: false },
+    { name: 'Android Chrome with WebXR immersive-ar', platform: platforms.androidChromeWebXr, isShown: true },
+    { name: 'Android Chrome without WebXR', platform: platforms.androidChromeNoWebXr, isShown: false },
+    {
+      name: 'Android Chrome whose WebXR lacks immersive-ar',
+      platform: platforms.androidChromeNoArSession,
+      isShown: false,
+    },
+    { name: 'desktop Chrome', platform: platforms.desktopChrome, isShown: false },
+  ])('$name → shown: $isShown', async ({ platform, isShown }) => {
+    installPlatform(platform);
+    renderAr();
+    await settle();
+    if (isShown) {
+      expect(arButton()).toBeInTheDocument();
+    } else {
+      expect(screen.queryByRole('button', { name: /view in your space/i })).not.toBeInTheDocument();
+    }
   });
 
-  it('returns nothing when AR cannot be activated (non-iOS / no kernel)', () => {
-    arMocks.canActivateAr = false;
-    const { container } = render(<ArButton artifact={undefined} />);
-    expect(container.firstChild).toBeNull();
+  it('stays hidden when the WebXR session constructor has no hit testing', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    vi.stubGlobal('XRSession', { prototype: {} });
+    renderAr();
+    await settle();
+    expect(screen.queryByRole('button', { name: /view in your space/i })).not.toBeInTheDocument();
   });
 
-  it('invokes activateAr() when clicked on a supported device', async () => {
-    render(<ArButton artifact={undefined} />, { wrapper: TooltipProvider });
-    await userEvent.click(screen.getByRole('button', { name: 'View in your space' }));
-    expect(arMocks.activateAr).toHaveBeenCalledTimes(1);
+  it('stays hidden on a supported device until there is a GLB model to open', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    renderAr({ mimeType: 'image/svg+xml', content: '<svg />' });
+    await settle();
+    expect(screen.queryByRole('button', { name: /view in your space/i })).not.toBeInTheDocument();
   });
 
-  it('disables the button while converting', () => {
-    arMocks.isConverting = true;
-    render(<ArButton artifact={undefined} />, { wrapper: TooltipProvider });
-    const button = screen.getByRole('button', { name: 'Preparing view in your space' });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute('aria-busy', 'true');
+  it('stays hidden for Quick Look without a runtime document to export USDZ', async () => {
+    installPlatform(platforms.iPhoneSafari);
+    render(<ArButton artifact={glbArtifact} />, { wrapper: TooltipProvider });
+    await settle();
+    expect(screen.queryByRole('button', { name: /view in your space/i })).not.toBeInTheDocument();
+  });
+
+  it('is icon-only, named and titled "View in your space"', async () => {
+    installPlatform(platforms.iPhoneSafari);
+    renderAr();
+    await settle();
+    const button = arButton();
+    expect(button).toHaveTextContent('');
+    expect(button.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    await userEvent.hover(button);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('View in your space');
+  });
+});
+
+describe('ArButton launch path', () => {
+  it('opens Quick Look on iPadOS with a same-origin USDZ blob and no WebXR session', async () => {
+    installPlatform(platforms.iPadOsDesktopUa);
+    const { document: runtimeDocument, exportModel } = createRuntimeDocument();
+    renderAr(glbArtifact, runtimeDocument);
+    await settle();
+    await userEvent.click(arButton());
+
+    await waitFor(() => {
+      expect(clickedLinks).toEqual([{ rel: 'ar', href: 'blob:http://localhost/0f6b6a52' }]);
+    });
+    expect(exportModel).toHaveBeenCalledWith('usdz');
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:http://localhost/0f6b6a52');
+    expect(xr.requestSession).not.toHaveBeenCalled();
+    expect(arButton()).toHaveFocus();
+    expectNoGeometryLeftTheDevice();
+  });
+
+  it('opens an in-page WebXR session on Android with the GLB bytes, then restores the control and focus', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    const { document: runtimeDocument, exportModel } = createRuntimeDocument();
+    renderAr(glbArtifact, runtimeDocument);
+    await settle();
+    await userEvent.click(arButton());
+
+    const exit = await screen.findByRole('button', { name: 'Exit AR' });
+    expect(xr.requestSession).toHaveBeenCalledWith(
+      'immersive-ar',
+      expect.objectContaining({ domOverlay: { root: exit.parentElement } }),
+    );
+    expect(sceneMocks.present).toHaveBeenCalledWith(session, glbBytes, expect.anything());
+    expect(exportModel).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('tap to place the model');
+    const preparing = screen.getByRole('button', { name: 'Preparing view in your space' });
+    expect(preparing).toHaveAttribute('aria-disabled', 'true');
+
+    await userEvent.click(exit);
+    expect(session.end).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(arButton()).toHaveFocus();
+    });
+    expect(screen.queryByRole('button', { name: 'Exit AR' })).not.toBeInTheDocument();
+    expectNoGeometryLeftTheDevice();
+  });
+
+  it('restores the control and focus when the system ends the session', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+    await screen.findByRole('button', { name: 'Exit AR' });
+
+    act(() => {
+      session.dispatchEvent(new Event('end'));
+    });
+    await waitFor(() => {
+      expect(arButton()).toHaveFocus();
+    });
+    expect(screen.queryByRole('button', { name: 'Exit AR' })).not.toBeInTheDocument();
+  });
+
+  it('ignores taps while the USDZ export is pending, keeping focus on the busy control', async () => {
+    installPlatform(platforms.iPhoneSafari);
+    let finish: (value: unknown) => void = () => undefined;
+    const { document: runtimeDocument, exportModel } = createRuntimeDocument(
+      async () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderAr(glbArtifact, runtimeDocument);
+    await settle();
+    await userEvent.click(arButton());
+
+    const busy = screen.getByRole('button', { name: 'Preparing view in your space' });
+    expect(busy).toHaveAttribute('aria-busy', 'true');
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
+    expect(busy).toHaveFocus();
+    await userEvent.click(busy);
+    expect(exportModel).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finish({
+        success: true,
+        files: [{ name: 'model.usdz', mimeType: mimeTypes.usdz, bytes: new Uint8Array([1]) }],
+      } satisfies Partial<ExportResult>);
+    });
+    expect(arButton()).toHaveFocus();
+  });
+});
+
+describe('ArButton recovery', () => {
+  it('names a denied camera permission, and Dismiss returns focus to the control', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    xr.requestSession.mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'));
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Camera access is off' });
+    expect(dialog).toHaveAccessibleDescription(/allow camera access for this site/i);
+    expect(screen.queryByRole('button', { name: 'Exit AR' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(arButton()).toHaveFocus();
+    expectNoGeometryLeftTheDevice();
+  });
+
+  it('names an unsupported session, and Try again launches it', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    xr.requestSession.mockRejectedValueOnce(new DOMException('No AR runtime', 'NotSupportedError'));
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+
+    await screen.findByRole('alertdialog', { name: 'AR isn’t available right now' });
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    expect(await screen.findByRole('button', { name: 'Exit AR' })).toBeInTheDocument();
+    expect(xr.requestSession).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('names a failed USDZ export with its issue, and Escape returns focus to the control', async () => {
+    installPlatform(platforms.iPhoneSafari);
+    const { document: runtimeDocument } = createRuntimeDocument(async () => ({
+      success: false,
+      issues: [{ message: 'Kernel cannot export USDZ' }],
+    }));
+    renderAr(glbArtifact, runtimeDocument);
+    await settle();
+    await userEvent.click(arButton());
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Couldn’t prepare the model for AR' });
+    expect(dialog).toHaveAccessibleDescription('Kernel cannot export USDZ');
+    expect(clickedLinks).toEqual([]);
+    await userEvent.keyboard('{Escape}');
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(arButton()).toHaveFocus();
+  });
+
+  it('keeps USDZ export validation: an unexpected file is a named failure, never launched', async () => {
+    installPlatform(platforms.iPhoneSafari);
+    const { document: runtimeDocument } = createRuntimeDocument(async () => ({
+      success: true,
+      files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) }],
+    }));
+    renderAr(glbArtifact, runtimeDocument);
+    await settle();
+    await userEvent.click(arButton());
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Couldn’t prepare the model for AR' });
+    expect(dialog).toHaveAccessibleDescription(/expected exactly one \.usdz artifact/);
+    expect(clickedLinks).toEqual([]);
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('ends the session and names a failed launch when the model cannot be shown', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    sceneMocks.present.mockRejectedValueOnce(new Error('Invalid glTF binary'));
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+
+    const dialog = await screen.findByRole('alertdialog', { name: 'Couldn’t open AR' });
+    expect(dialog).toHaveAccessibleDescription('Invalid glTF binary');
+    expect(session.end).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Exit AR' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(arButton()).toHaveFocus();
   });
 });

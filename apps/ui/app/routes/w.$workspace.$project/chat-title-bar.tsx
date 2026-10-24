@@ -71,6 +71,38 @@ function SwitcherRow({
 }
 
 /**
+ * Hand focus back to the chat title once the switcher has gone. Opening another chat can replace the title while the
+ * sheet closes, so a title that is no longer in the document gives way to the one that replaced it. Focus the person
+ * has moved elsewhere in the meantime is left alone, and nothing waits past a second.
+ *
+ * @param trigger - The title that opened the switcher.
+ */
+function returnFocusToTitle(trigger: HTMLButtonElement | undefined): void {
+  const take = (): boolean => {
+    const title = trigger?.isConnected
+      ? trigger
+      : document.querySelector<HTMLButtonElement>('[data-slot="chat-title-button"]');
+    if (!title) {
+      return false;
+    }
+    if (document.activeElement === null || document.activeElement === document.body) {
+      title.focus({ preventScroll: true });
+    }
+    return true;
+  };
+  if (take()) {
+    return;
+  }
+  const until = performance.now() + 1000;
+  const retry = (): void => {
+    if (!take() && performance.now() < until) {
+      requestAnimationFrame(retry);
+    }
+  };
+  requestAnimationFrame(retry);
+}
+
+/**
  * The phone chat switcher the title opens (canvas CH-09, PN-CHAT-3): New chat, this project's chats by recency
  * (the sidebar's order), then Rename and Export for the open chat. It reads the same chat records and runs the
  * same actions as the desktop header, sidebar and chat menu; it adds no data path of its own.
@@ -98,15 +130,20 @@ function ChatSwitcherSheet({
   const navigate = useNavigate();
   const { canExport, exportTranscript } = useExportTranscript();
   const [isOpen, setIsOpen] = useState(false);
-  /* A chosen row hands focus on (the new chat's composer, the rename field); only a dismissal returns it to the title. */
-  const hasChosen = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  /*
+   * What takes focus once the sheet has gone (its content unmounts after the exit animation). New chat hands it to
+   * the new chat's composer; Rename starts the inline editor only then, because the editor replaces this sheet and
+   * unmounting a drawer mid-close leaves vaul's nested body lock behind (iOS). Every other close returns it to the
+   * title.
+   */
+  const handOff = useRef<'composer' | 'rename' | undefined>(undefined);
   const projectChats = useMemo(
     () =>
       chats.filter((chat) => chat.deletedAt === undefined && chat.purgedAt === undefined).sort(compareChatsByRecency),
     [chats],
   );
   const choose = (action: () => void): void => {
-    hasChosen.current = true;
     setIsOpen(false);
     action();
   };
@@ -117,13 +154,14 @@ function ChatSwitcherSheet({
       open={isOpen}
       onOpenChange={(open) => {
         if (open) {
-          hasChosen.current = false;
+          handOff.current = undefined;
         }
         setIsOpen(open);
       }}
     >
       <DrawerTrigger asChild>
         <button
+          ref={triggerRef}
           type='button'
           data-slot='chat-title-button'
           aria-label={`${name}, ${title}`}
@@ -139,10 +177,17 @@ function ChatSwitcherSheet({
         </button>
       </DrawerTrigger>
       <DrawerContent
-        data-slot='chat-switcher'
+        data-testid='chat-switcher'
         onCloseAutoFocus={(event) => {
-          if (hasChosen.current) {
-            event.preventDefault();
+          const next = handOff.current;
+          handOff.current = undefined;
+          event.preventDefault();
+          if (next === 'rename') {
+            onRename?.();
+            return;
+          }
+          if (next === undefined) {
+            returnFocusToTitle(triggerRef.current ?? undefined);
           }
         }}
       >
@@ -153,7 +198,7 @@ function ChatSwitcherSheet({
           </DrawerDescription>
           <Button
             variant='outline'
-            size='icon'
+            size='icon-touch'
             aria-label='Close chats'
             onClick={() => {
               setIsOpen(false);
@@ -169,6 +214,7 @@ function ChatSwitcherSheet({
               label='New chat'
               isDisabled={!isNewChatReady}
               onSelect={() => {
+                handOff.current = 'composer';
                 choose(() => {
                   void onNewChat();
                 });
@@ -196,9 +242,8 @@ function ChatSwitcherSheet({
               label='Rename this chat'
               isDisabled={onRename === undefined}
               onSelect={() => {
-                choose(() => {
-                  onRename?.();
-                });
+                handOff.current = 'rename';
+                setIsOpen(false);
               }}
             />
             <SwitcherRow

@@ -24,7 +24,7 @@ const sheetWidth = 288;
 const sidebarSheet = (): Locator => selectors.getByRole('dialog', { name: 'Sidebar' });
 const navigation = (): Locator => selectors.getByRole('navigation', { name: 'Workbench' });
 const chatTitle = (): Locator => selectors.getByCss('[data-slot="chat-title-button"]');
-const chatSwitcher = (): Locator => selectors.getByCss('[data-slot="chat-switcher"]');
+const chatSwitcher = (): Locator => selectors.getByTestId('chat-switcher');
 
 const openSeededProject = async (viewport: { readonly width: number; readonly height: number }): Promise<void> => {
   await target.commands.uiOpenTarget({ hasTouch: true, isMobile: true });
@@ -207,6 +207,15 @@ test('opens this project’s chats from the chat title, switches chat, and start
   await expect.poll(async () => target.textContent(chatTitle())).toContain(other);
   await expect.poll(async () => target.currentUrl()).not.toBe(urlBefore);
   expect(new URL(await target.currentUrl()).searchParams.get('chat')).toBeTruthy();
+  // The switcher hands focus back to the title it opened from.
+  await expect
+    .poll(async () =>
+      target.evaluate(() => {
+        const active = document.activeElement;
+        return active instanceof HTMLElement ? (active.dataset['slot'] ?? null) : null;
+      }),
+    )
+    .toBe('chat-title-button');
 
   await target.click(chatTitle(), { touch: true });
   await target.expectVisible(chatSwitcher());
@@ -221,4 +230,20 @@ test('opens this project’s chats from the chat title, switches chat, and start
       target.evaluate((selector) => Boolean(document.activeElement?.closest(selector)), composerSelector),
     )
     .toBe(true);
+
+  // Rename from the switcher: the editor starts once the sheet has gone, and the page is left scrollable.
+  await target.click(chatTitle(), { touch: true });
+  await target.expectVisible(chatSwitcher());
+  await target.click(chatSwitcher().getByRole('button', { name: 'Rename this chat', exact: true }), { touch: true });
+  const field = selectors.getByRole('textbox', { name: 'Chat name' });
+  await target.expectVisible(field);
+  await target.expectHidden(chatSwitcher());
+  await expect
+    .poll(async () => target.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? null))
+    .toBe('Chat name');
+  await target.fill(field, 'Renamed on a phone');
+  await target.press(field, 'Enter');
+  await expect.poll(async () => target.textContent(chatTitle())).toContain('Renamed on a phone');
+  expect(await target.evaluate(() => document.body.style.position)).not.toBe('fixed');
+  expect(await target.evaluate(() => document.body.style.pointerEvents)).not.toBe('none');
 });

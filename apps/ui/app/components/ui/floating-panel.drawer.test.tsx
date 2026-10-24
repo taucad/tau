@@ -86,8 +86,7 @@ describe('FloatingPanel docked in a detented drawer', () => {
       <DockedPanel
         headerExtra={
           <Drawer open>
-            {/* A sheet names its own slot, as the chat switcher does. */}
-            <DrawerContent data-slot='chat-switcher'>
+            <DrawerContent data-testid='chat-switcher'>
               <DrawerTitle>Chats</DrawerTitle>
               <DrawerDescription className='sr-only'>Pick a chat</DrawerDescription>
               <button type='button' onClick={onPick}>

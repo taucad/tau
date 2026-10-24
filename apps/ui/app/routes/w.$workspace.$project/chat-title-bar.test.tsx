@@ -9,6 +9,7 @@ const createChat = vi.fn();
 const updateChatName = vi.fn();
 const navigate = vi.fn();
 const exportTranscript = vi.fn();
+const transcript = vi.hoisted(() => ({ canExport: true }));
 const sidebar = vi.hoisted(() => ({ isMobile: false, open: true }));
 const naming = vi.hoisted(() => ({ isGenerating: false }));
 let keybindingHandler: (() => Promise<void>) | undefined;
@@ -59,7 +60,7 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
 vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
 vi.mock('react-router', () => ({ useNavigate: () => navigate, Link: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-history-settings.js', () => ({
-  useExportTranscript: () => ({ canExport: true, exportTranscript }),
+  useExportTranscript: () => ({ canExport: transcript.canExport, exportTranscript }),
   ChatHistorySettings: ({ onRename }: { readonly onRename: () => void }) => (
     <>
       <button type='button'>Chat options</button>
@@ -270,6 +271,81 @@ describe('ChatTitleBar', () => {
 
     beforeEach(() => {
       sidebar.isMobile = true;
+      transcript.canExport = true;
+    });
+
+    const title = (): HTMLElement => screen.getByRole('button', { name: /^Bracket design, Chats in Rotor housing$/ });
+
+    it('should close only the switcher on Escape and give focus back to the title', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />);
+
+      const sheet = await openSwitcher(user);
+      fireEvent.keyDown(sheet, { key: 'Escape' });
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'Chats in Rotor housing' })).not.toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: 'Close chat' })).toBeInTheDocument();
+      await waitFor(() => {
+        expect(title()).toHaveFocus();
+      });
+    });
+
+    it('should export the transcript and give focus back to the title', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar />);
+
+      const sheet = await openSwitcher(user);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Export transcript' }));
+
+      expect(exportTranscript).toHaveBeenCalledTimes(1);
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(title()).toHaveFocus();
+      });
+    });
+
+    it('should give focus back to the title after switching chat or picking the open one', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar />);
+
+      let sheet = await openSwitcher(user);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Bracket design' }));
+      await waitFor(() => {
+        expect(title()).toHaveFocus();
+      });
+      // The open chat is already open: nothing navigates.
+      expect(navigate).not.toHaveBeenCalled();
+
+      sheet = await openSwitcher(user);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Gear ratio study' }));
+      await waitFor(() => {
+        expect(title()).toHaveFocus();
+      });
+      expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_newer', { state: { openChat: true } });
+    });
+
+    it('should disable Export when the chat has no transcript', async () => {
+      transcript.canExport = false;
+      const user = userEvent.setup();
+      render(<ChatTitleBar />);
+
+      const sheet = await openSwitcher(user);
+      const exportRow = within(sheet).getByRole('button', { name: 'Export transcript' });
+      expect(exportRow).toBeDisabled();
+      fireEvent.click(exportRow);
+      expect(exportTranscript).not.toHaveBeenCalled();
+    });
+
+    it('should give the switcher a 44px close control', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar />);
+
+      const sheet = await openSwitcher(user);
+      expect(within(sheet).getByRole('button', { name: 'Close chats' })).toHaveClass('size-11');
     });
 
     /* Rows are clicked with `fireEvent`: vaul’s pointer handlers need layout jsdom does not have. */
@@ -332,7 +408,13 @@ describe('ChatTitleBar', () => {
       sheet = await openSwitcher(user);
       fireEvent.click(within(sheet).getByRole('button', { name: 'Rename this chat' }));
 
-      expect(await screen.findByRole('textbox', { name: 'Chat name' })).toHaveValue('Bracket design');
+      // The editor starts once the sheet has gone, and takes focus from it.
+      const field = await screen.findByRole('textbox', { name: 'Chat name' });
+      expect(field).toHaveValue('Bracket design');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await waitFor(() => {
+        expect(field).toHaveFocus();
+      });
     });
 
     it('should leave the desktop title a plain name with no switcher', () => {

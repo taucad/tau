@@ -530,8 +530,6 @@ $writeProven = $false
 $readProven = $false
 
 # ---- Per-session window-station + private-desktop grants (Codex windows-sandbox-rs/src/desktop.rs) ----
-
-# ---- Per-session window-station + private-desktop grants (Codex windows-sandbox-rs/src/desktop.rs) ----
 # The write-restricted child needs a desktop whose DACL admits BOTH halves of the access check: the
 # normal check (the token's user SID) and the restricted check (one of its restricting SIDs: the
 # session cap SID). Codex creates a private desktop per launch (PrivateDesktop::create, desktop.rs:362)

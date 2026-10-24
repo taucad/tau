@@ -45,3 +45,9 @@ printf 'PASS: remove unloads only the Tau profile, reinstall restores it, sysctl
 sudo env DEBIAN_FRONTEND=noninteractive apt-get purge -y tau-staging tau-staging-runtime-1.0.1
 [[ ! -e /opt/tau-staging/sandbox && ! -e /etc/apparmor.d/tau-staging-bwrap ]]
 if sudo grep -F 'tau-staging-bwrap' /sys/kernel/security/apparmor/profiles; then exit 1; fi
+# Purge leaves the non-AppImage selector's `current` link (dangling) and so its parent directory; the later
+# tooling harness refuses a guest that already has /opt/tau-staging, so remove exactly those leftovers.
+sudo find /opt/tau-staging -mindepth 1 -printf 'leftover after purge: %p (%y)\n' 2>/dev/null || true
+if [[ -L /opt/tau-staging/current && ! -e /opt/tau-staging/current ]]; then sudo rm /opt/tau-staging/current; fi
+if [[ -d /opt/tau-staging ]]; then sudo rmdir /opt/tau-staging; fi
+[[ ! -e /opt/tau-staging ]]

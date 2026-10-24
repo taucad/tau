@@ -247,7 +247,7 @@ const packageFixture = async (): Promise<{ executable: string; clientRoot: strin
 const windowsProcesses = (): string[] =>
   sh('tasklist', ['/fo', 'csv', '/nh'])
     .split('\n')
-    .filter((line) => /^"(electron|TauS3Fixture|node)\.exe"/i.test(line))
+    .filter((line) => /^"(electron|taus3fixture|node)\.exe"/i.test(line))
     .map((line) => line.trim());
 
 const launch = async (kind: Kind, extraArguments: readonly string[] = []): Promise<Session> => {

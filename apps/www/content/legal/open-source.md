@@ -31,7 +31,7 @@ including how it builds and links OCCT, is at [github.com/taucad/geospec](https:
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 807 packages, with the license each declares.
+The web and desktop apps include the following 808 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -624,6 +624,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [node-domexception](https://github.com/jimmywarting/node-domexception) | 1.0.0 | MIT |
 | [node-fetch](https://github.com/node-fetch/node-fetch) | 3.3.2 | MIT |
 | [node-forge](https://github.com/digitalbazaar/forge) | 1.4.0 | (BSD-3-Clause OR GPL-2.0) |
+| [node-pty](https://github.com/microsoft/node-pty) | 1.1.0 | MIT |
 | [number-allocator](https://github.com/redboltz/number-allocator) | 1.0.14 | MIT |
 | [object-assign](https://github.com/sindresorhus/object-assign) | 4.1.1 | MIT |
 | [object-inspect](https://github.com/inspect-js/object-inspect) | 1.13.4 | MIT |

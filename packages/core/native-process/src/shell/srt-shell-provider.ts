@@ -128,7 +128,7 @@ const defaultSupervisor = (): Readonly<{ executablePath: string; arguments: read
 };
 
 const defaultLoadPty = async (): Promise<PtyBinding> => {
-  // eslint-disable-next-line import-x/no-extraneous-dependencies -- optional on purpose: without a toolchain node-pty may be absent, and a terminal launch then answers unsupported.
+  // eslint-disable-next-line import-x/no-extraneous-dependencies -- optional on purpose: without a toolchain node-pty may be absent, and a terminal launch then answers sandbox-unavailable.
   const module = (await import('node-pty')) as unknown as { default?: PtyBinding } & PtyBinding;
   return module.default ?? module;
 };

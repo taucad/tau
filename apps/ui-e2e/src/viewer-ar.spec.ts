@@ -79,6 +79,7 @@ function installArProbe(): void {
 /** Emulates supported Android Chrome: `immersive-ar` with hit testing, whose session requests fail in turn. */
 function emulateAndroidWebXr(failures: readonly string[]): void {
   const pending = [...failures];
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- runs in the page, where installArProbe set __arProbe; a global declaration would leak into every spec in this project.
   const probe = (globalThis as unknown as { __arProbe: ArProbe }).__arProbe;
   Object.defineProperty(globalThis, 'XRSession', {
     configurable: true,
@@ -128,6 +129,7 @@ async function showModel(viewport: { width: number; height: number }): Promise<v
 }
 
 async function readProbe(): Promise<ArProbe> {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- runs in the page, where installArProbe set __arProbe; a global declaration would leak into every spec in this project.
   return target.evaluate(() => (globalThis as unknown as { __arProbe: ArProbe }).__arProbe);
 }
 

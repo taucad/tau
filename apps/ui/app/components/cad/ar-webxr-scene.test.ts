@@ -7,7 +7,9 @@ import { presentGlbInArSession } from '#components/cad/ar-webxr-scene.js';
 // The jsdom environment has no WebGL, so the renderer is the one faked piece of Three.js; the scene graph, bounds and placement maths
 // run for real. The parsed GLB is a 0.2 m cube standing 0.1 m below its origin.
 const mocks = vi.hoisted(() => ({
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- assigned in beforeEach before any test reads it.
   renderer: undefined as unknown as FakeRenderer,
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- assigned in beforeEach before any test reads it.
   gltfScene: undefined as unknown as Object3D,
 }));
 
@@ -86,6 +88,12 @@ class FakeSession extends EventTarget {
   }
 }
 
+/** The fake implements only the members `presentGlbInArSession` uses. */
+function asXrSession(session: FakeSession): XRSession {
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a full XRSession cannot be built in jsdom.
+  return session as unknown as XRSession;
+}
+
 let geometry: BoxGeometry;
 let map: Texture;
 
@@ -114,7 +122,7 @@ describe('presentGlbInArSession', () => {
   it('places the model on the hit-tested floor at the tap, facing the viewer, standing on its lowest point', async () => {
     const session = new FakeSession();
     const onPlaced = vi.fn();
-    await presentGlbInArSession(session as unknown as XRSession, glb, { onPlaced });
+    await presentGlbInArSession(asXrSession(session), glb, { onPlaced });
 
     const { renderer } = mocks;
     renderer.loop?.(0, frameHitting(0, 0, 0));
@@ -139,7 +147,7 @@ describe('presentGlbInArSession', () => {
     const session = new FakeSession();
     session.hasHitTest = false;
     const onPlaced = vi.fn();
-    await presentGlbInArSession(session as unknown as XRSession, glb, { onPlaced });
+    await presentGlbInArSession(asXrSession(session), glb, { onPlaced });
 
     mocks.renderer.loop?.(0, {});
     const model = modelOf(mocks.renderer);
@@ -150,7 +158,7 @@ describe('presentGlbInArSession', () => {
 
   it('disposes geometry, textures and the WebGL context even though the ended session refuses cancel()', async () => {
     const session = new FakeSession();
-    const dispose = await presentGlbInArSession(session as unknown as XRSession, glb, { onPlaced: vi.fn() });
+    const dispose = await presentGlbInArSession(asXrSession(session), glb, { onPlaced: vi.fn() });
     // The reticle has found the floor, so a tap would place the model if placement were still listening.
     mocks.renderer.loop?.(0, frameHitting(1, 0, -1));
     const model = modelOf(mocks.renderer);
@@ -180,9 +188,7 @@ describe('presentGlbInArSession', () => {
     };
     const disposeGeometry = vi.spyOn(geometry, 'dispose');
 
-    await expect(presentGlbInArSession(session as unknown as XRSession, glb, { onPlaced: vi.fn() })).rejects.toBe(
-      refused,
-    );
+    await expect(presentGlbInArSession(asXrSession(session), glb, { onPlaced: vi.fn() })).rejects.toBe(refused);
     expect(renderer.dispose).toHaveBeenCalledOnce();
     expect(renderer.forceContextLoss).toHaveBeenCalledOnce();
     expect(disposeGeometry).toHaveBeenCalled();

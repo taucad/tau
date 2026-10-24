@@ -157,6 +157,7 @@ function createRuntimeDocument(result?: () => Promise<unknown>): {
         files: [{ name: 'model.usdz', mimeType: mimeTypes.usdz, bytes: new Uint8Array([1, 2, 3]) }],
       })),
   );
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the fake implements only `export`, the one member useAr calls.
   return { document: { export: exportModel } as unknown as RuntimeDocument, exportModel };
 }
 

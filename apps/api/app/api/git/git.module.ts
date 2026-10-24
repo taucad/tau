@@ -13,6 +13,14 @@ import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { ownerInFlightGateProvider } from '#api/git/admission/owner-in-flight.providers.js';
+import { DeriveScheduler } from '#api/git/forwarding/derive-scheduler.js';
+import {
+  gitExecutionProvider,
+  gitExecutorProvider,
+  receiptVerificationProvider,
+} from '#api/git/forwarding/forwarding.providers.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import { StorageReceiptsController } from '#api/git/forwarding/receipts.controller.js';
 import { repositoryRouteGuardProvider } from '#api/git/routing/routing.providers.js';
 import { RevisionSaltController } from '#api/git/revision-salt.controller.js';
 import { UsageController } from '#api/git/usage.controller.js';
@@ -29,7 +37,7 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
  */
 @Module({
   imports: [DatabaseModule, ProjectAccessModule, DurableEventsModule],
-  controllers: [GitController, GitProxyController, RevisionSaltController, UsageController],
+  controllers: [GitController, GitProxyController, RevisionSaltController, UsageController, StorageReceiptsController],
   providers: [
     GitRepositoryService,
     /* The API's one Redis budget primitive (D22). Provided here as well as in
@@ -42,10 +50,16 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
     repositoryRouteGuardProvider,
     /* DA6: the owner step, after the route step: 10 git requests and 5 pushes in flight per owner. */
     ownerInFlightGateProvider,
+    /* DC1: git executes in tau-storage behind a signed grant; receipts come back signed. */
+    gitExecutionProvider,
+    gitExecutorProvider,
+    receiptVerificationProvider,
+    DeriveScheduler,
     S3RepositoryStore,
     { provide: repositoryStoreKey, useExisting: S3RepositoryStore },
   ],
-  exports: [GitRepositoryService, S3RepositoryStore, repositoryStoreKey],
+  /* The executor is exported so `ProjectsModule` uses this one: one git execution, and so at most one in-process worker, per process. */
+  exports: [GitRepositoryService, S3RepositoryStore, repositoryStoreKey, gitExecutorKey],
 })
 export class GitModule implements NestModule, OnModuleInit {
   public constructor(private readonly adapterHost: HttpAdapterHost) {}

@@ -127,16 +127,11 @@ describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
   });
 
   /**
-   * Smoking-gun regression guard for the screenshot crispness gap. Upstream
-   * `Line2NodeMaterial` defaults `_useAlphaToCoverage = true`, which routes endcap
-   * fragments through the smoothstep + hardware alpha-to-coverage path; the
-   * alpha→sample-mask conversion is vendor-defined (gpuweb/gpuweb#4867 documents
-   * Qualcomm's 4×4 area-dither LUT) and produces visibly grainy edges on dithered
-   * drivers vs the deterministic 5-level MSAA `discard` path WebGL takes by default.
-   * The Tau factory must opt out so WebGPU joins WebGL on the discard path. See
-   * `docs/research/webgpu-edge-line-crispness-gap.md`.
+   * CAD strokes compute deterministic geometric coverage in the line shader. Do
+   * not also convert that alpha to a device-dependent multisample mask. This is
+   * a material-setting guard; the real-backend production tests certify pixels.
    */
-  it('opts out of alphaToCoverage to match WebGL crispness (regression guard)', () => {
+  it('keeps analytic CAD coverage independent of alpha-to-coverage', () => {
     const material = createWebGpuGltfFatLineMaterial();
     expect(material.alphaToCoverage).toBe(false);
   });

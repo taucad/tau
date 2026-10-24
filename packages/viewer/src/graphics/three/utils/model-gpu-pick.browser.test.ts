@@ -24,9 +24,13 @@ const height = 120;
 const fixture = new URL('fixtures/flanged-housing.glb', import.meta.url);
 const setupTimeout = 120_000;
 
-type Outcome = Readonly<{ object: THREE.Object3D | undefined; distance: number }>;
+type Outcome = Readonly<{
+  object: THREE.Object3D | undefined;
+  distance: number;
+}>;
 
 type Comparison = Readonly<{
+  objects: string[];
   hits: number;
   agreeing: number;
   /** Disagreeing pixels away from every silhouette: there must be none. */
@@ -65,7 +69,7 @@ const pixelRay = (camera: THREE.Camera, column: number, row: number): THREE.Rayc
 const describeOutcome = ({ object, distance }: Outcome): string =>
   object ? `${object.name || object.uuid.slice(0, 8)}@${distance.toFixed(5)}` : 'miss';
 
-describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) => {
+describe.each(['webgl', 'webgpu', 'nodegl'] as const)('model GPU pick on %s', (backend) => {
   const disposables: Array<{ dispose: () => void }> = [];
   let renderer: Awaited<ReturnType<typeof createRenderer>>;
   let picker: ModelGpuPicker;
@@ -73,7 +77,7 @@ describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) =>
   let camera: THREE.PerspectiveCamera;
   let radius: number;
   let center: THREE.Vector3;
-  const clip = createSectionClip(backend);
+  const clip = createSectionClip(backend === 'webgl' ? 'webgl' : 'webgpu');
   const landed = vi.fn();
 
   const frame = (): void => {
@@ -85,7 +89,10 @@ describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) =>
 
   const gpuOutcome = (result: ModelPickResult): Outcome => {
     if (result.status === 'hit') {
-      return { object: result.intersection.object, distance: result.intersection.distance };
+      return {
+        object: result.intersection.object,
+        distance: result.intersection.distance,
+      };
     }
     if (result.status === 'miss') {
       return { object: undefined, distance: Number.POSITIVE_INFINITY };
@@ -94,17 +101,38 @@ describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) =>
   };
 
   /** Every pixel picked on the GPU and raycast through the trees, then compared. */
-  const compare = (clipping: RaycastClipState | undefined): Comparison => {
+  const compare = async (clipping: RaycastClipState | undefined): Promise<Comparison> => {
     const tolerance = radius * 1e-3;
     const cpu: Outcome[] = [];
     const gpu: Outcome[] = [];
-    for (let row = 0; row < height; row++) {
-      for (let column = 0; column < width; column++) {
-        const raycaster = pixelRay(camera, column, row);
-        const pick = raycastFirstVisibleMeshHit({ raycaster, meshes, clipping });
-        expect(pick.pending).toBe(false);
-        cpu.push({ object: pick.hit?.object, distance: pick.hit?.distance ?? Number.POSITIVE_INFINITY });
-        gpu.push(gpuOutcome(picker.pick(raycaster)));
+    // Traverse independent 64px blocks so the oracle does not require a full-frame cache.
+    for (let top = 0; top < height; top += 64) {
+      for (let left = 0; left < width; left += 64) {
+        picker.pick(pixelRay(camera, Math.min(width - 1, left + 32), Math.min(height - 1, top + 32)));
+        // oxlint-disable-next-line no-await-in-loop -- Read each independent region before checking every original pixel.
+        await picker.refresh();
+        for (let row = top; row < Math.min(height, top + 64); row++) {
+          for (let column = left; column < Math.min(width, left + 64); column++) {
+            const raycaster = pixelRay(camera, column, row);
+            const pick = raycastFirstVisibleMeshHit({
+              raycaster,
+              meshes,
+              clipping,
+            });
+            expect(pick.pending).toBe(false);
+            cpu[row * width + column] = {
+              object: pick.hit?.object,
+              distance: pick.hit?.distance ?? Number.POSITIVE_INFINITY,
+            };
+            let answer = picker.pick(raycaster);
+            if (answer.status === 'pending') {
+              // oxlint-disable-next-line no-await-in-loop -- A block crossing the cached boundary must remain answerable.
+              await picker.refresh();
+              answer = picker.pick(raycaster);
+            }
+            gpu[row * width + column] = gpuOutcome(answer);
+          }
+        }
       }
     }
     const at = (column: number, row: number): Outcome | undefined =>
@@ -152,18 +180,34 @@ describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) =>
         } else if (isSilhouette(column, row)) {
           silhouette++;
         } else {
-          hard.push({ column, row, gpu: describeOutcome(actual), cpu: describeOutcome(expected) });
+          hard.push({
+            column,
+            row,
+            gpu: describeOutcome(actual),
+            cpu: describeOutcome(expected),
+          });
         }
       }
     }
-    return { hits, agreeing, hard, silhouette, largestDistanceError };
+    return {
+      objects: [...new Set(gpu.map(({ object }) => object?.name ?? 'miss'))].sort(),
+      hits,
+      agreeing,
+      hard,
+      silhouette,
+      largestDistanceError,
+    };
   };
 
   beforeAll(async () => {
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    renderer = await createRenderer('viewport', backend, canvas);
+    renderer = await createRenderer(
+      backend === 'nodegl' ? 'showcase' : 'viewport',
+      backend === 'webgpu' ? 'webgpu' : 'webgl',
+      canvas,
+    );
     disposables.push(renderer);
     if (backend === 'webgpu' && !(renderer instanceof WebGPURenderer && renderer.backend instanceof WebGPUBackend)) {
       throw new Error(
@@ -213,7 +257,12 @@ describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) =>
     }
 
     writeSectionClip(clip, []);
-    picker = createModelGpuPicker({ renderer, sectionClip: clip, onLanded: landed, settleMilliseconds: 50 });
+    picker = createModelGpuPicker({
+      renderer,
+      sectionClip: clip,
+      onLanded: landed,
+      settleMilliseconds: 50,
+    });
     expect(picker.supported).toBe(true);
     disposables.push(picker);
   }, setupTimeout);
@@ -227,32 +276,32 @@ describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) =>
   it('should name the mesh and the distance the BVH names, away from silhouettes', async () => {
     frame();
     await picker.refresh();
-    const result = compare(undefined);
+    const result = await compare(undefined);
     expect(result.hard).toEqual([]);
     expect(result.hits).toBeGreaterThan((width * height) / 8);
     expect(result.silhouette).toBeLessThan(result.hits / 10);
     expect(result.largestDistanceError).toBeLessThan(radius * 1e-3);
-    const objects = new Set(
-      Array.from({ length: width * height }, (_unused, index) => {
-        const pick = picker.pick(pixelRay(camera, index % width, Math.floor(index / width)));
-        return pick.status === 'hit' ? pick.intersection.object.name : 'miss';
-      }),
-    );
-    expect([...objects].sort()).toEqual(['box', 'housing', 'miss']);
+    expect(result.objects).toEqual(['box', 'housing', 'miss']);
   });
 
   it('should pick what the section cut leaves, through what it removes', async () => {
     // Removes everything above the housing's middle, opening it towards the camera.
-    const cut: SectionCut = { id: 'cut', kind: 'plane', plane: 'xy', offset: center.z, isFlipped: false };
+    const cut: SectionCut = {
+      id: 'cut',
+      kind: 'plane',
+      plane: 'xy',
+      offset: center.z,
+      isFlipped: false,
+    };
     const pieces = resolveSectionPieces([cut]);
     frame();
     await picker.refresh();
-    const before = compare(undefined);
+    const before = await compare(undefined);
 
     writeSectionClip(clip, pieces);
     frame();
     await picker.refresh();
-    const clipped = compare({ enabled: true, pieces });
+    const clipped = await compare({ enabled: true, pieces });
     writeSectionClip(clip, []);
 
     expect(clipped.hard).toEqual([]);
@@ -264,8 +313,9 @@ describe.each(['webgl', 'webgpu'] as const)('model GPU pick on %s', (backend) =>
 
   it('should answer pending for a scene the buffer does not show, then replay once when the pass lands', async () => {
     frame();
-    await picker.refresh();
     const ray = pixelRay(camera, width / 2, height / 2);
+    picker.pick(ray);
+    await picker.refresh();
     expect(picker.pick(ray).status).toBe('hit');
 
     landed.mockClear();

@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-10-19'
+updated: '2026-10-24'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -19,6 +19,7 @@ related:
   - docs/research/runtime-converter-dissolution-blueprint.md
   - docs/research/third-party-fork-org-naming.md
   - docs/research/apache-default-relicensing-blueprint.md
+  - docs/research/size-budget-autonomy-blueprint.md
 ---
 
 # npm Publishing Policy
@@ -358,6 +359,25 @@ Run in CI by `nx affected -t pkgcheck`, and at publish time as a `dependsOn` of 
 
 `pkgcheck` runs against a **staged copy** of the package with `publishConfig` applied (the same transform `npm publish` applies at publish time). This catches issues that only manifest after publish — for example, an `exports` map that resolves in workspace dev but breaks in the published shape.
 
+#### Changing a size budget
+
+A `.size-limit.json` limit is the latest measurement plus a little headroom, so authorized work routinely crosses it. Raising a limit inside the band below is a reversible detail the agent doing the work decides; it is never an operator question. Above the band, the operator decides.
+
+| Entry kind                                                                 | Autonomous raise, against the limit being replaced |
+| -------------------------------------------------------------------------- | -------------------------------------------------- |
+| Code: any positive path measures `.js`, `.mjs`, `.cjs`, `.html` or `.css`  | at most 10 % **and** at most 10 kB                 |
+| Asset: every other entry (WASM, fonts, images, models, source maps)        | at most 5 %                                        |
+| Any entry, cumulatively within one program, against its limit at its start | at most 20 %                                       |
+
+The operator decides, whatever the size, when:
+
+- the entry is reserved: the `@taucad/runtime` total and root (`.`) entries;
+- the growth is unexplained: a new dependency entered the measured output, a lazy chunk became eager, or the growth does not come from the change being made.
+
+Before raising, confirm the growth comes from the change (diff the entry's built files against the base build) and fix any accidental growth instead of raising. Set the new limit to the new measurement plus at most 10 % headroom, update the entry's `measured <size> on <date>` note with the reason, and run `pnpm size:raises` (add `--program-base <ref>` inside a program); it matches entries by `path`, parses limits as `size-limit` does (`1 kB` is 1,000 bytes), and exits 1 when a raise needs the operator. Report an autonomous raise as an FYI in the PR body and the program's state log with the script's table row. Do not split one raise across commits or PRs to stay inside the band.
+
+An operator raise is one message: the entry, old and new limit, the measured growth and where it comes from, and the alternative (what would be cut). Other work continues meanwhile. A program handoff does not reserve size budgets beyond this subsection unless its charter rules so.
+
 ### 8. README Required Sections
 
 Every publishable package's README is the primary npmjs.com landing page. The discoverability of a `@taucad/*` package against competitors (`@gltf-transform/core`, `replicad`, etc.) depends on a complete README. Required sections in this order:
@@ -523,6 +543,7 @@ Before merging a PR that touches a publishable package's `package.json` or `tsdo
 - [ ] Plugin packages export named `plugin` and no default plugin; core packages export no `plugin`
 - [ ] All required `package.json` fields present (Rule 6): `engines`, `sideEffects`, `bugs`, `homepage`; no `prepublishOnly` hook except the bucket F held-licence gate described above
 - [ ] `pnpm nx run <pkg>:pkgcheck` passes (Rule 7)
+- [ ] Every raised size limit is inside the band or operator-approved, and its `measured` note is current (`pnpm size:raises`, Rule 7)
 - [ ] README covers every required section (Rule 8)
 - [ ] Build-time integrations declared as optional peers (Rule 10)
 - [ ] `"private": false` (or omitted) on publishable packages (Rule 11)

@@ -9,6 +9,7 @@ import { ProjectAccessService } from '#api/collaboration/project-access.service.
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
 import { completeProjectDeletion, requestProjectDeletion } from '#api/projects/project-deletion.js';
+import { storeTombstoneFence } from '#api/git/store/tombstone-fence.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import type { Environment } from '#config/environment.config.js';
@@ -75,7 +76,7 @@ describe('project deletion registration and listing on isolated PostgreSQL', () 
     const retiredReaderList = await controller.list(fixture.readerId);
     expect(retiredReaderList.map((row) => row.id)).toEqual([fixture.neighborId]);
     expect(await controller.list(fixture.writerId)).toEqual([]);
-    await completeProjectDeletion({ database, store: createMemoryRepositoryStore(), ...fixture });
+    await completeProjectDeletion({ database, fence: storeTombstoneFence(createMemoryRepositoryStore()), ...fixture });
     const completedList = await controller.list(fixture.ownerId);
     expect(completedList.map((row) => row.id)).toEqual([fixture.neighborId]);
   });
@@ -113,7 +114,7 @@ describe('project deletion registration and listing on isolated PostgreSQL', () 
     const fixture = await seedDeletionProject(database);
     const { controller } = createController(database);
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
-    await completeProjectDeletion({ database, store: createMemoryRepositoryStore(), ...fixture });
+    await completeProjectDeletion({ database, fence: storeTombstoneFence(createMemoryRepositoryStore()), ...fixture });
     const receipt = await readProjectDeletion(database, fixture.projectId);
     await database.delete(schema.user).where(eq(schema.user.id, fixture.ownerId));
     expect(await database.select().from(schema.project).where(eq(schema.project.id, fixture.projectId))).toEqual([]);
@@ -147,7 +148,7 @@ describe('project deletion registration and listing on isolated PostgreSQL', () 
       response: { code: 'PROJECT_LIMIT_REACHED' },
     });
     await requestProjectDeletion({ database, ...fixture, userId: fixture.ownerId, enabled: true });
-    await completeProjectDeletion({ database, store: createMemoryRepositoryStore(), ...fixture });
+    await completeProjectDeletion({ database, fence: storeTombstoneFence(createMemoryRepositoryStore()), ...fixture });
     expect(await controller.register(freshId, {}, fixture.ownerId)).toEqual({ id: freshId });
     expect(await readProjectDeletion(database, fixture.projectId)).toMatchObject({ ownerId: fixture.ownerId });
     const [reserved] = await database.select().from(schema.project).where(eq(schema.project.id, fixture.projectId));

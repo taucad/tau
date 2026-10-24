@@ -14,7 +14,7 @@ import {
   isServedStore,
 } from '#api/git/routing/route.js';
 import type { RepositoryRoute } from '#api/git/routing/route.js';
-import { isFenceManifest } from '#api/git/store/fence.js';
+import { isFenceManifest } from '#api/git/store/fence-marker.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 
 /** How the guard reads routes: through the per-Machine cache, or past it. `RouteCache` is the deployment's. */
@@ -134,6 +134,37 @@ export class RepositoryRouteGuard {
     if (isFrozen(route, Date.now()) || !isServedStore(route.store)) {
       throw frozenRefusal();
     }
+  }
+
+  /**
+   * The route a storage grant carries (DC1, FR13): read past this Machine's
+   * cache for a write, through it for a read. A write whose authoritative read
+   * finds the repository frozen, or a route this build does not serve, is
+   * refused here, after `admit` and before a grant exists.
+   *
+   * @param projectId - The repository's project.
+   * @param authoritative - Whether to read past the cache, as every write does.
+   * @returns The grant's `route`.
+   * @throws HttpException `429 GIT_REPOSITORY_FROZEN` for a frozen write or an unserved store.
+   */
+  public async grantRoute(
+    projectId: string,
+    authoritative: boolean,
+  ): Promise<{ readonly store: string; readonly frozenUntil?: number; readonly authoritative: boolean }> {
+    const route = authoritative
+      ? await this.#routes.lookupAuthoritative(projectId)
+      : await this.#routes.lookup(projectId);
+    const now = Date.now();
+    if (!isServedStore(route.store) || (authoritative && isFrozen(route, now))) {
+      throw frozenRefusal();
+    }
+    return {
+      store: route.store,
+      ...(route.frozenUntil !== undefined && isFrozen(route, now)
+        ? { frozenUntil: Math.ceil(route.frozenUntil.getTime() / 1000) }
+        : {}),
+      authoritative,
+    };
   }
 
   /**

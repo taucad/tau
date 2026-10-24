@@ -71,11 +71,13 @@ export function KinematicsPlayer({
   unitId,
   mechanism,
   dofs,
+  isShown = true,
 }: {
   readonly kinematicsRef: KinematicsRef;
   readonly unitId: string;
   readonly mechanism: Mechanism;
   readonly dofs: readonly DegreeOfFreedom[];
+  readonly isShown?: boolean;
 }): React.JSX.Element {
   const status = useSelector(
     kinematicsRef,
@@ -92,6 +94,8 @@ export function KinematicsPlayer({
   const time = useSelector(
     kinematicsRef,
     unitSelector(unitId, (unit) => unit.playback.time),
+    // Hidden panes retain their controls, but animation ticks must not repaint them.
+    (previous, next) => !isShown || previous === next,
   );
   const isReducedMotion = useReducedMotion();
   const isPlaying = status === 'playing';

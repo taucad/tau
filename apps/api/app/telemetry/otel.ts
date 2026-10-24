@@ -28,6 +28,7 @@ import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 import { redactUrlQuery } from '#logger/logger-factory.js';
+import { cardinalityViews } from '#telemetry/cardinality-views.js';
 
 const configuredMetricsPort = process.env['OTEL_METRICS_PORT'];
 const metricsPort = configuredMetricsPort === undefined ? 9464 : Number(configuredMetricsPort);
@@ -41,9 +42,13 @@ process.env['OTEL_METRICS_EXEMPLAR_FILTER'] ??= 'trace_based';
 process.env['OTEL_SEMCONV_STABILITY_OPT_IN'] ??= 'http';
 
 /* eslint-disable @typescript-eslint/naming-convention -- OTEL semantic convention attribute names use dot-notation */
+/* One SDK for every Tau process: `OTEL_SERVICE_NAME` names it (tau-storage sets
+   it in its image, DC1), and an unset one is the API. */
+const serviceName = process.env['OTEL_SERVICE_NAME'] ?? 'tau-api';
+
 const resource = resourceFromAttributes({
-  // One image, several Fly apps: `tau-mirror` sets OTEL_SERVICE_NAME so its series are told apart (W14).
-  'service.name': process.env['OTEL_SERVICE_NAME'] ?? 'tau-api',
+  // One image, several Fly apps: `tau-mirror` and `tau-storage` set OTEL_SERVICE_NAME so their series are told apart (W14).
+  'service.name': serviceName,
   'service.version': process.env['FLY_IMAGE_REF'] ?? 'dev',
   'deployment.environment': process.env['NODE_ENV'] ?? 'development',
   'cloud.provider': process.env['FLY_REGION'] ? 'fly.io' : 'local',
@@ -85,6 +90,10 @@ const sdk = new NodeSDK({
     port: metricsPort,
     withResourceConstantLabels: /^(?:service\.name|tau\.process)$/u,
   }),
+
+  // Named views raise the series cap of the few instruments whose live set exceeds the SDK default of 2,000;
+  // every other instrument keeps that default and no instrument gets a second stream.
+  views: [...cardinalityViews],
 
   logRecordProcessors: hasOtlpEndpoint ? [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })] : undefined,
 
@@ -142,7 +151,7 @@ if (process.env['PYROSCOPE_SERVER_ADDRESS']) {
     const { default: Pyroscope } = await import('@pyroscope/nodejs');
     Pyroscope.init({
       serverAddress: process.env['PYROSCOPE_SERVER_ADDRESS'],
-      appName: 'tau-api',
+      appName: serviceName,
       tags: {
         region: process.env['FLY_REGION'] ?? 'local',
         version: process.env['FLY_IMAGE_REF'] ?? 'dev',

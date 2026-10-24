@@ -3,7 +3,7 @@ title: 'WebGPU Shader and Pipeline Policy'
 description: 'Rules for portable Three.js shaders, generated-source evidence, and render-pipeline ownership'
 status: active
 created: '2026-05-15'
-updated: '2026-10-01'
+updated: '2026-10-24'
 related:
   - docs/policy/graphics-backend-policy.md
   - docs/policy/webgpu-rendering-pipeline.md
@@ -20,7 +20,7 @@ related:
 
 # WebGPU Shader and Pipeline Policy
 
-Internal reference for authoring portable GLSL/TSL shaders and managing render-pipeline ownership under Three.js in `apps/ui`.
+Internal reference for authoring portable GLSL/TSL shaders and managing render-pipeline ownership under Three.js in `packages/viewer` and its app composition.
 
 ## Rationale
 
@@ -32,9 +32,9 @@ WebGPU validation is strict where WebGL is permissive: pipelines bind vertex-buf
 
 Avoid `scene.overrideMaterial` for any pass that spans more than one geometry signature (Mesh + Line2 + InstancedMesh + Sprite + section caps). It can declare vertex-buffer slots that a later draw does not bind under WebGPU. Also avoid the former workaround of traversing the scene, cloning/swapping every material, and replaying the complete scene merely to recover depth. If an existing pass already owns the required depth or normal attachment, retain that attachment and bridge it directly to its consumer.
 
-Only add a dedicated depth/normal render when no authoritative output exists. Such a pass must own materials that match every supported geometry signature; it must not dynamically mutate live scene materials.
+Only add a dedicated depth/normal render when no compatible authoritative output exists or a controlled comparison demonstrates that conversion/reuse costs more while preserving the same contract. Record that exception and its measurements. Such a pass must own materials that match every supported geometry signature; it must not dynamically mutate live scene materials.
 
-**Why**: Reusing an existing attachment is both the safer layout contract and the maximal-performance path: no scene traversal, no clone cache, no material mutation, and no second geometry rasterization. See three.js issues [#28927](https://github.com/mrdoob/three.js/issues/28927) and [#30398](https://github.com/mrdoob/three.js/issues/30398).
+**Why**: Compatible attachment reuse avoids scene traversal, clone caches, material mutation and a second geometry rasterization. Measure any conversion or synchronization cost before claiming it is fastest. See three.js issues [#28927](https://github.com/mrdoob/three.js/issues/28927) and [#30398](https://github.com/mrdoob/three.js/issues/30398).
 
 **Enforced by**: `tau-lint/no-scene-override-material` (error).
 
@@ -58,9 +58,9 @@ scene.overrideMaterial = null;
 
 ### 2. Treat the WebGPU canvas depth attachment as persistent across frames
 
-When rendering with `gl.autoClear = false`, the WebGPU canvas depth/stencil attachment is **not** wiped between frames. Authors of any `useFrame` subscriber that disables auto-clear must explicitly set `autoClearDepth = true` (and `autoClearStencil = true` when relevant) at the start of the next pass that should see a fresh depth buffer, or risk stale depth values silently failing the reversed-Z `GREATER` compare.
+When rendering with `gl.autoClear = false`, the WebGPU canvas depth/stencil attachment is **not** wiped between frames. Authors of any `useFrame` subscriber that disables auto-clear must explicitly clear the required attachments or enable `autoClear` with `autoClearDepth = true` (and `autoClearStencil = true` when relevant) at the start of the next pass that should see a fresh depth buffer, or risk stale depth values silently failing the reversed-Z `GREATER` compare.
 
-**Why**: WebGL's browser compositor implicitly clears the drawing-buffer depth between frames when `preserveDrawingBuffer: false`. WebGPU has no such compositor clear — the depth texture is a stable three.js-managed texture whose lifecycle is bounded only by `loadOp: 'load' | 'clear'`. See `docs/research/webgpu-overlay-depth-attachment-persistence.md`.
+**Why**: WebGL's browser compositor implicitly clears the drawing-buffer depth between frames when `preserveDrawingBuffer: false`. A retained WebGPU depth texture keeps its contents until cleared or replaced; `loadOp: 'load' | 'clear'` controls the initial contents of each render pass. See `docs/research/webgpu-overlay-depth-attachment-persistence.md`.
 
 CORRECT:
 
@@ -93,7 +93,7 @@ When constructing a depth-only override or custom render pass that must reset th
 
 Express axis-/feature-permutations via `If/ElseIf/Else` over `uniform()` values, not by recompiling N material variants. Prefer mutating `uniform.value` over recreating the material when only configuration scalars change.
 
-**Why**: Each material rebuild evicts the compiled WGSL from three.js's pipeline cache and triggers a fresh shader compile (10-100 ms hitch). Uniform branching is free on modern GPUs when the predicate is dynamically uniform; the WGSL uniformity analyser handles `uniform()` reads correctly. See `docs/research/webgpu-render-loop-audit.md` finding R1.
+**Why**: Rebuilding materials can repeat graph construction and compilation; uniform updates avoid structural churn. Dynamically uniform branching is not free, and specialization may reduce executed work or register pressure. Measure the relevant trade-off rather than claiming every rebuild recompiles or every branch has zero cost. See `docs/research/webgpu-render-loop-audit.md` finding R1.
 
 **Line materials addendum (mandatory).** For line materials drawn into the viewport canvas (`Line2NodeMaterial` consumers — scene `AxesHelper`, gizmo cube axes, edge overlays, future fat-line surfaces), the persistent mesh + material instance pattern is **mandatory**: each axis/edge owns one `Line2NodeMaterial` + one or more `Line2WebGpu` meshes constructed exactly once on mount, with hover/selection/visibility state mutated imperatively (`material.linewidth = ...`, `mesh.visible = ...`) from a `useLayoutEffect`. Routing hover state through React props that drive the material constructor inside a `useMemo` is forbidden — it triggers the exact pipeline-compile gap this rule warns about, manifesting as the "axis line vanishes on hover" frame skip documented in `docs/research/webgpu-axes-hover-pipeline-stall.md`. Apply rule 13 to preparation admission and measure cold first use separately from warmed interaction.
 
@@ -146,9 +146,9 @@ const line = React.useMemo(
 
 ### 5. Hoist per-frame scalars to varyings or CPU uniforms
 
-Quantities that depend only on the camera, model matrix, or other per-frame state must be computed in the vertex stage (and passed as a varying) or supplied as a CPU-side uniform. Do not recompute them per fragment.
+Prefer computing values constant across a draw once on the CPU and supplying uniforms. Vertex-stage computation with interpolation is appropriate only when it preserves the required spatial semantics. Verify the emitted shader and measure relevant costs; avoid moving nonlinear per-fragment work to vertices merely to reduce instruction counts.
 
-**Why**: Fragment count >> vertex count for fullscreen overlays. `length(cameraPosition)`, `worldPosition - cameraPosition` plane projections, and similar scalars are constant across the primitive and waste fragment cycles. Three.js's TSL `cameraPosition` is a uniform — sampling it in the fragment is legal but redundant if the value is already known at vertex time.
+**Why**: Fullscreen effects can evaluate the same uniform-only expression millions of times, although a compiler may hoist it. `length(cameraPosition)` is draw-constant; `worldPosition - cameraPosition` generally is not. Loading a uniform is not itself redundant computation, and interpolating a nonlinear value can change pixels.
 
 CORRECT:
 
@@ -192,13 +192,13 @@ A material's `transparent`, `depthWrite`, `depthTest`, `colorWrite`, and `side` 
 
 **Why**: `transparent = true` defers the draw to the transparent pass, but three.js still honors the material's explicit `depthWrite` value in both WebGL and WebGPU. Transparent overlays and ghosted model surfaces must set `depthWrite = false` themselves; depth-only pass materials must stay `transparent = false`, `depthWrite = true`, and `colorWrite = false`. See `docs/research/cad-viewer-isolation-transparency-depth-write.md`.
 
-### 8. Pipeline cache keys include geometry signature — assume per-mesh recompiles
+### 8. Bound observed pipeline variants by their actual context
 
-WebGPU pipelines are cached by `(stageVertex.id, stageFragment.id, backend.getRenderCacheKey(renderObject))` where the backend key includes the geometry's attribute layout (`renderObject.getGeometryCacheKey()`). When a material is applied to N meshes with M distinct attribute signatures, expect M compiled pipelines per material.
+Record unique shader/pipeline creation and first-use events. Cache keys include shader stages, geometry layout and backend render state, including attachment formats, sample count, blending, depth/stencil, winding and clipping. Compatible meshes can reuse a pipeline; one material can require several context variants. Neither per-mesh recompilation nor a `(mesh count × material count)` upper bound follows from persistent instances alone.
 
-**Why**: Plan capacity. Hot-swapping geometry attribute layouts (e.g. toggling vertex colors, instancing) invalidates pipeline cache entries. Authors building libraries of materials applied across diverse geometries should budget for the worst case and consider pipeline warmup (`renderer.compileAsync`).
+Keep ordinary pose, hover and scalar changes on persistent objects. When structural state must change, qualify the affected context and cold first-use cost. Resolve the installed dependency and patches before relying on a particular cache implementation.
 
-**Persistent-instance bound.** When the persistent mesh + material pattern from rule 4 is in force, the pipeline budget is bounded to `(mesh count × material count)` and is **knowable at mount time** — for example, the scene `AxesHelper` warms exactly six pipelines (three axes × two halves) once on mount, none of which recompile during hover. Any architecture that recreates meshes or materials on user-driven state changes breaks this bound and re-introduces the 10-100 ms compile hitch documented in rule 4. Apply rule 13 before adding any speculative preparation to the initial geometry path.
+**Why**: Stable ownership prevents avoidable churn, but cache behavior depends on the actual render context rather than object count alone.
 
 ### 9. Long-lived render pipelines must be owned by a single component
 
@@ -213,89 +213,43 @@ Every custom shader site must be registered in `shader-policy.ts` and prove each
 1. CPU semantic oracles for coordinate, unit, interpolation, tolerance, depth, and sizing math.
 2. TSL graph snapshots for deterministic graph structure; these are supplementary, not proof that generated WGSL compiles or renders correctly.
 3. Exact generated GLSL/WGSL inspection through public Three.js debug APIs, guarded to the installed Three.js revision when upstream source shape matters.
-4. Real WebGL2 compile/link and WebGPU `getCompilationInfo()` validation, including a negative-control shader and uncaptured-error/device-loss assertions.
+4. Real WebGL2 compile/link and WebGPU `getCompilationInfo()` validation, including uncaptured-error/device-loss assertions. Qualify negative-control shaders when the harness or compiler dependency changes; they need not be re-created for each material edit.
 5. Deterministic backend pixel/interaction tests for visible behavior.
 6. Frame/GPU timings for hot ubiquitous shaders or changes that add/remove render passes.
 
-Raw WGSL/GLSL is an escape hatch, not the default. Use TSL for logic that must execute on WebGPU and keep a paired classic WebGL material while the public renderer remains WebGL. A raw WGSL specialization requires a measured bottleneck, a documented portability boundary, and the same validation layers.
+Raw WGSL/GLSL is an escape hatch, not the default. Use shared TSL for the node WebGPU and node WebGL2 backends. Preserve required classic fallback behavior without duplicating every node-only optimization. Record the initialized execution backend independently of renderer family. A raw WGSL specialization requires a measured bottleneck, a documented portability boundary, and the same validation layers.
 
 **Why**: A graph snapshot can remain stable while generated source, validation, state, or pixels regress. The layers catch different failure classes and keep the inventory auditable.
 
-### 11. Compose-based AO over `builtinAOContext` when MRT outputs are available
+### 11. Declare AO lighting semantics and measure composition choices
 
-When the scene pass already produces a depth + normal MRT (as it must to feed GTAO inputs), the AO factor must be composited into the final image by multiplying the beauty color: `scenePassColor.mul(vec4(vec3(aoOutput.r), 1))`. Do not wire `scenePass.contextNode = builtinAOContext(...)` to re-render the scene with AO applied per-fragment.
+Keep AO visible during motion, with explicit estimation/filtering resolution and edge-preserving reconstruction. Record whether AO attenuates indirect lighting or multiplies already-lit beauty; these are not physically equivalent. Preserve the qualified appearance contract, including metallic highlights and alpha, when optimizing composition.
 
-**Why**: `builtinAOContext` requires a second scene rasterization (the depth/normal prepass plus the lit pass). Compose-based AO turns it into a single fullscreen multiply on the existing scene color attachment — saving an entire 4-MSAA scene render per frame. The math is identical (`scene_lit * ao_factor === scene_with_ao`); GTAO's own canonical example uses this pattern (`three/addons/tsl/display/GTAONode.js`).
+Reuse compatible depth and normal data. Do not assume every AO implementation requires a normal MRT or that a particular sample count/pass saving applies to the current frame. Compare composition, material-context application and normal reconstruction only where they satisfy the required contract. Avoid a redundant scene rasterization when retained inputs suffice, but do not prescribe a universal AO multiply or prohibit a justified measured alternative.
 
-CORRECT:
+**Why**: A historical pass-count saving does not prove the best lighting model, bandwidth or shader cost for a different frame architecture.
 
-```typescript
-const scenePass = pass(scene, camera);
-scenePass.setMRT(mrt({ output, normal: directionToColor(normalView) }));
-const scenePassColor = scenePass.getTextureNode('output');
-const scenePassDepth = scenePass.getTextureNode('depth');
-const aoOutput = ao(
-  scenePassDepth,
-  sample((uv) => colorToDirection(scenePass.getTextureNode('normal').sample(uv))),
-  camera,
-);
-post.outputNode = scenePassColor.mul(vec4(vec3(aoOutput.getTextureNode().sample(screenUV).r), 1));
-```
+### 12. Preserve authoritative depth, sample coverage and resource ownership
 
-INCORRECT:
+Every consumer must use depth representing the intended geometry and all applicable later cap writes. Record source/destination depth convention, projection, precision, sample count/positions, interpolation, UV orientation, comparison/bias and clear/load behavior. Preserve geometric occlusion for outlines, wash, grid, picking and captures.
 
-```typescript
-const prePass = pass(scene, camera);
-prePass.setMRT(mrt({ output: directionToColor(normalView) }));
-const aoOutput = ao(prePass.getTextureNode('depth'), /* normals */, camera);
-const scenePass = pass(scene, camera); // second scene rasterization
-scenePass.contextNode = builtinAOContext(aoOutput.getTextureNode().sample(screenUV).r);
-post.outputNode = scenePass;
-```
+Prefer existing compatible attachments. Copying, directly sharing an attachment and sampling depth in a shader are different operations: single-sample shader discard is not automatically equivalent to multisampled fixed-function depth. Prove the required equivalence at occlusion boundaries, thin features, coplanar surfaces and subpixel positions in both cameras and node backends before replacing one with another. Do not sample an attachment while it is incompatibly bound for writing or share live resources across renderer instances.
 
-### 12. Post owners restore authoritative depth directly before overlays
+One owner allocates and disposes each resource; consumers never dispose borrowed depth. Restore renderer state even on failure. Inspect supported load/store/resolve controls before introducing custom shader logic, and never discard data needed by a later consumer. Record descriptor storage, renderer counters and physical-memory observations separately: discard can save bandwidth without releasing capacity.
 
-The priority-1 post owner must expose one retained direct-to-canvas depth restore to the priority-2 `SceneOverlay`. The overlay invokes that restore and renders its own scene exactly once. It must never traverse, mutate, clone, or replay the main scene.
+Keep the currently qualified depth bridge until its replacement passes final-composition tests. The node frame and classic canvas may require different bridges. Do not mutate private `RenderPipeline._quadMesh` internals or traverse/clone/swap live scene materials to recover depth. Installed-version adaptations need exact source guards and an exit condition.
 
-- WebGL: retain the composer's stable depth texture in a `Pass`, then run one depth-only fullscreen draw to the default framebuffer.
-- WebGPU: sample the active `PassNode` depth with a separate retained `QuadMesh`/`NodeMaterial`, targeting the canvas immediately before the overlay.
-- Without post-processing: restoration is a no-op because the ordinary main render already owns canvas depth.
-
-Do **not** use `RenderPipeline._quadMesh`: it is private and, in Three.js r184, writes the pipeline's internal target rather than the canvas depth attachment. Do **not** fall back to a scene clone-swap replay; that duplicates geometry work and reintroduces heterogeneous vertex-layout hazards.
-
-**Why**: WebGPU canvas depth persists across frames (rule 2), while both post stacks render main color/depth offscreen. A direct bridge preserves exact clipping/depth output and costs one fullscreen depth write rather than a second scene rasterization. See `docs/research/webgpu-composite-quad-depth-write-non-functional.md` and `docs/research/threejs-shader-foundation-and-testing-blueprint.md`.
-
-CORRECT (priority-2 overlay):
-
-```typescript
-useFrame(({ gl, camera }) => {
-  const previousAutoClear = gl.autoClear;
-  gl.autoClear = false;
-  restoreDepth?.();
-  gl.render(overlayScene, camera);
-  gl.autoClear = previousAutoClear;
-}, 2);
-```
-
-INCORRECT (composite-quad depth wiring — does not reach canvas depth in r184):
-
-```typescript
-const post = new RenderPipeline(gpuRenderer);
-post.outputNode = scenePassColor.mul(vec4(vec3(ao.r), 1));
-const compositeMaterial = (post as unknown as { _quadMesh?: { material: NodeMaterial } })._quadMesh?.material;
-if (compositeMaterial !== undefined) {
-  compositeMaterial.depthNode = scenePassDepth.sample(screenUV);
-  compositeMaterial.depthWrite = true;
-  compositeMaterial.depthTest = false;
-  compositeMaterial.needsUpdate = true;
-}
-```
+**Why**: Correct depth ownership survives implementation changes; a prescribed quad-copy mechanism cannot substitute for coverage and lifecycle proof.
 
 ### 13. Prepare the correct active context; admit optional work on demand
 
 Finalize ownership, saved pose, visibility/opacity, physical bounds, render frame and the active camera before the first active scene draw. Preserve the previous committed scene until its replacement is valid. Build only the selected endpoint and required output graph. With AO disabled, allocate neither GTAO nor a normal MRT attachment. Construct inactive projections and optional Section/Measure helpers on first demand by default; spatial rebasing is a uniform update, not a reason to compile an inactive endpoint.
 
-The viewport's WebGPU output graph is a `QuadMesh` drawn through the renderer's frame target, not `RenderPipeline.render()`: the pipeline writes the canvas directly, and the next overlay's output pass would copy the frame target's stale contents over it. The graph tone-maps the scene itself and `renderer.toneMapping` stays `NoToneMapping`, so the output pass only encodes sRGB and overlays stay untone-mapped, as on WebGL.
+The composed R3F node canvas disables its default depth/stencil before its first draw (`canvas-three-gl.ts`): only final color encoding reaches that canvas. The explicit frame still owns depth/stencil for CAD draws, even with AO off. Keep standalone and offscreen renderer depth intact. Retain clear operations unless a controlled comparison proves their removal helps; loading an old attachment can cost more than clearing it.
+
+The node post owner retains one single-sample frame target with linear-light shader/blend semantics across the synchronous frame callbacks. Neutral tone mapping bounds the scene before composition, so this frame uses hardware-sRGB RGBA8 storage; unbounded/other tone mappings retain linear RGBA16F. Scene radiance remains HDR RGBA16F and the frame depth/stencil precision is unchanged. A tone-map format change disposes and replaces the frame through the same owner. Qualify storage changes with dark ramps, alpha, repeated blends and final opaque/transmissive captures; raw unpremultiplied PNG RGB near zero alpha is not displayed contrast. It draws scene color/depth at priority 1, allows later CAD draws to preserve/extend those attachments, then encodes once at priority 3.5. The graph tone-maps the scene itself; overlays remain untone-mapped. Final output and cleanup restore the prior target. A subsequent frame recovers the destination if an intervening subscriber threw. Do not hold this binding across an await.
+
+Evaluate standard `RenderPipeline.render()` as part of the shared node consolidation, using final-output tests that include later depth-writing caps and overlays. Adopt it only when later draws preserve both color and depth, with explicit sample/clear/output ownership; a standalone output screenshot is insufficient.
 
 Do not assume detached `gl.compileAsync(group, camera)` warms a live post pass. Frame target, sample count, MRT, clipping and call depth participate in its real render context; a viewport-copy graph built without them may be rebuilt on first draw. A 1×1 destination does not shrink a scene pass's intermediate targets. Keep semantic generated-node cache keys stable before and after setup, while distinguishing caller-provided nodes and incompatible structural variants.
 
@@ -318,6 +272,38 @@ await Promise.all([perspective, orthographic].map((camera) => gl.compileAsync(un
 // Optional endpoints and AO must not delay every cold load.
 ```
 
+### 14. Qualify optimization against the installed runtime and whole frame
+
+Record exact build, dependency version/patches, initialized backend, device, fixture, poses, CSS size, DPR and drawing buffer. Inspect installed source before applying upstream guidance. Predeclare the expected benefit and its measurement uncertainty; use unchanged A/A repeats to estimate noise, then alternating independent A/B runs. Report absolute milliseconds and bytes alongside percentages, distributions and variability across runs, query/sample counts, CPU submission, GPU query scope/precision, and instrumentation-off throughput. Correlate sparse GPU samples to submitted poses before making paired-pose claims. Do not sum overlapping intervals or compare different timing scopes as identical metrics. Separate cold startup/first use from steady state and descriptor allocations from physical memory.
+
+Do not impose a universal percentage improvement cutoff. Judge a repeatable saving against uncertainty, frame budget, CPU/tail/startup tradeoffs and implementation complexity. A saving smaller than variability remains inconclusive, not proof of no benefit. Memory, latency, reduced work and simpler ownership may independently justify a change without an FPS gain; state which benefit is actually established. Backend-specific acceptance is allowed when the other path remains correct and its cost is explicitly qualified.
+
+### 15. Separate functional correctness, appearance and optimization acceptance
+
+Declare these three decisions independently before evaluating a candidate:
+
+| Decision               | Evidence and disposition                                                                                                                                                                                                                                                                                            |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Functional correctness | Preserve required geometry, picking, clipping, depth precision, cap/grid occlusion, highlight visibility semantics, lifecycle and backend validation. Missing geometry, stale output or wrong visibility is a failure regardless of speed.                                                                          |
+| Appearance             | For arithmetic-preserving changes, exact or tightly bounded pixel comparison is appropriate. For changed rasterization, sampling or filtering, also measure boundary displacement, continuity, contrast/width and temporal residuals. A maximum channel error alone identifies difference, not perceptual severity. |
+| Benefit and complexity | Weigh measured GPU/CPU time, tails, memory, first use and ownership complexity. Neither fewer passes nor lower nominal storage proves faster rendering. A small repeatable improvement is not automatically rejected.                                                                                               |
+
+Calibrate appearance tolerances using reference variation, known defective controls and the intended display scale. Keep interior/occlusion checks distinct from antialiased boundary checks; whole-image averages must not hide broken small features. Include motion, camera/DPR changes and full production composition. Numerical thresholds are engineering contracts, not universal perceptual laws. A borderline noise or integrated-width failure needs spatial/temporal investigation before declaring the algorithm unacceptable.
+
+Keep depth precision and required CAD behavior as invariants. Sample count, target dimensions and pass sequence are implementations that may change when their replacements satisfy the contract. Preserve classic appearance as the reference; do not degrade it to pass a candidate.
+
+Version any justified gate revision with its rationale, negative controls, authorization and fresh evidence. Preserve original thresholds and failures; never relabel an old failed run as passed under a new gate. Use explicit dispositions: functional failure, appearance investigation, benefit inconclusive, bounded acceptance, or rollout qualified. Qualification of an optimization does not promote an execution backend or require completing unrelated rollout gates first.
+
+### 16. Separate composition replacement from broader rollout
+
+Decide independently whether a replacement materially regresses its current reference and whether the resulting renderer is ready for broader rollout. Classify unresolved findings as replacement-specific regressions, demonstrated shared defects, unattributed differences, accepted numerical/coverage differences, or follow-up improvements. Similar failures in both variants do not prove a shared mechanism: compare reproduction sequence, location, severity, frequency and impact. Preserve strict picking, clipping, depth, hidden-line and missing-stroke semantics.
+
+Use a bounded comparison with independent histories and retain every admitted run. A passing rerun is not a correction. End an inconclusive investigation with a supported disposition and the next decisive experiment. An unresolved material replacement-specific regression blocks promotion; an assessed shared defect belongs to the separate release acceptance record.
+
+Once a replacement qualifies, remove its obsolete production alternative and selector. Preserve reproducible historical baselines through source revisions or research artifacts, rather than permanent competing implementations. Necessary AO-off specializations and classic compatibility fallback are separate from node composition consolidation; node WebGL2 must independently qualify before becoming the automatic fallback.
+
+**Why**: A simpler qualified owner avoids indefinite implementation duplication without concealing pre-existing renderer defects or weakening release criteria.
+
 ## Anti-Patterns
 
 The following idioms read fine in a WebGL world but break or silently misbehave under WebGPU:
@@ -330,8 +316,8 @@ The following idioms read fine in a WebGL world but break or silently misbehave 
 - **Named `.toVar('x')` inside a `Fn` invoked more than once** (rule 6).
 - **Setting `transparent = true` on a depth-only pass material** (rule 7).
 - **Sharing a `RenderPipeline` across multiple React components** (rule 9).
-- **`builtinAOContext` + dedicated prepass when a single MRT scenepass would suffice** (rule 11).
-- **Relying on `RenderPipeline._quadMesh.material.depthNode` to populate canvas depth** (rule 12). Use the post owner's retained direct-to-canvas depth restore.
+- **An extra AO scene replay without a measured need or treating whole-beauty multiplication as indirect-only occlusion** (rule 11).
+- **Relying on `RenderPipeline._quadMesh.material.depthNode` to populate canvas depth** (rule 12). Use the post owner's explicit frame depth or classic direct-to-canvas bridge.
 - **Traversing/cloning/swapping/replaying the main scene to recover post depth** (rules 1 and 12). Reuse the authoritative pass output.
 - **First frame of a `RenderPipeline` blocking on synchronous pipeline compile** (rule 13).
 - **`useTemporalFiltering = true` on a node-graph AO under `frameloop='demand'`** — accumulator never converges; the per-frame rotation produces shimmer instead of smoothing. Set `false` until either `frameloop='always'` or a true history-buffer TAA pass exists.
@@ -341,22 +327,26 @@ The following idioms read fine in a WebGL world but break or silently misbehave 
 Before merging a new TSL material or render-pipeline change:
 
 - [ ] No `scene.overrideMaterial` or clone-swap scene replay; existing pass attachments are reused.
-- [ ] Any `useFrame` with `gl.autoClear = false` explicitly sets `autoClearDepth` per pass intent.
+- [ ] Clear/load behavior is explicit; `autoClearDepth` alone is not treated as a clear when `autoClear` is false.
 - [ ] Reversed-Z renderers use `getClearDepth()` / `autoClearDepth` (no manual `clearDepth(1.0)`).
-- [ ] Permutations expressed via `uniform()` branching, not separate material classes.
+- [ ] Ordinary scalar updates avoid structural churn; branching/specialization trade-offs are measured when relevant.
 - [ ] **Line materials drawn into the viewport canvas use the persistent mesh + material pattern with imperative property mutation; hover/selection state never drives the material constructor.**
 - [ ] Per-frame scalars computed in vertex or supplied as CPU uniforms.
 - [ ] Reusable `Fn` bodies use unnamed `.toVar()`.
 - [ ] Material lifecycle flags (`transparent`, `depthWrite`, `colorWrite`) match the pass intent table.
-- [ ] **Pipeline budget is bounded by `(mesh count × material count)` knowable at mount time; no user-driven state path recreates meshes or materials.**
+- [ ] Pipeline variants and first-use work are measured in the actual target/sample/clipping context; ordinary interaction does not rebuild objects.
 - [ ] Every custom shader site is registered in `shader-policy.ts`; each declared risk names evidence.
-- [ ] New `NodeMaterial` factory has a graph snapshot plus generated-source/compile/pixel evidence proportional to risk.
+- [ ] Shader structure, compilation and final pixels have evidence proportional to risk; snapshots alone do not establish behavior.
 - [ ] `RenderPipeline` instances have single React-owned lifecycle.
-- [ ] AO composes via `scenePassColor.mul(vec4(vec3(aoOutput.r), 1))`, not `builtinAOContext` + dedicated prepass.
-- [ ] Overlay depth comes from the active post owner's retained direct-to-canvas restore; the main scene is not replayed.
+- [ ] AO lighting semantics and measured composition costs are explicit, with smooth AO retained during motion.
+- [ ] Overlays preserve authoritative depth including caps; any changed depth mechanism proves sampling, occlusion and lifetime semantics.
 - [ ] The first active draw sees finalized pose/visibility/bounds/camera; disabled AO and unused projections perform no speculative work. Cold and warmed first-use latency are measured separately.
 
 ## References
+
+- [Three node renderer and WebGL2 execution](https://threejs.org/manual/pages/webgpurenderer)
+- [Three render-target attachment controls](https://threejs.org/docs/pages/RenderTarget.html) — verify availability in the installed version
+- [WebGPU timing limitations and throughput](https://webgpufundamentals.org/webgpu/lessons/webgpu-timing.html)
 
 - [WebGPU Shading Language spec](https://www.w3.org/TR/WGSL)
 - [WebGPU spec — vertex state](https://www.w3.org/TR/webgpu/#vertex-state) (vertex-buffer slot binding requirements)

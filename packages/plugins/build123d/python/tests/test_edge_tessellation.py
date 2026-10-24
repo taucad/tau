@@ -53,7 +53,7 @@ def carrier():
 
 class EdgeTessellationTest(unittest.TestCase):
     def assert_aligned(self, shape, linear, angular):
-        mesh = worker._mesh_shape(shape, linear, angular)
+        mesh = worker._mesh_shape(shape, linear, angular, include_edges=True)
         segments = line_segments(mesh)
         boundary = boundary_segments(mesh)
         self.assertTrue(segments)
@@ -84,8 +84,8 @@ class EdgeTessellationTest(unittest.TestCase):
 
     def test_free_circle_fallback_obeys_angular_and_linear_deflection(self):
         circle = Edge.make_circle(15).moved(Location((7, -9, 13), (17, 31, 43)))
-        coarse = worker._mesh_shape(circle, 0.2, math.radians(40))
-        fine = worker._mesh_shape(circle, 0.2, math.radians(5))
+        coarse = worker._mesh_shape(circle, 0.2, math.radians(40), include_edges=True)
+        fine = worker._mesh_shape(circle, 0.2, math.radians(5), include_edges=True)
         self.assertEqual(fine['positions'], [])
         self.assertGreater(len(fine['lineIndices']), len(coarse['lineIndices']))
         self.assertEqual(fine['edgeGroups'][0]['edgeId'], 1)
@@ -125,8 +125,8 @@ class EdgeTessellationTest(unittest.TestCase):
     def test_budget_retry_rebuilds_edges_from_the_admitted_surface(self):
         shape = Cylinder(15, 18)
         with self.assertRaises(worker._OverBudget):
-            worker._topology((shape,), 0.001, math.radians(5), 1)
-        _, meshes = worker._topology((shape,), 0.04, math.radians(24), 10000)
+            worker._topology((shape,), 0.001, math.radians(5), 1, include_edges=True)
+        _, meshes = worker._topology((shape,), 0.04, math.radians(24), 10000, include_edges=True)
         self.assertEqual(len(meshes), 1)
         mesh = next(iter(meshes.values()))
         self.assertTrue(all(edge in boundary_segments(mesh) for edge in line_segments(mesh)))

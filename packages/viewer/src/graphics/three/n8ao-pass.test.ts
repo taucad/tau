@@ -1,25 +1,30 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BoxGeometry,
   BufferGeometry,
+  Color,
   DepthTexture,
   Group,
   Mesh,
   MeshStandardMaterial,
+  Matrix4,
   OrthographicCamera,
   PerspectiveCamera,
   Scene,
   ShaderMaterial,
   Texture,
+  Vector2,
+  Vector3,
   WebGLRenderTarget,
 } from 'three';
 import type { Material, WebGLRenderer } from 'three';
 import { mock } from 'vitest-mock-extended';
-import { BlendFunction, EffectComposer, Pass, ToneMappingEffect } from 'postprocessing';
+import { BlendFunction, ToneMappingEffect } from 'postprocessing';
+// @ts-expect-error -- n8ao 1.10.2 does not publish TypeScript declarations.
+import { DepthType } from 'n8ao';
 import { ManagedN8AoPass } from '#graphics/three/n8ao-pass.js';
 import { invalidateSceneTransparency } from '#graphics/three/utils/scene-transparency-revision.js';
 
@@ -62,13 +67,14 @@ describe('ManagedN8AoPass', () => {
     expect(pass.configuration.transparencyAware).toBe(true);
     invalidateSceneTransparency(scene);
     const traversal = vi.spyOn(scene, 'traverseVisible');
-    const renderer = mock<WebGLRenderer>();
+    const renderer = mock<WebGLRenderer>({
+      capabilities: mock<WebGLRenderer['capabilities']>({ logarithmicDepthBuffer: true }),
+      xr: mock<WebGLRenderer['xr']>({ enabled: false }),
+    });
     const input = new WebGLRenderTarget(1, 1);
     const output = new WebGLRenderTarget(1, 1);
     // Preserve real classification while isolating unrelated AO draw setup.
-    const nativeRender = vi
-      .spyOn(Object.getPrototypeOf(ManagedN8AoPass.prototype), 'render')
-      .mockImplementation(() => undefined);
+    const nativeRender = vi.spyOn(pass, 'renderTransparency').mockImplementation(() => undefined);
     try {
       pass.render(renderer, input, output);
       pass.render(renderer, input, output);
@@ -105,98 +111,60 @@ describe('ManagedN8AoPass', () => {
     }
   });
 
-  it('should copy AO color without rejecting pixels against a reused composer depth attachment', () => {
-    const { pass } = createFixture();
-    expect(pass.copyQuad.material.depthTest).toBe(false);
-    expect(pass.copyQuad.material.depthWrite).toBe(false);
-  });
-
-  it.each([true, false])('should route the native AO copy without texture feedback when needsSwap=%s', (needsSwap) => {
-    const { pass } = createFixture();
-    pass.needsSwap = needsSwap;
-    type NativeRenderTarget = NonNullable<Parameters<WebGLRenderer['setRenderTarget']>[0]>;
-    let target: NativeRenderTarget | undefined;
-    const draws: Array<{
-      target: NativeRenderTarget | undefined;
-      material: ShaderMaterial;
-      sampledTextures: unknown[];
-    }> = [];
-    const renderer = mock<WebGLRenderer>({
-      capabilities: mock<WebGLRenderer['capabilities']>({ logarithmicDepthBuffer: true }),
-      xr: mock<WebGLRenderer['xr']>({ enabled: false }),
-      autoClear: false,
-    });
-    renderer.setRenderTarget.mockImplementation((value) => {
-      target = value ?? undefined;
-    });
-    renderer.render.mockImplementation((object) => {
-      if (!(object instanceof Mesh) || !(object.material instanceof ShaderMaterial)) {
-        throw new TypeError('Expected a native AO fullscreen draw.');
-      }
-      draws.push({
-        target,
-        material: object.material,
-        sampledTextures: Object.values(object.material.uniforms).flatMap((uniform) => {
-          const value: unknown = uniform.value;
-          return value instanceof Texture ? [value] : [];
-        }),
+  it.each([true, false])(
+    'should publish spatial AO without overwriting normal channels when halfRes=%s',
+    (halfResolution) => {
+      const { pass } = createFixture();
+      pass.configuration.halfRes = halfResolution;
+      type NativeRenderTarget = NonNullable<Parameters<WebGLRenderer['setRenderTarget']>[0]>;
+      let target: NativeRenderTarget | undefined;
+      const draws: Array<{
+        target: NativeRenderTarget | undefined;
+        material: ShaderMaterial;
+        sampledTextures: unknown[];
+      }> = [];
+      const renderer = mock<WebGLRenderer>({
+        capabilities: mock<WebGLRenderer['capabilities']>({ logarithmicDepthBuffer: true }),
+        xr: mock<WebGLRenderer['xr']>({ enabled: false }),
+        autoClear: false,
       });
-    });
-    const input = new WebGLRenderTarget(1, 1);
-    const output = new WebGLRenderTarget(1, 1);
-    try {
-      for (const mode of [0, 1, 2]) {
-        draws.length = 0;
-        pass.configuration.renderMode = mode;
-        pass.render(renderer, input, output, 0, false);
-        expect(draws.at(-1)?.target).toBe(needsSwap ? output : input);
-        expect(draws.at(-1)?.material).toBe(pass.copyQuad.material);
-        expect(draws.at(-2)?.material).toBe(pass.effectCompositerQuad.material);
-        expect(draws.at(-1)?.sampledTextures).toEqual([draws.at(-2)?.target?.texture]);
-        expect(draws.every((draw) => !draw.sampledTextures.includes(draw.target!.texture))).toBe(true);
+      renderer.setRenderTarget.mockImplementation((value) => {
+        target = value ?? undefined;
+      });
+      renderer.render.mockImplementation((object) => {
+        if (!(object instanceof Mesh) || !(object.material instanceof ShaderMaterial)) {
+          throw new TypeError('Expected a native AO fullscreen draw.');
+        }
+        draws.push({
+          target,
+          material: object.material,
+          sampledTextures: Object.values(object.material.uniforms).flatMap((uniform) => {
+            const value: unknown = uniform.value;
+            return value instanceof Texture ? [value] : [];
+          }),
+        });
+      });
+      const input = new WebGLRenderTarget(1, 1);
+      const output = new WebGLRenderTarget(1, 1);
+      try {
+        for (const mode of [0, 1, 2]) {
+          draws.length = 0;
+          pass.configuration.renderMode = mode;
+          pass.render(renderer, input, output, 0, false);
+          expect(draws.at(-1)?.target).toBe(pass.outputTargetInternal);
+          expect(draws.at(-1)?.material).toBe(pass.effectCompositerQuad.material);
+          expect(draws).toHaveLength(halfResolution ? 5 : 4);
+          expect(draws.some((draw) => draw.material === pass.copyQuad.material)).toBe(false);
+          expect(draws.some((draw) => draw.material === pass.accumulationQuad.material)).toBe(false);
+          expect(pass.effectCompositerQuad.material.uniforms['tDiffuse']?.value).toBe(pass.writeTargetInternal.texture);
+          expect(draws.every((draw) => !draw.sampledTextures.includes(draw.target!.texture))).toBe(true);
+        }
+      } finally {
+        input.dispose();
+        output.dispose();
       }
-    } finally {
-      input.dispose();
-      output.dispose();
-    }
-  });
-
-  it('should restart native composer frames at the MSAA geometry target after an in-place post chain', () => {
-    const renderer = mock<WebGLRenderer>({
-      getSize: (size) => size.set(800, 600),
-      getDrawingBufferSize: (size) => size.set(1600, 1200),
-      getContext: () => mock<WebGL2RenderingContext>({ getContextAttributes: () => ({ alpha: true }) }),
-    });
-    const composer = new EffectComposer(renderer, { multisampling: 4 });
-    composer.outputBuffer.samples = 0;
-    const geometry = new Pass();
-    geometry.needsSwap = false;
-    const preTone = new Pass();
-    const inPlaceAo = new Pass();
-    inPlaceAo.needsSwap = false;
-    const finalOutput = new Pass();
-    const probes = [geometry, preTone, inPlaceAo, finalOutput].map((pass) =>
-      vi.spyOn(pass, 'render').mockImplementation(() => undefined),
-    );
-    try {
-      for (const pass of [geometry, preTone, inPlaceAo, finalOutput]) {
-        composer.addPass(pass);
-      }
-      composer.render(0);
-      composer.setSize(1024, 768);
-      composer.render(0);
-      for (const frame of [0, 1]) {
-        expect(probes[0]!.mock.calls[frame]?.[1]).toBe(composer.inputBuffer);
-        expect(probes[1]!.mock.calls[frame]?.[1]).toBe(composer.inputBuffer);
-        expect(probes[2]!.mock.calls[frame]?.[1]).toBe(composer.outputBuffer);
-        expect(probes[3]!.mock.calls[frame]?.[1]).toBe(composer.outputBuffer);
-      }
-      expect(composer.inputBuffer.samples).toBe(4);
-      expect(composer.outputBuffer.samples).toBe(0);
-    } finally {
-      composer.dispose();
-    }
-  });
+    },
+  );
 
   it('should guard the dependency implementation whose owned wrappers it disposes', () => {
     const require = createRequire(import.meta.url);
@@ -208,10 +176,135 @@ describe('ManagedN8AoPass', () => {
     expect(createHash('sha256').update(source).digest('hex')).toBe(
       '8c4797567c3a2643942e64e006cbc75ed438bc73a7362c26119c9db82ac62a2a',
     );
-    const patchedSource = readFileSync(resolve(dirname(require.resolve('n8ao')), '../src/N8AOPostPass.js'), 'utf8');
-    expect(createHash('sha256').update(patchedSource).digest('hex')).toBe(
-      '90beac6de9eaf069b3e8da5453f1ed3a282fe7153f36ffaac46621a9b62b8972',
+    const composite = sourceMap.sourcesContent[sourceMap.sources.indexOf('src/EffectCompositer.js')]!;
+    expect(createHash('sha256').update(composite).digest('hex')).toBe(
+      '9ce856628c5534c6e5f9b3e3d9df020886cb97ae4755ce7a75e09d2c7f89b047',
     );
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Verify the exact upstream exported enum keys.
+    expect(DepthType).toEqual({ Default: 1, Log: 2, Reverse: 3 });
+  });
+
+  it('should initialize the weighted AO sum after every composite shader reconfiguration', () => {
+    const { pass } = createFixture();
+    for (const halfResolution of [false, true, false, true]) {
+      pass.configuration.halfRes = halfResolution;
+      for (const depthType of [1, 2, 3]) {
+        for (const orthographic of [false, true]) {
+          pass.configureEffectCompositer(depthType, orthographic);
+          const shader = pass.effectCompositerQuad.material.fragmentShader;
+          const start = shader.indexOf('#ifdef HALFRES');
+          const weightedSum = shader.indexOf('texel += sampleInfo * weight;');
+          expect(start).toBeGreaterThan(-1);
+          expect(weightedSum).toBeGreaterThan(start);
+          expect(shader.slice(start, weightedSum)).toContain('vec4 texel = vec4(0.0);');
+          expect(shader).not.toContain('vec4 texel;');
+          expect(shader).toContain('texel = texture2D(tDiffuse, vUv);');
+        }
+      }
+    }
+  });
+
+  it.each([
+    { orthographic: false, halfRes: false },
+    { orthographic: true, halfRes: false },
+    { orthographic: false, halfRes: true },
+    { orthographic: true, halfRes: true },
+  ])(
+    'should preserve native shader parameters outside the qualified spatial output bindings for %j',
+    ({ orthographic, halfRes: halfResolution }) => {
+      const camera = orthographic ? new OrthographicCamera() : new PerspectiveCamera();
+      camera.position.set(20, 30, 40);
+      const { pass } = createFixture(camera);
+      pass.configuration.halfRes = halfResolution;
+      pass.configuration.screenSpaceRadius = true;
+      pass.setSize(800, 600);
+      const renderer = mock<WebGLRenderer>({
+        capabilities: mock<WebGLRenderer['capabilities']>({ logarithmicDepthBuffer: true }),
+        xr: mock<WebGLRenderer['xr']>({ enabled: false }),
+      });
+      const captures: Array<Record<string, unknown>> = [];
+      renderer.render.mockImplementation((object) => {
+        if (!(object instanceof Mesh)) {
+          return;
+        }
+        const material: unknown = object.material;
+        if (!(material instanceof ShaderMaterial)) {
+          return;
+        }
+        if (
+          ![pass.effectShaderQuad.material, pass.poissonBlurQuad.material, pass.effectCompositerQuad.material].includes(
+            material,
+          )
+        ) {
+          return;
+        }
+        captures.push(
+          Object.fromEntries(
+            Object.entries(material.uniforms)
+              .filter(([name]) => material !== pass.effectCompositerQuad.material || name !== 'tDiffuse')
+              .map(([name, uniform]) => {
+                const value: unknown = uniform.value;
+                if (name === 'ortho') {
+                  return [name, Boolean(value)];
+                }
+                return [
+                  name,
+                  value instanceof Vector2 ||
+                  value instanceof Vector3 ||
+                  value instanceof Matrix4 ||
+                  value instanceof Color
+                    ? value.clone()
+                    : value,
+                ];
+              }),
+          ),
+        );
+      });
+      const clock = vi.spyOn(performance, 'now').mockReturnValue(1000);
+      const input = new WebGLRenderTarget(800, 600);
+      const output = new WebGLRenderTarget(800, 600);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Compare to the source-hash-guarded native render implementation on the same owned resources.
+      const native = Object.getPrototypeOf(ManagedN8AoPass.prototype) as Pick<ManagedN8AoPass, 'render'>;
+      try {
+        pass.render(renderer, input, output);
+        const managed = captures.splice(0);
+        native.render.call(pass, renderer, input, output);
+        expect(captures).toHaveLength(4);
+        expect(managed).toEqual(captures);
+      } finally {
+        clock.mockRestore();
+        input.dispose();
+        output.dispose();
+      }
+    },
+  );
+
+  it('should restore renderer flags if the half-resolution composite draw fails', () => {
+    const { pass } = createFixture();
+    pass.configuration.halfRes = true;
+    const renderer = mock<WebGLRenderer>({
+      capabilities: mock<WebGLRenderer['capabilities']>({ logarithmicDepthBuffer: true }),
+      xr: mock<WebGLRenderer['xr']>({ enabled: true }),
+      autoClear: true,
+    });
+    const failure = new Error('draw failed');
+    renderer.render.mockImplementation((object) => {
+      if (object instanceof Mesh && object.material === pass.effectCompositerQuad.material) {
+        throw failure;
+      }
+    });
+    const input = new WebGLRenderTarget(1, 1);
+    const output = new WebGLRenderTarget(1, 1);
+    try {
+      expect(() => {
+        pass.render(renderer, input, output);
+      }).toThrow(failure);
+      expect(renderer.xr.enabled).toBe(true);
+      expect(renderer.autoClear).toBe(true);
+    } finally {
+      input.dispose();
+      output.dispose();
+    }
   });
 
   it.each(['perspective', 'orthographic'] as const)(
@@ -220,6 +313,7 @@ describe('ManagedN8AoPass', () => {
       const camera = projection === 'perspective' ? new PerspectiveCamera() : new OrthographicCamera();
       const { pass } = createFixture(camera);
       pass.configuration.halfRes = true;
+      expect(pass.depthDownsampleTarget?.depthBuffer).toBe(false);
       const renderer = mock<WebGLRenderer>({
         capabilities: mock<WebGLRenderer['capabilities']>({ logarithmicDepthBuffer: true }),
         xr: mock<WebGLRenderer['xr']>({ enabled: false }),

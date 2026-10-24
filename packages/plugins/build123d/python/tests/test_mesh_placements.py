@@ -39,7 +39,7 @@ class MeshPlacementTest(unittest.TestCase):
         normals = np.array(normal_directions)
 
         for linear_tolerance, angular_tolerance in ((0.05, 0.1), (0.25, 0.5)):
-            mesh = worker._mesh_shape(leaf, linear_tolerance, angular_tolerance)
+            mesh = worker._mesh_shape(leaf, linear_tolerance, angular_tolerance, include_edges=True)
             for attribute in ("positions", "lines"):
                 with self.subTest(attribute=attribute):
                     actual = np.array(mesh[attribute]).reshape(-1, 3)

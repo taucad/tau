@@ -632,6 +632,37 @@ describe('KinematicsPane', () => {
     expect(fieldRenders.get('Slide')).toBe(before.get('Slide'));
   });
 
+  it('should stop hidden playback renders and restore exact controls with their disclosure state', async () => {
+    const user = userEvent.setup();
+    const view = renderPane();
+    await openSunFollowers(user);
+    act(() => {
+      kinematics.send({ type: 'play', unitId });
+    });
+
+    hostState.isShown = false;
+    view.rerender();
+    const before = new Map(fieldRenders);
+    const tick = (): void => {
+      kinematics.send({ type: 'tick', unitId, elapsed: 1 / 60 });
+    };
+    for (let frame = 0; frame < 60; frame++) {
+      act(tick);
+    }
+    expect(unit().playback.time).toBeCloseTo(1);
+    expect(fieldRenders).toEqual(before);
+
+    act(() => {
+      kinematics.send({ type: 'seek', unitId, time: 1.234 });
+    });
+    hostState.isShown = true;
+    view.rerender();
+    expect(trigger('Followers of Sun')).toHaveAttribute('aria-expanded', 'true');
+    expect(field('Sun')).toHaveValue('444.24');
+    expect(screen.getByRole('slider', { name: 'Time' })).toHaveAttribute('aria-valuenow', '1.234');
+    expect(unit().dragEnabled).toBe(true);
+  });
+
   it('should play the chosen animation from the picker, including the driver sweep, at the chosen speed', async () => {
     const user = userEvent.setup();
     renderPane();

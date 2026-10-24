@@ -156,14 +156,17 @@ export function ActorBridge(): ReactNode {
       return;
     }
 
+    const target = new Vector3();
+    const offset = new Vector3();
     const handleControlsUpdate = (): void => {
       if (synchronizingControlsRef.current) {
         return;
       }
       const { camera } = controls;
-      const target = controls.getTarget(new Vector3(), false);
-      const offset = camera.position.clone().sub(target);
-      if (offset.lengthSq() === 0) {
+      controls.getTarget(target, false);
+      offset.copy(camera.position).sub(target);
+      const distance = offset.length();
+      if (distance === 0) {
         return;
       }
       const physicalTarget = fromThreeRenderPoint({ renderFrame, point: target });
@@ -171,14 +174,14 @@ export function ActorBridge(): ReactNode {
         camera instanceof OrthographicCamera
           ? ((camera.top - camera.bottom) / camera.zoom) * renderFrame.metersPerRenderUnit
           : perspectiveVerticalSpan({
-              distance: offset.length() * renderFrame.metersPerRenderUnit,
+              distance: distance * renderFrame.metersPerRenderUnit,
               verticalFieldOfView: camera.fov,
               zoom: camera.zoom,
             });
       rig.actorRef.send({
         type: 'setView',
         target: physicalTarget,
-        direction: [offset.x / offset.length(), offset.y / offset.length(), offset.z / offset.length()],
+        direction: [offset.x / distance, offset.y / distance, offset.z / distance],
         up: [camera.up.x, camera.up.y, camera.up.z],
         verticalSpan,
         ...(camera instanceof OrthographicCamera ? {} : { perspectiveZoom: camera.zoom }),

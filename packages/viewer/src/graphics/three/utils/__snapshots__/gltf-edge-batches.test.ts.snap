@@ -3,16 +3,15 @@
 exports[`edge occurrence semantics > should retain the stripped occurrence endpoint graph 1`] = `
 "{
   "blendColor": 0,
-  "blending": 0,
   "color": 0,
   "dashSize": 3,
   "depthWrite": false,
+  "forceSinglePass": true,
   "gapSize": 1,
   "inputNodes": {
     "edgeEndNode": "<nodeRef>",
     "edgeStartNode": "<nodeRef>"
   },
-  "linewidth": 2,
   "metadata": {
     "generator": "Material.toJSON",
     "type": "Material",
@@ -143,6 +142,8 @@ exports[`edge occurrence semantics > should retain the stripped occurrence endpo
     }
   ],
   "scale": 1,
+  "side": 2,
+  "transparent": true,
   "type": "Line2NodeMaterial"
 }
 "

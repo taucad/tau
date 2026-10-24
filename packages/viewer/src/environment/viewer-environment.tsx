@@ -63,8 +63,12 @@ export const defaultViewerEnvironment: ViewerEnvironment = {
   colorScheme: 'light',
   isHighContrast: false,
   accentColor: '#00987c',
-  graphicsBackend: 'webgl',
-  features: { tauDebug: false, webGpuInspector: false, webGpuShaderStacks: false },
+  graphicsBackend: 'webgpu',
+  features: {
+    tauDebug: false,
+    webGpuInspector: false,
+    webGpuShaderStacks: false,
+  },
 };
 
 const ViewerEnvironmentContext = createContext<ViewerEnvironment>(defaultViewerEnvironment);

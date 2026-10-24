@@ -25,6 +25,7 @@ import type { RepositoryLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import {
   isPublishableTreePath,
+  leaseGitRunner,
   parseLfsPointer,
   readPublishedTree,
 } from '#api/publications/publication-materializer.js';
@@ -158,6 +159,8 @@ function createStoreStub(repositoryPath: string): PublicationsServiceDeps[8] {
 function leaseDependencies(repositoryPath: string): readonly [PublicationsServiceDeps[8], PublicationsServiceDeps[9]] {
   const store = createStoreStub(repositoryPath);
   const repositories = {
+    /* The lease here is a real directory, so its git is a local child (DC1 sends it to tau-storage). */
+    leaseGit: leaseGitRunner,
     withLease: async <T>(
       access: { ownerId: string; projectId: string },
       work: (lease: RepositoryLease) => Promise<T>,

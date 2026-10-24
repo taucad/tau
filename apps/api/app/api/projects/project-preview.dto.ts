@@ -1,8 +1,7 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { projectPreviewMaximumBytes } from '#api/projects/project-preview-key.js';
 
-/** A catalog image is bounded separately from optional generated exports. */
-export const projectPreviewMaximumBytes = 256 * 1024;
 export const projectPreviewSchema = z.object({
   image: z
     .string()

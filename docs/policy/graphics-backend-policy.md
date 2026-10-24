@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, backend evidence, and kernel mesh resolution'
 status: active
 created: '2026-05-07'
-updated: '2026-10-18'
+updated: '2026-10-25'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -19,7 +19,7 @@ related:
 
 # Graphics Backend Policy
 
-Tau maintains WebGL and WebGPU Three.js paths in `apps/ui`. WebGL is the default interactive baseline. The default-off `webGpu` feature flag enables experimental WebGPU viewers when an adapter is available; this opt-in does not establish default-backend readiness.
+Tau prefers native WebGPU for interactive CAD on supported devices and uses the shared node renderer on WebGL2 when WebGPU is unavailable or initialization fails. PBR remains the default material model; post-processing and AO are on by default and AO stays visible during motion. The viewer settings do not expose a post-processing switch. The visible, default-on `webGpu` feature flag selects the backend preference. Rollout qualification is owned by the [high-resolution rendering blueprint](../research/high-resolution-rendering-blueprint.md).
 
 Rules 15 to 17 govern the meshes kernels hand the viewer, captures and exports: how their resolution is named, bounded and reported. The [kernel tessellation blueprint](../research/kernel-tessellation-policy-blueprint.md) holds the rulings (R1, R2) and the measurements behind them.
 
@@ -27,13 +27,19 @@ Rules 15 to 17 govern the meshes kernels hand the viewer, captures and exports: 
 
 ### 1. Resolve the backend once
 
-Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/ui/app/utils/graphics-backend-override.ts`: the `webGpu` feature flag requests WebGPU only when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the experimental flag is the public opt-in. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
+Resolve interactive viewers through `resolveViewerGraphicsBackend` in `apps/ui/app/utils/graphics-backend-override.ts`: the `webGpu` feature flag prefers WebGPU when an adapter is available, otherwise WebGL. Keep persisted per-view preferences normalized to WebGL; the application flag owns the user-facing preference. The internal `?graphicsBackend=` override takes precedence for manual and e2e evidence.
+
+If WebGPU initialization fails, mount the node WebGL2 pipeline on a fresh canvas. Do not mistake Three's node renderer with its WebGL2 backend for native WebGPU, and do not route arbitrary scene or shader errors through an initialization fallback. Dispose a partially allocated owned device; never call Three's normal renderer disposal before initialization completes.
+
+Record the initialized renderer's effective backend in validation evidence. API presence, adapter-probe success and requested preferences are not proof of the selected backend. The operator authorized node WebGL2 fallback and always-on post-processing on 2026-10-25, with broader qualification deferred in the [rollout register](../research/artifacts/high-resolution-rendering-audit/runs/2026-10-18-implementation/node-consolidation/default-rollout.md). Do not portray that product decision as completed cross-device qualification. Retain classic WebGL for explicit reference/offscreen consumers, not automatic interactive fallback. Attribute whole-pipeline comparisons to those pipelines, not to the graphics API or later fixes.
 
 Key `ThreeCanvasInstance` by backend as `ThreeProvider` does. A backend switch must recreate renderer-owned state rather than reusing an incompatible canvas, material graph, controls instance, or post-processing pipeline.
 
+During consolidation, distinguish renderer family (classic or node) from the initialized execution backend (WebGPU or WebGL2). The node renderer class name and adapter availability alone cannot establish execution. Share definitions and contracts across node backends, never incompatible live GPU resources. Preserve one material, frame, depth and lifecycle contract; admit a small backend-specific implementation only when capability or measurements justify it. The destination is two qualified execution backends of one node architecture, not three permanent competing pipelines.
+
 ### 2. Create renderers through the shared factory
 
-Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset owns interactive MSAA and backend depth/post-processing choices; `offscreen` owns bitmap-transfer choices; `showcase` owns brand surfaces built on TSL node materials (the metal morph loader), always returning Three's node renderer so one graph serves WebGPU and its WebGL 2 backend. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer.
+Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset with `nodePipeline: true` owns interactive antialiasing and backend depth/post-processing choices; the performance-first node candidate uses single-sample scene/frame targets while classic WebGL retains its existing MSAA; `offscreen` owns bitmap-transfer choices; `showcase` owns brand surfaces built on TSL node materials (the metal morph loader), always returning Three's node renderer so one graph serves WebGPU and its WebGL 2 backend. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer.
 
 A showcase surface is not an interactive viewer: it may prefer WebGPU when an adapter exists because Three falls back to the WebGL 2 backend on its own, and it must pause while offscreen, hidden, or under reduced motion. It scales its own cost to the device: tessellation, post-processing, thin-film shading and frame rate follow a quality tier, and a frame-time governor steps pixel ratio, bloom and frame rate down under load.
 
@@ -57,7 +63,7 @@ When opacity is below one, set `transparent: true` on both backends. Library wra
 
 Highlights, ghosts, labels, contours, gizmos, and other overlays must state `depthTest` and `depthWrite` deliberately. Preserve opaque focused-surface depth writes; dimmed/ghost surfaces and overlay outlines must not occlude later geometry unless their contract explicitly requires it.
 
-Overlays must display identically on both backends. The WebGL canvas is premultiplied, like WebGPU's; a straight-alpha canvas darkens every fractional-alpha pixel. WebGPU blends in a linear half-float frame target, so Tau's transparent `Line2NodeMaterial` and the WebGPU infinite grid composite themselves in sRGB space against a viewport copy (`compositeOverViewportSrgb`) and draw with `NoBlending`. Such a composite overwrites the target, so it must discard uncovered fragments, and fat lines carry analytic edge coverage instead of alpha-to-coverage, whose dropped samples WebGPU resolves in linear space. Do not substitute the stock WebGPU line material for those consumers or apply that correction to opaque edge materials.
+Overlays retain the same CAD semantics on both backends; final appearance parity remains a qualification gate. The node candidate blends transparent lines and grid in linear light and performs one final shader output conversion. For Neutral tone mapping, its bounded composed color uses hardware-sRGB RGBA8 storage (automatic decode/encode around linear blending); HDR scene radiance stays RGBA16F. Both node backends compose AO once and apply surface FXAA from this composed storage into reused scene RGBA16F color, before analytic lines and overlays. Keep this as the sole AO-on surface-composition path; historical fused comparisons belong to source revisions and research artifacts. Other tone mappings retain a linear RGBA16F frame. Do not confuse storage encoding with shader output encoding or reduce depth precision when changing color storage. Do not add viewport-copy gamma compensation to that path. Keep the classic reference unchanged and measure coverage, blending and final encoding separately.
 
 ### 5. Preserve depth ordering
 
@@ -75,7 +81,9 @@ Draw section caps with the stencil buffer (`graphics/three/utils/section-stencil
 - **Per loop**: any other source (an open or non-manifold surface, or one shown in part). A worker slices its shown triangles when a face's plane changes, and fans over the closed loops it finds count into the stencil **even-odd**; the same cap polygon, stripes, overlap and outline then draw. Open chains are outlined in `sectionCapOpenChainColor` (`--destructive`) at the outline's width, open regions stay unfilled, and the source's materials draw both sides while it is cut, so its inside shows through them. The last landed slice stays drawn until the next lands. Overlapping shells inside one such source cancel, as even-odd does.
 - **Pending**: a source whose census has not landed is cut and outlined, uncapped, until it does.
 
-The grade is diagnostics, never interface text: it is published on the section helper's `userData`, in Tau debug, and as `renderer.section-cap-graded` spans. A census above `maxSynchronousBvhTriangles` runs in the section worker and never falls back to the main thread; a worker failure caps that source per loop. Stencil operations live only in the cap owners that `section-view-cleanup.ratchet.test.ts` names. WebGPU post-processing passes carry no stencil, so the caps draw as an overlay pass on the canvas after the post owner restores depth, on both backends; they are not tone-mapped or ambient-occluded.
+Node cap outlines and their padded clipping masks use analytic triangle-plane world-position differentials. Do not derive those footprints from neighboring fragment values: cross-primitive derivatives reproduced unstable contour coverage under unchanged inputs. The cap owner caches an outline-only triangle stream with constant geometric normals per source revision; original surface geometry and stencil draws remain unchanged. This one-time preprocessing may visit triangles, but ordinary camera/transform updates must reuse the buffers and preserve mesh-level batching. Invalidate changed source attributes/indices, retire unused derived buffers and dispose them with the cap owner. Keep geometric depth and hidden-line semantics unchanged; qualify coverage under primitive regrouping and subpixel motion on both node backends. This requirement does not prohibit appropriate derivatives elsewhere.
+
+The grade is diagnostics, never interface text: it is published on the section helper's `userData`, in Tau debug, and as `renderer.section-cap-graded` spans. A census above `maxSynchronousBvhTriangles` runs in the section worker and never falls back to the main thread; a worker failure caps that source per loop. Stencil operations live only in the cap owners that `section-view-cleanup.ratchet.test.ts` names. On node WebGL2, the post owner shares one D24S8 attachment between the scene and composed frame; initialize or resize both targets before the authoritative scene write, clear depth/stencil for that write, and preserve them during the color-only composite. Native WebGPU retains separate scene depth and frame depth/stencil with composite depth installation. The owner retires both targets together; no independent consumer owns the shared attachment. Caps draw into the composed frame after its scene color/depth are ready. Classic caps draw on the canvas after its depth bridge. Caps are not tone-mapped or ambient-occluded. Later grid/highlight draws retain cap depth, and node output encoding occurs only after all overlays.
 
 ### 7. Preserve one viewport lifecycle
 
@@ -114,6 +122,8 @@ Send measurement and overlay pointer events to their owning XState machine. Use 
 Shader graph snapshots and source fingerprints are supplementary. Pair them with focused runtime assertions. For user-visible parity, use the backend e2e harness and remote-canvas screenshots with deterministic pixel characteristics. Where a headless adapter cannot present frames, read an offscreen render target back through the renderer so the backend still yields pixel evidence; keep presented-canvas screenshots wherever the canvas does present.
 
 Test backend construction, WebGPU initialization, reversed-depth transparent ordering, alpha/depth state, clone ownership, cross-renderer material isolation, demand-frame invalidation, cache eviction, clipping-aware picking, and gesture cancellation.
+
+Apply [shader/pipeline policy rules 14–15](webgpu-shader-and-pipeline-policy.md) to optimization acceptance: distinguish functional correctness, appearance investigation, measured benefit and rollout qualification. Backend parity does not require byte-identical antialiasing from different rasterization algorithms. Preserve CAD semantics and qualify boundary/temporal appearance explicitly.
 
 ### 13. Change pointer-rate scene objects in place
 

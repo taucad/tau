@@ -6,7 +6,7 @@ import { RouteCache } from '#api/git/routing/route-cache.js';
 import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
 import { defaultRoute, freezeHoldMilliseconds, freezeRetryAfterSeconds } from '#api/git/routing/route.js';
 import type { RepositoryRoute } from '#api/git/routing/route.js';
-import { migrationFenceCommitter } from '#api/git/store/fence.js';
+import { migrationFenceCommitter } from '#api/git/store/fence-marker.js';
 import { succeedManifest } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 

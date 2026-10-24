@@ -106,6 +106,7 @@ const mocks = vi.hoisted(() => {
     /** What the GPU pick answers; `unavailable` routes every ray through the trees, as a renderer without it does. */
     modelPickResult: pickResult({ status: 'unavailable' }),
     modelPickReplay: vi.fn(),
+    kinematicsPointerDown: vi.fn(),
   };
 });
 
@@ -164,7 +165,7 @@ vi.mock('#graphics/three/use-section-view.js', () => ({
 }));
 
 vi.mock('#graphics/three/react/kinematics-viewer.js', () => ({
-  useKinematicsViewer: () => () => undefined,
+  useKinematicsViewer: () => mocks.kinematicsPointerDown,
 }));
 
 vi.mock('#graphics/metadata/gltf-component-manifest.js', () => ({
@@ -748,6 +749,47 @@ describe('GltfMesh camera lifecycle', () => {
     expect(gltf.scene.raycast).toBe(originalRaycast);
   });
 
+  it('should admit camera presses, skip camera movement queries and restore the same pointer ray on release', async () => {
+    const gltf = createGltf();
+    const mesh = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
+    mesh.position.z = -2;
+    gltf.scene.add(mesh);
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
+    const snapshot = mocks.graphicsActor.getSnapshot();
+    let cameraInteracting = false;
+    let cameraInteractionHadMovement = false;
+    vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockImplementation(() => ({
+      context: { ...snapshot.context, cameraInteracting, cameraInteractionHadMovement },
+    }));
+    const query = vi.spyOn(bvhRaycast, 'raycastFirstVisibleMeshHit');
+    const view = render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(view.container.querySelector('primitive')).not.toBeNull();
+    });
+    setModelComponentOwner(mesh, { unitId: 'unit:test', componentId: 'root' });
+    gltf.scene.updateMatrixWorld(true);
+    const raycaster = new Raycaster(new Vector3(), new Vector3(0, 0, -1));
+    expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([mesh]);
+    query.mockClear();
+
+    cameraInteracting = true;
+    // Camera controls may receive the native press before R3F. A press must still hit the model.
+    expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([mesh]);
+    expect(query).toHaveBeenCalledTimes(1);
+    query.mockClear();
+    cameraInteractionHadMovement = true;
+    for (let frame = 0; frame < 60; frame++) {
+      expect(raycaster.intersectObject(gltf.scene, true)).toEqual([]);
+    }
+    expect(query).not.toHaveBeenCalled();
+
+    cameraInteracting = false;
+    cameraInteractionHadMovement = false;
+    expect(raycaster.intersectObject(gltf.scene, true).map((hit) => hit.object)).toEqual([mesh]);
+    expect(query).toHaveBeenCalledTimes(1);
+    view.unmount();
+  });
+
   it('should clip model hits with the section plane current at raycast time, without re-rendering', async () => {
     const gltf = createGltf();
     const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
@@ -775,6 +817,11 @@ describe('GltfMesh camera lifecycle', () => {
   });
 
   it('should reuse the authoritative R3F hit for hover, selection and the secondary-pointer menu', async () => {
+    const snapshot = mocks.graphicsActor.getSnapshot();
+    let cameraInteracting = false;
+    vi.spyOn(mocks.graphicsActor, 'getSnapshot').mockImplementation(() => ({
+      context: { ...snapshot.context, cameraInteracting, cameraInteractionHadMovement: false },
+    }));
     const gltf = createGltf();
     const near = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
     const far = new Mesh(new BoxGeometry(), new MeshBasicMaterial());
@@ -847,7 +894,10 @@ describe('GltfMesh camera lifecycle', () => {
       });
       expect(raycast).toHaveBeenCalledTimes(1);
 
+      cameraInteracting = true;
       await act(async () => handlers?.onPointerDown(pointer));
+      expect(mocks.kinematicsPointerDown).toHaveBeenCalledWith(expect.objectContaining({ object: near }));
+      cameraInteracting = false;
       raycast.mockClear();
       await act(async () => handlers?.onClick(pointer));
       expect(mocks.graphicsActor.send).toHaveBeenCalledWith({
@@ -859,6 +909,7 @@ describe('GltfMesh camera lifecycle', () => {
       expect(raycast).toHaveBeenCalledTimes(1);
 
       near.layers.set(1);
+      cameraInteracting = true;
       raycast.mockClear();
       await act(async () => handlers?.onPointerDown(secondaryPointerEvent));
       expect(secondaryPointer).toHaveBeenLastCalledWith({ unitId: 'unit:test', componentId: 'far' });

@@ -158,10 +158,13 @@ function MobileSurface({ id }: { readonly id: MobilePanelId }): React.ReactNode 
       return <ChatConverter />;
     }
     case 'share': {
-      // The share body has no header of its own; on a phone it gets the title and Close every pane has (PN-SHR-1).
+      // On a phone Share gets the title and Close every sheet pane has (PN-SHR-1). The share frame's own
+      // "Share project" heading would repeat that title, so it is hidden here; it still names the frame's section.
       return (
         <MobilePane id={id}>
-          <ProjectShareWorkbenchPanel />
+          <div className='flex min-h-0 flex-1 flex-col [&_[data-slot=share-pane-title]]:hidden'>
+            <ProjectShareWorkbenchPanel />
+          </div>
         </MobilePane>
       );
     }

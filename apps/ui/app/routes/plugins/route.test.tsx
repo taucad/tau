@@ -600,6 +600,33 @@ describe('PluginsRoute', () => {
     expect(screen.getByText('GitHub')).toBeInTheDocument();
   });
 
+  it('should show no-match instead of empty sections and restore every section from Clear filters', async () => {
+    const user = userEvent.setup();
+    renderRoute();
+    const search = screen.getByRole('textbox', { name: 'Search plugins' });
+
+    await user.type(search, 'github');
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual(['Featured']);
+    expect(screen.getByRole('status')).toHaveTextContent(/^1 of \d+ match$/);
+
+    await user.clear(search);
+    await user.type(search, 'no such plugin');
+    expect(screen.queryByRole('heading', { level: 2, name: 'Featured' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { level: 2, name: 'Skills' })).not.toBeInTheDocument();
+    expect(screen.getByText('No plugins match “no such plugin”')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/^0 of \d+ match$/);
+
+    await user.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(search).toHaveValue('');
+    expect(search).toHaveFocus();
+    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
+      'Featured',
+      'System',
+      'Skills',
+    ]);
+    expect(screen.getByRole('status')).toHaveTextContent(/^\d+ plugins and skills$/);
+  });
+
   it('should name and title each row by its true state, a shadowed skill included', async () => {
     mockReadFile.mockResolvedValue(
       encoder.encode(

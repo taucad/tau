@@ -127,4 +127,36 @@ describe('Tags', () => {
     expect(screen.queryByText('team@example.com')).not.toBeInTheDocument();
     expect(onTagsChange).not.toHaveBeenCalled();
   });
+
+  it('opens the popover when an existing tag is clicked', async () => {
+    const user = userEvent.setup();
+    render(<TagsHarness initialTags={['friend@example.com']} />);
+
+    await user.click(screen.getByText('friend@example.com'));
+
+    const input = screen.getByRole('combobox', { name: 'Tags' });
+    expect(input).toHaveFocus();
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('toggles the popover only through the input trigger when the input is clicked', async () => {
+    const user = userEvent.setup();
+    render(<TagsHarness />);
+
+    const input = screen.getByRole('combobox', { name: 'Tags' });
+    await user.click(input);
+    expect(input).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(input);
+    expect(input).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('keeps the popover closed when a remove button is clicked', async () => {
+    const user = userEvent.setup();
+    render(<TagsHarness initialTags={['friend@example.com', 'team@example.com']} />);
+
+    await user.click(screen.getByRole('button', { name: 'Remove friend@example.com' }));
+
+    expect(screen.getByRole('combobox', { name: 'Tags' })).toHaveAttribute('aria-expanded', 'false');
+  });
 });

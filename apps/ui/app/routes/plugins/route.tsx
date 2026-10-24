@@ -19,12 +19,14 @@ import {
   Plus,
   Puzzle,
   Search,
+  SearchX,
   Store,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
+import { PanelEmptyState } from '@taucad/ui/components/panel-empty-state';
 import { Separator } from '@taucad/ui/components/separator';
 import type { Handle } from '#types/matches.types.js';
 import { PageHeader } from '#components/layout/page-header.js';
@@ -393,6 +395,18 @@ export function PluginStoreView({
   const toggleKind = (next: 'plugins' | 'skills'): void => {
     setKind((current) => (current === next ? undefined : next));
   };
+  const featuredMatches = kind === 'skills' ? [] : featuredPlugins.filter((item) => matches(item));
+  const systemMatches = kind === 'plugins' ? [] : systemSkills.filter((item) => matches(item));
+  const skillMatches = kind === 'plugins' ? [] : storeSkills.filter((item) => matches(item));
+  const total = featuredPlugins.length + systemSkills.length + storeSkills.length;
+  const matchCount = featuredMatches.length + systemMatches.length + skillMatches.length;
+  const isFiltered = query.trim() !== '' || builtByTau || kind !== undefined;
+  const clearFilters = (): void => {
+    setQuery('');
+    setKind(undefined);
+    setBuiltByTau(false);
+    searchRef.current?.focus();
+  };
   return (
     <PageContent className='space-y-6'>
       <PageHeader
@@ -459,20 +473,27 @@ export function PluginStoreView({
       />
 
       {statusContent}
-      {kind === 'skills' ? null : (
-        <StoreSection title='Featured' items={featuredPlugins.filter((item) => matches(item))} />
-      )}
-      {kind === 'plugins' ? null : (
-        <>
-          <StoreSection title='System' items={systemSkills.filter((item) => matches(item))} />
-          <StoreSection
-            title='Skills'
-            items={storeSkills.filter((item) => matches(item))}
-            getStatus={getSkillInstallStatus}
-            onInstall={installSkill}
-          />
-        </>
-      )}
+      <p role='status' className='text-sm text-muted-foreground tabular-nums'>
+        {isFiltered ? `${matchCount} of ${total} match` : `${total} plugins and skills`}
+      </p>
+      {matchCount === 0 ? (
+        <div className='h-64'>
+          <PanelEmptyState
+            icon={SearchX}
+            title={query.trim() ? `No plugins match “${query.trim()}”` : 'No plugins match these filters'}
+            description='Try another name or filter.'
+          >
+            <Button variant='outline' size='sm' onClick={clearFilters}>
+              Clear filters
+            </Button>
+          </PanelEmptyState>
+        </div>
+      ) : null}
+      {featuredMatches.length > 0 ? <StoreSection title='Featured' items={featuredMatches} /> : null}
+      {systemMatches.length > 0 ? <StoreSection title='System' items={systemMatches} /> : null}
+      {skillMatches.length > 0 ? (
+        <StoreSection title='Skills' items={skillMatches} getStatus={getSkillInstallStatus} onInstall={installSkill} />
+      ) : null}
 
       {/* Below the collections: the first viewport belongs to the lists (page composition Rule 14). */}
       <section className='flex h-40 items-center justify-center overflow-hidden rounded-md border bg-[linear-gradient(135deg,color-mix(in_oklab,var(--information)_18%,var(--background)),color-mix(in_oklab,var(--feature)_14%,var(--background)),color-mix(in_oklab,var(--warning)_12%,var(--background)))]'>

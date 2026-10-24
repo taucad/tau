@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SidebarProvider } from '@taucad/ui/components/sidebar';
-import { SettingsDialog } from '#components/settings/settings-dialog.js';
+import { SettingsDialog, SettingsSurface } from '#components/settings/settings-dialog.js';
 
 const renderSecuritySettings = vi.hoisted(() => vi.fn(() => <div>Mounted security settings</div>));
 const deferredBillingState = vi.hoisted(() => ({ showTarget: false }));
@@ -184,5 +184,38 @@ describe('SettingsDialog', () => {
     expect(searchbox).toHaveValue('');
     expect(screen.getByRole('button', { name: 'General' })).toBeInTheDocument();
     expect(screen.queryByText('No settings found')).not.toBeInTheDocument();
+  });
+
+  it('should render embedded outside a dialog and keep search-clearing Escape from the host', async () => {
+    const user = userEvent.setup();
+    const onHostKeyDown = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/home/project']}>
+        <SidebarProvider>
+          {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- stands in for the embedding host's key handling. */}
+          <div
+            onKeyDown={(event) => {
+              onHostKeyDown(event.key);
+            }}
+          >
+            <SettingsSurface isEmbedded activeSection='general' openSection={vi.fn()} close={vi.fn()} />
+          </div>
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+    const searchbox = screen.getByRole('searchbox', { name: 'Search settings' });
+
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+
+    await user.type(searchbox, 'theme');
+    onHostKeyDown.mockClear();
+    await user.keyboard('{Escape}');
+
+    expect(searchbox).toHaveValue('');
+    expect(onHostKeyDown).not.toHaveBeenCalled();
+
+    await user.keyboard('{Escape}');
+
+    expect(onHostKeyDown).toHaveBeenCalledWith('Escape');
   });
 });

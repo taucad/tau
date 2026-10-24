@@ -103,7 +103,7 @@ const errorRecord = (error) => ({
 export const assertMissingBrepRefusal = (error) => {
   const result = frameworkResult(error);
   assert.equal(result.status, 'refused');
-  assert.equal(result.diagnostics[0].code, 'GEOSPEC_EVIDENCE_UNSUPPORTED');
+  assert.equal(result.diagnostics[0].code, 'GEOSPEC_UNSUPPORTED_EVIDENCE');
   assert.equal(result.diagnostics[0].details.matcher, 'toHaveFilletFeature');
   assert.equal(result.diagnostics[0].details.missing, 'exact BRep fillet-feature evidence');
 };

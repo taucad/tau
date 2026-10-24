@@ -183,6 +183,7 @@ describe('isUndecidedFailure', () => {
     expect(isUndecidedFailure({ status: 'inconclusive', category: 'infrastructure' })).toBe(true);
     expect(isUndecidedFailure({ status: 'not-run' })).toBe(true);
     expect(isUndecidedFailure({ category: 'timeout' })).toBe(true);
+    expect(isUndecidedFailure({ category: 'invalid-expectation' })).toBe(true);
     expect(isUndecidedFailure({ category: 'infrastructure' })).toBe(false);
     expect(isUndecidedFailure({})).toBe(false);
   });

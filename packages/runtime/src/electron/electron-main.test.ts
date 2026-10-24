@@ -1347,7 +1347,8 @@ describe('Electron main runtime memory supervision', () => {
       liveUtilities.at(-1)?.stderr?.end();
       await vi.advanceTimersByTimeAsync(1000);
 
-      expect(onUtilityExit).toHaveBeenCalledWith(expect.not.objectContaining({ exceeded: expect.anything() }));
+      expect(onUtilityExit).toHaveBeenCalledOnce();
+      expect(onUtilityExit.mock.calls[0]?.[0]).not.toHaveProperty('exceeded');
     } finally {
       handle.dispose();
       vi.useRealTimers();

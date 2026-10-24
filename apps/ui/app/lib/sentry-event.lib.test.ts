@@ -42,3 +42,52 @@ describe('sendSentryEventDirectly', () => {
     }
   });
 });
+
+describe('decorateForStaleBuild', () => {
+  it.each(['superseded', 'current', 'undecided'] as const)(
+    'should give an event sent without the SDK the same tag, level and fingerprint as beforeSend for %s',
+    async (tag) => {
+      const { createBeforeSend } = await import('#lib/sentry.lib.js');
+      const failure = new TypeError('Importing a module script failed.');
+      const viaSdk = await createBeforeSend(async () => tag)(
+        {
+          type: undefined,
+          level: 'error',
+          tags: {},
+          exception: { values: [{ type: 'TypeError', value: failure.message }] },
+        },
+        { originalException: failure },
+      );
+      const bodies: string[] = [];
+      vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+        bodies.push(typeof init.body === 'string' ? init.body : '');
+        return new Response('{}');
+      });
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name.
+      await sendSentryEventDirectly(failure, { stale_build: tag });
+      const direct = JSON.parse(bodies[0]?.split('\n')[2] ?? '{}') as {
+        readonly tags?: Record<string, string>;
+        readonly level?: string;
+        readonly fingerprint?: string[];
+      };
+
+      expect(direct.tags?.['stale_build']).toBe(viaSdk?.tags?.['stale_build']);
+      expect(direct.level).toBe(viaSdk?.level);
+      expect(direct.fingerprint).toStrictEqual(viaSdk?.fingerprint);
+    },
+  );
+
+  it('should skip a value the SDK already captured', async () => {
+    const bodies: unknown[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      bodies.push(init.body);
+      return new Response('{}');
+    });
+    const failure = new Error('captured by the SDK');
+    Object.defineProperty(failure, '__sentry_captured__', { value: true });
+
+    await sendSentryEventDirectly(failure, {});
+
+    expect(bodies).toHaveLength(0);
+  });
+});

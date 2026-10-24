@@ -1,6 +1,6 @@
 import { ENV } from '#environment.config.js';
 import type * as SentryLibrary from '#lib/sentry.lib.js';
-import { sendSentryEventDirectly } from '#lib/sentry-event.lib.js';
+import { sendSentryEventDirectly, sendSentryEventsAtPageExit } from '#lib/sentry-event.lib.js';
 import { isWeakKey } from '#lib/weak-key.js';
 
 /**
@@ -125,6 +125,12 @@ const start = async (): Promise<{ readonly sentry?: typeof SentryLibrary; readon
       sentry?.initSentry();
     } catch (error) {
       logSdkThrow(error);
+      // Half-started: the client may be bound with its global handlers installed; turn it off first.
+      try {
+        sentry?.stopSentry();
+      } catch {
+        // Nothing more can be undone.
+      }
       sendWaitingWithoutSdk();
       return {};
     }
@@ -176,14 +182,18 @@ export const setErrorDescriber = (next: ErrorDescriber): void => {
 
 /**
  * The page is hidden (every `pagehide`, kept in the back/forward cache or not, since a frozen page
- * may be evicted without running again): send every error still waiting, for the SDK's load or for
- * its tags, now, without the SDK and with the tags known now. Each is sent once; errors reported
- * after the page is shown again are handled as usual.
+ * may be evicted without running again): the errors still waiting, for the SDK's load or for their
+ * tags, go now without the SDK, with the tags known now, as far as the page-exit budget allows
+ * (`sendSentryEventsAtPageExit`: newest first, stacks trimmed, the rest counted in one summary
+ * event). None is sent again; errors reported after the page is shown again are handled as usual.
  */
 export const sendWaitingErrors = (): void => {
-  for (const report of [...waitingForLoad.splice(0), ...waitingForTags]) {
-    sendDirectly(report, describer.now(report.error));
+  const waiting = [...waitingForLoad.splice(0), ...waitingForTags].filter((report) => !sentDirectly.has(report));
+  waitingForTags.clear();
+  for (const report of waiting) {
+    sentDirectly.add(report);
   }
+  sendSentryEventsAtPageExit(waiting.map((report) => ({ error: report.error, tags: describer.now(report.error) })));
 };
 
 /**

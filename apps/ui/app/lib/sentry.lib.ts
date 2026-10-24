@@ -3,7 +3,13 @@ import type { Breadcrumb, ErrorEvent, EventHint } from '@sentry/react';
 import { isAbortError } from '@taucad/utils/error';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
-import { scrubSentryEvent, scrubUrl, sentryEnvironment, sentryRelease } from '#lib/sentry-event.lib.js';
+import {
+  decorateForStaleBuild,
+  scrubSentryEvent,
+  scrubUrl,
+  sentryEnvironment,
+  sentryRelease,
+} from '#lib/sentry-event.lib.js';
 import { classifyStaleBuildFailure, isStaleModuleError } from '#lib/stale-build-recovery.js';
 import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 
@@ -36,9 +42,6 @@ export const isUnhandledAbortRejection = (event: ErrorEvent, hint: EventHint | u
 export const beforeSendSentryEvent = (event: ErrorEvent, hint?: EventHint): ErrorEvent | null =>
   isUnhandledAbortRejection(event, hint) ? null : scrubSentryEvent(event);
 
-/** Fingerprint shared by chunk failures a deploy explains, so they group apart from genuine ones. */
-export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
-
 /**
  * The `beforeSend` hook with version-skew tagging (TAU-UI-6).
  *
@@ -58,13 +61,7 @@ export const createBeforeSend = (describe: (failure: unknown) => Promise<StaleBu
   const tagged = async (event: ErrorEvent, hint?: EventHint): Promise<ErrorEvent | null> => {
     // Held until the failure's decision settles (bounded): the tracker hears a failure before it is decided.
     const tag = await describe(hint?.originalException);
-    const annotated: ErrorEvent = {
-      ...event,
-      // oxlint-disable-next-line naming-convention -- A Sentry tag name, filtered on by operators.
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
-      tags: { ...event.tags, stale_build: tag },
-      ...(tag === 'superseded' ? { level: 'info', fingerprint: [...staleBuildFingerprint] } : {}),
-    };
+    const annotated = decorateForStaleBuild(event, tag);
     return beforeSendSentryEvent(annotated, hint);
   };
   // oxlint-disable-next-line typescript/no-restricted-types -- Sentry's beforeSend drops an event by returning null.
@@ -173,4 +170,24 @@ export const captureUiError = (error: unknown): void => {
   if (Sentry.isInitialized()) {
     Sentry.captureException(error);
   }
+};
+
+/**
+ * Turn the SDK off for the page after `initSentry` threw part-way: the client may already be bound,
+ * with some integrations (the global handlers) installed, and would otherwise capture (or mark as
+ * captured) what the page then reports without it. Disabled and unbound at once, so those handlers
+ * return early; the client's own close settles on its own.
+ *
+ * @public
+ */
+export const stopSentry = (): void => {
+  const client = Sentry.getClient();
+  if (client === undefined) {
+    return;
+  }
+  client.getOptions().enabled = false;
+  // Unbound, so the installed handlers return before capturing (and marking) anything.
+  Sentry.getCurrentScope().setClient(undefined);
+  // async-iife: bootstrap -- disabling is immediate; the close only flushes, and settles on its own.
+  void client.close(0);
 };

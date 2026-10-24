@@ -7,6 +7,7 @@ const sentry = vi.hoisted(() => ({
   /** Holds the next load until released, as a slow network would. */
   holdNextLoad: undefined as Promise<void> | undefined,
   initSentry: vi.fn(),
+  stopSentry: vi.fn(),
   captureUiError: vi.fn(),
 }));
 
@@ -26,7 +27,7 @@ const sentryLibrary = async () => {
     // A chunk a deploy stopped serving, or a content blocker: the lazy import of the SDK fails.
     throw new TypeError('Importing a module script failed.');
   }
-  return { initSentry: sentry.initSentry, captureUiError: sentry.captureUiError };
+  return { initSentry: sentry.initSentry, stopSentry: sentry.stopSentry, captureUiError: sentry.captureUiError };
 };
 
 /** A fresh page: whether reporting has started, and the SDK load, are module-level. */
@@ -239,31 +240,77 @@ describe('error reporting', () => {
     expect(posted).toHaveLength(page.unreportedErrorLimit + 1);
   });
 
-  it('should send every waiting error when the page is hidden, keeping keepalive bodies within the budget and capping each', async () => {
+  it('should send errors beyond the keepalive budget as ordinary requests while the page lives', async () => {
     const posted = stubIngest();
-    sentry.holdNextLoad = new Promise<void>((resolve) => {
-      setTimeout(resolve, 60_000);
-    });
     const page = await load();
     const { keepaliveBudget, directEventTextLimit } = await import('#lib/sentry-event.lib.js');
-    void page.startErrorReporting();
+    sentry.failNextLoad = true;
+    await page.startErrorReporting();
+
     for (let index = 0; index < 20; index += 1) {
       const error = new Error(`${String(index)} ${'x'.repeat(50_000)}`);
       error.stack = 'y'.repeat(50_000);
+      void page.reportUiError(error);
+    }
+    await settle();
+
+    expect(posted).toHaveLength(20);
+    const keptAlive = posted.filter((envelope) => envelope.init.keepalive === true);
+    expect(keptAlive.length).toBeGreaterThan(0);
+    expect(keptAlive.length).toBeLessThan(keepaliveBudget.requests);
+    expect(keptAlive.reduce((total, envelope) => total + bodyOf(envelope).length, 0)).toBeLessThanOrEqual(
+      keepaliveBudget.bytes,
+    );
+    for (const envelope of posted) {
+      expect(envelope.event.exception.values[0]?.value.length).toBeLessThanOrEqual(directEventTextLimit.message);
+    }
+  });
+
+  it('should send what fits the keepalive budget at page exit, newest first, and count the rest in one summary', async () => {
+    const posted = stubIngest();
+    const page = await load();
+    const { keepaliveBudget, directEventTextLimit, undeliveredAtPageExitMessage } =
+      await import('#lib/sentry-event.lib.js');
+    // Every error waits for its decision, still under way when the page goes.
+    page.setErrorDescriber({
+      now: () => ({}),
+      settled: async () =>
+        new Promise((resolve) => {
+          setTimeout(() => resolve({}), 60_000);
+        }),
+    });
+    sentry.failNextLoad = true;
+    await page.startErrorReporting();
+    const reports = [
+      ...Array.from({ length: 20 }, (_, index) => {
+        const error = new Error(`large ${String(index)} ${'x'.repeat(50_000)}`);
+        error.stack = 'y'.repeat(50_000);
+        return error;
+      }),
+      ...Array.from({ length: 50 }, (_, index) => new Error(`small ${String(index)}`)),
+    ];
+    for (const error of reports) {
       void page.reportUiError(error);
     }
 
     page.sendWaitingErrors();
     await settle();
 
-    expect(posted).toHaveLength(20);
-    const keptAlive = posted.filter((envelope) => envelope.init.keepalive === true);
-    const keptAliveBytes = keptAlive.reduce((total, envelope) => total + bodyOf(envelope).length, 0);
-    expect(keptAlive.length).toBeGreaterThan(0);
-    expect(keptAliveBytes).toBeLessThanOrEqual(keepaliveBudget);
+    expect(posted.length).toBeGreaterThan(1);
+    expect(posted.length).toBeLessThan(keepaliveBudget.requests);
+    expect(posted.every((envelope) => envelope.init.keepalive === true)).toBe(true);
+    expect(posted.reduce((total, envelope) => total + bodyOf(envelope).length, 0)).toBeLessThanOrEqual(
+      keepaliveBudget.bytes,
+    );
+    const values = posted.map((envelope) => envelope.event.exception.values[0]?.value ?? '');
+    const delivered = values.slice(0, -1);
+    // Newest first.
+    expect(delivered[0]).toBe('small 49');
+    expect(values.at(-1)).toBe(undeliveredAtPageExitMessage(reports.length - delivered.length));
     for (const envelope of posted) {
-      expect(envelope.event.exception.values[0]?.value.length).toBeLessThanOrEqual(directEventTextLimit.message);
-      expect(bodyOf(envelope).length).toBeLessThan(directEventTextLimit.message + directEventTextLimit.stack + 2000);
+      expect(bodyOf(envelope).length).toBeLessThan(
+        directEventTextLimit.message + directEventTextLimit.stackAtPageExit + 2000,
+      );
     }
   });
 

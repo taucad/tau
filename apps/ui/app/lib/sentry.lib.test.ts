@@ -7,11 +7,10 @@ import {
   beforeSendSentryEvent,
   consoleBreadcrumbTextLimit,
   createBeforeSend,
-  staleBuildFingerprint,
   isUnhandledAbortRejection,
   scrubSentryBreadcrumb,
 } from '#lib/sentry.lib.js';
-import { scrubSentryEvent, sentryEnvelopeUrl, sentryRelease } from '#lib/sentry-event.lib.js';
+import { scrubSentryEvent, sentryEnvelopeUrl, sentryRelease, staleBuildFingerprint } from '#lib/sentry-event.lib.js';
 
 const rejectionMechanism = 'auto.browser.global_handlers.onunhandledrejection';
 

@@ -3,6 +3,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { ENV } from '#environment.config.js';
 import { readBuildId } from '#lib/build-identity.js';
 import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
+import type { StaleBuildTag } from '#lib/stale-build-recovery.js';
 
 /*
  * What every Sentry event from the UI carries and how it is scrubbed, without the SDK: the page's
@@ -75,17 +76,46 @@ export const sentryEnvelopeUrl = (dsn: string): string | undefined => {
   }
 };
 
+/** Fingerprint shared by chunk failures a deploy explains, so they group apart from genuine ones. */
+export const staleBuildFingerprint = ['stale-build-chunk-load'] as const;
+
 /**
- * Bytes of `keepalive` request bodies a page may have in flight; browsers refuse a `keepalive`
- * request past 64 KiB in total, so, as Sentry's own transport does, stay under about 60 KB and send
- * the rest as ordinary requests (which still complete while the page lives).
+ * Decorate an event with a chunk failure's `stale_build` tag, as every path to Sentry does (the
+ * SDK's `beforeSend` and an event sent without it): one a deploy explains (`superseded`) is grouped
+ * apart (its own fingerprint) at level `info`; any other keeps its group and level.
+ *
+ * @param event - The event about to be sent.
+ * @param tag - The failure's tag.
+ * @returns The decorated event.
+ * @public
  */
-export const keepaliveBudget = 60_000;
+export const decorateForStaleBuild = (event: ErrorEvent, tag: StaleBuildTag): ErrorEvent => ({
+  ...event,
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name, filtered on by operators.
+  tags: { ...event.tags, stale_build: tag },
+  ...(tag === 'superseded' ? { level: 'info', fingerprint: [...staleBuildFingerprint] } : {}),
+});
 
-/** Longest message and stack text an event sent without the SDK carries. */
-export const directEventTextLimit = { message: 2000, stack: 6000 } as const;
+const staleBuildTags: ReadonlySet<string> = new Set<StaleBuildTag>(['superseded', 'current', 'unknown', 'undecided']);
 
-let keepaliveInFlight = 0;
+const isStaleBuildTag = (value: string | undefined): value is StaleBuildTag =>
+  value !== undefined && staleBuildTags.has(value);
+
+/**
+ * What Sentry's own fetch transport allows `keepalive` requests: browsers refuse one once the
+ * bodies in flight pass 64 KiB, or (in some engines) past a handful of requests, so the transport
+ * uses `keepalive` only while, counting the new request, at most 60 KB and fewer than 15 requests
+ * are in flight.
+ */
+export const keepaliveBudget = { bytes: 60_000, requests: 15 } as const;
+
+/** Longest message and stack text an event sent without the SDK carries; tighter at page exit. */
+export const directEventTextLimit = { message: 2000, stack: 6000, stackAtPageExit: 2000 } as const;
+
+const inFlight = { bytes: 0, requests: 0 };
+
+const fitsKeepalive = (bytes: number, requests: number): boolean =>
+  inFlight.bytes + bytes <= keepaliveBudget.bytes && inFlight.requests + requests < keepaliveBudget.requests;
 
 /**
  * Mark a value as captured the way the SDK does (`__sentry_captured__`, which its
@@ -102,33 +132,31 @@ const markCaptured = (error: unknown): void => {
   }
 };
 
+/** Whether the SDK, or an earlier event sent without it, already captured a value. */
+const isCaptured = (error: unknown): boolean => {
+  try {
+    return (error as { __sentry_captured__?: unknown } | null | undefined)?.__sentry_captured__ === true;
+  } catch {
+    return false;
+  }
+};
+
 const randomEventId = (): string => randomUuid().replaceAll('-', '');
 
-/**
- * Report an error without the SDK, when its chunk could not be loaded: one event, stamped with this
- * page's own release and environment, scrubbed as `beforeSend` scrubs, its message and stack
- * capped ({@link directEventTextLimit}), posted once as an envelope, with `keepalive` (so it survives
- * the page going) while the bodies in flight stay within {@link keepaliveBudget}. Nothing is stored and nothing is retried: if the
- * request is blocked as well (a content blocker), the error is lost.
- *
- * @param error - The value to report.
- * @param tags - Tags for the event, such as `stale_build`.
- * @returns Settles once the request has been answered or refused; never rejects.
- */
-export const sendSentryEventDirectly = async (
+/** An envelope ready to post, and its size in bytes. */
+type Envelope = { readonly body: string; readonly size: number };
+
+const buildEnvelope = (
+  dsn: string,
   error: unknown,
   tags: Readonly<Record<string, string>>,
-): Promise<void> => {
-  const dsn = ENV.SENTRY_DSN;
-  const endpoint = dsn ? sentryEnvelopeUrl(dsn) : undefined;
-  if (!dsn || endpoint === undefined) {
-    return;
-  }
-  markCaptured(error);
+  stackLimit: number,
+): Envelope => {
   const isError = error instanceof Error;
   const release = sentryRelease(readBuildId());
   const environment = sentryEnvironment();
-  const event = scrubSentryEvent({
+  const { stale_build: staleBuild, ...otherTags } = tags;
+  const plain: ErrorEvent = {
     type: undefined,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's event field.
     event_id: randomEventId(),
@@ -137,7 +165,7 @@ export const sendSentryEventDirectly = async (
     level: 'error',
     ...(release === undefined ? {} : { release }),
     ...(environment === undefined ? {} : { environment }),
-    tags: { ...tags, delivery: 'without-sdk' },
+    tags: { ...otherTags, delivery: 'without-sdk' },
     exception: {
       values: [
         {
@@ -147,24 +175,28 @@ export const sendSentryEventDirectly = async (
         },
       ],
     },
-    ...(isError && error.stack !== undefined
-      ? { extra: { stack: error.stack.slice(0, directEventTextLimit.stack) } }
-      : {}),
+    ...(isError && error.stack !== undefined ? { extra: { stack: error.stack.slice(0, stackLimit) } } : {}),
     request: { url: globalThis.location.href },
-  });
+  };
+  // Decorated exactly as `beforeSend` decorates the SDK's own events.
+  const event = scrubSentryEvent(isStaleBuildTag(staleBuild) ? decorateForStaleBuild(plain, staleBuild) : plain);
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's envelope header fields.
   const header = { event_id: event.event_id, sent_at: new Date().toISOString(), dsn };
   const body = `${JSON.stringify(header)}\n${JSON.stringify({ type: 'event' })}\n${JSON.stringify(event)}`;
-  const size = new TextEncoder().encode(body).length;
-  const keepalive = keepaliveInFlight + size <= keepaliveBudget;
+  return { body, size: new TextEncoder().encode(body).length };
+};
+
+/** Post one envelope, with `keepalive` when asked; never rejects, and a refused request is simply lost. */
+const post = async (endpoint: string, envelope: Envelope, keepalive: boolean): Promise<void> => {
   if (keepalive) {
-    keepaliveInFlight += size;
+    inFlight.bytes += envelope.size;
+    inFlight.requests += 1;
   }
   try {
     // A simple request (no preflight), as the SDK's own transport sends.
     await fetch(endpoint, {
       method: 'POST',
-      body,
+      body: envelope.body,
       keepalive,
       headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
     });
@@ -172,7 +204,89 @@ export const sendSentryEventDirectly = async (
     // Blocked or unavailable: the error is lost, and nothing reports that.
   } finally {
     if (keepalive) {
-      keepaliveInFlight -= size;
+      inFlight.bytes -= envelope.size;
+      inFlight.requests -= 1;
+    }
+  }
+};
+
+const endpointOf = (): { readonly dsn: string; readonly endpoint: string } | undefined => {
+  const dsn = ENV.SENTRY_DSN;
+  const endpoint = dsn ? sentryEnvelopeUrl(dsn) : undefined;
+  return dsn && endpoint !== undefined ? { dsn, endpoint } : undefined;
+};
+
+/**
+ * Report an error without the SDK while the page lives, when the SDK's chunk could not be loaded:
+ * one event, stamped with this page's own release and environment, decorated and scrubbed as
+ * `beforeSend` does, its message and stack capped ({@link directEventTextLimit}), posted once as an
+ * envelope, with `keepalive` while {@link keepaliveBudget} allows and as an ordinary request
+ * otherwise. A value the SDK (or an earlier such event) already captured is skipped. Nothing is
+ * stored and nothing is retried: if the request is blocked as well (a content blocker), the error is lost.
+ *
+ * @param error - The value to report.
+ * @param tags - Tags for the event, such as `stale_build`.
+ * @returns Settles once the request has been answered or refused; never rejects.
+ */
+export const sendSentryEventDirectly = async (
+  error: unknown,
+  tags: Readonly<Record<string, string>>,
+): Promise<void> => {
+  const target = endpointOf();
+  if (target === undefined || isCaptured(error)) {
+    return;
+  }
+  markCaptured(error);
+  const envelope = buildEnvelope(target.dsn, error, tags, directEventTextLimit.stack);
+  await post(target.endpoint, envelope, fitsKeepalive(envelope.size, 1));
+};
+
+/** The message of the event that stands in for errors a page could not send as it went. */
+export const undeliveredAtPageExitMessage = (count: number): string =>
+  `${String(count)} further UI errors were not delivered at page exit`;
+
+/**
+ * Report errors without the SDK as the page goes (`pagehide`), where only `keepalive` requests
+ * survive: within {@link keepaliveBudget} (counting what is already in flight), newest first, each
+ * stack trimmed to {@link directEventTextLimit}`.stackAtPageExit`. Those that do not fit are counted
+ * in one small final event ({@link undeliveredAtPageExitMessage}), sent when that still fits; the
+ * errors themselves are lost.
+ *
+ * @param reports - The errors and their tags, oldest first.
+ */
+export const sendSentryEventsAtPageExit = (
+  reports: ReadonlyArray<{ readonly error: unknown; readonly tags: Readonly<Record<string, string>> }>,
+): void => {
+  const target = endpointOf();
+  if (target === undefined) {
+    return;
+  }
+  const newestFirst = reports.filter((report) => !isCaptured(report.error)).toReversed();
+  // Room is kept for the summary while anything might be left out: its count has at most as many digits as the total.
+  const summarySize = buildEnvelope(
+    target.dsn,
+    new Error(undeliveredAtPageExitMessage(newestFirst.length)),
+    {},
+    0,
+  ).size;
+  let sent = 0;
+  for (const [index, report] of newestFirst.entries()) {
+    const envelope = buildEnvelope(target.dsn, report.error, report.tags, directEventTextLimit.stackAtPageExit);
+    const isLast = index === newestFirst.length - 1;
+    if (!fitsKeepalive(envelope.size + (isLast ? 0 : summarySize), isLast ? 1 : 2)) {
+      break;
+    }
+    markCaptured(report.error);
+    // async-iife: bootstrap -- the page is going; nothing on it can wait for the answer.
+    void post(target.endpoint, envelope, true);
+    sent += 1;
+  }
+  const left = newestFirst.length - sent;
+  if (left > 0) {
+    const summary = buildEnvelope(target.dsn, new Error(undeliveredAtPageExitMessage(left)), {}, 0);
+    if (fitsKeepalive(summary.size, 1)) {
+      // async-iife: bootstrap -- the page is going; nothing on it can wait for the answer.
+      void post(target.endpoint, summary, true);
     }
   }
 };

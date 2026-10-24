@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
@@ -8,6 +8,7 @@ const projectRef = { kind: 'project' };
 const createChat = vi.fn();
 const updateChatName = vi.fn();
 const navigate = vi.fn();
+const exportTranscript = vi.fn();
 const sidebar = vi.hoisted(() => ({ isMobile: false, open: true }));
 const naming = vi.hoisted(() => ({ isGenerating: false }));
 let keybindingHandler: (() => Promise<void>) | undefined;
@@ -25,14 +26,23 @@ vi.mock('#hooks/use-chats.js', () => ({
 }));
 vi.mock('#hooks/use-chat-records.js', () => ({
   useChatRecords: () => ({
-    chats: [{ id: 'chat_active', resourceId: 'proj_one', name: 'Bracket design', createdAt: 1, updatedAt: 1 }],
+    chats: [
+      { id: 'chat_active', resourceId: 'proj_one', name: 'Bracket design', createdAt: 1, updatedAt: 1 },
+      { id: 'chat_newer', resourceId: 'proj_one', name: 'Gear ratio study', createdAt: 2, updatedAt: 5 },
+      { id: 'chat_trashed', resourceId: 'proj_one', name: 'Trashed sketch', createdAt: 3, updatedAt: 9, deletedAt: 9 },
+    ],
     isLoading: false,
   }),
 }));
 vi.mock('#hooks/use-chat.js', () => ({ useChatSelector: () => undefined }));
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { readonly kind: string }, selector: (state: { context: Record<string, unknown> }) => unknown) =>
-    selector({ context: actor.kind === 'editor' ? { focusedChatId: 'chat_active' } : { isLoading: false } }),
+    selector({
+      context:
+        actor.kind === 'editor'
+          ? { focusedChatId: 'chat_active' }
+          : { isLoading: false, project: { name: 'Rotor housing' } },
+    }),
 }));
 vi.mock('#routes/w.$workspace.$project/use-active-chat-naming.js', () => ({
   useActiveChatNaming: () => naming.isGenerating,
@@ -49,6 +59,7 @@ vi.mock('@taucad/ui/components/keyboard', () => ({
 vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
 vi.mock('react-router', () => ({ useNavigate: () => navigate, Link: () => null }));
 vi.mock('#routes/w.$workspace.$project/chat-history-settings.js', () => ({
+  useExportTranscript: () => ({ canExport: true, exportTranscript }),
   ChatHistorySettings: ({ onRename }: { readonly onRename: () => void }) => (
     <>
       <button type='button'>Chat options</button>
@@ -248,6 +259,88 @@ describe('ChatTitleBar', () => {
       sidebar.isMobile = true;
       rerender(<ChatTitleBar />);
       expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('phone chat switcher (CH-09)', () => {
+    const openSwitcher = async (user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> => {
+      await user.click(screen.getByRole('button', { name: /^Bracket design, Chats in Rotor housing$/ }));
+      return screen.findByRole('dialog', { name: 'Chats in Rotor housing' });
+    };
+
+    beforeEach(() => {
+      sidebar.isMobile = true;
+    });
+
+    /* Rows are clicked with `fireEvent`: vaul’s pointer handlers need layout jsdom does not have. */
+    it('should open this project’s chats, most recent first, with New chat leading', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />);
+
+      const sheet = await openSwitcher(user);
+      const rows = within(within(sheet).getByRole('list', { name: 'Chats' })).getAllByRole('button');
+      expect(rows.map((row) => row.textContent)).toEqual(['New chat', 'Gear ratio study', 'Bracket design']);
+      expect(within(sheet).getByRole('button', { name: 'Bracket design' })).toHaveAttribute('aria-current', 'true');
+      expect(within(sheet).getByRole('button', { name: 'Gear ratio study' })).not.toHaveAttribute('aria-current');
+      // A chat in Trash is not offered.
+      expect(within(sheet).queryByText('Trashed sketch')).not.toBeInTheDocument();
+      // Each row is a 44px target (I3).
+      for (const row of rows) {
+        expect(row).toHaveClass('h-11');
+      }
+    });
+
+    it('should open a picked chat and close the switcher', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar />);
+
+      const sheet = await openSwitcher(user);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Gear ratio study' }));
+
+      expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_newer', { state: { openChat: true } });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'Chats in Rotor housing' })).not.toBeInTheDocument();
+      });
+    });
+
+    it('should start a new chat that asks for the composer’s focus', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar />);
+
+      const sheet = await openSwitcher(user);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'New chat' }));
+
+      await waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith('/w/home/bracket?chat=chat_new', {
+          state: { focusChatComposer: true },
+        });
+      });
+      expect(createChat).toHaveBeenCalledWith({ name: 'New chat', messages: [] });
+    });
+
+    it('should rename and export the open chat from the switcher', async () => {
+      const user = userEvent.setup();
+      render(<ChatTitleBar />);
+
+      let sheet = await openSwitcher(user);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Export transcript' }));
+      expect(exportTranscript).toHaveBeenCalledTimes(1);
+
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      });
+      sheet = await openSwitcher(user);
+      fireEvent.click(within(sheet).getByRole('button', { name: 'Rename this chat' }));
+
+      expect(await screen.findByRole('textbox', { name: 'Chat name' })).toHaveValue('Bracket design');
+    });
+
+    it('should leave the desktop title a plain name with no switcher', () => {
+      sidebar.isMobile = false;
+      render(<ChatTitleBar />);
+
+      expect(screen.queryByRole('button', { name: /Chats in/ })).not.toBeInTheDocument();
+      expect(screen.getByText('Bracket design').tagName).toBe('SPAN');
     });
   });
 });

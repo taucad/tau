@@ -156,6 +156,8 @@ describe('Vitest Browser test-runner ownership', () => {
       // a module worker in three engines, which Browser Mode cannot host.
       'apps/ui/scripts/check-asset-integrity.mts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
+      // Composer and pane-resize acceptance emulate a coarse pointer through the browser session.
+      'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       // Production SSR audits own isolated no-JavaScript contexts and graphics failure injection.
       // The story harness imports only the Page type; tooling owns the runtime driver import.

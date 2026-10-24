@@ -684,11 +684,14 @@ const collapsibleClassNames = (
         ),
         editor: cn(
           collapseTransition,
-          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7',
+          // Under a coarse pointer the row also clears the controls' 6px touch rings, so a tap at the
+          // editor's edge reaches the editor, not + or dictation (see `composerTouchTargetsClassName`).
+          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-8.5',
           '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:max-h-6 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:overflow-hidden',
           hasDictation === true
-            ? '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-15'
-            : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7',
+            ? // Touch also spaces dictation and Send 12px apart.
+              '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-15 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-18.5'
+            : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7 pointer-coarse:@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-8.5',
         ),
         editorContent: cn(
           collapseTransition,
@@ -711,6 +714,17 @@ const collapsibleControlsClassName = cn(
   'flex min-w-0 flex-row items-center empty:hidden',
   '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:invisible @max-[768px]/composer:group-data-[collapsed]/chat-textarea:opacity-0',
 );
+
+/**
+ * Touch targets (I3). The bar keeps its 28px controls, so the composer keeps its
+ * geometry, but under a coarse pointer each control's hit area reaches 40px and
+ * the controls sit 12px apart, so neighbouring hit areas meet without overlapping.
+ */
+const composerTouchTargetsClassName =
+  "pointer-coarse:gap-3 pointer-coarse:[&_button]:relative pointer-coarse:[&_button]:after:absolute pointer-coarse:[&_button]:after:-inset-1.5 pointer-coarse:[&_button]:after:content-['']";
+
+/** Keyboard hints are for keyboards (I7). */
+const keyboardHintClassName = 'pointer-coarse:hidden';
 
 /** The labels that leave, in order, before the model's name is cut (D6). */
 const collapseSteps = ['data-hide-kernel', 'data-hide-mode', 'data-hide-level'] as const;
@@ -864,10 +878,17 @@ export const ChatTextareaBar = memo(function ({
     <div
       ref={barRef}
       data-slot='composer-bar'
-      className={cn('group/bar flex items-center justify-between gap-2 px-2', collapsedBarClassName)}
+      className={cn(
+        'group/bar flex items-center justify-between gap-2 px-2',
+        composerTouchTargetsClassName,
+        collapsedBarClassName,
+      )}
     >
       {dictationRecording === undefined ? (
-        <div data-slot='composer-left' className='pointer-events-auto flex shrink-0 flex-row items-center gap-0.5'>
+        <div
+          data-slot='composer-left'
+          className='pointer-events-auto flex shrink-0 flex-row items-center gap-0.5 pointer-coarse:gap-3'
+        >
           <ChatAddMenu
             enableContextActions={enableContextActions}
             isAttachmentSupported={attachmentInputSupported}
@@ -875,7 +896,10 @@ export const ChatTextareaBar = memo(function ({
             handleFileSelect={handleFileSelect}
             focusEditor={focusEditor}
           />
-          <div data-slot='composer-collapsible' className={cn(collapsibleControlsClassName, 'gap-0.5')}>
+          <div
+            data-slot='composer-collapsible'
+            className={cn(collapsibleControlsClassName, 'gap-0.5 pointer-coarse:gap-3')}
+          >
             <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
             {creationLocationControl}
             {enableKernelSelector ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
@@ -894,9 +918,15 @@ export const ChatTextareaBar = memo(function ({
           {dictationRecording}
         </div>
       )}
-      <div data-slot='composer-right' className='pointer-events-auto flex min-w-0 flex-row items-center gap-1'>
+      <div
+        data-slot='composer-right'
+        className='pointer-events-auto flex min-w-0 flex-row items-center gap-1 pointer-coarse:gap-3'
+      >
         {dictationRecording === undefined ? (
-          <div data-slot='composer-collapsible' className={cn(collapsibleControlsClassName, 'gap-1')}>
+          <div
+            data-slot='composer-collapsible'
+            className={cn(collapsibleControlsClassName, 'gap-1 pointer-coarse:gap-3')}
+          >
             <ChatContextIndicator />
             <ChatAgentSheet
               agentConfig={agentConfig}
@@ -992,7 +1022,8 @@ function ChatAddMenu({
             </Button>
           </TooltipTrigger>
         </DropdownMenuTrigger>
-        <TooltipContent>{enableContextActions ? 'Attach a file or add context' : 'Attach a file'}</TooltipContent>
+        {/* The same word as its name (I6); the menu says what it adds. */}
+        <TooltipContent>Add</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         align='start'
@@ -1032,7 +1063,7 @@ function ChatAddMenu({
           >
             <AtSign aria-hidden='true' />
             Add context
-            <DropdownMenuShortcut>@</DropdownMenuShortcut>
+            <DropdownMenuShortcut className={keyboardHintClassName}>@</DropdownMenuShortcut>
           </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>

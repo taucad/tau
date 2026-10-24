@@ -112,7 +112,13 @@ export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode
             </span>
           </span>
         )}
-        <FloatingPanelContentHeaderActions className={cn(!isRenaming && 'md:absolute md:inset-y-0 md:right-0')}>
+        <FloatingPanelContentHeaderActions
+          className={cn(
+            !isRenaming && 'md:absolute md:inset-y-0 md:right-0',
+            // A touch tablet keeps the desktop row but has no hover to reveal its menu (I2, D12).
+            'pointer-coarse:opacity-100',
+          )}
+        >
           <FloatingPanelButtonGroup>
             <ChatHistorySettings onRename={startRename} />
           </FloatingPanelButtonGroup>

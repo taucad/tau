@@ -56,19 +56,19 @@ describe('FloatingPanel docked in a detented drawer', () => {
     const onOpenChange = vi.fn<(open: boolean) => void>();
     render(<DockedPanel onOpenChange={onOpenChange} />);
     const grabber = screen.getByRole('slider', { name: 'Drawer height' });
-    expect(grabber).toHaveAttribute('aria-valuetext', '25% height');
+    expect(grabber).toHaveAttribute('aria-valuetext', 'Peek');
 
     const title = screen.getByText('Parameters');
     await user.click(title);
     await user.dblClick(title);
     await user.click(title.closest('[data-slot="floating-panel-content-header"]')!);
 
-    expect(grabber).toHaveAttribute('aria-valuetext', '25% height');
+    expect(grabber).toHaveAttribute('aria-valuetext', 'Peek');
     expect(onOpenChange).not.toHaveBeenCalled();
     expect(screen.getByRole('dialog', { name: 'Workbench' })).toBeInTheDocument();
 
     // The grabber is what moves the sheet, so the assertions above are not blind to a change.
     fireEvent.keyDown(grabber, { key: 'Enter' });
-    expect(grabber).toHaveAttribute('aria-valuetext', '58% height');
+    expect(grabber).toHaveAttribute('aria-valuetext', 'Half');
   });
 });

@@ -221,8 +221,27 @@ function DrawerClose({ ...properties }: React.ComponentProps<typeof DrawerPrimit
 }
 
 /**
+ * The spoken name of a detent, by its place: the lowest is the peek, the tallest is full, and the one between three is
+ * half. Names, not percentages, so the same detent reads the same at every viewport height.
+ *
+ * @param index - The detent's place, from the lowest.
+ * @param count - How many detents the drawer has.
+ * @returns The detent's name.
+ */
+function detentName(index: number, count: number): string {
+  if (index === 0) {
+    return 'Peek';
+  }
+  if (index === count - 1) {
+    return 'Full';
+  }
+  return count === 3 ? 'Half' : `Detent ${index + 1} of ${count}`;
+}
+
+/**
  * Supplies Vaul's draggable drawer handle. For multiple snap points it implements the APG slider pattern:
- * arrows step, Home/End select the extremes, and Enter/Space cycle without dismissing. The current height is announced.
+ * arrows step, Home/End select the extremes, and Enter/Space cycle without dismissing. The current detent is announced
+ * by name (Peek, Half, Full).
  *
  * @public
  * @example <caption>Render a drawer handle.</caption>
@@ -240,7 +259,6 @@ function DrawerHandle({
   const snaps = React.useContext(DrawerSnapContext);
   const adjustable = snaps !== undefined && snaps.points.length > 1;
   const index = adjustable ? Math.max(0, snaps.points.indexOf(snaps.active ?? snaps.points[0]!)) : 0;
-  const value = snaps?.points[index];
   return (
     <DrawerPrimitive.Handle
       data-slot='drawer-handle'
@@ -254,7 +272,7 @@ function DrawerHandle({
             'aria-valuemin': 1,
             'aria-valuemax': snaps.points.length,
             'aria-valuenow': index + 1,
-            'aria-valuetext': typeof value === 'number' ? `${Math.round(value * 100)}% height` : `${value} height`,
+            'aria-valuetext': detentName(index, snaps.points.length),
           }
         : {})}
       {...properties}

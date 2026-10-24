@@ -420,6 +420,31 @@ describe('ChatInterfaceMobile', () => {
     expect(surface).not.toHaveFocus();
   });
 
+  it('should owe no focus after a person chooses the surface already open', async () => {
+    state.drawerOpen = true;
+    state.activeTab = 'parameters';
+    renderShell();
+    const navigation = screen.getByRole('navigation', { name: 'Workbench' });
+    fireEvent.click(within(navigation).getByRole('button', { name: 'Parameters' }));
+
+    // The app closes the sheet and later opens the same surface itself: that visit takes no focus.
+    act(() => {
+      selectSurface('viewer');
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: 'Parameters' })).not.toBeInTheDocument();
+    });
+    act(() => {
+      selectSurface('parameters');
+    });
+
+    const surface = await screen.findByRole('region', { name: 'Parameters' });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+    expect(surface).not.toHaveFocus();
+  });
+
   it('should leave Escape in a text field to the field and keep the sheet open', async () => {
     state.drawerOpen = true;
     state.activeTab = 'chat';

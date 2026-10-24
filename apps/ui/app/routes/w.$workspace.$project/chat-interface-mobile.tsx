@@ -324,10 +324,12 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const surfaceToFocus = useRef<MobilePanelId | undefined>(undefined);
   const chooseSurface = useCallback(
     (id: MobilePanelId) => {
-      surfaceToFocus.current = id === 'viewer' ? undefined : id;
+      // Choosing the open surface changes nothing, so no focus is owed to a later, app-opened visit.
+      const isUnchanged = id === activeTab && drawerOpen;
+      surfaceToFocus.current = id === 'viewer' || isUnchanged ? undefined : id;
       handleTabChange(id);
     },
-    [handleTabChange],
+    [activeTab, drawerOpen, handleTabChange],
   );
   useEffect(() => {
     if (surfaceToFocus.current === activeTab && drawerOpen && section) {

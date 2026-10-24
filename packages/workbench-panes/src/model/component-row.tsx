@@ -215,7 +215,8 @@ export const ComponentRow = memo(function ComponentRow({
         // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
         'group/part relative flex w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
         // A part row leads with its 80 px preview; groups stay compact.
-        isPreviewRow ? 'h-22 gap-2' : 'h-7',
+        // Under a coarse pointer a compact row grows 4px so its 20px part button reaches the 24px floor (I3).
+        isPreviewRow ? 'h-22 gap-2' : 'h-7 pointer-coarse:h-8',
         'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
         isSelected ? 'bg-primary/10 text-foreground' : 'text-sidebar-foreground',
         !isSelected && isFocused ? 'bg-sidebar-accent/70 text-foreground ring-1 ring-inset ring-primary/30' : undefined,

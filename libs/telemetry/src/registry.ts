@@ -11,6 +11,7 @@ import {
   lookupOutcomes,
   tauToolNames,
 } from '#ingest.js';
+import { runtimeMetrics } from '#runtime-metrics.js';
 
 /**
  * `tau.sync.operation`: the client-facing request a sync series counts. `advertise` is a served
@@ -563,6 +564,10 @@ export const TauMetrics = {
 
   wsReconnectionDuration: defineHistogram({
     name: 'ws.reconnection.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'WebSocket reconnection latency (reported by client)',
     buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
@@ -573,6 +578,10 @@ export const TauMetrics = {
 
   editorLoadDuration: defineHistogram({
     name: 'editor.load.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'Editor initialization time (reported by client)',
     buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
@@ -583,6 +592,10 @@ export const TauMetrics = {
 
   wasmModuleLoadDuration: defineHistogram({
     name: 'wasm.module.load.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'WASM module download + instantiation time (reported by client)',
     buckets: [0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60],
@@ -593,6 +606,10 @@ export const TauMetrics = {
 
   indexeddbOperationDuration: defineHistogram({
     name: 'indexeddb.operation.duration',
+    deprecated: {
+      removal: 'the Runtime Observability follow-up after PR-4 (Tau has no versioned releases; UI releases are SHAs)',
+      reason: 'D-T18: no producer in apps/ui or anywhere else; a follow-up deletes it and the panels that query it',
+    },
     unit: 's',
     description: 'IndexedDB operation latency (reported by client)',
     buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 5],
@@ -1439,4 +1456,8 @@ export const TauMetrics = {
       outcome: z.enum(['ok', 'error']),
     }),
   }),
+
+  // --- Runtime observation (Runtime Observability PR-2; recorded by the API at ingest) ---
+
+  ...runtimeMetrics,
 } as const;

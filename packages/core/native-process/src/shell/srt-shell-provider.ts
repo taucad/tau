@@ -8,7 +8,7 @@
  */
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { closeSync, existsSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, relative } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -159,11 +159,28 @@ const inside = (path: string, root: string): boolean => {
  * @param options - Provider options.
  * @returns A complete sandbox-runtime configuration.
  */
+/**
+ * The spellings of each denied path the runtime can mask. Bubblewrap masks a directory by mounting over it, which it
+ * cannot do through a symbolic link (`/var/run` is one to `/run` on current distributions), so on Linux a link is
+ * replaced by its target. Seatbelt matches both spellings, so macOS keeps them.
+ */
+const deniedVariants = (paths: readonly string[]): string[] =>
+  physicalVariants(paths).filter((path) => {
+    if (process.platform !== 'linux') {
+      return true;
+    }
+    try {
+      return !lstatSync(path).isSymbolicLink();
+    } catch {
+      return true;
+    }
+  });
+
 export const shellSandboxProfile = (
   launch: Pick<ShellLaunch, 'filesystem' | 'network'>,
   options: SandboxShellProviderOptions = {},
 ): Record<string, unknown> => {
-  const denied = physicalVariants([
+  const denied = deniedVariants([
     ...launch.filesystem.denied,
     ...shellBaselineDenied({ platform: process.platform, home: options.home ?? homedir(), environment: process.env }),
   ]);

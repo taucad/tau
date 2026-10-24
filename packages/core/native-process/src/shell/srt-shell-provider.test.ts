@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment variables keep their wire names. */
 // @vitest-environment node
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -277,6 +277,19 @@ describe('shellSandboxProfile', () => {
     });
 
     expect(profile['network']).toStrictEqual({ allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true });
+  });
+
+  it.runIf(process.platform === 'linux')('should mask a denied symbolic link through its target only', () => {
+    const root = fixtureRoot();
+    mkdirSync(join(root, 'target'));
+    symlinkSync(join(root, 'target'), join(root, 'link'));
+    const profile = shellSandboxProfile({
+      filesystem: { readable: [], writable: [], denied: [join(root, 'link')] },
+      network: { domains: [] },
+    }) as { filesystem: Record<string, string[]> };
+
+    expect(profile.filesystem['denyRead']).toContain(join(root, 'target'));
+    expect(profile.filesystem['denyRead']).not.toContain(join(root, 'link'));
   });
 
   it('should deny reads and writes of denied paths and the baseline set inside granted roots', () => {

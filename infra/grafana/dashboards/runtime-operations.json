@@ -1226,9 +1226,9 @@
       "description": "Entry-free GET /v1/telemetry/policy requests; before activation the only runtime-telemetry traffic a deployment answers.",
       "targets": [
         {
-          "expr": "sum by (answer, tau_runtime_route) (increase(tau_telemetry_policy_probes_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
+          "expr": "sum by (answer) (increase(tau_telemetry_policy_probes_total{app=~\"$app\",service_name=~\"$service\"}[1h]))",
           "refId": "A",
-          "legendFormat": "{{tau_runtime_route}} {{answer}}"
+          "legendFormat": "{{answer}}"
         }
       ],
       "fieldConfig": {

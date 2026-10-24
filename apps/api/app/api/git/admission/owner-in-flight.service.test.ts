@@ -63,6 +63,7 @@ const gitEnvironment = {
   LANG: 'C',
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_CONFIG_SYSTEM: '/dev/null',
+  TAU_GIT_PUSH_ADMITTED: '1',
 } as unknown as NodeJS.ProcessEnv;
 /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
 
@@ -183,7 +184,7 @@ beforeAll(async () => {
   const run = (...args: readonly string[]): void => {
     execFileSync('git', ['-c', 'user.name=DA6', '-c', 'user.email=da6@tau.test', ...args], {
       cwd: client,
-      env: { ...gitEnvironment, TAU_GIT_PUSH_ADMITTED: '1' },
+      env: gitEnvironment,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
   };

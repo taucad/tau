@@ -235,7 +235,6 @@ function LayoutDocument({
        * is English-only and re-renders continuously (chat stream, editor, viewer). */
       translate='no'
       className={cn(
-        '[--spacing:0.275rem] md:[--spacing:0.25rem]',
         (resolvedTheme === Theme.BLACK || resolvedTheme === Theme.HIGH_CONTRAST) && Theme.DARK,
         // Leave the specific product theme last so it overrides Dark's base palette.
         resolvedTheme,

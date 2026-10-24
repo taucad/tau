@@ -184,7 +184,7 @@ export function PackagesPanel(): React.JSX.Element {
           href={runOutsideTauUrl}
           target='_blank'
           rel='noopener noreferrer'
-          className='text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline'
+          className='inline-flex items-center text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline pointer-coarse:min-h-6'
         >
           Run a model outside Tau
         </a>

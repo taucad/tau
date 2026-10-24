@@ -214,7 +214,7 @@ const ownerCapRefusal = {
   status: 429,
   response: {
     code: 'GIT_OWNER_IN_FLIGHT_LIMIT',
-    retryAfterSeconds: expect.any(Number),
+    retryAfterSeconds: expect.any(Number) as unknown,
   },
 };
 

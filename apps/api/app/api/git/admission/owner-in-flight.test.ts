@@ -158,12 +158,12 @@ const capContract = (name: string, create: () => Promise<OwnerInFlightCap>): voi
 
 capContract('the in-memory cap', async () => new MemoryOwnerInFlightCap());
 
-describe.skipIf(!(await redisReachable(process.env['REDIS_URL'])))('the Redis cap', () => {
+describe.skipIf(!(await redisReachable(process.env.REDIS_URL)))('the Redis cap', () => {
   let client: Redis;
   const caps: RedisOwnerInFlightCap[] = [];
 
   beforeAll(async () => {
-    client = new Redis(process.env['REDIS_URL']!, { lazyConnect: true });
+    client = new Redis(process.env.REDIS_URL, { lazyConnect: true });
     await client.connect();
   });
 
@@ -286,7 +286,7 @@ describe('the over-cap answer', () => {
       expect(seconds).toBeLessThanOrEqual(3);
       seen.add(seconds);
     }
-    expect([...seen].toSorted()).toEqual([1, 2, 3]);
+    expect([...seen].toSorted((left, right) => left - right)).toEqual([1, 2, 3]);
   });
 
   const recording = (): {

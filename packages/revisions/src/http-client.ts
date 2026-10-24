@@ -180,7 +180,9 @@ const sleepUnlessAborted = async (milliseconds: number, signal?: AbortSignal): P
   await new Promise<void>((resolve, reject) => {
     const abort = (): void => {
       clearTimeout(timer);
-      reject(signal?.reason);
+      reject(
+        signal?.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
+      );
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', abort);

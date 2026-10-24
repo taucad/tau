@@ -49,6 +49,10 @@ TAU_S3_COPY_FORCE_PATH_STYLE = 'false'
 TAU_MIRROR_POLL_MILLISECONDS = '10000'
 TAU_MIRROR_CONCURRENCY = '4'
 TAU_MIRROR_BACKFILL_SHARE = '0.5'
+# The daily verify drill (DR2-lite): repositories read back from the copy per run, and the
+# environment its `mirror_drill_run` rows and `tau_mirror_drill_*` series carry. 0 turns it off.
+TAU_MIRROR_ENVIRONMENT = 'production'
+TAU_MIRROR_DRILL_SAMPLE = '3'
 DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
 DATABASE_IDLE_TIMEOUT_SECONDS = '60'
 DATABASE_STATEMENT_TIMEOUT_MS = '15000'

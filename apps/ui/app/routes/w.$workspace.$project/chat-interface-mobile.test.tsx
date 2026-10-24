@@ -431,10 +431,10 @@ describe('ChatInterfaceMobile', () => {
     const navigation = screen.getByRole('navigation', { name: 'Workbench' });
     fireEvent.click(within(navigation).getByRole('button', { name: 'All' }));
     fireEvent.click(
-      within(await screen.findByRole('dialog', { name: 'All surfaces' })).getByRole('button', { name: 'Jobs' }),
+      within(await screen.findByRole('dialog', { name: 'All surfaces' })).getByRole('button', { name: 'Agents' }),
     );
 
-    const surface = await screen.findByRole('region', { name: 'Jobs' });
+    const surface = await screen.findByRole('region', { name: 'Agents' });
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'All surfaces' })).not.toBeInTheDocument();
     });
@@ -443,10 +443,10 @@ describe('ChatInterfaceMobile', () => {
 
   it('should not take focus for a surface restored from storage', async () => {
     state.drawerOpen = true;
-    state.activeTab = 'jobs';
+    state.activeTab = 'agents';
     renderShell();
 
-    const surface = await screen.findByRole('region', { name: 'Jobs' });
+    const surface = await screen.findByRole('region', { name: 'Agents' });
     expect(surface).not.toHaveFocus();
   });
 

@@ -140,9 +140,10 @@ export function createDocumentWorkerDispatcher(
         worker.setSignalBuffer(memoryHandle.signalBuffer);
       }
       const computeStorePort = options?.computeStorePort ?? memoryHandle?.computeStorePort;
+      const sizing = memoryHandle?.computeMemoryConstrained === true ? { memoryConstrained: true } : {};
       if (computeStorePort) {
         computeStore = createComputeStoreChannelClient(computeStorePort);
-        worker.setComputeBinding({ mode: 'durable', store: computeStore.store });
+        worker.setComputeBinding({ mode: 'durable', store: computeStore.store, ...sizing });
       } else if ((options?.computeBindingMode ?? memoryHandle?.computeBindingMode) === 'off') {
         worker.setComputeBinding({ mode: 'off' });
       } else if (
@@ -150,7 +151,7 @@ export function createDocumentWorkerDispatcher(
         memoryHandle?.computeBindingMode === 'memory' ||
         memoryHandle?.computeBindingMode === 'durable'
       ) {
-        worker.setComputeBinding({ mode: 'memory' });
+        worker.setComputeBinding({ mode: 'memory', ...sizing });
       }
       if (options?.bindingsFactory && memoryHandle) {
         const bindings = options.bindingsFactory(memoryHandle);

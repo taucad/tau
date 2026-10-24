@@ -208,7 +208,13 @@ describe('trace projection', () => {
 
   it('builds phase lanes for an evaluate trace, whose root now owns dependency and parameter phases', () => {
     const evaluate = buildTelemetryTraces([
-      makeEntry({ name: 'kernel.evaluate', startTime: 0, duration: 50, workerTimeOrigin: 1000, detail: { spanId: 'e' } }),
+      makeEntry({
+        name: 'kernel.evaluate',
+        startTime: 0,
+        duration: 50,
+        workerTimeOrigin: 1000,
+        detail: { spanId: 'e' },
+      }),
       makeEntry({
         name: 'kernel.resolve-deps',
         startTime: 5,

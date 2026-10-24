@@ -53,7 +53,10 @@ vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-manifest-issue-banner.js', () => ({
   ProjectManifestIssueBanner: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-interface-nav.js', () => ({ ChatInterfaceNav: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-interface-nav.js', () => ({
+  ChatInterfaceNav: () => null,
+  surfaceTitle: (id: string) => id,
+}));
 vi.mock('#routes/w.$workspace.$project/workspace-skeleton.js', () => ({ WorkspaceSkeleton: () => null }));
 
 describe('ChatInterface code splitting (B-27, D-UI-16)', () => {

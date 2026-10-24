@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatInterfaceNav, chatTabs } from '#routes/w.$workspace.$project/chat-interface-nav.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -22,8 +23,89 @@ describe('mobile secondary surfaces', () => {
   it('keeps Share available', () => {
     expect(chatTabs.find(({ id }) => id === 'share')?.label).toBe('Share');
   });
-  it('keeps revision history available', () => {
-    expect(chatTabs.find(({ id }) => id === 'revisions')?.label).toBe('History');
+  it('keeps revision history available under its workbench title', () => {
+    expect(chatTabs.find(({ id }) => id === 'revisions')?.label).toBe('Revisions');
+  });
+});
+
+/** The nav as the shell drives it: the selected surface comes back as activeTab. */
+function ControlledNav({ initial = 'chat' }: { readonly initial?: MobilePanelId }): React.JSX.Element {
+  const [activeTab, setActiveTab] = useState<MobilePanelId>(initial);
+  return (
+    <>
+      <ChatInterfaceNav activeTab={activeTab} onTabChange={setActiveTab} />
+      <output aria-label='Active surface'>{activeTab}</output>
+    </>
+  );
+}
+
+describe('All surfaces', () => {
+  it('should list only the secondary surfaces, by their workbench titles, under All surfaces', () => {
+    render(<ControlledNav />);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
+
+    const sheet = screen.getByRole('dialog', { name: 'All surfaces' });
+    expect(
+      within(sheet)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['Files', 'Editor', 'Details', 'Export', 'Share', 'Revisions']);
+    for (const primary of ['Chat', 'Parameters', 'Model']) {
+      expect(within(sheet).queryByRole('button', { name: primary })).not.toBeInTheDocument();
+    }
+  });
+
+  it('should mark the selected surface in the nav and in All, and close All once a surface is chosen', async () => {
+    render(<ControlledNav />);
+    const navigation = screen.getByRole('navigation', { name: 'Workbench' });
+    fireEvent.click(within(navigation).getByRole('button', { name: 'All' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('button', { name: 'Revisions' }),
+    );
+
+    expect(screen.getByRole('status', { name: 'Active surface' })).toHaveTextContent('revisions');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'All surfaces' })).not.toBeInTheDocument();
+    });
+    // A secondary surface is reached through All, so All carries the selection in the nav.
+    expect(within(navigation).getByRole('button', { name: 'All' })).toHaveAttribute('aria-current', 'page');
+    expect(within(navigation).getByRole('button', { name: 'Chat' })).not.toHaveAttribute('aria-current');
+
+    fireEvent.click(within(navigation).getByRole('button', { name: 'All' }));
+    const sheet = screen.getByRole('dialog', { name: 'All surfaces' });
+    expect(within(sheet).getByRole('button', { name: 'Revisions' })).toHaveAttribute('aria-current', 'page');
+    expect(within(sheet).getByRole('button', { name: 'Files' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('should lay the sheet out in columns of at least 8rem, so a title is not clipped at 320px', () => {
+    render(<ControlledNav />);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Workbench' })).getByRole('button', { name: 'All' }));
+
+    const grid = within(screen.getByRole('dialog', { name: 'All surfaces' })).getByRole('button', {
+      name: 'Files',
+    }).parentElement!;
+    expect(grid).toHaveClass('grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]');
+    expect(grid).not.toHaveClass('grid-cols-3');
+  });
+});
+
+describe('mobile navigation height', () => {
+  it('should fit 40px targets in the bar and keep them above the home indicator', () => {
+    render(<ChatInterfaceNav activeTab='chat' onTabChange={vi.fn()} />);
+    const navigation = screen.getByRole('navigation', { name: 'Workbench' });
+
+    // 1px top border + 1px + 40px + 2px is the 44px --nav-height; the inset is added below the buttons.
+    expect(navigation).toHaveClass(
+      '[--nav-height:calc(var(--spacing)*11)]',
+      'h-(--nav-offset)',
+      'border-t',
+      'pt-px',
+      'pb-[calc(var(--spacing)*0.5_+_env(safe-area-inset-bottom))]',
+    );
+    for (const button of within(navigation).getAllByRole('button')) {
+      expect(button).toHaveClass('h-10');
+      expect(button).not.toHaveClass('min-h-11');
+    }
   });
 });
 

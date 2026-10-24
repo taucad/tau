@@ -374,7 +374,7 @@ export const ChatConsole = memo(function ChatConsole(): React.JSX.Element {
         <SearchInput
           aria-label='Filter logs'
           autoComplete='off'
-          className='h-7 min-w-0 flex-1 bg-background'
+          className='h-7 min-w-0 flex-1 bg-background pointer-coarse:h-10'
           placeholder='Filter logs…'
           value={query}
           onChange={(event) => {

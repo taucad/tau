@@ -37,8 +37,13 @@ describe('classifyConfig', () => {
     expect(raise).toMatchObject({ name: 'total (ESM JS)', kind: 'code', from: 8000, to: 8800, decision: 'autonomous' });
   });
 
-  it('should send a code raise above 10 % to the operator', () => {
-    const [raise] = classifyConfig(config, [js('9 kB')], { base: [js('8 kB')] });
+  it('should let an agent raise a code entry by up to 2 kB whatever the percentage', () => {
+    expect(classifyConfig(config, [js('9 kB')], { base: [js('8 kB')] })[0]?.decision).toBe('autonomous');
+    expect(classifyConfig(config, [js('3 kB')], { base: [js('1 kB')] })[0]?.decision).toBe('autonomous');
+  });
+
+  it('should send a code raise above both 2 kB and 10 % to the operator', () => {
+    const [raise] = classifyConfig(config, [js('22.5 kB')], { base: [js('20 kB')] });
 
     expect(raise?.decision).toBe('operator');
     expect(raise?.reasons).toEqual(['+12.5 % exceeds 10.0 %']);
@@ -63,6 +68,12 @@ describe('classifyConfig', () => {
     expect(raise?.reasons).toEqual(['+22.2 % since program start exceeds 20.0 %']);
   });
 
+  it('should allow 2 kB of cumulative code growth in a program whatever the percentage', () => {
+    expect(classifyConfig(config, [js('3 kB')], { base: [js('2 kB')], programBase: [js('1 kB')] })[0]?.decision).toBe(
+      'autonomous',
+    );
+  });
+
   it('should send every raise of a reserved entry to the operator', () => {
     const runtime = (limit: string) => ({
       name: 'total (ESM JS)',
@@ -84,10 +95,10 @@ describe('classifyConfig', () => {
 
 describe('sizeRaiseReport', () => {
   it('should render one row per raise with its decision', () => {
-    const report = sizeRaiseReport(classifyConfig('a/.size-limit.json', [js('9 kB')], { base: [js('8 kB')] }));
+    const report = sizeRaiseReport(classifyConfig('a/.size-limit.json', [js('22.5 kB')], { base: [js('20 kB')] }));
 
     expect(report).toContain(
-      '| a/.size-limit.json | total (ESM JS) | code | 8000 → 9000 B (+12.5 %) | operator: +12.5 % exceeds 10.0 % |',
+      '| a/.size-limit.json | total (ESM JS) | code | 20000 → 22500 B (+12.5 %) | operator: +12.5 % exceeds 10.0 % |',
     );
     expect(sizeRaiseReport([])).toBe('No size budget raises.');
   });

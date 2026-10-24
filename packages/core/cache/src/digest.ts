@@ -80,7 +80,8 @@ export const canonicalizeComputeAction = (action: ComputeAction): string =>
   canonicalizeCacheValue({ value: actionValue(action) });
 
 const sha256 = async (bytes: Uint8Array<ArrayBuffer>): Promise<`sha256:${string}`> => {
-  const hash = await globalThis.crypto.subtle.digest('SHA-256', new Uint8Array(bytes));
+  // WebCrypto copies its input before hashing, so the caller's buffer needs no defensive copy.
+  const hash = await globalThis.crypto.subtle.digest('SHA-256', bytes);
   const hexadecimal = [...new Uint8Array(hash)].map((value) => value.toString(16).padStart(2, '0')).join('');
   return `sha256:${hexadecimal}`;
 };

@@ -539,6 +539,36 @@ export class MetricsService {
     unit: TauMetrics.gitHotProjectWriters.unit,
   });
 
+  // --- Git route table and freeze answer (DW1, DW2) ---
+
+  /** Observed at collection from the route table, so a lapsed freeze reads 0 rather than a stale count. */
+  public readonly gitRouteFrozen = this.apiMeter.createObservableGauge(TauMetrics.gitRouteFrozen.name, {
+    description: TauMetrics.gitRouteFrozen.description,
+    unit: TauMetrics.gitRouteFrozen.unit,
+  });
+
+  public readonly gitRouteFrozenOldest = this.apiMeter.createObservableGauge(TauMetrics.gitRouteFrozenOldest.name, {
+    description: TauMetrics.gitRouteFrozenOldest.description,
+    unit: TauMetrics.gitRouteFrozenOldest.unit,
+  });
+
+  public readonly gitRouteHolds = this.apiMeter.createCounter(TauMetrics.gitRouteHolds.name, {
+    description: TauMetrics.gitRouteHolds.description,
+    unit: TauMetrics.gitRouteHolds.unit,
+  });
+
+  public readonly gitRouteHoldDuration = this.apiMeter.createHistogram(TauMetrics.gitRouteHoldDuration.name, {
+    description: TauMetrics.gitRouteHoldDuration.description,
+    unit: TauMetrics.gitRouteHoldDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteHoldDuration.buckets] },
+  });
+
+  public readonly gitRouteLookupDuration = this.apiMeter.createHistogram(TauMetrics.gitRouteLookupDuration.name, {
+    description: TauMetrics.gitRouteLookupDuration.description,
+    unit: TauMetrics.gitRouteLookupDuration.unit,
+    advice: { explicitBucketBoundaries: [...TauMetrics.gitRouteLookupDuration.buckets] },
+  });
+
   // Client-reported: Tau Sync
 
   public readonly syncClientAttempts = this.clientMeter.createCounter(TauMetrics.syncClientAttempts.name, {

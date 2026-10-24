@@ -57,6 +57,7 @@ import {
 } from '#api/git/git.constants.js';
 import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
 import { HotProjects, hotProjectRanks } from '#api/git/hot-projects.js';
+import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
 import type { HotProject } from '#api/git/hot-projects.js';
 import { commitLease } from '#api/git/store/commit.js';
 import type { MovedRef } from '#api/git/store/commit.js';
@@ -385,6 +386,8 @@ export class GitRepositoryService {
     private readonly durableEvents: DurableEventsService,
     @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
     @Optional() private readonly metrics: MetricsService = new MetricsService(),
+    /* DW1/DW2: holds a frozen repository's requests before any lease; open outside the module. */
+    @Optional() private readonly routes: RepositoryRouteGuard = RepositoryRouteGuard.open(),
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
@@ -1247,6 +1250,25 @@ export class GitRepositoryService {
    * @throws ServiceUnavailableException When another lease would not fit, or the owner already holds its share.
    */
   private async admitLease(
+    access: Pick<GitAccess, 'projectId' | 'ownerId' | 'callerId' | 'viaDevice'>,
+    operation: GitOperation,
+  ): Promise<() => void> {
+    /* The route step first (DW1/DW2): a frozen repository is held here, before it costs a slot. */
+    const routed = await this.routes.admit(access.projectId);
+    try {
+      const release = await this.admitLeaseSlot(access, operation);
+      return () => {
+        release();
+        routed();
+      };
+    } catch (error) {
+      routed();
+      throw error;
+    }
+  }
+
+  /** {@link admitLease}'s disk, owner-share and hydrate-budget steps. */
+  private async admitLeaseSlot(
     access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>,
     operation: GitOperation,
   ): Promise<() => void> {
@@ -1396,6 +1418,8 @@ export class GitRepositoryService {
    * own attempts (W14 N10).
    */
   private async commit(args: Parameters<typeof commitLease>[0]): ReturnType<typeof commitLease> {
+    /* DW1, FR13: a lease hydrated from a migration fence reads the route past this Machine's cache. */
+    await this.routes.assertCommittable(args.lease.locator.projectId, args.lease.manifest);
     const startedAt = performance.now();
     const attempt = (outcome: GitCommitAttemptAttributes['outcome']): void => {
       this.metrics.gitCommitAttempts.add(1, { outcome, 'tau.git.commit.kind': 'push' });
@@ -1419,6 +1443,8 @@ export class GitRepositoryService {
       if (error instanceof RepositoryStoreError && error.code === 'lost') {
         this.metrics.syncManifestConflicts.add(1);
         attempt('lost_race');
+        /* DW2: a race lost to a freeze's fence gets the freeze answer, not the 503. */
+        throw (await this.routes.refusalForLostRace(args.lease.locator.projectId)) ?? error;
       } else if (!(error instanceof RepositoryStoreError && refusedBeforeManifestWrite.has(error.code))) {
         attempt('error');
       }

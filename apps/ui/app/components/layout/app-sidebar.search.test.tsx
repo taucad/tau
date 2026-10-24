@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -71,7 +71,7 @@ function Shell(): React.JSX.Element {
           <SidebarProvider>
             <RegisterItems />
             {/* The page header's trigger, which opens the phone sheet. */}
-            <SidebarTrigger aria-label='Open sidebar' />
+            <SidebarTrigger />
             <AppSidebar />
           </SidebarProvider>
         </CommandPaletteProvider>
@@ -118,11 +118,12 @@ describe('sidebar search trigger', () => {
       const controls = [...header.querySelectorAll<HTMLElement>('a, button')];
 
       const search = within(header).getByRole('button', { name: 'Search' });
-      expect(controls).toEqual([
-        header.querySelector('[data-slot=sidebar-trigger]'),
-        within(header).getByRole('link', { name: 'Home' }),
-        search,
-      ]);
+      const close = within(header).getByRole('button', { name: 'Close sidebar' });
+      act(() => {
+        close.focus();
+      });
+      expect(await screen.findByRole('tooltip')).toHaveTextContent(/^Close sidebar/);
+      expect(controls).toEqual([close, within(header).getByRole('link', { name: 'Home' }), search]);
       // The icon-lg size: a 40px header target, matching the 40px close and Home controls beside it.
       expect(search).toHaveClass('size-10');
       expect(controls[0]).toHaveClass('size-10');
@@ -216,8 +217,30 @@ describe('sidebar search trigger', () => {
       expect(await screen.findByText('Project page')).toBeInTheDocument();
     });
 
-    it('should open the palette dialog from the keyboard shortcut and close it on Escape', async () => {
+    it('should return focus to the Search row when Escape closes the palette dialog', async () => {
       renderShell();
+      const row = screen.getByRole('button', { name: 'Search' });
+
+      await userEvent.click(row);
+      const field = await screen.findByPlaceholderText('Search projects, chats, and actions…');
+      await waitFor(() => {
+        expect(field).toHaveFocus();
+      });
+
+      await userEvent.keyboard('{Escape}');
+
+      await waitFor(() => {
+        expect(screen.queryByPlaceholderText('Search projects, chats, and actions…')).not.toBeInTheDocument();
+      });
+      await waitFor(() => {
+        expect(row).toHaveFocus();
+      });
+    });
+
+    it('should open the palette dialog from the keyboard shortcut and return focus to where it was', async () => {
+      renderShell();
+      const account = screen.getByRole('button', { name: 'Account' });
+      account.focus();
 
       await userEvent.keyboard('{Control>}k{/Control}');
       expect(await screen.findByPlaceholderText('Search projects, chats, and actions…')).toHaveFocus();
@@ -226,6 +249,16 @@ describe('sidebar search trigger', () => {
       await waitFor(() => {
         expect(screen.queryByPlaceholderText('Search projects, chats, and actions…')).not.toBeInTheDocument();
       });
+      await waitFor(() => {
+        expect(account).toHaveFocus();
+      });
+    });
+
+    it('should keep the toggle named Toggle Sidebar', () => {
+      renderShell();
+
+      expect(screen.getByRole('button', { name: 'Toggle Sidebar' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^(Open|Close) sidebar$/ })).not.toBeInTheDocument();
     });
   });
 });

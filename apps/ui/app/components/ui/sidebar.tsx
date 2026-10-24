@@ -109,6 +109,8 @@ const SidebarTrigger = ({
 }): React.JSX.Element => {
   const { isMobile, open, openMobile, toggleSidebar } = useSidebar();
   const isOpen = isMobile ? openMobile : open;
+  /* On phones the sidebar is a sheet: the control opens it from a page, and inside the sheet it closes it. */
+  const label = isMobile ? (isOpen ? 'Close sidebar' : 'Open sidebar') : undefined;
 
   return (
     <Tooltip>
@@ -151,11 +153,11 @@ const SidebarTrigger = ({
           {...properties}
         >
           {children ?? <PanelLeft aria-hidden data-slot='sidebar-panel-icon' className='size-3.5' />}
-          <span className='sr-only'>Toggle Sidebar</span>
+          <span className='sr-only'>{label ?? 'Toggle Sidebar'}</span>
         </Button>
       </TooltipTrigger>
       <TooltipContent>
-        Sidebar{' '}
+        {label ?? 'Sidebar'}{' '}
         <KeyShortcut className='ml-1' variant='tooltip'>
           {formatKeyCombination(sidebarToggleKeyCombo)}
         </KeyShortcut>

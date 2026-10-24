@@ -1,5 +1,5 @@
 import { Search } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { defaultFilter } from 'cmdk';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Fragment } from 'react/jsx-runtime';
@@ -306,7 +306,22 @@ type CommandPaletteProperties = {
   readonly items: CommandPaletteItem[];
 };
 
-function CommandPalette({ isOpen, onOpenChange, items }: CommandPaletteProperties): React.JSX.Element {
+/** Runs `onUnmount` when the dialog content leaves, after its exit animation. */
+function OnContentUnmount({ onUnmount }: { readonly onUnmount: () => void }): undefined {
+  useEffect(() => onUnmount, [onUnmount]);
+  return undefined;
+}
+
+type CommandPaletteDialogProperties = CommandPaletteProperties & {
+  readonly onContentUnmount: () => void;
+};
+
+function CommandPalette({
+  isOpen,
+  onOpenChange,
+  items,
+  onContentUnmount,
+}: CommandPaletteDialogProperties): React.JSX.Element {
   const runCommand = useRunCommand(onOpenChange);
 
   return (
@@ -316,6 +331,7 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
       onOpenChange={onOpenChange}
       contentClassName='*:data-[slot=dialog-close]:hidden [&_[data-slot=command-input-wrapper]>svg]:hidden'
     >
+      <OnContentUnmount onUnmount={onContentUnmount} />
       <CommandPaletteResults items={items} onRun={runCommand} />
     </CommandDialog>
   );
@@ -337,13 +353,40 @@ function CommandPaletteTrigger({
   items,
   formattedKeyCombination,
 }: CommandPaletteTriggerProperties): React.JSX.Element {
+  /*
+   * `CommandDialog` has no Radix trigger, so on close it would leave focus on the page body. The
+   * opener is the Search row, or whatever had focus when the shortcut fired.
+   */
+  const opener = useRef<HTMLElement | undefined>(undefined);
+
+  /* Layout effects run before the dialog's focus scope moves focus into the field. */
+  useLayoutEffect(() => {
+    if (isOpen && !opener.current && document.activeElement instanceof HTMLElement) {
+      opener.current = document.activeElement;
+    }
+  }, [isOpen]);
+
+  const returnFocus = useCallback(() => {
+    const element = opener.current;
+    opener.current = undefined;
+    // After the focus scope's own unmount handling; focus an item's action moved elsewhere stays there.
+    setTimeout(() => {
+      const isFocusLost = !document.activeElement || document.activeElement === document.body;
+      if (isFocusLost && element?.isConnected) {
+        element.focus();
+      }
+    }, 0);
+  }, []);
+
   return (
     <>
       <SidebarMenuButton
         variant='outline'
         aria-label='Search'
         className='text-muted-foreground max-md:hidden'
-        onClick={() => {
+        onClick={(event) => {
+          // Safari does not focus a clicked button, so name the row as the opener rather than reading focus.
+          opener.current = event.currentTarget;
           onOpenChange(true);
         }}
       >
@@ -351,7 +394,7 @@ function CommandPaletteTrigger({
         <span className='flex-1 whitespace-nowrap'>Search</span>
         <KeyShortcut className='ml-2 shrink-0'>{formattedKeyCombination}</KeyShortcut>
       </SidebarMenuButton>
-      <CommandPalette isOpen={isOpen} items={items} onOpenChange={onOpenChange} />
+      <CommandPalette isOpen={isOpen} items={items} onContentUnmount={returnFocus} onOpenChange={onOpenChange} />
     </>
   );
 }

@@ -1,12 +1,114 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Metric names use OTEL dot notation. */
 import { describe, it, expect } from 'vitest';
+import { toPrometheusName } from '#prometheus.js';
 import { TauMetrics } from '#registry.js';
 
 describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(76);
+    expect(metrics).toHaveLength(87);
+  });
+
+  /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
+  it('should declare the git edge, admission, lease, hydrate and commit instruments by their catalogue names', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.syncRefusals,
+        TauMetrics.gitAdmissions,
+        TauMetrics.gitLeasesActive,
+        TauMetrics.gitLeaseReservedBytes,
+        TauMetrics.gitDiskFreeBytes,
+        TauMetrics.gitHydrateBytes,
+        TauMetrics.gitCommitAttempts,
+        TauMetrics.gitCommitDuration,
+        TauMetrics.gitRepositorySize,
+        TauMetrics.gitHotProjectCommitRate,
+        TauMetrics.gitHotProjectWriters,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_sync_refusals_total: { type: 'counter', unit: '{refusal}' },
+      tau_git_admissions_total: { type: 'counter', unit: '{admission}' },
+      tau_git_leases_active: { type: 'upDownCounter', unit: '{lease}' },
+      tau_git_lease_reserved_bytes: { type: 'gauge', unit: 'By' },
+      tau_git_disk_free_bytes: { type: 'gauge', unit: 'By' },
+      tau_git_hydrate_bytes: { type: 'histogram', unit: 'By' },
+      tau_git_commit_attempts_total: { type: 'counter', unit: '{attempt}' },
+      tau_git_commit_duration: { type: 'histogram', unit: 's' },
+      tau_git_repository_size: { type: 'histogram', unit: 'By' },
+      tau_git_hot_project_commit_rate: { type: 'gauge', unit: '{commit}/s' },
+      tau_git_hot_project_writers: { type: 'gauge', unit: '{writer}' },
+    });
+  });
+
+  it('should split retryable refusals out of error as busy on the sync edge', () => {
+    for (const metric of [TauMetrics.syncOperations, TauMetrics.syncOperationDuration]) {
+      expect(
+        metric.attributes.safeParse({
+          'tau.sync.operation': 'push',
+          outcome: 'busy',
+        }).success,
+      ).toBe(true);
+    }
+  });
+
+  it('should bound a refusal to a declared code, never a free-form one', () => {
+    const refusal = (code: string): boolean =>
+      TauMetrics.syncRefusals.attributes.safeParse({
+        'tau.sync.operation': 'push',
+        'tau.sync.refusal.code': code,
+        'http.response.status_code': 503,
+      }).success;
+    expect(refusal('GIT_LEASE_OWNER_BUSY')).toBe(true);
+    expect(refusal('GIT_PUSH_RACE_LOST')).toBe(true);
+    expect(refusal('other')).toBe(true);
+    expect(refusal('GIT_SOMETHING_NEW')).toBe(false);
+  });
+
+  it('should label the hot-project gauges by rank alone, never by project or owner', () => {
+    for (const metric of [TauMetrics.gitHotProjectCommitRate, TauMetrics.gitHotProjectWriters]) {
+      expect(Object.keys(metric.attributes.shape)).toEqual(['rank']);
+      expect(metric.attributes.safeParse({ rank: '1' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ rank: '10' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ rank: '11' }).success).toBe(false);
+      expect(metric.attributes.safeParse({ rank: 'proj_123' }).success).toBe(false);
+    }
+  });
+
+  it('should bound admission, hydrate and commit labels to enums', () => {
+    expect(
+      TauMetrics.gitAdmissions.attributes.safeParse({
+        'tau.git.operation': 'receive_pack',
+        outcome: 'owner_busy',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.gitAdmissions.attributes.safeParse({
+        'tau.git.operation': 'receive_pack',
+        outcome: 'proj_1',
+      }).success,
+    ).toBe(false);
+    expect(
+      TauMetrics.gitHydrateBytes.attributes.safeParse({
+        'tau.git.hydrate.source': 'object_store',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.gitCommitAttempts.attributes.safeParse({
+        outcome: 'lost_race',
+        'tau.git.commit.kind': 'push',
+      }).success,
+    ).toBe(true);
+    expect(
+      TauMetrics.gitCommitDuration.attributes.safeParse({
+        'tau.git.commit.phase': 'total',
+        'tau.git.commit.kind': 'push',
+      }).success,
+    ).toBe(true);
+    expect(Object.keys(TauMetrics.gitRepositorySize.attributes.shape)).toEqual([]);
+    expect(TauMetrics.gitRepositorySize.buckets.at(0)).toBe(64 * 1024);
+    expect(TauMetrics.gitRepositorySize.buckets.at(-1)).toBe(1024 ** 3);
   });
 
   it('should bound funded-operation telemetry to content-free dimensions', () => {

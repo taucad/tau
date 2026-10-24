@@ -1,8 +1,11 @@
 import { execFile } from 'node:child_process';
-import process from 'node:process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { pktLine } from '#api/git/git.constants.js';
 import type { GitService } from '#api/git/git.constants.js';
+import { gitChildEnvironment, runGit } from '#api/git/store/lease.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 
 /**
@@ -47,7 +50,7 @@ const receivePackCapabilities = 'report-status report-status-v2 delete-refs side
 
 /** What of the advertisement depends on the git that will serve the RPC that follows it. */
 export type AdvertisementDialect = {
-  /** The `agent=` value: `git/<version>` as `git_user_agent_sanitized` writes it. */
+  /** The `agent=` value exactly as the installed git advertises it, e.g. `git/2.39.5` or `git/2.55.0-Linux`. */
   readonly agent: string;
   /**
    * Whether `upload-pack` names its capabilities on a repository with no refs,
@@ -57,31 +60,95 @@ export type AdvertisementDialect = {
   readonly capabilitiesWhenEmpty: boolean;
 };
 
-/** The first release whose `upload-pack` advertises capabilities for an empty repository. */
-const capabilitiesWhenEmptySince = [2, 41] as const;
+/** The null object id a repository with no refs names its capabilities on. */
+const capabilitiesLine = / capabilities\^\{\}\0(?<capabilities>[^\n]*)\n$/u;
 
 /**
- * The dialect of the git that printed `output`.
+ * The payload of the first pkt-line of `output`, or `undefined` when it opens
+ * with a flush.
  *
- * @param output - What `git version` wrote to stdout.
- * @returns The agent string and the version-dependent shapes.
- * @throws Error When `output` is not a `git version` line.
+ * @param output - An advertisement, one byte per code unit (`latin1`).
+ * @param service - Which service wrote it, for the error.
+ * @returns The first line's payload.
+ * @throws Error When `output` does not open with a pkt-line.
  */
-export const dialectOf = (output: string): AdvertisementDialect => {
-  const version = /^git version (?<version>[^\n]+)\n?$/u.exec(output)?.groups?.['version'];
-  if (version === undefined) {
-    throw new Error(`Expected a git version line, got ${JSON.stringify(output.slice(0, 80))}`);
+const firstPacketLine = (output: string, service: GitService): string | undefined => {
+  const header = output.slice(0, 4);
+  const length = /^[\da-f]{4}$/u.test(header) ? Number.parseInt(header, 16) : Number.NaN;
+  if (length === 0) {
+    return undefined;
   }
-  const [major = 0, minor = 0] = version.split('.').map((part) => Number.parseInt(part, 10));
-  const [sinceMajor, sinceMinor] = capabilitiesWhenEmptySince;
-  return {
-    /* `git_user_agent_sanitized`: any byte at or below the space, or at or past DEL, becomes a dot. */
-    agent: `git/${version}`.replaceAll(/[^!-~]/gu, '.'),
-    capabilitiesWhenEmpty: major > sinceMajor || (major === sinceMajor && minor >= sinceMinor),
-  };
+  if (!(length > 4 && length <= output.length)) {
+    throw new Error(`Expected a pkt-line from ${service}, got ${JSON.stringify(output.slice(0, 80))}`);
+  }
+  return output.slice(4, length);
+};
+
+/**
+ * The dialect of the git that wrote these two advertisements over an empty
+ * repository.
+ *
+ * The agent comes from what git itself advertises, never from `git version`:
+ * git appends the operating system to its agent (`git/2.55.0-Linux`, under
+ * `transfer.advertiseOSInfo`, on by default) and `git version` prints no such
+ * suffix. `receive-pack` names its capabilities, agent included, on every
+ * repository, so its empty-repository line is read for the agent; whether
+ * `upload-pack` writes a line at all is the empty-repository shape.
+ *
+ * @param advertisements - Both services' `--stateless-rpc --advertise-refs` output over an empty bare repository, as `latin1`.
+ * @returns The agent and the empty-repository shape.
+ * @throws Error When either output is not an empty repository's advertisement.
+ */
+export const dialectFromAdvertisements = (advertisements: {
+  readonly uploadPack: string;
+  readonly receivePack: string;
+}): AdvertisementDialect => {
+  const receive = capabilitiesLine.exec(firstPacketLine(advertisements.receivePack, 'git-receive-pack') ?? '');
+  const agent = receive?.groups?.['capabilities']
+    ?.split(' ')
+    .find((capability) => capability.startsWith('agent='))
+    ?.slice('agent='.length);
+  if (agent === undefined || agent === '') {
+    throw new Error(
+      `Expected receive-pack to name its agent over an empty repository, got ${JSON.stringify(advertisements.receivePack.slice(0, 200))}`,
+    );
+  }
+  const upload = firstPacketLine(advertisements.uploadPack, 'git-upload-pack');
+  if (upload !== undefined && !capabilitiesLine.test(upload)) {
+    throw new Error(
+      `Expected upload-pack to answer an empty repository with a flush or capabilities^{}, got ${JSON.stringify(advertisements.uploadPack.slice(0, 200))}`,
+    );
+  }
+  return { agent, capabilitiesWhenEmpty: upload !== undefined };
 };
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Asks the installed git for both advertisements over a throwaway empty bare
+ * repository, initialised as `hydrateLease` initialises a lease and run with
+ * the environment every lease child gets.
+ *
+ * @returns The installed git's dialect.
+ */
+const probeInstalledGit = async (): Promise<AdvertisementDialect> => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'tau-advertise-probe-'));
+  try {
+    await runGit(directory, ['init', '--bare', '--quiet', '--template=', '--initial-branch=main', '.']);
+    const advertise = async (service: GitService): Promise<string> => {
+      const { stdout } = await execFileAsync(
+        'git',
+        [service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', directory],
+        { encoding: 'latin1', timeout: 10_000, env: gitChildEnvironment(directory) },
+      );
+      return stdout;
+    };
+    const [uploadPack, receivePack] = await Promise.all([advertise('git-upload-pack'), advertise('git-receive-pack')]);
+    return dialectFromAdvertisements({ uploadPack, receivePack });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+};
 
 let installed: Promise<AdvertisementDialect> | undefined;
 
@@ -89,8 +156,8 @@ let installed: Promise<AdvertisementDialect> | undefined;
  * The dialect of the git this process spawns for every RPC, asked once per
  * process. The advertisement promises capabilities the following
  * `upload-pack`/`receive-pack` child must honour, and both run on this Machine,
- * so it speaks for that binary rather than a constant. A failed probe is not
- * kept, so the next advertisement asks again.
+ * so it speaks for that binary, read from that binary's own advertisement. A
+ * failed probe is not kept, so the next advertisement asks again.
  *
  * ponytail: once per process, because the binary only changes with the image;
  * DC1, which takes git off the API, carries the workers' dialect instead.
@@ -98,21 +165,7 @@ let installed: Promise<AdvertisementDialect> | undefined;
  * @returns The installed git's dialect.
  */
 export const installedGitDialect = async (): Promise<AdvertisementDialect> => {
-  installed ??= (async () => {
-    /* eslint-disable @typescript-eslint/naming-convention -- process environment names */
-    const { stdout } = await execFileAsync('git', ['version'], {
-      encoding: 'utf8',
-      timeout: 10_000,
-      env: {
-        PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-        LANG: 'C',
-        GIT_CONFIG_GLOBAL: '/dev/null',
-        GIT_CONFIG_SYSTEM: '/dev/null',
-      } as unknown as NodeJS.ProcessEnv,
-    });
-    /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
-    return dialectOf(stdout);
-  })();
+  installed ??= probeInstalledGit();
   try {
     return await installed;
   } catch (error) {

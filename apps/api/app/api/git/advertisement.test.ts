@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { advertiseReferences, dialectOf, installedGitDialect } from '#api/git/advertisement.js';
+import { advertiseReferences, dialectFromAdvertisements, installedGitDialect } from '#api/git/advertisement.js';
 import type { AdvertisementDialect } from '#api/git/advertisement.js';
 import type { GitService } from '#api/git/git.constants.js';
 import { readLeaseReferences } from '#api/git/store/lease.js';
@@ -223,13 +223,16 @@ describe('the advertisement served from the manifest (DB1)', () => {
  * objects it names.
  */
 describe('the pinned git 2.39.5 advertisement', () => {
-  const pinned = dialectOf('git version 2.39.5\n');
+  const receiveCapabilities =
+    'report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=git/2.39.5';
+  /* What 2.39.5 writes over an empty bare repository: the probe's input on the deployed image. */
+  const emptyUploadPack = '0000';
+  const emptyReceivePack = `00b1${'0'.repeat(40)} capabilities^{}\0${receiveCapabilities}\n0000`;
+  const pinned = dialectFromAdvertisements({ uploadPack: emptyUploadPack, receivePack: emptyReceivePack });
   const commit = '9a78875d96aea884af31fe7f1e85019e11d79cff';
   const annotated = '12773c56409db96de618125189f26afa03130fd5';
   const uploadCapabilities =
     'multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed no-done';
-  const receiveCapabilities =
-    'report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1 agent=git/2.39.5';
   const text = (service: GitService, references: Manifest['refs']): string =>
     served({ service, refs: references, dialect: pinned });
 
@@ -243,8 +246,8 @@ describe('the pinned git 2.39.5 advertisement', () => {
   });
 
   it('answers an empty repository with a bare flush on upload-pack and capabilities^{} on receive-pack', () => {
-    expect(text('git-upload-pack', {})).toBe('0000');
-    expect(text('git-receive-pack', {})).toBe(`00b1${'0'.repeat(40)} capabilities^{}\0${receiveCapabilities}\n0000`);
+    expect(text('git-upload-pack', {})).toBe(emptyUploadPack);
+    expect(text('git-receive-pack', {})).toBe(emptyReceivePack);
   });
 
   it('answers an unborn HEAD without a HEAD line or a symref', () => {
@@ -302,20 +305,56 @@ describe('the pinned git 2.39.5 advertisement', () => {
   });
 });
 
-describe('dialectOf', () => {
+/** An empty repository's `capabilities^{}` pkt-line naming `capabilities`. */
+const emptyLine = (capabilities: string): string => {
+  const payload = `${'0'.repeat(40)} capabilities^{}\0${capabilities}\n`;
+  return `${(payload.length + 4).toString(16).padStart(4, '0')}${payload}`;
+};
+
+describe('dialectFromAdvertisements', () => {
+  const upload =
+    'multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed no-done object-format=sha1';
+  const receive = 'report-status report-status-v2 delete-refs side-band-64k quiet atomic ofs-delta object-format=sha1';
+
   it.each([
-    ['git version 2.39.5\n', { agent: 'git/2.39.5', capabilitiesWhenEmpty: false }],
-    ['git version 2.40.1\n', { agent: 'git/2.40.1', capabilitiesWhenEmpty: false }],
-    ['git version 2.41.0\n', { agent: 'git/2.41.0', capabilitiesWhenEmpty: true }],
-    ['git version 2.43.0\n', { agent: 'git/2.43.0', capabilitiesWhenEmpty: true }],
-    ['git version 3.0.0\n', { agent: 'git/3.0.0', capabilitiesWhenEmpty: true }],
-    /* `git_user_agent_sanitized`: every byte outside printable ASCII, and the space, becomes a dot. */
-    ['git version 2.39.3 (Apple Git-146)\n', { agent: 'git/2.39.3.(Apple.Git-146)', capabilitiesWhenEmpty: false }],
-  ] as const)('reads %j as %j', (output, expected) => {
-    expect(dialectOf(output)).toStrictEqual(expected);
+    ['2.39.5, which answers upload-pack with a bare flush', 'git/2.39.5', false],
+    ['2.43.0, which names upload-pack capabilities on capabilities^{}', 'git/2.43.0', true],
+    /* `transfer.advertiseOSInfo` (on by default): the agent carries the OS, which `git version` never prints. */
+    ['2.55.0, which appends the operating system to its agent', 'git/2.55.0-Linux', true],
+    ['an Apple build, whose agent git has already sanitised', 'git/2.39.3.(Apple.Git-146)', false],
+  ] as const)('reads %s', (_label, agent, capabilitiesWhenEmpty) => {
+    const uploadPack = capabilitiesWhenEmpty ? `${emptyLine(`${upload} agent=${agent}`)}0000` : '0000';
+    expect(
+      dialectFromAdvertisements({ uploadPack, receivePack: `${emptyLine(`${receive} agent=${agent}`)}0000` }),
+    ).toStrictEqual({ agent, capabilitiesWhenEmpty });
   });
 
-  it('refuses output that is not a git version line', () => {
-    expect(() => dialectOf('sh: git: not found\n')).toThrow('git version');
+  it('refuses a receive-pack advertisement that names no agent', () => {
+    expect(() => dialectFromAdvertisements({ uploadPack: '0000', receivePack: `${emptyLine(receive)}0000` })).toThrow(
+      'name its agent',
+    );
+  });
+
+  it('refuses output that is not an advertisement', () => {
+    expect(() =>
+      dialectFromAdvertisements({ uploadPack: '0000', receivePack: 'fatal: not a git repository\n' }),
+    ).toThrow('pkt-line');
+    expect(() =>
+      dialectFromAdvertisements({
+        uploadPack: `003c${'1'.repeat(40)} refs/heads/main\n0000`,
+        receivePack: `${emptyLine(`${receive} agent=git/2.43.0`)}0000`,
+      }),
+    ).toThrow('flush or capabilities^{}');
+  });
+});
+
+describe('installedGitDialect', () => {
+  it('names the agent the git on PATH advertises, which may carry more than `git version` prints', async () => {
+    const version = execFileSync('git', ['version'], { encoding: 'utf8', env: gitEnvironment }).trim();
+    const dialect = await installedGitDialect();
+    expect(dialect.agent.startsWith(`git/${version.slice('git version '.length).replaceAll(/[^!-~]/gu, '.')}`)).toBe(
+      true,
+    );
+    await expect(installedGitDialect()).resolves.toBe(dialect);
   });
 });

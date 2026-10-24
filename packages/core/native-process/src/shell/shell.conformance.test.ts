@@ -300,18 +300,24 @@ describe.runIf(enabled)('shell conformance', () => {
     const before = [join(secret, 'canary.txt'), join(outside, 'canary.txt'), join(home, '.ssh', 'id_canary')].map(
       (path) => digestOf(path),
     );
-    const probes = [
+    /* Reads and writes the mount table refuses must fail inside the sandbox. */
+    const refused = [
       `cat ${secret}/canary.txt`,
       `cat ${outside}/canary.txt`,
       `cat ${home}/.ssh/id_canary`,
       `printf X > ${readonly}/written.txt`,
       `printf X > ${outside}/written.txt`,
-      `printf X > ${secret}/canary.txt`,
-      `printf X > ${home}/.ssh/id_canary`,
     ];
-    const outcomes = await Promise.all(probes.map(async (probe) => run(probe)));
+    /*
+     * A denied path inside a granted root may be masked by a private empty mount (bubblewrap's tmpfs) rather than
+     * refused, so a write there can succeed into the mask. Only the bytes outside the sandbox judge it.
+     */
+    const masked = [`printf X > ${secret}/canary.txt`, `printf X > ${home}/.ssh/id_canary`];
+    const outcomes = await Promise.all([...refused, ...masked].map(async (probe) => run(probe)));
 
-    expect(outcomes.map((outcome) => outcome.exitCode !== 0)).toStrictEqual(probes.map(() => true));
+    expect(outcomes.slice(0, refused.length).map((outcome) => outcome.exitCode !== 0)).toStrictEqual(
+      refused.map(() => true),
+    );
     expect(outcomes.map((outcome) => outcome.stdout).join('')).not.toMatch(/CANARY/u);
     expect(existsSync(join(readonly, 'written.txt')) || existsSync(join(outside, 'written.txt'))).toBe(false);
     expect(

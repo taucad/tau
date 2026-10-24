@@ -73,6 +73,41 @@ export type GuardResolver = (host: string) => Promise<ReadonlyArray<{ address: s
 
 const defaultResolver: GuardResolver = async (host) => lookup(host, { all: true, verbatim: true });
 
+/** How the guard opens a TCP connection to a checked address; injectable for tests. @public */
+export type GuardDialer = (address: string, port: number) => Socket;
+
+const defaultDialer: GuardDialer = (address, port) => connect({ host: address, port });
+
+/**
+ * Connect to the first checked address that answers, IPv4 first: a host or VM without an IPv6 route resolves names
+ * to IPv6 addresses it cannot reach, and every address in the list has already passed the refusal check.
+ */
+const dialFirst = async (
+  addresses: ReadonlyArray<{ address: string; family: number }>,
+  port: number,
+  { dial, track }: Readonly<{ dial: GuardDialer; track: (socket: Socket) => void }>,
+): Promise<Socket | undefined> => {
+  const ordered = [...addresses].sort((left, right) => left.family - right.family);
+  for (const { address } of ordered) {
+    const socket = dial(address, port);
+    track(socket);
+    // oxlint-disable-next-line no-await-in-loop -- addresses are tried one at a time, in order.
+    const connected = await new Promise<boolean>((resolve) => {
+      socket.once('connect', () => {
+        resolve(true);
+      });
+      socket.once('error', () => {
+        resolve(false);
+      });
+    });
+    if (connected) {
+      return socket;
+    }
+    socket.destroy();
+  }
+  return undefined;
+};
+
 /** A running guard. @public */
 export type GuardProxy = AsyncDisposable &
   Readonly<{
@@ -141,9 +176,13 @@ const target = (requestLine: string): { connect: boolean; host: string; port: nu
  *
  * @public
  * @param resolver - Name resolution; the system resolver by default.
+ * @param dial - How a checked address is connected to; a plain TCP connection by default.
  * @returns The running guard; dispose it to close every connection.
  */
-export const startGuardProxy = async (resolver: GuardResolver = defaultResolver): Promise<GuardProxy> => {
+export const startGuardProxy = async (
+  resolver: GuardResolver = defaultResolver,
+  dial: GuardDialer = defaultDialer,
+): Promise<GuardProxy> => {
   const credential = randomBytes(24).toString('hex');
   const expected = Buffer.from(Buffer.from(`tau:${credential}`).toString('base64'));
   const sockets = new Set<Socket>();
@@ -184,30 +223,28 @@ export const startGuardProxy = async (resolver: GuardResolver = defaultResolver)
       respond(client, '403 Forbidden');
       return;
     }
-    const upstream = connect({ host: addresses[0]!.address, port: destination.port });
-    track(upstream);
-    upstream.once('error', () => {
+    const upstream = await dialFirst(addresses, destination.port, { dial, track });
+    if (upstream === undefined) {
       respond(client, '502 Bad Gateway');
-    });
-    upstream.once('connect', () => {
-      if (destination.connect) {
-        client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-      } else {
-        /* Forward the absolute-form request head without the guard's credential, and close after one response so a
-         * kept-alive client socket can never carry a second request to another host through this upstream. */
-        const forwarded = [
-          requestLine,
-          ...headers.filter((line) => !/^(?:proxy-authorization|proxy-connection|connection|keep-alive):/iu.test(line)),
-          'Connection: close',
-        ];
-        upstream.write(`${forwarded.join('\r\n')}\r\n\r\n`);
-      }
-      if (request.rest.length > 0) {
-        upstream.write(request.rest);
-      }
-      client.pipe(upstream).pipe(client);
-      client.resume();
-    });
+      return;
+    }
+    if (destination.connect) {
+      client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+    } else {
+      /* Forward the absolute-form request head without the guard's credential, and close after one response so a
+       * kept-alive client socket can never carry a second request to another host through this upstream. */
+      const forwarded = [
+        requestLine,
+        ...headers.filter((line) => !/^(?:proxy-authorization|proxy-connection|connection|keep-alive):/iu.test(line)),
+        'Connection: close',
+      ];
+      upstream.write(`${forwarded.join('\r\n')}\r\n\r\n`);
+    }
+    if (request.rest.length > 0) {
+      upstream.write(request.rest);
+    }
+    client.pipe(upstream).pipe(client);
+    client.resume();
   };
   const server: Server = createServer((client) => {
     track(client);

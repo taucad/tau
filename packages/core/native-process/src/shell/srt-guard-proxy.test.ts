@@ -103,7 +103,7 @@ describe('startGuardProxy', () => {
     expect({ status, connections }).toStrictEqual({ status: 'HTTP/1.1 403 Forbidden', connections: 0 });
   });
 
-  it('should tunnel to the address it checked', async () => {
+  it('should refuse a malformed request line', async () => {
     const guard = await startGuardProxy(resolvingTo('93.184.215.14'));
     disposables.push(guard);
     const upstream = createServer((socket) => {
@@ -115,5 +115,35 @@ describe('startGuardProxy', () => {
     disposables.push(upstream);
 
     expect(await ask(guard, `GARBAGE\r\n${authorization(guard)}\r\n`)).toBe('HTTP/1.1 400 Bad Request');
+  });
+
+  it('should tunnel to a checked address, IPv4 first, past one that does not answer', async () => {
+    const upstream = createServer((socket) => {
+      socket.end('pong');
+    });
+    await new Promise<void>((resolve) => {
+      upstream.listen(0, '127.0.0.1', resolve);
+    });
+    disposables.push(upstream);
+    const { port } = upstream.address() as AddressInfo;
+    const dialed: string[] = [];
+    const guard = await startGuardProxy(
+      async () => [
+        { address: '2606:2800:21f:cb07:6820:80da:af6b:8b2c', family: 6 },
+        { address: '93.184.215.15', family: 4 },
+        { address: '93.184.215.14', family: 4 },
+      ],
+      (address) => {
+        dialed.push(address);
+        /* The first IPv4 address refuses; the second reaches the local upstream standing in for the public host. */
+        return connect({ host: '127.0.0.1', port: address === '93.184.215.14' ? port : 1 });
+      },
+    );
+    disposables.push(guard);
+
+    const reply = await ask(guard, `CONNECT example.com:443 HTTP/1.1\r\n${authorization(guard)}\r\n`);
+
+    expect(reply).toBe('HTTP/1.1 200 Connection Established');
+    expect(dialed).toStrictEqual(['93.184.215.15', '93.184.215.14']);
   });
 });

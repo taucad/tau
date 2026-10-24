@@ -50,7 +50,7 @@ export const workbenchPanes: Readonly<Record<WorkbenchPaneId, WorkbenchPaneDefin
     group: 'design',
     shortcut: { key: 'x', ctrlKey: true },
   },
-  model: { id: 'model', title: 'Model', icon: Box, group: 'design', shortcut: { key: 'a', ctrlKey: true } },
+  model: { id: 'model', title: 'Model tree', icon: Box, group: 'design', shortcut: { key: 'a', ctrlKey: true } },
   kinematics: {
     id: 'kinematics',
     title: 'Kinematics',

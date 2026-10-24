@@ -768,9 +768,9 @@ describe("the tab's panels (W10)", () => {
       await page.keyboard.press('Escape');
 
       /* The person hides a component; Tau opens the project with the page's camera and that display (Q14). */
-      await panels.getByRole('tab', { name: 'Model' }).click();
+      await panels.getByRole('tab', { name: 'Model tree' }).click();
       await panels
-        .getByRole('tabpanel', { name: 'Model' })
+        .getByRole('tabpanel', { name: 'Model tree' })
         .getByRole('button', { name: /^Hide / })
         .first()
         .click();
@@ -1198,8 +1198,10 @@ describe('Add to chat on each route (VUI-3)', () => {
    */
   const addPart = async (root: Frame | Page, part: string, item: string): Promise<void> => {
     const lane = root.getByRole('complementary', { name: 'Workbench' });
-    await lane.getByRole('tab', { name: 'Model' }).click();
-    const actions = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: `Actions for ${part}` });
+    await lane.getByRole('tab', { name: 'Model tree' }).click();
+    const actions = lane
+      .getByRole('tabpanel', { name: 'Model tree' })
+      .getByRole('button', { name: `Actions for ${part}` });
     await actions.waitFor({ timeout: 60_000 });
     await actions.click();
     const menu = root.getByRole('menu');
@@ -1428,8 +1430,8 @@ describe('the part menu from the keyboard (VUI-6)', () => {
     async () => {
       const { page } = await openKeys();
       const lane = page.getByRole('complementary', { name: 'Workbench' });
-      await lane.getByRole('tab', { name: 'Model' }).click();
-      const row = lane.getByRole('tabpanel', { name: 'Model' }).getByRole('button', { name: 'Wide', exact: true });
+      await lane.getByRole('tab', { name: 'Model tree' }).click();
+      const row = lane.getByRole('tabpanel', { name: 'Model tree' }).getByRole('button', { name: 'Wide', exact: true });
       await row.waitFor({ timeout: 60_000 });
       await row.click();
 
@@ -1624,7 +1626,7 @@ describe('the viewer page from a text host', () => {
       const lane = page.getByRole('complementary', { name: 'Workbench' });
       const tablist = lane.getByRole('tablist', { name: 'Open panes' });
       const tabs = tablist.getByRole('tab');
-      expect(await tabs.allTextContents()).toEqual(['Parameters', 'Model', 'Kinematics']);
+      expect(await tabs.allTextContents()).toEqual(['Parameters', 'Model tree', 'Kinematics']);
       expect(await lane.getByRole('button', { name: 'Hide workbench' }).count()).toBe(0);
       expect(await tablist.evaluate((list) => list.scrollWidth <= list.clientWidth)).toBe(true);
       /* Each tab's centre hits the tab, never a header button drawn over it. */

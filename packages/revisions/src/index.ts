@@ -87,8 +87,13 @@ export type { LfsPointer } from '#lfs.js';
  * machine is here either. Keeping them would put `xstate` in the graph of every
  * page that imports a remote *type* from this barrel. */
 export { createLfsClient, LfsQuotaError, withQuotaPaths } from '#lfs-client.js';
-export { createRevisionHttpClient, keepaliveLimitBytes } from '#http-client.js';
-export type { RevisionHttpClient, RevisionHttpRequest, RevisionHttpResponse } from '#http-client.js';
+export { createRevisionHttpClient, keepaliveLimitBytes, revisionHttpRetryPolicy } from '#http-client.js';
+export type {
+  RevisionHttpClient,
+  RevisionHttpRequest,
+  RevisionHttpResponse,
+  RevisionHttpRetryOptions,
+} from '#http-client.js';
 /*
  * The sync scheduler's public value types (W13).
  *

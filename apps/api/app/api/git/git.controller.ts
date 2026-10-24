@@ -92,6 +92,8 @@ const busyRefusalCodes: ReadonlySet<string> = new Set([
   'GIT_RATE_LIMITED',
   /* DW2: a repository frozen past the hold, answered 429 with `Retry-After: 1`. */
   'GIT_REPOSITORY_FROZEN',
+  /* DA6: an owner over its in-flight cap, answered 429 with a jittered `Retry-After` of 1–3 s. */
+  'GIT_OWNER_IN_FLIGHT_LIMIT',
 ]);
 
 /** The codes `tau.sync.refusals` names; any other code counts as `other`, so the label stays bounded. */

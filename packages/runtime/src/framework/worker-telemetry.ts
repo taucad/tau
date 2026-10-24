@@ -104,6 +104,12 @@ export type WorkerTelemetryFlush = Readonly<{
 }>;
 
 /**
+ * Where one observed operation's spans start in the collector: taken once when the operation is dequeued, read once
+ * after its terminal reply. Opaque to callers.
+ */
+export type OperationMark = Readonly<{ position: number; refused: number }>;
+
+/**
  * Collects runtime telemetry entries in a worker and flushes them in batches.
  * No timers -- flush is called explicitly by the framework after each operation.
  *
@@ -120,6 +126,10 @@ export class WorkerTelemetryCollector {
   private dropped = 0;
   private droppedRoots: Record<string, string> | undefined;
   private disposed = false;
+  /** Spans flushed so far, so a position counts every span this collector ever held. */
+  private flushedEntries = 0;
+  /** Spans refused by the bound so far; a mark taken before a refusal cannot vouch for a complete slice. */
+  private refused = 0;
 
   /**
    * Create a new telemetry collector wired to the given send callback.
@@ -151,17 +161,63 @@ export class WorkerTelemetryCollector {
     }
   }
 
-  /** Send all pending entries and the dropped count to the main thread. No-op when nothing was collected or lost. */
-  public flush(): void {
-    if (this.pending.length === 0 && this.dropped === 0) {
+  /**
+   * Send pending entries and the dropped count to the main thread. No-op when nothing was collected or lost.
+   *
+   * @param upTo - A {@link WorkerTelemetryCollector.position} to flush up to, so spans an operation that started
+   *   after it has already collected stay pending for that operation's own flush. Everything when omitted.
+   */
+  public flush(upTo?: number): void {
+    const count =
+      upTo === undefined ? this.pending.length : Math.min(this.pending.length, Math.max(0, upTo - this.flushedEntries));
+    if (count === 0 && this.dropped === 0) {
       return;
     }
 
-    const entries = this.pending.splice(0);
+    const entries = this.pending.splice(0, count);
     const { dropped, droppedRoots } = this;
+    this.flushedEntries += count;
     this.dropped = 0;
     this.droppedRoots = undefined;
     this.send(droppedRoots === undefined ? { entries, dropped } : { entries, dropped, droppedRoots });
+  }
+
+  /**
+   * Mark where the next operation's spans begin. Constant time, once per observed operation; nothing per span.
+   *
+   * @returns The mark to pass to {@link WorkerTelemetryCollector.operationEntries}.
+   */
+  public beginOperation(): OperationMark {
+    return { position: this.position(), refused: this.refused };
+  }
+
+  /**
+   * How many spans this collector has ever held: where the next span will land. Constant time.
+   *
+   * @returns An absolute position for {@link WorkerTelemetryCollector.operationEntries} and
+   *   {@link WorkerTelemetryCollector.flush}.
+   */
+  public position(): number {
+    return this.flushedEntries + this.pending.length;
+  }
+
+  /**
+   * The spans collected since `mark`, read after the operation's terminal reply and before the flush that sends them.
+   *
+   * Operations are serialized per worker, so every span after the mark belongs to this operation or is a deferred span
+   * of an earlier one, which a walk from this operation's root ignores by parent.
+   *
+   * @param mark - The mark taken when the operation was dequeued.
+   * @param end - The {@link WorkerTelemetryCollector.position} when the operation settled; the slice stops there.
+   * @returns The spans, or `undefined` when a flush moved them on or the bound refused any since the mark, so a caller
+   *   never reads a partial picture as a whole one.
+   */
+  public operationEntries(mark: OperationMark, end = this.position()): readonly TelemetryEntry[] | undefined {
+    const start = mark.position - this.flushedEntries;
+    if (start < 0 || mark.refused !== this.refused || end < mark.position) {
+      return undefined;
+    }
+    return this.pending.slice(start, end - this.flushedEntries);
   }
 
   /** Flush remaining entries and reject subsequent collection. */
@@ -176,6 +232,7 @@ export class WorkerTelemetryCollector {
   /* Off the common path: runs only while the queue is full. */
   private refuse(entry: TelemetryEntry): void {
     this.dropped++;
+    this.refused++;
     const operationId = entry.detail?.['operation.id'];
     const spanId = entry.detail?.['spanId'];
     if (typeof operationId !== 'string' || typeof spanId !== 'string') {

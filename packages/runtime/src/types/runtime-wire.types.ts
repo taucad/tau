@@ -1,6 +1,7 @@
 import type { MessagePortLike } from '@taucad/rpc';
 import type { ExportFile } from '@taucad/types';
 import type { CapabilitiesManifest } from '#types/runtime.types.js';
+import type { RuntimeObservationMode } from '#types/runtime-observation.types.js';
 
 /** Binary bytes travel inline or through transport-owned shared memory. @public */
 export type BinaryContentDelivery =
@@ -85,10 +86,16 @@ export type RuntimeInitializeArgs = {
   resumeToken?: string;
   /** The client's id for this attempt; the worker's `kernel.bootstrap` root carries it as `operation.id`. */
   operationId?: string;
+  /** Whether the worker computes operation facts after each terminal reply. Defaults to `off`. */
+  observation?: RuntimeObservationMode;
 };
 
 /** Runtime worker initialize result. @public */
-export type RuntimeInitializeResult = { capabilities: CapabilitiesManifest };
+export type RuntimeInitializeResult = {
+  capabilities: CapabilitiesManifest;
+  /** The observation modes this worker supports; absent from a worker that predates observation. */
+  observation?: readonly RuntimeObservationMode[];
+};
 
 /** Versioned runtime server hello. @public */
 export type RuntimeHelloPayload = {

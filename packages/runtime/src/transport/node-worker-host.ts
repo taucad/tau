@@ -79,6 +79,7 @@ export const nodeWorkerHost = (
       }
       port = acquireNodeParentPort();
       serverHandle = createDocumentWorkerDispatcher(options.worker, port, {
+        realm: 'node-worker',
         bindingsFactory: (handle) => createWorkerHostBindings(handle),
       });
       crashTrapDispose = installWorkerCrashTrap(serverHandle);

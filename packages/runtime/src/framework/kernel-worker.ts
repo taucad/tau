@@ -7098,6 +7098,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           duration,
           ...(reason === undefined ? {} : { reason }),
         });
+        // Background work settles after its operation flushed; report it now, not at the next operation.
+        this.telemetryCollector?.flush();
       },
       onScopeSettled: ({ operationId, generation, settlement }) => {
         this.tracer.startSpan('kernel.compute.reuse', { operationId }).end({

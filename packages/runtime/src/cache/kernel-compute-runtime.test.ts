@@ -835,6 +835,19 @@ describe('deferred whole-action publication (D1)', () => {
     },
   );
 
+  it('should publish a delivered result before a revisit of the same action looks it up, idle or not', async () => {
+    const { host, settled, encoded, evaluate } = createDeferredHost({ idle: () => false });
+    await evaluate({ value: 6 });
+    await evaluate({ value: 7 });
+    host.permitPublication();
+    await nextMacrotask();
+    expect(encoded, 'the worker is busy, so nothing publishes in the background').toHaveLength(0);
+
+    await expect(evaluate({ value: 6 })).resolves.toMatchObject({ source: 'cache', value: 'brep-6' });
+    expect(encoded, 'only the revisited action publishes').toEqual(['brep-6']);
+    expect(settled).toEqual([{ actionDigest: await digestAction({ action: action(6) }), status: 'stored' }]);
+  });
+
   it('should never publish a result whose operation was cancelled before its delivery', async () => {
     const { host, settled, encoded, evaluate } = createDeferredHost();
     const operation = new AbortController();

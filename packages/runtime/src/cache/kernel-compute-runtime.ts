@@ -581,43 +581,66 @@ export const createComputeCapabilityHost = (input: {
     }
   };
 
+  /**
+   * Run one permitted publication to its settlement, or until an admitted operation interrupts it.
+   * @param entry - The queued publication.
+   * @returns Whether it was interrupted and stays queued.
+   */
+  const runEntry = async (entry: DeferredPublication): Promise<'settled' | 'interrupted'> => {
+    const controller = new AbortController();
+    running = { entry, controller };
+    entry.startedAt ??= Date.now();
+    try {
+      const outcome = await entry.task.run({ signal: controller.signal });
+      settleDeferred(entry, outcome.status, outcome.status === 'skipped' ? outcome.reason : undefined);
+      if (outcome.status === 'stored') {
+        // oxlint-disable-next-line unicorn/no-useless-spread -- settleDeferred mutates the queue.
+        for (const queued of [...deferred]) {
+          if (queued.task.actionDigest === entry.task.actionDigest) {
+            settleDeferred(queued, 'dropped', 'duplicate');
+          }
+        }
+      }
+      return 'settled';
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        settleDeferred(entry, 'skipped', error instanceof Error ? error.message : String(error));
+        return 'settled';
+      }
+      if (controller.signal.reason !== 'interrupted') {
+        settleDeferred(entry, 'dropped', 'aborted');
+        return 'settled';
+      }
+      // Interrupted by an admitted operation: it stays first and runs again at the next idle.
+      return 'interrupted';
+    } finally {
+      running = undefined;
+    }
+  };
+
   const runDeferred = async (options: { readonly ignoreIdle: boolean }): Promise<void> => {
     for (;;) {
       if (!options.ignoreIdle && !(input.isIdle?.() ?? true)) {
         return;
       }
       const entry = deferred.find((queued) => queued.permitted);
-      if (!entry) {
+      // oxlint-disable-next-line no-await-in-loop -- deferred publications run one at a time, in order.
+      if (!entry || (await runEntry(entry)) === 'interrupted') {
         return;
       }
-      const controller = new AbortController();
-      running = { entry, controller };
-      entry.startedAt ??= Date.now();
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- deferred publications run one at a time, in order.
-        const outcome = await entry.task.run({ signal: controller.signal });
-        settleDeferred(entry, outcome.status, outcome.status === 'skipped' ? outcome.reason : undefined);
-        if (outcome.status === 'stored') {
-          // oxlint-disable-next-line unicorn/no-useless-spread -- settleDeferred mutates the queue.
-          for (const queued of [...deferred]) {
-            if (queued.task.actionDigest === entry.task.actionDigest) {
-              settleDeferred(queued, 'dropped', 'duplicate');
-            }
-          }
-        }
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          settleDeferred(entry, 'skipped', error instanceof Error ? error.message : String(error));
-        } else if (controller.signal.reason !== 'interrupted') {
-          settleDeferred(entry, 'dropped', 'aborted');
-        }
-        // Interrupted by an admitted operation: it stays first and runs again at the next idle.
-        if (controller.signal.reason === 'interrupted') {
-          return;
-        }
-      } finally {
-        running = undefined;
-      }
+    }
+  };
+
+  /**
+   * Publish a delivered, still queued result of this action now, so a revisit before the worker
+   * was idle hits instead of recomputing. Other queued work waits for idle as before.
+   * @param digest - The action the operation is about to look up.
+   */
+  const publishBeforeLookup = async (digest: ActionDigest): Promise<void> => {
+    await pumpPromise;
+    const entry = deferred.find((queued) => queued.permitted && queued.task.actionDigest === digest);
+    if (entry && running === undefined) {
+      await runEntry(entry);
     }
   };
 
@@ -1064,6 +1087,7 @@ export const createComputeCapabilityHost = (input: {
             });
           }
           try {
+            await publishBeforeLookup(digest);
             const evaluationSignal = evaluation.signal ?? signal;
             operations.set(evaluationSignal, operationId);
             return await service.evaluate({

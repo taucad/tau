@@ -29,7 +29,7 @@ describe('main geometry', () => {
 });
 ```
 
-Specs are always TypeScript or JavaScript, whatever the model's kernel: `loadModel({ file })` evaluates `main.ts`, `main.tsx`, `main.py`, `main.scad`, `main.kcl` or `main.cs` through Tau's runtime. `test_model` discovers `*.geospec.ts` and `*.geospec.js` only.
+Specs are always TypeScript or JavaScript, whatever the model's kernel: `loadModel({ file })` evaluates `main.ts`, `main.tsx`, `main.py`, `main.scad`, `main.kcl` or `main.cs` through the exporter the host or the project's `geospec.config.ts` supplies. On Tau projects that is Tau's runtime, configured in `tau.config.ts`; never set GeoSpec exporters there. `test_model` discovers `*.geospec.ts` and `*.geospec.js` only.
 
 Every matcher takes one expectation object:
 

@@ -27,6 +27,7 @@ const publicEntries = {
   './assertion-client': './assertion-client/index.d.ts',
   './cli': './cli/index.d.ts',
   './vitest': './vitest/index.d.ts',
+  './vitest/node': './vitest/node/index.d.ts',
   './config': './config/index.d.ts',
   './config/node': './config/node/index.d.ts',
 } as const;

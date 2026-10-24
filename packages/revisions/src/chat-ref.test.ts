@@ -22,6 +22,7 @@ import {
   chatIdOfRef,
   chatRecordsPath,
   chatRefName,
+  chatPulledAtPath,
   chatSegmentPath,
   projectChats,
   replayChatSegment,
@@ -339,6 +340,48 @@ describe.each([
         refs: [{ name: `refs/remotes/tau/tau/chats/${chatId}`, head: head! }],
       }),
     ).toEqual([]);
+  });
+
+  /*
+   * XD3, round 18: a pull records when it read the remote's refs beside the other devices' segments, once those are
+   * written, so a reader can tell quiet it observed from quiet it only inferred. At most once a minute, never back.
+   */
+  it.runIf(enabled)('records when a pull read the remote beside the segments it projected', async () => {
+    const id = `pulled_${_engine}`;
+    const commit = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n']]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Pulled' },
+    });
+    const references = [{ name: chatRefName(id), head: revisionId(commit.commitId) }];
+    const target = await createMemoryProvider();
+    const pull = async (pulledAt?: number) =>
+      projectChats({ port: harness.port, filesystem: target, deviceId: 'device-b', refs: references, pulledAt });
+    const read = async (checkout: FileSystemProvider) => readChatFile(checkout, chatPulledAtPath, id);
+
+    await pull();
+    expect(await read(target)).toBeUndefined();
+
+    await pull(now);
+    expect(await read(target)).toBe(String(now));
+    await pull(now + 30_000);
+    expect(await read(target)).toBe(String(now));
+    await pull(now - 120_000);
+    expect(await read(target)).toBe(String(now));
+    await pull(now + 60_000);
+    expect(await read(target)).toBe(String(now + 60_000));
+
+    /* A chat holding no other device's segment has no other device's run to observe. */
+    const alone = await createMemoryProvider();
+    await projectChats({
+      port: harness.port,
+      filesystem: alone,
+      deviceId: 'device-a',
+      refs: references,
+      pulledAt: now,
+    });
+    expect(await read(alone)).toBeUndefined();
   });
 
   it.runIf(enabled)('never truncates a compatible foreign segment and rejects divergent bytes', async () => {

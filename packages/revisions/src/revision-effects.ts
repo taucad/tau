@@ -4427,6 +4427,8 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             reject(new RevisionPortError('INVALID_TRANSPORT', 'The remote did not answer in time.'));
           });
         });
+        /* Before the listing, on the raw clock a file's modification time is stamped by (`chatPulledAtPath`). */
+        const pulledAt = clock();
         const advertised = await Promise.race([port.listRemoteRefs(input.remote, { signal: abort }), deadline]);
         signal.throwIfAborted();
         const [localBranchesBefore, trackingBefore, places] = await Promise.all([
@@ -4722,6 +4724,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             refs: recordReferences.map((ref) => ({ name: remoteTrackingRef(input.remote, ref.name), head: ref.head })),
             syncChats,
             syncLargeExports,
+            pulledAt,
             priorEvidenceHead: pending.entries.some(
               (entry) => entry.operation === 'projection' && entry.ref === evidenceRefName,
             )
@@ -4778,6 +4781,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
                     ...context,
                     refs: [ref],
                     signal,
+                    pulledAt: input.pulledAt,
                     onWritten: (id) => written.push(id),
                   });
                   return {

@@ -950,6 +950,23 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(syncs).toEqual([]);
   });
 
+  /* XD3: a foreign run's quiet is evidenced only by a pull, so a host that holds a chat for one asks for it. */
+  it('should ask the root to pull the remote when the host asks, and nothing once fenced', async () => {
+    const project = await createProject();
+    const { revisions, syncs } = observeSyncs(withRemote(project.open().revisions));
+    const placement = createTurnPlacementPort({ revisions, openTools: ({ filesystem: view }) => view });
+
+    expect(await placement.pull({ requestId: 'pull:1', chatId: key.chatId })).toEqual({
+      requestId: 'pull:1',
+      status: 'applied',
+    });
+    expect(syncs).toEqual([{ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } }]);
+
+    await placement.fence();
+    expect(await placement.pull({ requestId: 'pull:2', chatId: key.chatId })).toMatchObject({ status: 'refused' });
+    expect(syncs).toHaveLength(1);
+  });
+
   it('should record nothing for an attempt the root refused', async () => {
     const project = await createProject();
     await project.filesystem.writeFile('main.ts', 'export const size = 1;\n');

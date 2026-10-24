@@ -66,6 +66,20 @@ export const chatLogFileName = 'events.jsonl';
 export const chatSegmentPath = (deviceId: string): string => `events/${deviceId}.jsonl`;
 
 /**
+ * When this device last held everything the remote held of one chat (XD3): epoch milliseconds on this device's clock,
+ * as decimal text, read before a pull listed the remote's refs and written once that pull projected the chat. It sits
+ * beside the other devices' segments and never rides the ref's tree.
+ *
+ * It is the cross-device run fence's evidence that another device went quiet: that device's run is abandoned only when
+ * its segment did not change here from when its rows arrived to a pull at least the staleness bound later. A clock on
+ * this device alone, or a segment's age, says nothing about what the remote held meanwhile: a device that slept for
+ * hours has old segments and has not seen the live run another device kept writing.
+ *
+ * @public
+ */
+export const chatPulledAtPath = 'events/pulled-at';
+
+/**
  * Whether a tree path is one of this host's own segments, under any actor form.
  *
  * @param context - The segment name this write uses, and every one this host has used.
@@ -223,6 +237,11 @@ export type ProjectChatsInput = ChatRefContext &
      * one whose record then conflicts, whose segments were still written (CH1).
      */
     onWritten?: (chatId: string) => void;
+    /**
+     * When the pull read the remote's refs, before it listed them ({@link chatPulledAtPath}): every chat it projects
+     * that holds another device's segment records it. Absent, nothing is recorded.
+     */
+    pulledAt?: number | undefined;
   }>;
 
 const textDecoder = new TextDecoder();
@@ -936,6 +955,21 @@ const projectedRecord = (
 };
 
 /**
+ * Record a pull of one chat ({@link chatPulledAtPath}). Rewritten at most once a heartbeat's minute and never moved
+ * back, so pulls write little: a reader then finds a quiet run abandoned up to a minute late, never early.
+ *
+ * @param filesystem - The checkout.
+ * @param path - The chat's record of its last pull.
+ * @param at - When the pull read the remote's refs.
+ */
+const notePull = async (filesystem: FileSystemProvider, path: string, at: number): Promise<void> => {
+  const prior = Number(textDecoder.decode(await readFileOrUndefined(filesystem, path)));
+  if (!(at - prior < 60_000)) {
+    await filesystem.writeFile(path, new TextEncoder().encode(String(at)));
+  }
+};
+
+/**
  * Write every fetched chat ref's tree into the checkout's `.tau/chats/**`.
  *
  * The *fetch path* writes the projection (A39): a client reads chats from
@@ -998,6 +1032,13 @@ export const projectChats = async (input: ProjectChatsInput): Promise<readonly s
       signal: input.signal,
     });
     input.signal?.throwIfAborted();
+    if (
+      input.pulledAt !== undefined &&
+      !purged &&
+      tree.entries().some((entry) => entry.path.startsWith('events/') && !isOwnSegment(input, entry.path))
+    ) {
+      await notePull(input.filesystem, `${directory}/${chatPulledAtPath}`, input.pulledAt);
+    }
     const removed = purged && (await removePurgedChatBytes(input.filesystem, chatId));
     const changed = written || removed;
     if (changed) {

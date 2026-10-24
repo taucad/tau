@@ -100,6 +100,11 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
     input: Readonly<{ requestId: string; chatId: string }>,
   ) => Promise<Answer<Nothing, Fenced | 'CHAT_NOT_SHARED'>>;
   /**
+   * Pull the project's remote now (XD3): another device's run on a chat has been quiet here past the staleness bound,
+   * and only a pull can show whether it stayed quiet there. Answered once asked, not once pulled.
+   */
+  pull: (input: Readonly<{ requestId: string; chatId: string }>) => Promise<Answer<Nothing, Fenced>>;
+  /**
    * End this session (TS-R6): its later requests are refused `SESSION_FENCED`, its tools are revoked once their
    * accepted writes land, and its `settlements` listens end. The root keeps every turn actor.
    */
@@ -1110,6 +1115,14 @@ export const createTurnPlacementPort = <Tools>(
         });
       }
       recordsChanged();
+      return { requestId, status: 'applied' };
+    },
+
+    pull: async ({ requestId }) => {
+      if (fenced) {
+        return fencedAnswer(requestId);
+      }
+      actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });
       return { requestId, status: 'applied' };
     },
 

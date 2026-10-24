@@ -275,6 +275,7 @@ function ProjectSheet({
 }): React.JSX.Element {
   const { openPanel } = useProjectWorkspace();
   const closeRef = useRef<HTMLButtonElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
   /* The surface a destination opened, which takes focus instead of the title. */
   const chosenSurface = useRef<string | undefined>(undefined);
   const open = (panel: 'revisions' | 'export' | 'details'): void => {
@@ -290,7 +291,15 @@ function ProjectSheet({
   return (
     <Drawer open={isOpen} onOpenChange={onOpenChange}>
       <DrawerContent
+        ref={sheetRef}
         data-slot='project-sheet'
+        className='outline-none'
+        onOpenAutoFocus={(event) => {
+          /* Vaul leaves focus on the title, outside the modal the page is hidden behind; the sheet takes it (T6). Not
+           * Close: focusing it would open its tooltip on every tap of the title. */
+          event.preventDefault();
+          sheetRef.current?.focus({ preventScroll: true });
+        }}
         onCloseAutoFocus={(event) => {
           const surface = chosenSurface.current;
           chosenSurface.current = undefined;

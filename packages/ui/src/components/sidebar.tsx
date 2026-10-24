@@ -192,6 +192,8 @@ function Sidebar({
   readonly collapsible?: 'offcanvas' | 'icon' | 'none';
 }): React.JSX.Element {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  /* What opened the phone sheet. Its trigger is not a dialog trigger, so Radix has nowhere to return focus to. */
+  const opener = React.useRef<HTMLElement | undefined>(undefined);
 
   if (collapsible === 'none') {
     return (
@@ -212,11 +214,27 @@ function Sidebar({
           data-sidebar='sidebar'
           data-slot='sidebar'
           data-mobile='true'
+          // The phone sidebar is the app's chrome, as the wide-screen sidebar is: its shortcuts work inside it.
+          data-shortcut-scope='app'
           className='z-100 w-(--sidebar-width) bg-sidebar text-sidebar-foreground [&>button]:hidden'
           style={{ '--sidebar-width': sidebarWidthMobile } as CssVariableProperties}
           side={side}
           onOpenAutoFocus={(event) => {
+            /* The sheet itself takes focus, so a keyboard user is inside the modal the page is hidden behind; not its
+               first control, which would raise that control's tooltip on every tap. */
             event.preventDefault();
+            opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+            if (event.currentTarget instanceof HTMLElement) {
+              event.currentTarget.focus({ preventScroll: true });
+            }
+          }}
+          onCloseAutoFocus={(event) => {
+            // Back to what opened the sheet, while it is still on the page (a link may have navigated away from it).
+            event.preventDefault();
+            if (opener.current?.isConnected) {
+              opener.current.focus({ preventScroll: true });
+            }
+            opener.current = undefined;
           }}
         >
           <SheetHeader className='sr-only'>

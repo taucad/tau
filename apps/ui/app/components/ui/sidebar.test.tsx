@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +16,7 @@ vi.mock('#hooks/use-cookie.js', async () => {
   };
 });
 
-const { SidebarProvider, SidebarTrigger } = await import('#components/ui/sidebar.js');
+const { Sidebar, SidebarProvider, SidebarTrigger } = await import('#components/ui/sidebar.js');
 
 const Navigate = () => {
   const navigate = useNavigate();
@@ -109,5 +109,39 @@ describe('SidebarTrigger', () => {
 
     await user.click(screen.getByRole('button', { name: 'Navigate' }));
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('moves focus into the phone sidebar sheet as it opens and returns it to the trigger on Escape', async () => {
+    mobile.value = true;
+    render(
+      <MemoryRouter>
+        <KeyboardProvider>
+          <TooltipProvider>
+            <SidebarProvider>
+              <Sidebar>
+                <button type='button'>Inside</button>
+              </Sidebar>
+              <SidebarTrigger />
+            </SidebarProvider>
+          </TooltipProvider>
+        </KeyboardProvider>
+      </MemoryRouter>,
+    );
+    const trigger = screen.getByRole('button', { name: 'Open sidebar' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const sheet = await screen.findByRole('dialog', { name: 'Sidebar' });
+    await waitFor(() => {
+      expect(sheet).toContainElement(document.activeElement as HTMLElement);
+    });
+
+    fireEvent.keyDown(sheet, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Sidebar' })).not.toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger);
+    });
   });
 });

@@ -22,18 +22,42 @@ export type AxeFinding = {
   readonly targets: readonly string[];
 };
 
+export type AxeNode = {
+  readonly target: string;
+  /** The opening markup of the node, to find its owner. */
+  readonly html: string;
+  /** Why axe flagged the node (its check messages), so an incomplete result can be adjudicated. */
+  readonly messages: readonly string[];
+};
+
+export type AxeNodeFinding = AxeFinding & {
+  /** Every flagged node (up to 50), with its markup and messages. */
+  readonly nodes: readonly AxeNode[];
+};
+
+export type AxeAudit = {
+  /** Violations of every impact. */
+  readonly violations: readonly AxeNodeFinding[];
+  /** Checks axe could not decide (`incomplete`), which a person must adjudicate. */
+  readonly incomplete: readonly AxeNodeFinding[];
+};
+
 /**
- * Serious and critical axe violations in `selector` (the whole document by
- * default), with the full sweep tags or only the named `rules`.
+ * Every axe violation and incomplete result in `selector` (the whole document by default), with the full sweep tags
+ * or only the named `rules`.
  */
-export const seriousAxeViolations = async (
+export const axeAudit = async (
   options: { readonly rules?: readonly string[]; readonly selector?: string } = {},
-): Promise<AxeFinding[]> =>
+): Promise<AxeAudit> =>
   target.evaluate(
     async ({ axeSource, tags, rules, selector }) => {
-      type AxeResults = {
-        violations: Array<{ id: string; impact?: string; nodes: Array<{ target: unknown[] }> }>;
+      type AxeCheck = { message?: string };
+      type AxeResult = {
+        id: string;
+        impact?: string;
+        nodes: Array<{ target: unknown[]; html?: string; any?: AxeCheck[]; all?: AxeCheck[]; none?: AxeCheck[] }>;
       };
+      type AxeResults = { violations: AxeResult[]; incomplete: AxeResult[] };
       const scope = globalThis as typeof globalThis & {
         axe?: { run(root: Element | Document, options: unknown): Promise<AxeResults> };
       };
@@ -47,16 +71,35 @@ export const seriousAxeViolations = async (
       const results = await scope.axe.run(root, {
         runOnly: rules ? { type: 'rule', values: rules } : { type: 'tag', values: tags },
       });
-      return results.violations
-        .filter(({ impact }) => impact === 'serious' || impact === 'critical')
-        .map(({ id, impact, nodes }) => ({
-          id,
-          impact,
-          targets: nodes.slice(0, 5).map((node) => node.target.join(' ')),
-        }));
+      const toFinding = ({ id, impact, nodes }: AxeResult) => ({
+        id,
+        impact: impact ?? undefined,
+        targets: nodes.slice(0, 5).map((node) => node.target.join(' ')),
+        nodes: nodes.slice(0, 50).map((node) => ({
+          target: node.target.join(' '),
+          html: (node.html ?? '').slice(0, 200),
+          messages: [...(node.any ?? []), ...(node.all ?? []), ...(node.none ?? [])]
+            .map((check) => check.message ?? '')
+            .filter(Boolean),
+        })),
+      });
+      return { violations: results.violations.map(toFinding), incomplete: results.incomplete.map(toFinding) };
     },
     { axeSource: axe.source, tags: sweepTags, rules: options.rules, selector: options.selector },
   );
+
+/**
+ * Serious and critical axe violations in `selector` (the whole document by
+ * default), with the full sweep tags or only the named `rules`.
+ */
+export const seriousAxeViolations = async (
+  options: { readonly rules?: readonly string[]; readonly selector?: string } = {},
+): Promise<AxeFinding[]> => {
+  const { violations } = await axeAudit(options);
+  return violations
+    .filter(({ impact }) => impact === 'serious' || impact === 'critical')
+    .map(({ id, impact, targets }) => ({ id, impact, targets }));
+};
 
 export type HorizontalOverflow = {
   /** Width the document scrolls past the viewport. */

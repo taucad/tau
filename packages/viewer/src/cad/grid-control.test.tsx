@@ -17,7 +17,10 @@ const mocks = vi.hoisted(() => ({
   graphicsSend: vi.fn(),
   smallSize: 0.05,
   isGridSizeLocked: false,
+  isMobile: false,
 }));
+
+vi.mock('@taucad/ui/hooks/use-mobile', () => ({ useIsMobile: () => mocks.isMobile }));
 
 vi.mock('#hooks/use-graphics.jsx', () => ({
   useGraphics: () => ({ send: mocks.graphicsSend }),
@@ -53,6 +56,7 @@ describe('GridSizeIndicator', () => {
     vi.clearAllMocks();
     mocks.smallSize = 0.05;
     mocks.isGridSizeLocked = false;
+    mocks.isMobile = false;
   });
 
   it('should read the grid size on one line of 12 px mono figures', () => {
@@ -65,13 +69,33 @@ describe('GridSizeIndicator', () => {
     expect(trigger.querySelector('.lucide-lock')).toBeNull();
   });
 
-  it('should show the lock glyph when the grid size is locked', () => {
+  it('should show the lock glyph and name the lock when the grid size is locked', () => {
     mocks.isGridSizeLocked = true;
     renderGridSizeIndicator();
 
-    const trigger = screen.getByRole('button', { name: 'Grid 50 mm, units and grid' });
+    const trigger = screen.getByRole('button', { name: 'Grid 50 mm, locked, units and grid' });
     expect(trigger.querySelector('.lucide-lock')).toBeInTheDocument();
   });
+
+  it.each([
+    { isGridSizeLocked: false, name: 'Grid 50 mm, units and grid' },
+    { isGridSizeLocked: true, name: 'Grid 50 mm, locked, units and grid' },
+  ])(
+    'should carry the size and lock state in the name and tooltip of the glyph-only phone trigger (locked: $isGridSizeLocked)',
+    async ({ isGridSizeLocked, name }) => {
+      const user = userEvent.setup();
+      mocks.isMobile = true;
+      mocks.isGridSizeLocked = isGridSizeLocked;
+      renderGridSizeIndicator();
+
+      const trigger = screen.getByRole('button', { name });
+      expect(trigger).toHaveTextContent(/^$/);
+      expect(trigger.querySelector('.lucide-lock')).toBeNull();
+
+      await user.hover(trigger);
+      expect(await screen.findByRole('tooltip', { name })).toBeInTheDocument();
+    },
+  );
 
   it('should open the unit and grid lock settings and keep them open while choosing a unit', async () => {
     const user = userEvent.setup();

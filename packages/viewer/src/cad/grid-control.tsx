@@ -65,6 +65,8 @@ export function GridSizeIndicator(): React.ReactNode {
     [displaySize],
   );
   const gridLabel = `${localizedSmallGridSize} ${unit}`;
+  // The phone's glyph-only trigger hides the readout and lock glyph, so its name and tooltip carry both.
+  const triggerLabel = `Grid ${gridLabel}${isGridSizeLocked ? ', locked' : ''}, units and grid`;
 
   // If there's no valid grid size, don't render
   if (!gridSizes.smallSize) {
@@ -79,7 +81,7 @@ export function GridSizeIndicator(): React.ReactNode {
             <Button
               variant='ghost'
               size={isMobile ? controlSize : 'sm'}
-              aria-label={`Grid ${gridLabel}, units and grid`}
+              aria-label={triggerLabel}
               className={`gap-1 px-2 font-mono text-xs tabular-nums has-[>svg]:px-2 ${controlSize === 'icon-touch' ? '' : 'h-7'}`}
             >
               {/* Below 520 px of viewer width the readout keeps its value and drops its glyph. */}
@@ -95,7 +97,7 @@ export function GridSizeIndicator(): React.ReactNode {
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>
-        <TooltipContent>Change unit settings</TooltipContent>
+        <TooltipContent>{triggerLabel}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent
         side='top'

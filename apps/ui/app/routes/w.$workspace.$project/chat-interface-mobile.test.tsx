@@ -172,13 +172,16 @@ describe('ChatInterfaceMobile', () => {
       const surface = await screen.findByRole('region', { name: 'Chat' });
       const drawer = surface.closest<HTMLElement>('[data-slot="drawer-content"]')!;
       const environment = { viewportHeight, safeAreaBottom };
-      // Vaul shows the top `snapPoint` of the viewport-tall sheet; the grabber row comes first, then the surface.
+      // Vaul shows the top `snapPoint` of the viewport-tall sheet; its 1px top border and the grabber row come first, then the surface.
       const sheetTop = (1 - snapPoint) * viewportHeight;
+      const topBorder = drawer.classList.contains('border-t') ? 1 : 0;
       const grabber = resolveLength('var(--drawer-handle-height)', drawer.className, environment);
-      const surfaceBottom = sheetTop + grabber + resolveLength(surface.style.height, drawer.className, environment);
+      const surfaceBottom =
+        sheetTop + topBorder + grabber + resolveLength(surface.style.height, drawer.className, environment);
       const navTop = viewportHeight - resolveLength('var(--nav-offset)', drawer.className, environment);
 
       expect(grabber).toBe(24);
+      expect(topBorder).toBe(1);
       expect(surfaceBottom).toBeCloseTo(navTop);
     },
   );

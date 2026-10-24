@@ -204,7 +204,7 @@ function barLayout(isMobile: boolean, isTouch: boolean): { bar: string; toolRows
       'pointer-events-auto flex max-w-full flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs',
       isMobile ? 'max-h-full min-h-0 min-w-0' : 'min-w-min',
     ),
-    toolRows: cn(isMobile && 'min-h-0 overflow-y-auto'),
+    toolRows: cn('flex flex-col gap-1', isMobile && 'min-h-0 overflow-y-auto'),
     controls: cn(
       'flex items-center',
       isMobile && 'max-w-full flex-wrap justify-center',

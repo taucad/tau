@@ -162,8 +162,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                   'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
                 )}
                 style={{
-                  // The visible sheet less its grabber row and the nav (with the home-indicator inset) over its foot.
-                  height: `calc(${Number(activeSnapPoint)} * 100dvh - var(--drawer-handle-height) - var(--nav-offset))`,
+                  // The visible sheet less its grabber row, its 1px top border and the nav (with the home-indicator inset) over its foot.
+                  height: `calc(${Number(activeSnapPoint)} * 100dvh - var(--drawer-handle-height) - var(--nav-offset) - 1px)`,
                 }}
               >
                 <div className='flex h-full flex-1 flex-col'>

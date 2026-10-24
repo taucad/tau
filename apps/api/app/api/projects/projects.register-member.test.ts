@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { ConfigService } from '@nestjs/config';
+import type { Environment } from '#config/environment.config.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { inArray } from 'drizzle-orm';
 import postgres from 'postgres';
@@ -72,23 +75,25 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('PUT /v1/projects/:id b
       { projectId, userId: readerId, role: 'read', invitedBy: ownerId },
     ]);
 
-    const databaseService = { database } as unknown as DatabaseService;
+    const databaseService = Object.assign(mock<DatabaseService>(), { database });
     controller = new ProjectsController(
       databaseService,
-      {
-        consumeDailyBudget: async ({ key }: { key: string }) => {
-          spent.set(key, (spent.get(key) ?? 0) + 1);
-          return { allowed: true, count: spent.get(key) };
-        },
-      } as unknown as PublicationRateLimiterService,
-      {
+      mock<PublicationRateLimiterService>({
+        consumeDailyBudget: vi.fn<PublicationRateLimiterService['consumeDailyBudget']>(async ({ key }) => {
+          const count = (spent.get(key) ?? 0) + 1;
+          spent.set(key, count);
+          return { allowed: true, count };
+        }),
+      }),
+      mock<CommercialEntitlementsService>({
         getEntitlements: async (userId: string) => ({
           canSyncFiles: entitled.has(userId),
           canCreatePrivateShares: entitled.has(userId),
           canUseProKernels: entitled.has(userId),
         }),
-      } as unknown as CommercialEntitlementsService,
+      }),
       new ProjectAccessService(databaseService),
+      mock<ConfigService<Environment, true>>({ get: vi.fn().mockReturnValue(false) }),
     );
   }, 60_000);
 

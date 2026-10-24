@@ -3,5 +3,10 @@
     "closureIntegrity": "sha256-rK/0atavPXQH3iAOfIcnG5L15ArSwL+xK4AUK0zWsLw=",
     "treeIntegrity": "sha256-gsa864Y8RqPlFM/UvR2WFbDiT5WoD/BkIDX1icAoZLc=",
     "fileCount": 230
+  },
+  "linux-x64-glibc": {
+    "closureIntegrity": "sha256-jXyHvnlxefp/14p+I38i4nwP08gDBgU2SxGnZhNHCeA=",
+    "treeIntegrity": "sha256-AMrYff91D24vMaX6lVB5nnir3/D6YpW0CYhbq2veF/o=",
+    "fileCount": 231
   }
 }

@@ -9,6 +9,7 @@ export {
   type GeoSpecTestCounts,
   type TestModelOutput,
 } from '#geospec/result.js';
+export { createGeoSpecConfigSession, type GeoSpecTestModelConfig } from '#geospec/config-session.js';
 export { queryDirectAp242MinimumDistance } from '#geospec/exact-ap242-minimum.js';
 export {
   createGeoSpecRunProgress,

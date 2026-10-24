@@ -79,6 +79,127 @@ const noViews: Evaluation = {
   issues: [],
 };
 
+/** A CAD unit on an in-process runtime whose GLB view supports edges natively or through middleware. */
+function edgeRuntimeActor(provider: 'native' | 'middleware') {
+  const renders: Array<RuntimeContentInput | undefined> = [];
+  const kernel = defineKernel({
+    id: 'interactive-edges',
+    name: 'Interactive edges',
+    version: '1.0.0',
+    extensions: ['edges'],
+    views: {
+      model: {
+        title: 'Model',
+        mimeType: 'model/gltf-binary',
+        ...(provider === 'native' ? { content: ['includeEdges'] as const } : {}),
+      },
+    },
+    exports: {},
+    async initialize() {
+      return {};
+    },
+    async resolve({ entryPath }) {
+      return { resolved: [entryPath], unresolved: [] };
+    },
+    async describe() {
+      return createKernelSuccess({
+        parameters: {
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:interactive-edges',
+            $uses: ['JSONSchemaUnits'],
+            name: 'InteractiveEdgesParameters',
+            type: 'object',
+          },
+          defaults: {},
+        },
+      });
+    },
+    async evaluate() {
+      return { handle: {}, views: ['model'] };
+    },
+    async render({ content }: { handle: Record<string, unknown>; content?: RuntimeContentInput }) {
+      renders.push(content);
+      return {
+        content: writeGlb({
+          nodes: [
+            {
+              primitives: [
+                {
+                  mode: 4,
+                  positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+                  material: {},
+                },
+                ...(content?.includeEdges
+                  ? [
+                      {
+                        mode: 1,
+                        positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+                        material: {},
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ],
+        }),
+      };
+    },
+  })();
+  const runtime: AnyRuntimeDefinition = defineRuntime({
+    kernels: [kernel],
+    middleware: provider === 'middleware' ? [gltfEdgeDetection()] : [],
+  });
+  const client = createRuntimeClient({
+    transport: inProcessTransport({
+      runtime,
+      fileSystem: fromMemoryFs({ 'main.edges': '' }),
+    }),
+  });
+  const actor = createActor(
+    cadMachine.provide({
+      actors: {
+        connectKernelActor: fromSafeAsync(
+          async (): Promise<{
+            type: 'kernelConnected';
+            client: AppRuntimeClient;
+            cleanups: Array<() => void>;
+          }> => {
+            await client.connect();
+            return { type: 'kernelConnected', client, cleanups: [] };
+          },
+        ),
+      },
+    }),
+    {
+      input: {
+        shouldInitializeKernelOnStart: false,
+        fileSystemRoot: '',
+        kernelOptionsFactory,
+        operationTimeout: 0,
+      },
+    },
+  );
+  actor.start();
+  return { actor, renders };
+}
+
+/** Whether a successful GLB rendering carries any LINES primitive. */
+function hasLinePrimitives(rendering: Rendering | undefined): boolean {
+  if (!rendering?.success || rendering.artifact.mimeType !== 'model/gltf-binary') {
+    throw new Error('Expected a GLB rendering');
+  }
+  const bytes = rendering.artifact.content;
+  if (typeof bytes === 'string') {
+    throw new TypeError('Expected binary GLB');
+  }
+  const jsonLength = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true);
+  const json = z
+    .object({ meshes: z.array(z.object({ primitives: z.array(z.object({ mode: z.number().optional() })) })) })
+    .parse(JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))));
+  return json.meshes.some((mesh) => mesh.primitives.some((primitive) => primitive.mode === 1));
+}
+
 describe('cadMachine watched document', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -119,104 +240,7 @@ describe('cadMachine watched document', () => {
   it.each(['native', 'middleware'] as const)(
     'requests %s GLB edges through the actual CAD subscription',
     async (provider) => {
-      const kernel = defineKernel({
-        id: 'interactive-edges',
-        name: 'Interactive edges',
-        version: '1.0.0',
-        extensions: ['edges'],
-        views: {
-          model: {
-            title: 'Model',
-            mimeType: 'model/gltf-binary',
-            ...(provider === 'native' ? { content: ['includeEdges'] as const } : {}),
-          },
-        },
-        exports: {},
-        async initialize() {
-          return {};
-        },
-        async resolve({ entryPath }) {
-          return { resolved: [entryPath], unresolved: [] };
-        },
-        async describe() {
-          return createKernelSuccess({
-            parameters: {
-              schema: {
-                $schema: 'https://json-structure.org/meta/extended/v0/#',
-                $id: 'urn:taucad:test:interactive-edges',
-                $uses: ['JSONSchemaUnits'],
-                name: 'InteractiveEdgesParameters',
-                type: 'object',
-              },
-              defaults: {},
-            },
-          });
-        },
-        async evaluate() {
-          return { handle: {}, views: ['model'] };
-        },
-        async render({ content }: { handle: Record<string, unknown>; content?: RuntimeContentInput }) {
-          return {
-            content: writeGlb({
-              nodes: [
-                {
-                  primitives: [
-                    {
-                      mode: 4,
-                      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
-                      material: {},
-                    },
-                    ...(content?.includeEdges
-                      ? [
-                          {
-                            mode: 1,
-                            positions: new Float32Array([0, 0, 0, 1, 0, 0]),
-                            material: {},
-                          },
-                        ]
-                      : []),
-                  ],
-                },
-              ],
-            }),
-          };
-        },
-      })();
-      const runtime: AnyRuntimeDefinition = defineRuntime({
-        kernels: [kernel],
-        middleware: provider === 'middleware' ? [gltfEdgeDetection()] : [],
-      });
-      const client = createRuntimeClient({
-        transport: inProcessTransport({
-          runtime,
-          fileSystem: fromMemoryFs({ 'main.edges': '' }),
-        }),
-      });
-      const actor = createActor(
-        cadMachine.provide({
-          actors: {
-            connectKernelActor: fromSafeAsync(
-              async (): Promise<{
-                type: 'kernelConnected';
-                client: AppRuntimeClient;
-                cleanups: Array<() => void>;
-              }> => {
-                await client.connect();
-                return { type: 'kernelConnected', client, cleanups: [] };
-              },
-            ),
-          },
-        }),
-        {
-          input: {
-            shouldInitializeKernelOnStart: false,
-            fileSystemRoot: '',
-            kernelOptionsFactory,
-            operationTimeout: 0,
-          },
-        },
-      );
-      actor.start();
+      const { actor } = edgeRuntimeActor(provider);
       try {
         await waitFor(actor, (snapshot) => snapshot.value === 'idle');
         actor.send({ type: 'initializeModel', entryPath: 'main.edges' });
@@ -226,19 +250,40 @@ describe('cadMachine watched document', () => {
             state.context.rendering?.success === true &&
             state.context.defaultView?.request.content?.includeEdges === true,
         );
-        const { rendering } = snapshot.context;
-        if (!rendering?.success || rendering.artifact.mimeType !== 'model/gltf-binary') {
-          throw new Error('Expected an edge-enabled GLB rendering');
-        }
-        const bytes = rendering.artifact.content;
-        if (typeof bytes === 'string') {
-          throw new TypeError('Expected binary GLB');
-        }
-        const jsonLength = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true);
-        const json = z
-          .object({ meshes: z.array(z.object({ primitives: z.array(z.object({ mode: z.number().optional() })) })) })
-          .parse(JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))));
-        expect(json.meshes.some((mesh) => mesh.primitives.some((primitive) => primitive.mode === 1))).toBe(true);
+        expect(hasLinePrimitives(snapshot.context.rendering)).toBe(true);
+      } finally {
+        disposeCadRuntime(actor.getSnapshot().context);
+        actor.stop();
+      }
+    },
+  );
+
+  it.each(['native', 'middleware'] as const)(
+    'computes %s GLB edges only while a viewer shows them, and again when shown',
+    async (provider) => {
+      const { actor, renders } = edgeRuntimeActor(provider);
+      try {
+        await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+        actor.send({ type: 'setViewerEdges', viewerId: 'pane-1', shown: false });
+        actor.send({ type: 'initializeModel', entryPath: 'main.edges' });
+        const hidden = await waitFor(actor, (state) => state.context.rendering?.success === true);
+        expect(hidden.context.defaultView?.request.content).toEqual({ includeEdges: false });
+        expect(hasLinePrimitives(hidden.context.rendering)).toBe(false);
+        expect(renders.map((content) => content?.includeEdges === true)).toEqual([false]);
+
+        // A second viewer that shows lines asks for them for the shared default view.
+        actor.send({ type: 'setViewerEdges', viewerId: 'pane-2', shown: true });
+        const shown = await waitFor(actor, (state) => hasLinePrimitives(state.context.rendering));
+        expect(shown.context.defaultView?.request.content).toEqual({ includeEdges: true });
+        expect(renders).toHaveLength(2);
+
+        // Once no viewer shows lines the view stops asking for them.
+        actor.send({ type: 'setViewerEdges', viewerId: 'pane-2', shown: undefined });
+        const dropped = await waitFor(
+          actor,
+          (state) => state.context.rendering?.success === true && !hasLinePrimitives(state.context.rendering),
+        );
+        expect(dropped.context.defaultView?.request.content).toEqual({ includeEdges: false });
       } finally {
         disposeCadRuntime(actor.getSnapshot().context);
         actor.stop();

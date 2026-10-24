@@ -314,7 +314,6 @@ const main = async (): Promise<void> => {
       corpusUnchanged: fingerprintBefore === (await corpusFingerprint(corpusPaths)),
       packageHashes: {
         geospec: await digest(resolve(repoRoot, 'packages/geospec/package.json')),
-        geospecEngine: await digest(resolve(repoRoot, 'packages/geospec-engine/package.json')),
         geospecEngineNative: await digest(createRequire(import.meta.url).resolve('geospec-engine/package.json')),
         runtime: await digest(resolve(repoRoot, 'packages/runtime/package.json')),
       },

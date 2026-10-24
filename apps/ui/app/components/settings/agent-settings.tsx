@@ -15,13 +15,14 @@ function SettingRow({
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className='flex items-center justify-between gap-4'>
-      <div className='flex flex-col gap-0.5'>
+    // The whole row is the switch's target: the bare switch alone is too small to tap.
+    <label className='flex items-center justify-between gap-4'>
+      <span className='flex flex-col gap-0.5'>
         <span className='text-sm font-medium'>{label}</span>
         <span className='text-xs text-muted-foreground'>{description}</span>
-      </div>
+      </span>
       {children}
-    </div>
+    </label>
   );
 }
 

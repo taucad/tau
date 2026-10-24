@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { ArButton } from '#components/cad/ar-button.js';
 
 const mobileMocks = vi.hoisted(() => ({ isMobile: true }));
@@ -45,14 +46,16 @@ describe('ArButton', () => {
   });
 
   it('invokes activateAr() when clicked on a supported device', async () => {
-    render(<ArButton artifact={undefined} />);
-    await userEvent.click(screen.getByRole('button'));
+    render(<ArButton artifact={undefined} />, { wrapper: TooltipProvider });
+    await userEvent.click(screen.getByRole('button', { name: 'View in your space' }));
     expect(arMocks.activateAr).toHaveBeenCalledTimes(1);
   });
 
   it('disables the button while converting', () => {
     arMocks.isConverting = true;
-    render(<ArButton artifact={undefined} />);
-    expect(screen.getByRole('button').hasAttribute('disabled')).toBe(true);
+    render(<ArButton artifact={undefined} />, { wrapper: TooltipProvider });
+    const button = screen.getByRole('button', { name: 'Preparing view in your space' });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-busy', 'true');
   });
 });

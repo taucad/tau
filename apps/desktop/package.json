@@ -31,7 +31,6 @@
     "@taucad/esbuild": "workspace:*",
     "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
-    "@taucad/geospec-engine": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/grbl": "workspace:*",
     "@taucad/host": "workspace:*",

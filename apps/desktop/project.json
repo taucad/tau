@@ -706,7 +706,7 @@
       }
     },
     "test": {
-      "dependsOn": ["test-sourcemaps"]
+      "dependsOn": ["test-sourcemaps", "test-first-use-download"]
     },
     "test-qualification-appimage-sandbox": {
       "executor": "nx:run-commands",
@@ -722,6 +722,12 @@
       "options": {
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/preload-sandbox.test.mts",
         "cwd": "."
+      }
+    },
+    "test-first-use-download": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "node --import @oxc-node/core/register --test apps/desktop/scripts/first-use-evidence.test.mts"
       }
     }
   }

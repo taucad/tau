@@ -44,6 +44,10 @@
 \* and written through one path; queue paths unchanged.
 \* A chat's open reads its placement through that one shared read too; queue paths unchanged.
 \* A placement held during a load is checked against reach once it is held; queue paths unchanged.
+\* Other devices' segments reach the projection with this device's read time, so a run held
+\* elsewhere goes stale by this device's clock; queue paths unchanged.
+\* QueuePlacement.tla separately checks host-local lost-ACK recovery and scoped
+\* legacy receipt rebasing; this module retains its single-host FIFO scope.
 EXTENDS Naturals, Sequences, FiniteSets, TLC
 CONSTANTS Messages, Tabs, Durable, QuietSubmit, StableIdentity,
           ObserveBarrier, TargetedCancel, TerminalBeforeSend,

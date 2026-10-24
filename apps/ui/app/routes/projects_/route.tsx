@@ -5,12 +5,16 @@
  */
 import { Outlet, useLocation } from 'react-router';
 import type { MetaFunction } from 'react-router';
-import { ProjectLibrary } from '#components/project-library/project-library.js';
+import { NewProjectLink, ProjectLibrary } from '#components/project-library/project-library.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const meta: MetaFunction = () => [{ title: 'Projects · Tau' }];
 
 export const handle: Handle = {
+  title: 'Projects',
+  // D11 (PG-PROJ-1): New project in the phone top bar at 40px; from `md` up it stays in the title row.
+  actions: () => <NewProjectLink size='lg' />,
+  actionsScope: 'phone',
   enableOverflowY: true,
 };
 

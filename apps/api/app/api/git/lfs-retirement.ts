@@ -2,7 +2,8 @@ import { and, asc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Database } from '#database/owner-lock.js';
 import { withOwnerLock } from '#database/owner-lock.js';
-import { project, projectGit, projectGitLfsObject } from '#database/schema.js';
+import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
+import { project, projectGit, projectGitLfsObject, projectDeletion } from '#database/schema.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import { hydrateLease } from '#api/git/store/lease.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
@@ -88,6 +89,23 @@ export const retireLfsObjects = async function* (
 ): AsyncGenerator<{ retired: readonly string[] }> {
   const window = args.window ?? lfsRetirementWindowMilliseconds;
 
+  await assertProjectActive(dependencies.database, args.projectId);
+  const [row] = await dependencies.database
+    .select({ storageAccountId: project.storageAccountId })
+    .from(project)
+    .where(and(eq(project.id, args.projectId), eq(project.ownerId, args.ownerId)))
+    .limit(1);
+  if (
+    row === undefined ||
+    (row.storageAccountId !== null && row.storageAccountId !== dependencies.storage.account.id)
+  ) {
+    throw new Error('LFS retirement project storage account unavailable');
+  }
+  const locator = repositoryLocator({
+    ownerId: args.ownerId,
+    projectId: args.projectId,
+    ...(row.storageAccountId === null ? {} : { accountId: row.storageAccountId }),
+  });
   let cursor: string | undefined;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- stable OID pages bound parameters and memory
@@ -110,7 +128,7 @@ export const retireLfsObjects = async function* (
     // oxlint-disable-next-line no-await-in-loop -- refresh and dispose one bounded batch before the next
     const lease = await hydrateLease({
       store: dependencies.store,
-      locator: repositoryLocator({ ownerId: args.ownerId, projectId: args.projectId }),
+      locator,
       ...(dependencies.leaseParentDirectory === undefined
         ? {}
         : { parentDirectory: dependencies.leaseParentDirectory }),
@@ -129,6 +147,7 @@ export const retireLfsObjects = async function* (
 
     // oxlint-disable-next-line no-await-in-loop -- release the owner lock between bounded deletion batches
     yield await withOwnerLock(dependencies.database, args.ownerId, async (transaction) => {
+      await assertActiveProjectLocked(transaction, args.projectId);
       if (returned.length > 0) {
         await transaction
           .update(projectGitLfsObject)
@@ -232,9 +251,11 @@ export const retireDueLfsObjects = async function* (
       .selectDistinct({ projectId: projectGitLfsObject.projectId, ownerId: project.ownerId })
       .from(projectGitLfsObject)
       .innerJoin(project, eq(project.id, projectGitLfsObject.projectId))
+      .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
       .where(
         and(
           dueCondition(args.now, window),
+          isNull(projectDeletion.projectId),
           cursor === undefined ? undefined : gt(projectGitLfsObject.projectId, cursor),
         ),
       )

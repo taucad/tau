@@ -4,13 +4,13 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { localDatabaseName } from '@taucad/utils/worktree-database';
 import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 import {
   basicAuthorization,
   deleteTauCloudOwner,
   gitE2EProjectId,
   projectExists,
+  queryDatabase,
   registerProject,
   resetOwnerStorage,
   runGit,
@@ -120,23 +120,10 @@ const connectProject = async (token: string, projectId: string, name = 'Git serv
  * the headroom they read was the real one, not the seeded one.
  */
 const spendStorage = async (projectId: string, bytes: number): Promise<void> => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  await promisify(execFile)('docker', [
-    'exec',
-    'tau-postgres',
-    'psql',
-    '-qtAX',
-    '-v',
-    'ON_ERROR_STOP=1',
-    '-U',
-    'dev_user',
-    '-d',
-    localDatabaseName(),
-    '-c',
+  await queryDatabase(
     `INSERT INTO project_git (project_id, storage_bytes, lfs_bytes) VALUES ('${projectId}', 0, ${String(bytes)}) ` +
       `ON CONFLICT (project_id) DO UPDATE SET lfs_bytes = ${String(bytes)};`,
-  ]);
+  );
 };
 
 const proLimitBytes = 10 * 1024 ** 3;

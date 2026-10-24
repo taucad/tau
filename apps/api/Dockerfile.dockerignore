@@ -19,6 +19,11 @@ repos
 # -- E2E test projects (not needed in the API production image) ---------------
 apps/ui-e2e
 apps/api-e2e
+# The root tsconfig.json references both. `@oxc-node/core` drops the whole tsconfig when a
+# reference is missing and falls back to a target without top-level await, so a build script
+# such as `cli:stage-acp` fails to load. Each solution file has no sources and adds no project.
+!apps/ui-e2e/tsconfig.json
+!apps/api-e2e/tsconfig.json
 
 # -- Documentation (not needed at build time) ---------------------------------
 docs

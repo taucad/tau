@@ -292,7 +292,7 @@ test('should play, pause and reset the shipped PicoVoxel stage without remeshing
   // The selected component reveals its bound follower, using the same action as the viewer part menu.
   await target.click(selectors.getByRole('button', { name: 'Followers of Handwheel' }));
   await target.expectCount(slide, 0);
-  await openCommand('Open model structure');
+  await openCommand('Open model tree');
   const parts = selectors.getByRole('list', { name: 'Model components for main.ts' });
   const carriage = parts.getByRole('button', { name: 'Carriage', exact: true });
   await target.click(carriage);

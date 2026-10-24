@@ -28,6 +28,7 @@ import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
+
 import { gitLfsObjectKey } from '#api/git/git.constants.js';
 import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
@@ -40,6 +41,9 @@ import {
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
+
+// Real lifecycle lock interleavings live in publication-deletion.integration.test.ts.
+vi.mock('#database/project-lifecycle.js', () => ({ assertProjectActive: vi.fn() }));
 
 /**
  * The runner the API passes in, as a plain `spawnSync` so the suite exercises
@@ -279,7 +283,11 @@ const createPublicationDatabase = (
         execute: vi.fn(async () => undefined),
         /* The re-read under that lock, which one caller always wins. */
         select: vi.fn(() => ({
-          from: vi.fn(() => ({ where: vi.fn(() => ({ limit: vi.fn(async () => rows) })) })),
+          from: vi.fn(() => ({
+            where: vi.fn(() => ({
+              limit: vi.fn(async () => rows.map((row) => ({ ...row, unpublishedAt: row.unpublishedAt ?? null }))),
+            })),
+          })),
         })),
         insert: vi.fn(() => ({
           values: vi.fn((payload: Record<string, unknown>) => {

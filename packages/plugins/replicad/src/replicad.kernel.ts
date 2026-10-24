@@ -518,7 +518,9 @@ export const replicadKernel = defineKernel({
     'replicad-opencascadejs': { name: '@taulabs/replicad-opencascadejs', version: '0.23.0-beta.0' },
   },
   name: 'ReplicadKernel',
-  version: '1.4.0',
+  // 1.5.0: native-handle snapshots are binary BRep. The version keys every cached entry, so text
+  // snapshots from 1.4.0 stop matching and age out; there is nothing to migrate.
+  version: '1.5.0',
   optionsSchema: replicadOptionsSchema,
   views: {
     model: {
@@ -1227,15 +1229,23 @@ export const replicadKernel = defineKernel({
     });
   },
 
-  serializeHandle({ handle }, runtime) {
-    return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () => serializeReplicadHandle(handle));
+  serializeHandle({ handle }, runtime, context) {
+    return tracedStep(runtime.tracer, 'create.serializeNativeHandle', () =>
+      serializeReplicadHandle(handle, context.replicadLibrary),
+    );
   },
 
   deserializeHandle({ serialized }, _runtime, context): NativeHandle {
+    if (serialized.format !== replicadSnapshotFormat) {
+      throw new Error(`Unsupported replicad native-handle snapshot format: ${String(serialized.format)}`);
+    }
     return {
       ...serialized,
       shapes: serialized.shapes.map((entry) => ({
-        shape: context.replicadLibrary.deserializeShape(entry.brep),
+        shape:
+          'drawing' in entry
+            ? restoreDrawing(context.replicadLibrary, entry.drawing)
+            : readBinaryBrep(context.replicadLibrary, entry.brep),
         ...entry.metadata,
       })),
     };
@@ -1260,12 +1270,99 @@ const deleteExportCopies = (copies: ReadonlyArray<{ readonly shape: AnyShape }> 
   }
 };
 
-const serializeReplicadHandle = (nativeHandle: NativeHandle) => ({
+/* oxlint-disable new-cap -- OCCT exposes callable C++ PascalCase methods. */
+/** Binary BRep (`BinTools`) without triangulation; the kernel version keys it, so text snapshots age out. */
+const replicadSnapshotFormat = 'occt-bintools';
+let snapshotSequence = 0;
+
+/**
+ * Write one shape as binary BRep through MEMFS.
+ *
+ * The shipped binding cannot write binary without triangles: its six-argument `BinTools.Write` needs
+ * the unbound `BinTools_FormatVersion` enum. So the display triangulation a render cached on the
+ * live shape is dropped first. It is a cache, and the replicad mesher re-meshes on every render.
+ *
+ * @param library - The replicad library bound to this realm's OpenCASCADE instance.
+ * @param shape - The live shape to snapshot.
+ * @returns The binary BRep bytes.
+ */
+const writeBinaryBrep = (library: ReplicadLibrary, shape: AnyShape): Uint8Array<ArrayBuffer> => {
+  const oc = library.getOC();
+  const path = `/tmp/tau_replicad_native_handle_${++snapshotSequence}.bin`;
+  const progress = new oc.Message_ProgressRange();
+  try {
+    oc.BRepTools.Clean(shape.wrapped, false);
+    if (!oc.BinTools.Write(shape.wrapped, path, progress)) {
+      throw new Error('Replicad native-handle snapshot write failed.');
+    }
+    return new Uint8Array(oc.FS.readFile(path));
+  } finally {
+    progress.delete();
+    try {
+      oc.FS.unlink(path);
+    } catch {
+      // A failed write may leave no file; MEMFS cleanup is best-effort.
+    }
+  }
+};
+
+/**
+ * Restore one shape from binary BRep through MEMFS.
+ *
+ * @param library - The replicad library bound to this realm's OpenCASCADE instance.
+ * @param bytes - Binary BRep bytes written by {@link writeBinaryBrep}.
+ * @returns The restored shape.
+ */
+const readBinaryBrep = (library: ReplicadLibrary, bytes: Uint8Array<ArrayBuffer>): AnyShape => {
+  const oc = library.getOC();
+  const path = `/tmp/tau_replicad_native_handle_${++snapshotSequence}.bin`;
+  const progress = new oc.Message_ProgressRange();
+  const shape = new oc.TopoDS_Shape();
+  try {
+    oc.FS.writeFile(path, bytes);
+    if (!oc.BinTools.Read(shape, path, progress) || shape.IsNull()) {
+      throw new Error('Replicad native-handle snapshot read failed.');
+    }
+    return library.cast(shape);
+  } catch (error) {
+    shape.delete();
+    throw error;
+  } finally {
+    progress.delete();
+    try {
+      oc.FS.unlink(path);
+    } catch {
+      // MEMFS cleanup is best-effort.
+    }
+  }
+};
+
+/* oxlint-enable new-cap */
+
+/**
+ * Restore a drawing entry the way a fresh render input admits one.
+ * @param library - The realm's replicad library.
+ * @param serialized - The drawing's own serialisation.
+ * @returns The handle shape.
+ */
+const restoreDrawing = (library: ReplicadLibrary, serialized: string): AnyShape => {
+  const [entry] = normalizeRenderShapes(library.deserializeDrawing(serialized));
+  if (!entry) {
+    throw new Error('Replicad native-handle snapshot drawing is empty.');
+  }
+  return entry.shape;
+};
+
+const serializeReplicadHandle = (nativeHandle: NativeHandle, library: ReplicadLibrary) => ({
+  format: replicadSnapshotFormat,
   images: nativeHandle.images,
   textures: nativeHandle.textures,
   samplers: nativeHandle.samplers,
   shapes: nativeHandle.shapes.map((entry) => ({
-    brep: entry.shape.serialize(),
+    // A drawing has no native BRep; it keeps replicad's own serialisation.
+    ...(isDrawingShape(entry.shape)
+      ? { drawing: entry.shape.serialize() }
+      : { brep: writeBinaryBrep(library, entry.shape) }),
     metadata: {
       name: entry.name,
       color: entry.color,

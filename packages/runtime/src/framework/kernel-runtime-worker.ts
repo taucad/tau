@@ -458,8 +458,10 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           issues: [...(output.issues ?? [])],
           /* D12: the snapshot is an export artifact that no display render reads, and serialising a
            * Replicad or OpenCascade shape is not cheap — so it is produced where someone asks for
-           * it. The liveness check is load-bearing, not defensive: this thunk outlives the handle,
-           * and serialising a disposed kernel shape is a crash. */
+           * it: the cache's publication, which the runtime runs only once the worker is idle, or an
+           * export. It is not memoised here, so a published snapshot is not retained for the life of
+           * the evaluation. The liveness check is load-bearing, not defensive: this thunk outlives
+           * the handle, and serialising a disposed kernel shape is a crash. */
           serializeHandleSnapshot: () => {
             if (!this.isEvaluationSlotLive(slot)) {
               return undefined;

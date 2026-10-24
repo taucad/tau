@@ -29,6 +29,7 @@ import { isFunction } from '#utils/function.utils.js';
 import type { Handle } from '#types/matches.types.js';
 
 export const handle: Handle = {
+  title: 'Community',
   enableOverflowY: true,
 };
 

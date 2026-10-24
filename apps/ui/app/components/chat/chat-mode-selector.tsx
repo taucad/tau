@@ -157,7 +157,8 @@ export function ChatAgentModeControl({
       </Popover>
       <TooltipContent>
         <span className='flex items-center gap-1.5'>
-          {option.name}: {current.name}
+          {/* The trigger's own name (I6). */}
+          Mode: {current.name}
           <KeyShortcut variant='tooltip'>{formatKeyCombination(toggleModeKeyCombination)}</KeyShortcut>
         </span>
       </TooltipContent>

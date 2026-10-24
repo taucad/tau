@@ -36,6 +36,8 @@ const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ k
 export const meta: MetaFunction = () => [{ title: 'New project · Tau' }];
 
 export const handle: Handle = {
+  // Nested under `/projects`, so the phone bar shows "‹ Projects".
+  title: 'New project',
   // Mobile: section scrolls as one page. Desktop: route uses h-full flex + inner list scroll (see layout).
   enableOverflowY: true,
 };
@@ -274,7 +276,12 @@ export default function ProjectsNew(): React.JSX.Element {
                           setSelectedKernel(option.id);
                         }}
                       >
-                        <RadioGroupItem value={option.id} id={`mobile-${option.id}`} className='mt-1' />
+                        <RadioGroupItem
+                          value={option.id}
+                          aria-label={option.name}
+                          id={`mobile-${option.id}`}
+                          className='mt-1'
+                        />
                         <div className='min-w-0 flex-1'>
                           <AccordionTrigger
                             className={cn(
@@ -290,7 +297,7 @@ export default function ProjectsNew(): React.JSX.Element {
                                     {option.name}
                                     <KernelCommercialBadge kernelId={option.id} />
                                   </span>
-                                  <span className='font-mono text-xs text-muted-foreground/70'>
+                                  <span className='font-mono text-xs text-muted-foreground'>
                                     {option.backendProvider}
                                   </span>
                                 </div>
@@ -334,7 +341,12 @@ export default function ProjectsNew(): React.JSX.Element {
                           setSelectedKernel(option.id);
                         }}
                       >
-                        <RadioGroupItem value={option.id} id={`kernel-${option.id}`} className='mt-1' />
+                        <RadioGroupItem
+                          value={option.id}
+                          aria-label={option.name}
+                          id={`kernel-${option.id}`}
+                          className='mt-1'
+                        />
                         <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />
                         <div className='flex w-full min-w-0 flex-col gap-1'>
                           <div className='flex w-full items-start justify-between gap-2'>
@@ -342,7 +354,7 @@ export default function ProjectsNew(): React.JSX.Element {
                               {option.name}
                               <KernelCommercialBadge kernelId={option.id} />
                             </span>
-                            <span className='font-mono text-xs text-muted-foreground/70'>{option.backendProvider}</span>
+                            <span className='font-mono text-xs text-muted-foreground'>{option.backendProvider}</span>
                           </div>
                           <span className='text-xs leading-relaxed text-muted-foreground'>{option.description}</span>
                         </div>

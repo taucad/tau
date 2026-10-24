@@ -342,6 +342,19 @@ afterEach(() => {
 });
 
 describe('ChatExplorerTree', () => {
+  it('names the panel and its Close Model tree, as the Workbench does (EQ5, I6)', () => {
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: [],
+      viewSettings: {},
+      viewGraphics: new Map(),
+    });
+    renderExplorerTree();
+
+    expect(screen.getByText('Model tree')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Close Model tree' })).toBeInTheDocument();
+  });
+
   it('refuses a small GLB view backed by an oversized allocation before preview preparation', async () => {
     const digest = vi.spyOn(partThumbnailVisual, 'sourceGlbDigest');
     const prepare = vi.spyOn(partThumbnailVisual, 'canonicalPartPreviews');

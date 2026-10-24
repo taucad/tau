@@ -50,7 +50,7 @@ export type ModelComponentHostActions = Readonly<{
    * "Send to chat" or "Copy reference". "Add to chat" when absent.
    */
   addToChatLabel?: string;
-  /** "Reveal in Explorer": select the part and reveal it in the Model pane. Offered only in the viewer's menu. */
+  /** "Reveal in model tree": select the part and reveal it in the Model pane. Offered only in the viewer's menu. */
   revealInExplorer?: (target: ModelComponentActionTarget) => void;
   /**
    * "Show kinematics": open the Kinematics pane on the joint that moves the part. `componentId` is the part, or the

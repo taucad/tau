@@ -1,6 +1,6 @@
 {
   "name": "@taucad/warehouse",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "description": "Editable parametric mechanical parts with portable geometry specifications",
   "type": "module",
   "sideEffects": false,
@@ -58,8 +58,8 @@
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/cli": "workspace:*",
     "@taucad/esbuild": "workspace:*",
-    "@taucad/geospec-engine": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/replicad": "workspace:*",

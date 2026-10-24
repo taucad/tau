@@ -24,9 +24,18 @@ export type QueuedChatMessage = Readonly<{
   message: MyUIMessage;
   execution?: CadAgentExecution;
   command?: QueuedStartCommand;
+  commandPlacement?: string;
   steer?: QueuedCancelCommand;
 }>;
-export type ChatMessageQueueRecord = Readonly<{ version: 1; items: readonly QueuedChatMessage[]; afterRunId?: string }>;
+export type ChatMessageQueueRecord = Readonly<{
+  version: 1;
+  items: readonly QueuedChatMessage[];
+  afterRunId?: string;
+  /** Accepting connection key; absent is an unqualified older receipt. */
+  afterPlacement?: string;
+  /** Explicit destination allowed to continue an older, unqualified receipt. */
+  rebasedPlacement?: string;
+}>;
 export type QueueLock = <T>(name: string, task: () => Promise<T>) => Promise<T>;
 
 /** Domain transaction lock; actual file writes and notifications still use the filesystem authority. */
@@ -49,6 +58,7 @@ const itemSchema = z.strictObject({
   command: z
     .strictObject({ type: z.literal('start'), commandId: z.string(), payload: commandPayloads.start })
     .optional(),
+  commandPlacement: z.string().min(1).optional(),
   steer: z
     .strictObject({ type: z.literal('cancel'), commandId: z.string(), payload: commandPayloads.cancel })
     .optional(),
@@ -57,6 +67,8 @@ const recordSchema = z.strictObject({
   version: z.literal(1),
   items: z.array(itemSchema),
   afterRunId: z.string().min(1).optional(),
+  afterPlacement: z.string().min(1).optional(),
+  rebasedPlacement: z.string().min(1).optional(),
 });
 const emptyRecord: ChatMessageQueueRecord = { version: 1, items: [] };
 
@@ -110,7 +122,7 @@ export type ChatMessageQueueStore = {
     change: (item: QueuedChatMessage) => QueuedChatMessage | undefined,
   ): Promise<ChatMessageQueueRecord>;
   move(id: string, beforeId: string | undefined): Promise<ChatMessageQueueRecord>;
-  acknowledge(id: string, commandId: string): Promise<ChatMessageQueueRecord>;
+  acknowledge(id: string, commandId: string, placement?: string): Promise<ChatMessageQueueRecord>;
   remove(): Promise<void>;
 };
 export const createChatMessageQueueStore = (
@@ -186,13 +198,15 @@ export const createChatMessageQueueStore = (
           return { ...record, items };
         }),
       ),
-    acknowledge: async (id: string, commandId: string): Promise<ChatMessageQueueRecord> =>
+    acknowledge: async (id: string, commandId: string, placement?: string): Promise<ChatMessageQueueRecord> =>
       update((record) => {
         const item = record.items.find((entry) => entry.id === id);
         return item?.command?.commandId === commandId
           ? {
               ...record,
               afterRunId: item.command.payload.runId,
+              afterPlacement: placement,
+              rebasedPlacement: undefined,
               items: record.items.filter((entry) => entry.id !== id),
             }
           : record;

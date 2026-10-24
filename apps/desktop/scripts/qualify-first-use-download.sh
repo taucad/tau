@@ -15,7 +15,7 @@
 #   quarantine   `xattr -p com.apple.quarantine` exits non-zero on every store file
 #   ready        both workers evaluate a model to a GLB inside sandbox-exec (the model raises
 #                if the worker can open a socket, so success also shows the sandbox held)
-#   syspolicy    the unified log for the window shows no Gatekeeper prompt for the workers
+#   syspolicy    scoped worker logs show no denial; actual unscoped UI alerts fail closed
 #   negative     a quarantined clone of the store is refused; only observable with SIP on
 #                (GitHub-hosted runners report SIP disabled, ruling X19)
 #   golden       build123d's treeIntegrity and closureIntegrity equal tau-plugin.golden.json
@@ -44,9 +44,11 @@ fi
 [[ "$(uname -s)" == Darwin ]] || { echo "ERROR: macOS only" >&2; exit 3; }
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-TAU_APP="$(cd "$1" && pwd)"
+TAU_APP="$(cd "$1" && pwd -P)"
 mkdir -p "$2"
-OUT="$(cd "$2" && pwd)"
+OUT="$(cd "$2" && pwd -P)"
+EVIDENCE="$REPO_ROOT/apps/desktop/scripts/first-use-evidence.mts"
+ADDONS="$REPO_ROOT/apps/desktop/scripts/first-use-native-addons.mts"
 TAU_BIN="$TAU_APP/Contents/MacOS/Tau"
 CLI="$REPO_ROOT/packages/cli/dist/bin/tau.mjs"
 GOLDEN="$REPO_ROOT/packages/plugins/build123d/tau-plugin.golden.json"
@@ -62,12 +64,13 @@ if [[ -e "$STORE" ]]; then
   echo "ERROR: the store $STORE already exists; qualification starts from an empty store (set TAU_CONFIG_DIR)" >&2
   exit 2
 fi
-Q_CONFIG="$HOME/Library/Application Support/tau-w12-quarantined"
-rm -rf "$Q_CONFIG"
+Q_CONFIG="$(mktemp -d "$OUT/quarantined.XXXXXX")"
 
-# The CLI inside the notarised binary, as Node. The store comes from TAU_CONFIG_DIR or the default.
+# The CLI inside the notarised binary, as Node. The preload uses only matching release-signed
+# Sharp native code; checkout addons have another Team ID and cannot load in this hardened app.
+# The store comes from TAU_CONFIG_DIR or the default.
 tau() {
-  ELECTRON_RUN_AS_NODE=1 "$TAU_BIN" "$CLI" "$@"
+  ELECTRON_RUN_AS_NODE=1 "$TAU_BIN" --import "$ADDONS" "$CLI" "$@"
 }
 
 # A JSON field from the last JSON line of a file, or "" when absent.
@@ -83,13 +86,26 @@ field() {
   ' "$1" "$2"
 }
 
-CELLS="$OUT/cells.tsv"
+CELLS="$OUT/cells.jsonl"
 : >"$CELLS"
 cell() {
-  # name, verdict (PASS|FAIL|UNOBSERVABLE|RECORDED), detail
-  printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$CELLS"
+  # name, verdict (PASS|FAIL|UNOBSERVABLE), detail
+  node "$EVIDENCE" cell "$CELLS" "$1" "$2" "$3"
   printf '%s %s: %s\n' "$2" "$1" "$3"
 }
+
+finish() {
+  local status=$?
+  trap - EXIT
+  if [[ $status -ne 0 ]]; then printf 'Harness exited %s before normal completion.\n' "$status" >>"$OUT/harness-error.txt"; fi
+  rm -rf "$Q_CONFIG"
+  node "$EVIDENCE" summary "$OUT" "$ANNOTATE" || status=1
+  cat "$OUT/summary.md"
+  exit "$status"
+}
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 stamp() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -104,6 +120,8 @@ echo "→ host facts"
   echo "--- stapler"
   # xcrun opens an install dialog on a Mac without the developer tools.
   if xcode-select -p >/dev/null 2>&1; then xcrun stapler validate "$TAU_APP" 2>&1 || true; else echo "no developer tools"; fi
+  echo "--- codesign integrity"
+  codesign --verify --deep --strict "$TAU_APP" 2>&1
   echo "--- codesign"
   codesign -dv --verbose=2 "$TAU_APP" 2>&1 | grep -E '^(Identifier|Authority|TeamIdentifier|Timestamp|Runtime Version|Notarization Ticket)' || true
   echo "--- Tau.app quarantine: $(xattr -p com.apple.quarantine "$TAU_APP" 2>&1 || true)"
@@ -134,7 +152,7 @@ class Params:
 def main(params: Params):
     try:
         socket.create_connection(("1.1.1.1", 53), timeout=5).close()
-    except Exception:
+    except PermissionError:
         return Box(params.width, 20, 30)
     raise RuntimeError("worker egress allowed")
 PY
@@ -147,15 +165,10 @@ using PicoGK;
 try
 {
     using var client = new TcpClient();
-    if (client.ConnectAsync("1.1.1.1", 53).Wait(5000))
-    {
-        throw new InvalidOperationException("worker egress allowed");
-    }
+    client.Connect("1.1.1.1", 53);
+    throw new InvalidOperationException("worker egress allowed");
 }
-catch (AggregateException)
-{
-}
-catch (SocketException)
+catch (SocketException error) when (error.SocketErrorCode == SocketError.AccessDenied)
 {
 }
 
@@ -183,7 +196,8 @@ for kernel in build123d picogk; do
   download_detail+="$kernel exit $status, status '${readiness:-none}' in ${seconds} s, $(field "$OUT/prepare-$kernel.json" byteLength) bytes, closureIntegrity $(field "$OUT/prepare-$kernel.json" closureIntegrity); "
   tail -5 "$OUT/prepare-$kernel.stderr.txt" || true
 done
-closures=$(find "$STORE/closures" -mindepth 2 -maxdepth 2 -type d 2>/dev/null | wc -l | tr -d ' ')
+closures=0
+if [[ -d "$STORE/closures" ]]; then closures=$(find "$STORE/closures" -mindepth 2 -maxdepth 2 -type d | wc -l | tr -d ' '); fi
 download_detail+="sealed closures in the store: $closures"
 cell download "$($download_ok && echo PASS || echo FAIL)" "$download_detail"
 
@@ -220,8 +234,9 @@ cell quarantine "$verdict" "$files store files probed, $quarantined carry com.ap
 # runs. sandbox-exec applies the profile and then executes the worker in its own process, so the
 # worker's parent is the process that spawned sandbox-exec.
 sample() {
+  local parent=$1
   while :; do
-    ps -axo pid=,ppid=,command= | grep -E 'python3|dotnet|Tau.PicoGK' | grep -v grep | while read -r pid ppid command; do
+    ps -axo pid=,ppid=,command= | awk -v parent="$parent" '$2 == parent' | while read -r pid ppid command; do
       printf '%s pid %s parent %s (%s): %s\n' "$(date +%T)" "$pid" "$ppid" "$(ps -o comm= -p "$ppid" 2>/dev/null || echo gone)" "$command"
     done || true
     sleep 0.2
@@ -230,14 +245,14 @@ sample() {
 export_model() {
   # label, config dir, model file, glb
   local label=$1 config=$2 model=$3 glb=$4 status
-  sample >"$OUT/ps-$label.txt" 2>/dev/null &
-  local sampler=$!
-  local started
+  local started tau_pid sampler
   started=$(date +%s)
-  set +e
-  TAU_CONFIG_DIR="$config" tau export "$model" --ext glb --output "$glb" --json >"$OUT/export-$label.json" 2>"$OUT/export-$label.stderr.txt"
-  status=$?
-  set -e
+  TAU_CONFIG_DIR="$config" ELECTRON_RUN_AS_NODE=1 "$TAU_BIN" --import "$ADDONS" "$CLI" export "$model" --ext glb --output "$glb" --json >"$OUT/export-$label.json" 2>"$OUT/export-$label.stderr.txt" &
+  tau_pid=$!
+  sample "$tau_pid" >"$OUT/ps-$label.txt" 2>/dev/null &
+  sampler=$!
+  status=0
+  wait "$tau_pid" || status=$?
   kill "$sampler" 2>/dev/null || true
   wait "$sampler" 2>/dev/null || true
   echo "$status $(($(date +%s) - started))"
@@ -262,33 +277,19 @@ cell ready "$($ready_ok && echo PASS || echo FAIL)" "${ready_detail}each model r
 # --- syspolicyd -----------------------------------------------------------------------------
 echo "→ unified log for $WINDOW_START .. $WINDOW_END"
 sleep 2
+log_status=0
 /usr/bin/log show --start "$WINDOW_START" --end "$(stamp)" --info --debug --style compact \
   --predicate 'subsystem BEGINSWITH "com.apple.syspolicy" OR process == "syspolicyd" OR process == "CoreServicesUIAgent"' \
-  >"$OUT/syspolicy-log.txt" 2>&1 || true
-log_lines=$(grep -vc '^Timestamp' "$OUT/syspolicy-log.txt" || true)
-# The log redacts paths as <private>, so lines are tied to the run by process id: the workers and
-# their Tau parents, as the sampler saw them.
-pids=$(cat "$OUT"/ps-build123d.txt "$OUT"/ps-picogk.txt 2>/dev/null | awk '{ print $3; print $5 }' | sort -u | tr '\n' ' ')
-pid_pattern=$(printf '%s\n' $pids | sed 's/.*/(pid |\\[)&([^0-9]|$)/' | paste -sd'|' -)
-{
-  [[ -z "$pid_pattern" ]] || grep -E "$pid_pattern" "$OUT/syspolicy-log.txt" || true
-  grep -E 'python3|dotnet|Tau\.PicoGK|picogk|/payloads/|Tau\.app' "$OUT/syspolicy-log.txt" || true
-} | sort -u >"$OUT/syspolicy-excerpt.txt"
-grep -E ' CoreServicesUIAgent\[' "$OUT/syspolicy-log.txt" >"$OUT/coreservicesuiagent.txt" || true
-ui_agent=$(wc -l <"$OUT/coreservicesuiagent.txt" | tr -d ' ')
-ui_prompts=$(grep -ciE 'gatekeeper|GK|quarantin|prompt|alert|malware|unidentified|verify' "$OUT/coreservicesuiagent.txt" || true)
-prompts=$(grep -ciE 'prompt|user override|denied|reject|not allowed|malware|blocked' "$OUT/syspolicy-excerpt.txt" || true)
-assessments=$(grep -ciE 'assess|evaluat|scan|GK ' "$OUT/syspolicy-log.txt" || true)
-verdict=FAIL
-if [[ "$ui_prompts" -eq 0 && "$prompts" -eq 0 ]]; then verdict=PASS; fi
-cell syspolicy "$verdict" "$log_lines syspolicy log lines in the window, $(wc -l <"$OUT/syspolicy-excerpt.txt" | tr -d ' ') name the app, a worker or one of their pids ($pids), $prompts of those prompt, deny or reject; lines that mention an assessment, evaluation or scan: $assessments; CoreServicesUIAgent lines $ui_agent, of them about Gatekeeper, quarantine or a prompt $ui_prompts"
+  >"$OUT/syspolicy-log.txt" 2>&1 || log_status=$?
+node "$EVIDENCE" policy "$OUT" "$TAU_APP" "$STORE" "$log_status"
 
 # --- Quarantined copy -----------------------------------------------------------------------
 echo "→ quarantined clone of the store"
 mkdir -p "$Q_CONFIG"
 cp -c -R "$STORE" "$Q_CONFIG/payloads"
 xattr -r -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" "$Q_CONFIG/payloads"
-q_marked=$(find "$Q_CONFIG/payloads" -type f -path '*/bin/python3*' -print0 | xargs -0 -n 1 xattr -p com.apple.quarantine 2>/dev/null | head -1)
+q_helper=$(find "$Q_CONFIG/payloads" -type f -path '*/bin/python3*' -print -quit)
+q_marked=$(xattr -p com.apple.quarantine "$q_helper")
 Q_START="$(stamp)"
 negative_detail="quarantine set ('$q_marked'); "
 refused=0
@@ -298,7 +299,12 @@ for pair in build123d:py picogk:cs; do
   read -r status seconds < <(export_model "q-$kernel" "$Q_CONFIG" "$MODELS/$ext/main.$ext" "$OUT/q-$kernel.glb")
   message=$(field "$OUT/export-q-$kernel.json" message)
   [[ -n "$message" ]] || message=$(tail -1 "$OUT/export-q-$kernel.stderr.txt" 2>/dev/null || true)
-  if [[ $status -ne 0 ]]; then refused=$((refused + 1)); fi
+  # A module-load or argument failure is not a successful quarantine refusal.
+  if [[ $status -ne 0 && ! -s "$OUT/q-$kernel.glb" && "$(field "$OUT/export-q-$kernel.json" code)" == RUNTIME ]]; then
+    if [[ "$message" == *"Build123d Python exited (SIGKILL)."* || "$message" == *"PicoGK C# exited (130)."* ]]; then
+      refused=$((refused + 1))
+    fi
+  fi
   negative_detail+="$kernel exit $status in ${seconds} s, message '${message:0:300}'; "
 done
 sleep 2
@@ -322,47 +328,6 @@ verdict=FAIL
 if [[ -n "$tree" && "$tree" == "$golden_tree" && "$closure" == "$golden_closure" ]]; then verdict=PASS; fi
 cell golden "$verdict" "build123d treeIntegrity $tree (golden $golden_tree), closureIntegrity $closure (golden $golden_closure); picogk treeIntegrity $(field "$OUT/prepare-picogk.json" treeIntegrity), closureIntegrity $(field "$OUT/prepare-picogk.json" closureIntegrity) (no PicoGK golden is checked in)"
 
-# --- Summary --------------------------------------------------------------------------------
-node -e '
-  const fs = require("node:fs");
-  const [cellsPath, out, annotate] = process.argv.slice(1);
-  const cells = fs.readFileSync(cellsPath, "utf8").trim().split("\n").map((line) => {
-    const [name, verdict, ...detail] = line.split("\t");
-    return { name, verdict, detail: detail.join("\t") };
-  });
-  fs.writeFileSync(`${out}/cells.json`, `${JSON.stringify(cells, undefined, 2)}\n`);
-  const md = ["| Cell | Verdict | Detail |", "| --- | --- | --- |", ...cells.map((c) => `| ${c.name} | ${c.verdict} | ${c.detail.replaceAll("|", "\\|")} |`)];
-  fs.writeFileSync(`${out}/summary.md`, `${md.join("\n")}\n`);
-  const escape = (text) => text.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-  if (annotate === "1") {
-    console.log(`::notice title=W12 host facts::${escape(fs.readFileSync(`${out}/host-facts.txt`, "utf8").slice(0, 3800))}`);
-    console.log(`::notice title=W12 cells::${escape(cells.map((c) => `${c.verdict} ${c.name}: ${c.detail}`).join("\n").slice(0, 3800))}`);
-    const xattr = fs.readFileSync(`${out}/xattr-helpers.txt`, "utf8");
-    console.log(`::notice title=W12 xattr listing::${escape(xattr.slice(0, 3800))}`);
-    const excerpt = fs.readFileSync(`${out}/syspolicy-excerpt.txt`, "utf8");
-    const log = fs.readFileSync(`${out}/syspolicy-log.txt`, "utf8");
-    const noise = /com\.apple\.xpc|CoreFoundation|CoreAnalytics|looking up ticket|completing lookup/;
-    const notable = log.split("\n").filter((l) => !noise.test(l)).slice(0, 20).join("\n");
-    const agent = fs.readFileSync(`${out}/coreservicesuiagent.txt`, "utf8").split("\n").slice(0, 10).join("\n");
-    console.log(`::notice title=W12 log show excerpt::${escape(`--- lines naming the app, a worker or their pids ---\n${excerpt.split("\n").slice(0, 15).join("\n")}\n--- CoreServicesUIAgent ---\n${agent}\n--- the window without xpc, prefs and ticket-lookup lines ---\n${notable}`.slice(0, 3800))}`);
-    const negative = fs.readFileSync(`${out}/syspolicy-log-quarantined.txt`, "utf8");
-    console.log(`::notice title=W12 quarantined-copy log::${escape(negative.split("\n").filter((l) => /python3|dotnet|PicoGK|payloads|quarantin|reject|deny/i.test(l)).slice(0, 25).join("\n").slice(0, 3800) || "no matching lines")}`);
-    const sampled = (k) => (fs.existsSync(`${out}/ps-${k}.txt`) ? fs.readFileSync(`${out}/ps-${k}.txt`, "utf8") : "");
-    const ps = ["build123d", "picogk"].map((k) => `## ${k}\n${[...new Set(sampled(k).split("\n").filter(Boolean).map((l) => l.replace(/^\S+ /, "")))].slice(0, 8).join("\n")}`).join("\n");
-    console.log(`::notice title=W12 worker processes::${escape(ps.slice(0, 3800))}`);
-    if (cells.some((c) => c.verdict === "FAIL")) {
-      const tails = fs.readdirSync(out).filter((f) => f.endsWith(".stderr.txt")).map((f) => `## ${f}\n${fs.readFileSync(`${out}/${f}`, "utf8").split("\n").slice(-12).join("\n")}`).join("\n");
-      console.log(`::warning title=W12 stderr tails::${escape(tails.slice(-3800))}`);
-    }
-    for (const c of cells.filter((c) => c.verdict === "FAIL")) {
-      console.log(`::error title=W12 ${c.name}::${escape(c.detail.slice(0, 3800))}`);
-    }
-  }
-' "$CELLS" "$OUT" "$ANNOTATE"
-cat "$OUT/summary.md"
-
-if grep -q $'\tFAIL\t' "$CELLS"; then
-  echo "W12 qualification failed" >&2
-  exit 1
-fi
+# The EXIT trap writes a structured report even if a prerequisite or command failed mid-run.
+node "$EVIDENCE" summary "$OUT" 0
 echo "✓ W12 qualification: every observable cell passed"

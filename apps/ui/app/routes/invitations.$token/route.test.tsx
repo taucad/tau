@@ -107,7 +107,13 @@ describe('AcceptInvitation', () => {
        reads its role from. Dropping it made the opened project's Sync region
        ask again from scratch, which is a frame with no role at all. */
     expect(queryClient.getQueryData(['cloud-projects', 'user_1'])).toStrictEqual([
-      { id: 'proj_shared00000000000000', name: 'Shared Housing', role: 'write' },
+      {
+        id: 'proj_shared00000000000000',
+        name: 'Shared Housing',
+        role: 'write',
+        canDeleteCloud: false,
+        cloudState: 'active',
+      },
     ]);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://api.test/v1/invitations/tok_abcdef',

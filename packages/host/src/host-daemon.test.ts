@@ -1563,39 +1563,152 @@ describe('startHostDaemon', () => {
     expect(await daemon.closed).toEqual({ cause: 'requested' });
   }, 30_000);
 
+  it.each([
+    {
+      relayEnabled: false,
+      paired: false,
+      session: 'cli-account-session',
+      expected: 'Bearer cli-account-session',
+      mode: 'session',
+    },
+    {
+      relayEnabled: false,
+      paired: true,
+      session: 'cli-account-session',
+      expected: 'Bearer cli-account-session',
+      mode: 'session',
+    },
+    { relayEnabled: false, paired: false, session: undefined, expected: undefined, mode: 'unpaired' },
+    {
+      relayEnabled: false,
+      paired: true,
+      session: undefined,
+      expected: 'Bearer paired-device-credential-with-32-characters',
+      mode: 'paired',
+    },
+    {
+      relayEnabled: true,
+      paired: true,
+      session: 'cli-account-session',
+      expected: 'Bearer paired-device-credential-with-32-characters',
+      mode: 'paired',
+    },
+  ])(
+    'should authenticate model requests for relay=$relayEnabled paired=$paired with session=$session',
+    async ({ relayEnabled, paired, session, expected, mode }) => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-model-auth-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      if (paired) {
+        await writeHostCredential({
+          v: 1,
+          deviceId: 'device-1',
+          credential: 'paired-device-credential-with-32-characters',
+        });
+      }
+      const requests: Array<{ path: string | undefined; authorization: string | undefined }> = [];
+      const gateway = createServer((request, response) => {
+        requests.push({ path: request.url, authorization: request.headers.authorization });
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({ code: 'UNAUTHENTICATED', message: 'Fixture response after inspecting authorization.' }),
+        );
+      });
+      resources.push(gateway);
+      await new Promise<void>((resolve) => {
+        gateway.listen(0, '127.0.0.1', resolve);
+      });
+      const address = gateway.address();
+      if (!address || typeof address === 'string') {
+        throw new TypeError('Expected a TCP gateway address.');
+      }
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: relayEnabled,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(temporaryDirectory)),
+          tauApiToken: session,
+          gatewayBaseUrl: `http://127.0.0.1:${String(address.port)}`,
+        },
+      });
+      try {
+        await daemon.ready;
+        const project = projectHostSpy.mock.calls.at(-1)?.[0];
+        if (!project) {
+          throw new TypeError('Expected the daemon to open a project host.');
+        }
+        expect(project.credential()).toMatchObject({ mode });
+        const stream = project.modelTransport.stream({
+          attemptId: 'attempt-model-auth',
+          invocationPurpose: 'generation',
+          modelId: 'fixture-model',
+          providerKind: 'vertexai',
+          systemPrompt: 'Reply briefly.',
+          messages: [{ id: 'user-1', role: 'user', content: 'Hello' }],
+          tools: [],
+          signal: AbortSignal.timeout(10_000),
+        });
+        const consume = async () => {
+          const events = [];
+          for await (const event of stream) {
+            events.push(event);
+          }
+          return events;
+        };
+        await expect(consume()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+        expect(requests).toEqual([{ path: '/v1/llm/openai/v1/chat/completions', authorization: expected }]);
+      } finally {
+        await daemon.close();
+      }
+    },
+    30_000,
+  );
+
   /* W6.r1 round 3 (GI-Q6): the account the pairing exchange returned, stored with the credential, is the principal
    * the daemon's credential port and its funded transport name. */
-  it('should name the stored account as the principal of its credential and funded transport', async () => {
-    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-principal-'));
-    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
-    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
-    const relay = await startRelay();
-    await writeHostCredential({
-      v: 1,
-      deviceId: 'device-1',
-      credential: 'secret-credential-value-that-never-enters-a-url',
-      accountId: 'account-1',
-    });
-    projectHostSpy.mockClear();
-    const daemon = startHostDaemon({
-      relayUrl: relay.url,
-      runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
-      agent: { ...(await agentOptionsIn(temporaryDirectory)), tauCloudEnabled: true },
-    });
-    await daemon.ready;
-    const options = projectHostSpy.mock.calls.at(-1)?.[0];
-    if (options === undefined) {
-      throw new TypeError('Expected the daemon to open a project host.');
-    }
+  it.each([true, false])(
+    'should name the stored account as the funded principal with relay=%s',
+    async (relayEnabled) => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-principal-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      await writeHostCredential({
+        v: 1,
+        deviceId: 'device-1',
+        credential: 'secret-credential-value-that-never-enters-a-url',
+        accountId: 'account-1',
+      });
+      projectHostSpy.mockClear();
+      const daemon = startHostDaemon({
+        relayUrl: relay.url,
+        relay: relayEnabled,
+        runtimeHost: { modulePath: fileURLToPath(new URL('fixtures/runtime-host-proof-child.mjs', import.meta.url)) },
+        agent: {
+          ...(await agentOptionsIn(temporaryDirectory)),
+          tauCloudEnabled: true,
+          tauApiToken: 'other-account-session',
+        },
+      });
+      await daemon.ready;
+      const options = projectHostSpy.mock.calls.at(-1)?.[0];
+      if (options === undefined) {
+        throw new TypeError('Expected the daemon to open a project host.');
+      }
 
-    await vi.waitFor(() => {
-      expect(options.credential()).toMatchObject({ mode: 'paired', principal: 'account-1' });
-    });
-    const { funding } = options.modelTransport as { readonly funding?: { principal: () => Promise<unknown> } };
-    await expect(funding?.principal()).resolves.toBe('account-1');
+      await vi.waitFor(() => {
+        expect(options.credential()).toMatchObject({ mode: 'paired', principal: 'account-1' });
+      });
+      const { funding } = options.modelTransport as { readonly funding?: { principal: () => Promise<unknown> } };
+      await expect(funding?.principal()).resolves.toBe('account-1');
 
-    await daemon.close();
-  }, 30_000);
+      await daemon.close();
+    },
+    30_000,
+  );
 
   it('should bind the runtime child a masked view and keep the revisions filesystem raw', async () => {
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-runtime-view-'));

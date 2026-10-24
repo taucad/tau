@@ -432,6 +432,25 @@
           "TAU_E2E_API_SELF_HOST": "true"
         }
       }
+    },
+    "test:deletion": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "metadata": {
+        "description": "Cloud deletion in a completed signed desktop artifact and fresh browser/CLI clients. Requires explicitly isolated external services and already-built artifacts; does not start shared Compose or rebuild."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.config.ts src/project-deletion.spec.ts --maxWorkers=2",
+        "env": {
+          "TAU_E2E_COMPLETED_ARTIFACT": "true",
+          "TAU_E2E_EXTERNAL_SERVICES": "true",
+          "TAU_E2E_COMPLETED_CLOUD_GATEWAY": "true",
+          "TAU_E2E_DESKTOP_CLOUD_ENABLED": "true",
+          "TAU_E2E_BUILT_CLI": "true"
+        }
+      }
     }
   }
 }

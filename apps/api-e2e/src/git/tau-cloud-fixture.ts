@@ -38,20 +38,61 @@ const assertTestEmail = (email: string): void => {
   }
 };
 
+/** Explicit fixture coordinates must travel together so SQL and the API cannot select different servers. */
+const isolatedPostgres = async (): Promise<{ container: string; user: string; database: string }> => {
+  const container = process.env['TAU_E2E_POSTGRES_CONTAINER'];
+  const user = process.env['TAU_E2E_POSTGRES_USER'];
+  const database = process.env['TAU_E2E_POSTGRES_DATABASE'];
+  if (!container && !user && !database) {
+    return { container: 'tau-postgres', user: 'dev_user', database: localDatabaseName() };
+  }
+  if (
+    !container ||
+    !user ||
+    !database ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u.test(container) ||
+    !/^[a-zA-Z][a-zA-Z0-9_]*$/u.test(user) ||
+    !/^[a-zA-Z][a-zA-Z0-9_]*$/u.test(database)
+  ) {
+    throw new Error('Git E2E PostgreSQL overrides require container, user and database together.');
+  }
+  const connection = process.env['DATABASE_URL'];
+  if (!connection) {
+    throw new Error('Git E2E PostgreSQL overrides require DATABASE_URL.');
+  }
+  const url = new URL(connection);
+  if (
+    !['127.0.0.1', 'localhost'].includes(url.hostname) ||
+    !url.port ||
+    url.port === '5432' ||
+    decodeURIComponent(url.username) !== user ||
+    decodeURIComponent(url.pathname.slice(1)) !== database ||
+    container === 'tau-postgres'
+  ) {
+    throw new Error('Git E2E PostgreSQL overrides must match a dedicated alternate-port DATABASE_URL.');
+  }
+  const { stdout } = await execFileAsync('docker', ['port', container, '5432/tcp'], { encoding: 'utf8' });
+  if (!stdout.trim().split('\n').includes(`127.0.0.1:${url.port}`)) {
+    throw new Error('Git E2E PostgreSQL container does not own the configured loopback port.');
+  }
+  return { container, user, database };
+};
+
 const psql = async (statement: string): Promise<string> => {
+  const target = await isolatedPostgres();
   const { stdout } = await execFileAsync(
     'docker',
     [
       'exec',
-      'tau-postgres',
+      target.container,
       'psql',
       '-qtAX',
       '-v',
       'ON_ERROR_STOP=1',
       '-U',
-      'dev_user',
+      target.user,
       '-d',
-      localDatabaseName(),
+      target.database,
       '-c',
       statement,
     ],
@@ -130,7 +171,7 @@ export const seedTauCloudOwner = async (label: string): Promise<TauCloudOwner> =
   await execFileAsync(
     process.execPath,
     [
-      '--env-file-if-exists=apps/api/.env',
+      ...(process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true' ? [] : ['--env-file-if-exists=apps/api/.env']),
       '--import',
       '@oxc-node/core/register',
       'apps/api/app/testing/development-billing-account.ts',
@@ -261,7 +302,7 @@ export const deleteTauCloudOwner = async (owner: TauCloudOwner): Promise<void> =
     await execFileAsync(
       process.execPath,
       [
-        '--env-file-if-exists=apps/api/.env',
+        ...(process.env['TAU_E2E_COMPLETED_ARTIFACT'] === 'true' ? [] : ['--env-file-if-exists=apps/api/.env']),
         '--import',
         '@oxc-node/core/register',
         'apps/api/app/testing/development-billing-account.ts',

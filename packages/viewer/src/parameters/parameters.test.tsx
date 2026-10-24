@@ -1275,8 +1275,8 @@ describe('Parameters - Search Highlighting', () => {
     const networkField = screen.getByLabelText('Parameter: Network Name');
     expect(networkField).toBeTruthy();
 
-    // Should have highlighted text - use within() to scope queries and aria-label
-    const highlight = within(networkField).getByLabelText('Highlighted: Network');
+    // Should have highlighted text - use within() to scope the semantic mark
+    const highlight = within(networkField).getByText('Network', { selector: 'mark' });
     expect(highlight).toBeTruthy();
     expect(highlight).toHaveTextContent('Network');
   });
@@ -1325,8 +1325,8 @@ describe('Parameters - Search Highlighting', () => {
     });
     expect(description).toBeTruthy();
 
-    // Should have highlighted text in description - use within() to scope queries and aria-label
-    const highlight = within(description).getByLabelText('Highlighted: server');
+    // Should have highlighted text in description - use within() to scope the semantic mark
+    const highlight = within(description).getByText('server', { selector: 'mark' });
     expect(highlight).toBeTruthy();
     expect(highlight).toHaveTextContent('server');
   });
@@ -1372,9 +1372,9 @@ describe('Parameters - Search Highlighting', () => {
     const group = screen.getByLabelText('Group: Configuration');
     expect(group).toBeTruthy();
 
-    // Should have highlighted text in group title - use within() to scope queries and aria-label
+    // Should have highlighted text in group title - use within() to scope the semantic mark
     // Search term "config" matches "Config" in "Configuration" (case-insensitive)
-    const highlight = within(group).getByLabelText('Highlighted: Config');
+    const highlight = within(group).getByText('Config', { selector: 'mark' });
     expect(highlight).toBeTruthy();
     expect(highlight.textContent.toLowerCase()).toBe('config');
   });

@@ -385,7 +385,7 @@ test('keeps the live camera and canvas when only workbench tabs change', async (
   );
   const modelTab = selectors.getByCss('.dv-tab[data-tab-panel-id="workbench:model"]');
   await target.expectVisible(modelTab, 60_000);
-  expect(await target.textContent(modelTab.getByCss('.dockview-tab-title'))).toBe('Model');
+  expect(await target.textContent(modelTab.getByCss('.dockview-tab-title'))).toBe('Model tree');
   const identity = await target.evaluate(() => {
     const scope = globalThis as typeof globalThis & {
       __TAU_SECTION_VIEW_TEST__?: { getViewportCanvas(): HTMLCanvasElement };

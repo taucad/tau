@@ -243,9 +243,27 @@ describe('PicoVoxel dual path through the runtime', () => {
       }),
       files: { 'main.ts': model },
     });
+    // A build publishes, with its native-handle snapshot, once the worker is idle after delivery.
+    const published: string[] = [];
+    client.on('telemetry', ({ entries }) => {
+      for (const entry of entries) {
+        if (entry.name === 'kernel.compute.publication' && entry.detail?.['status'] === 'stored') {
+          published.push(entry.name);
+        }
+      }
+    });
+    const settled = async (count: number) =>
+      vi.waitFor(() => {
+        expect(published.length).toBeGreaterThanOrEqual(count);
+      });
     try {
       const fast = await render(client);
+      // The fast lane's build and mesh.
+      await settled(2);
       const exact = await render(client, 'exact');
+      // The exact build: the lane switch disposes the fast lane's handle, so each build must publish
+      // while it is current. A revisited mesh still queued publishes before its lookup.
+      await settled(3);
       const fastAgain = await render(client);
       const exactAgain = await render(client, 'exact');
 

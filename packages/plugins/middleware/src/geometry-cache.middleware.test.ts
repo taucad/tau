@@ -139,8 +139,8 @@ describe('geometryCache', () => {
       }
       expect(encoded.content).toHaveLength(1);
       expect(hash).toHaveBeenCalledOnce();
-      expect(cloneCalls).toBe(2); // Codec capture and existing digestContent's defensive hash input copy.
-      expect(copiedBytes).toBe(2 * bytes.byteLength);
+      expect(cloneCalls).toBe(1); // The codec's one capture; WebCrypto copies its own hash input.
+      expect(copiedBytes).toBe(bytes.byteLength);
       // oxlint-disable-next-line new-cap -- Retain the native constructor while instrumenting the global.
       const large = new original(32 * 1024 * 1024);
       hash.mockClear();
@@ -150,8 +150,8 @@ describe('geometryCache', () => {
         codec.encode({ value: { ...reusableBuild(), serializedHandle: [large, large, large] }, signal }),
       ).rejects.toThrow('ownership budget');
       expect(hash).toHaveBeenCalledOnce();
-      expect(cloneCalls).toBe(2);
-      expect(copiedBytes).toBe(64 * 1024 * 1024);
+      expect(cloneCalls).toBe(1);
+      expect(copiedBytes).toBe(32 * 1024 * 1024);
     } finally {
       vi.unstubAllGlobals();
       hash.mockRestore();
@@ -172,8 +172,8 @@ describe('geometryCache', () => {
       const restored = z.object({ serializedHandle: z.array(z.instanceof(original)) }).parse(decoded);
       expect(readContent).toHaveBeenCalledOnce();
       expect(hashDecode).toHaveBeenCalledOnce();
-      expect(cloneCalls).toBe(4); // One validation capture, one hash input and two independent result slots.
-      expect(copiedBytes).toBe(4 * small.byteLength);
+      expect(cloneCalls).toBe(3); // One validation capture and two independent result slots.
+      expect(copiedBytes).toBe(3 * small.byteLength);
       restored.serializedHandle[0]![0] = 99;
       expect([...restored.serializedHandle[1]!]).toEqual([1, 2, 3]);
       expect([...small]).toEqual([1, 2, 3]);
@@ -357,6 +357,22 @@ describe('geometryCache', () => {
       expect([...second.data.content]).toEqual([7, 8, 9]);
     }
     expect(runtime.tracer.startSpan).toHaveBeenCalledWith('cache.geometry.mesh.evaluate');
+  });
+
+  it('should hash a published display mesh once as its producer and once at the store', async () => {
+    const runtime = createMockRuntime();
+    const glb = new Uint8Array(12_345).fill(5);
+    const handler = vi.fn(async () => successfulRender({ mimeType: 'model/gltf-binary', content: glb }));
+    const input = { view: 'model', mimeType: 'model/gltf-binary', options: { tolerance: 0.1 } };
+    const hash = vi.spyOn(globalThis.crypto.subtle, 'digest');
+    try {
+      await middleware.wrapRender!(input, handler, runtime);
+      const meshHashes = hash.mock.calls.filter(([, data]) => (data as ArrayBufferView).byteLength === glb.byteLength);
+      // The codec's one owned copy is hashed once; the store, its own trust boundary here, verifies once.
+      expect(meshHashes).toHaveLength(2);
+    } finally {
+      hash.mockRestore();
+    }
   });
 
   it('keeps nonbinary string display content inline and exactly reusable', async () => {

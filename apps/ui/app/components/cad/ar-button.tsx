@@ -1,35 +1,14 @@
 import { memo } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Scan } from 'lucide-react';
 import type { Artifact, RuntimeDocument } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { useAr } from '#components/cad/use-ar.js';
-import { cn } from '@taucad/ui/utils/cn';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
-function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
-  return (
-    <svg
-      xmlns='http://www.w3.org/2000/svg'
-      viewBox='0 0 24 24'
-      fill='none'
-      stroke='currentColor'
-      strokeWidth={2}
-      strokeLinecap='round'
-      strokeLinejoin='round'
-      className={className}
-    >
-      {/* Viewfinder corners */}
-      <path d='M3 7V5a2 2 0 0 1 2-2h2' />
-      <path d='M17 3h2a2 2 0 0 1 2 2v2' />
-      <path d='M21 17v2a2 2 0 0 1-2 2h-2' />
-      <path d='M7 21H5a2 2 0 0 1-2-2v-2' />
-      {/* 3D cube */}
-      <path d='m12 7 4 2.5v5L12 17l-4-2.5v-5Z' />
-      <path d='m12 7 0 5' />
-      <path d='m12 12 4 2.5' />
-      <path d='m12 12-4 2.5' />
-    </svg>
-  );
+/** Shared AR glyph for the launch button and proposed grouped controls. */
+export function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
+  return <Scan aria-hidden className={className} />;
 }
 
 export const ArButton = memo(function ({
@@ -48,15 +27,35 @@ export const ArButton = memo(function ({
     return undefined;
   }
 
-  return (
-    <Button
-      variant='overlay'
-      size='icon'
-      className={cn('size-10 rounded-xl shadow-md', className)}
-      disabled={isConverting}
-      onClick={activateAr}
-    >
-      {isConverting ? <Loader2 className='size-5 spin-glyph' /> : <ArIcon className='size-5' />}
-    </Button>
-  );
+  return <ArControl isPreparing={isConverting} onActivate={activateAr} className={className} />;
 });
+
+/** AR presentation shared by the capability-gated host and the review canvas. */
+export function ArControl({
+  isPreparing = false,
+  onActivate,
+  className,
+}: {
+  readonly isPreparing?: boolean;
+  readonly onActivate: () => void;
+  readonly className?: string;
+}): React.JSX.Element {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant='ghost'
+          size='icon-sm'
+          className={className}
+          aria-label={isPreparing ? 'Preparing view in your space' : 'View in your space'}
+          aria-busy={isPreparing}
+          disabled={isPreparing}
+          onClick={onActivate}
+        >
+          {isPreparing ? <Loader2 className='size-4 spin-glyph' /> : <ArIcon className='size-4' />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>View in your space</TooltipContent>
+    </Tooltip>
+  );
+}

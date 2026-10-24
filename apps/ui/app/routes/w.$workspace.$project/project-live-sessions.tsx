@@ -230,9 +230,10 @@ function ProjectSessionBinding({
       const execution = stored?.activeExecution ?? fallback;
       const daemonHostId = daemonPlacementOf(execution);
       if (daemonHostId !== undefined) {
-        return createAgentHostClient(
-          createDaemonAgentHostTransport(async () => dialExecutionHost(execution, projectId)),
-        );
+        return {
+          ...createAgentHostClient(createDaemonAgentHostTransport(async () => dialExecutionHost(execution, projectId))),
+          placement: { hostId: daemonHostId },
+        };
       }
       if (execution.kind !== 'tau') {
         throw new Error(`Chat ${chatId} has no readable host placement.`);
@@ -304,7 +305,7 @@ function ProjectSessionBinding({
       } as const;
       const hostClient = createBrowserAgentHostClient(options);
       browserHostRelease.current ??= { projectId, release: retainBrowserAgentHostProject(options) };
-      return hostClient;
+      return { ...hostClient, placement: { hostId: daemonHostId } };
     };
     const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
       const stored = await chatSessions.getChatHostSettings(chatId);

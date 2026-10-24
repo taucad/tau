@@ -5,6 +5,7 @@ import { PublicationsModule } from '#api/publications/publications.module.js';
 import { ProjectPreviewController } from '#api/projects/project-preview.controller.js';
 import { ProjectPreviewService } from '#api/projects/project-preview.service.js';
 import { StorageModule } from '#storage/storage.module.js';
+import { ProjectDeletionController } from '#api/projects/project-deletion.controller.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 
 /**
@@ -19,7 +20,7 @@ import { ProjectsController } from '#api/projects/projects.controller.js';
      `PUT /v1/projects/:projectId` consumes (review R5). One direction only:
      nothing in publications reads this module. */
   imports: [DatabaseModule, PublicationsModule, CollaborationModule, StorageModule],
-  controllers: [ProjectsController, ProjectPreviewController],
+  controllers: [ProjectsController, ProjectPreviewController, ProjectDeletionController],
   providers: [ProjectPreviewService],
 })
 export class ProjectsModule {}

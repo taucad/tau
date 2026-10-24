@@ -9,6 +9,7 @@ import { useProject } from '#hooks/use-project.js';
 import { ProjectSyncPlaceholder } from '#routes/w.$workspace.$project/project-sync-placeholder.js';
 import { WorkspaceLanesContext } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectWorkbenchPanesHost } from '#routes/w.$workspace.$project/workbench-panes-host.js';
+import { subscribeWorkbenchReveal } from '#routes/w.$workspace.$project/workbench-reveal.js';
 
 /** The replicad kernel reports a rejected mechanism as a warning whose `details.mechanism` holds the reason. */
 const isMechanismIssue = (issue: KernelIssue): boolean =>
@@ -58,14 +59,11 @@ function KinematicsPanelBodyContent({ panelApi }: { readonly panelApi?: Kinemati
       kinematics: {
         useIsShown,
         // "Show kinematics" from the part menu.
-        subscribeReveal(listener) {
-          const subscription = editorRef.on('kinematicsRevealRequested', (event) => {
-            listener({ entryPath: event.entryPath, componentId: event.componentId });
-          });
-          return () => {
-            subscription.unsubscribe();
-          };
-        },
+        // A reveal that opened the pane arrives held, before this pane subscribed.
+        subscribeReveal: (listener) =>
+          subscribeWorkbenchReveal(editorRef, 'kinematics', ({ entryPath, componentId }) => {
+            listener({ entryPath, componentId });
+          }),
         useUnitStatus: useProjectKinematicsUnitStatus,
       },
     };

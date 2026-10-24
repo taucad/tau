@@ -301,14 +301,14 @@ function TestingSwitch({
 
   return (
     <div className='flex flex-col gap-1 border-b px-3 py-2'>
-      <div className='flex items-center justify-between gap-4'>
-        <div className='flex flex-col gap-0.5'>
+      <label className='flex items-center justify-between gap-4'>
+        <span className='flex flex-col gap-0.5'>
           <span className='text-sm font-medium'>Testing</span>
           <span id={descriptionId} className='text-xs text-muted-foreground'>
             Lets you try controls designed for this machine but not yet qualified on it, so they can be qualified.
             Agents never get them.
           </span>
-        </div>
+        </span>
         <span className='flex shrink-0 items-center gap-2'>
           {isPending ? (
             <span role='status' aria-label='Saving' aria-busy='true'>
@@ -325,7 +325,7 @@ function TestingSwitch({
             }}
           />
         </span>
-      </div>
+      </label>
       {error === undefined ? null : (
         <p role='alert' className='flex items-start gap-1.5 text-xs'>
           <CircleAlert aria-hidden className='mt-px size-3.5 shrink-0 text-feature' />

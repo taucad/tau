@@ -1610,7 +1610,8 @@ export function ChatAgentSheet({
       </Popover>
       <TooltipContent>
         <span className='flex items-center gap-1.5'>
-          {name}
+          {/* The trigger's own name (I6). */}
+          Agent and model: {name}
           <KeyShortcut variant='tooltip'>{formatKeyCombination(openModelSelectorKeyCombination)}</KeyShortcut>
         </span>
       </TooltipContent>

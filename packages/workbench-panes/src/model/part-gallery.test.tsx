@@ -66,7 +66,7 @@ describe('PartGallery', () => {
     const addToChat = vi.fn();
     renderGallery({ addToChat, addToChatLabel: 'Copy reference' });
 
-    expect(screen.queryByRole('button', { name: 'Reveal in Explorer' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Reveal in model tree' })).toBeNull();
     await user.click(screen.getByRole('button', { name: 'More actions for Gear' }));
     await user.click(screen.getByRole('menuitem', { name: 'Copy reference' }));
 

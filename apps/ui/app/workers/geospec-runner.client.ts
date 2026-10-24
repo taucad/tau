@@ -276,6 +276,10 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
     }
     pending.progress.apply(message.event);
     if (message.event.type === 'run-start' && pending.abortTimeoutId === undefined) {
+      // A project config's testTimeout is known only to the worker, so the budget is re-resolved here.
+      if (message.testTimeout !== undefined) {
+        pending.runBudget = resolveGeoSpecRunBudget(hostRunBudget, message.testTimeout, hostLimits.maxRunBudget);
+      }
       // Waiting behind an earlier run is not this run's work: its budget starts now.
       armRunBudget(message.requestId, pending);
     }
@@ -396,6 +400,7 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         runtimeConfig: options.runtimeConfig,
         fileSystemPort,
         maxWorkUnitLimit: hostLimits.maxWorkUnitLimit,
+        maxRunBudget: hostLimits.maxRunBudget,
       };
       worker.postMessage(request, [fileSystemPort]);
     } catch (error) {

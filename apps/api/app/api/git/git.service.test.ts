@@ -7,7 +7,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { Logger, ServiceUnavailableException, VersioningType } from '@nestjs/common';
+import { GoneException, Logger, NotFoundException, ServiceUnavailableException, VersioningType } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { APP_FILTER } from '@nestjs/core';
@@ -51,7 +51,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
-import { project, projectGit, user } from '#database/schema.js';
+import { project, projectDeletion, projectGit, user } from '#database/schema.js';
 
 /**
  * D19's one mechanism, on its own: the generation a push commits is recorded
@@ -164,6 +164,9 @@ const databaseStub = (
   row: GitRow,
   control: {
     failTransaction: boolean;
+    deleting?: boolean;
+    storageAccountId?: string;
+    beforeTransaction?: () => void;
     /** What the publication lookup answers: the ref-removal verb's check (D24). */
     publications?: readonly unknown[];
     /** Every `update().set(...)` payload, in order: how a retirement is seen. */
@@ -181,45 +184,52 @@ const databaseStub = (
      both awaitable and chainable; an `async` member would return a promise of
      the builder rather than being one. */
   const select = (): unknown => ({
-    from: () => ({
+    from: (table: unknown) => ({
       /* Two readers, two shapes: the generation read ends in `.limit(1)`,
          and the materializer's publication lookup awaits the builder
          itself. Both are answered here so a derivation that throws is a
          real failure rather than a stub that ran out of methods. */
       where: () =>
         Object.assign(Promise.resolve([...publications]), {
-          limit: async (): Promise<unknown[]> => [
-            { generation: row.generation, derivedGeneration: row.derivedGeneration },
-          ],
+          limit: async (): Promise<unknown[]> =>
+            table === projectDeletion
+              ? control.deleting
+                ? [{ projectId, ownerId }]
+                : []
+              : table === project
+                ? [{ storageAccountId: control.storageAccountId ?? null }]
+                : [{ generation: row.generation, derivedGeneration: row.derivedGeneration }],
         }),
+    }),
+  });
+  const insert = () => ({
+    values: (values: Partial<GitRow>) => ({
+      onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
+        if (typeof change.set['generation'] === 'number') {
+          row.generation = change.set['generation'];
+        }
+        if (typeof change.set['derivedGeneration'] === 'number') {
+          row.derivedGeneration = change.set['derivedGeneration'];
+        }
+        if (typeof change.set['storageBytes'] === 'number') {
+          row.storageBytes = change.set['storageBytes'];
+        } else if (typeof values.storageBytes === 'number') {
+          row.storageBytes = values.storageBytes;
+        }
+      },
     }),
   });
   return {
     database: {
       select,
       update,
-      insert: () => ({
-        values: (values: Partial<GitRow>) => ({
-          onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
-            if (typeof change.set['generation'] === 'number') {
-              row.generation = change.set['generation'];
-            }
-            if (typeof change.set['derivedGeneration'] === 'number') {
-              row.derivedGeneration = change.set['derivedGeneration'];
-            }
-            if (typeof change.set['storageBytes'] === 'number') {
-              row.storageBytes = change.set['storageBytes'];
-            } else if (typeof values.storageBytes === 'number') {
-              row.storageBytes = values.storageBytes;
-            }
-          },
-        }),
-      }),
+      insert,
       transaction: async (run: (transaction: unknown) => Promise<unknown>): Promise<unknown> => {
+        control.beforeTransaction?.();
         if (control.failTransaction) {
           throw new Error('the worker died inside the derivation');
         }
-        return run({ execute: async (): Promise<void> => undefined, select, update });
+        return run({ execute: async (): Promise<void> => undefined, select, update, insert });
       },
     },
   } as unknown as DatabaseService;
@@ -247,7 +257,16 @@ const createService = (
   new GitRepositoryService(
     database,
     { getEntitlements: async () => ({ tier: 'pro', canSyncFiles: true }) } as unknown as CommercialEntitlementsService,
-    {} as unknown as ObjectStorageService,
+    mock<ObjectStorageService>({
+      account: {
+        id: 'tau-default',
+        endpoint: 'http://localhost',
+        region: 'test',
+        bucket: 'test',
+        forcePathStyle: true,
+        credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
+      },
+    }),
     {
       authorize: async () => ({ projectId, ownerId, role: 'owner' }),
       invalidate: () => undefined,
@@ -372,6 +391,59 @@ describe('GitRepositoryService derived state (D19)', () => {
     for (const directory of scratchDirectories) {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it('should refuse stale cached owner and collaborator admission before reading remote bytes', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const control = { failTransaction: false, deleting: false };
+    const service = createService(store, databaseStub(row, control));
+    const cached = await service.authorize({ projectId, userId: ownerId, mode: 'read' });
+    control.deleting = true;
+    await expect(service.authorize({ projectId, userId: ownerId, mode: 'read' })).rejects.toBeInstanceOf(GoneException);
+    await expect(service.authorize({ projectId, userId: 'collaborator', mode: 'read' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    const read = vi.spyOn(store, 'readManifest');
+    try {
+      await expect(service.advertiseRefs(cached, 'git-upload-pack')).rejects.toThrow('deleted');
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+      await service.settled();
+    }
+  });
+
+  it('should refuse a foreign storage account without reading the default store', async () => {
+    const service = createService(
+      store,
+      databaseStub(
+        { generation: 1, derivedGeneration: 0, storageBytes: 0 },
+        { failTransaction: false, storageAccountId: 'foreign' },
+      ),
+    );
+    const read = vi.spyOn(store, 'readManifest');
+    try {
+      await expect(service.advertiseRefs(access, 'git-upload-pack')).rejects.toThrow('storage account is unavailable');
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      read.mockRestore();
+      await service.settled();
+    }
+  });
+
+  it('should leave accounting unchanged when deletion wins before the derive transaction', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const control = {
+      failTransaction: false,
+      deleting: false,
+      beforeTransaction: () => {
+        control.deleting = true;
+      },
+    };
+    const service = createService(store, databaseStub(row, control));
+    await service.advertiseRefs(access, 'git-upload-pack');
+    await service.settled();
+    expect(row).toEqual({ generation: 1, derivedGeneration: 0, storageBytes: 0 });
   });
 
   it('leaves derived_generation behind when the derivation cannot finish, and still serves', async () => {
@@ -1193,10 +1265,13 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('derived_generation is 
     const staleDatabase = {
       database: {
         select: () => ({
-          from: () => ({
-            leftJoin: () => ({ where: async () => [frozenRead] }),
-            where: () => Object.assign(Promise.resolve([] as unknown[]), { limit: async () => [frozenRead] }),
-          }),
+          from: (table: unknown) =>
+            table === projectDeletion || table === project
+              ? database.select().from(table as typeof project | typeof projectDeletion)
+              : {
+                  leftJoin: () => ({ where: async () => [frozenRead] }),
+                  where: () => Object.assign(Promise.resolve([] as unknown[]), { limit: async () => [frozenRead] }),
+                },
         }),
         insert: (table: unknown) => database.insert(table as typeof projectGit),
         transaction: async (run: (transaction: unknown) => Promise<unknown>) => database.transaction(run),

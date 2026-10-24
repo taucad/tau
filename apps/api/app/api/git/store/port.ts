@@ -89,7 +89,10 @@ export type RepositoryStore = {
   readonly capabilities: StoreCapabilities;
 
   /** Reads the current manifest and the token that commits against it. `undefined` means generation 0. */
-  readManifest(locator: RepositoryLocator): Promise<{ manifest: ManifestBytes; token: CommitToken } | undefined>;
+  readManifest(
+    locator: RepositoryLocator,
+    signal?: AbortSignal,
+  ): Promise<{ manifest: ManifestBytes; token: CommitToken } | undefined>;
 
   /**
    * Replaces the manifest conditionally. `expected` is the token read at
@@ -102,6 +105,7 @@ export type RepositoryStore = {
     locator: RepositoryLocator,
     next: ManifestBytes,
     expected: CommitToken | 'absent',
+    signal?: AbortSignal,
   ): Promise<CommitToken | 'lost'>;
 
   /** Writes an immutable object. `key` is unique per upload, so this never overwrites (charter I3). */
@@ -110,6 +114,7 @@ export type RepositoryStore = {
     key: string,
     body: Uint8Array<ArrayBuffer>,
     options: PutObjectOptions,
+    signal?: AbortSignal,
   ): Promise<void>;
 
   /**

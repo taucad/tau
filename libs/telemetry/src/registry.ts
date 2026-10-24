@@ -30,6 +30,8 @@ const syncRefusalCodes = [
   'GIT_SERVICE_RESTARTING',
   'GIT_RATE_LIMITED',
   'GIT_REPOSITORY_FROZEN',
+  /* DA6: an owner over its in-flight cap (10 requests, 5 pushes), answered 429 with a jittered Retry-After. */
+  'GIT_OWNER_IN_FLIGHT_LIMIT',
   'GIT_REPOSITORY_INCOMPLETE',
   'GIT_QUOTA_EXCEEDED',
   'GIT_REPOSITORY_CEILING_EXCEEDED',
@@ -1018,10 +1020,19 @@ export const TauMetrics = {
   gitAdmissions: defineCounter({
     name: 'tau.git.admissions',
     unit: '{admission}',
-    description: 'Lease admission decisions by git operation and outcome; anything but admitted is a refusal',
+    description:
+      'Git admission decisions by git operation and outcome; anything but admitted is a refusal (owner_capped: over the owner in-flight cap)',
     attributes: z.object({
       'tau.git.operation': z.enum(gitOperations),
-      outcome: z.enum(['admitted', 'owner_busy', 'disk_full', 'budget_exhausted', 'restarting', 'memory']),
+      outcome: z.enum([
+        'admitted',
+        'owner_busy',
+        'disk_full',
+        'budget_exhausted',
+        'restarting',
+        'memory',
+        'owner_capped',
+      ]),
     }),
   }),
 

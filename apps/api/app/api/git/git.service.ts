@@ -68,6 +68,7 @@ import {
 } from '#api/git/admission/reservation.js';
 import type { LeaseKind } from '#api/git/admission/reservation.js';
 import { HotProjects, hotProjectRanks } from '#api/git/hot-projects.js';
+import { OwnerInFlightGate } from '#api/git/admission/owner-in-flight.js';
 import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
 import type { HotProject } from '#api/git/hot-projects.js';
 import { commitLease } from '#api/git/store/commit.js';
@@ -404,6 +405,8 @@ export class GitRepositoryService {
     @Optional() private readonly metrics: MetricsService = new MetricsService(),
     /* DW1/DW2: holds a frozen repository's requests before any lease; open outside the module. */
     @Optional() private readonly routes: RepositoryRouteGuard = RepositoryRouteGuard.open(),
+    /* DA6: the owner's in-flight cap (10 requests, 5 pushes); open outside the module. */
+    @Optional() private readonly owners: OwnerInFlightGate = OwnerInFlightGate.open(),
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
@@ -822,11 +825,14 @@ export class GitRepositoryService {
    * @param access - What `authorize` resolved.
    * @param service - The service the client named.
    * @returns The advertisement bytes, without the service prefix.
-   * @throws HttpException `429 GIT_REPOSITORY_FROZEN` when the freeze hold is spent.
+   * @throws HttpException `429 GIT_REPOSITORY_FROZEN` when the freeze hold is spent, or `429 GIT_OWNER_IN_FLIGHT_LIMIT` over the owner's in-flight cap (DA6).
    */
   public async advertiseRefs(access: GitAccess, service: GitSmartService): Promise<Uint8Array<ArrayBuffer>> {
     const routed = await this.routes.admit(access.projectId);
+    let owned: () => void = () => undefined;
     try {
+      /* DA6: after the route step, so a held request holds no owner slot; before the manifest read. */
+      owned = await this.owners.admit({ ownerId: access.ownerId, operation: 'advertise' });
       const locator = await this.resolveActiveLocator(access);
       const read = await this.store.readManifest(locator);
       const manifest = read === undefined ? undefined : decodeManifest(read.manifest);
@@ -840,6 +846,7 @@ export class GitRepositoryService {
     } catch (error) {
       throw this.refusalFor(error);
     } finally {
+      owned();
       routed();
     }
   }
@@ -1317,23 +1324,29 @@ export class GitRepositoryService {
    * @param access - Whose repository the lease hydrates, and who asked.
    * @param operation - What the lease is for, as the admission and lease series label it.
    * @returns The grant, whose release every path must call.
-   * @throws HttpException `429` when a daily hydrate budget is spent.
+   * @throws HttpException `429` when a daily hydrate budget is spent, or `429 GIT_OWNER_IN_FLIGHT_LIMIT` over the owner's in-flight cap (DA6).
    * @throws ServiceUnavailableException When the lease does not fit, or the owner already holds its share.
    */
   private async admitLease(access: GitAccess, operation: GitOperation): Promise<LeaseAdmissionGrant> {
     /* The route step first (DW1/DW2): a frozen repository is held here, before it costs a slot
        or its manifest is read to size one (DA3). */
     const routed = await this.routes.admit(access.projectId);
+    let owned: () => void = () => undefined;
     try {
+      /* The owner step next (DA6): an owner over its in-flight cap is refused 429 before its
+         manifest is read or a slot is reserved, and holds its slot until the lease is released. */
+      owned = await this.owners.admit({ ownerId: access.ownerId, operation });
       const grant = await this.admitLeaseSlot(access, operation);
       return {
         ...grant,
         release: () => {
           grant.release();
+          owned();
           routed();
         },
       };
     } catch (error) {
+      owned();
       routed();
       throw error;
     }

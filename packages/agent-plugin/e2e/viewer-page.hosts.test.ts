@@ -1469,7 +1469,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       /* The Menu key opens the same menu; Escape closes it and gives focus back to the canvas region. */
       await page.keyboard.press('ContextMenu');
       await menu.waitFor();
-      expect(await menu.getByRole('menuitem', { name: 'Reveal in Explorer' }).count()).toBe(1);
+      expect(await menu.getByRole('menuitem', { name: 'Reveal in model tree' }).count()).toBe(1);
       await page.keyboard.press('Escape');
       await expect.poll(async () => menu.count()).toBe(0);
       await expect.poll(async () => isFocused(region)).toBe(true);
@@ -1478,7 +1478,7 @@ describe('the part menu from the keyboard (VUI-6)', () => {
       await trigger.focus();
       await page.keyboard.press('Enter');
       await menu.waitFor();
-      for (const name of ['Focus on part', 'Copy reference', 'Reveal in Explorer', 'Hide', 'Isolate']) {
+      for (const name of ['Focus on part', 'Copy reference', 'Reveal in model tree', 'Hide', 'Isolate']) {
         // oxlint-disable-next-line no-await-in-loop -- one item at a time.
         expect(await menu.getByRole('menuitem', { name, exact: true }).count()).toBe(1);
       }

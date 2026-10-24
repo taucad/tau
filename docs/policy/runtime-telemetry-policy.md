@@ -21,12 +21,12 @@ Structured telemetry enables performance debugging and kernel panel visualizatio
 
 ## Design Principles
 
-- Every span must have a parent. No orphan root spans except the four permitted roots (`kernel.bootstrap`, `kernel.render`, `kernel.export`, `kernel.transcode`).
+- Every span must have a parent. No orphan root spans except the permitted roots: `kernel.bootstrap` and one per client operation (`kernel.describe`, `kernel.evaluate`, `kernel.render`, `kernel.export`, `kernel.transcode`).
 - The worker does the heavy lifting: span hierarchy, timing, and attributes are computed entirely on the worker thread. Consumers (UI, DevTools) receive pre-structured data and never need to reconstruct relationships.
 - Span overhead must be negligible: use monotonic counter IDs (not UUIDs), `performance.now()` timing, direct entry batching, and no string concatenation in hot loops.
 - Do not write runtime spans to the realm-wide Performance Timeline during normal operation. Mirror uniquely named `tau:*` measures only when `devtoolsTelemetry` is explicitly enabled.
 - The DevTools extension `devtools` track payload is meaningful only as `performance.measure` detail. Build it inside the `devtoolsTelemetry` branch, never on the entry every consumer discards: carrying it cost 57 % of span CPU and 45 % of wire bytes.
-- The `RuntimeTracer` uses stack-based parent tracking via `activeSpanId`. Async/await naturally preserves hierarchy as long as spans are started and ended in the correct order within the same async context.
+- The `RuntimeTracer` keeps an open-span stack: a new span's parent is the innermost span that is still open, and a span that ends pops itself and any descendant still open above it. A child that outlives its parent therefore never leaves the next sibling parented to a span that already ended, and because every operation opens its root first, a span started after an earlier sibling ended still lands under that operation's root.
 
 ## Naming Convention
 
@@ -53,16 +53,20 @@ All span names follow the pattern `{subsystem}.{operation}`, inspired by OpenTel
 
 ## Root Span Policy
 
-Exactly four root spans are permitted per worker lifecycle:
+`kernel.bootstrap` and one root per client operation are permitted. `KernelWorker.enqueueOperation` is the one boundary every operation crosses, so it opens the operation's root when the operation is dequeued and ends it where the operation settles:
 
-| Root Span          | Lifecycle Phase       | Context                                                          |
-| ------------------ | --------------------- | ---------------------------------------------------------------- |
-| `kernel.bootstrap` | Worker initialization | Wraps middleware loading and kernel init                         |
-| `kernel.render`    | Render cycle          | Wraps deps, params, geometry, and middleware for a single render |
-| `kernel.export`    | Geometry export       | Wraps format conversion for file export                          |
-| `kernel.transcode` | Direct transcode      | Wraps a public transcoder operation without a kernel render      |
+| Root Span          | Lifecycle Phase       | Context                                                      |
+| ------------------ | --------------------- | ------------------------------------------------------------ |
+| `kernel.bootstrap` | Worker initialization | Wraps middleware loading and kernel init                     |
+| `kernel.describe`  | Describe              | Wraps parameter description for one request                  |
+| `kernel.evaluate`  | Evaluation            | Wraps deps, params, bundling and geometry for one evaluation |
+| `kernel.render`    | Render cycle          | Wraps the render of one view for one evaluation              |
+| `kernel.export`    | Geometry export       | Wraps format conversion for file export                      |
+| `kernel.transcode` | Direct transcode      | Wraps a public transcoder operation without a kernel render  |
 
-All other spans MUST be children of one of these roots. If a span appears at root level in the telemetry tree, it is a bug.
+Every operation root carries `operation.id`, the id the client uses for that attempt, and ends with `operation.outcome` (`succeeded`, `issue`, `cancelled`, `timed-out` or `failed`) and, for `issue` and `failed`, `error.type`: the first error issue's code or the thrown error's stable code or name, never a message. `kernel.bootstrap` carries `operation.id` when the client sent one with `initialize`.
+
+All other spans MUST be children of one of these roots. If a span appears at root level in the telemetry tree, it is a bug. The one exception is background work the worker finishes while idle, after an operation's reply and before the next operation is dequeued, such as `kernel.compute.publication`: it belongs to no operation.
 
 ## Span Hierarchy Reference
 
@@ -132,9 +136,11 @@ Attributes are `Record<string, string | number | boolean>` only. No objects, no 
 | Span                     | Required Attributes                   | Optional Attributes                                                                                                                                                                                                                                                                               |
 | ------------------------ | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `kernel.bootstrap`       | --                                    | `{ kernel }` (constructor name)                                                                                                                                                                                                                                                                   |
-| `kernel.render`          | `{ file }`                            | --                                                                                                                                                                                                                                                                                                |
-| `kernel.export`          | `{ format }`                          | --                                                                                                                                                                                                                                                                                                |
-| `kernel.transcode`       | `{ from, to, transcoder }`            | `{ success }`                                                                                                                                                                                                                                                                                     |
+| `kernel.describe`        | `{ operation.id, operation.outcome }` | `{ file, error.type }`                                                                                                                                                                                                                                                                            |
+| `kernel.evaluate`        | `{ operation.id, operation.outcome }` | `{ file, error.type }`                                                                                                                                                                                                                                                                            |
+| `kernel.render`          | `{ operation.id, operation.outcome }` | `{ error.type }`                                                                                                                                                                                                                                                                                  |
+| `kernel.export`          | `{ operation.id, operation.outcome }` | `{ format, error.type }`                                                                                                                                                                                                                                                                          |
+| `kernel.transcode`       | `{ operation.id, operation.outcome }` | `{ from, to, transcoder, success, error.type }`                                                                                                                                                                                                                                                   |
 | `image.render`           | `{ mode, format, width, height }`     | `{ adapterBackend, adapterName, adapterDeviceType, success, errorCode, outputCount, outputBytes, parseMs, setupMs, capBuildMs, uploadMs, renderMs, overlayMs, encodeMs, peakReadbackBytes, glbParses, adapterDeviceRequests, pipelineSets, presentationBuilds, sceneUploads, targetAllocations }` |
 | `kernel.select`          | `{ file }`                            | --                                                                                                                                                                                                                                                                                                |
 | `kernel.detect-import`   | `{ kernel }` (kernel ID being tested) | --                                                                                                                                                                                                                                                                                                |
@@ -180,14 +186,14 @@ Spans are emitted per producer and merged per session, so a batch must say who p
 - Every telemetry batch carries `epoch`: the absolute Unix-epoch millisecond value of that realm's `performance.now()` zero, recomputed at each flush (`Date.now() - performance.now()`). Consumers reconcile clocks with `epoch + startTime`. `workerTimeOrigin` is the fallback, not the rule: it is captured once at realm start and never re-anchored, so realms that started on opposite sides of a system suspend or an NTP step disagree by that step.
 - `origin` and `epoch` are batch fields **on the wire**: the tracer MUST NOT put them on a `TelemetryEntry`, because they are constant across a flush and paying for them per span is pure wire cost. Any consumer or sink that retains a span _beyond_ its batch folds them in and stores a `TelemetrySpanRecord` instead — a retained span with no producer and no clock anchor cannot be merged with anyone else's. One JSONL line is one such record.
 - Telemetry MUST NOT accumulate without bound in any process. A machine or store that retains entries for display bounds them at the assign site — 20 traces' worth of entries, bounded entries per trace, with the trace the user has selected preserved across eviction. A store that publishes to React rebuilds its array per batch by construction; what is forbidden is letting that array grow without a ceiling, because the copy is what reached 207 ms at 80k entries. A selection that must outlive eviction is held as the selected object, not as an id looked up in the surviving window.
-- File exporters enqueue and return. An exporter MUST NOT perform synchronous filesystem work in the flush turn, MUST attach an error handler and disable itself on failure rather than throwing out of the event loop, and MUST bound what it buffers. Native child processes never write telemetry files; their stage timings ride the existing control channel as numeric attributes on one span.
+- File exporters enqueue and return. An exporter MUST NOT perform synchronous filesystem work in the flush turn, MUST attach an error handler and disable itself on a stream failure rather than throwing out of the event loop, and MUST bound what it buffers. A record that will not serialize costs that record only, never the sink, and every span an exporter accepts and does not write — unserializable, refused over the buffer bound, written during a rotation, or after a stream failure — is counted in the exporter's `dropped`. Native child processes never write telemetry files; their stage timings ride the existing control channel as numeric attributes on one span.
 
 ## Sinks and Producers
 
 Spans are produced in every realm. Where they go is the host's answer, not the tracer's.
 
-- **Node realms** (desktop utility, CLI, in-process harnesses) write JSONL under `TAU_TELEMETRY_DIR`, or under the desktop's own diagnostics directory (`TAU_DESKTOP_LOG_DIR`), one file per producer, rotated at 5 MiB with one previous file kept. `TAU_TELEMETRY=0` turns it off. A run's trace is the merge of that directory ordered on `epoch + startTime`; both performance harnesses record the merged path as `MeasurementTags.runtimeTraceJsonl`.
-- **`TAU_TELEMETRY_FORMAT=otlp`** makes a sink write one OTLP JSON payload per flushed batch instead, which is what an OpenTelemetry collector's `otlpjsonfile` receiver reads. The conversion happens at the sink and nowhere else: no OpenTelemetry SDK runs in any Tau process. Trace and span ids are hashes of `origin.instance` plus `spanId`, because a tracer's ids restart at `0` per realm.
+- **Node realms** (desktop utility, CLI, in-process harnesses) write JSONL under `TAU_TELEMETRY_DIR`, or under the desktop's own diagnostics directory (`TAU_DESKTOP_LOG_DIR`), one file per producer, rotated at 5 MiB with one previous file kept. `TAU_TELEMETRY=0` turns it off. A run's trace is the merge of that directory ordered on `epoch + startTime`; both performance harnesses record the merged path as `MeasurementTags.runtimeTraceJsonl`. A Node host opens the sink through `openTelemetryFileSink`, `telemetryDirectory` and `telemetryFormat` from `@taucad/runtime/node`, and passes each batch the client's `telemetry` event delivers.
+- **`TAU_TELEMETRY_FORMAT=otlp`** makes a sink write one OTLP JSON payload per flushed batch instead, which is what an OpenTelemetry collector's `otlpjsonfile` receiver reads. The conversion happens at the sink and nowhere else: no OpenTelemetry SDK runs in any Tau process. Span ids are hashes of `origin.instance` plus `spanId`, because a tracer's ids restart at `0` per realm. A trace id is a 128-bit hash of the operation's `operation.id` — read from the root, or from the batch's `droppedRoots` when the bounded collector had to drop the root — so a root lost under pressure leaves one trace with a missing parent rather than one parentless fragment per child. A span with no operation above it falls back to a hash of its batch root.
 - **The browser** has no host-visible file. The renderer buffers its spans bounded (`packages/viewer/src/lib/renderer-telemetry.ts`), nothing is posted anywhere, and the trace leaves only by an explicit export from the telemetry pane, which merges the worker entries the CAD machine holds with the renderer's own buffer into the same JSONL.
 - **The renderer is a producer like any other**: one page-scoped `origin` (`label: 'renderer'`), `epoch` re-anchored per record, `renderer.presentation` for the frame that presented a model with the presentation pipeline's durations as attributes, and `renderer.long-animation-frame` from a `PerformanceObserver`. These observers are out-of-band by construction — the platform reports a Long Animation Frame only after a frame has already blocked for 50 ms — and the "no `PerformanceObserver`" rule scopes to the span-producer path (`WorkerTelemetryCollector` and the tracer), not to them.
 - **`Document-Policy: js-profiling`** is served on development and staging documents only: the SSR document sets it off the canonical production origin, and the desktop's `app://` handler sets it on an unpackaged build. Neither production nor a packaged app offers a profiler.
@@ -223,7 +229,7 @@ Tracing wraps outermost so spans include exception handling overhead.
 
 ### Span Hierarchy
 
-Per-call spans are children of `replicad.run-main` (the tracer's stack-based `activeSpanId` makes any `startSpan()` during `runMain()` a child):
+Per-call spans are children of `replicad.run-main` (the tracer's open-span stack makes any `startSpan()` during `runMain()` a child):
 
 ```
 kernel.compute
@@ -260,12 +266,12 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 
 ### Worker Side
 
-- `RuntimeTracer.startSpan()` is O(1): monotonic ID increment, one `performance.now()` call, and an active-parent update.
+- `RuntimeTracer.startSpan()` is O(1): monotonic ID increment, one `performance.now()` call, and one push onto the open-span stack. `end()` pops in O(1) when the span is innermost, which is the common case.
 - `SpanHandle.end()` creates one `TelemetryEntry` and sends it directly to `WorkerTelemetryCollector`; normal operation MUST NOT call `performance.mark()` or `performance.measure()`.
-- `RuntimeTracer.reset()` is called once per render cycle and only advances the span epoch and clears active ancestry. It MUST NOT clear realm-wide marks or measures.
-- `WorkerTelemetryCollector` is a pending-entry batch sink. It MUST NOT create a `PerformanceObserver` or timer.
+- `RuntimeTracer.reset()` is called when the worker is recycled and only advances the span epoch and clears the open-span stack. It MUST NOT clear realm-wide marks or measures. A span that ends after a reset is not emitted; it is counted as dropped.
+- `WorkerTelemetryCollector` is a pending-entry batch sink. It MUST NOT create a `PerformanceObserver` or timer. It holds at most 10,000 pending spans; further spans are refused and counted, and every batch carries `dropped` (spans lost since the previous batch) and, when a dropped span was an operation root, `droppedRoots` (span id → `operation.id`).
 - `devtoolsTelemetry: true` MAY mirror uniquely named `tau:*` measures into the worker Performance Timeline. This mode is diagnostic and MUST remain opt-in.
-- Telemetry is explicitly flushed by the dispatcher after each `render()` and `export()` operation (before the response is sent) to ensure spans arrive before results.
+- Telemetry is explicitly flushed by the dispatcher after every operation's terminal reply — `initialize`, `describe`, `evaluate`, `render`, `export` and `transcode` — never before it and never with the next operation: the reply is posted first, then the operation's spans. A notify reply (`evaluated`, `rendered`) and the operation's settlement are joined by operation id; a call reply flushes after the channel posts its result, and a thrown call after its error.
 
 ### Main Thread
 
@@ -286,7 +292,7 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 | `RuntimeTracer`                  | `packages/runtime/src/framework/runtime-tracer.ts`                        | Span creation with parent-child hierarchy                    |
 | `createKernelLibraryTracer`      | `packages/runtime/src/framework/kernel-library-tracing.ts`                | First-party kernel library attribution proxy                 |
 | `WorkerTelemetryCollector`       | `packages/runtime/src/framework/worker-telemetry.ts`                      | Direct-entry batching                                        |
-| `createDocumentWorkerDispatcher` | `packages/runtime/src/transport/_internal/runtime-document-dispatcher.ts` | Telemetry wiring and flush before operation completion       |
+| `createDocumentWorkerDispatcher` | `packages/runtime/src/transport/_internal/runtime-document-dispatcher.ts` | Telemetry wiring and flush after each terminal reply         |
 | `KernelWorker`                   | `packages/runtime/src/framework/kernel-worker.ts`                         | Framework span instrumentation                               |
 | `KernelRuntimeWorker`            | `packages/runtime/src/framework/kernel-runtime-worker.ts`                 | Kernel selection spans                                       |
 | `wrapOcWithTracing`              | `packages/core/occt/src/oc-tracing.ts`                                    | OC API call tracing proxy (shared by Replicad + OpenCascade) |

@@ -25,6 +25,7 @@ import { wrapMessagePortMain } from '@taucad/rpc';
 import { _resolveComputeStore } from '#cache/kernel-compute-runtime.js';
 import { exposeComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
 import type { ComputeBinding } from '#types/runtime-compute.types.js';
+import type { ResourceLimitDetails } from '#types/runtime.types.js';
 
 /**
  * Default IPC channel used by Tau's Electron runtime bridge.
@@ -115,6 +116,10 @@ export type ElectronRuntimeHostExit = {
   readonly released: boolean;
   /** Last stderr the utility wrote, bounded and omitted when empty. */
   readonly stderrTail?: string;
+  /** The limit main killed the utility for, when it killed it for one: the resident limit today. */
+  readonly exceeded?: ResourceLimitDetails;
+  /** Largest resident set the {@link ElectronRuntimeResidentLimit} sampled, in bytes; absent when never sampled. */
+  readonly peakResidentBytes?: number;
 };
 
 /**
@@ -125,8 +130,6 @@ export type ElectronRuntimeHostExit = {
 export type ElectronRuntimeUtilityExit = ElectronRuntimeHostExit & {
   /** Broker-assigned identity of the utility that exited. */
   readonly hostId: string;
-  /** Largest resident set the {@link ElectronRuntimeResidentLimit} sampled, in bytes; absent when never sampled. */
-  readonly peakResidentBytes?: number;
 };
 
 /**
@@ -324,6 +327,8 @@ type LiveUtility = {
   releaseResolved?: () => void;
   /** Largest resident sample, reported with the exit. */
   peakResidentBytes?: number;
+  /** Set before a limit kill, so the exit names the limit it enforced. */
+  exceeded?: ResourceLimitDetails;
 };
 
 /**
@@ -596,6 +601,13 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
           `registerElectronRuntimeMain: utility ${record.hostId ?? ''} resident memory ${String(bytes)} bytes exceeds ${String(limit.maxBytes)}; killing it`,
         ),
       );
+      record.exceeded = {
+        limit: 'host.utility.resident',
+        unit: 'By',
+        maximum: limit.maxBytes,
+        demand: { kind: 'measured', value: bytes },
+        origin: 'host-option',
+      };
       try {
         record.utility.kill();
       } catch {
@@ -659,12 +671,10 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         exitCode: code,
         released: record.released,
         ...(record.stderrTail === '' ? {} : { stderrTail: record.stderrTail }),
-      };
-      options.onUtilityExit?.({
-        hostId,
-        ...exit,
+        ...(record.exceeded === undefined ? {} : { exceeded: record.exceeded }),
         ...(record.peakResidentBytes === undefined ? {} : { peakResidentBytes: record.peakResidentBytes }),
-      });
+      };
+      options.onUtilityExit?.({ hostId, ...exit });
       record.onExit?.(exit);
     };
     /* A spare that died before adoption leases nothing, so there is no host to

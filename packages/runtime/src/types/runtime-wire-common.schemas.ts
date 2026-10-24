@@ -99,6 +99,7 @@ export const runtimeInitializeArgsSchema = z
     memoryHandle: runtimeInitializeMemoryHandleSchema.optional(),
     sessionId: z.string().optional(),
     resumeToken: z.string().optional(),
+    operationId: z.string().min(1).optional(),
   })
   .catchall(z.unknown());
 
@@ -132,6 +133,8 @@ export const runtimeTelemetryArgsSchema = z
     entries: z.array(telemetryEntrySchema),
     origin: telemetryOriginSchema,
     epoch: z.number(),
+    dropped: z.number().int().nonnegative().optional(),
+    droppedRoots: z.record(z.string(), z.string()).optional(),
   })
   .catchall(z.unknown());
 

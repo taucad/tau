@@ -85,6 +85,7 @@ export type {
   MiddlewareRegistration,
   MiddlewareRegistrations,
   RenderCapability,
+  ResourceLimitDetails,
   RuntimeCapabilities,
   RuntimeCapabilityRegistration,
   SourceRevision,

@@ -330,7 +330,11 @@ export function createRuntimeClient(options: {
       if (currentLifecycle() === 'terminated') {
         throw terminationFailure();
       }
-      const initialized = await transport.initialize(config === undefined ? {} : { config });
+      const initializeOperationId = `initialize:${randomUuid()}`;
+      const initialized = await transport.initialize({
+        operationId: initializeOperationId,
+        ...(config === undefined ? {} : { config }),
+      });
       if (currentLifecycle() === 'terminated') {
         throw terminationFailure();
       }
@@ -356,8 +360,14 @@ export function createRuntimeClient(options: {
           topics.log.emit(entry);
         }
       });
-      channel.onNotify('telemetry', ({ entries, origin, epoch }) => {
-        topics.telemetry.emit({ entries, origin, epoch });
+      channel.onNotify('telemetry', ({ entries, origin, epoch, dropped, droppedRoots }) => {
+        topics.telemetry.emit({
+          entries,
+          origin,
+          epoch,
+          ...(dropped === undefined ? {} : { dropped }),
+          ...(droppedRoots === undefined ? {} : { droppedRoots }),
+        });
       });
       channel.onNotify('errorEvent', (event) => {
         if (event.scope === 'connection') {
@@ -480,6 +490,7 @@ export function createRuntimeClient(options: {
       const request = channel.call(
         'describe',
         {
+          operationId,
           file: normalized.file,
           ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
           ...(normalized.stage === undefined ? {} : { stage: normalized.stage }),
@@ -573,7 +584,11 @@ export function createRuntimeClient(options: {
           : undefined;
       try {
         // The public route projection validates concrete options; wire admission validates the object again.
-        const call = channel.call('transcode', request as RuntimeTranscodeArgs, controller.signal);
+        const call = channel.call(
+          'transcode',
+          { ...(request as RuntimeTranscodeArgs), operationId },
+          controller.signal,
+        );
         void clearRecoveryWhenSettled(call, operationId);
         const wire = await waitWithAbort(Promise.race([call, timed.promise, terminated.promise]), signal);
         workerReplied = true;

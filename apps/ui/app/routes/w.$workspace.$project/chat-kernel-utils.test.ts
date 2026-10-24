@@ -182,6 +182,13 @@ describe('trace projection', () => {
     expect(traces[1]).toMatchObject({ id: 'p1:render-1', spanCount: 4, duration: 100, absoluteStart: 1030 });
   });
 
+  it('should attribute the describe and evaluate operation roots', () => {
+    const roots = ['kernel.describe', 'kernel.evaluate'].map((name, index) =>
+      makeEntry({ name, startTime: 300 + index, duration: 1, workerTimeOrigin: 1000, detail: { spanId: name } }),
+    );
+    expect(buildTelemetryTraces(roots).map(({ kind }) => kind)).toEqual(['describe', 'evaluate']);
+  });
+
   it('selects only the latest completed root', () => {
     expect(getLatestTrace(buildTelemetryTraces(entries))?.id).toBe('p1:orphan');
     expect(getLatestTrace(buildTelemetryTraces(entries).filter(({ kind }) => kind !== 'unattributed'))?.id).toBe(

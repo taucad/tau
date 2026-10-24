@@ -13,6 +13,8 @@ import { categoryLabels, phaseLabels, phaseOrder } from '#routes/w.$workspace.$p
 
 const traceKindsByRootName: Record<string, TelemetryTraceKind> = {
   'kernel.bootstrap': 'bootstrap',
+  'kernel.describe': 'describe',
+  'kernel.evaluate': 'evaluate',
   'kernel.render': 'render',
   'kernel.export': 'export',
   'kernel.transcode': 'transcode',

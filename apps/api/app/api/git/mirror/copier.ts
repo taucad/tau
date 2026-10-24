@@ -60,6 +60,12 @@ export type CopierContext = {
   readonly bufferLimit?: number;
   /** LFS rows read per batch. */
   readonly lfsBatch?: number;
+  /**
+   * Bytes of late LFS (finalized after the newest copied push) one caught-up round
+   * copies before it returns; the rest waits for the next poll, so a large backlog
+   * never holds a poll's pushes up. At least one object is always copied. 256 MiB.
+   */
+  readonly lateLfsBytes?: number;
   readonly report?: (event: Readonly<Record<string, unknown>>) => void;
   readonly signal?: AbortSignal;
 };
@@ -252,16 +258,24 @@ const copySegments = async (state: RoundState, manifest: Manifest, index: Versio
   }
 };
 
+/** The default {@link CopierContext.lateLfsBytes}. */
+export const lateLfsByteBudget = 256 * 1024 * 1024;
+
 /**
  * Step 3: LFS objects finalized at or before G's commit and not yet copied. They
  * are a precondition for advancing the watermark, though the manifest does not
  * name them (W13 Finding 1). Each is verified against its own oid.
+ *
+ * With `late`, a caught-up round's straggler pass: one batch at most, stopping
+ * once `bytes` are copied, and each version found already held is extended to
+ * `clock.until` before its row is marked copied, as a round extends what it reuses.
  */
-const copyLfs = async (state: RoundState, finalizedBy: Date): Promise<void> => {
+const copyLfs = async (state: RoundState, finalizedBy: Date, late?: { bytes: number }): Promise<void> => {
   const { context, locator } = state;
   const batch = context.lfsBatch ?? 100;
   let index: VersionIndex | undefined;
   let after: string | undefined;
+  let copiedBytes = 0;
   for (;;) {
     // oxlint-disable-next-line no-await-in-loop -- keyset pages
     const pending = await context.ledger.pendingLfs(locator.projectId, finalizedBy, batch, after);
@@ -272,10 +286,15 @@ const copyLfs = async (state: RoundState, finalizedBy: Date): Promise<void> => {
     index ??= await indexVersions(context.destination, lfsPrefix(locator), context.signal);
     state.lfsIndex = index;
     const copied: string[] = [];
+    const reused: string[] = [];
     for (const object of pending) {
+      if (late !== undefined && copiedBytes >= late.bytes) {
+        break;
+      }
       const key = lfsKey(locator, object.oid);
       if (holds(index, key, object.sizeBytes)) {
         state.reused.add(key);
+        reused.push(key);
       } else {
         // oxlint-disable-next-line no-await-in-loop -- one object in flight per repository
         await copyOne(state, {
@@ -298,12 +317,20 @@ const copyLfs = async (state: RoundState, finalizedBy: Date): Promise<void> => {
         });
       }
       copied.push(object.oid);
+      copiedBytes += object.sizeBytes;
+    }
+    if (late !== undefined && reused.length > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- runs once: a late pass is one batch
+      await extendDependencies(context, { keys: reused, indexes: [index], written: state.written, clock: state.clock });
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- recorded per batch so a crash repeats at most one batch
       await context.ledger.markLfsCopied(locator.projectId, copied, state.clock.at);
     } catch (error) {
       throw failAt('watermark', error);
+    }
+    if (late !== undefined) {
+      return;
     }
     after = pending.at(-1)?.oid;
   }
@@ -534,9 +561,10 @@ const runRound = async (context: CopierContext, candidate: CopyCandidate): Promi
     await context.ledger.settle(candidate.projectId, manifest.generation);
     // Caught up: what is left is LFS finalized after the last push, which no later
     // round may ever come for. It is locked to `clock.until`, at or past the lock the
-    // row records, so the recorded lock still holds for every dependency.
+    // row records, so the recorded lock still holds for every dependency. One bounded
+    // batch per round; the next poll claims the repository again for the rest.
     if (!isTombstoned(manifest) && !(await ownerTombstoned(context, candidate.ownerId))) {
-      await copyLfs(state, clock.at);
+      await copyLfs(state, clock.at, { bytes: context.lateLfsBytes ?? lateLfsByteBudget });
     }
     return state.objects > 0
       ? { outcome: 'copied', generation: manifest.generation, objects: state.objects }

@@ -73,6 +73,7 @@ const mirrorDrillChecks = [
   'push_log',
   'retention',
   'hidden_versions',
+  'deadline',
   'error',
   'refs',
   'fsck',

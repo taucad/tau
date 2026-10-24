@@ -84,7 +84,8 @@ const ensureRole = async (
  *
  * - `SELECT` on `project_git`, `project_git_lfs_object`, `storage_tombstone` and
  *   `mirror_drill_run`, and on the three `project` columns that locate a
- *   repository (`id`, `owner_id`, `storage_account_id`).
+ *   repository (`id`, `owner_id`, `storage_account_id`), and `project_deletion.project_id`,
+ *   so a project being deleted is not claimed for its late LFS.
  * - `UPDATE` of the copy columns only: `copied_generation`, `copy_pending_since`,
  *   `copy_locked_until`, `copied_manifest_sha256` (and `updated_at`, which Drizzle
  *   sets on every update), `project_git_lfs_object.copied_at` and
@@ -103,6 +104,7 @@ export async function installMirrorRole(client: postgres.Sql, password?: string)
     await transaction`GRANT USAGE ON SCHEMA public TO tau_mirror`;
     await transaction`GRANT SELECT ON public.project_git, public.project_git_lfs_object, public.storage_tombstone, public.mirror_drill_run TO tau_mirror`;
     await transaction`GRANT SELECT (id, owner_id, storage_account_id) ON public.project TO tau_mirror`;
+    await transaction`GRANT SELECT (project_id) ON public.project_deletion TO tau_mirror`;
     await transaction`GRANT UPDATE (copied_generation, copy_pending_since, copy_locked_until, copied_manifest_sha256, updated_at) ON public.project_git TO tau_mirror`;
     await transaction`GRANT UPDATE (copied_at) ON public.project_git_lfs_object TO tau_mirror`;
     await transaction`GRANT UPDATE (copy_marked_at) ON public.storage_tombstone TO tau_mirror`;

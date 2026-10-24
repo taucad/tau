@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { lfsKey, ownerMarkerKey } from '#api/git/mirror/keys.js';
@@ -138,6 +139,67 @@ describe('pollOnce and LFS finalized after the newest copied generation', () => 
     await pollOnce({ context: h.context, ...options });
 
     expect(h.destination.keys(`tenants/${alice.ownerId}/lfs/`)).toStrictEqual([]);
+  });
+
+  /** A caught-up repository with `count` late objects, its first copy done. */
+  const caughtUpWithLate = async (h: ReturnType<typeof harness>, count: number) => {
+    h.ledger.recordGeneration(alice, h.source.push(alice, h.time.now()).generation);
+    await pollOnce({ context: h.context, ...options });
+    h.time.advance(60_000);
+    const late = Array.from({ length: count }, (_, index) => {
+      const object = h.source.addLfs(alice, `late object ${String(index)}`);
+      h.ledger.addLfsRow(alice, object, h.time.now());
+      return object;
+    });
+    h.time.advance(5 * 60_000);
+    return late;
+  };
+
+  it("should copy at most one batch of a caught-up repository's late LFS per poll, so new pushes are not held up", async () => {
+    const h = harness();
+    await caughtUpWithLate(h, 5);
+    const context = { ...h.context, lfsBatch: 2 };
+
+    await pollOnce({ context, ...options });
+    expect(h.destination.keys(`tenants/${alice.ownerId}/lfs/`)).toHaveLength(2);
+
+    await pollOnce({ context, ...options });
+    await pollOnce({ context, ...options });
+    expect(h.destination.keys(`tenants/${alice.ownerId}/lfs/`)).toHaveLength(5);
+  });
+
+  it("should stop a caught-up round's late LFS at its byte budget, copying at least one object", async () => {
+    const h = harness();
+    await caughtUpWithLate(h, 3);
+    const context = { ...h.context, lateLfsBytes: 1 };
+
+    await pollOnce({ context, ...options });
+    expect(h.destination.keys(`tenants/${alice.ownerId}/lfs/`)).toHaveLength(1);
+
+    await pollOnce({ context, ...options });
+    await pollOnce({ context, ...options });
+    expect(h.destination.keys(`tenants/${alice.ownerId}/lfs/`)).toHaveLength(3);
+  });
+
+  it('should extend a late LFS version a crashed round left to at least the recorded lock before marking it copied', async () => {
+    const h = harness();
+    const [late] = await caughtUpWithLate(h, 1);
+    const bytes = h.source.lfs.get(`${alice.ownerId}/${alice.projectId}/${late!.oid}`)!;
+    // A crashed round uploaded it with a lock short of the one the row records.
+    await h.destination.put(lfsKey(alice, late!.oid), bytes, {
+      contentLength: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('base64'),
+      retainUntil: new Date(h.time.now().getTime() + 60_000),
+    });
+
+    await pollOnce({ context: h.context, ...options });
+
+    expect([...(await h.ledger.copiedLfs('proj_one'))]).toStrictEqual([late!.oid]);
+    const recorded = h.ledger.row('proj_one').copyLockedUntil!;
+    expect(h.destination.objects.get(lfsKey(alice, late!.oid))).toHaveLength(1);
+    expect(h.destination.latest(lfsKey(alice, late!.oid))!.retainUntil.getTime()).toBeGreaterThanOrEqual(
+      recorded.getTime(),
+    );
   });
 });
 

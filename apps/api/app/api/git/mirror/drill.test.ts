@@ -1,8 +1,13 @@
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryLocator } from '#api/git/store/port.js';
 import { copyRepository } from '#api/git/mirror/copier.js';
-import { runVerifyDrill } from '#api/git/mirror/drill.js';
+import type { CopyReader } from '#api/git/mirror/destination.js';
+import { removeDrillScratch, runVerifyDrill } from '#api/git/mirror/drill.js';
 import type { DrillContext, DrillLedger, DrillRun, PackChecker } from '#api/git/mirror/drill.js';
 import { lfsKey, repositoryKey, repositoryPrefix } from '#api/git/mirror/keys.js';
 import { MirrorMetrics } from '#api/git/mirror/metrics.js';
@@ -133,18 +138,19 @@ describe('runVerifyDrill', () => {
     );
     expect(total(recorded, 'tau.mirror.drill_verified_bytes', { environment: 'staging' })).toBe(result.bytes);
     expect(recorded.get('tau.mirror.drill_duration_seconds')).toHaveLength(1);
-    expect(events).toStrictEqual([
-      {
-        event: 'tau_mirror.drill',
-        environment: 'staging',
-        outcome: 'pass',
-        repositories: 2,
-        objects: 9,
-        bytes: result.bytes,
-        failed: {},
-        seconds: expect.any(Number),
-      },
-    ]);
+    expect(events).toHaveLength(1);
+    const [{ seconds, ...line } = {}] = events;
+    expect(typeof seconds).toBe('number');
+    expect(line).toStrictEqual({
+      event: 'tau_mirror.drill',
+      environment: 'staging',
+      outcome: 'pass',
+      repositories: 2,
+      objects: 9,
+      bytes: result.bytes,
+      failed: {},
+      truncated: false,
+    });
     expect(JSON.stringify(events)).not.toMatch(/proj_|user_/u);
   });
 
@@ -235,5 +241,55 @@ describe('runVerifyDrill', () => {
     expect(ledger.runs.size).toBe(0);
     expect(total(recorded, 'tau.mirror.drill_runs')).toBe(0);
     expect(events).toMatchObject([{ event: 'tau_mirror.drill', outcome: 'skipped', repositories: 0 }]);
+  });
+
+  it('should stop reading at its byte budget and say the run was truncated, failing nothing', async () => {
+    const h = harness();
+    await copied(h, alice);
+    await copied(h, bob);
+    const mark = h.destination.calls.length;
+    const { context, ledger } = drill(h, { byteBudget: 1 });
+
+    const result = await runVerifyDrill(context);
+
+    expect(result).toMatchObject({ outcome: 'pass', truncated: true, repositories: 1, objects: 1, failed: {} });
+    // The snapshot is read; nothing after it.
+    expect(h.destination.calls.slice(mark).filter((call) => call === 'get')).toHaveLength(1);
+    expect([...ledger.runs.values()]).toMatchObject([{ outcome: 'pass', restoredBytes: result.bytes }]);
+  });
+
+  it('should end a run whose read stalls at its deadline, record it and fail deadline', async () => {
+    const h = harness();
+    await copied(h, alice);
+    await copied(h, bob);
+    const stalled: CopyReader = {
+      name: 'b2',
+      listVersions: (prefix) => h.destination.listVersions(prefix),
+      head: async (key, versionId) => h.destination.head(key, versionId),
+      // B2 answers the headers, then never sends the body.
+      get: async () => new Readable({ read: () => undefined }),
+    };
+    const { context, ledger } = drill(h, { copy: stalled, deadlineMilliseconds: 50 });
+
+    const result = await runVerifyDrill(context);
+
+    expect(result).toMatchObject({ outcome: 'fail', failed: { deadline: 1 }, repositories: 1 });
+    expect([...ledger.runs.values()]).toMatchObject([{ outcome: 'fail', failedChecks: ['deadline'] }]);
+  });
+});
+
+describe('removeDrillScratch', () => {
+  it('should remove scratch repositories a killed drill left, and nothing else', async () => {
+    const parent = await mkdtemp(path.join(tmpdir(), 'dr1-scratch-'));
+    try {
+      await mkdir(path.join(parent, 'tau-mirror-drill-abc', 'check.git'), { recursive: true });
+      await mkdir(path.join(parent, 'tau-mirror-lease-keep'));
+
+      expect(await removeDrillScratch(parent)).toBe(1);
+
+      expect(await readdir(parent)).toStrictEqual(['tau-mirror-lease-keep']);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
   });
 });

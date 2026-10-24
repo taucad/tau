@@ -16,7 +16,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getEnvironment } from '#config/environment.config.js';
 import * as schema from '#database/schema.js';
-import { project, projectGit, projectGitLfsObject, storageTombstone, user } from '#database/schema.js';
+import { project, projectDeletion, projectGit, projectGitLfsObject, storageTombstone, user } from '#database/schema.js';
 import { installMaintenanceRole, installMirrorRole } from '#database/service-roles.js';
 import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
@@ -321,6 +321,10 @@ describe('the B2 copier against MinIO with Object Lock and PostgreSQL', () => {
     const [candidate] = await ours(finalizedAt);
     expect(candidate).toMatchObject({ projectId, generation: 3, copiedGeneration: 3 });
     expect(await ours(finalizedAt, new Set([projectId]))).toStrictEqual([]);
+    // A project being deleted is left to its purge, not re-claimed every poll.
+    await ownerDatabase().insert(projectDeletion).values({ projectId, ownerId, requestedBy: 'user_dr1' });
+    expect(await ours(finalizedAt)).toStrictEqual([]);
+    await ownerDatabase().delete(projectDeletion).where(eq(projectDeletion.projectId, projectId));
 
     const result = await copyRepository({ ...context, now: () => new Date(finalizedAt.getTime() + 1000) }, candidate!);
 

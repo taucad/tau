@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, notInArray, or, sql } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { Database } from '#database/owner-lock.js';
-import { project, projectGit, projectGitLfsObject, storageTombstone } from '#database/schema.js';
+import { project, projectDeletion, projectGit, projectGitLfsObject, storageTombstone } from '#database/schema.js';
 
 /**
  * The copy's work signal and watermark in Postgres (W13 B4), behind a port so the
@@ -210,6 +210,9 @@ export class PostgresMirrorLedger implements MirrorLedger {
     const excluded = [...args.exclude];
     // The partial index `project_git_lfs_object_copy_pending_idx` serves the `exists`.
     const pendingLfs = sql`exists (select 1 from ${projectGitLfsObject} where ${projectGitLfsObject.projectId} = ${projectGit.projectId} and ${projectGitLfsObject.copiedAt} is null and ${projectGitLfsObject.finalizedAt} is not null and ${projectGitLfsObject.finalizedAt} <= ${args.finalizedBefore.toISOString()}::timestamptz)`;
+    // A project being deleted is never claimed: its purge removes the LFS rows, and
+    // re-claiming it every poll until then would only copy what is about to go.
+    const notDeleting = sql`not exists (select 1 from ${projectDeletion} where ${projectDeletion.projectId} = ${projectGit.projectId})`;
     const rows = await this.database
       .select(candidateColumns)
       .from(projectGit)
@@ -218,6 +221,7 @@ export class PostgresMirrorLedger implements MirrorLedger {
         and(
           gt(projectGit.copiedGeneration, 0),
           lte(projectGit.generation, projectGit.copiedGeneration),
+          notDeleting,
           isNull(projectGit.copyPendingSince),
           defaultAccount,
           notTombstoned,

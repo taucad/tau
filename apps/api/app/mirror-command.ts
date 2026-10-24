@@ -15,7 +15,7 @@ import { copyRepository, markTombstonedOwners } from '#api/git/mirror/copier.js'
 import type { CopierContext } from '#api/git/mirror/copier.js';
 import { S3MirrorDestination } from '#api/git/mirror/destination.js';
 import type { DestinationAccount } from '#api/git/mirror/destination.js';
-import { PostgresDrillLedger, exportLastDrillPass, runVerifyDrill } from '#api/git/mirror/drill.js';
+import { PostgresDrillLedger, exportLastDrillPass, removeDrillScratch, runVerifyDrill } from '#api/git/mirror/drill.js';
 import type { DrillContext } from '#api/git/mirror/drill.js';
 import { MirrorMetrics } from '#api/git/mirror/metrics.js';
 import { reconcile } from '#api/git/mirror/reconcile.js';
@@ -191,6 +191,14 @@ async function main(): Promise<void> {
           drillSample: environment.TAU_MIRROR_DRILL_SAMPLE,
         });
         const drilling = drill(environment.TAU_MIRROR_DRILL_SAMPLE);
+        // A drill killed mid-check (a deploy, an OOM) leaves its scratch repository behind.
+        await removeDrillScratch().catch((error: unknown) => {
+          report({
+            event: 'tau_mirror.pass_failed',
+            pass: 'drill_scratch',
+            error: error instanceof Error ? error.name : 'Error',
+          });
+        });
         if (environment.TAU_MIRROR_DRILL_SAMPLE > 0) {
           await exportLastDrillPass(drilling).catch((error: unknown) => {
             report({

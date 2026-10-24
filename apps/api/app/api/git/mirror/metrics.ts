@@ -22,6 +22,7 @@ export type MirrorDrillCheck =
   | 'push_log'
   | 'retention'
   | 'hidden_versions'
+  | 'deadline'
   | 'error';
 
 const counter = (meter: Meter, metric: MetricDefinition<'counter'>) =>
@@ -223,7 +224,7 @@ export class MirrorMetrics {
       this.drillVerifiedBytes.add(run.bytes, { environment });
     }
     for (const [check, count] of Object.entries(run.failed)) {
-      if (count !== undefined && count > 0) {
+      if (count > 0) {
         this.drillCheckFailures.add(count, { environment, check });
       }
     }

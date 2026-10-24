@@ -77,6 +77,15 @@ export type MirrorLedger = {
   candidate(projectId: string): Promise<CopyCandidate | undefined>;
   /** The owner's `storage_tombstone` row, if any: its locks are never extended again (W13 B6). */
   tombstone(ownerId: string): Promise<TombstonedOwner | undefined>;
+  /**
+   * Repositories the copy has caught up with that still have finalized, uncopied
+   * LFS objects finalized at or before `finalizedBefore`, project order. A round
+   * copies only LFS finalized by its generation's commit, so an object finalized
+   * after a repository's last push is copied here or not at all (the staging
+   * 100 MiB finding, 2026-10-24). Erased owners and owner-supplied accounts are
+   * never returned.
+   */
+  lfsStragglers(args: { limit: number; finalizedBefore: Date; exclude: ReadonlySet<string> }): Promise<CopyCandidate[]>;
   /** Finalized, uncopied LFS objects of a project finalized at or before `finalizedBy`, oid order, after `after`. */
   pendingLfs(projectId: string, finalizedBy: Date, limit: number, after?: string): Promise<PendingLfsObject[]>;
   markLfsCopied(projectId: string, oids: readonly string[], at: Date): Promise<void>;
@@ -99,7 +108,7 @@ export type MirrorLedger = {
   backlog(): Promise<BacklogReading>;
 };
 
-const candidateColumns = {
+export const candidateColumns = {
   projectId: projectGit.projectId,
   ownerId: project.ownerId,
   generation: projectGit.generation,
@@ -109,7 +118,7 @@ const candidateColumns = {
   copiedManifestSha256: projectGit.copiedManifestSha256,
 };
 
-type CandidateRow = {
+export type CandidateRow = {
   projectId: string;
   ownerId: string;
   generation: number;
@@ -122,7 +131,7 @@ type CandidateRow = {
   copiedManifestSha256: string | null;
 };
 
-const toCandidate = (row: CandidateRow): CopyCandidate => ({
+export const toCandidate = (row: CandidateRow): CopyCandidate => ({
   projectId: row.projectId,
   ownerId: row.ownerId,
   generation: row.generation,
@@ -134,9 +143,9 @@ const toCandidate = (row: CandidateRow): CopyCandidate => ({
 });
 
 /** Only the Tau default account is copied; an owner-supplied bucket is the owner's (D26). */
-const defaultAccount = isNull(project.storageAccountId);
+export const defaultAccount = isNull(project.storageAccountId);
 
-const notTombstoned = sql`not exists (select 1 from ${storageTombstone} where ${storageTombstone.ownerId} = ${project.ownerId})`;
+export const notTombstoned = sql`not exists (select 1 from ${storageTombstone} where ${storageTombstone.ownerId} = ${project.ownerId})`;
 
 /** `tau_mirror`'s Postgres, through Drizzle. */
 export class PostgresMirrorLedger implements MirrorLedger {
@@ -191,6 +200,34 @@ export class PostgresMirrorLedger implements MirrorLedger {
       .where(and(eq(projectGit.projectId, projectId), defaultAccount))
       .limit(1);
     return row === undefined ? undefined : toCandidate(row);
+  }
+
+  public async lfsStragglers(args: {
+    limit: number;
+    finalizedBefore: Date;
+    exclude: ReadonlySet<string>;
+  }): Promise<CopyCandidate[]> {
+    const excluded = [...args.exclude];
+    // The partial index `project_git_lfs_object_copy_pending_idx` serves the `exists`.
+    const pendingLfs = sql`exists (select 1 from ${projectGitLfsObject} where ${projectGitLfsObject.projectId} = ${projectGit.projectId} and ${projectGitLfsObject.copiedAt} is null and ${projectGitLfsObject.finalizedAt} is not null and ${projectGitLfsObject.finalizedAt} <= ${args.finalizedBefore.toISOString()}::timestamptz)`;
+    const rows = await this.database
+      .select(candidateColumns)
+      .from(projectGit)
+      .innerJoin(project, eq(project.id, projectGit.projectId))
+      .where(
+        and(
+          gt(projectGit.copiedGeneration, 0),
+          lte(projectGit.generation, projectGit.copiedGeneration),
+          isNull(projectGit.copyPendingSince),
+          defaultAccount,
+          notTombstoned,
+          pendingLfs,
+          excluded.length === 0 ? undefined : notInArray(projectGit.projectId, excluded),
+        ),
+      )
+      .orderBy(asc(projectGit.projectId))
+      .limit(args.limit);
+    return rows.map((row) => toCandidate(row));
   }
 
   public async tombstone(ownerId: string): Promise<TombstonedOwner | undefined> {

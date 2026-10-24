@@ -257,10 +257,9 @@ const copySegments = async (state: RoundState, manifest: Manifest, index: Versio
  * are a precondition for advancing the watermark, though the manifest does not
  * name them (W13 Finding 1). Each is verified against its own oid.
  */
-const copyLfs = async (state: RoundState, manifest: Manifest): Promise<void> => {
+const copyLfs = async (state: RoundState, finalizedBy: Date): Promise<void> => {
   const { context, locator } = state;
   const batch = context.lfsBatch ?? 100;
-  const finalizedBy = new Date(manifest.committedAt);
   let index: VersionIndex | undefined;
   let after: string | undefined;
   for (;;) {
@@ -523,11 +522,6 @@ const runRound = async (context: CopierContext, candidate: CopyCandidate): Promi
     );
   }
   const { manifest, bytes } = read;
-  if (manifest.generation <= candidate.copiedGeneration) {
-    await context.ledger.settle(candidate.projectId, manifest.generation);
-    return { outcome: 'noop', generation: manifest.generation };
-  }
-
   const state: RoundState = {
     context,
     locator,
@@ -536,6 +530,19 @@ const runRound = async (context: CopierContext, candidate: CopyCandidate): Promi
     reused: new Set(),
     objects: 0,
   };
+  if (manifest.generation <= candidate.copiedGeneration) {
+    await context.ledger.settle(candidate.projectId, manifest.generation);
+    // Caught up: what is left is LFS finalized after the last push, which no later
+    // round may ever come for. It is locked to `clock.until`, at or past the lock the
+    // row records, so the recorded lock still holds for every dependency.
+    if (!isTombstoned(manifest) && !(await ownerTombstoned(context, candidate.ownerId))) {
+      await copyLfs(state, clock.at);
+    }
+    return state.objects > 0
+      ? { outcome: 'copied', generation: manifest.generation, objects: state.objects }
+      : { outcome: 'noop', generation: manifest.generation };
+  }
+
   const repository = await indexVersions(context.destination, repositoryPrefix(locator), context.signal);
   if (repository.hidden > 0) {
     context.report?.({
@@ -566,7 +573,7 @@ const runRound = async (context: CopierContext, candidate: CopyCandidate): Promi
 
   await copyPacks(state, manifest, repository);
   await copySegments(state, manifest, repository);
-  await copyLfs(state, manifest);
+  await copyLfs(state, new Date(manifest.committedAt));
   const snapshot = await writeSnapshot(state, manifest, bytes, repository);
 
   let lockedUntil = candidate.copyLockedUntil;

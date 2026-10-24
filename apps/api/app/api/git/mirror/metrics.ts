@@ -12,6 +12,17 @@ import type { MirrorFailureReason, MirrorFailureStage } from '#api/git/mirror/fa
 
 export type MirrorObjectKind = 'pack' | 'idx' | 'manifest' | 'segment' | 'retired_marker' | 'lfs' | 'owner_marker';
 export type MirrorRoundOutcome = 'copied' | 'noop' | 'failed' | 'tombstoned';
+export type MirrorDrillEnvironment = 'staging' | 'production' | 'development';
+export type MirrorDrillCheck =
+  | 'snapshot'
+  | 'missing'
+  | 'checksum'
+  | 'pack'
+  | 'lfs'
+  | 'push_log'
+  | 'retention'
+  | 'hidden_versions'
+  | 'error';
 
 const counter = (meter: Meter, metric: MetricDefinition<'counter'>) =>
   meter.createCounter(metric.name, {
@@ -47,6 +58,11 @@ export class MirrorMetrics {
   private readonly reconcileHiddenVersions;
   private readonly destinationStoredBytes;
   private readonly destinationObjectVersions;
+  private readonly drillRuns;
+  private readonly drillCheckFailures;
+  private readonly drillLastSuccess;
+  private readonly drillDuration;
+  private readonly drillVerifiedBytes;
 
   /** The `destination` label: B2 is the only second copy (W13 B1). */
   private get destination(): 'b2' {
@@ -79,6 +95,17 @@ export class MirrorMetrics {
     this.reconcileHiddenVersions = gauge(this.meter, TauMetrics.mirrorReconcileHiddenVersions);
     this.destinationStoredBytes = gauge(this.meter, TauMetrics.mirrorDestinationStoredBytes);
     this.destinationObjectVersions = gauge(this.meter, TauMetrics.mirrorDestinationObjectVersions);
+    this.drillRuns = counter(this.meter, TauMetrics.mirrorDrillRuns);
+    this.drillCheckFailures = counter(this.meter, TauMetrics.mirrorDrillCheckFailures);
+    this.drillLastSuccess = gauge(this.meter, TauMetrics.mirrorDrillLastSuccess);
+    this.drillVerifiedBytes = counter(this.meter, TauMetrics.mirrorDrillVerifiedBytes);
+    this.drillDuration = this.meter.createHistogram(TauMetrics.mirrorDrillDuration.name, {
+      description: TauMetrics.mirrorDrillDuration.description,
+      unit: TauMetrics.mirrorDrillDuration.unit,
+      advice: {
+        explicitBucketBoundaries: [...TauMetrics.mirrorDrillDuration.buckets],
+      },
+    });
   }
 
   public round(outcome: MirrorRoundOutcome): void {
@@ -178,5 +205,32 @@ export class MirrorMetrics {
       destination,
       scope,
     });
+  }
+
+  /** One finished verify drill (DR2-lite): its outcome, time, bytes read back and failed checks. */
+  public drill(
+    environment: MirrorDrillEnvironment,
+    run: {
+      outcome: 'pass' | 'fail';
+      seconds: number;
+      bytes: number;
+      failed: Readonly<Partial<Record<MirrorDrillCheck, number>>>;
+    },
+  ): void {
+    this.drillRuns.add(1, { environment, outcome: run.outcome });
+    this.drillDuration.record(Math.max(0, run.seconds), { environment });
+    if (run.bytes > 0) {
+      this.drillVerifiedBytes.add(run.bytes, { environment });
+    }
+    for (const [check, count] of Object.entries(run.failed)) {
+      if (count !== undefined && count > 0) {
+        this.drillCheckFailures.add(count, { environment, check });
+      }
+    }
+  }
+
+  /** The freshness gauge: when the newest passing drill finished. */
+  public drillPassed(environment: MirrorDrillEnvironment, at: Date): void {
+    this.drillLastSuccess.record(Math.floor(at.getTime() / 1000), { environment });
   }
 }

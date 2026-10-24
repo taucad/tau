@@ -298,6 +298,40 @@ describe('the B2 copier against MinIO with Object Lock and PostgreSQL', () => {
     expect(lfsRow?.copiedAt).not.toBeNull();
   });
 
+  it('should find a caught-up repository by an LFS object finalized after its last push, and copy it as tau_mirror', async () => {
+    const content = new Uint8Array(Buffer.from(`late lfs ${run}`));
+    const oid = createHash('sha256').update(content).digest('hex');
+    await driver.putBlob({
+      namespace: 'tenants',
+      key: tenantLfsObjectKey(ownerId, projectId, oid),
+      body: content,
+      contentType: 'application/octet-stream',
+      tier: 'private',
+    });
+    const finalizedAt = new Date(Date.now() + clockOffset + 1000);
+    await ownerDatabase()
+      .insert(projectGitLfsObject)
+      .values({ projectId, oid, sizeBytes: content.byteLength, finalizedAt });
+    const ours = async (finalizedBefore: Date, exclude: ReadonlySet<string> = new Set()) => {
+      const found = await context.ledger.lfsStragglers({ limit: 1000, finalizedBefore, exclude });
+      return found.filter((candidate) => candidate.projectId === projectId);
+    };
+
+    expect(await ours(new Date(finalizedAt.getTime() - 1))).toStrictEqual([]);
+    const [candidate] = await ours(finalizedAt);
+    expect(candidate).toMatchObject({ projectId, generation: 3, copiedGeneration: 3 });
+    expect(await ours(finalizedAt, new Set([projectId]))).toStrictEqual([]);
+
+    const result = await copyRepository({ ...context, now: () => new Date(finalizedAt.getTime() + 1000) }, candidate!);
+
+    expect(result).toMatchObject({ outcome: 'copied', generation: 3, objects: 1 });
+    const versions = await versionsOf(lfsKey(locator, oid));
+    expect(versions.map((version) => version.key)).toStrictEqual([lfsKey(locator, oid)]);
+    expect(await ours(finalizedAt)).toStrictEqual([]);
+    const after = await row();
+    expect(after.copiedGeneration).toBe(3);
+  });
+
   it('should extend an idle repository through the sweep, and the store should refuse a shortening', async () => {
     const { copyLockedUntil: before } = await row();
     clockOffset = 6 * 60 * 1000;

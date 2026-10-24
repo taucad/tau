@@ -26,7 +26,8 @@ afterEach(async () => {
   }
 });
 
-const sha256 = (content: string | Uint8Array): string => createHash('sha256').update(content).digest('hex');
+const sha256 = (content: string | Uint8Array<ArrayBuffer>): string =>
+  createHash('sha256').update(content).digest('hex');
 
 /** Body bytes anywhere inside one frame. */
 const bodyBytes = (value: unknown): number => {
@@ -52,7 +53,7 @@ const connect = () => {
       port1.postMessage(message);
     },
     addEventListener(type, listener) {
-      port1.addEventListener(type, (event: MessageEvent) => {
+      port1.addEventListener(type as 'message', (event: MessageEvent) => {
         tap.repliedBodyBytes += bodyBytes(event.data);
         listener(event);
       });
@@ -104,14 +105,16 @@ describe('hashFiles over the node provider leg', () => {
   it('detects a same-length rewrite that keeps the mtime', async () => {
     const { root, provider } = connect();
     const file = join(root, 'main.ts');
+    const tick = new Date(1_700_000_000_000);
     writeFileSync(file, 'v1');
-    const { atime, mtime } = statSync(file);
+    utimesSync(file, tick, tick);
+    const stamp = statSync(file);
     const before = await provider.hashFiles(['main.ts']);
 
     writeFileSync(file, 'v2');
-    utimesSync(file, atime, mtime);
+    utimesSync(file, tick, tick);
 
-    expect(statSync(file).mtimeMs).toBe(mtime.getTime());
+    expect([statSync(file).size, statSync(file).mtimeMs]).toEqual([stamp.size, stamp.mtimeMs]);
     expect(await provider.hashFiles(['main.ts'])).not.toEqual(before);
   });
 

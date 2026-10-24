@@ -331,7 +331,7 @@ const desktopFileSystem = (files: Record<string, string>) => {
       port1.postMessage(message);
     },
     addEventListener(type, listener) {
-      port1.addEventListener(type, (event: MessageEvent) => {
+      port1.addEventListener(type as 'message', (event: MessageEvent) => {
         leg.repliedBodyBytes += bodyBytes(event.data);
         listener(event);
       });
@@ -398,9 +398,12 @@ describe('retained-closure revalidation on the desktop provider leg', () => {
     const first = await evaluate(worker, request);
 
     const file = join(desktop.root, 'lib/part-1.ts');
-    const { atime, mtime } = statSync(file);
+    const tick = new Date(1_700_000_000_000);
+    utimesSync(file, tick, tick);
+    const stamp = statSync(file);
     desktop.write('lib/part-1.ts', 'PART 1');
-    utimesSync(file, atime, mtime);
+    utimesSync(file, tick, tick);
+    expect([statSync(file).size, statSync(file).mtimeMs]).toEqual([stamp.size, stamp.mtimeMs]);
     const second = await evaluate(worker, request);
 
     expect(counts.evaluations).toBe(2);

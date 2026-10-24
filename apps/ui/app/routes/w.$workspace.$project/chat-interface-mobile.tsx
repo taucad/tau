@@ -167,7 +167,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           )}
         >
           <Tabs value={activeTab} onValueChange={handleTabChange}>
-            <ChatInterfaceNav className='h-(--nav-height)' />
+            <ChatInterfaceNav className='h-(--nav-height)' activeTab={activeTab} onTabChange={handleTabChange} />
           </Tabs>
         </div>
       </div>

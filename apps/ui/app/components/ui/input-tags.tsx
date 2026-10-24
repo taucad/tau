@@ -4,9 +4,8 @@ import type { ComponentProps, MouseEventHandler, ReactNode } from 'react';
 import { Badge } from '@taucad/ui/components/badge';
 import type { CommandGroup } from '@taucad/ui/components/command';
 import { Command, CommandEmpty, CommandItem, CommandList } from '@taucad/ui/components/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { cn } from '@taucad/ui/utils/cn';
-import { stringToColor } from '#utils/color.utils.js';
 
 type TagsContextType = {
   value: string;
@@ -133,7 +132,7 @@ export function TagsTrigger({
   };
 
   return (
-    <PopoverTrigger asChild>
+    <PopoverAnchor asChild>
       <div
         className={cn(
           'group/tags-trigger flex h-auto min-h-9 w-full cursor-text flex-wrap items-center gap-1 rounded-md border border-input bg-background p-2 text-sm shadow-xs transition-[box-shadow] outline-none dark:bg-input/30',
@@ -153,24 +152,28 @@ export function TagsTrigger({
             {tag}
           </TagsValue>
         ))}
-        <input
-          ref={inputRef}
-          data-slot='input-tags-input'
-          id={id}
-          type='text'
-          aria-label={inputAriaLabel}
-          value={value}
-          disabled={disabled}
-          placeholder={tags.length === 0 ? placeholder : ''}
-          className='w-0 flex-1 bg-transparent px-0.5 py-px text-sm outline-none group-focus-within/tags-trigger:w-30 placeholder:text-muted-foreground pointer-coarse:text-base'
-          onChange={(event) => {
-            setValue(event.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onBlur={commitCurrentValue}
-        />
+        <PopoverTrigger asChild>
+          <input
+            // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- PopoverTrigger supplies aria-expanded and aria-controls to this slotted input.
+            role='combobox'
+            ref={inputRef}
+            data-slot='input-tags-input'
+            id={id}
+            type='text'
+            aria-label={inputAriaLabel ?? placeholder}
+            value={value}
+            disabled={disabled}
+            placeholder={tags.length === 0 ? placeholder : ''}
+            className='w-0 flex-1 bg-transparent px-0.5 py-px text-sm outline-none group-focus-within/tags-trigger:w-30 placeholder:text-muted-foreground pointer-coarse:text-base'
+            onChange={(event) => {
+              setValue(event.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            onBlur={commitCurrentValue}
+          />
+        </PopoverTrigger>
       </div>
-    </PopoverTrigger>
+    </PopoverAnchor>
   );
 }
 
@@ -195,11 +198,7 @@ export function TagsValue({
   };
 
   return (
-    <Badge
-      style={{ backgroundColor: stringToColor(String(children), 0.7) }}
-      className={cn('flex items-center gap-2 pr-0.5', className)}
-      {...props}
-    >
+    <Badge variant='secondary' className={cn('flex items-center gap-2 pr-0.5', className)} {...props}>
       {children}
       {onRemove ? (
         <button

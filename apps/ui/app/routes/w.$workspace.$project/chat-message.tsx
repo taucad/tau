@@ -1,3 +1,4 @@
+import { ChatMessageSurface } from '#components/chat/chat-message-surface.js';
 import {
   BookOpen,
   Box,
@@ -46,7 +47,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '#utils/date.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
-import { chatUserMessagePaddingClassName, chatInputTextClassName } from '#components/chat/chat-input-styles.js';
+import { chatInputTextClassName } from '#components/chat/chat-input-styles.js';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/w.$workspace.$project/chat-message-tool-edit-file.js';
@@ -243,7 +244,11 @@ const retiredToolPart = (part: unknown): DynamicToolUIPart | undefined => {
   }
   // SAFETY: a static tool part carries every field a dynamic one does; only the name moves from `type` to `toolName`.
   // oxlint-disable-next-line typescript/consistent-type-assertions -- a persisted part of a retired tool has no static type.
-  return { ...part, type: 'dynamic-tool', toolName: type.slice(5) } as DynamicToolUIPart;
+  return {
+    ...part,
+    type: 'dynamic-tool',
+    toolName: type.slice(5),
+  } as DynamicToolUIPart;
 };
 
 // oxlint-disable-next-line complexity -- Part type dispatch requires many branches
@@ -277,7 +282,11 @@ function renderAssistantPart(
       return (
         <ChatMessageMedia
           key={`${messageId}-message-part-${index}`}
-          media={{ url: part.url, mediaType: part.mediaType, ...(part.filename ? { filename: part.filename } : {}) }}
+          media={{
+            url: part.url,
+            mediaType: part.mediaType,
+            ...(part.filename ? { filename: part.filename } : {}),
+          }}
           className='my-2'
         />
       );
@@ -965,12 +974,9 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           </When>
           <When shouldRender={!isEditing}>
             {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + toolbar + padding + border = 15.125rem). Keep in sync so click-to-edit does not jump. */}
-            <div
+            <ChatMessageSurface
+              isUser={isUser}
               className={cn(
-                'flex flex-col gap-0 min-w-0',
-                isUser &&
-                  'relative z-10 cursor-action rounded-lg border bg-background px-3 outline-none hover:border-foreground/20 focus-visible:focus-outline',
-                isUser && chatUserMessagePaddingClassName,
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}
@@ -993,7 +999,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               ) : (
                 <AssistantParts parts={inlineParts} messageId={displayMessage.id} />
               )}
-            </div>
+            </ChatMessageSurface>
           </When>
           {footer}
         </div>

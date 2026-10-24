@@ -2,9 +2,10 @@ import { fileContentBytes } from '@taucad/fs-client/file-content-service';
 import { z } from 'zod';
 import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useObservation } from '@taucad/fs-client/react/use-observation';
+import { useNavigate } from 'react-router';
 import type { MetaFunction } from 'react-router';
 import { PageContent } from '#components/layout/page-content.js';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState, useRef } from 'react';
 import {
   Blocks,
   Check,
@@ -41,7 +42,7 @@ export const handle: Handle = {
   enableOverflowY: true,
 };
 
-type StoreItem = {
+export type StoreItem = {
   readonly slug?: string;
   readonly name: string;
   readonly description: string;
@@ -189,6 +190,8 @@ function StoreItemRow({
               ? `${item.name} installed`
               : `Install ${item.name}`
         }
+        disabled={!canInstall || onInstall === undefined}
+        title={!canInstall && !isInstalled ? 'This integration is not available yet' : undefined}
         onClick={() => {
           if (canInstall && item.slug) {
             onInstall?.(item.slug);
@@ -249,9 +252,6 @@ export default function PluginsRoute(): React.JSX.Element {
   const manifestSnapshot = useObservation(manifestService);
   const manifest = manifestSnapshot.value ?? {};
 
-  const systemSkills = useMemo(() => systemSkillsCatalog.map((skill) => systemSkillToStoreItem(skill)), []);
-  const storeSkills = useMemo(() => tauStoreSkills.map((skill, index) => skillToStoreItem(skill, index)), []);
-
   const getSkillInstallStatus = useCallback(
     (item: StoreItem): 'available' | 'installed' | 'shadowed' => {
       if (!item.slug) {
@@ -311,75 +311,151 @@ export default function PluginsRoute(): React.JSX.Element {
   );
 
   return (
+    <PluginStoreView
+      getSkillInstallStatus={getSkillInstallStatus}
+      installSkill={installSkill}
+      statusContent={
+        <>
+          {manifestSnapshot.error && (
+            <p role='alert' className='text-sm text-destructive'>
+              {manifestSnapshot.error}
+            </p>
+          )}
+          {manifestService &&
+          (manifestSnapshot.status === 'closed' ||
+            manifestSnapshot.status === 'error' ||
+            (manifestSnapshot.value !== undefined && manifestSnapshot.status !== 'ready')) ? (
+            <div role='status' className='flex items-center justify-between gap-2 text-sm'>
+              <span>
+                {manifestSnapshot.status === 'registering' || manifestSnapshot.status === 'pending'
+                  ? 'Plugin updates pending'
+                  : 'Plugin updates unavailable'}
+              </span>
+              <Button
+                variant='ghost'
+                size='sm'
+                aria-label='Retry plugin updates'
+                onClick={() => {
+                  manifestService.refresh();
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : undefined}
+          {catalog.status === 'ready' ? undefined : (
+            <div role='status' className='flex items-center justify-between gap-2 text-sm'>
+              <span>
+                {catalog.status === 'registering' || catalog.status === 'pending'
+                  ? 'Skill updates pending'
+                  : 'Skill updates unavailable'}
+              </span>
+              <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
+                Retry
+              </Button>
+            </div>
+          )}
+        </>
+      }
+    />
+  );
+}
+
+/** Shared store composition; hosts supply installation state and its effect. */
+export function PluginStoreView({
+  getSkillInstallStatus,
+  installSkill,
+  statusContent,
+}: {
+  readonly getSkillInstallStatus: (item: StoreItem) => 'available' | 'installed' | 'shadowed';
+  readonly installSkill: (slug: string) => void;
+  readonly statusContent?: React.ReactNode;
+}): React.JSX.Element {
+  const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<'plugins' | 'skills'>('plugins');
+  const [builtByTau, setBuiltByTau] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+  const systemSkills = systemSkillsCatalog.map((item) => systemSkillToStoreItem(item));
+  const storeSkills = tauStoreSkills.map((item, index) => skillToStoreItem(item, index));
+  const matches = (item: StoreItem): boolean =>
+    `${item.name} ${item.description}`.toLowerCase().includes(query.toLowerCase());
+  return (
     <PageContent className='space-y-6'>
       <PageHeader
         title='Plugins'
         action={
           <div className='ml-auto flex w-full flex-wrap items-center gap-2 sm:w-auto'>
             <div className='flex items-center gap-1'>
-              <Button size='sm' variant='secondary'>
+              <Button
+                size='sm'
+                variant={tab === 'plugins' ? 'secondary' : 'ghost'}
+                aria-pressed={tab === 'plugins'}
+                onClick={() => {
+                  setTab('plugins');
+                }}
+              >
                 Plugins
               </Button>
-              <Button size='sm' variant='ghost'>
+              <Button
+                size='sm'
+                variant={tab === 'skills' ? 'secondary' : 'ghost'}
+                aria-pressed={tab === 'skills'}
+                onClick={() => {
+                  setTab('skills');
+                }}
+              >
                 Skills
               </Button>
             </div>
             <div className='relative min-w-0 grow sm:w-64'>
               <Search className='pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
-              <Input aria-label='Search plugins' className='pl-8' placeholder='Search plugins…' />
+              <Input
+                ref={searchRef}
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                }}
+                aria-label='Search plugins'
+                className='pl-8'
+                placeholder='Search plugins…'
+              />
             </div>
-            <Button variant='secondary' size='sm'>
+            <Button
+              variant={builtByTau ? 'secondary' : 'ghost'}
+              size='sm'
+              aria-pressed={builtByTau}
+              onClick={() => {
+                setBuiltByTau(true);
+              }}
+            >
               Built by Tau
             </Button>
-            <Button variant='secondary' size='sm'>
+            <Button
+              variant={builtByTau ? 'ghost' : 'secondary'}
+              size='sm'
+              aria-pressed={!builtByTau}
+              onClick={() => {
+                setBuiltByTau(false);
+              }}
+            >
               All
             </Button>
           </div>
         }
       />
 
-      {manifestSnapshot.error && (
-        <p role='alert' className='text-sm text-destructive'>
-          {manifestSnapshot.error}
-        </p>
-      )}
-      {manifestService &&
-      (manifestSnapshot.status === 'closed' ||
-        manifestSnapshot.status === 'error' ||
-        (manifestSnapshot.value !== undefined && manifestSnapshot.status !== 'ready')) ? (
-        <div role='status' className='flex items-center justify-between gap-2 text-sm'>
-          <span>
-            {manifestSnapshot.status === 'registering' || manifestSnapshot.status === 'pending'
-              ? 'Plugin updates pending'
-              : 'Plugin updates unavailable'}
-          </span>
-          <Button
-            variant='ghost'
-            size='sm'
-            aria-label='Retry plugin updates'
-            onClick={() => {
-              manifestService.refresh();
-            }}
-          >
-            Retry
-          </Button>
-        </div>
-      ) : undefined}
-      {catalog.status === 'ready' ? undefined : (
-        <div role='status' className='flex items-center justify-between gap-2 text-sm'>
-          <span>
-            {catalog.status === 'registering' || catalog.status === 'pending'
-              ? 'Skill updates pending'
-              : 'Skill updates unavailable'}
-          </span>
-          <Button variant='ghost' size='sm' aria-label='Retry skill updates' onClick={catalog.retry}>
-            Retry
-          </Button>
-        </div>
-      )}
-      <StoreSection title='Featured' items={featuredPlugins} />
-      <StoreSection title='System' items={systemSkills} />
-      <StoreSection title='Skills' items={storeSkills} getStatus={getSkillInstallStatus} onInstall={installSkill} />
+      {statusContent}
+      {tab === 'plugins' && !builtByTau ? (
+        <StoreSection title='Featured' items={featuredPlugins.filter((item) => matches(item))} />
+      ) : null}
+      <StoreSection title='System' items={systemSkills.filter((item) => matches(item))} />
+      <StoreSection
+        title='Skills'
+        items={storeSkills.filter((item) => matches(item))}
+        getStatus={getSkillInstallStatus}
+        onInstall={installSkill}
+      />
 
       {/* Below the collections: the first viewport belongs to the lists (page composition Rule 14). */}
       <section className='flex h-40 items-center justify-center overflow-hidden rounded-md border bg-[linear-gradient(135deg,color-mix(in_oklab,var(--information)_18%,var(--background)),color-mix(in_oklab,var(--feature)_14%,var(--background)),color-mix(in_oklab,var(--warning)_12%,var(--background)))]'>
@@ -392,7 +468,13 @@ export default function PluginsRoute(): React.JSX.Element {
             Computer Use
             <span className='text-muted-foreground'>Play a playlist to help me lock in</span>
           </Badge>
-          <Button size='xs' className='h-7 rounded-md px-3 text-xs'>
+          <Button
+            size='xs'
+            className='h-7 rounded-md px-3 text-xs'
+            onClick={() => {
+              void navigate('/', { state: { focusChatComposer: true } });
+            }}
+          >
             <Puzzle className='size-3.5' />
             Try in chat
           </Button>
@@ -407,7 +489,16 @@ export default function PluginsRoute(): React.JSX.Element {
             Shared plugin and skill packs will install into the workspace filesystem.
           </p>
         </div>
-        <Button variant='secondary' size='xs' className='h-7 rounded-md px-2 text-xs'>
+        <Button
+          variant='secondary'
+          size='xs'
+          className='h-7 rounded-md px-2 text-xs'
+          onClick={() => {
+            setTab('skills');
+            setQuery('');
+            searchRef.current?.focus();
+          }}
+        >
           Add
         </Button>
       </section>

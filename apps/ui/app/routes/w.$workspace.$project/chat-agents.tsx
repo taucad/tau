@@ -58,21 +58,21 @@ const statePresentation: Readonly<
     label: 'Waiting',
     icon: Clock3,
     rail: 'before:bg-warning',
-    tone: 'border-warning/30 bg-warning/10 text-warning',
+    tone: 'border-warning/30 bg-warning/10 text-foreground',
     iconClassName: 'text-warning',
   },
   running: {
     label: 'Running',
     icon: Radio,
     rail: 'before:bg-information',
-    tone: 'border-information/30 bg-information/10 text-information',
+    tone: 'border-information/30 bg-information/10 text-foreground',
     iconClassName: 'text-information animate-pulse motion-reduce:animate-none',
   },
   error: {
     label: 'Error',
     icon: CircleAlert,
     rail: 'before:bg-feature',
-    tone: 'border-feature/30 bg-feature/10 text-feature',
+    tone: 'border-feature/30 bg-feature/10 text-foreground',
     iconClassName: 'text-feature',
   },
   idle: {
@@ -277,7 +277,10 @@ const AgentRowContent = ({ agent }: { readonly agent: AgentProjection }): React.
           <div className='flex min-w-0 items-center gap-1.5'>
             <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>{agent.name}</h3>
             {agent.focused ? (
-              <Badge variant='outline' className='h-5 border-primary/30 bg-primary/5 px-1.5 text-[10px] text-primary'>
+              <Badge
+                variant='outline'
+                className='h-5 border-primary/30 bg-primary/5 px-1.5 text-[10px] text-foreground'
+              >
                 Focused
               </Badge>
             ) : null}

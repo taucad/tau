@@ -156,7 +156,10 @@ function usePaneRuntimeView({
         setViewError((current) =>
           current?.key === subscriptionKey
             ? current
-            : { key: subscriptionKey, message: 'The selected view is unavailable.' },
+            : {
+                key: subscriptionKey,
+                message: 'The selected view is unavailable.',
+              },
         );
       }
     });
@@ -389,7 +392,12 @@ const ChatViewerContent = memo(function ({
       panelApi.updateParameters({ entryPath: path });
 
       // Update the Dockview panel title
-      panelApi.setTitle(viewTabTitle({ ...(viewRecord ?? newViewRecord(path)), entryPath: path }));
+      panelApi.setTitle(
+        viewTabTitle({
+          ...(viewRecord ?? newViewRecord(path)),
+          entryPath: path,
+        }),
+      );
     },
     [
       entriesRecord,
@@ -591,16 +599,25 @@ const ViewerContent = memo(function ({
   const graphicsActor = useGraphics();
   const presentedUnitId = useGraphicsSelector((state) => state.context.modelInteractionUnitId);
   const presentedMediaType = useGraphicsSelector((state) => state.context.artifact?.mimeType);
-  const previousPresentation = useRef({ unitId: presentedUnitId, mimeType: presentedMediaType });
+  const previousPresentation = useRef({
+    unitId: presentedUnitId,
+    mimeType: presentedMediaType,
+  });
   useEffect(() => {
     const previous = previousPresentation.current;
-    previousPresentation.current = { unitId: presentedUnitId, mimeType: presentedMediaType };
+    previousPresentation.current = {
+      unitId: presentedUnitId,
+      mimeType: presentedMediaType,
+    };
     if (
       previous.unitId &&
       (previous.unitId !== presentedUnitId ||
         (previous.mimeType === 'model/gltf-binary' && presentedMediaType !== 'model/gltf-binary'))
     ) {
-      projectRef.send({ type: 'reconcileViewManifest', unitId: previous.unitId });
+      projectRef.send({
+        type: 'reconcileViewManifest',
+        unitId: previous.unitId,
+      });
     }
   }, [presentedUnitId, presentedMediaType, projectRef]);
   useEffect(() => {
@@ -632,7 +649,10 @@ const ViewerContent = memo(function ({
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-  const partMenu = useViewerPartMenu({ graphicsRef: graphicsActor, actions: useModelComponentMenuActions() });
+  const partMenu = useViewerPartMenu({
+    graphicsRef: graphicsActor,
+    actions: useModelComponentMenuActions(),
+  });
   const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryPath }), [entryPath]);
   const thumbnails = useOptionalPartThumbnailService(modelInteractionUnitId);
   const previewSourceDigests = useRef(new WeakMap<Uint8Array<ArrayBuffer>, Promise<string>>());
@@ -662,7 +682,11 @@ const ViewerContent = memo(function ({
       return;
     }
     const part = { id: viewerPart.id, primitives: viewerPart.primitiveRefs! };
-    setPreviewRetry((current) => ({ part, requestId: (current?.requestId ?? 0) + 1, sourceKey: presentedKey }));
+    setPreviewRetry((current) => ({
+      part,
+      requestId: (current?.requestId ?? 0) + 1,
+      sourceKey: presentedKey,
+    }));
   }, [presentedKey, viewerPart]);
   useEffect(() => {
     if (previewRetry && previewRetry.sourceKey !== presentedKey) {
@@ -717,7 +741,12 @@ const ViewerContent = memo(function ({
               content,
               renderContent: prepared.renderContent,
             },
-            [{ ...requestedPart, visualKey: prepared.previews[0]?.key ?? prepared.visualKey }],
+            [
+              {
+                ...requestedPart,
+                visualKey: prepared.previews[0]?.key ?? prepared.visualKey,
+              },
+            ],
             pendingRetry ? { manualPartId: pendingRetry.part.id } : undefined,
           );
           if (pendingRetry) {
@@ -845,47 +874,46 @@ const ViewerContent = memo(function ({
         )
       }
       /* Bottom controls: the bar is centred on the last line and grows upward as tools start. In the editor it starts
-         with the view menus and the build status, and the issues list unfolds above its controls. The AR button
-         (mobile iOS only) has the line above it, so the bar never covers it. In a pane narrower than the bar, the
+         with the view menus and the build status, and the issues list unfolds above its controls. Capability-gated mobile AR shares the controls row. In a pane narrower than the bar, the
          bar starts at the left edge, keeping the grid readout and Section in view. */
       controls={
-        <>
-          <div className='flex w-full items-end gap-2 [&>*]:pointer-events-auto'>
-            <ArButton artifact={artifact} runtimeDocument={runtimeDocument} className='ml-auto shrink-0' />
-          </div>
-          {profile === 'editor' ? (
-            <ViewerIssues
-              entryPath={entryPath}
-              notice={
-                unavailable
-                  ? { message: unavailable, actionLabel: 'Use default view', onAct: restoreDefaultView }
-                  : undefined
-              }
-            >
-              {({ segment, list }) => (
-                <ChatViewerControls
-                  captureRendering={captureRendering}
-                  kernelSettings={
-                    cadRef ? (
-                      <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
-                    ) : undefined
+        profile === 'editor' ? (
+          <ViewerIssues
+            entryPath={entryPath}
+            notice={
+              unavailable
+                ? {
+                    message: unavailable,
+                    actionLabel: 'Use default view',
+                    onAct: restoreDefaultView,
                   }
-                  leading={
-                    <>
-                      {cadRef ? (
-                        <ViewerProjectionPicker viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
-                      ) : null}
-                      {segment}
-                    </>
-                  }
-                  aboveControls={list}
-                />
-              )}
-            </ViewerIssues>
-          ) : (
-            <ChatViewerControls shouldEnableCapture={false} captureRendering={captureRendering} />
-          )}
-        </>
+                : undefined
+            }
+          >
+            {({ segment, list }) => (
+              <ChatViewerControls
+                mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+                captureRendering={captureRendering}
+                kernelSettings={
+                  cadRef ? <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : undefined
+                }
+                leading={
+                  <>
+                    {cadRef ? <ViewerProjectionPicker viewId={viewId} entryPath={entryPath} cadActor={cadRef} /> : null}
+                    {segment}
+                  </>
+                }
+                aboveControls={list}
+              />
+            )}
+          </ViewerIssues>
+        ) : (
+          <ChatViewerControls
+            mobileAction={<ArButton artifact={artifact} runtimeDocument={runtimeDocument} />}
+            shouldEnableCapture={false}
+            captureRendering={captureRendering}
+          />
+        )
       }
     >
       {!artifact && !overlayFailureMessage ? <GeometryStatus isEmpty={emptyModel} /> : null}

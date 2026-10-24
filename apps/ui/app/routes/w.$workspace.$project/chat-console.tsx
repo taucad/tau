@@ -136,18 +136,18 @@ const ConsoleLogRow = ({
   <pre
     data-console-log-row
     className={cn('group/log mx-2 rounded p-1 font-mono text-xs text-wrap', {
-      'bg-feature/10 text-feature hover:bg-feature/20': log.level === logLevels.error,
-      'bg-warning/10 text-warning hover:bg-warning/20': log.level === logLevels.warn,
+      'bg-feature/10 text-foreground hover:bg-feature/20': log.level === logLevels.error,
+      'bg-warning/10 text-foreground hover:bg-warning/20': log.level === logLevels.warn,
       'hover:bg-neutral/20': log.level === logLevels.info,
       'bg-neutral/10': log.level === logLevels.info && log.infoIndex % 2 !== 0,
-      'bg-stable/10 text-stable hover:bg-stable/20': log.level === logLevels.debug,
+      'bg-stable/10 text-foreground hover:bg-stable/20': log.level === logLevels.debug,
       'text-muted-foreground hover:bg-neutral/20': log.level === logLevels.trace,
     })}
   >
     <span className='sr-only'>{log.level} log: </span>
     <span className='flex flex-wrap items-baseline gap-2'>
       {displayConfig.showTimestamp ? (
-        <span className='shrink-0 opacity-60'>
+        <span className='shrink-0 text-muted-foreground'>
           [<HighlightText text={formatTimestamp(log.timestamp)} searchTerm={query} />]
         </span>
       ) : null}

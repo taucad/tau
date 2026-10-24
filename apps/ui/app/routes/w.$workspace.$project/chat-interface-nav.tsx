@@ -1,6 +1,8 @@
 import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal, Download, Files, History, Share2 } from 'lucide-react';
-import { TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
-import { cn } from '@taucad/ui/utils/cn';
+import { useState } from 'react';
+import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
+import { Button } from '@taucad/ui/components/button';
+import { MobileWorkbenchNavigation } from '#components/mobile-workbench-navigation.js';
 import type { MobilePanelId } from '#constants/editor.constants.js';
 
 export const chatTabs = [
@@ -49,39 +51,59 @@ export const chatTabs = [
     label: 'History',
     icon: <History />,
   },
-] as const satisfies Array<{ id: MobilePanelId; label: string; icon: React.ReactNode }>;
+] as const satisfies Array<{
+  id: MobilePanelId;
+  label: string;
+  icon: React.ReactNode;
+}>;
 
-export function ChatInterfaceNav({ className }: { readonly className?: string }): React.ReactNode {
+export function ChatInterfaceNav({
+  className,
+  activeTab,
+  onTabChange,
+}: {
+  readonly className?: string;
+  readonly activeTab: MobilePanelId;
+  readonly onTabChange: (id: MobilePanelId) => void;
+}): React.ReactNode {
+  const [isAllOpen, setAllOpen] = useState(false);
+  const active =
+    activeTab === 'viewer' ? 'model' : activeTab === 'chat' || activeTab === 'parameters' ? activeTab : 'all';
   return (
-    <TabsList
-      enableAnimation={false}
-      // Each trigger frames itself; the shared indicator's tighter corners and shadow covered its border's corners.
-      activeClassName='hidden'
-      className={cn(
-        'w-full justify-start overflow-x-auto border-t bg-sidebar',
-        'gap-0.25 rounded-none border-x-0 border-b-0 p-0.5 text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
-        className,
-      )}
-    >
-      {chatTabs.map((tab) => (
-        <TabsTrigger
-          key={tab.id}
-          enableAnimation={false}
-          value={tab.id}
-          className={cn(
-            'flex min-w-12 flex-1 flex-col items-center justify-center gap-0.5 pb-0.5 text-[10px]',
-            'rounded-lg border border-transparent transition-[color,background-color,border-color] duration-200 ease-linear',
-            'data-[state=active]:border-border',
-            'data-[state=active]:bg-background',
-            'data-[state=active]:text-accent-foreground',
-            'data-[state=active]:[&_svg]:text-accent-foreground',
-            tab.id === 'viewer' && 'border-sidebar-primary/20 data-[state=inactive]:bg-neutral/20',
-          )}
-        >
-          {tab.icon}
-          {tab.label}
-        </TabsTrigger>
-      ))}
-    </TabsList>
+    <>
+      <MobileWorkbenchNavigation
+        className={className}
+        active={isAllOpen ? 'all' : active}
+        onSelect={(id) => {
+          if (id === 'all') {
+            setAllOpen(true);
+          } else {
+            onTabChange(id === 'model' ? 'viewer' : id);
+          }
+        }}
+      />
+      <Drawer open={isAllOpen} onOpenChange={setAllOpen}>
+        <DrawerContent>
+          <DrawerTitle className='px-3'>Open a surface</DrawerTitle>
+          <DrawerDescription className='sr-only'>Choose a workbench surface</DrawerDescription>
+          <div className='grid grid-cols-3 gap-2 p-3'>
+            {chatTabs.map((tab) => (
+              <Button
+                key={tab.id}
+                variant='outline'
+                size='touch'
+                onClick={() => {
+                  onTabChange(tab.id);
+                  setAllOpen(false);
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+              </Button>
+            ))}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    </>
   );
 }

@@ -296,7 +296,7 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelContentHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeaderActions: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentTitle: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
-  FloatingPanelClose: () => null,
+  FloatingPanelClose: ({ label }: { readonly label?: string }) => <button type='button' aria-label={label} />,
 }));
 
 vi.mock('@taucad/ui/components/key-shortcut', () => ({
@@ -610,6 +610,12 @@ describe('ChatConverter', () => {
     mockViewSettings = {};
     mockParameterEntries.clear();
     mockParameterSnapshots.clear();
+  });
+
+  it('should name its Close after the panel, as its tooltip does (I6)', () => {
+    render(<ChatConverter isExpanded />);
+
+    expect(screen.getByRole('button', { name: 'Close Exporter' })).toBeInTheDocument();
   });
 
   it('should retain export recovery in the mounted panel after its error toast is gone', async () => {

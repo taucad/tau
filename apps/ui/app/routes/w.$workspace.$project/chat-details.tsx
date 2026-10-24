@@ -130,6 +130,7 @@ export function ChatDetails({
           <FloatingPanelContentTitle>Details</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Details'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>

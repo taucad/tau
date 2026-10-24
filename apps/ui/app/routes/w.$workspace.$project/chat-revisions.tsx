@@ -112,6 +112,7 @@ export function ChatRevisions({
           <FloatingPanelContentTitle>Revisions</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Revisions'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>{isOpen ? 'Close' : 'Open'} Revisions</div>

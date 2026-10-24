@@ -389,7 +389,11 @@ vi.mock('#components/ui/floating-panel.js', () => ({
   FloatingPanelContentHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentHeaderActions: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FloatingPanelContentTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  FloatingPanelClose: () => <button type='button'>Close</button>,
+  FloatingPanelClose: ({ label }: { readonly label?: string }) => (
+    <button type='button' aria-label={label}>
+      Close
+    </button>
+  ),
   FloatingPanelMenuButton: ({
     children,
     onClick,
@@ -545,6 +549,14 @@ describe('ChatParameters', () => {
         },
       ],
     ]);
+  });
+
+  it('should name its Close after the panel, as its tooltip does (I6)', async () => {
+    mockGeometryUnits.set('main.ts', mockCadRef);
+
+    render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Close Parameters' })).toBeInTheDocument();
   });
 
   it('should render single geometry unit inside PaneviewReact', async () => {

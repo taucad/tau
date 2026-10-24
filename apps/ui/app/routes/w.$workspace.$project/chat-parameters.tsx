@@ -420,6 +420,7 @@ export const ChatParameters = memo(function (props: {
           <FloatingPanelContentTitle>Parameters</FloatingPanelContentTitle>
           <FloatingPanelContentHeaderActions>
             <FloatingPanelClose
+              label='Close Parameters'
               icon={XIcon}
               tooltipContent={(isOpen) => (
                 <div className='flex items-center gap-2'>

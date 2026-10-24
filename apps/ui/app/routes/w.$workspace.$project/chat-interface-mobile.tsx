@@ -261,54 +261,102 @@ function isEditingTarget(target: EventTarget | undefined): boolean {
 const clippingOverflow = new Set(['auto', 'scroll', 'hidden', 'clip']);
 
 /**
- * A decision or failure a surface may hold: an alert (a run's error card), or an agent question still waiting for an
- * answer, in the transcript or the tray above the composer (`QuestionCard`'s open card; a settled one takes
- * `tabindex=-1` and is a record, not a decision).
+ * What can raise the sheet (I5): the run's error card (`data-decision=run-error`, which rides the transcript's last
+ * turn), an approval waiting above the composer (`data-decision=approval`), and an agent question waiting for an answer
+ * (`data-ask-state=open`), in the transcript or in the tray above the composer. Other alerts (a job's outcome, a form
+ * error, a tool note) are records a person scrolls through, never a reason to move the sheet.
  */
-const decisionSelector = '[role=alert], [role=group][data-ask-id]:not([tabindex])';
+const decisionSelector = '[data-decision], [data-ask-state=open]';
 
-/** Whether a scroller or clipping box between the element and its surface cuts part of it off. */
-function isCutOff(element: HTMLElement, section: HTMLElement): boolean {
-  const box = element.getBoundingClientRect();
-  for (let parent = element.parentElement; parent && parent !== section; parent = parent.parentElement) {
+/** The fixed rows' overflow at the peek, as an acknowledgement key. */
+const fixedRowsKey = 'fixed-rows';
+
+/** A decision's identity across a remount: the same ask in either home, the same failure or approval. */
+function decisionKey(decision: HTMLElement): string {
+  const { askId, decision: kind } = decision.dataset;
+  return askId === undefined ? `${kind ?? ''}:${decision.textContent}` : `ask:${askId}`;
+}
+
+/** Whether a scroller sits where it rests with nothing scrolled by hand: the tray at its top, a transcript at its end. */
+function isAtRest(scroller: HTMLElement): boolean {
+  if (scroller.matches('ul[aria-label=Questions]')) {
+    return scroller.scrollTop <= 1;
+  }
+  return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 1;
+}
+
+/**
+ * Whether the detent itself cuts the decision off: it is taller than the box that clips it, or that box is resting
+ * (nothing scrolled by hand) and still cannot show all of it. A decision the person scrolled past is not cut off by
+ * the detent, and neither is one that is not displayed.
+ */
+function isCutOffByDetent(decision: HTMLElement, section: HTMLElement): boolean {
+  const box = decision.getBoundingClientRect();
+  if (box.width === 0 || box.height === 0) {
+    return false;
+  }
+  for (let parent = decision.parentElement; parent && parent !== section; parent = parent.parentElement) {
     if (!clippingOverflow.has(getComputedStyle(parent).overflowY)) {
       continue;
     }
     const clip = parent.getBoundingClientRect();
-    if (box.top < clip.top - 1 || box.bottom > clip.bottom + 1) {
-      return true;
+    if (box.top >= clip.top - 1 && box.bottom <= clip.bottom + 1) {
+      continue;
     }
+    // The nearest box that cuts it decides: a taller decision never fits; otherwise only a resting scroller's size counts.
+    const scrolls = parent.scrollHeight > parent.clientHeight + 1;
+    return box.height > clip.height + 1 || !scrolls || isAtRest(parent);
   }
   return false;
 }
 
 /**
- * Never fold away a decision (I5). At the peek, a surface whose fixed rows (a title, a composer with an approval or a
- * question above it) no longer fit is raised to half height instead of being clipped under the nav. At the peek and at
- * half, a surface whose decision or failure (a run's error card riding the transcript's last turn, a question in the
- * tray or the transcript) a short scroller would cut off is raised one detent.
+ * Never fold away a decision (I5). When a decision arrives or changes and the detent cuts it off, the sheet rises one
+ * detent, and again from half if half still cuts it off; at the peek the same holds for fixed rows (a title, a composer
+ * with an approval or a question above it) that no longer fit. A detent the person chooses is theirs: the decisions on
+ * screen when they move the sheet are acknowledged, and only a decision that arrives after can raise it again.
+ *
+ * @returns The acknowledgement to call when the person moves the sheet.
  */
 function useRaiseWhenClipped(
   section: HTMLElement | undefined,
   detent: 'peek' | 'half' | undefined,
   raise: () => void,
-): void {
+): () => void {
+  const acknowledged = useRef(new Set<string>());
+  const acknowledge = useCallback(() => {
+    const keys = new Set<string>([fixedRowsKey]);
+    for (const decision of section?.querySelectorAll<HTMLElement>(decisionSelector) ?? []) {
+      keys.add(decisionKey(decision));
+    }
+    acknowledged.current = keys;
+  }, [section]);
   useEffect(() => {
     if (!section || detent === undefined || typeof ResizeObserver === 'undefined') {
       return;
     }
     const check = (): void => {
+      const decisions = [...section.querySelectorAll<HTMLElement>(decisionSelector)];
+      const fresh = decisions.filter((decision) => !acknowledged.current.has(decisionKey(decision)));
+      if (fresh.length > 0) {
+        // Something new arrived: the person has not chosen a detent for it.
+        acknowledged.current.delete(fixedRowsKey);
+      }
       for (const panel of section.querySelectorAll<HTMLElement>('[data-slot=floating-panel-content]')) {
-        if (detent === 'peek' && panel.scrollHeight > panel.clientHeight + 1) {
+        if (
+          detent === 'peek' &&
+          !acknowledged.current.has(fixedRowsKey) &&
+          panel.scrollHeight > panel.clientHeight + 1
+        ) {
           raise();
           return;
         }
-        for (const decision of panel.querySelectorAll<HTMLElement>(decisionSelector)) {
-          if (isCutOff(decision, section)) {
-            raise();
-            return;
-          }
-        }
+      }
+      // One decision may show in two homes (a question's transcript card and its tray row): it is folded away only
+      // when every copy is cut off.
+      const copies = Map.groupBy(fresh, decisionKey);
+      if ([...copies.values()].some((group) => group.every((copy) => isCutOffByDetent(copy, section)))) {
+        raise();
       }
     };
     const resize = new ResizeObserver(check);
@@ -334,6 +382,7 @@ function useRaiseWhenClipped(
       mutations.disconnect();
     };
   }, [section, detent, raise]);
+  return acknowledge;
 }
 
 /** The detents a decision can raise the sheet from; full has nowhere higher to go. */
@@ -395,7 +444,20 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const raiseOneDetent = useCallback(() => {
     handleSnapChange(activeSnapPoint === mobileDrawerPeekSnapPoint ? mobileDrawerOpenSnapPoint : 1);
   }, [activeSnapPoint, handleSnapChange]);
-  useRaiseWhenClipped(section, drawerOpen ? raisableDetent(activeSnapPoint) : undefined, raiseOneDetent);
+  const acknowledgeDecisions = useRaiseWhenClipped(
+    section,
+    drawerOpen ? raisableDetent(activeSnapPoint) : undefined,
+    raiseOneDetent,
+  );
+  const chooseSnapPoint = useCallback(
+    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Vaul API
+    (value: number | string | null): void => {
+      // The person moved the sheet (a drag or the grabber's keys): their detent holds over what is on screen now.
+      acknowledgeDecisions();
+      handleSnapChange(value);
+    },
+    [acknowledgeDecisions, handleSnapChange],
+  );
 
   const isViewerTab = activeTab === 'viewer';
   const sheetHeight = snapPointLength(activeSnapPoint);
@@ -436,7 +498,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           open={drawerOpen}
           snapPoints={snapPoints}
           activeSnapPoint={activeSnapPoint}
-          setActiveSnapPoint={handleSnapChange}
+          setActiveSnapPoint={chooseSnapPoint}
           onOpenChange={handleDrawerChange}
         >
           <DrawerTitle className='sr-only' id='drawer-title'>

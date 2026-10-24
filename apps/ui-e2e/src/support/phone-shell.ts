@@ -185,3 +185,55 @@ export const unshownReason = async (locator: Locator): Promise<string | undefine
     }
     return undefined;
   });
+
+/**
+ * The detent once the sheet has stopped moving and stayed put for half a second: a raise lands within a frame or two of
+ * the change that causes it, so a detent read sooner may not be the one the sheet keeps.
+ *
+ * @returns The settled detent.
+ */
+export const stableDetent = async (): Promise<string | undefined> => {
+  let last: string | undefined;
+  let since = 0;
+  await expect
+    .poll(
+      async () => {
+        await sheetSettled();
+        const now = await detent();
+        if (now !== last || since === 0) {
+          last = now;
+          since = performance.now();
+          return false;
+        }
+        return performance.now() - since >= 500;
+      },
+      { timeout: 15_000, interval: 100 },
+    )
+    .toBe(true);
+  return last;
+};
+
+/**
+ * Assert the sheet holds a detent: sampled every frame for a second, it never leaves it.
+ *
+ * @param expected - The detent the sheet must keep.
+ */
+export const expectDetentHeld = async (expected: string): Promise<void> => {
+  await sheetSettled();
+  const seen = await target.evaluateLocator(grabber(), async (handle) => {
+    const values = new Set<string>();
+    const until = performance.now() + 1000;
+    while (performance.now() < until) {
+      values.add(String(handle.getAttribute('aria-valuenow')));
+      // oxlint-disable-next-line no-await-in-loop -- one sample per frame.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          resolve();
+        });
+      });
+    }
+    values.add(String(handle.getAttribute('aria-valuenow')));
+    return [...values];
+  });
+  expect(seen).toEqual([expected]);
+};

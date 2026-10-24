@@ -65,7 +65,12 @@ const TurnGroup = memo(function ({
           footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
         />
       ))}
-      {isLast ? <ChatError className='mx-4' /> : null}
+      {/* The run's failure is a decision the phone sheet never folds away (I5, `chat-interface-mobile.tsx`). */}
+      {isLast ? (
+        <div data-decision='run-error'>
+          <ChatError className='mx-4' />
+        </div>
+      ) : null}
     </div>
   );
 });
@@ -303,7 +308,11 @@ const ExpandedChatHistory = memo(function ({
           all: their text still in the composer, no row, no banner. One banner
           at a time: while there are turns, the group above owns it.
         */}
-            {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
+            {groups.length === 0 ? (
+              <div data-decision='run-error' className='shrink-0'>
+                <ChatError className='mx-4 mb-1' />
+              </div>
+            ) : null}
             {/* Chat input area. The agent's task list and its questions share one
               tray directly above the composer; the task list is keyed by chat so
               its fold never carries across chats (D8, agent questions D8). */}

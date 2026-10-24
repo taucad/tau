@@ -17,6 +17,7 @@ import {
   currentPath,
   detent,
   detents,
+  expectDetentHeld,
   followSidebarLink,
   grabber,
   moveSheet,
@@ -25,7 +26,7 @@ import {
   openPhone,
   phoneViewports,
   projectTitle,
-  sheetSettled,
+  stableDetent,
   surface,
   tapDestination,
   traverseHistory,
@@ -236,41 +237,38 @@ const unshownEverywhere = async (locator: Locator): Promise<string | undefined> 
   return reasons.length === 0 ? 'is not rendered' : reasons.join('; ');
 };
 
-/**
- * Ask for the peek, full and half in turn and look at each part. A surface whose decision or failure no longer fits
- * raises itself (I5, `useRaiseWhenClipped`), so a request may settle higher than asked; it never settles lower, and it
- * never leaves a part cut off.
- *
- * @param parts - What must be wholly on screen.
- * @returns The detent each request settled on.
- */
-const expectShownAtEveryDetent = async (parts: readonly Locator[]): Promise<readonly string[]> => {
-  const shownAll = async (): Promise<ReadonlyArray<string | undefined>> =>
-    Promise.all(parts.map(async (part) => unshownEverywhere(part)));
-  const settled: string[] = [];
-  for (const [key, requested] of [
-    ['Home', detents.peek],
-    ['End', detents.full],
-    ['ArrowDown', detents.half],
-  ] as const) {
-    // oxlint-disable-next-line no-await-in-loop -- one detent at a time.
-    await target.press(grabber(), key);
-    // oxlint-disable-next-line no-await-in-loop -- one detent at a time.
-    await sheetSettled();
-    // A raise lands within a frame or two of the move; let it, then let the sheet finish moving.
-    // oxlint-disable-next-line no-await-in-loop -- one detent at a time.
-    await target.delay(300);
-    // oxlint-disable-next-line no-await-in-loop -- one detent at a time.
-    await sheetSettled();
-    // oxlint-disable-next-line no-await-in-loop -- one detent at a time.
-    const landed = (await detent()) ?? '';
-    expect(Number(landed), `asked for detent ${requested}`).toBeGreaterThanOrEqual(Number(requested));
-    settled.push(landed);
-    // oxlint-disable-next-line no-await-in-loop -- one detent at a time.
-    await expect.poll(shownAll, { timeout: 10_000 }).toEqual(parts.map(() => undefined));
-  }
-  return settled;
+/** Wait until every part has a wholly shown copy. */
+const expectShown = async (parts: readonly Locator[], where: string): Promise<void> => {
+  await expect
+    .poll(async () => Promise.all(parts.map(async (part) => unshownEverywhere(part))), {
+      timeout: 10_000,
+      message: `every part should be wholly shown at ${where}`,
+    })
+    .toEqual(parts.map(() => undefined));
 };
+
+/**
+ * The person's moves after a decision has raised the sheet: full shows it whole, and a lower detent they choose holds,
+ * with no snap back (I5 raises for a decision that arrives, never against the person's own move).
+ *
+ * @param parts - What must be wholly shown at full.
+ * @param shownAtHalf - Whether the decision also fits at half, where it must then be wholly shown.
+ */
+const expectPersonsDetentsHold = async (parts: readonly Locator[], shownAtHalf: boolean): Promise<void> => {
+  await moveSheet('End', detents.full);
+  expect(await stableDetent()).toBe(detents.full);
+  await expectShown(parts, 'full');
+  await moveSheet('ArrowDown', detents.half);
+  await expectDetentHeld(detents.half);
+  if (shownAtHalf) {
+    await expectShown(parts, 'half');
+  }
+  await moveSheet('Home', detents.peek);
+  await expectDetentHeld(detents.peek);
+};
+
+/** Where the sheet settles when the decision arrives at the peek, per phone: the lowest detent that shows it whole. */
+const questionArrivalDetent: Readonly<Record<number, string>> = { 320: detents.full, 390: detents.half };
 
 test.each(phoneViewports)(
   'keeps a pending question and both answers on screen at peek, half and full at $width×$height (I5, WB-09, PN-CHAT-4)',
@@ -288,6 +286,8 @@ test.each(phoneViewports)(
     await target.installAgentHostGatewayFixture(script);
     await tapDestination('Chat');
     await target.expectVisible(composer(), 60_000);
+    // The person rests the sheet at the peek; the question then arrives.
+    await moveSheet('Home', detents.peek);
     await send('Design a desk ornament');
 
     const question = selectors.getByText('Which form should the desk ornament take?', { exact: true });
@@ -296,34 +296,77 @@ test.each(phoneViewports)(
     });
     const other = selectors.getByRole('button', { name: 'B, Faceted gem. Crisp at 0.2 mm layers.' });
     await expect.poll(async () => countOf(other), { timeout: 120_000 }).toBeGreaterThan(0);
-    await expectShownAtEveryDetent([question, recommended, other]);
+    // The decision raises the sheet exactly as far as it needs, and is wholly shown there.
+    expect(await stableDetent()).toBe(questionArrivalDetent[viewport.width]);
+    await expectShown([question, recommended, other], 'the detent it raised the sheet to');
+    await expectPersonsDetentsHold([question, recommended, other], viewport.width !== 320);
 
     // Away and back: the question is still waiting.
     await tapDestination('Parameters');
     await target.expectVisible(surface('Parameters'), 60_000);
-    // Back on Chat the question is still there, and answering it finishes the turn.
+    // Back on Chat the question is still there at the peek the person chose; raised to full, answering it finishes
+    // the turn.
     await tapDestination('Chat');
+    await moveSheet('End', detents.full);
     await expect.poll(async () => unshownEverywhere(other), { timeout: 30_000 }).toBeUndefined();
     await target.click(other.first(), { touch: true });
     await target.expectVisible(selectors.getByText('Going with the faceted gem.', { exact: true }), 120_000);
   },
 );
 
+/** The chat transcript's scroller, moved as a person's swipe would. */
+const scrollTranscript = async (to: 'top' | 'end'): Promise<void> =>
+  target.evaluateLocator(
+    surface('Chat'),
+    (region, where) => {
+      const scroller = region.querySelector<HTMLElement>('[data-virtuoso-scroller]');
+      if (!scroller) {
+        throw new Error('The chat transcript has no scroller.');
+      }
+      scroller.scrollTop = where === 'top' ? 0 : scroller.scrollHeight;
+      scroller.dispatchEvent(new Event('scroll'));
+    },
+    to,
+  );
+
+const longReply = Array.from({ length: 24 }, (_, index) => `Step ${String(index + 1)} of the bracket plan.`).join(
+  '\n\n',
+);
+
 test.each(phoneViewports)(
-  'keeps a failed run and its recovery on screen at peek, half and full at $width×$height (I5, PN-CHAT-7)',
+  'raises the sheet for a failed run, keeps it and its recovery on screen, and holds for a scrolled transcript at $width×$height (I5, PN-CHAT-7)',
   async (viewport) => {
     await openPhone(viewport, '/__e2e/chat-attachments');
-    await target.installAgentHostGatewayFixture([{ text: 'Recovered reply.', usage }]);
+    await target.installAgentHostGatewayFixture([
+      { text: longReply, usage },
+      { text: 'Recovered reply.', usage },
+    ]);
     await tapDestination('Chat');
     await target.expectVisible(composer(), 60_000);
+    // A transcript long enough to scroll at every detent.
+    await send('Plan a bracket');
+    await target.expectVisible(selectors.getByText('Step 24 of the bracket plan.', { exact: true }), 120_000);
+
+    // The person rests the sheet at the peek; the next turn is refused there.
+    await moveSheet('Home', detents.peek);
     await target.setAgentHostGatewayFailure({ status: 400, message: 'Refused once.', type: 'INVALID_REQUEST' });
     await send('Model a bracket');
-
     const recovery = selectors.getByRole('button', { name: /^(?:Resume|Try again)$/u });
-    await target.expectVisible(recovery, 120_000);
+    const failure = selectors.getByCss('[data-decision="run-error"]').filter({ has: recovery });
+    await expect.poll(async () => countOf(recovery), { timeout: 120_000 }).toBeGreaterThan(0);
     await target.setAgentHostGatewayFailure();
-    const failure = selectors.getByRole('alert').filter({ has: recovery });
-    await expectShownAtEveryDetent([failure, recovery]);
+    // The failure raises the sheet to half, where the resting transcript shows it whole.
+    expect(await stableDetent()).toBe(detents.half);
+    await expectShown([failure, recovery], 'half');
+
+    // The person scrolls up past it: the failure leaves the transcript's view, and the sheet stays at half.
+    await scrollTranscript('top');
+    await expect.poll(async () => unshownEverywhere(failure)).toBeDefined();
+    await expectDetentHeld(detents.half);
+    await scrollTranscript('end');
+    await expectShown([failure, recovery], 'half, scrolled back');
+
+    await expectPersonsDetentsHold([failure, recovery], true);
 
     // Away and back, the failure is still the chat's last word, and its recovery finishes the turn.
     await tapDestination('Parameters');

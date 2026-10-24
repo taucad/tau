@@ -60,4 +60,24 @@ describe('GTAO depth convention adapter', () => {
     expect(adapter.camera.near).toBe(0.5);
     expect(adapter.camera.far).toBe(25);
   });
+  it.each([true, false])('retargets stable reconstruction uniforms across camera kinds (reversed=%s)', (reversed) => {
+    const first = cameras[0]!.make(reversed);
+    const next = cameras[1]!.make(reversed);
+    const adapter = createGtaoCameraAdapter(first, reversed);
+    const projection = adapter.camera.projectionMatrix;
+    const inverse = adapter.camera.projectionMatrixInverse;
+    for (const source of [next, first, next]) {
+      adapter.update(source);
+      expect(adapter.camera.projectionMatrix).toBe(projection);
+      expect(adapter.camera.projectionMatrixInverse).toBe(inverse);
+      const point = new Vector3(0.02, -0.01, -10);
+      const sample = point.clone().applyMatrix4(source.projectionMatrix);
+      if (reversed) {
+        sample.z = 1 - sample.z;
+      }
+      expect(sample.applyMatrix4(inverse).distanceTo(point)).toBeLessThan(1e-6);
+      expect(adapter.camera.near).toBe(source.near);
+      expect(adapter.camera.far).toBe(source.far);
+    }
+  });
 });

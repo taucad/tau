@@ -47,17 +47,27 @@ describe('createTauR3fGlProp', () => {
     });
 
     expect(hoisted.createRenderer).toHaveBeenCalledTimes(1);
-    expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgpu', canvas);
+    expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgpu', {
+      canvas,
+      preserveDrawingBuffer: false,
+      nodePipeline: true,
+    });
   });
 
   it('asks for a readable WebGL canvas when the owner captures it', async () => {
     const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
-    const glFactory = createTauR3fGlProp('webgl', [], { preserveDrawingBuffer: true });
+    const glFactory = createTauR3fGlProp('webgl', [], {
+      preserveDrawingBuffer: true,
+    });
 
     const canvas = document.createElement('canvas');
     await glFactory({ canvas, alpha: true });
 
-    expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgl', { canvas, preserveDrawingBuffer: true });
+    expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgl', {
+      canvas,
+      preserveDrawingBuffer: true,
+      nodePipeline: true,
+    });
   });
 
   it('delegates WebGL canvases to createRenderer viewport presets', async () => {
@@ -73,7 +83,21 @@ describe('createTauR3fGlProp', () => {
     });
 
     expect(hoisted.createRenderer).toHaveBeenCalledTimes(1);
-    expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgl', canvas);
+    expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgl', {
+      canvas,
+      preserveDrawingBuffer: false,
+      nodePipeline: true,
+    });
+  });
+
+  it('should leave canvas depth to the composed frame without changing standalone renderers', async () => {
+    const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
+    const canvas = document.createElement('canvas');
+    const renderer = new WebGPURenderer({ canvas, stencil: true });
+    expect([renderer.depth, renderer.stencil]).toEqual([true, true]);
+    hoisted.createRenderer.mockResolvedValue(renderer);
+    await createTauR3fGlProp('webgpu')({ canvas, alpha: true });
+    expect([renderer.depth, renderer.stencil]).toEqual([false, false]);
   });
 
   it('should size one renderer through overlapping and later resized R3F configurations', async () => {
@@ -81,19 +105,21 @@ describe('createTauR3fGlProp', () => {
     const canvas = document.createElement('canvas');
     const renderers: WebGPURenderer[] = [];
     const releases: Array<() => void> = [];
-    hoisted.createRenderer.mockImplementation(async (_preset: string, _backend: string, surface: HTMLCanvasElement) => {
-      // Construct the real sizing owner without init(), a GPU device or a rendered React root.
-      const renderer = new WebGPURenderer({
-        canvas: surface,
-        reversedDepthBuffer: true,
-      });
-      renderers.push(renderer);
-      return new Promise<WebGPURenderer>((resolve) => {
-        releases.push(() => {
-          resolve(renderer);
+    hoisted.createRenderer.mockImplementation(
+      async (_preset: string, _backend: string, surface: { canvas: HTMLCanvasElement }) => {
+        // Construct the real sizing owner without init(), a GPU device or a rendered React root.
+        const renderer = new WebGPURenderer({
+          canvas: surface.canvas,
+          reversedDepthBuffer: true,
         });
-      });
-    });
+        renderers.push(renderer);
+        return new Promise<WebGPURenderer>((resolve) => {
+          releases.push(() => {
+            resolve(renderer);
+          });
+        });
+      },
+    );
     const factory = createTauR3fGlProp('webgpu');
     if (typeof factory !== 'function') {
       throw new TypeError('Expected renderer factory');
@@ -153,8 +179,16 @@ describe('createTauR3fGlProp', () => {
     expect(await second({ canvas: canvases[1] })).toBe(renderers[1]);
     expect(await first({ canvas: canvases[0] })).toBe(renderers[0]);
     expect(hoisted.createRenderer).toHaveBeenCalledTimes(2);
-    expect(hoisted.createRenderer).toHaveBeenNthCalledWith(1, 'viewport', 'webgpu', canvases[0]);
-    expect(hoisted.createRenderer).toHaveBeenNthCalledWith(2, 'viewport', 'webgpu', canvases[1]);
+    expect(hoisted.createRenderer).toHaveBeenNthCalledWith(1, 'viewport', 'webgpu', {
+      canvas: canvases[0],
+      preserveDrawingBuffer: false,
+      nodePipeline: true,
+    });
+    expect(hoisted.createRenderer).toHaveBeenNthCalledWith(2, 'viewport', 'webgpu', {
+      canvas: canvases[1],
+      preserveDrawingBuffer: false,
+      nodePipeline: true,
+    });
   });
 
   it('should preserve DPR changes but skip buffer resets for an unchanged DPR', async () => {
@@ -225,7 +259,12 @@ describe('createTauR3fGlProp', () => {
   it('should release the WebGL drawing buffer as soon as its canvas is removed', async () => {
     const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
     const forceContextLoss = vi.fn();
-    const renderer = { setPixelRatio: vi.fn(), getPixelRatio: () => 1, dispose: vi.fn(), forceContextLoss };
+    const renderer = {
+      setPixelRatio: vi.fn(),
+      getPixelRatio: () => 1,
+      dispose: vi.fn(),
+      forceContextLoss,
+    };
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgl');
     const canvas = document.createElement('canvas');
@@ -245,9 +284,69 @@ describe('createTauR3fGlProp', () => {
     expect(forceContextLoss).toHaveBeenCalledOnce();
   });
 
+  it('keeps renderer resource bookkeeping alive through scene effect cleanup', async () => {
+    const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
+    const events: string[] = [];
+    const renderer = {
+      setPixelRatio: vi.fn(),
+      getPixelRatio: () => 1,
+      dispose: vi.fn(() => {
+        events.push('renderer');
+      }),
+      forceContextLoss: vi.fn(() => {
+        events.push('context');
+      }),
+    };
+    hoisted.createRenderer.mockResolvedValue(renderer);
+    const factory = createTauR3fGlProp('webgl');
+    const canvas = document.createElement('canvas');
+    factory.bindCanvas(canvas);
+    await factory({ canvas });
+    const releaseScene = factory.retainScene();
+
+    factory.bindCanvas(undefined);
+    await Promise.resolve();
+    expect(factory.isRetired()).toBe(true);
+    expect(renderer.dispose).not.toHaveBeenCalled();
+
+    // The parent's passive cleanup runs before descendant environment/target cleanup.
+    releaseScene();
+    events.push('cube-target');
+    expect(renderer.dispose).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(events).toEqual(['cube-target', 'renderer', 'context']);
+  });
+
+  it('preserves a replayed scene until its final cleanup', async () => {
+    const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
+    const renderer = {
+      setPixelRatio: vi.fn(),
+      getPixelRatio: () => 1,
+      dispose: vi.fn(),
+    };
+    hoisted.createRenderer.mockResolvedValue(renderer);
+    const factory = createTauR3fGlProp('webgpu');
+    const canvas = document.createElement('canvas');
+    factory.bindCanvas(canvas);
+    await factory({ canvas });
+    const releaseFirst = factory.retainScene();
+    releaseFirst();
+    const releaseReplay = factory.retainScene();
+    factory.bindCanvas(undefined);
+    await Promise.resolve();
+    expect(renderer.dispose).not.toHaveBeenCalled();
+    releaseReplay();
+    await Promise.resolve();
+    expect(renderer.dispose).toHaveBeenCalledOnce();
+  });
+
   it('should retire a WebGPU renderer, which has no context to lose, by disposing it', async () => {
     const { createTauR3fGlProp } = await import('#graphics/three/canvas-three-gl.js');
-    const renderer = { setPixelRatio: vi.fn(), getPixelRatio: () => 1, dispose: vi.fn() };
+    const renderer = {
+      setPixelRatio: vi.fn(),
+      getPixelRatio: () => 1,
+      dispose: vi.fn(),
+    };
     hoisted.createRenderer.mockResolvedValue(renderer);
     const factory = createTauR3fGlProp('webgpu');
     const canvas = document.createElement('canvas');

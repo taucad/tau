@@ -49,10 +49,10 @@ export const flagRegistry = {
     description: 'Browse and remix reusable parametric parts.',
   },
   webGpu: {
-    showInExperimental: false,
-    schema: z.boolean().default(false),
-    label: 'WebGPU rendering',
-    description: 'Use the experimental WebGPU renderer when supported. Turn off to return to WebGL.',
+    showInExperimental: true,
+    schema: z.boolean().default(true),
+    label: 'Prefer WebGPU',
+    description: 'Uses WebGL2 when WebGPU is unavailable or cannot start. Turn off to prefer WebGL2.',
   },
   webGpuShaderStacks: {
     showInExperimental: false,

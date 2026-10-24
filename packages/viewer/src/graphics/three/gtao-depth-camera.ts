@@ -9,12 +9,12 @@ const reverseClipDepth = new Matrix4().set(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 1, 
 export function createGtaoCameraAdapter(
   source: ThreeCamera,
   reversedDepth: boolean,
-): Readonly<{ camera: ThreeCamera; update: () => void }> {
+): Readonly<{ camera: ThreeCamera; update: (current?: ThreeCamera) => void }> {
   const camera = source.clone();
-  const update = (): void => {
-    camera.near = source.near;
-    camera.far = source.far;
-    camera.projectionMatrix.copy(source.projectionMatrix);
+  const update = (current = source): void => {
+    camera.near = current.near;
+    camera.far = current.far;
+    camera.projectionMatrix.copy(current.projectionMatrix);
     if (reversedDepth) {
       camera.projectionMatrix.premultiply(reverseClipDepth);
     }

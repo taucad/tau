@@ -422,6 +422,32 @@ describe('sampleAnimation', () => {
     expect(sampleAnimation({ animation: clip, time })['arm']).toBe(arm);
   });
 
+  it('should preserve sparse tracks and duplicate-time values while seeking in either direction', () => {
+    const animation: Animation = {
+      id: 'sparse',
+      duration: 4,
+      keyframes: [
+        { time: 0, coordinates: { arm: 0 } },
+        { time: 1, coordinates: { slide: 10 } },
+        { time: 2, coordinates: { arm: 20 } },
+        { time: 2, coordinates: { arm: 40 } },
+        { time: 4, coordinates: { arm: 80, slide: 40 } },
+      ],
+    };
+    const original = structuredClone(animation);
+    for (const time of [4, 0, 3, 2, 1.5, -1, 9, 2]) {
+      const arm = time < 0 ? 0 : time < 2 ? time * 10 : Math.min(time * 20, 80);
+      const slide = Math.max(10, Math.min(time * 10, 40));
+      expect(sampleAnimation({ animation, time })).toEqual({ arm, slide });
+    }
+    expect(animation).toEqual(original);
+    const first = sampleAnimation({ animation, time: 2 });
+    expect(sampleAnimation({ animation, time: 2 })).not.toBe(first);
+    const replacement = { ...animation, keyframes: [{ time: 0, coordinates: { arm: 5 } }] };
+    expect(sampleAnimation({ animation: replacement, time: 2 })).toEqual({ arm: 5 });
+    expect(sampleAnimation({ animation, time: 2 })).toEqual({ arm: 40, slide: 20 });
+  });
+
   it('should pose the planetary clip back to the reference at the end of the loop', () => {
     const planetary = planetaryGearSystem();
     const coordinates = sampleAnimation({ animation: planetary.animations![0]!, time: 7.9999 });

@@ -51,12 +51,16 @@ vi.mock('#hooks/use-graphics.jsx', () => ({
         graphicsBackendPreference: 'webgpu',
         webGpuAvailable: true,
         upDirection: 'z',
-        artifact: { mimeType: mocks.geometryFormat === 'svg' ? 'image/svg+xml' : 'model/gltf-binary' },
+        artifact: {
+          mimeType: mocks.geometryFormat === 'svg' ? 'image/svg+xml' : 'model/gltf-binary',
+        },
       },
     }),
   useCameraRig: () => ({ actorRef: { send: mocks.cameraSend } }),
   useCameraSelector: <T,>(selector: (state: CameraState) => T): T =>
-    selector({ context: { view: { requestedVerticalFieldOfView: mocks.fieldOfView } } }),
+    selector({
+      context: { view: { requestedVerticalFieldOfView: mocks.fieldOfView } },
+    }),
 }));
 
 const fieldOfViewName = 'Field of view, 0° is orthographic';
@@ -74,7 +78,11 @@ const renderViewerSettings = (): void => {
   render(
     <TooltipProvider>
       <ViewerSettings
-        operationTimeout={{ value: 60_000, defaultValue: 180_000, onChange: mocks.setOperationTimeout }}
+        operationTimeout={{
+          value: 60_000,
+          defaultValue: 180_000,
+          onChange: mocks.setOperationTimeout,
+        }}
       />
     </TooltipProvider>,
   );
@@ -97,11 +105,11 @@ describe('ViewerSettings', () => {
     mocks.fieldOfView = 42;
   });
 
-  it('should retain post-processing while omitting removed viewer controls', async () => {
+  it('should omit the always-on post-processing switch and removed viewer controls', async () => {
     const user = userEvent.setup();
     await openViewerSettings(user);
 
-    expect(await screen.findByText('Post-processing')).toBeVisible();
+    expect(screen.queryByText('Post-processing')).not.toBeInTheDocument();
     expect(await screen.findByText('Timeout')).toBeVisible();
     expect(screen.queryByText('Environment')).not.toBeInTheDocument();
     expect(screen.queryByText('Studio')).not.toBeInTheDocument();
@@ -214,7 +222,9 @@ describe('ViewerSettings', () => {
 
       await user.hover(screen.getByRole('spinbutton', { name: fieldOfViewName }));
 
-      const tooltip = await screen.findByRole('tooltip', { name: /Drag for field of view/ });
+      const tooltip = await screen.findByRole('tooltip', {
+        name: /Drag for field of view/,
+      });
       expect(tooltip).toHaveTextContent('Drag for field of view · 0° is orthographic');
       expect(tooltip).toHaveTextContent('Click or Enter to type · ←→ step 1° · Shift 5° · P toggles orthographic');
     });

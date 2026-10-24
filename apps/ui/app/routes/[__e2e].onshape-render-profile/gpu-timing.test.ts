@@ -1,7 +1,7 @@
 import type { WebGLRenderer } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { createFrameGpuTimer } from '#routes/[__e2e].onshape-render-profile/gpu-timing.js';
+import { correlateGpuFrames, createFrameGpuTimer } from '#routes/[__e2e].onshape-render-profile/gpu-timing.js';
 
 describe('createFrameGpuTimer', () => {
   it('should collect only completed valid samples, bound pending queries and dispose every owned query', () => {
@@ -101,4 +101,15 @@ describe('createFrameGpuTimer', () => {
     expect(gl.getExtension).toHaveBeenCalledWith('EXT_disjoint_timer_query_webgl2');
     expect(gl.createQuery).not.toHaveBeenCalled();
   });
+});
+
+it('correlates only complete ordered query results with the frames actually submitted', () => {
+  const frames = [true, false, true, false].map((gpuQueryStarted) => ({ gpuQueryStarted }));
+  expect(correlateGpuFrames(frames, { samples: 2, pending: 0, disjointDiscarded: 0 })).toEqual([0, 2]);
+  expect(correlateGpuFrames(frames, { samples: 1, pending: 0, disjointDiscarded: 0 })).toBeUndefined();
+  expect(correlateGpuFrames(frames, { samples: 2, pending: 1, disjointDiscarded: 0 })).toBeUndefined();
+  expect(correlateGpuFrames(frames, { samples: 2, pending: 0, disjointDiscarded: 1 })).toBeUndefined();
+  expect(
+    correlateGpuFrames(frames, { samples: 2, pending: 0, disjointDiscarded: 0, failedSamples: 1 }),
+  ).toBeUndefined();
 });

@@ -2,12 +2,16 @@ import type { RootState } from '@react-three/fiber';
 import { Canvas, flushSync as flushThreeSync, useThree } from '@react-three/fiber';
 import { flushSync } from 'react-dom';
 import type { RefCallback } from 'react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { WebGPUCoordinateSystem } from 'three';
+import type { RendererInstance } from '#graphics/three/renderer.js';
+import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import type { WebGPURenderer } from 'three/webgpu';
 import { RenderFpsOverlay } from '#graphics/three/render-fps-overlay.jsx';
 import { renderLoopObservers } from '#graphics/three/render-loop-observer.js';
 import { ActorBridge } from '#graphics/three/actor-bridge.jsx';
 import { createTauR3fGlProp } from '#graphics/three/canvas-three-gl.js';
+import type { TauR3fGlFactory } from '#graphics/three/canvas-three-gl.js';
 import { GraphicsContextLostFallback } from '#graphics/three/graphics-context-lost-fallback.jsx';
 import { Grid } from '#graphics/three/grid.jsx';
 import { PostProcessing } from '#graphics/three/post-processing.jsx';
@@ -24,7 +28,7 @@ import {
 import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-camera.js';
 import { WebGpuInspectorOverlay } from '#graphics/three/webgpu-inspector-overlay.jsx';
 import { cn } from '@taucad/ui/utils/cn';
-import { useCameraRig } from '#hooks/use-graphics.jsx';
+import { useCameraRig, useGraphics } from '#hooks/use-graphics.jsx';
 import { useViewerEnvironment, useViewerFeature } from '#environment/viewer-environment.jsx';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 
@@ -43,7 +47,9 @@ export type ThreeCanvasInstanceProps = ThreeContextProperties & {
 /** Reports the canvas's surface size from inside the R3F root, on mount and whenever it changes. */
 function SurfaceSizeReporter({
   onSurfaceResize,
-}: Readonly<{ onSurfaceResize: (cssPixels: number, pixelRatio: number) => void }>): undefined {
+}: Readonly<{
+  onSurfaceResize: (cssPixels: number, pixelRatio: number) => void;
+}>): undefined {
   const cssPixels = useThree((state) => state.size.width * state.size.height);
   const pixelRatio = useThree((state) => state.viewport.dpr);
   useEffect(() => {
@@ -77,6 +83,18 @@ const installTauPointerRays = (state: RootState): void => {
   });
 };
 
+// The R3F scene root unmounts separately from the DOM canvas root.
+function CanvasRendererLifetime({ factory }: { readonly factory: TauR3fGlFactory }): undefined {
+  const release = useRef<(() => void) | undefined>(undefined);
+  useLayoutEffect(() => {
+    // Environment targets are allocated in layout effects. The DOM canvas can retire
+    // before passive effects mount, so ownership must already exist at that point.
+    release.current = factory.retainScene();
+  }, [factory]);
+  useEffect(() => release.current, [factory]);
+  return undefined;
+}
+
 /**
  * One R3F `<Canvas>` mount plus lifecycle state tied to that GPU binding (`isCanvasReady`, loss handlers).
  * `ThreeProvider` mounts this with `key` = `${graphicsBackend}:${retryCount}` so teardown listeners never update a survivor instance.
@@ -106,7 +124,12 @@ export function ThreeCanvasInstance({
   const isInspectorEnabled = useViewerFeature('webGpuInspector');
   const { showRenderFps = true, readableCanvas = false } = useViewerEnvironment();
   const isTauDebugEnabled = useViewerFeature('tauDebug');
-  const [isCanvasReady, setIsCanvasReady] = useState(false);
+  const canvasId = useId();
+  const graphicsRef = useGraphics();
+  const [initializedRenderer, setInitializedRenderer] = useState<{
+    factory: TauR3fGlFactory;
+    backend: ResolvedGraphicsBackend;
+  }>();
   const [isContextLost, setIsContextLost] = useState(false);
   const [rendererError, setRendererError] = useState<Error>();
   const cameraRig = useCameraRig();
@@ -160,6 +183,20 @@ export function ThreeCanvasInstance({
     [cameraRig, graphicsBackend, readableCanvas],
   );
 
+  const isCanvasReady = initializedRenderer?.factory === glProperty;
+  useEffect(() => {
+    if (!initializedRenderer || initializedRenderer.factory !== glProperty || isContextLost || glProperty.isRetired()) {
+      return;
+    }
+    graphicsRef.send({
+      type: 'rendererInitialized',
+      payload: { canvasId, backend: initializedRenderer.backend },
+    });
+    return () => {
+      graphicsRef.send({ type: 'rendererRemoved', canvasId });
+    };
+  }, [canvasId, glProperty, graphicsRef, initializedRenderer, isContextLost]);
+
   const bindCanvas = useCallback<RefCallback<HTMLCanvasElement>>(
     (canvas) => {
       glProperty.bindCanvas(canvas ?? undefined);
@@ -192,10 +229,11 @@ export function ThreeCanvasInstance({
       }
       rootRef.current = state;
       installTauPointerRays(state);
-      const renderer = state.gl;
+      // R3F types its renderer as WebGL even when the factory supplies WebGPU.
+      const renderer = state.gl as RendererInstance;
 
-      if ('isWebGPURenderer' in renderer && renderer.isWebGPURenderer) {
-        const webGpuRenderer = renderer as unknown as InstanceType<typeof WebGPURenderer>;
+      if ('isWebGPURenderer' in renderer) {
+        const webGpuRenderer = renderer;
         const previousOnDeviceLost = webGpuRenderer.onDeviceLost;
         webGpuRenderer.onDeviceLost = (
           info: Parameters<InstanceType<typeof WebGPURenderer>['onDeviceLost']>[0],
@@ -216,7 +254,10 @@ export function ThreeCanvasInstance({
         });
       }
 
-      setIsCanvasReady(true);
+      setInitializedRenderer({
+        factory: glProperty,
+        backend: renderer.coordinateSystem === WebGPUCoordinateSystem ? 'webgpu' : 'webgl',
+      });
     },
     [glProperty],
   );
@@ -243,21 +284,23 @@ export function ThreeCanvasInstance({
       className={cn('bg-background', className)}
       onCreated={onCanvasCreated}
     >
-      <ThreeGraphicsBackendProvider value={graphicsBackend}>
-        <Scene
-          enableGizmo={enableGizmo}
-          enableDamping={enableDamping}
-          enableZoom={enableZoom}
-          enablePan={enablePan}
-          secondaryMouseButtonMode={secondaryMouseButtonMode}
-          upDirection={upDirection}
-          stageOptions={stageOptions}
-          zoomSpeed={zoomSpeed}
-          gizmoContainer={gizmoContainer}
-        >
-          {children}
-        </Scene>
+      <CanvasRendererLifetime factory={glProperty} />
+      {/* Both execution backends consume node materials. Effective API is reported above after init. */}
+      <ThreeGraphicsBackendProvider value='webgpu'>
         <OverlayDepthProvider>
+          <Scene
+            enableGizmo={enableGizmo}
+            enableDamping={enableDamping}
+            enableZoom={enableZoom}
+            enablePan={enablePan}
+            secondaryMouseButtonMode={secondaryMouseButtonMode}
+            upDirection={upDirection}
+            stageOptions={stageOptions}
+            zoomSpeed={zoomSpeed}
+            gizmoContainer={gizmoContainer}
+          >
+            {children}
+          </Scene>
           <PostProcessing settings={postProcessingSettings} />
           {isInspectorEnabled ? <WebGpuInspectorOverlay /> : null}
           <ModelEmphasisOverlay />

@@ -50,7 +50,9 @@ For an authorized sweeping migration of unreleased APIs, complete the architectu
 
 Use the smallest meaningful acceptance evidence for each change. Prefer applicable existing checks; add a focused semantic regression check for changed non-trivial behavior. Run project checks through Nx and follow `testing-policy`. Verify UI/runtime outcomes when needed. Passing frontmatter, a worker's assertion, or exit zero alone cannot establish the selected behavior.
 
-Give a fresh reviewer a bounded correctness question and the actual diff/evidence. Keep post-implementation review separate from `adversarial-review`, which owns pre-implementation research review. Resolve material findings and rerun affected checks; stop expanding verification after relevant checks pass unless new changes or failures justify it.
+When independent review is permitted, give a fresh reviewer a bounded correctness question and the actual diff/evidence. When the user requires solo work, perform a separate self-review of the diff and evidence, record that limitation, and do not delegate or call it independent review. Keep post-implementation review separate from `adversarial-review`, which owns pre-implementation research review. Resolve material findings and rerun affected checks; stop expanding verification after relevant checks pass unless new changes or failures justify it.
+
+When an authorized experiment revises an acceptance contract, record the new version and rationale before rerunning. Preserve historical failures; distinguish functional failure, unresolved appearance, uncertain benefit and bounded acceptance. Do not let unrelated rollout gates block a qualified incremental change, or report incremental acceptance as full rollout.
 
 On interruption or a new session:
 

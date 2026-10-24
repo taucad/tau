@@ -5,6 +5,8 @@ import { ThreeCanvasInstance } from '#graphics/three/three-canvas-instance.jsx';
 import type { ThreeContextProperties } from '#graphics/three/three-viewer-properties.js';
 import { useWebglContextRef } from '#hooks/use-webgl-context-tracker.jsx';
 import { useViewerFeature } from '#environment/viewer-environment.jsx';
+import { WebglErrorBoundary } from '#cad/webgl-error-boundary.jsx';
+import { WebGpuInitializationError } from '#graphics/three/webgpu-initialization-error.js';
 import { resolveViewerPixelRatio } from '#graphics/three/utils/device-tier.js';
 import { admitsViewerContext, estimateViewerSurfaceBytes } from '#machines/webgl-context.machine.js';
 
@@ -19,7 +21,24 @@ let shaderStackOwners = 0;
  * @returns The canvas, or the WebGL limit fallback.
  * @public
  */
-export function ThreeProvider({
+export function ThreeProvider(properties: ThreeContextProperties): React.JSX.Element {
+  return (
+    <WebglErrorBoundary
+      key={properties.graphicsBackend}
+      fallback={({ error }) => {
+        if (properties.graphicsBackend !== 'webgpu' || !(error instanceof WebGpuInitializationError)) {
+          throw error ?? new Error('Renderer failed without an error description');
+        }
+        // A canvas cannot change its GPU context type. Mount the node WebGL2 pipeline on a fresh owner.
+        return <ThreeProviderCanvas {...properties} graphicsBackend='webgl' />;
+      }}
+    >
+      <ThreeProviderCanvas {...properties} />
+    </WebglErrorBoundary>
+  );
+}
+
+function ThreeProviderCanvas({
   children,
   graphicsBackend,
   enableGizmo = false,
@@ -65,7 +84,11 @@ export function ThreeProvider({
     }
 
     // WebGPU canvases hold a device and surface too, so both backends count against one budget.
-    webglRef.send({ type: 'acquire', id: holderId, bytes: initialSurfaceBytes });
+    webglRef.send({
+      type: 'acquire',
+      id: holderId,
+      bytes: initialSurfaceBytes,
+    });
     return () => {
       webglRef.send({ type: 'release', id: holderId });
     };
@@ -73,7 +96,11 @@ export function ThreeProvider({
 
   const handleSurfaceResize = useCallback(
     (cssPixels: number, pixelRatio: number): void => {
-      webglRef?.send({ type: 'resize', id: holderId, bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio) });
+      webglRef?.send({
+        type: 'resize',
+        id: holderId,
+        bytes: estimateViewerSurfaceBytes(cssPixels, pixelRatio),
+      });
     },
     [webglRef, holderId],
   );

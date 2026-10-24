@@ -3,7 +3,7 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-10-02'
+updated: '2026-10-18'
 related:
   - docs/research/onshape-viewer-lighting-profile.md
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
@@ -70,60 +70,27 @@ The public GLB-to-image API therefore accepts standard packed, accessor-offset, 
 
 ## Tone Mapping Policy
 
-Use `ACESFilmicToneMapping` with `toneMappingExposure: 0.5` for the interactive viewport. Keep the WebGL composer in `HalfFloatType` until the final tone-mapping pass. Apply the same ACES curve and exposure after WebGL N8AO compositing; enabling AO must not change the color of unoccluded surfaces. The current value is measured against the [Onshape planetary-gear reference](../research/onshape-viewer-lighting-profile.md), not a universal physical light calibration.
+Use `NeutralToneMapping` with exposure `1` for the default interactive viewport, as owned by `defaultStudioLighting` and `defaultPostProcessingSettings`. Preserve linear HDR beauty until the selected tone boundary and encode sRGB exactly once. Diagnostic tone/exposure controls must not change authored materials.
 
-**Rationale**: The prior 1.0 direct-render exposure over-brightened the reference gray surface; applying the same output transform across direct and composited paths keeps the AO toggle from changing the base material color. ACES rolls off HDR highlights without clipping every bright reflection to white.
-
-**Decision gate for AgX**: If visual testing reveals unacceptable hue shifts under ACES (particularly in saturated reds/blues), switch to `THREE.AgXToneMapping` which preserves hues more accurately under bright lighting. Acceptance criteria:
-
-- Highlight rolloff: smooth gradation from specular peak to diffuse, no hard clipping
-- Color shift: saturated base colors (red, blue, green) should not visibly shift hue under bright environment
-- White clipping: no pure-white patches on curved metallic surfaces
+Keep AO-off and unoccluded AO-on pixels consistent. The accepted display-space AO profile multiplies tone-mapped linear display RGB while preserving alpha; it is an appearance choice, not physically equivalent to applying occlusion only to indirect illumination. A change to that appearance requires matched material and motion captures.
 
 ## Ambient Occlusion
 
-When post-processing is enabled, WebGL uses **N8AO** (from `n8ao`) and WebGPU uses **GTAO** for screen-space ambient occlusion, adding depth to crevices, part junctions, and concave areas. The default graphics setting currently leaves post-processing off; the user can enable it per viewer.
+Keep PBR as the default material foundation. The classic WebGL reference currently uses N8AO and the native WebGPU candidate uses GTAO. Evaluate shared node AO estimation/reconstruction on forced WebGL2 and native WebGPU; matching definitions is preferred where supported and measured, not a requirement to force an inefficient or incorrect algorithm. AO must remain visible during orbit and mechanism motion whenever enabled; never implement interaction quality by silently disabling it. The global post-processing default remains gated on measured motion quality and native-resolution performance.
 
-**WebGL configuration** (in `post-processing-webgl.tsx`):
+`post-processing-settings.ts` owns radius, estimator, denoiser and composition settings. The default radius is 1% of the CSS viewport diagonal with a four-device-pixel minimum, converted once to physical pixels. N8AO intensity is 3 and screen-space distance falloff is 0.2; zero falloff suppresses occlusion samples. GTAO uses its separate intensity/falloff controls, eight samples and half-resolution spatial estimation without temporal filtering.
 
-```
-screenSpaceRadius: true       -- AO radius in pixels, consistent at any zoom level
-aoRadius:          24          -- screen-space radius in pixels
-intensity:         1           -- pow(ao, intensity); 1 = natural, higher = darker AO
-distanceFalloff:   0.2         -- attenuation radius as a fraction of the screen-space AO radius
-```
+Choose effect resolution independently of native beauty/output pixels. Qualify half-resolution reconstruction at equal radius using holes, tooth tips, contact gaps, transparency and moving parts. Record actual target dimensions and GPU cost; half resolution alone is not evidence of a faster pipeline. Keep demand rendering idle and never reuse stale AO after object motion.
 
-A zero N8AO falloff suppresses occlusion samples; do not use it to disable attenuation. WebGPU GTAO uses a 24 px world-space-converted radius, half-resolution sampling, eight samples, and distance falloff 1. Both paths must preserve depth for overlays and section caps.
-
-**Rationale**: Professional CAD viewers (e.g. Onshape at 37.5% AO) use ambient occlusion to create depth perception. Without AO, the scene appears flat, especially from top-down and bottom-up views. N8AO was chosen because it:
-
-- Supports logarithmic depth buffers (auto-detected)
-- Coexists with the BVH contour-fill section view path
-- Works with the `frameloop="demand"` mode (AO runs during render passes only)
-- Uses `screenSpaceRadius` for zoom-independent consistent appearance
-
-**Section view compatibility**: Section View clips the source geometry with one fixed-array section clip over every cut (at most eight convex pieces) and draws generated BVH contour fills outside that clip: an exact cap for each cut face and source, trimmed by the other cuts and outlined by its cap edge rings. Section caps are opaque, depth-owned meshes rather than stencil-derived transparent planes; post-processing must preserve their normal depth ordering.
-
-**Section cap diagnostics**: Section-plane overlap highlighting is a viewport visual diagnostic, not GeoSpec exact positive-volume evidence. Implement red overlap cues by splitting generated cap regions into disjoint normal and diagnostic triangles in section-cap geometry, preferably using one packed vertex-colored mesh per source on each cut face, and shared opaque WebGL/WebGPU striped cap materials. Do not render transparent red overlays, coincident duplicate cap meshes, or stencil-derived caps for this diagnostic.
+Section caps use the stencil overlay contract in [Graphics Backend Policy](graphics-backend-policy.md), after authoritative depth restoration. They are not part of the tone-mapped or ambient-occluded main pass. Preserve stencil for those active consumers. Exact contours and certified overlap remain worker-owned diagnostics; do not restore CPU per-frame slicing or treat viewport overlap as GeoSpec proof.
 
 ## Environment Strategy
 
-The main CAD viewer uses an `<Environment>` component with `<Lightformer>` children (from `@react-three/drei`) for studio-style lighting.
+Use the renderer-owned neutral `RoomEnvironment` selected by `defaultStudioLighting`. Preserve the current camera-relative directional/ambient rig and theme adjustments. Diagnostic studio-panel and white-furnace modes remain explicit calibration inputs; they are not alternate persisted product presets.
 
-### Design Decisions
+Generate and prefilter environment lighting only when its radiance or resolution changes. Camera motion rotates the existing environment and updates the light direction; it must not regenerate PMREM. Keep environment resources owned by their mount, release them at teardown, and skip them in MatCap mode. Preserve the current device-tier resolution (512 normally, 256 on coarse-pointer devices) until measured image/memory evidence selects another value.
 
-- **Lightformers, not HDRI presets**: Full control over light panel placement, no CDN dependency, deterministic appearance across environments.
-- **Size-aware placement**: All Lightformer positions and scales are expressed as multiples of the scene's bounding sphere radius (`sceneRadius`). This ensures a 5mm watch gear and a 5-meter building frame both receive proportionally sized soft panels.
-- **No background**: The environment map contributes PBR lighting and reflections (`background` is not set). The app's CSS background shows through, consistent with standard CAD viewer behaviour.
-- **Conditional on matcap**: When matcap is enabled, the environment is skipped entirely since `MeshMatcapMaterial` ignores environment maps. This avoids unnecessary GPU work.
-- **Camera-relative rig**: Five asymmetric Lightformers provide key, left fill, top, ground, and back-fill panels; the complete camera quaternion rotates the environment through tilt, roll, and pole crossings, keeping the rig fixed in view space.
-- **Headlamp and ambient floor**: The default view-space directional key follows `normalize([1, 1, 1])` at intensity `1.5`, with ambient intensity `0.1` and environment intensity `1`. Keep all light energy independent of field of view and projection. The key reflection panel uses intensity `64`, position `[1, 1, 1] × sceneRadius`, and size `[1.2, 1.2] × sceneRadius`; the other four panels provide low-energy fill.
-- **Environment resolution**: `512px` for sharp, defined reflections on surfaces.
-- **Material ownership**: Preserve authored glTF roughness and metalness; do not add a post-load global material override merely to fit one reference part.
-
-### Canonical Studio Environment
-
-The interactive Three.js CAD viewer has one environment implementation: the Studio Lightformer rig. It is renderer behavior rather than a user-selectable or persisted preset. The rig mounts whenever matcap is disabled and is skipped when matcap is enabled; there is no alternate environment branch.
+Never override authored metallic, roughness or Physical features globally to fit one reference image. Environment illumination and reflectance model are separate choices.
 
 ## Color Pipeline
 
@@ -143,17 +110,7 @@ Source color (sRGB) --> GLTF baseColorFactor (linear via spec) --> Three.js line
 
 ## Tessellation Quality
 
-Current defaults per kernel:
-
-| Kernel             | Linear Tolerance | Angular Tolerance | Notes                                          |
-| ------------------ | ---------------- | ----------------- | ---------------------------------------------- |
-| Replicad           | 0.02mm           | 20deg             | Locked by `occt-tessellation-defaults.test.ts` |
-| Replicad (export)  | 0.01mm           | 20deg             | Higher quality for file export                 |
-| JSCAD              | N/A              | N/A               | Fan triangulation of CSG output polygons       |
-| OpenRSCAD          | Engine defaults  | Engine defaults   | Native tessellation options                    |
-| BRep import kernel | OCCT defaults    | OCCT defaults     | `undefined` passed to `ReadStepFile`           |
-
-**Known limitation**: The BRep import kernel does not expose tessellation quality parameters. This means curved surfaces may appear faceted on high-detail models. Future work: expose `linearDeflection` and `angularDeflection` options.
+Use the shared tessellation vocabulary, preview/export defaults and budgets in [Graphics Backend Policy rules 15–17](graphics-backend-policy.md#15-name-mesh-resolution-with-one-tessellation-vocabulary). Rendering quality controls must not silently change the model, export geometry or native BRep edge topology.
 
 ## Camera Framing Policy
 
@@ -221,12 +178,14 @@ Compare rendering properties independently of authored material names and metada
 
 ### Post-Processing Performance
 
-- **No double MSAA**: The Canvas `gl` config omits `antialias: true` since `EffectComposer` handles antialiasing via its own `multisampling` FBO.
-- **N8AO resolution**: The current WebGL pass uses the dependency's full-resolution default. Do not claim half-resolution savings without enabling and measuring that mode.
+- Resolve multisampled geometry into immutable post-readable color/depth once. Color-only intermediate targets are single sample; composer swaps must never send tone mapping, AO or encoding back into a multisampled geometry target.
+- Keep final canvas sampling explicit: the factory's antialiased canvas also serves direct AO-off rendering and overlays. It is a separate boundary from offscreen post targets; do not disable it to hide intermediate routing defects.
+- Test the complete chain, including trailing FXAA, consecutive frames, both cameras, toggles, resize and authoritative overlay depth. Never sample a texture attached to the active output target.
+- Remove disabled accumulation or redundant copies only with alpha, transparency-aware AO, debug modes, borrowed-depth lifetime and disposal parity. Preserve negative performance/quality results.
+- Record source, adapter, actual physical buffers and full feature state for performance claims. Natural foreground frame cadence, CPU submission and asynchronous GPU elapsed time are distinct measurements; reciprocal GPU time is not product FPS.
 
 ## Known Limitations
 
 - **No per-material metalness heuristics**: STEP files do not carry metal/non-metal metadata. All surfaces default to non-metallic. Future work could infer metalness from part names or colour patterns.
 - **No normal map generation**: The pipeline relies on vertex normals from tessellation. No tangent-space normal maps are generated for surface detail enhancement.
-- **Fixed tessellation quality for BRep imports**: The BRep kernel passes `undefined` to `ReadStepFile`, using OCCT library defaults. Curved surfaces may appear faceted.
 - **Matcap ignores environment**: When matcap is enabled, the environment map is skipped. The matcap texture provides its own baked lighting.

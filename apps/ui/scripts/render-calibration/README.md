@@ -76,3 +76,41 @@ node apps/ui/scripts/render-calibration/render-nano.mts \
 The CLI verifies fixture hashes, preserves all GLB bytes/materials/native edges, and saves white-background and transparent-mask PNGs plus complete option/adapter/timing metadata under `out/render-calibration/captures/nano`. Defaults are 1276×798, 1 px lines, installed studio lighting, canonical isometric orthographic camera, 0.1985 m span and the fixture bounds center. `--camera` accepts the harness capture JSON; only the supported fixed-camera fields are forwarded. `--span`, `--distance`, `--width`, `--height`, `--line-width`, `--output` and `--catalog` allow explicit aligned captures. `--profile` accepts a nanoraster lighting JSON, strictly validated by its public API; `--fixtures` is a comma-separated catalog ID list.
 
 The installed ESM runtime and types are resolved through the existing image-plugin dependency owner, without adding a UI dependency. API-only lighting experiments and the reproduced orthographic shading defect are documented in `docs/research/artifacts/onshape-viewer-lighting-profile/runs/pbr-calibration/nano-lane.md`. The tested candidate lost housing wall contrast on F7 and was rejected as a universal default; no profile is selected or applied by this CLI.
+
+### Performance ablation (calibration server only)
+
+The calibration Vite configuration applies guarded source experiments through
+`app/routes/[__e2e].onshape-render-profile/ablation-transform.ts`. Production configuration
+never installs them; query choices do not enter the viewer API. The current branch
+contains the lean production candidate described below. Restart the calibration
+server after editing that transform. Query parameters are fixed at page load:
+
+- `abl=full|direct|beauty|mrt|raw-ao|filtered-ao|bilateral-ao`: full graph; direct PBR draw; tone-mapped beauty;
+  tone-mapped beauty with normal MRT; raw GTAO with bilinear sampling; filtered GTAO with bilinear sampling (the lean default); filtered GTAO with native bilateral reconstruction.
+- The lean candidate has no FXAA intermediate. Historical `aa=off` comparisons belong to commit `1cec9efe67`.
+- `samples=0|4`: override the single-sample renderer default; `sceneSamples=0|4`: independently set the scene target.
+- `nodegl=1`: force the node WebGL2 backend, preserving standard depth and reporting actual execution.
+- `frameStorage=half`: retain the RGBA16F composed-color reference. Default Neutral tone mapping uses hardware-sRGB RGBA8 storage with linear blending; other tone mappings keep RGBA16F. This changes no depth, AO or scene HDR allocation.
+- `edges=off`: omit BRep lines. `overlay=grid|axes|both`: enable only those overlays.
+- `depthRestore=off`: intentionally incorrect occlusion control; omit the later depth restore.
+- The lean candidate uses ordinary linear overlay blending without viewport copies. Historical `overlayBlend` comparisons belong to commit `1cec9efe67`.
+- `view=close`: initial span request 0.09 m; full is 0.22 m.
+
+Example: `/calibration-preview.html?abl=full&view=close&overlay=both&sceneSamples=0`.
+Select the desired backend after loading; wait for readiness, then explicitly set the span
+(the initial auto-fit can override it). Verify the actual projection and drawing buffer in
+the completed report. For the 5K experiment use CSS 2560×1440, DPR 2, natural cadence and
+Benchmark combined. Save PNG + metadata only after timing finishes. Warmup is 30 frames,
+then 300 samples. Run matched repeats; never report capped cadence as exclusive GPU time.
+
+`mrt` and `raw-ao` remove graph dependencies, not merely their visible
+contribution. `filtered-ao` matches the lean full graph; `bilateral-ao` restores the expensive reconstruction for controlled comparison. Draw counts and allocated target counts verify the intended execution. Raw/filtered controls intentionally change appearance. The lean branch defaults to single-sample
+scene acquisition and frame targets, bilinear AO reconstruction, no FXAA intermediate and linear overlay blending; it is not appearance-qualified. Direct rendering still
+uses Tau's loaded meshes, materials, lighting and update owners; it is not a standalone
+Three.js application or a measurement of all Tau CPU overhead.
+
+### Transmission retirement and depth-copy experiment
+
+`ledger=1` now distinguishes historical per-texture events from active renderer allocations. `backendLive` is the last texture event; `activeBackendAllocation` also excludes disposed/lost renderers. `retirement` records observed device destruction or GL context loss, and `disposedAt` records renderer disposal time. `canvasDepth` reports the separate native descriptor or GL context attributes; it is not process/driver VRAM. Three's byte counter may be stale after viewport-copy resize, so calculate mip storage from the latest allocation descriptor.
+
+`depthCopy=load` tests integer texel loads only in the full-resolution composed depth copy. The default retains normalized nearest sampling, and scaled explicit depth bridges are unchanged. It is diagnostic-only: the October21 5K trials were pixel-identical but did not establish a repeatable timing benefit. Match the actual initialized backend, poses, output depth state and current factory before admitting a comparison; the canvas-depth optimization already ships in `canvas-three-gl.ts`.

@@ -4,7 +4,7 @@ import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 const ThreeGraphicsBackendContext = createContext<ResolvedGraphicsBackend>('webgl');
 
 /**
- * Provides the CAD viewer rendering backend resolved for this `@react-three/fiber` subtree.
+ * Provides the material family (`webgpu` for shared nodes, `webgl` for classic) for this `@react-three/fiber` subtree.
  *
  * @public
  */
@@ -19,9 +19,10 @@ export function ThreeGraphicsBackendProvider({
 }
 
 /**
- * Read the rendering backend resolved for the enclosing `@react-three/fiber` subtree. Defaults to `webgl` outside a provider.
+ * Read the material family for the enclosing `@react-three/fiber` subtree. Defaults to `webgl` outside a provider.
  *
- * @returns The resolved graphics backend.
+ * Execution API is reported separately from the initialized renderer in the graphics actor.
+ * @returns The material-family discriminator.
  * @public
  */
 export function useThreeGraphicsBackend(): ResolvedGraphicsBackend {

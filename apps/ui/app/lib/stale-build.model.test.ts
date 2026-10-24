@@ -17,7 +17,10 @@
  * recovery comes at once or only after the failure's verdict (a fast verdict: no build id, a quick
  * answer), so whose failure it is cannot depend on which arrives first (I9). A third tab may boot on
  * either build at any moment, its announcement heard at once, so a peer's claim can land while a
- * lookup is still confirming (I10).
+ * lookup is still confirming (I10); one whose edge confirmed its build may claim it live and close
+ * at once, so an older tab that boots while a newer one is stopped is told by nothing but the
+ * stopped tab itself (I1b). The browser takes only a few beacons at a time, so a hide may not fit
+ * everything that waits; whatever does not fit goes no other way while the page is hidden (I8b).
  */
 import process from 'node:process';
 import { array, assert, asyncProperty, constant, constantFrom, oneof, record, tuple } from 'fast-check';
@@ -36,6 +39,7 @@ type Channel = 'boundary' | 'global' | 'preload';
 type Step =
   | { readonly kind: 'deliver' }
   | { readonly kind: 'announce'; readonly build: 0 | 1 }
+  | { readonly kind: 'claimLive'; readonly build: 0 | 1 }
   | { readonly kind: 'answer'; readonly tab: 0 | 1; readonly answer: Answer }
   | { readonly kind: 'failure'; readonly tab: 0 | 1; readonly channel: Channel }
   | { readonly kind: 'again'; readonly tab: 0 | 1; readonly channel: Channel }
@@ -62,8 +66,13 @@ const model = {
   /** The next SDK load fails with this value, which Vite's preloader dispatches first. */
   sdkLoadFailure: undefined as { readonly tab: Tab; readonly failure: TypeError } | undefined,
   installing: undefined as Tab | undefined,
+  /** The tab whose page is loading, whose channel the next `BroadcastChannel` is. */
+  loading: undefined as Tab | undefined,
   failures: 0,
 };
+
+/** Beacons the browser takes from one tab until the next tick: few, so a hide may not fit what waits. */
+const beaconRoom = 2;
 
 /** The tabs' shared BroadcastChannel, delivering only when the model says so. */
 const bus = {
@@ -73,6 +82,8 @@ const bus = {
 
 class FakeChannel {
   private readonly listeners: Array<(event: { readonly data: unknown }) => void> = [];
+  /** The tab whose page opened this channel, if any (a third tab's announcement has none). */
+  private readonly owner = model.loading;
   public constructor(_name: string) {
     bus.channels.add(this);
   }
@@ -86,6 +97,8 @@ class FakeChannel {
     bus.channels.delete(this);
   }
   public receive(data: unknown): void {
+    const heard = Number(typeof data === 'object' && data !== null && 'buildId' in data ? data.buildId : data);
+    this.owner?.heard.add(heard);
     for (const listener of this.listeners) {
       listener({ data });
     }
@@ -117,8 +130,14 @@ type Tab = {
   fetches: number;
   /** Every build the edge named, in order (`unreachable` and `none` included), across this tab's pages. */
   readonly answers: Answer[];
-  /** I10 violations found when a decision landed, checked after each step. */
+  /** I10 violations found when a decision landed, and I8b ones when an event went, checked after each step. */
   readonly violations: string[];
+  /** The builds the current page heard announced (plainly or as a live claim). */
+  heard: Set<number>;
+  /** Beacons the browser still takes from this tab until the next tick. */
+  beacons: number;
+  /** Whether the browser refused this tab a beacon since its page was last shown. */
+  beaconRefused: boolean;
   errorReporting?: typeof ErrorReporting;
   /** Events the model error tracker sent per failure; Sentry ignores a second capture of the same value. */
   readonly tracked: Map<unknown, number>;
@@ -167,6 +186,8 @@ type Tab = {
 
 const loadTab = async (tab: Tab): Promise<void> => {
   vi.resetModules();
+  tab.heard = new Set();
+  tab.beaconRefused = false;
   // The page's own document: its modules read it, so one tab's visibility is never the other's.
   vi.stubGlobal('document', {
     get visibilityState() {
@@ -242,7 +263,9 @@ const loadTab = async (tab: Tab): Promise<void> => {
     };
   });
   tab.errorReporting = await import('#lib/error-reporting.js');
+  model.loading = tab;
   tab.skew = await import('#filesystem/build-skew.js');
+  model.loading = undefined;
   tab.recovery = await import('#lib/stale-build-recovery.js');
   tab.recovery.subscribeGenuineFailures((failure) => {
     tab.analytics.set(failure, (tab.analytics.get(failure) ?? 0) + 1);
@@ -258,26 +281,63 @@ const loadTab = async (tab: Tab): Promise<void> => {
   model.installing = undefined;
 };
 
-/**
- * The model ingest: an event sent without the SDK (`sendSentryEventDirectly`) is counted for the
- * failure whose message it carries (each failure's is unique), with the tag it was sent with.
- */
-const ingest = async (_url: string, init: { readonly body?: unknown }): Promise<Response> => {
-  const event = JSON.parse(String(init.body).split('\n')[2] ?? '{}') as {
-    readonly tags?: Readonly<Record<string, string>>;
-    readonly exception?: { readonly values?: ReadonlyArray<{ readonly value?: string }> };
-  };
+type IngestedEvent = {
+  readonly tags?: Readonly<Record<string, string>>;
+  readonly exception?: { readonly values?: ReadonlyArray<{ readonly value?: string }> };
+};
+
+/** The tab and failure an event sent without the SDK is for, by the message it carries (each failure's is unique). */
+const ownerOf = (
+  body: unknown,
+): { readonly tab: Tab; readonly failure: unknown; readonly event: IngestedEvent } | undefined => {
+  const event = JSON.parse(String(body).split('\n')[2] ?? '{}') as IngestedEvent;
   const message = event.exception?.values?.[0]?.value;
   for (const tab of model.tabs) {
-    const failure = tab.failures.find(
+    const entry = tab.failures.find(
       (candidate) => candidate.failure instanceof Error && candidate.failure.message === message,
-    )?.failure;
-    if (failure !== undefined) {
-      tab.tracked.set(failure, (tab.tracked.get(failure) ?? 0) + 1);
-      tab.tags.set(failure, Promise.resolve(event.tags?.['stale_build'] as StaleBuildRecovery.StaleBuildTag));
+    );
+    if (entry !== undefined) {
+      return { tab, failure: entry.failure, event };
     }
   }
+  return undefined;
+};
+
+/** Count an event sent without the SDK for its failure, with the tag it was sent with. */
+const receiveEvent = (body: unknown): void => {
+  const owner = ownerOf(body);
+  if (owner !== undefined) {
+    const { tab, failure, event } = owner;
+    tab.tracked.set(failure, (tab.tracked.get(failure) ?? 0) + 1);
+    tab.tags.set(failure, Promise.resolve(event.tags?.['stale_build'] as StaleBuildRecovery.StaleBuildTag));
+  }
+};
+
+/**
+ * The model ingest, for requests (`sendSentryEventDirectly`). I8b: a hidden page sends only what the
+ * browser takes as it hides (a beacon here); an ordinary request from it may never go out.
+ */
+const ingest = async (_url: string, init: { readonly body?: unknown }): Promise<Response> => {
+  const owner = ownerOf(init.body);
+  if (owner !== undefined && isHidden(owner.tab)) {
+    owner.tab.violations.push(`I8b ${String(owner.failure)} sent as a request while its page was hidden`);
+  }
+  receiveEvent(init.body);
   return new Response('{}');
+};
+
+/** The browser's `sendBeacon`: it takes a few from each tab at a time ({@link beaconRoom}), then refuses. */
+const sendBeacon = (_url: string, body: unknown): boolean => {
+  const tab = ownerOf(body)?.tab;
+  if (tab !== undefined) {
+    if (tab.beacons === 0) {
+      tab.beaconRefused = true;
+      return false;
+    }
+    tab.beacons -= 1;
+  }
+  receiveEvent(body);
+  return true;
 };
 
 /**
@@ -333,6 +393,7 @@ function noteHiddenTags(tab: Tab): void {
 
 /** The page is shown again: a `pagehide` is undone by `pageshow`, a hidden document turns visible. */
 const showPage = (tab: Tab): void => {
+  tab.beaconRefused = false;
   if (tab.inPageHide) {
     tab.inPageHide = false;
     for (const listener of tab.pageShow) {
@@ -395,6 +456,9 @@ const newTab = (build: number, answer: Answer, answerDelay: number): Tab => ({
   fetches: 0,
   answers: [],
   violations: [],
+  heard: new Set(),
+  beacons: beaconRoom,
+  beaconRefused: false,
   tracked: new Map(),
   tagsAtLeave: new Map(),
   tagsAtHide: new Map(),
@@ -534,7 +598,8 @@ const checkNothingWaitsWhileHidden = async (tab: Tab, label: string): Promise<vo
       channels.size === 1 &&
       channels.has('preload') &&
       typeof tab.errorReporting?.isSdkLoadFailure(failure) !== 'boolean';
-    expect(mayBeSdkLoad, `I8 failure sent while hidden (${label})`).toBe(true);
+    // What the browser had no room for waits for the page to be shown or hidden again (I8b).
+    expect(mayBeSdkLoad || tab.beaconRefused, `I8 failure sent while hidden (${label})`).toBe(true);
   }
 };
 
@@ -590,6 +655,14 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
       }
       return 1;
     }
+    case 'claimLive': {
+      // A third tab, its build confirmed live by its own edge, says so and closes at once.
+      const message = { buildId: tabs[step.build].build, live: true };
+      for (const channel of bus.channels) {
+        channel.receive(message);
+      }
+      return 1;
+    }
     case 'answer': {
       tabs[step.tab].answer = step.answer;
       return 0;
@@ -610,6 +683,10 @@ const run = async (tabs: readonly [Tab, Tab], step: Step): Promise<number> => {
       return 0;
     }
     case 'tick': {
+      // The beacons sent so far have gone, so the browser takes more.
+      for (const tab of tabs) {
+        tab.beacons = beaconRoom;
+      }
       await vi.advanceTimersByTimeAsync(step.ms);
       return 0;
     }
@@ -664,7 +741,7 @@ const checkStep = (
 ): void => {
   const confirmations = 1 + (tabs[0].skew?.serverConfirmations ?? 2);
   for (const [index, tab] of tabs.entries()) {
-    expect(tab.violations, `I10 tab ${String(index)}`).toStrictEqual([]);
+    expect(tab.violations, `I8b and I10 tab ${String(index)}`).toStrictEqual([]);
     const skew = tab.skew!;
     const isWriting = !skew.isBuildSuperseded();
     if (!isWriting) {
@@ -705,6 +782,9 @@ const checkStep = (
   if (step.kind === 'deliver' && bus.queue.length === 0) {
     const bothWriting = tabs.every((tab) => !tab.skew!.isBuildSuperseded());
     if (bothWriting) {
+      // I1b: an older tab never writes beside a newer one it was not told of (its edge may disagree).
+      const [older, newer] = tabs[0].build < tabs[1].build ? tabs : [tabs[1], tabs[0]];
+      expect(older.heard.has(newer.build), 'I1b older tab writes unaware of the newer one').toBe(true);
       for (const [index, tab] of tabs.entries()) {
         if (tab.everStopped) {
           expect(tab.resumedWithOwn ?? 0, `I1 tab ${String(index)}`).toBeGreaterThanOrEqual(confirmations);
@@ -753,6 +833,7 @@ const channel = constantFrom<Channel>('boundary', 'global', 'preload');
 const step: Arbitrary<Step> = oneof(
   { weight: 3, arbitrary: constant({ kind: 'deliver' } as const) },
   { weight: 1, arbitrary: record({ kind: constant<'announce'>('announce'), build: tabIndex }) },
+  { weight: 1, arbitrary: record({ kind: constant<'claimLive'>('claimLive'), build: tabIndex }) },
   { weight: 3, arbitrary: record({ kind: constant<'answer'>('answer'), tab: tabIndex, answer }) },
   { weight: 2, arbitrary: record({ kind: constant<'failure'>('failure'), tab: tabIndex, channel }) },
   { weight: 1, arbitrary: record({ kind: constant<'again'>('again'), tab: tabIndex, channel }) },
@@ -793,6 +874,7 @@ beforeEach(() => {
   // The page's own reload is a request the model's `leave` step completes; every page listener is its page's.
   vi.stubGlobal('location', { href: 'https://taucad.dev/w/model', reload: () => undefined });
   vi.stubGlobal('fetch', ingest);
+  vi.stubGlobal('navigator', { sendBeacon });
   vi.stubGlobal('addEventListener', (type: string, listener: (event: { readonly persisted: boolean }) => void) => {
     if (type === 'pagehide' && model.installing !== undefined) {
       model.installing.pageHide.push(listener);
@@ -955,6 +1037,52 @@ describe('build-skew and stale-build-recovery, together (model)', () => {
       },
     );
   }, 60_000);
+
+  it('tell an older tab that boots while the newer one is stopped, once its writes resume, though the live-claiming tab closed', async () => {
+    await runModel(
+      ['X', 'X', 0, 60_000],
+      [
+        { kind: 'deliver' },
+        // A tab on build X, confirmed live by its edge, claims it and closes: tab B (build Y) stops.
+        { kind: 'claimLive', build: 0 },
+        // Tab A boots afresh on build X while B is stopped; B stays silent to it.
+        { kind: 'reload', tab: 0 },
+        { kind: 'deliver' },
+        { kind: 'answer', tab: 0, answer: 'Y' },
+        { kind: 'answer', tab: 1, answer: 'Y' },
+        // B's edge names Y as often as leaving supersession takes: B writes again, and says so.
+        ...Array.from({ length: 3 }, () => ({ kind: 'tick', ms: 30_000 }) as const),
+        { kind: 'deliver' },
+      ],
+      ([older, newer]) => {
+        expect(newer.skew?.isBuildSuperseded()).toBe(false);
+        expect(older.heard.has(newer.build)).toBe(true);
+      },
+    );
+  }, 60_000);
+
+  it.each(['pagehide', 'hidden'] as const)(
+    'keep what a hide (%s) cannot fit in the beacons the browser takes waiting, never sent as a request while hidden, and send it once shown',
+    async (via) => {
+      await runModel(
+        ['Y', 'Y', 3500, 60_000],
+        [
+          { kind: 'trackerFails', tab: 0 },
+          // Decisions still under way when the page is hidden, more than the browser takes beacons for.
+          ...Array.from({ length: 4 }, () => ({ kind: 'failure', tab: 0, channel: 'boundary' }) as const),
+          { kind: 'hide', tab: 0, via },
+          { kind: 'show', tab: 0 },
+        ],
+        ([tab]) => {
+          expect(tab.failures).toHaveLength(4);
+          for (const { failure } of tab.failures) {
+            expect(tab.tracked.get(failure)).toBe(1);
+          }
+        },
+      );
+    },
+    60_000,
+  );
 
   it('send errors reported after a failed SDK load without it, once, with the decision of the page that saw them', async () => {
     await runModel(

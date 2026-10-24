@@ -144,9 +144,10 @@ const releaseDirect = (): void => {
  * trimmed). Each is admitted ({@link admitDirect}) as it goes, so tab switches during a stalled load
  * never pass {@link directErrorLimit}.
  *
- * Hidden is not gone: what does not fit stays waiting, for the SDK or the next hide, and while the
- * page stays hidden ({@link isPageHidden}) a report that would wait, for the load or for its tags,
- * goes the same way at once ({@link sendNowIfHidden}). Only at exit
+ * Hidden is not gone: what does not fit stays waiting, for the SDK, the next hide or the page being
+ * shown again ({@link resumeWaitingErrors}), and while the page stays hidden ({@link isPageHidden})
+ * a report that would wait, for the load or for its tags, goes the same way at once
+ * ({@link sendNowIfHidden}), a wait the hide released included. Only at exit
  * (`exit`: a `pagehide` the page does not come back from) is the rest counted in one summary event
  * and given up.
  *
@@ -193,14 +194,48 @@ const sendNowIfHidden = (): void => {
 };
 
 /**
+ * Reports whose tags settled while the page was hidden and that the hide could not fit: they wait
+ * for the page to be shown ({@link resumeWaitingErrors}) or hidden again.
+ */
+let heldWhileHidden: Report[] = [];
+
+/**
  * Send a report without the SDK once its tags settle, unless the page being hidden sent it first.
  * It is waiting from the call on, so a caller's {@link sendNowIfHidden} right after sends it at once.
+ * One rule decides how it goes once its tags are in: on a visible page as an ordinary send; on a
+ * hidden page only through the hide's own admission ({@link sendWaitingErrors}), so a wait the hide
+ * released never sends past the keepalive budget, and what does not fit keeps waiting, for the next
+ * hide or the page being shown again ({@link resumeWaitingErrors}).
  */
 const sendDirectlyWhenTagged = async (report: Report): Promise<void> => {
   waitingForTags.add(report);
   const tags = await describer.settled(report.error);
-  if (waitingForTags.has(report)) {
-    sendDirectly(report, tags);
+  if (!waitingForTags.has(report)) {
+    return;
+  }
+  if (isPageHidden()) {
+    sendNowIfHidden();
+    if (waitingForTags.has(report)) {
+      heldWhileHidden = [...heldWhileHidden, report];
+    }
+    return;
+  }
+  sendDirectly(report, tags);
+};
+
+/**
+ * The page is shown again: what waited for its tags through the hide and did not fit the keepalive
+ * budget goes as it would have on a visible page, each once its tags settle again.
+ */
+export const resumeWaitingErrors = (): void => {
+  if (isPageHidden()) {
+    return;
+  }
+  for (const report of heldWhileHidden.splice(0)) {
+    if (waitingForTags.has(report)) {
+      // async-iife: bootstrap -- each event goes once its tags settle, as on any visible page.
+      void sendDirectlyWhenTagged(report);
+    }
   }
 };
 

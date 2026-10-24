@@ -54,6 +54,7 @@ import {
   isErrorTrackerListening,
   isSdkLoadFailure,
   reportUiError,
+  resumeWaitingErrors,
   sendWaitingErrors,
   setErrorDescriber,
 } from '#lib/error-reporting.js';
@@ -945,10 +946,11 @@ export const installStaleBuildRecovery = (): (() => void) => {
    * without a `pagehide`) and every `pagehide` (a page kept in the back/forward cache is frozen and
    * may be evicted without running again). Chrome freezes only a page already hidden one of these
    * ways, so `freeze` adds nothing. Hidden is not gone: what waited goes as far as the keepalive
-   * budget allows and the rest keeps waiting. Only a page that is really going (`pagehide`, not
-   * persisted) settles what a pending reload covered and gives up what is left (counted in one
-   * summary event). A `pageshow` only undoes a `pagehide`: a document that boots hidden (opened in a
-   * background tab) is hidden from the start and stays hidden through its first `pageshow`. */
+   * budget allows and the rest keeps waiting, for the next hide or the page being shown again.
+   * Only a page that is really going (`pagehide`, not persisted) settles what a pending reload
+   * covered and gives up what is left (counted in one summary event). A `pageshow` only undoes a
+   * `pagehide`: a document that boots hidden (opened in a background tab) is hidden from the start
+   * and stays hidden through its first `pageshow`. */
   const hide = (phase: 'hidden' | 'exit'): void => {
     getPageRecovery().flush();
     sendWaitingErrors(phase);
@@ -960,12 +962,16 @@ export const installStaleBuildRecovery = (): (() => void) => {
     }
     hide(event.persisted ? 'hidden' : 'exit');
   };
+  // Shown again, by whichever of the two comes last: what a hide could not fit goes as on any visible page.
   const onPageShow = (): void => {
     notePageShow();
+    resumeWaitingErrors();
   };
   const onVisibilityChange = (): void => {
     if (isPageHidden()) {
       hide('hidden');
+    } else {
+      resumeWaitingErrors();
     }
   };
   if (isPageHidden()) {

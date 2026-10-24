@@ -29,7 +29,8 @@
  *   newer announcement wins, as it did before, and nothing is asked again.
  *
  * A tab answers older announcements while it still writes, so the older tab stops;
- * once superseded it stays silent and a live tab answers instead.
+ * once superseded it stays silent and a live tab answers instead. An older tab it stayed silent to
+ * is told as soon as its writes resume, so it never goes on writing beside this one unheard.
  *
  * A peer's `live` claim is checked the same way, never taken on trust. Once the
  * server has spoken, its build outranks anything a tab says.
@@ -140,6 +141,12 @@ let state: SkewState = { phase: 'idle', superseding: undefined, vouches: false, 
 /** Bumped on each phase change, so a server answer asked for an earlier phase is not applied to this one. */
 let epoch = 0;
 let phaseTimer: ReturnType<typeof setTimeout> | undefined;
+/**
+ * An older tab announced itself while this tab's writes were stopped, so this tab stayed silent to
+ * it: whenever writes resume, this tab owes it an announcement, or the older tab never learns it is
+ * stale and both bundles write (DF20).
+ */
+let owesOlderTab = false;
 
 const writeStopTopic = new Topic<void>({ name: 'build-skew' });
 const reloadOfferTopic = new Topic<void>({ name: 'build-reload-offer' });
@@ -420,15 +427,22 @@ const dispatch = (event: SkewEvent): void => {
   if (offers(next) !== offers(before) || hasStopped(next) !== hasStopped(before)) {
     reloadOfferTopic.emit();
   }
-  /* Writes resumed because the server named this build: tell the peer whose claim stopped them, so
-   * it checks in turn (DF20). Keyed on the writes resuming, whatever phase they resume into; never
-   * in answer to a live claim (`vouches`), which bounds two tabs behind disagreeing edges. */
+  /* Writes resumed: one announcement, if any is owed, keyed on the writes resuming whatever phase
+   * they resume into. Resumed because the server named this build: tell the peer whose claim stopped
+   * them, so it checks in turn (DF20); never in answer to a live claim (`vouches`), which bounds two
+   * tabs behind disagreeing edges. Otherwise plainly, which only an older tab acts on: resumed
+   * without the server over an older peer's claim (the newer build wins), or with an older tab heard
+   * while stopped, which nothing else would tell (a live claim also tells it, so it is owed no more). */
   const resumedWrites = stopsWrites(before) && !stopsWrites(next);
-  if (resumedWrites && before.vouches && event.type === 'answer' && event.answer === buildId) {
-    channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
-  } else if (resumedWrites && event.type === 'answer' && typeof event.answer !== 'number') {
-    // Resumed without the server, over an older peer's claim: the newer build wins, so say so plainly.
-    channel?.postMessage(buildId);
+  if (resumedWrites) {
+    const isServersWord = event.type === 'answer' && event.answer === buildId;
+    const isWithoutServer = event.type === 'answer' && typeof event.answer !== 'number';
+    if (before.vouches && isServersWord) {
+      channel?.postMessage({ buildId, live: true } satisfies LiveAnnouncement);
+    } else if (isWithoutServer || owesOlderTab) {
+      channel?.postMessage(buildId);
+    }
+    owesOlderTab = false;
   }
   if (next.server !== before.server) {
     serverVerdictTopic.emit();
@@ -548,8 +562,11 @@ if (channel) {
     if (!isLive && other < buildId) {
       /* While this tab still writes, an older tab must hear it and stop, or two bundles write (DF20),
        * even when a deploy already replaced this build. Once its own writes have stopped it is not the
-       * build to vouch for; a live tab answers instead. */
-      if (!hasStopped(state)) {
+       * build to vouch for; a live tab answers instead, and this tab tells the older one itself once
+       * its writes resume, since the live tab may have closed meanwhile. */
+      if (hasStopped(state)) {
+        owesOlderTab = true;
+      } else {
         channel.postMessage(buildId);
       }
       return;

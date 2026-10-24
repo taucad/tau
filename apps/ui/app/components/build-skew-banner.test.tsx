@@ -372,6 +372,38 @@ describe('build-id skew guard (DF20)', () => {
     expect(heard.map((event) => event.data as unknown)).toContainEqual({ buildId, live: true });
   });
 
+  it.each([
+    { stoppedBy: "an older peer's live claim the server confirmed", claim: -1, firstAnswer: -1 },
+    { stoppedBy: "a newer peer's live claim the server could not check", claim: 1, firstAnswer: 'unreachable' },
+  ] as const)(
+    'tells an older tab it heard while its writes were stopped (by $stoppedBy) once they resume, so both never write (DF20)',
+    async ({ claim, firstAnswer }) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { buildId, isBuildSuperseded, haveWritesStopped, peerRecheckDelay, serverConfirmations } = await load();
+      answerLiveBuild(firstAnswer === 'unreachable' ? firstAnswer : buildId + firstAnswer);
+      announce({ buildId: buildId + claim, live: true });
+      await pause();
+      expect(haveWritesStopped()).toBe(true);
+      const heard = listen();
+      const answered = (): unknown[] =>
+        heard.map((event) => event.data as unknown).filter((message) => message !== buildId - 2);
+
+      // An older tab boots while this one is stopped, which stays silent to it; the claiming tab closes.
+      announce(buildId - 2);
+      await pause();
+      expect(answered()).toStrictEqual([]);
+      answerLiveBuild(buildId);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(peerRecheckDelay * (1 + serverConfirmations));
+      });
+      await pause();
+
+      expect(isBuildSuperseded()).toBe(false);
+      // A plain announcement: the older tab learns it is stale, and no live claim answers a live claim.
+      expect(answered()).toStrictEqual([buildId]);
+    },
+  );
+
   it('keeps counting back to this build when a recheck gets no answer', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const { buildId, isReloadOffered, offerReload, queryLiveBuild, peerRecheckDelay, serverConfirmations } =

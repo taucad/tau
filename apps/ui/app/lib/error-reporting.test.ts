@@ -488,6 +488,63 @@ describe('error reporting', () => {
     expect(posted[0]?.event.tags).toMatchObject({ stale_build: 'undecided' });
   });
 
+  it('should keep waiting, not send as ordinary requests, what the tags released by a hide leave beyond the keepalive budget, and send it once shown', async () => {
+    const posted = stubIngest();
+    const page = await load();
+    const { keepaliveBudget } = await import('#lib/sentry-event.lib.js');
+    // Every decision is under way until the page is hidden, which releases each wait at once.
+    const waits: Array<() => void> = [];
+    page.setErrorDescriber({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name.
+      now: () => ({ stale_build: 'undecided' }),
+      settled: async () =>
+        new Promise((resolve) => {
+          waits.push(() => {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name.
+            resolve({ stale_build: 'undecided' });
+          });
+        }),
+    });
+    sentry.failNextLoad = true;
+    await page.startErrorReporting();
+    const errors = Array.from({ length: keepaliveBudget.requests * 2 }, (_, index) => {
+      const error = new Error(`waiting for its tags ${String(index)}`);
+      error.stack = 'short';
+      return error;
+    });
+    for (const error of errors) {
+      void page.reportUiError(error);
+    }
+    await settle();
+    expect(posted).toHaveLength(0);
+
+    // The document turns hidden: the recovery releases every wait, then what waits goes as it may.
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    for (const wake of waits.splice(0)) {
+      wake();
+    }
+    page.sendWaitingErrors('hidden');
+    await settle();
+
+    // Only what the keepalive budget took went while hidden; nothing went as an ordinary request.
+    expect(posted.length).toBeGreaterThan(0);
+    expect(posted.length).toBeLessThan(errors.length);
+    expect(posted.every((envelope) => envelope.init.keepalive === true)).toBe(true);
+
+    // Shown again: what still waited goes, each once its tags settle.
+    hidden.mockReturnValue('visible');
+    page.resumeWaitingErrors();
+    for (const wake of waits.splice(0)) {
+      wake();
+    }
+    await settle();
+
+    const byText = (left: string, right: string): number => left.localeCompare(right);
+    expect(posted.map((envelope) => envelope.event.exception.values[0]?.value ?? '').toSorted(byText)).toStrictEqual(
+      errors.map((error) => error.message).toSorted(byText),
+    );
+  });
+
   it('should send an error reported while the SDK loads on a document that boots hidden at once, with no event saying so', async () => {
     const posted = stubIngest();
     sentry.holdNextLoad = new Promise<void>((resolve) => {

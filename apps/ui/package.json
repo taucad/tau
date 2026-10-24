@@ -37,7 +37,6 @@
     "@taucad/filesystem": "workspace:*",
     "@taucad/fs-bridge": "workspace:*",
     "@taucad/fs-client": "workspace:*",
-    "@taucad/geospec-engine": "workspace:*",
     "@taucad/gltf": "workspace:*",
     "@taucad/grammars": "workspace:*",
     "@taucad/image": "workspace:*",

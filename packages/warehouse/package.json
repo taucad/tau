@@ -58,8 +58,8 @@
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/cli": "workspace:*",
     "@taucad/esbuild": "workspace:*",
-    "@taucad/geospec-engine": "workspace:*",
     "@taucad/image": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/replicad": "workspace:*",

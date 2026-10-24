@@ -331,8 +331,9 @@ const config: KnipConfig = {
       entry: ['src/**/*.test-d.ts'],
     },
     'packages/cli': {
-      // The `stage-acp` target runs it from the workspace root.
-      entry: ['scripts/stage-acp-adapters.mts'],
+      // The `stage-acp` target runs the first from the workspace root; runtime-e2e, warehouse and
+      // the example-packaging skill spawn the second, `geospec run` with Tau's exporter, by path.
+      entry: ['scripts/stage-acp-adapters.mts', 'scripts/geospec.mts'],
       // `stage-acp` copies the pinned ACP adapters into `dist-acp` by name, and `tau serve`
       // resolves them there (`acpAdapterResolveFrom`, packages/host/src/acp/registry.ts).
       ignoreDependencies: ['@agentclientprotocol/claude-agent-acp', '@agentclientprotocol/codex-acp'],

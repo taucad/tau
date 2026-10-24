@@ -1,11 +1,5 @@
-import { execFile } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
 import { pktLine } from '#api/git/git.constants.js';
 import type { GitService } from '#api/git/git.constants.js';
-import { gitChildEnvironment, runGit } from '#api/git/store/lease.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 
 /**
@@ -18,6 +12,10 @@ import type { Manifest } from '#api/git/store/manifest.js';
  * advertisement names: every ref, its object id and, for an annotated tag, the
  * peeled target the lease's `packed-refs` carries (`store/lease.ts`). So the
  * same bytes are written here with no lease, no disk and no git child.
+ *
+ * The one fact that depends on a git binary, its {@link AdvertisementDialect},
+ * is probed where that binary runs (`advertisement-probe.ts`): on tau-storage,
+ * which serves the RPC that follows, and which tau-api asks for it (DC1).
  *
  * Byte identity with stock git is the contract, proved by
  * `advertisement.test.ts` against the git on `PATH` and against the bytes of
@@ -120,58 +118,6 @@ export const dialectFromAdvertisements = (advertisements: {
     );
   }
   return { agent, capabilitiesWhenEmpty: upload !== undefined };
-};
-
-const execFileAsync = promisify(execFile);
-
-/**
- * Asks the installed git for both advertisements over a throwaway empty bare
- * repository, initialised as `hydrateLease` initialises a lease and run with
- * the environment every lease child gets.
- *
- * @returns The installed git's dialect.
- */
-const probeInstalledGit = async (): Promise<AdvertisementDialect> => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'tau-advertise-probe-'));
-  try {
-    await runGit(directory, ['init', '--bare', '--quiet', '--template=', '--initial-branch=main', '.']);
-    const advertise = async (service: GitService): Promise<string> => {
-      const { stdout } = await execFileAsync(
-        'git',
-        [service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', directory],
-        { encoding: 'latin1', timeout: 10_000, env: gitChildEnvironment(directory) },
-      );
-      return stdout;
-    };
-    const [uploadPack, receivePack] = await Promise.all([advertise('git-upload-pack'), advertise('git-receive-pack')]);
-    return dialectFromAdvertisements({ uploadPack, receivePack });
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-};
-
-let installed: Promise<AdvertisementDialect> | undefined;
-
-/**
- * The dialect of the git this process spawns for every RPC, asked once per
- * process. The advertisement promises capabilities the following
- * `upload-pack`/`receive-pack` child must honour, and both run on this Machine,
- * so it speaks for that binary, read from that binary's own advertisement. A
- * failed probe is not kept, so the next advertisement asks again.
- *
- * ponytail: once per process, because the binary only changes with the image;
- * DC1, which takes git off the API, carries the workers' dialect instead.
- *
- * @returns The installed git's dialect.
- */
-export const installedGitDialect = async (): Promise<AdvertisementDialect> => {
-  installed ??= probeInstalledGit();
-  try {
-    return await installed;
-  } catch (error) {
-    installed = undefined;
-    throw error;
-  }
 };
 
 /** Git's ref order: `strcmp` over the name's bytes, which for a storable (ASCII) ref name is code-unit order. */

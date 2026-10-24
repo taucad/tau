@@ -31,7 +31,6 @@ import type {
 } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
 import {
-  leaseGitRunner,
   materializePublication,
   materializePublishedTags,
   releaseManifestBlobs,
@@ -39,13 +38,13 @@ import {
 import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import type { RepositoryLease } from '#api/git/store/lease.js';
 import { decodeManifest } from '#api/git/store/manifest.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import type { ReadLease } from '#api/git/git.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import { assertProjectActive, assertActiveProjectLocked } from '#database/project-lifecycle.js';
 import { EmailService } from '#email/email.service.js';
@@ -143,10 +142,9 @@ export class PublicationsService {
     return {
       databaseService: this.databaseService,
       storage: this.storage,
-      /* This service's children are bounded by the requests that start them —
-         one publish, one repair — rather than by the smart-HTTP route's own
-         ceiling, which is no longer reachable from here (review R8). */
-      git: leaseGitRunner,
+      /* Git over the read lease, on tau-storage (DC1): this API runs no git
+         child, and each command is one bounded `git-read` (review R8). */
+      git: this.repositories.leaseGit,
       /* The LFS endpoint's own resolver, so a publication reads an object from
          wherever that endpoint serves it: the tenant key, or the pre-D24 one
          for a project the relocation has not reached (W4b). */
@@ -823,7 +821,7 @@ export class PublicationsService {
    */
   private async withLease<T>(
     args: { readonly projectId: string; readonly ownerId: string; readonly callerId: string },
-    body: (lease: RepositoryLease) => Promise<T>,
+    body: (lease: ReadLease) => Promise<T>,
   ): Promise<T> {
     return this.repositories.withLease({ ...args, role: 'owner', remainingBytes: 0, storageLimitBytes: 0 }, body);
   }

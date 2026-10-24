@@ -1,14 +1,16 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { apiRoot, importChain, moduleGraph, sourceFiles } from '#testing/module-graph.js';
+import { apiRoot, importChain, moduleGraph, moduleGraphExcept, sourceFiles } from '#testing/module-graph.js';
 
 /**
  * North star DC4 (review FR4): `deleteFiles`-class object-storage calls are
  * reachable only from the maintenance image (`tau-maintenance`) and from the
  * storage commit path, which DC1 moves to `tau-storage`. The public API's own
  * entry points reach no other delete, so the day its token loses delete
- * capability nothing on the request path breaks.
+ * capability nothing on the request path breaks. The API still reaches the
+ * commit path through DC1's in-process fallback, which serves git while
+ * production has no tau-storage.
  *
  * A "delete-class call" is any call of the driver's delete verbs or the
  * repository store's `deleteObjects`, and any `Delete*Command` of the AWS SDK.
@@ -27,6 +29,12 @@ const definitions = new Set(['app/storage/object-storage.service.ts', 'app/api/g
 
 /** The storage commit path: a commit sweeps the packs it retired (W6). DC1 moves it into `tau-storage`. */
 const commitPath = new Set(['app/api/git/store/sweep.ts']);
+
+/** The `tau-storage` image's only entry (Dockerfile `storage` target, DC1). */
+const storageEntry = 'app/storage-worker.ts';
+
+/** DC1's in-process fallback: how an API without `TAU_STORAGE_URL` still serves git. */
+const inProcessFallback = 'app/api/git/forwarding/in-process-executor.ts';
 
 /**
  * The API image's request-serving and billing entries: `vite.config.ts`
@@ -68,10 +76,18 @@ describe('delete-class object-storage calls (DC4)', () => {
     expect(reached).toEqual([]);
   });
 
-  it('should reach the commit path from the API entries, so the allowance above is still needed', () => {
+  it('should reach the commit path from the API entries only through the in-process fallback (DC1)', () => {
     const api = moduleGraph(...apiEntries);
+    const forwarded = moduleGraphExcept(new Set([inProcessFallback]), ...apiEntries);
 
     expect([...commitPath].filter((file) => !api.modules.has(file))).toEqual([]);
+    expect([...commitPath].filter((file) => forwarded.modules.has(file))).toEqual([]);
+  });
+
+  it('should reach the commit path from the tau-storage entry', () => {
+    const storage = moduleGraph(storageEntry);
+
+    expect([...commitPath].filter((file) => !storage.modules.has(file))).toEqual([]);
   });
 
   it('should reach every lifecycle delete from the maintenance entry', () => {

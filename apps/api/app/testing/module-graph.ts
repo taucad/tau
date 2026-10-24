@@ -71,7 +71,18 @@ export const runtimeSpecifiers = (source: string): string[] =>
  * @param entries - Paths relative to `apps/api`, such as `app/maintenance-command.ts`.
  * @returns The reached modules and packages.
  */
-export const moduleGraph = (...entries: string[]): ModuleGraph => {
+export const moduleGraph = (...entries: string[]): ModuleGraph => moduleGraphExcept(new Set(), ...entries);
+
+/**
+ * {@link moduleGraph} that does not enter the given modules: what the entries
+ * reach when those modules are cut out, so a test can hold everything but one
+ * deliberate edge to a rule.
+ *
+ * @param excluded - Modules (relative to `apps/api`) the walk does not enter.
+ * @param entries - Entry files relative to `apps/api`.
+ * @returns The graph without the excluded modules and what only they reach.
+ */
+export const moduleGraphExcept = (excluded: ReadonlySet<string>, ...entries: string[]): ModuleGraph => {
   const modules = new Set<string>();
   const packages = new Set<string>();
   const importedBy = new Map<string, string>();
@@ -79,7 +90,7 @@ export const moduleGraph = (...entries: string[]): ModuleGraph => {
 
   for (let file = pending.pop(); file !== undefined; file = pending.pop()) {
     const relative = path.relative(apiRoot, file);
-    if (modules.has(relative)) {
+    if (modules.has(relative) || excluded.has(relative)) {
       continue;
     }
     modules.add(relative);

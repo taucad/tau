@@ -1,12 +1,13 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- Nest decorators and runtime DI metadata. */
-import { BadRequestException, Controller, Delete, Get, Header, Param, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Delete, Get, Header, Inject, Param, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { FastifyReply } from 'fastify';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { DatabaseService } from '#database/database.service.js';
 import type { Environment } from '#config/environment.config.js';
-import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { gitExecutorKey } from '#api/git/forwarding/git-executor.js';
+import type { GitExecutor } from '#api/git/forwarding/git-executor.js';
+import { executorTombstoneFence } from '#api/git/forwarding/tombstone-fence.js';
 import { isProjectRepositoryId } from '#api/git/git.constants.js';
 import {
   completeProjectDeletion,
@@ -20,8 +21,9 @@ import type { ProjectDeletionStatus } from '#api/projects/project-deletion.js';
 export class ProjectDeletionController {
   public constructor(
     private readonly databaseService: DatabaseService,
-    private readonly storage: ObjectStorageService,
     private readonly config: ConfigService<Environment, true>,
+    /* DC1: the tombstone is committed by tau-storage; tau-api holds no repository write. */
+    @Inject(gitExecutorKey) private readonly executor: GitExecutor,
   ) {}
 
   @Get(':projectId/deletion')
@@ -50,7 +52,7 @@ export class ProjectDeletionController {
     });
     const result = await completeProjectDeletion({
       database: this.databaseService.database,
-      store: new S3RepositoryStore(this.storage),
+      fence: executorTombstoneFence(this.executor),
       projectId,
     });
     void reply.status(result.state === 'deleted' ? 200 : 202);

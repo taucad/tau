@@ -106,5 +106,6 @@ ssh "${ssh_options[@]}" tau@127.0.0.1 \
   < "$REPO_ROOT/packages/core/native-process/scripts/shell-conformance-guest.sh" | tee "$output/guest.txt" || status=$?
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-conformance-receipt.json' > "$output/receipt.json" || true
 ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/shell-service-conformance-receipt.json' > "$output/service-receipt.json" || true
+ssh "${ssh_options[@]}" tau@127.0.0.1 'cat ~/terminal-conformance-receipt.json' > "$output/terminal-receipt.json" || true
 printf '%s\n' "$status" > "$output/exit-code.txt"
 exit "$status"

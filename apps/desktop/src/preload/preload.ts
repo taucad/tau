@@ -63,6 +63,7 @@ import type {
   QuickLookUsdzRequest,
 } from '#shared/quick-look.js';
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
+import { createTerminalBridge } from '#preload/terminal-bridge.js';
 
 const bootstrap = readBootstrap(process.argv);
 
@@ -188,6 +189,8 @@ contextBridge.exposeInMainWorld('tau', {
   requestServicesPort: (requestId: string, concern: string, context?: Readonly<Record<string, string>>): void => {
     ipcRenderer.send(servicesPortRelayTag, { requestId, concern, context });
   },
+  /* The Terminal's own seam: preload holds the session port and validates both directions (W5). */
+  terminal: createTerminalBridge(ipcRenderer),
   agentHost: {
     retain: async (workspaceRoot: string, projectId: string, attachmentId: string): Promise<void> => {
       await ipcRenderer.invoke(agentHostSessionChannels.retain, { workspaceRoot, projectId, attachmentId });

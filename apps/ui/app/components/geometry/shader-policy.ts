@@ -74,6 +74,7 @@ export const shaderSites = [
   },
   {
     id: 'section-stencil-caps',
+    helpers: ['packages/viewer/src/graphics/three/materials/triangle-derivatives.node.ts'],
     modules: [
       'packages/viewer/src/graphics/three/materials/section-stencil.material.ts',
       'packages/viewer/src/graphics/three/materials/section-cap-outline.material.ts',
@@ -321,10 +322,12 @@ export const shaderEvidence = {
   },
   'section-stencil-caps': {
     reference: [
+      'packages/viewer/src/graphics/three/utils/section-outline-geometry.test.ts::should preserve every triangle position and winding with constant geometric normals',
       `${sectionStencilCapsUnit}::should take the half-spaces whose removed side holds a perspective eye`,
       `${sectionStencilCapsUnit}::should cut a box into the polygon where the plane meets it, ordered around it`,
     ],
     'generated-source': [
+      'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should keep cap coverage independent of triangle grouping through 5K motion on %s',
       `${sectionCapOutlineUnit}::should compile the outline band after the clipping chunks and discard off the band`,
       `${sectionCapOutlineUnit}::matches stable stripped section cap outline node material JSON snapshot`,
     ],
@@ -332,6 +335,7 @@ export const shaderEvidence = {
       `${sectionStencilCapsBrowser}::should compile and draw every pass without a shader or pipeline error`,
     ],
     pixels: [
+      'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should keep cap coverage independent of triangle grouping through 5K motion on %s',
       'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should give section outlines the BREP square-pixel coverage at 5K',
       `${sectionStencilCapsBrowser}::should cap each owner where its solids hold the cut, and nowhere else`,
       'packages/viewer/src/graphics/three/post-processing-antialias.browser.test.tsx::should occlude grid and hidden outlines through actual stencil caps',
@@ -350,6 +354,7 @@ export const shaderEvidence = {
       `${sectionStencilCapsUnit}::should cap with the shared surface depth bias and the cap stencil test`,
     ],
     lifecycle: [
+      'packages/viewer/src/graphics/three/utils/section-outline-geometry.test.ts::should reuse buffers for transforms and draw ranges and retire only owned revisions',
       `${sectionStencilCapsUnit}::should reuse its pooled draws frame after frame, and let go of a source that left`,
     ],
     'structural-perf': [

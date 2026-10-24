@@ -1,6 +1,7 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`Loop`/`Break` are shader graph factories */
 import { squarePixelStripCoverage } from '#graphics/three/materials/line-coverage.js';
 import { namedUniformArray } from '#graphics/three/materials/named-uniform-array.js';
+import { triangleWorldDerivatives } from '#graphics/three/materials/triangle-derivatives.node.js';
 import { Color, DoubleSide, REVISION, WebGPUCoordinateSystem } from 'three';
 import type { PerspectiveCamera, Vector4 } from 'three';
 import { MeshBasicNodeMaterial } from 'three/webgpu';
@@ -11,8 +12,6 @@ import {
   cameraNear,
   cameraProjectionMatrix,
   cameraViewMatrix,
-  dFdx,
-  dFdy,
   expression,
   float,
   Fn,
@@ -52,12 +51,12 @@ const outlineNodes = (faces: SectionCapOutlineFaces): SectionCapOutlineNodes => 
   const forward = uniform(faces.forward);
   const planes = namedUniformArray(faces.planes as Vector4[], 'tauCapPlanes');
   const bounds = namedUniformArray(faces.bounds as Vector4[], 'tauCapBounds');
-  // Mirrors `section-cap-outline.material.ts`: the derivatives are taken once, before any branch.
+  // The geometry supplies a constant triangle normal; analytical differentials
+  // cannot mix neighboring triangles when the GPU merges fragment quads.
   // `x` is the coverage, `y` how far back along the view ray the nearest crossing of a face's plane lies, or 0.
   const outline = Fn(() => {
     const point = positionWorld;
-    const dx = dFdx(point).toVar();
-    const dy = dFdy(point).toVar();
+    const { dx, dy } = triangleWorldDerivatives();
     const isOrthographic = forward.w.greaterThan(0.5);
     const pixelWorld = eye.w.mul(select(isOrthographic, float(1), point.sub(eye.xyz).dot(forward.xyz))).toVar();
     const ray = select(isOrthographic, forward.xyz, point.sub(eye.xyz)).toVar();

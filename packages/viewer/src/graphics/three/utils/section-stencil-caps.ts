@@ -5,6 +5,7 @@ import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { isSameSectionHalfSpace, resolveSectionFaces, resolveSectionTrimmingPieces } from '#graphics/section-cuts.js';
 import type { SectionFace, SectionHalfSpace, SectionPiece } from '#graphics/section-cuts.js';
 import { createSectionCapOutlineNodeMaterial } from '#graphics/three/materials/section-cap-outline.node.js';
+import { createSectionOutlineGeometryCache } from '#graphics/three/utils/section-outline-geometry.js';
 import {
   createSectionCapOutlineFaces,
   createSectionCapOutlineMaterial,
@@ -422,6 +423,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
   const outlineClip = createSectionClip(backend);
   const outlineMask = outlineClip.backend === 'webgpu' ? createSectionClipMask(outlineClip, 0.5) : undefined;
   const outlineMaterials = new Map<number, THREE.Material>();
+  const outlineGeometry = backend === 'webgpu' ? createSectionOutlineGeometryCache() : undefined;
   let openChainMaterial: THREE.Material | undefined;
   const stencilMaterials = new Map<SectionStencilPass, THREE.Material>();
   let overlapCapMaterial: THREE.Material | undefined;
@@ -743,7 +745,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
         stats.outlineSourceCount++;
         const material = outlineMaterial(source.edgeHex);
         for (const mesh of source.meshes) {
-          takeMesh(mesh.geometry, material, mesh.matrixWorld, outlineOrder);
+          takeMesh(outlineGeometry?.get(mesh.geometry) ?? mesh.geometry, material, mesh.matrixWorld, outlineOrder);
         }
       }
       // Open chains over the ordinary outline, in one colour on every theme and emphasis: the cut there bounds no cap.
@@ -753,7 +755,12 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
           if (geometry.openChainCount > 0) {
             stats.openChainDrawCount++;
             openChainMaterial ??= createOutlineMaterial(openChainFaces, sectionCapOpenChainColor);
-            takeMesh(geometry.open, openChainMaterial, source.loops!.matrix, openChainOrder);
+            takeMesh(
+              outlineGeometry?.get(geometry.open) ?? geometry.open,
+              openChainMaterial,
+              source.loops!.matrix,
+              openChainOrder,
+            );
           }
         }
       }
@@ -770,6 +777,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
     }
     stats.meshDrawCount = meshesUsed;
     stats.polygonDrawCount = polygonsUsed;
+    outlineGeometry?.retireUnused();
     if (meshesUsed + polygonsUsed > 0) {
       const previousAutoClear = renderer.autoClear;
       renderer.autoClear = false;
@@ -799,6 +807,7 @@ export const createSectionStencilCaps = (backend: ResolvedGraphicsBackend): Sect
       fillSlots.length = 0;
       capSlots.length = 0;
       outlineMaterials.clear();
+      outlineGeometry?.dispose();
       openChainMaterial = undefined;
       stencilMaterials.clear();
       overlapCapMaterial = undefined;

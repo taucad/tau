@@ -1,22 +1,10 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`Loop`/`Break` are shader graph factories */
 import { namedUniformArray } from '#graphics/three/materials/named-uniform-array.js';
+import { triangleWorldDerivatives } from '#graphics/three/materials/triangle-derivatives.node.js';
 import { Vector2, Vector4 } from 'three';
 import type { Material, Object3D, WebGLProgramParametersWithUniforms, WebGLRenderer } from 'three';
 import type { Node } from 'three/webgpu';
-import {
-  bool,
-  Break,
-  cameraWorldMatrix,
-  dFdx,
-  dFdy,
-  float,
-  Fn,
-  If,
-  Loop,
-  positionView,
-  uniform,
-  vec4,
-} from 'three/tsl';
+import { bool, Break, cameraWorldMatrix, float, Fn, If, Loop, positionView, uniform, vec4 } from 'three/tsl';
 import { maxSectionPieces } from '#graphics/section-cuts.js';
 import type { SectionPiece } from '#graphics/section-cuts.js';
 import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
@@ -114,9 +102,10 @@ export const createSectionClipMask = (
   const secondHalfSpaces = namedUniformArray(second as Vector4[], 'tauSectionSecond');
   return Fn(() => {
     const point = cameraWorldMatrix.mul(vec4(positionView, 1)).xyz;
-    // Evaluate derivatives before divergent piece membership tests.
-    const dx = paddingPixels > 0 ? dFdx(point).toVar() : undefined;
-    const dy = paddingPixels > 0 ? dFdy(point).toVar() : undefined;
+    // Padding is used only by cap outlines, whose geometry has triangle normals.
+    const derivatives = paddingPixels > 0 ? triangleWorldDerivatives() : undefined;
+    const dx = derivatives?.dx;
+    const dy = derivatives?.dy;
     const isKept = bool(true).toVar();
     Loop(maxSectionPieces, ({ i }) => {
       If(float(i).greaterThanEqual(clip.x), () => {

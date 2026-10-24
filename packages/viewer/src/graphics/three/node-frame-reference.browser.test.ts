@@ -1,10 +1,13 @@
 import { Line2NodeMaterial } from '#graphics/three/materials/line2.material.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { Line2 } from 'three/addons/lines/webgpu/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { expect, it, vi } from 'vitest';
 import { page } from 'vitest/browser';
 import {
   RenderTarget,
+  BufferGeometry,
+  Material,
   HalfFloatType,
   UnsignedByteType,
   LinearSRGBColorSpace,
@@ -24,7 +27,8 @@ import {
   Scene,
   SRGBColorSpace,
 } from 'three';
-import { WebGLBackend, WebGPUBackend, RenderPipeline, NodeMaterial, QuadMesh } from 'three/webgpu';
+import { WebGLBackend, WebGPUBackend, WebGPURenderer, RenderPipeline, NodeMaterial, QuadMesh } from 'three/webgpu';
+import type { Node } from 'three/webgpu';
 import { pass, screenUV, vec4 } from 'three/tsl';
 import { createRenderer } from '#graphics/three/renderer.js';
 
@@ -587,6 +591,142 @@ it.each(['webgpu', 'webgl'] as const)(
       cap.dispose();
       caps.dispose();
       lineMaterial.dispose();
+      renderer.dispose();
+      canvas.remove();
+    }
+  },
+);
+
+// Original packaged Planet_Gear_7 contour: neighboring triangles produced different
+// coverage when the driver grouped their fragment quads. Keep the exact saved pose.
+it.each(['webgpu', 'webgl'] as const)(
+  'should keep cap coverage independent of triangle grouping through 5K motion on %s',
+  async (backend) => {
+    const { createSectionOutlineGeometry } = await import('#graphics/three/utils/section-outline-geometry.js');
+    const { createSectionCapOutlineNodeMaterial } =
+      await import('#graphics/three/materials/section-cap-outline.node.js');
+    const { createSectionCapOutlineFaces, writeSectionCapOutlineCamera } =
+      await import('#graphics/three/materials/section-cap-outline.material.js');
+    const { createSectionClip, createSectionClipMask } = await import('#graphics/three/materials/section-clip.js');
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    const renderer = new WebGPURenderer({
+      canvas,
+      antialias: false,
+      samples: 0,
+      reversedDepthBuffer: true,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Three's backend selector.
+      forceWebGL: backend === 'webgl',
+    });
+    await renderer.init();
+    expect(renderer.backend).toBeInstanceOf(backend === 'webgl' ? WebGLBackend : WebGPUBackend);
+    const response = await fetch(new URL('fixtures/planetary.glb', import.meta.url));
+    const gltf = await new GLTFLoader().parseAsync(await response.arrayBuffer(), '');
+    const source = gltf.scene.getObjectByName('Planet_Gear_7');
+    if (!(source instanceof Mesh) || !(source.geometry instanceof BufferGeometry)) {
+      throw new Error('Missing planetary source');
+    }
+    // Three's instanceof narrows BufferGeometry attributes to any; this GLTF has standard position attributes.
+    const pair = (source.geometry as BufferGeometry).clone();
+    const indices = pair.getIndex()!;
+    pair.setIndex([2935, 2936].flatMap((face) => [0, 1, 2].map((corner) => indices.getX(face * 3 + corner))));
+    const geometry = createSectionOutlineGeometry(pair);
+    const faces = createSectionCapOutlineFaces();
+    faces.settings.set(2, 2);
+    faces.planes[0]!.set(0, 1, 0, 10);
+    faces.planes[1]!.set(1, 0, 0, 0);
+    faces.bounds[0]!.set(0, 0, 0, -1);
+    faces.bounds[1]!.set(0, 0, 0, -1);
+    const clip = createSectionClip('webgpu');
+    clip.settings.set(2, 0);
+    clip.first[0]!.copy(faces.planes[0]!);
+    clip.second[0]!.copy(faces.planes[0]!);
+    clip.first[1]!.copy(faces.planes[1]!);
+    clip.second[1]!.copy(faces.planes[1]!);
+    const material = createSectionCapOutlineNodeMaterial(faces, 0);
+    material.depthTest = false;
+    material.maskNode = (material.maskNode as Node<'bool'>).and(createSectionClipMask(clip, 0.5));
+    const mesh: Mesh = new Mesh(geometry, [material, material]);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.fromArray([
+      1000, 0, 0, 0, 0, 0, 1000, 0, 0, -1000, 0, 0, -0.031154602766036987, 0, -5.99999912083149, 1,
+    ]);
+    const scene = new Scene();
+    scene.background = new Color(0xff_ff_ff);
+    scene.add(mesh);
+    const camera = new PerspectiveCamera(35, 5120 / 2880, 242.493942, 1454.883306);
+    camera.coordinateSystem = renderer.coordinateSystem;
+    camera.matrixAutoUpdate = false;
+    camera.matrix.fromArray([
+      -0.7071067811865475, 0.7071067811865476, 5.551115123125783e-17, 0, -0.408248290463863, -0.40824829046386313,
+      0.8164965809277259, 0, 0.5773502691896257, 0.5773502691896256, 0.5773502691896258, 0, 216.668845397234, 216.7,
+      216.7000008791685, 1,
+    ]);
+    camera.updateMatrixWorld();
+    camera.projectionMatrix.fromArray([
+      1.7840220763293073, 0, 0, 0, 0, 3.171594802363213, 0, 0, 0, 0, -1.4000265085993016, -1, 0, 0, -581.9918893896642,
+      0,
+    ]);
+    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
+    const target = new RenderTarget(5120, 2880, { depthBuffer: false, type: UnsignedByteType });
+    target.texture.colorSpace = SRGBColorSpace;
+    renderer.setPixelRatio(1);
+    renderer.setSize(5120, 2880, false);
+    renderer.setRenderTarget(target);
+    renderer.toneMapping = NoToneMapping;
+    const x = 2285,
+      y = backend === 'webgpu' ? 1250 : 1598;
+    const capture = async (split: boolean) => {
+      geometry.clearGroups();
+      geometry.addGroup(0, split ? 3 : 6, 0);
+      if (split) {
+        geometry.addGroup(3, 3, 1);
+      }
+      renderer.render(scene, camera);
+      return renderer.readRenderTargetPixelsAsync(target, x, y, 64, 32);
+    };
+    try {
+      writeSectionCapOutlineCamera(faces, camera, 2880);
+      mesh.material = material;
+      const generated = await renderer.debug.getShaderAsync(scene, camera, mesh);
+      mesh.material = [material, material];
+      // Neither line coverage nor padded clipping may read a neighboring primitive.
+      expect(JSON.stringify(generated)).not.toMatch(/\b(?:dFdx|dFdy|fwidth|dpdx|dpdy)(?:Fine|Coarse)?\s*\(/);
+      for (const phase of [0, 0.125, 0.25, 0.5, 0.75, 1, 0]) {
+        mesh.matrix.elements[12] = -0.031154602766036987 + phase * 0.03;
+        // oxlint-disable-next-line no-await-in-loop -- A/B/A must share one renderer and complete in order.
+        const grouped = await capture(false);
+        // oxlint-disable-next-line no-await-in-loop -- Change only primitive grouping after A completes.
+        const separated = await capture(true);
+        // oxlint-disable-next-line no-await-in-loop -- Reverse the intervention before advancing motion.
+        const returned = await capture(false);
+        expect([...grouped].some((value, index) => index % 4 === 0 && value < 200)).toBe(true);
+        let maximum = 0;
+        for (const [index, value] of grouped.entries()) {
+          maximum = Math.max(maximum, Math.abs(Number(value) - Number(separated[index])));
+        }
+        expect(maximum, 'Same triangles, shader and pose; grouping phase ' + phase).toBeLessThanOrEqual(3);
+        expect(returned).toEqual(grouped);
+      }
+    } finally {
+      renderer.setRenderTarget(null);
+      target.dispose();
+      geometry.dispose();
+      pair.dispose();
+      material.dispose();
+      gltf.scene.traverse((object) => {
+        if (object instanceof Mesh) {
+          if (object.geometry instanceof BufferGeometry) {
+            object.geometry.dispose();
+          }
+          const materials: unknown[] = Array.isArray(object.material) ? object.material : [object.material];
+          for (const entry of materials) {
+            if (entry instanceof Material) {
+              entry.dispose();
+            }
+          }
+        }
+      });
       renderer.dispose();
       canvas.remove();
     }

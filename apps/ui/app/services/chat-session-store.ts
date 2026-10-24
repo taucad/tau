@@ -600,6 +600,10 @@ export type ChatRevisionFacts = Readonly<{
   branch?: string;
 }>;
 
+/** A connection identity, distinct from an unknown connection or implicit browser placement. */
+const connectionPlacement = (placement: { hostId?: string } | undefined): string | undefined =>
+  placement === undefined ? undefined : placement.hostId === undefined ? 'browser' : `host:${placement.hostId}`;
+
 type ObservedChat = {
   projectId: string;
   refs: number;
@@ -2037,6 +2041,44 @@ export class ChatSessionStore {
     }
   }
 
+  /** Pin a prepared message before transmission so a lost acknowledgement cannot replay on another host. */
+  async #connectQueuedCommand(
+    session: InternalSession,
+    connector: ProjectHostConnector,
+    { queueId, signal }: { queueId: string; signal: AbortSignal },
+  ): ReturnType<ProjectHostConnector['connect']> {
+    const client = await connector.connect(session.chatId);
+    try {
+      signal.throwIfAborted();
+      const destination = connectionPlacement(client.placement);
+      await session.messageQueueStore.update((record) => {
+        const item = record.items.find((entry) => entry.id === queueId);
+        if (item?.command === undefined) {
+          throw new Error('Queued message is no longer awaiting delivery.');
+        }
+        if (item.commandPlacement !== undefined && item.commandPlacement !== destination) {
+          throw new Error(
+            'This message may already have been sent on another host. Return to its original host to confirm delivery.',
+          );
+        }
+        if (destination === undefined || item.commandPlacement === destination) {
+          return record;
+        }
+        return {
+          ...record,
+          items: record.items.map((entry) =>
+            entry.id === queueId ? { ...entry, commandPlacement: destination } : entry,
+          ),
+        };
+      });
+      signal.throwIfAborted();
+      return client;
+    } catch (error) {
+      await client.close();
+      throw error;
+    }
+  }
+
   /** One serial outbox advancement; the session machine still owns turn admission. */
   async #advanceMessageQueue(
     session: InternalSession,
@@ -2052,10 +2094,13 @@ export class ChatSessionStore {
       if (projection === undefined || projection.fault !== undefined || !selectCaughtUp(projection)) {
         return { items: record.items, status: 'waiting' };
       }
+      const observation = this.#observed.get(session.chatId);
+      const placement = observation?.status === 'attached' ? observation.placement : undefined;
+      const observedPlacement = connectionPlacement(placement);
       for (const entry of record.items) {
         if (entry.command !== undefined && projection.ledger.applied[entry.command.commandId] !== undefined) {
           // oxlint-disable-next-line no-await-in-loop -- each acknowledgement reads the preceding durable queue state.
-          record = await session.messageQueueStore.acknowledge(entry.id, entry.command.commandId);
+          record = await session.messageQueueStore.acknowledge(entry.id, entry.command.commandId, observedPlacement);
         }
       }
       if (!canDeliver) {
@@ -2080,18 +2125,38 @@ export class ChatSessionStore {
           return { items: record.items, status: 'waiting' };
         }
         session.messageQueueRef.send({ type: 'loaded', items: record.items, sendingId: item.id });
-        const answer = await sendHostCommand(async () => connector.connect(session.chatId), item.command, { signal });
+        let acceptingPlacement: string | undefined;
+        const answer = await sendHostCommand(
+          async () => {
+            const client = await this.#connectQueuedCommand(session, connector, { queueId: item.id, signal });
+            acceptingPlacement = connectionPlacement(client.placement);
+            return client;
+          },
+          item.command,
+          { signal },
+        );
         if (answer.status === 'refused') {
           throw new Error(`Delivery could not be confirmed: ${answer.message}`);
         }
         if (answer.effect !== 'durable') {
           throw new Error('Message saved. The host has not confirmed durable acceptance.');
         }
-        const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId);
+        const after = await session.messageQueueStore.acknowledge(item.id, item.command.commandId, acceptingPlacement);
         return { items: after.items, status: 'changed' };
       }
       {
-        if (record.afterRunId !== undefined && projection.ledger.runs[record.afterRunId] === undefined) {
+        if (
+          record.afterRunId !== undefined &&
+          projection.ledger.runs[record.afterRunId] === undefined &&
+          (record.afterPlacement === undefined ||
+            observedPlacement === undefined ||
+            record.afterPlacement === observedPlacement) &&
+          !(
+            record.afterPlacement === undefined &&
+            observedPlacement !== undefined &&
+            record.rebasedPlacement === observedPlacement
+          )
+        ) {
           return { items: record.items, status: 'waiting' };
         }
         if (isLive(session.stateActorRef.getSnapshot()) && !retainsLiveRun(phase)) {
@@ -2668,9 +2733,22 @@ export class ChatSessionStore {
         });
         abort.signal.throwIfAborted();
       }
-      const answer = await sendHostCommand(async () => connector.connect(session.chatId), command, {
-        signal: abort.signal,
-      });
+      let acceptingPlacement: string | undefined;
+      const answer = await sendHostCommand(
+        async () => {
+          const client =
+            request.queueId === undefined
+              ? await connector.connect(session.chatId)
+              : await this.#connectQueuedCommand(session, connector, {
+                  queueId: request.queueId,
+                  signal: abort.signal,
+                });
+          acceptingPlacement = connectionPlacement(client.placement);
+          return client;
+        },
+        command,
+        { signal: abort.signal },
+      );
       if (session.commandAbort !== abort || abort.signal.aborted) {
         return;
       }
@@ -2682,7 +2760,7 @@ export class ChatSessionStore {
         return;
       }
       if (request.queueId !== undefined) {
-        await session.messageQueueStore.acknowledge(request.queueId, command.commandId);
+        await session.messageQueueStore.acknowledge(request.queueId, command.commandId, acceptingPlacement);
         if (session.commandAbort !== abort) {
           return;
         }
@@ -3676,6 +3754,30 @@ export class ChatSessionStore {
               ) {
                 return;
               }
+              // A destination-specific grant keeps a cancelled switch from
+              // releasing the old host's fence. Unknown prepared commands remain
+              // blocked even if the initial attachment has not connected yet.
+              const destination =
+                observed?.placement === undefined || input.activeExecution === undefined
+                  ? undefined
+                  : connectionPlacement({ hostId: daemonPlacementOf(input.activeExecution) });
+              await session.messageQueueStore.update((record) => {
+                const items = record.items.map((item) =>
+                  item.command !== undefined && item.commandPlacement === undefined
+                    ? { ...item, commandPlacement: 'unconfirmed' }
+                    : item,
+                );
+                if (
+                  destination === undefined ||
+                  record.afterRunId === undefined ||
+                  record.afterPlacement !== undefined ||
+                  items.some((item) => item.command !== undefined || item.steer !== undefined)
+                ) {
+                  return items.every((item, index) => item === record.items[index]) ? record : { ...record, items };
+                }
+                return { ...record, rebasedPlacement: destination };
+              });
+              signal.throwIfAborted();
               if (observed !== undefined) {
                 this.#stopObservedAttachment(input.chatId, observed);
                 this.#projectionTopics.get(input.chatId)?.emit();

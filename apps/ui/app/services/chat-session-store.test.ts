@@ -389,122 +389,191 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
       lifecycleRow(1, 'running', runId),
     ];
   };
-  it.each(['changed host', 'same host', 'failed save', 'released save', 'superseded save'] as const)(
-    'hands the chat observation over only after a current placement save: %s',
-    async (scenario) => {
-      const store = createStore();
-      const chatId = 'chat_placement';
-      const projectId = 'project_placement';
-      const deps = createStubDeps();
-      let row = chatRow(chatId, projectId, {
-        activeExecution: { kind: 'tau', model: 'model-a', hostId: 'host-a' },
-      });
-      deps.getChat.mockImplementation(async (id) => ({ ...row, id }));
-      const pending = Promise.withResolvers<void>();
-      deps.patchChat.mockImplementation(async (_id, key, value) => {
-        if (key !== 'activeExecution') {
-          return;
-        }
-        if (scenario === 'failed save') {
-          throw new Error('Placement save failed');
-        }
-        row = { ...row, activeExecution: value as ChatEntity['activeExecution'] };
+  it.each([
+    'changed host',
+    'same host',
+    'failed save',
+    'released save',
+    'superseded save',
+    'prepared save',
+    'unconnected prepared save',
+    'cancelled rebase',
+  ] as const)('hands the chat observation over only after a current placement save: %s', async (scenario) => {
+    const store = createStore();
+    const chatId = 'chat_placement';
+    const projectId = 'project_placement';
+    const deps = createStubDeps();
+    let row = chatRow(chatId, projectId, {
+      activeExecution: { kind: 'tau', model: 'model-a', hostId: 'host-a' },
+    });
+    deps.getChat.mockImplementation(async (id) => ({ ...row, id }));
+    const pending = Promise.withResolvers<void>();
+    deps.patchChat.mockImplementation(async (_id, key, value) => {
+      if (key !== 'activeExecution') {
+        return;
+      }
+      if (scenario === 'failed save') {
+        throw new Error('Placement save failed');
+      }
+      row = { ...row, activeExecution: value as ChatEntity['activeExecution'] };
+      if (scenario === 'released save' || (scenario === 'superseded save' && deps.patchChat.mock.calls.length === 1)) {
+        await pending.promise;
+      }
+    });
+    store.setDependencies(deps);
+    const prepared = {
+      id: 'saved_message',
+      requestId: 'saved_request',
+      message: { id: 'saved_message', role: 'user', parts: [{ type: 'text', text: 'saved' }] },
+      command: {
+        type: 'start',
+        commandId: 'saved_request',
+        payload: {
+          chatId,
+          runId: 'saved_request',
+          trigger: 'submit',
+          message: { id: 'saved_message', role: 'user', content: 'saved' },
+        },
+      },
+    };
+    await deps.client.writeFile(
+      chatMessageQueuePath(projectId, chatId),
+      new TextEncoder().encode(
+        JSON.stringify({
+          version: 1,
+          afterRunId: 'legacy_run',
+          items: scenario.endsWith('prepared save') ? [prepared] : [],
+        }),
+      ),
+    );
+    const rebaseStarted = Promise.withResolvers<void>();
+    const write = deps.client.writeFile.bind(deps.client);
+    if (scenario === 'cancelled rebase') {
+      vi.spyOn(deps.client, 'writeFile').mockImplementation(async (path, bytes) => {
         if (
-          scenario === 'released save' ||
-          (scenario === 'superseded save' && deps.patchChat.mock.calls.length === 1)
+          path === chatMessageQueuePath(projectId, chatId) &&
+          new TextDecoder().decode(bytes).includes('rebasedPlacement')
         ) {
+          rebaseStarted.resolve();
           await pending.promise;
         }
+        await write(path, bytes);
       });
-      store.setDependencies(deps);
-      const unsubscribeA = vi.fn();
-      const closeA = vi.fn(async () => undefined);
-      const subscribeA = vi.fn((..._args: Parameters<AgentHostClient['subscribe']>) => unsubscribeA);
-      const subscribeB = vi.fn((...args: Parameters<AgentHostClient['subscribe']>) => {
-        queueMicrotask(() =>
-          args[3]?.({
-            status: 'batch',
-            chatId: args[0].chatId,
-            sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
-            cursor: 0,
-            nextCursor: 3,
-            endCursor: 3,
-            events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running'), lifecycleRow(2, 'completed')],
-          }),
-        );
-        return vi.fn();
+    }
+    const unsubscribeA = vi.fn();
+    const closeA = vi.fn(async () => undefined);
+    const subscribeA = vi.fn((..._args: Parameters<AgentHostClient['subscribe']>) => unsubscribeA);
+    const subscribeB = vi.fn((...args: Parameters<AgentHostClient['subscribe']>) => {
+      queueMicrotask(() =>
+        args[3]?.({
+          status: 'batch',
+          chatId: args[0].chatId,
+          sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+          cursor: 0,
+          nextCursor: 3,
+          endCursor: 3,
+          events: [lifecycleRow(0, 'admitted'), lifecycleRow(1, 'running'), lifecycleRow(2, 'completed')],
+        }),
+      );
+      return vi.fn();
+    });
+    const connect = vi.fn(async (id: string) => ({
+      placement:
+        scenario === 'unconnected prepared save' && row.activeExecution?.hostId === 'host-a'
+          ? undefined
+          : { hostId: id === chatId ? row.activeExecution?.hostId : 'host-a' },
+      catchUp: writerOwnedCatchUp,
+      read: vi.fn<AgentHostClient['read']>(),
+      subscribe: id === chatId && row.activeExecution?.hostId === 'host-b' ? subscribeB : subscribeA,
+      hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
+      close: closeA,
+    }));
+    const unpublish = store.publishProjectHostConnector(projectId, connect);
+    const unobserve = store.observe(chatId, projectId);
+    const unobserveOther = store.observe('chat_other', projectId);
+    const session = store.acquire(chatId, projectId);
+    try {
+      await vi.waitFor(() => {
+        expect(subscribeA).toHaveBeenCalledTimes(2);
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
       });
-      const connect = vi.fn(async (id: string) => ({
-        placement: { hostId: id === chatId ? row.activeExecution?.hostId : 'host-a' },
-        catchUp: writerOwnedCatchUp,
-        read: vi.fn<AgentHostClient['read']>(),
-        subscribe: id === chatId && row.activeExecution?.hostId === 'host-b' ? subscribeB : subscribeA,
-        hostCommand: vi.fn<AgentHostClient['hostCommand']>(),
-        close: closeA,
-      }));
-      const unpublish = store.publishProjectHostConnector(projectId, connect);
-      const unobserve = store.observe(chatId, projectId);
-      const unobserveOther = store.observe('chat_other', projectId);
-      const session = store.acquire(chatId, projectId);
-      try {
-        await vi.waitFor(() => {
-          expect(subscribeA).toHaveBeenCalledTimes(2);
-          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
-        });
+      session.persistenceActorRef.send({
+        type: 'setActiveExecution',
+        execution: { kind: 'tau', model: 'model-b', hostId: scenario === 'same host' ? 'host-a' : 'host-b' },
+      });
+      await vi.waitFor(() => {
+        expect(deps.patchChat).toHaveBeenCalled();
+      });
+      if (scenario === 'cancelled rebase') {
+        await rebaseStarted.promise;
         session.persistenceActorRef.send({
           type: 'setActiveExecution',
-          execution: { kind: 'tau', model: 'model-b', hostId: scenario === 'same host' ? 'host-a' : 'host-b' },
+          execution: { kind: 'tau', model: 'model-c', hostId: 'host-a' },
         });
         await vi.waitFor(() => {
-          expect(deps.patchChat).toHaveBeenCalled();
+          expect(deps.patchChat).toHaveBeenCalledTimes(2);
         });
-        if (scenario === 'released save') {
-          // Disposing the session cancels its persistence effect; a late write
-          // must not replace the observation belonging to a future session.
-          store.release(chatId);
-          pending.resolve();
-        } else if (scenario === 'superseded save') {
-          // B is durable before the first save resolves. A second B choice
-          // cancels that effect while the actual subscription still belongs to A.
-          session.persistenceActorRef.send({
-            type: 'setActiveExecution',
-            execution: { kind: 'tau', model: 'model-c', hostId: 'host-b' },
-          });
-          await vi.waitFor(() => {
-            expect(deps.patchChat).toHaveBeenCalledTimes(2);
-          });
-          pending.resolve();
-        }
-        await vi.waitFor(() => {
-          expect(
-            session.persistenceActorRef.getSnapshot().matches({ activeExecutionPersistence: 'idle' }) ||
-              scenario === 'released save',
-          ).toBe(true);
-        });
-        await settle();
-        if (scenario === 'changed host' || scenario === 'superseded save') {
-          await vi.waitFor(() => {
-            expect(subscribeB).toHaveBeenCalledOnce();
-          });
-          expect(unsubscribeA).toHaveBeenCalledOnce();
-          expect(closeA).toHaveBeenCalledOnce();
-          expect(store.getProjection(chatId)?.ledger.runs['run_1']?.lifecycle).toBe('completed');
-        } else {
-          expect(subscribeB).not.toHaveBeenCalled();
-          expect(unsubscribeA).not.toHaveBeenCalled();
-          expect(closeA).not.toHaveBeenCalled();
-        }
-        expect(subscribeA).toHaveBeenCalledTimes(2);
-      } finally {
-        unpublish();
-        unobserve();
-        unobserveOther();
-        if (scenario !== 'released save') {
-          store.release(chatId);
-        }
+        pending.resolve();
       }
-    },
-  );
+      if (scenario === 'released save') {
+        // Disposing the session cancels its persistence effect; a late write
+        // must not replace the observation belonging to a future session.
+        store.release(chatId);
+        pending.resolve();
+      }
+      if (scenario === 'superseded save') {
+        // B is durable before the first save resolves. A second B choice
+        // cancels that effect while the actual subscription still belongs to A.
+        session.persistenceActorRef.send({
+          type: 'setActiveExecution',
+          execution: { kind: 'tau', model: 'model-c', hostId: 'host-b' },
+        });
+        await vi.waitFor(() => {
+          expect(deps.patchChat).toHaveBeenCalledTimes(2);
+        });
+        pending.resolve();
+      }
+      await vi.waitFor(() => {
+        expect(
+          session.persistenceActorRef.getSnapshot().matches({ activeExecutionPersistence: 'idle' }) ||
+            scenario === 'released save',
+        ).toBe(true);
+      });
+      await settle();
+      if (scenario === 'changed host' || scenario === 'superseded save' || scenario.endsWith('prepared save')) {
+        await vi.waitFor(() => {
+          expect(subscribeB).toHaveBeenCalledOnce();
+        });
+        expect(unsubscribeA).toHaveBeenCalledOnce();
+        expect(closeA).toHaveBeenCalledOnce();
+        expect(store.getProjection(chatId)?.ledger.runs['run_1']?.lifecycle).toBe('completed');
+      } else {
+        expect(subscribeB).not.toHaveBeenCalled();
+        expect(unsubscribeA).not.toHaveBeenCalled();
+        expect(closeA).not.toHaveBeenCalled();
+      }
+      expect(subscribeA).toHaveBeenCalledTimes(2);
+      const saved = deps.client.json(chatMessageQueuePath(projectId, chatId));
+      if (scenario === 'changed host' || scenario === 'superseded save') {
+        expect(saved).toHaveProperty('rebasedPlacement', 'host:host-b');
+      }
+      expect(saved).toHaveProperty('afterRunId', 'legacy_run');
+      if (scenario === 'cancelled rebase') {
+        expect(saved).toHaveProperty('rebasedPlacement', 'host:host-b');
+        expect(row.activeExecution?.hostId).toBe('host-a');
+      }
+      if (scenario.endsWith('prepared save')) {
+        expect(saved).toHaveProperty('items', [{ ...prepared, commandPlacement: 'unconfirmed' }]);
+      }
+    } finally {
+      unpublish();
+      unobserve();
+      unobserveOther();
+      if (scenario !== 'released save') {
+        store.release(chatId);
+      }
+    }
+  });
 
   it('should reopen the transcript watch when an external approval resumes the same attempt', async () => {
     const store = createStore();
@@ -4524,6 +4593,117 @@ describe('ChatSessionStore', () => {
       requestId: `req_${id}`,
       message: { id, role: 'user', parts: [{ type: 'text', text: id }] },
     });
+
+    it.each([
+      { previous: 'host:host-a', current: 'host-a', sends: false },
+      { previous: 'host:host-a', current: 'host-b', sends: true },
+      { previous: 'browser', current: 'host-b', sends: true },
+      { previous: 'host:host-a', current: undefined, sends: true },
+      { previous: undefined, current: 'host-b', sends: false },
+      { previous: undefined, current: 'host-b', rebase: 'host:host-b', sends: true },
+      { previous: undefined, current: 'host-a', rebase: 'host:host-b', sends: false },
+      { previous: 'host:host-a', current: 'host-b', preparedOn: 'host:host-a', sends: false },
+      { previous: 'host:host-a', current: 'host-a', preparedOn: 'host:host-a', sends: true },
+    ])(
+      'scopes a missing acknowledged run to its accepting host: $previous → $current',
+      async ({ previous, current, sends, rebase, preparedOn }) => {
+        const chatId = 'chat_queue_host';
+        const projectId = 'queue_host_project';
+        const { store, session, deps, hostCommand, unpublish } = await open(chatId, projectId);
+        unpublish();
+        await deps.client.writeFile(
+          chatMessageQueuePath(projectId, chatId),
+          new TextEncoder().encode(
+            JSON.stringify({
+              version: 1,
+              items:
+                preparedOn === undefined
+                  ? []
+                  : [
+                      {
+                        id: 'new_host_message',
+                        requestId: 'req_new_host_message',
+                        commandPlacement: preparedOn,
+                        message: { id: 'new_host_message', role: 'user', parts: [{ type: 'text', text: 'saved' }] },
+                        command: {
+                          type: 'start',
+                          commandId: 'req_new_host_message',
+                          payload: {
+                            chatId,
+                            runId: 'req_new_host_message',
+                            trigger: 'submit',
+                            message: { id: 'new_host_message', role: 'user', content: 'saved' },
+                          },
+                        },
+                      },
+                    ],
+              afterRunId: 'old_host_run',
+              afterPlacement: previous,
+              rebasedPlacement: rebase,
+            }),
+          ),
+        );
+        const unadmit = queueAdmission(chatId);
+        const stopConnector = store.publishProjectHostConnector(projectId, async () => ({
+          hostCommand,
+          placement: { hostId: current },
+          catchUp: writerOwnedCatchUp,
+          read: vi.fn<AgentHostClient['read']>(),
+          subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
+            queueMicrotask(() =>
+              args[3]?.({
+                status: 'batch',
+                chatId,
+                cursor: 0,
+                nextCursor: 0,
+                endCursor: 0,
+                events: [],
+                sourceHealth: { historyIntact: true, newerHistory: false, quarantined: false },
+              }),
+            );
+            return vi.fn();
+          },
+          close: async () => undefined,
+        }));
+        const unobserve = store.observe(chatId, projectId);
+        try {
+          await vi.waitFor(() => {
+            expect(store.getAttachmentStatus(chatId)).toBe('attached');
+          });
+          if (preparedOn === undefined) {
+            await store.requestTurn(chatId, queuedGesture('new_host_message'));
+          }
+          await vi.waitFor(() => {
+            if (sends) {
+              expect(hostCommand).toHaveBeenCalledOnce();
+              expect(session.messageQueueRef.getSnapshot().context.items).toEqual([]);
+            } else {
+              expect(
+                session.messageQueueRef.getSnapshot().matches(preparedOn === undefined ? 'waiting' : 'failed'),
+              ).toBe(true);
+            }
+          });
+          if (sends) {
+            expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+              afterPlacement: current === undefined ? 'browser' : `host:${current}`,
+            });
+          } else {
+            expect(hostCommand).not.toHaveBeenCalled();
+            if (preparedOn !== undefined) {
+              expect(session.messageQueueRef.getSnapshot().context.error).toContain('original host');
+              expect(deps.client.json(chatMessageQueuePath(projectId, chatId))).toMatchObject({
+                items: [{ commandPlacement: preparedOn, command: { commandId: 'req_new_host_message' } }],
+              });
+            }
+          }
+        } finally {
+          unadmit();
+          stopConnector();
+          unobserve();
+          store.release(chatId);
+        }
+      },
+    );
 
     it('should wake a persisted queue once when draft attachment cleanup fails', async () => {
       const chatId = 'queue_cleanup_failure';

@@ -109,6 +109,9 @@ export class S3RepositoryStore implements RepositoryStore {
       key: manifestKey(locator),
       body: next,
       contentType: manifestContentType,
+      // One request per call: the committer's own loop owns the backoff, and
+      // its `reconcile` owns "did a write that threw actually land" (FR21).
+      singleAttempt: true,
       ...(signal === undefined ? {} : { signal }),
       tier: 'private',
       ...(expected === 'absent' ? { ifNoneMatch: '*' } : { ifMatch: expected.token }),

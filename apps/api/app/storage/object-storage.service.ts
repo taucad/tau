@@ -23,6 +23,7 @@ import type { Environment } from '#config/environment.config.js';
 import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage/storage.constants.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { instrumentStorageClient } from '#storage/storage-metrics.js';
+import type { StorageMetricTier } from '#storage/storage-metrics.js';
 import { MetricsService } from '#telemetry/metrics.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
@@ -67,6 +68,13 @@ export type PutBlobArgs = {
   ifMatch?: string;
   /** Base64 SHA-256 the backend verifies against the received bytes. */
   checksumSha256?: string;
+  /**
+   * Send exactly one request: no AWS SDK retry. For a caller whose own loop
+   * owns the backoff, such as the manifest write's three attempts, where the
+   * SDK's default three attempts inside each would put up to nine requests on
+   * one contended key (review FR21).
+   */
+  singleAttempt?: boolean;
   tier?: StorageTier;
   signal?: AbortSignal;
 };
@@ -260,6 +268,16 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
   private readonly client: S3Client;
 
+  /**
+   * The same endpoint and credentials with `maxAttempts: 1`, built on first
+   * use, for {@link PutBlobArgs.singleAttempt}.
+   */
+  private singleAttemptClient: S3Client | undefined;
+
+  private readonly clientConfig: S3ClientConfig;
+
+  private readonly tierOfBucket: (bucket: string | undefined) => StorageMetricTier;
+
   private readonly bucket: string;
 
   private readonly privateBucket: string;
@@ -333,12 +351,10 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
       clientConfig.responseChecksumValidation = 'WHEN_REQUIRED';
     }
 
-    this.client = new S3Client(clientConfig);
-    if (this.metrics !== undefined) {
-      instrumentStorageClient(this.client, this.metrics, (bucket) =>
-        scopedAccount === undefined ? (bucket === this.privateBucket ? 'private' : 'public') : 'account',
-      );
-    }
+    this.clientConfig = clientConfig;
+    this.tierOfBucket = (bucket) =>
+      scopedAccount === undefined ? (bucket === this.privateBucket ? 'private' : 'public') : 'account';
+    this.client = this.newClient(clientConfig);
     this.signingClient = this.client as unknown as Parameters<typeof getSignedUrl>[0];
   }
 
@@ -362,7 +378,8 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     const { resolvedKey } = this.resolveKey(args.namespace, args.key);
 
     try {
-      const response = await this.client.send(
+      const client = args.singleAttempt === true ? this.singleAttempt() : this.client;
+      const response = await client.send(
         new PutObjectCommand({
           Bucket: this.resolveBucket(args.tier),
           Key: resolvedKey,
@@ -862,6 +879,19 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
       throw error;
     }
+  }
+
+  private newClient(config: S3ClientConfig): S3Client {
+    const client = new S3Client(config);
+    if (this.metrics !== undefined) {
+      instrumentStorageClient(client, this.metrics, this.tierOfBucket);
+    }
+    return client;
+  }
+
+  private singleAttempt(): S3Client {
+    this.singleAttemptClient ??= this.newClient({ ...this.clientConfig, maxAttempts: 1 });
+    return this.singleAttemptClient;
   }
 
   private async presign(command: unknown, expiresIn: number): Promise<string> {

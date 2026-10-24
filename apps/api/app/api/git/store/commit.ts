@@ -110,7 +110,12 @@ const resolveBounds = (
   deadlineAt: args.deadlineAt ?? Date.now() + commitDeadlineMilliseconds,
 });
 
-/** Attempts at a rate-limited manifest write: the first, then two retries at 200 ms and 600 ms. */
+/**
+ * Attempts at a rate-limited manifest write: the first, then two retries at
+ * 200 ms and 600 ms. These are the only attempts: the adapter sends each one
+ * as a single request with the AWS SDK's own retries off, so a contended key
+ * sees three requests per push rather than up to nine (review FR21).
+ */
 const manifestWriteAttempts = 3;
 
 /**
@@ -475,9 +480,11 @@ const leasePackFile = (key: string): string => path.posix.basename(key);
  * The conditional write, plus the two things the W1 hand-off says a caller
  * must do about `lost`.
  *
- * `lost` means "did not certainly win", not "certainly did not write": the AWS
- * SDK retries a PUT on a transport error, so a first attempt that landed and a
- * retry that then fails its own precondition both report `lost`. Before
+ * `lost` means "did not certainly win", not "certainly did not write": a
+ * first attempt that landed while its response was lost, and the retry of it
+ * that then fails its own precondition, both report `lost`. The adapter no
+ * longer lets the AWS SDK make such retries (FR21), but this loop still does,
+ * and a throw can still be a write that reached the backend. Before
  * answering 503 the committer re-reads and compares bytes; if the store holds
  * what it sent, it won. If the store holds a *different* incarnation, the
  * repository was purged and re-registered under the lease, which is not a

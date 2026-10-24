@@ -56,7 +56,7 @@ The kernels' libraries come with the server: do not install them or add a `packa
 4. `test_model` runs the project's GeoSpec suite, or one file or test by name. Fix the model, not the test, unless the requirement changed.
 5. `screenshot` the views that show the change, and look at the images before you describe the result.
 6. `export_model` only when the user asks for a file. `evaluate_model` lists the export IDs a file offers; pass one, or an extension such as `step`, `stl` or `3mf`.
-7. `arrange_workbench` is optional: it opens views and panes for a person who has the project open in the Tau app (skill `workbench`).
+7. `arrange_workbench` is optional: it opens views and panes for a person who has the project open in the Tau app (skill `workbench`). `screenshot { workbenchView: '<id>' }` then captures a saved view as that person sees it: its file, camera, field of view, section cuts and display. Section offsets are metres in both tools.
 
 These are the Tau server's tools; your host may show them with a server prefix. Repeat steps 2–5 until the model evaluates cleanly and the tests pass.
 
@@ -84,13 +84,13 @@ For a worked GeoSpec suite, read the planetary example at the tag of the release
 
 ## Mechanisms
 
-A moving assembly exports a `mechanism` beside its geometry. After `evaluate_model`, read `mechanism`: `declared` says the source exports one, and `admitted` says the default view carries it. When it is declared but not admitted, fix the path its `issues` name rather than the geometry. Show the source, not an export: `show_model { targetFile: 'main.ts' }` shows the parameters and mechanism, and its `mechanism.preserved` says whether the page received them. The viewer then follows the source: each edit to the file or its parameters redraws every open page, so call `show_model` again only to show another file. A file under `.tau/artifacts` is an export, drawn as exported: `show_model` on it answers a `hint` naming its source. Never deliver a moving assembly as a `.glb` from `.tau/artifacts`.
+A moving assembly exports a `mechanism` beside its geometry. After `evaluate_model`, read `mechanism`: `declared` says the source exports one, and `admitted` says the default view carries it. When it is declared but not admitted, fix the path its `issues` name rather than the geometry. Show the source, not an export: `show_model { targetFile: 'main.ts' }` shows the parameters and mechanism, and its `mechanism.preserved` says whether the page received them. The viewer then follows the source: each edit to the file or its parameters redraws every open page, so call `show_model` again only to show another file. A file under `.tau/artifacts` is an export, drawn as exported: `show_model` on it answers a `hint` naming its source. Never deliver a moving assembly as a `.glb` from `.tau/artifacts`. Prove the motion before you say it works: `pose_model { animation: { id, action: 'seek', time } }` answers every coordinate at that time, and `view_state` reports what the page plays; `screenshot { pose }` captures a pose without a page.
 
 ## Files Tau writes
 
 - Exports go under `.tau/artifacts/` in the project; the result lists each file's project-relative path.
 - Screenshots come back in the tool result; their image files stay in a temporary folder outside the project.
-- `arrange_workbench` writes the view and pane records under `.tau/workbench/`.
+- `arrange_workbench` writes the view and pane records under `.tau/workbench/`. The viewer page opens a model from those records too, so an arranged view stays after the person reloads the page.
 
 Leave `.tau/artifacts/` out of commits unless the user wants exports versioned.
 

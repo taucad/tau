@@ -2,7 +2,9 @@ import { act, renderHook } from '@testing-library/react';
 import { renderToString } from 'react-dom/server';
 import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useIsMobile } from '#hooks/use-mobile.js';
+import { ResponsiveSurfaceProvider, useIsMobile } from '#hooks/use-mobile.js';
+
+import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 
 type MediaListener = (event: MediaQueryListEvent) => void;
 
@@ -67,4 +69,16 @@ describe('useIsMobile', () => {
 
     expect(renderToString(createElement(probe))).toBe('<span>false</span>');
   });
+});
+
+it('scopes an embedded mobile surface without changing the document viewport', () => {
+  stubViewport(false);
+  const container = document.createElement('div');
+  const { result } = renderHook(() => ({ mobile: useIsMobile(), container: useResponsiveSurfaceContainer() }), {
+    wrapper: ({ children }) => createElement(ResponsiveSurfaceProvider, { isMobile: true, container }, children),
+  });
+  expect(result.current).toEqual({ mobile: true, container });
+  const outside = renderHook(() => useIsMobile());
+  expect(outside.result.current).toBe(false);
+  vi.unstubAllGlobals();
 });

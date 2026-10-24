@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import type { BrowserWindow, DownloadItem, Event } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 import {
   desktopE2EApiUrl,
@@ -926,18 +926,17 @@ export const authenticatePackagedDesktop = async (session: DesktopSession, beare
     }
   })();
   let externalUrl = '';
-  await expect
-    .poll(
-      async () => {
-        externalUrl = await session.application.evaluate(() => {
-          const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
-          return testState.__TAU_E2E_EXTERNAL_URL__ ?? '';
-        });
-        return externalUrl;
-      },
-      { timeout: 30_000 },
-    )
-    .not.toBe('');
+  // Authentication also runs in beforeAll; expect.poll requires an active test body.
+  await vi.waitFor(
+    async () => {
+      externalUrl = await session.application.evaluate(() => {
+        const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
+        return testState.__TAU_E2E_EXTERNAL_URL__ ?? '';
+      });
+      expect(externalUrl, 'Packaged sign-in must open its browser handoff').not.toBe('');
+    },
+    { timeout: 30_000 },
+  );
   const redirect = new URL(externalUrl).searchParams.get('redirectTo');
   if (!redirect) {
     throw new Error(`Packaged desktop sign-in emitted no redirect target: ${externalUrl}`);

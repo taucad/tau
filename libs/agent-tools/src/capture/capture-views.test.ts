@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { screenshotSectionSchema } from '@taucad/chat/schemas/tools/screenshot';
-
 import {
   buildCaptureExportOptions,
   canonicalCaptureViews,
@@ -132,30 +130,5 @@ describe('capture sections', () => {
 
   it('adds no section to an uncut capture', () => {
     expect(buildCaptureExportOptions({ mode: 'single', size: 1600 })).not.toHaveProperty('sections');
-  });
-
-  it.each([
-    [
-      { plane: 'xy', offset: 0.006 },
-      { plane: 'xy', offsetMm: 6 },
-    ],
-    [
-      { plane: 'xz', offset: -0.0125, keep: 'negative' },
-      { plane: 'xz', offsetMm: -12.5, keep: 'negative' },
-    ],
-    [
-      { plane: 'yz', offset: 0.0333 },
-      { plane: 'yz', offsetMm: 33.3 },
-    ],
-  ] as const)('should capture %o exactly as its deprecated millimetre spelling %o', (metres, millimetres) => {
-    const fromMetres = screenshotSectionSchema.parse(metres);
-    const fromMillimetres = screenshotSectionSchema.parse(millimetres);
-    expect(fromMillimetres).toStrictEqual(fromMetres);
-    expect(describeCaptureSection(fromMillimetres)).toBe(describeCaptureSection(fromMetres));
-    for (const mode of ['single', 'multi_angle'] as const) {
-      expect(buildCaptureExportOptions({ mode, size: 1600, section: fromMillimetres })).toStrictEqual(
-        buildCaptureExportOptions({ mode, size: 1600, section: fromMetres }),
-      );
-    }
   });
 });

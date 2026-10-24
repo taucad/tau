@@ -15,8 +15,9 @@ export type ScriptedRender = Readonly<{ bytes: Uint8Array<ArrayBuffer> } | { iss
 /** One opened document, as the fixture recorded it. */
 export type ScriptedDocument = Readonly<{
   entryPath: string;
-  parameters: Readonly<Record<string, unknown>> | undefined;
   watch: boolean;
+  /** The updates asked of it, in order: a drag's transient values, or `{}` to restore the committed ones. */
+  updates: ReadonlyArray<Readonly<Record<string, unknown>>>;
   /** The view requests made of it, in order. */
   viewRequests: ReadonlyArray<Readonly<{ id: string; request: unknown }>>;
   isClosed(): boolean;
@@ -95,13 +96,16 @@ export const scriptedRuntime = (
     let view: EntryView | undefined;
     let evaluations = 0;
 
+    const updates: Array<Readonly<Record<string, unknown>>> = [];
+    let isTransient = false;
+
     const renderNow = (): void => {
       renders += 1;
       const outcome = renderOf(input.source.path, renders);
       const base = {
         requestId: `render-${String(renders)}`,
         evaluationId: evaluation?.id ?? '',
-        transient: false,
+        transient: isTransient,
         sourceRevision: {
           entry: input.source.path,
           files: { [input.source.path]: `sha256:${String(renders)}` as SourceRevision['files'][string] },
@@ -124,7 +128,8 @@ export const scriptedRuntime = (
       rendered.resolve();
     };
 
-    const run = async (): Promise<void> => {
+    const run = async (transient = false): Promise<void> => {
+      isTransient = transient;
       evaluated = Promise.withResolvers<void>();
       rendered = Promise.withResolvers<void>();
       await Promise.resolve();
@@ -139,7 +144,7 @@ export const scriptedRuntime = (
         success: true,
         views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
         exports: [],
-        transient: false,
+        transient,
         issues: [],
       };
       emit(handlers, 'evaluated', evaluation);
@@ -155,6 +160,11 @@ export const scriptedRuntime = (
       on: on(handlers) as EntryDocument['on'],
       evaluation: async () => {
         await evaluated.promise;
+        return { superseded: false, evaluation: evaluation! };
+      },
+      update: async (request) => {
+        updates.push(request);
+        await run(request.transient === true);
         return { superseded: false, evaluation: evaluation! };
       },
       view(id, request) {
@@ -182,8 +192,8 @@ export const scriptedRuntime = (
     };
     documents.push({
       entryPath: input.source.path,
-      parameters: input.parameters,
       watch: input.watch,
+      updates,
       viewRequests,
       isClosed: () => closed,
       run,

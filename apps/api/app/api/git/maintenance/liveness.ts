@@ -14,7 +14,13 @@ import type { ObjectStorageService } from '#storage/object-storage.service.js';
  */
 
 /** The subcommands the nightly loop runs, in order. */
-export const scheduledMaintenanceCommands = ['purge', 'retire-lfs', 'collect-blobs'] as const;
+export const scheduledMaintenanceCommands = [
+  'purge',
+  'retire-lfs',
+  'collect-blobs',
+  'recover-projects',
+  'purge-projects',
+] as const;
 
 /** One of {@link scheduledMaintenanceCommands}. */
 export type ScheduledMaintenanceCommand = (typeof scheduledMaintenanceCommands)[number];
@@ -35,6 +41,8 @@ const runRecordSchema = z.object({
   startedAt: z.iso.datetime().optional(),
   completedAt: z.iso.datetime().optional(),
   failedAt: z.iso.datetime().optional(),
+  pending: z.number().optional(),
+  oldestPendingAge: z.number().optional(),
 });
 
 /** What one subcommand last did, as ISO timestamps. */
@@ -69,7 +77,7 @@ const readRecord = async (
   command: ScheduledMaintenanceCommand,
 ): Promise<MaintenanceRunRecord | undefined> => {
   try {
-    const { body } = await store.getBlob(recordLocation(command));
+    const { body } = await store.getBlob({ ...recordLocation(command), signal: AbortSignal.timeout(5000) });
     return runRecordSchema.parse(await json(body));
   } catch (error) {
     if (isS3ObjectMissing(error)) {
@@ -88,19 +96,26 @@ const writeRecord = async (
     ...recordLocation(command),
     body: new TextEncoder().encode(JSON.stringify(record)),
     contentType: 'application/json',
+    signal: AbortSignal.timeout(5000),
   });
 };
 
 const time = (value: string | undefined): number | undefined => (value === undefined ? undefined : Date.parse(value));
 
-const commandState = (record: MaintenanceRunRecord | undefined, now: Date): MaintenanceCommandState => {
+const commandState = (
+  record: MaintenanceRunRecord | undefined,
+  now: Date,
+  command: ScheduledMaintenanceCommand,
+): MaintenanceCommandState => {
+  const passBudget = command === 'recover-projects' ? 120_000 : maintenancePassBudgetMilliseconds;
+  const staleAfter = command === 'recover-projects' ? 120_000 : maintenanceStaleAfterMilliseconds;
   const started = time(record?.startedAt);
   const completed = time(record?.completedAt);
   const failed = time(record?.failedAt);
-  const completedInTime = completed !== undefined && now.getTime() - completed <= maintenanceStaleAfterMilliseconds;
+  const completedInTime = completed !== undefined && now.getTime() - completed <= staleAfter;
 
   if (started !== undefined && (completed === undefined || started > completed)) {
-    if ((failed !== undefined && failed >= started) || now.getTime() - started > maintenancePassBudgetMilliseconds) {
+    if ((failed !== undefined && failed >= started) || now.getTime() - started > passBudget) {
       return 'failed';
     }
     // A first pass has nothing to be stale against; a restart loop after one has.
@@ -122,6 +137,7 @@ export const recordMaintenancePass = async <T>(args: {
   run: () => Promise<T>;
   now?: () => Date;
   report?: (line: string) => void;
+  details?: () => Pick<MaintenanceRunRecord, 'pending' | 'oldestPendingAge'>;
 }): Promise<T> => {
   const now = args.now ?? (() => new Date());
   const previous = await readRecord(args.store, args.command);
@@ -145,7 +161,7 @@ export const recordMaintenancePass = async <T>(args: {
     throw error;
   }
 
-  const completed = { ...started, completedAt: now().toISOString() };
+  const completed = { ...started, ...args.details?.(), completedAt: now().toISOString() };
   await writeRecord(args.store, args.command, completed);
   args.report?.(
     JSON.stringify({ event: 'revisions_maintenance.pass', command: args.command, outcome: 'completed', ...completed }),
@@ -158,7 +174,7 @@ export const readMaintenanceLiveness = async (store: LivenessStore, now: Date): 
   const entries = await Promise.all(
     scheduledMaintenanceCommands.map(async (command) => {
       const record = await readRecord(store, command);
-      return [command, { ...record, state: commandState(record, now) }] as const;
+      return [command, { ...record, state: commandState(record, now, command) }] as const;
     }),
   );
   const commands = Object.fromEntries(entries) as MaintenanceLiveness['commands'];

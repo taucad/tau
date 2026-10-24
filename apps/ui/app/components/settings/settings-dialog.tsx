@@ -20,6 +20,7 @@ import { ComputeReuseSettings } from '#components/settings/compute-reuse-setting
 import { MachinesSettings } from '#components/settings/machines-settings.js';
 import { useKeybinding } from '@taucad/ui/components/keyboard';
 
+import { cn } from '@taucad/ui/utils/cn';
 import { Button } from '@taucad/ui/components/button';
 import { SearchInput } from '@taucad/ui/components/search-input';
 import {
@@ -32,6 +33,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from '#components/ui/sidebar.js';
+import type { SettingId } from '#components/settings/settings-registry.js';
 import { settingsSections, searchSettings } from '#components/settings/settings-registry.js';
 import { SettingsItem } from '#components/settings/settings-item.js';
 
@@ -120,7 +122,7 @@ function SettingsContent({ section }: { readonly section: SettingsSection }): Re
 
 /** URL-backed settings navigation with a searchable catalogue of individual controls. */
 export function SettingsDialog(): React.JSX.Element {
-  const { isOpen, section: activeSection, open, close } = useSettingsDialog();
+  const { isOpen, section: activeSection, target, open, close } = useSettingsDialog();
   useKeybinding({ key: ',', modKey: true }, () => {
     open();
   });
@@ -137,14 +139,30 @@ export function SettingsDialog(): React.JSX.Element {
       {isOpen ? (
         <SettingsSurface
           activeSection={settingsSections.some(({ id }) => id === activeSection) ? activeSection : 'general'}
+          openSection={open}
+          close={close}
+          linkedSetting={target}
         />
       ) : null}
     </Dialog>
   );
 }
 
-function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSection }): React.JSX.Element {
-  const { open: openSection, close, target: linkedSetting } = useSettingsDialog();
+/** Settings presentation with navigation supplied by the owning host. */
+export function SettingsSurface({
+  activeSection,
+  openSection,
+  close,
+  linkedSetting,
+  isEmbedded = false,
+}: {
+  readonly activeSection: SettingsSection;
+  readonly openSection: (section?: SettingsSection, target?: SettingId) => void;
+  readonly close: () => void;
+  readonly linkedSetting?: string;
+  readonly isEmbedded?: boolean;
+}): React.JSX.Element {
+  const Content = isEmbedded ? EmbeddedSettingsContent : DialogContent;
   const [query, setQuery] = useState('');
   const [searchDestination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -188,13 +206,13 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
     };
     // Billing and filesystem destinations may arrive after their data finishes loading.
     const observer = new MutationObserver(() => {
-      if (document.activeElement !== content) {
+      if (content.ownerDocument.activeElement !== content) {
         observer.disconnect();
         return;
       }
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        if (document.activeElement === content && reveal()) {
+        if (content.ownerDocument.activeElement === content && reveal()) {
           observer.disconnect();
         }
       });
@@ -224,7 +242,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
   };
 
   return (
-    <DialogContent
+    <Content
       className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl [&_[data-slot=input-group]]:bg-card [&_[data-slot=input]]:bg-card [&_[data-slot=select-trigger]]:bg-card [&_[data-slot=slider-input]]:bg-card [&_[data-slot=textarea]]:bg-card'
       onOpenAutoFocus={(event) => {
         // A deep link owns focus: its reveal moves it to the content, not the dialog's first button.
@@ -361,6 +379,14 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
           </div>
         </div>
       </div>
-    </DialogContent>
+    </Content>
   );
+}
+
+/** Embedded hosts already own their focus boundary. */
+function EmbeddedSettingsContent({
+  children,
+  className,
+}: React.ComponentProps<typeof DialogContent>): React.JSX.Element {
+  return <div className={cn(className, 'grid h-full w-full max-w-none sm:max-w-none')}>{children}</div>;
 }

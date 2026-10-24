@@ -26,10 +26,12 @@ import {
 } from '@nestjs/common';
 import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { storageLimitBytesByTier } from '@taucad/billing';
+import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
+import { withOwnerLock, readOwnerUsage } from '#database/owner-lock.js';
 import { DatabaseService } from '#database/database.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
-import { project, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
+import { project, projectDeletion, projectGit, projectGitLfsObject, publication } from '#database/schema.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { DurableEventsService } from '#api/durable-events/durable-events.service.js';
@@ -60,7 +62,7 @@ import type { RepositoryLease } from '#api/git/store/lease.js';
 import { leaseDiskBytesPerLease, repositoryByteCeiling } from '#api/git/store/limits.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { Manifest } from '#api/git/store/manifest.js';
-import type { RepositoryStore } from '#api/git/store/port.js';
+import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
@@ -366,6 +368,7 @@ export class GitRepositoryService {
     /** The cloud host the owner's request came through (D21), when it did. */
     viaDevice?: string | undefined;
   }): Promise<GitAccess> {
+    await assertProjectActive(this.databaseService.database, args.projectId, args.userId);
     const access = await this.projectAccess.authorize(
       args.projectId,
       args.userId,
@@ -456,12 +459,13 @@ export class GitRepositoryService {
   ): Promise<{ storageBytes: number; lfsBytes: number; retainedBytes: number }> {
     const rows = await this.databaseService.database
       .select({
-        storageBytes: sql<number>`coalesce(sum(${projectGit.storageBytes}), 0)`,
-        lfsBytes: sql<number>`coalesce(sum(${projectGit.lfsBytes}), 0)`,
-        retainedBytes: sql<number>`coalesce(sum(${projectGit.retainedBytes}), 0)`,
+        storageBytes: sql<number>`coalesce(sum(case when ${projectDeletion.deletedAt} is null then ${projectGit.storageBytes} else 0 end), 0)`,
+        lfsBytes: sql<number>`coalesce(sum(case when ${projectDeletion.deletedAt} is null then ${projectGit.lfsBytes} else 0 end), 0)`,
+        retainedBytes: sql<number>`coalesce(sum(case when ${projectDeletion.deletedAt} is null then ${projectGit.retainedBytes} else ${projectDeletion.retainedBytes} end), 0)`,
       })
       .from(project)
       .leftJoin(projectGit, eq(projectGit.projectId, project.id))
+      .leftJoin(projectDeletion, eq(projectDeletion.projectId, project.id))
       .where(eq(project.ownerId, ownerId));
     const [row] = rows;
     return {
@@ -501,6 +505,11 @@ export class GitRepositoryService {
   }): Promise<GitLfsReservation> {
     return this.databaseService.database.transaction(async (transaction) => {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
+      await assertActiveProjectLocked(
+        transaction,
+        args.access.projectId,
+        args.access.viaDevice === undefined ? args.access.callerId : args.access.ownerId,
+      );
       const requestedByOid = new Map<string, { readonly oid: string; readonly size: number }>();
       for (const object of args.objects) {
         const prior = requestedByOid.get(object.oid);
@@ -543,16 +552,8 @@ export class GitRepositoryService {
         }
       }
       const novel = requested.filter((object) => !byOid.has(object.oid));
-      const usageRows = await transaction
-        .select({
-          storageBytes: sql<number>`coalesce(sum(${projectGit.storageBytes}), 0)`,
-          lfsBytes: sql<number>`coalesce(sum(${projectGit.lfsBytes}), 0)`,
-        })
-        .from(project)
-        .leftJoin(projectGit, eq(projectGit.projectId, project.id))
-        .where(eq(project.ownerId, args.access.ownerId));
-      const usage = usageRows[0];
-      const usedBytes = Number(usage?.storageBytes ?? 0) + Number(usage?.lfsBytes ?? 0);
+      const usage = await readOwnerUsage(transaction, args.access.ownerId);
+      const usedBytes = usage.storageBytes + usage.lfsBytes;
       const remainingBytes = Math.max(0, args.access.storageLimitBytes - usedBytes);
       const incoming = novel.reduce((total, object) => total + object.size, 0);
       if (incoming > remainingBytes) {
@@ -617,6 +618,11 @@ export class GitRepositoryService {
   }): Promise<'finalized' | 'already-finalized' | 'unreserved' | 'invalid'> {
     return this.databaseService.database.transaction(async (transaction) => {
       await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
+      await assertActiveProjectLocked(
+        transaction,
+        args.access.projectId,
+        args.access.viaDevice === undefined ? args.access.callerId : args.access.ownerId,
+      );
       const rows = await transaction
         .select({
           size: projectGitLfsObject.sizeBytes,
@@ -903,7 +909,11 @@ export class GitRepositoryService {
          the client retries against a Machine that is staying. */
       this.refuseWhenStopping('This server is restarting; retry the removal.');
       const decided = await this.databaseService.database.transaction(async (transaction) => {
-        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${access.projectId}, 0))`);
+        await assertActiveProjectLocked(
+          transaction,
+          access.projectId,
+          access.viaDevice === undefined ? access.callerId : access.ownerId,
+        );
         const [affected] =
           tag === undefined
             ? []
@@ -974,6 +984,33 @@ export class GitRepositoryService {
     await Promise.all(this.#background);
   }
 
+  /** Resolves current admission and the persisted account before any repository or LFS bytes are touched. */
+  public async resolveActiveLocator(access: GitAccess): Promise<RepositoryLocator> {
+    await assertProjectActive(
+      this.databaseService.database,
+      access.projectId,
+      access.viaDevice === undefined ? access.callerId : access.ownerId,
+    );
+    const [row] = await this.databaseService.database
+      .select({ storageAccountId: project.storageAccountId })
+      .from(project)
+      .where(and(eq(project.id, access.projectId), eq(project.ownerId, access.ownerId)))
+      .limit(1);
+    if (row === undefined) {
+      throw new NotFoundException('Project not found');
+    }
+    // No fallback: a foreign locator must never read or write the default account.
+    if (row.storageAccountId !== null && row.storageAccountId !== this.storage.account.id) {
+      throw new ServiceUnavailableException('This project’s storage account is unavailable.');
+    }
+    return repositoryLocator({
+      ownerId: access.ownerId,
+      projectId: access.projectId,
+      ...(row.storageAccountId === null ? {} : { accountId: row.storageAccountId }),
+    });
+  }
+
+  /** Hydrates a lease for `access`, timed as the `hydrate` lease phase. */
   /**
    * Starts a compacting commit's sweep without the reply waiting on it (W13b):
    * the sweep lists `packs/` and `retired/`, which grow with every push inside
@@ -999,10 +1036,13 @@ export class GitRepositoryService {
              them. ponytail: two workers' sweeps of one project may land out of
              order, leaving the older listing's figure until the next sweep. */
           if (swept !== undefined) {
-            await this.databaseService.database
-              .update(projectGit)
-              .set({ retainedBytes: swept.retainedBytes })
-              .where(eq(projectGit.projectId, projectId));
+            await this.databaseService.database.transaction(async (transaction) => {
+              await assertActiveProjectLocked(transaction, projectId);
+              await transaction
+                .update(projectGit)
+                .set({ retainedBytes: swept.retainedBytes })
+                .where(eq(projectGit.projectId, projectId));
+            });
           }
           outcome = 'ok';
         } finally {
@@ -1208,13 +1248,12 @@ export class GitRepositoryService {
     }
   }
 
-  /** Hydrates a lease for `access`, timed as the `hydrate` lease phase. */
-  private async hydrate(access: Pick<GitAccess, 'ownerId' | 'projectId'>): Promise<RepositoryLease> {
+  private async hydrate(access: GitAccess): Promise<RepositoryLease> {
     const startedAt = performance.now();
     try {
       return await hydrateLease({
         store: this.store,
-        locator: repositoryLocator({ ownerId: access.ownerId, projectId: access.projectId }),
+        locator: await this.resolveActiveLocator(access),
         parentDirectory: this.#leaseParent,
       });
     } finally {
@@ -1505,14 +1544,17 @@ export class GitRepositoryService {
    * after generation 6 must not rewind the marker.
    */
   private async recordGeneration(projectId: string, generation: number): Promise<void> {
-    await this.databaseService.database
-      .insert(projectGit)
-      .values({ projectId, generation })
-      .onConflictDoUpdate({
-        target: projectGit.projectId,
-        set: { generation, updatedAt: new Date() },
-        setWhere: lt(projectGit.generation, generation),
-      });
+    await this.databaseService.database.transaction(async (transaction) => {
+      await assertActiveProjectLocked(transaction, projectId);
+      await transaction
+        .insert(projectGit)
+        .values({ projectId, generation })
+        .onConflictDoUpdate({
+          target: projectGit.projectId,
+          set: { generation, updatedAt: new Date() },
+          setWhere: lt(projectGit.generation, generation),
+        });
+    });
   }
 
   /**
@@ -1535,6 +1577,18 @@ export class GitRepositoryService {
     moved: readonly MovedRef[];
   }): Promise<void> {
     const { access, manifest } = args;
+    try {
+      await assertProjectActive(this.databaseService.database, access.projectId);
+    } catch (error) {
+      if (error instanceof GoneException) {
+        return;
+      }
+      this.#logger.warn(
+        { err: error, projectId: access.projectId },
+        'Derived state admission failed after a durable push',
+      );
+      return;
+    }
     /* D13: tell every open client of this project that the remote moved. First
        and whatever the rebuild below does, because the manifest is already
        durable and a reader parked on the long poll makes no git request that
@@ -1578,32 +1632,35 @@ export class GitRepositoryService {
 
     /* Swallowed like the rebuild above: the push this follows is durable. */
     try {
-      await this.databaseService.database
-        .insert(projectGit)
-        .values({
-          projectId: access.projectId,
-          storageBytes,
-          generation: manifest.generation,
-          derivedGeneration: manifest.generation,
-        })
-        .onConflictDoUpdate({
-          target: projectGit.projectId,
-          set: {
+      await withOwnerLock(this.databaseService.database, access.ownerId, async (transaction) => {
+        await assertActiveProjectLocked(transaction, access.projectId);
+        await transaction
+          .insert(projectGit)
+          .values({
+            projectId: access.projectId,
             storageBytes,
-            /* `generation` moves with the marker: this row is the proof that the
+            generation: manifest.generation,
+            derivedGeneration: manifest.generation,
+          })
+          .onConflictDoUpdate({
+            target: projectGit.projectId,
+            set: {
+              storageBytes,
+              /* `generation` moves with the marker: this row is the proof that the
                store reached this generation, so a repair that runs because
                `recordGeneration` never did must leave the two columns agreeing
                (review F1). */
-            generation: manifest.generation,
-            derivedGeneration: manifest.generation,
-            updatedAt: new Date(),
-          },
-          /* Compare-and-swap (review F4). A request repairing generation 5 and a
+              generation: manifest.generation,
+              derivedGeneration: manifest.generation,
+              updatedAt: new Date(),
+            },
+            /* Compare-and-swap (review F4). A request repairing generation 5 and a
              request committing generation 6 are not ordered by anything, and the
              slower of the two must not take `derived_generation` — and
              `storage_bytes` with it — backwards. */
-          setWhere: lt(projectGit.derivedGeneration, manifest.generation),
-        });
+            setWhere: lt(projectGit.derivedGeneration, manifest.generation),
+          });
+      });
     } catch (error) {
       this.#logger.warn(
         { err: error, projectId: access.projectId, generation: manifest.generation },

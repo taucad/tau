@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '#components/drawer.js';
 
@@ -23,7 +23,10 @@ beforeEach(() => {
   scrollIntoView.mockClear();
   // Jsdom does no layout, so it has no scrollIntoView.
   HTMLElement.prototype.scrollIntoView = scrollIntoView;
-  Object.defineProperty(globalThis, 'visualViewport', { configurable: true, value: viewport });
+  Object.defineProperty(globalThis, 'visualViewport', {
+    configurable: true,
+    value: viewport,
+  });
 });
 
 afterEach(() => {
@@ -114,5 +117,68 @@ describe('DrawerContent', () => {
       viewport.showKeyboard(400);
     });
     expect(content).not.toHaveAttribute('data-keyboard');
+  });
+});
+
+describe('drawer height keyboard controls', () => {
+  it('should expose its current snap point and clamp arrow navigation without dismissing', () => {
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    render(
+      <Drawer open snapPoints={[0.25, 0.58, 1]} onOpenChange={onOpenChange}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuetext', '58% height');
+    fireEvent.keyDown(handle, { key: 'End' });
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuenow', '3');
+    fireEvent.keyDown(handle, { key: 'Home' });
+    fireEvent.keyDown(handle, { key: 'ArrowDown' });
+    expect(handle).toHaveAttribute('aria-valuenow', '1');
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('should cycle through its detents with Enter and Space, wrapping from the tallest to the first', () => {
+    const onOpenChange = vi.fn<(open: boolean) => void>();
+    render(
+      <Drawer open snapPoints={[0.25, 0.58, 1]} onOpenChange={onOpenChange}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    const handle = screen.getByRole('slider', { name: 'Drawer height' });
+    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    expect(fireEvent.keyDown(handle, { key: 'Enter' })).toBe(false);
+    expect(handle).toHaveAttribute('aria-valuetext', '58% height');
+    // Handled, so Space neither scrolls the page nor reaches a parent's key handler.
+    expect(fireEvent.keyDown(handle, { key: ' ' })).toBe(false);
+    expect(handle).toHaveAttribute('aria-valuetext', '100% height');
+    fireEvent.keyDown(handle, { key: 'Enter' });
+    expect(handle).toHaveAttribute('aria-valuetext', '25% height');
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('should send keyboard snap changes to a controlled host', () => {
+    const setActiveSnapPoint = vi.fn<NonNullable<React.ComponentProps<typeof Drawer>['setActiveSnapPoint']>>();
+    render(
+      <Drawer open snapPoints={[0.25, 0.58, 1]} activeSnapPoint={0.58} setActiveSnapPoint={setActiveSnapPoint}>
+        <DrawerContent>
+          <DrawerTitle>Workbench</DrawerTitle>
+          <DrawerDescription>Review panes</DrawerDescription>
+        </DrawerContent>
+      </Drawer>,
+    );
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Drawer height' }), {
+      key: 'ArrowDown',
+    });
+    expect(setActiveSnapPoint).toHaveBeenCalledWith(0.25);
   });
 });

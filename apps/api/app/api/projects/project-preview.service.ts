@@ -120,6 +120,7 @@ export class ProjectPreviewService {
       key: this.key(input),
       tier: 'private',
       body: bytes,
+      signal: AbortSignal.timeout(5000),
       contentType: 'image/webp',
       cacheControl: 'private, no-store',
       ...(input.createOnly ? { ifNoneMatch: '*' } : {}),

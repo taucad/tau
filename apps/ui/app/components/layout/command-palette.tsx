@@ -159,7 +159,7 @@ type CommandPaletteResultsProperties = {
 };
 
 /** Mounted only while the dialog is open, so the query resets on every open. */
-function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties): React.JSX.Element {
+export function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties): React.JSX.Element {
   const [search, setSearch] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
   const rows = useMemo(() => rankCommandPaletteRows(items, search), [items, search]);

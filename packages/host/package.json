@@ -1,6 +1,6 @@
 {
   "name": "@taucad/host",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "description": "Tau Host daemon for pairing browsers with supervised remote CAD runtimes",
   "type": "module",
   "sideEffects": false,
@@ -72,6 +72,7 @@
     "@taucad/filesystem": "workspace:*",
     "@taucad/grbl": "workspace:*",
     "@taucad/jobs": "workspace:*",
+    "@taucad/kinematics": "workspace:*",
     "@taucad/mcp": "workspace:*",
     "@taucad/native-process-core": "workspace:*",
     "@taucad/parameters": "workspace:*",

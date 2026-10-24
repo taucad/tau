@@ -40,7 +40,7 @@ const memoryStore = (): LivenessStore & { objects: Map<string, string> } => {
 
 /** Every scheduled subcommand completes one pass starting at `start`. */
 const completeNightlyPass = async (store: LivenessStore, start: Date): Promise<void> => {
-  for (const command of ['purge', 'retire-lfs', 'collect-blobs'] as const) {
+  for (const command of ['purge', 'purge-projects', 'retire-lfs', 'collect-blobs'] as const) {
     // oxlint-disable-next-line no-await-in-loop -- the loop runs the subcommands one after another
     await recordMaintenancePass({ store, command, now: () => start, run: async () => 'done' });
   }
@@ -65,6 +65,23 @@ const killPurgeMidRun = async (store: LivenessStore, start: Date): Promise<void>
 };
 
 describe('maintenance liveness', () => {
+  it('should expose backlog age and mark recovery stale after two minutes', async () => {
+    const store = memoryStore();
+    await completeNightlyPass(store, midnight);
+    await recordMaintenancePass({
+      store,
+      command: 'recover-projects',
+      now: () => midnight,
+      details: () => ({ pending: 3, oldestPendingAge: 90_000 }),
+      run: async () => undefined,
+    });
+    const fresh = await readMaintenanceLiveness(store, at(120_000));
+    expect(fresh.ok).toBe(true);
+    expect(fresh.commands['recover-projects']).toMatchObject({ pending: 3, oldestPendingAge: 90_000 });
+    const stale = await readMaintenanceLiveness(store, at(120_001));
+    expect(stale.commands['recover-projects'].state).toBe('stale');
+    expect(stale.ok).toBe(false);
+  });
   it('should record a completed pass in the private tier and report the group healthy', async () => {
     const store = memoryStore();
 
@@ -76,6 +93,8 @@ describe('maintenance liveness', () => {
     });
     await recordMaintenancePass({ store, command: 'retire-lfs', now: () => midnight, run: async () => [] });
     await recordMaintenancePass({ store, command: 'collect-blobs', now: () => midnight, run: async () => [] });
+    await recordMaintenancePass({ store, command: 'purge-projects', now: () => midnight, run: async () => [] });
+    await recordMaintenancePass({ store, command: 'recover-projects', now: () => at(hour), run: async () => [] });
 
     expect(result).toStrictEqual(['outcome']);
     expect([...store.objects.keys()].every((key) => key.startsWith('private:blobs/revisions-maintenance/'))).toBe(true);
@@ -88,6 +107,12 @@ describe('maintenance liveness', () => {
     const store = memoryStore();
     await completeNightlyPass(store, midnight);
 
+    await recordMaintenancePass({
+      store,
+      command: 'recover-projects',
+      now: () => at(maintenanceStaleAfterMilliseconds),
+      run: async () => [],
+    });
     const liveness = await readMaintenanceLiveness(store, at(maintenanceStaleAfterMilliseconds));
 
     expect(liveness.ok).toBe(true);
@@ -137,6 +162,7 @@ describe('maintenance liveness', () => {
     await completeNightlyPass(store, midnight);
     await killPurgeMidRun(store, at(24 * hour));
 
+    await recordMaintenancePass({ store, command: 'recover-projects', now: () => at(25 * hour), run: async () => [] });
     const during = await readMaintenanceLiveness(store, at(24 * hour + hour));
     const after = await readMaintenanceLiveness(store, at(24 * hour + maintenancePassBudgetMilliseconds + 1));
 

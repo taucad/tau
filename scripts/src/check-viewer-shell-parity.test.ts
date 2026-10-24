@@ -22,6 +22,7 @@ const paths = {
   dockviewTab: 'apps/ui/app/components/panes/dockview-tab.tsx',
   viewerPage: 'packages/agent-plugin/app/viewer-page.tsx',
   lane: 'packages/agent-plugin/app/workbench-lane.tsx',
+  stackTrace: 'apps/ui/app/routes/w.$workspace.$project/chat-stack-trace.tsx',
 } as const;
 
 /** The checkout's host sources with one file swapped for its text before the adoption. */
@@ -90,6 +91,13 @@ describe('viewer shell parity guard', () => {
       `${paths.viewerPage}: does not import @taucad/workbench-panes/shell/viewer-header-actions`,
       `${paths.viewerPage}: does not import @taucad/workbench-panes/components/workbench-tab`,
       `${paths.viewerPage}: carries a PaneAction for Share or Export (ViewerHeaderActions draws them)`,
+    ]);
+  });
+
+  it('should fail when the desktop issues go back to their own list and stack trace', () => {
+    expect(checkViewerShellParity(reverted(paths.stackTrace, fixture('chat-stack-trace')))).toEqual([
+      `${paths.stackTrace}: does not import @taucad/workbench-panes/shell/viewer-issues`,
+      `${paths.stackTrace}: carries the stack trace toggle (ViewerIssues draws the issue list)`,
     ]);
   });
 

@@ -7,7 +7,7 @@ import type {
 } from '@taucad/types/desktop-native-kernels';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { unpreparedKernelOf, useNativeKernelDownload } from '#hooks/use-native-kernel-download.js';
+import { useNativeKernelDownload } from '#hooks/use-native-kernel-download.js';
 
 const bridge = vi.hoisted(() => ({ current: undefined as DesktopNativeKernelBridge | undefined }));
 
@@ -50,21 +50,6 @@ const fakeBridge = () => {
     },
   };
 };
-
-describe('unpreparedKernelOf', () => {
-  it('should name the kernel and size of the first KERNEL_NOT_PREPARED issue', () => {
-    expect(
-      unpreparedKernelOf([
-        { message: 'x', severity: 'warning', type: 'runtime', code: 'DISPLAY_SIMPLIFIED' },
-        unprepared('picogk'),
-      ]),
-    ).toEqual({
-      kernel: 'picogk',
-      byteLength: 300_000_000,
-    });
-    expect(unpreparedKernelOf([])).toBeUndefined();
-  });
-});
 
 describe('useNativeKernelDownload', () => {
   beforeEach(() => {

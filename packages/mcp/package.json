@@ -1,6 +1,6 @@
 {
   "name": "@taucad/mcp",
-  "version": "0.1.0-beta.8",
+  "version": "0.1.0-beta.9",
   "description": "Model Context Protocol server for Tau's CAD tools over canonical chat RPC contracts",
   "type": "module",
   "sideEffects": false,
@@ -65,7 +65,8 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "catalog:"
+    "@modelcontextprotocol/sdk": "catalog:",
+    "@taucad/workbench": "workspace:*"
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",

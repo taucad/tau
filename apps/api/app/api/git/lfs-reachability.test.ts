@@ -3,6 +3,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { GoneException } from '@nestjs/common';
+import { mock } from 'vitest-mock-extended';
+import type { Database } from '#database/owner-lock.js';
+import { requestProjectDeletion } from '#api/projects/project-deletion.js';
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
@@ -207,6 +211,43 @@ describe.skipIf(!(await databaseReachable(databaseUrl)))('LFS reachability over 
       rmSync(directory, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it('should reject a scanner that resumes after deletion without changing marks or recreating accounting', async () => {
+    const locator = await newProject();
+    const object = pointerFor('paused scanner');
+    const old = new Date('2026-01-01T00:00:00Z');
+    const directory = newClient();
+    writeFileSync(path.join(directory, 'part.stl'), object.text);
+    commitAll(directory, 'pointer');
+    await pushAndCommit(locator, directory, ['main']);
+    await seedObject(locator, object, old);
+    const lease = await hydrateLease({ store, locator, parentDirectory: scratch('paused') });
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const paused = mock<Database>();
+    paused.transaction.mockImplementation(async (run) => {
+      entered.resolve();
+      await resume.promise;
+      return database.transaction(run);
+    });
+    const scan = markLfsReachability({ database: paused }, { ...locator, directory: lease.directory, at: new Date() });
+    const rejected = expect(scan).rejects.toBeInstanceOf(GoneException);
+    try {
+      await entered.promise;
+      await requestProjectDeletion({ database, projectId: locator.projectId, userId: locator.ownerId, enabled: true });
+      await database.delete(projectGit).where(eq(projectGit.projectId, locator.projectId));
+      resume.resolve();
+      await rejected;
+      expect(await markOf(locator, object.oid)).toEqual(old);
+      expect(
+        await database.query.projectGit.findFirst({ where: eq(projectGit.projectId, locator.projectId) }),
+      ).toBeUndefined();
+    } finally {
+      resume.resolve();
+      await scan.catch(() => undefined);
+      await lease.dispose();
+    }
+  });
 
   it('should clear the mark for every pointer the pushed repository still reaches', async () => {
     const locator = await newProject();

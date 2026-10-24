@@ -134,6 +134,8 @@ const config: KnipConfig = {
         // `open-to-frame-observation.test.ts` spawn the other two.
         'apps/ui-e2e/production-server.ts',
         'apps/ui-e2e/src/support/{host-fixture,open-to-frame}.ts',
+        // The isolated deletion race target selects this nested Vitest configuration.
+        'apps/api-e2e/src/git/project-deletion-race.vitest.config.ts',
       ],
       project: ['**/*.{ts,tsx,mts}'],
       ignore: [
@@ -170,6 +172,8 @@ const config: KnipConfig = {
         'app/testing/billing-load/{run,driver,cluster}.ts',
         'app/testing/development-billing-account.ts',
         'app/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
+        // The deletion recovery integration test spawns this process by path.
+        'app/testing/project-deletion-process.ts',
         'app/lifecycle/graceful-shutdown.signal-fixture.ts',
       ],
       ignoreDependencies: [
@@ -266,6 +270,8 @@ const config: KnipConfig = {
         'app/**/*.{cloud,self-host,desktop}.{ts,tsx}',
         // Vite alias replacement for `@resvg/resvg-js` in the browser bundle.
         'app/lib/browser-stubs/resvg-js.ts',
+        // The deletion component browser suite selects this nested config with --config.
+        'app/components/project-library/project-cloud-delete.vitest.browser.config.ts',
       ],
       ignore: ['public/**'],
       // The desktop and serve builds are separate React Router apps (`build:desktop`,
@@ -352,6 +358,8 @@ const config: KnipConfig = {
     'packages/host': {
       // `runtime-child-render.integration.test.ts` spawns it by path.
       entry: ['src/fixtures/render-child-probe.ts'],
+      // `pose_model` in the bundled `@taucad/agent-tools` imports it at runtime.
+      ignoreDependencies: ['@taucad/kinematics'],
     },
     'packages/plugins/bambu': {
       // The `qualify-x1c` target runs it from the workspace root.

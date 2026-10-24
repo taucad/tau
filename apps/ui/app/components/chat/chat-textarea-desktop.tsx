@@ -136,8 +136,8 @@ export const acpCommandToSlashCommand = (
 
 /**
  * At rest a collapsible composer is one row; anything in flight — focus, a
- * draft, dictation, a send, a drag — unfolds it. The `max-md:` variants
- * confine the collapsed layout to phones.
+ * draft, dictation, a send, a drag — unfolds it. The container variants
+ * confine the collapsed layout to mobile-width composer surfaces.
  *
  * @returns Whether the composer collapses: it may, and nothing holds it open.
  */
@@ -375,7 +375,11 @@ export const ChatTextareaDesktop = memo(function ({
       return undefined;
     }
     const lazyTree: Map<string, FileEntry> = treeService?.getTreeSnapshot() ?? new Map<string, FileEntry>();
-    const segments = buildPastedContent(inputText, { fileTree: lazyTree, chats, knownTokens });
+    const segments = buildPastedContent(inputText, {
+      fileTree: lazyTree,
+      chats,
+      knownTokens,
+    });
     /* Same text is a no-op (typing must not move the caret) unless tokens that arrived
      * late (catalog, agent commands) now resolve to more chips — a restored draft rehydrates. */
     const chipCount = segments.filter((segment) => segment.type === 'chip').length;
@@ -387,7 +391,9 @@ export const ChatTextareaDesktop = memo(function ({
     let isCurrent = true;
     queueMicrotask(() => {
       if (isCurrent && !editor.isDestroyed) {
-        editor.commands.setContent(buildEditorContentJson(segments), { emitUpdate: false });
+        editor.commands.setContent(buildEditorContentJson(segments), {
+          emitUpdate: false,
+        });
       }
     });
     return () => {
@@ -436,7 +442,12 @@ export const ChatTextareaDesktop = memo(function ({
           const isFolder = path.endsWith('/');
           const segments = path.split('/').filter((segment) => segment.length > 0);
           const label = segments.at(-1) ?? path;
-          return { id: path, label, chipType: isFolder ? 'folder' : 'file', path };
+          return {
+            id: path,
+            label,
+            chipType: isFolder ? 'folder' : 'file',
+            path,
+          };
         }),
       );
     };
@@ -540,7 +551,7 @@ export const ChatTextareaDesktop = memo(function ({
     // and intentionally takes NO `className` passthrough — see
     // ChatTextareaBorderBeam's docs for why. All layout / styling
     // overrides live on the inner border container below.
-    <div className='relative w-full' data-chat-composer={mode}>
+    <div className='@container/composer relative w-full' data-chat-composer={mode}>
       <ChatTextareaBorderBeam isActive={isSubmitting} className={radius} />
 
       <div
@@ -643,12 +654,12 @@ export const ChatTextareaDesktop = memo(function ({
 
 ChatTextareaDesktop.displayName = 'ChatTextareaDesktop';
 
-/* The collapsed composer (phones only, `max-md:`): one row. The editor makes
+/* The collapsed composer (mobile-width surfaces): one row. The editor makes
  * room for + on the left and dictation and Send on the right; the bar rises
  * onto the editor's line, and every other control fades out in place, keeping
  * its width so the bar's measured collapse (D6) never re-runs. */
 const collapseTransition =
-  'transition-[padding,margin,border-radius,opacity,visibility] duration-200 ease-out motion-reduce:transition-none';
+  'transition-[padding,margin,border-radius,corner-shape,opacity,visibility] duration-200 ease-out motion-reduce:transition-none';
 
 /**
  * A collapsible composer's own classes: the box's corners, and the editor's
@@ -659,33 +670,46 @@ const collapseTransition =
 const collapsibleClassNames = (
   isCollapsible: boolean | undefined,
   hasDictation: boolean | undefined,
-): { readonly composer?: string; readonly editor?: string; readonly editorContent?: string } =>
+): {
+  readonly composer?: string;
+  readonly editor?: string;
+  readonly editorContent?: string;
+} =>
   isCollapsible === true
     ? {
-        composer: cn(collapseTransition, 'max-md:data-[collapsed]:rounded-3xl'),
+        composer: cn(
+          collapseTransition,
+          // Half the Send diameter + its inset + the border. A finite radius interpolates without pill clamping.
+          '[corner-shape:superellipse(1.5)] @max-[768px]/composer:data-[collapsed]:rounded-[calc(var(--spacing)*5.5+1px)] @max-[768px]/composer:data-[collapsed]:[corner-shape:round] @max-[768px]/composer:data-[collapsed]:pt-2.5',
+        ),
         editor: cn(
           collapseTransition,
-          'max-md:group-data-[collapsed]/chat-textarea:pl-7',
-          'max-md:group-data-[collapsed]/chat-textarea:max-h-6 max-md:group-data-[collapsed]/chat-textarea:overflow-hidden',
+          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pl-7',
+          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:max-h-6 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:overflow-hidden',
           hasDictation === true
-            ? 'max-md:group-data-[collapsed]/chat-textarea:pr-15'
-            : 'max-md:group-data-[collapsed]/chat-textarea:pr-7',
+            ? '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-15'
+            : '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pr-7',
         ),
-        editorContent: cn(collapseTransition, 'max-md:group-data-[collapsed]/chat-textarea:pb-0'),
+        editorContent: cn(
+          collapseTransition,
+          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:[&_.tiptap]:overflow-hidden',
+          // Match the collapsed editor's 24px box on fine pointers as well as touch devices.
+          '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:pb-0 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:leading-6',
+        ),
       }
     : {};
 
 /** The bar, risen onto the editor's line; taps between its controls reach the editor. */
 const collapsedBarClassName = cn(
   collapseTransition,
-  'max-md:group-data-[collapsed]/chat-textarea:-mt-6.5 max-md:group-data-[collapsed]/chat-textarea:pointer-events-none',
+  '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:-mt-6.5 @max-[768px]/composer:group-data-[collapsed]/chat-textarea:pointer-events-none',
 );
 
 /** Controls a collapsed composer hides: every one but +, dictation and Send. */
 const collapsibleControlsClassName = cn(
   collapseTransition,
   'flex min-w-0 flex-row items-center empty:hidden',
-  'max-md:group-data-[collapsed]/chat-textarea:invisible max-md:group-data-[collapsed]/chat-textarea:opacity-0',
+  '@max-[768px]/composer:group-data-[collapsed]/chat-textarea:invisible @max-[768px]/composer:group-data-[collapsed]/chat-textarea:opacity-0',
 );
 
 /** The labels that leave, in order, before the model's name is cut (D6). */
@@ -724,7 +748,11 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
     /* Labels change without a resize (another model, a level). Attributes are
      * not observed, so the flags this sets cannot loop. */
     const mutation = new MutationObserver(fit);
-    mutation.observe(bar, { childList: true, subtree: true, characterData: true });
+    mutation.observe(bar, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
     /* Webfonts change the name's width without a resize. */
     const refitWhenFontsLoad = async (): Promise<void> => {
       await document.fonts.ready;

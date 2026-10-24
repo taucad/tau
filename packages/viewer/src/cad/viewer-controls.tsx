@@ -1,5 +1,7 @@
+import { viewerTouchContext, useViewerControlSize } from '#cad/viewer-control-size.js';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { FlipHorizontal, Ruler } from 'lucide-react';
+import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { Separator } from '@taucad/ui/components/separator';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
@@ -73,7 +75,11 @@ function useStackedLeading(
     observer.observe(controls);
     // A stacked group keeps the strip's width, so its content changes are watched directly.
     const mutations = new MutationObserver(measure);
-    mutations.observe(leading, { childList: true, subtree: true, characterData: true });
+    mutations.observe(leading, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
     return () => {
       observer.disconnect();
       mutations.disconnect();
@@ -100,6 +106,8 @@ type ToolRowProps = Readonly<{
 
 /** A running tool's row inside the bar: its name, its options, then Done. */
 function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
+  const isMobile = useIsMobile();
   const rowRef = useRef<HTMLDivElement>(null);
   useFocusHandOff(rowRef, resolveToolToggle);
   return (
@@ -111,7 +119,8 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
       className='flex max-w-full flex-col gap-1 border-b pb-1'
     >
       {above}
-      <div className='flex min-h-7 items-center gap-1'>
+      {/* A phone's row wraps within the sheet; a desktop row holds its width so the bar never shrinks below it. */}
+      <div className={cn('flex min-h-7 items-center gap-1', isMobile && 'flex-wrap')}>
         <span className='flex shrink-0 items-center gap-1 px-1 text-xs font-medium'>
           {icon}
           {/* Below 520 px the name gives way to its glyph, as the toggles' labels do, so the row fits. */}
@@ -119,7 +128,13 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
         </span>
         <Hairline className='mx-1' />
         {children}
-        <Button variant='secondary' size='xs' className='h-7' aria-label={`Done with ${tool}`} onClick={onDone}>
+        <Button
+          variant='secondary'
+          size={isTouch ? 'touch' : 'xs'}
+          className={isTouch ? undefined : 'h-7'}
+          aria-label={`Done with ${tool}`}
+          onClick={onDone}
+        >
           Done
         </Button>
       </div>
@@ -135,6 +150,10 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
 export type ViewerControlsProps = Readonly<{
   /** The capture control, in its own section after Fullscreen; hosts without capture leave it out. */
   capture?: React.ReactNode;
+  /** Mobile-only host action, such as AR, after Fit view. */
+  mobileAction?: React.ReactNode;
+  /** Request touch targets in an embedded mobile surface; defaults to compact controls. */
+  enableTouchTargets?: boolean;
   /** The pane's kernel settings, shown in Viewer settings. */
   kernelSettings?: React.ReactNode;
   /** The render timeout Viewer settings offers, when the host runs a kernel. */
@@ -164,14 +183,49 @@ export type ViewerControlsProps = Readonly<{
  * @returns The bar.
  * @public
  */
-export function ViewerControls({
+export function ViewerControls(props: ViewerControlsProps): React.JSX.Element {
+  return (
+    <viewerTouchContext.Provider value={props.enableTouchTargets}>
+      <ViewerControlsBody {...props} />
+    </viewerTouchContext.Provider>
+  );
+}
+
+/**
+ * The bar's layout classes. On a phone the bar fits the space it is given, wraps its controls and scrolls its tool
+ * rows; a desktop pane's bar never shrinks below its rows, so a narrow strip keeps them whole.
+ * @param isMobile - Whether the viewport is a phone's.
+ * @param isTouch - Whether the controls take touch targets.
+ * @returns The classes of the bar, its tool rows and its controls line.
+ */
+function barLayout(isMobile: boolean, isTouch: boolean): { bar: string; toolRows: string; controls: string } {
+  return {
+    bar: cn(
+      'pointer-events-auto flex max-w-full flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs',
+      isMobile ? 'max-h-full min-h-0 min-w-0' : 'min-w-min',
+    ),
+    toolRows: cn('flex flex-col gap-1', isMobile && 'min-h-0 overflow-y-auto'),
+    controls: cn(
+      'flex items-center',
+      isMobile && 'max-w-full flex-wrap justify-center',
+      isTouch ? 'gap-0' : 'gap-1',
+      !isMobile && !isTouch && 'h-7',
+    ),
+  };
+}
+
+function ViewerControlsBody({
   capture,
+  mobileAction,
   kernelSettings,
   operationTimeout,
   leading,
   aboveControls,
   actions,
 }: ViewerControlsProps): React.JSX.Element {
+  const controlSize = useViewerControlSize();
+  const isMobile = useIsMobile();
+  const layout = barLayout(isMobile, controlSize === 'icon-touch');
   const graphicsRef = useGraphics();
   const barRef = useRef<HTMLDivElement>(null);
   const leadingRef = useRef<HTMLDivElement>(null);
@@ -203,46 +257,46 @@ export function ViewerControls({
   }, []);
 
   return (
-    <div
-      ref={barRef}
-      data-slot='viewer-controls'
-      className='pointer-events-auto flex max-w-full min-w-min flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs'
-    >
-      {!is2dGeometry && isSectionViewActive ? (
-        <ToolRow
-          tool='section'
-          name='Section view'
-          icon={<FlipHorizontal className='size-4 text-viewer-tool-active' />}
-          above={<SectionEditor />}
-          onDone={stopSection}
-        >
-          <SectionOptions />
-        </ToolRow>
-      ) : null}
-      {!is2dGeometry && isMeasureActive ? (
-        <ToolRow
-          tool='measure'
-          name='Measuring'
-          icon={<Ruler className='size-4 -rotate-45 text-viewer-tool-active' />}
-          above={
-            measurementsExpanded && measurementCount > 0 ? (
-              <MeasurementList
-                onEmptied={() => {
-                  setMeasurementsExpanded(false);
-                }}
-              />
-            ) : null
-          }
-          onDone={stopMeasure}
-        >
-          <MeasureOptions expanded={measurementsExpanded} onExpandedChange={setMeasurementsExpanded} />
-        </ToolRow>
+    <div ref={barRef} data-slot='viewer-controls' className={layout.bar}>
+      {!is2dGeometry && (isSectionViewActive || isMeasureActive) ? (
+        <div data-slot='viewer-tool-rows' className={layout.toolRows}>
+          {isSectionViewActive ? (
+            <ToolRow
+              tool='section'
+              name='Section view'
+              icon={<FlipHorizontal className='size-4 text-viewer-tool-active' />}
+              above={<SectionEditor />}
+              onDone={stopSection}
+            >
+              <SectionOptions />
+            </ToolRow>
+          ) : null}
+          {isMeasureActive ? (
+            <ToolRow
+              tool='measure'
+              name='Measuring'
+              icon={<Ruler className='size-4 -rotate-45 text-viewer-tool-active' />}
+              above={
+                measurementsExpanded && measurementCount > 0 ? (
+                  <MeasurementList
+                    onEmptied={() => {
+                      setMeasurementsExpanded(false);
+                    }}
+                  />
+                ) : null
+              }
+              onDone={stopMeasure}
+            >
+              <MeasureOptions expanded={measurementsExpanded} onExpandedChange={setMeasurementsExpanded} />
+            </ToolRow>
+          ) : null}
+        </div>
       ) : null}
       {aboveControls}
       <div
         role='group'
         aria-label='Viewer controls'
-        className='flex flex-wrap items-center justify-center gap-1 self-center text-muted-foreground [&_button]:font-normal [&_button:focus-visible]:text-foreground [&_button:hover]:text-foreground [&_button[aria-expanded=true]]:text-foreground [&_button[aria-pressed=true]]:text-foreground [&_button[data-state=open]]:text-foreground'
+        className='flex shrink-0 flex-wrap items-center justify-center gap-1 self-center text-muted-foreground [&_button]:font-normal [&_button:focus-visible]:text-foreground [&_button:hover]:text-foreground [&_button[aria-expanded=true]]:text-foreground [&_button[aria-pressed=true]]:text-foreground [&_button[data-state=open]]:text-foreground'
       >
         {leading === undefined ? null : (
           <>
@@ -250,7 +304,8 @@ export function ViewerControls({
               ref={leadingRef}
               data-slot='viewer-leading'
               className={cn(
-                'flex h-7 min-w-0 items-center gap-1 empty:hidden',
+                'flex min-w-0 items-center gap-1 empty:hidden',
+                controlSize === 'icon-touch' ? 'min-h-11' : 'h-7',
                 isLeadingStacked && 'h-8 basis-full justify-center border-b pb-1',
               )}
             >
@@ -259,7 +314,7 @@ export function ViewerControls({
             {isLeadingStacked ? null : <Hairline />}
           </>
         )}
-        <div ref={controlsRef} className='flex h-7 items-center gap-1'>
+        <div ref={controlsRef} className={layout.controls}>
           <GridSizeIndicator />
           <Hairline />
           {is2dGeometry ? null : (
@@ -270,7 +325,7 @@ export function ViewerControls({
             </>
           )}
           <FitViewControl shortcut={keys.fitView} />
-          <FullscreenViewControl />
+          {isMobile ? mobileAction : <FullscreenViewControl />}
           {capture === undefined ? null : (
             <>
               <Hairline />
@@ -283,7 +338,7 @@ export function ViewerControls({
             align='end'
             kernelSettings={kernelSettings}
             operationTimeout={operationTimeout}
-            className='size-7 border-0 bg-transparent shadow-none hover:bg-accent/50 dark:hover:bg-accent/80'
+            className='border-0 bg-transparent shadow-none hover:bg-accent/50 dark:hover:bg-accent/80'
           />
           {actions === undefined ? null : (
             <>

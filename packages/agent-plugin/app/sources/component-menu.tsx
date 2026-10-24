@@ -2,12 +2,14 @@
  * The viewer page's part verbs and reveal channels, behind the Tau app's part menu: right-click a part on the canvas,
  * press Shift+F10 or the Menu key with the canvas region focused, open the header's "Actions for <name>", or open a
  * row's menu in the Model pane. The menu itself is `useViewerPartMenu` from `@taucad/workbench-panes`, as on the
- * desktop; the page's verbs are "Add to chat" (the host bridge), "Reveal in Explorer" (the Model pane) and "Show
- * kinematics" (the Kinematics pane). The page has no part gallery or thumbnails, so "Open preview" and "Retry preview"
- * never show.
+ * desktop; the page's verbs are "Add to chat" (the host bridge), "Reveal in Explorer" (the Model pane), "Show
+ * kinematics" (the Kinematics pane) and "Open preview" (the page's part gallery).
  */
 import type { GeometryComponentReference } from '@taucad/types';
-import type { ModelComponentHostActions } from '@taucad/workbench-panes/component-menu/component-actions';
+import type {
+  ModelComponentHostActions,
+  ModelComponentPreviewRequest,
+} from '@taucad/workbench-panes/component-menu/component-actions';
 import type { KinematicsRevealRequest, KinematicsSource } from '@taucad/workbench-panes/kinematics/kinematics-source';
 import type { ModelComponentTarget, ModelSource } from '@taucad/workbench-panes/model/model-source';
 
@@ -88,21 +90,25 @@ export type PageComponentMenuOptions = Readonly<{
   openPane: (pane: ComponentMenuPane) => void;
   /** The page's reveal channels. */
   reveal: ComponentReveal;
+  /** "Open preview": open the page's part gallery on a part. */
+  openPreview: (request: ModelComponentPreviewRequest) => void;
 }>;
 
 /**
  * The page's part verbs, for both the canvas menu and the Model pane's row menus.
  *
  * @param options - What the page does for chat and its panes, and the chat item's label.
- * @returns The host verbs; "Open preview" is absent because the page has no part gallery.
+ * @returns The host verbs.
  */
 export function createPageComponentActions({
   addToChat,
   addToChatLabel,
   openPane,
   reveal,
+  openPreview,
 }: PageComponentMenuOptions): ModelComponentHostActions {
   return {
+    openPreview,
     addToChat: (reference) => {
       addToChat(reference);
     },

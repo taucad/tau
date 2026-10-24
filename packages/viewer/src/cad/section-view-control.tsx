@@ -1,3 +1,4 @@
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import { useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { FlipHorizontal } from 'lucide-react';
@@ -34,6 +35,7 @@ export function ToolToggle({
   shortcut,
   onToggle,
 }: ToolToggleProps): React.JSX.Element {
+  const controlSize = useViewerControlSize();
   const hasGeometry = useGraphicsSelector((state) => state.context.geometryRadius > 0);
   const unavailable = !hasGeometry && !isActive;
   return (
@@ -41,7 +43,7 @@ export function ToolToggle({
       <TooltipTrigger asChild>
         <Button
           variant='ghost'
-          size='icon-sm'
+          size={controlSize}
           aria-label={name}
           aria-pressed={isActive}
           data-active={isActive}

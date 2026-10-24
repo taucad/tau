@@ -11,13 +11,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { Box, Maximize2, MessageSquarePlus } from 'lucide-react';
+import { tauViewerToolName } from '@taucad/mcp/viewer-protocol';
 import type {
   TauViewerCamera,
+  TauViewerEntryStatus,
+  TauViewerIssue,
   TauViewerModel,
   TauViewerShowResult,
-  TauViewerEntryStatus,
+  TauViewerWorkbenchState,
 } from '@taucad/mcp/viewer-protocol';
 import type { Artifact } from '@taucad/runtime';
+import { isKernelIssueCode } from '@taucad/runtime/types';
 import type { GeometryComponentReference } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { KeyboardProvider } from '@taucad/ui/components/keyboard';
@@ -34,10 +38,12 @@ import { buildGeometryComponentReference } from '@taucad/viewer/graphics/metadat
 import { getModelInteractionUnitState } from '@taucad/viewer/machines/model-interaction.machine';
 import { getViewCameraSession } from '@taucad/viewer/services/graphics-camera-registry';
 import { ModelViewer } from '@taucad/viewer/model-viewer';
+import { ToolCallError } from '#app/host-bridge.js';
 import type { ChatRoute, HostBridge, HostView } from '#app/host-bridge.js';
 import { loadModel } from '#app/model-loader.js';
 import { chatReferenceOf } from '#app/chat-reference.js';
 import { captureLiveView, startLiveLink, viewStateOf, whenDrawn } from '#app/live-link.js';
+import { applyPoseCommand, motionOf } from '#app/kinematics-link.js';
 import type { LiveLink } from '#app/live-link.js';
 import {
   createModelComponentActionMenus,
@@ -52,7 +58,14 @@ import { ViewerHeaderActions } from '@taucad/workbench-panes/shell/viewer-header
 import { ViewerStage } from '@taucad/workbench-panes/shell/viewer-stage';
 import type { ViewerStageStatus } from '@taucad/workbench-panes/shell/viewer-stage';
 import { createComponentReveal, createPageComponentActions } from '#app/sources/component-menu.jsx';
+import { createFilesSource } from '#app/sources/files-source.js';
 import { WorkbenchLane } from '#app/workbench-lane.jsx';
+import { entryPathOf, liveViewSettings, readWorkbenchState, seedViewer } from '#app/workbench-state.js';
+import { PageViewerIssues } from '#app/page-issues.jsx';
+import type { PageIssues } from '#app/page-issues.jsx';
+import { laneStoreFor } from '#app/lane-store.js';
+import { PagePartGallery, usePartPreviews } from '#app/part-previews.jsx';
+import { usePageViewerControls } from '#app/viewer-chrome.jsx';
 
 type Loaded = Readonly<{ model: TauViewerModel; artifact: Artifact }>;
 
@@ -60,10 +73,61 @@ type PageState =
   | Readonly<{ kind: 'waiting' }>
   | Readonly<{ kind: 'loading'; model: TauViewerModel; loaded: number; previous?: Loaded }>
   | Readonly<{ kind: 'ready'; current: Loaded }>
-  | Readonly<{ kind: 'failed'; message: string; previous?: Loaded }>;
+  | Readonly<{
+      kind: 'failed';
+      message: string;
+      /** What the failure reported, as issues the bar lists. */
+      issues: readonly TauViewerIssue[];
+      /** The source that failed, when the page knows it. */
+      sourceFile: string | undefined;
+      previous?: Loaded;
+    }>;
 
 const previousOf = (state: PageState): Loaded | undefined =>
   state.kind === 'ready' ? state.current : state.kind === 'waiting' ? undefined : state.previous;
+
+/**
+ * A failure the page heard as a code and a message, as the one issue it lists.
+ *
+ * @param message - The failure's message.
+ * @param code - The server's code, when it named one; a code the runtime does not define reads as `UNKNOWN`.
+ * @returns The issue.
+ */
+const failureIssue = (message: string, code: string | undefined): TauViewerIssue => ({
+  message,
+  code: isKernelIssueCode(code) ? code : 'UNKNOWN',
+  severity: 'error',
+});
+
+/**
+ * The page's one issue source: the server's live status of the shown source (PAR-1), else the shown model's issues, or
+ * the failed show's. Nothing while a model loads, as the desktop bar shows no issues while the build runs.
+ *
+ * @param state - What the page shows.
+ * @param liveStatus - The live state of each watched source, by project-relative path; absent from an older server.
+ * @returns The issues, whether the build failed and the source they are for.
+ */
+const pageIssuesOf = (
+  state: PageState,
+  liveStatus: Readonly<Record<string, TauViewerEntryStatus>> | undefined,
+): PageIssues => {
+  if (state.kind === 'failed') {
+    return { issues: state.issues, isFailed: true, sourceFile: state.sourceFile };
+  }
+  if (state.kind === 'ready') {
+    const { model } = state.current;
+    const entry = liveStatus?.[model.sourceFile ?? model.path];
+    if (entry !== undefined) {
+      return {
+        issues: entry.issues,
+        isFailed: entry.issues.some((issue) => issue.severity === 'error'),
+        sourceFile: model.sourceFile,
+      };
+    }
+    return { issues: model.issues ?? [], isFailed: false, sourceFile: model.sourceFile };
+  }
+  return { issues: [], isFailed: false, sourceFile: undefined };
+};
 
 /** The card's height where the host's cap allows it (E5, G21). */
 const inlineHeight = 420;
@@ -107,18 +171,30 @@ const chatNotice = (route: ChatRoute, added?: Readonly<{ count: number; isRepeat
 /** The parts the person added to chat from one shown model, keyed `path#componentId`, in the order added. */
 type AddedParts = Readonly<{ modelKey: string; parts: ReadonlyMap<string, GeometryComponentReference> }>;
 
+/** Seeds the viewer from a model's saved view before the model is drawn (PAR-3). */
+type SeedViewer = (model: TauViewerModel, saved: TauViewerWorkbenchState | undefined) => void;
+
 /**
- * Follows the bridge: shows each model it hands over, keeping the last one on screen while the next loads. The
- * returned `show` takes a model the live link heard of; `select` is the agent's latest selection request.
+ * Follows the bridge: shows each model it hands over, keeping the last one on screen while the next loads, and seeds
+ * the viewer from the model's saved view before it is drawn. The returned `show` takes a model the live link heard of;
+ * `select` is the agent's latest selection request.
  */
 function useShownModel(
   bridge: HostBridge,
-): readonly [PageState, HostView, React.RefObject<((result: TauViewerShowResult) => void) | undefined>, SelectRequest] {
+  seedRef: React.RefObject<SeedViewer | undefined>,
+): readonly [
+  PageState,
+  HostView,
+  React.RefObject<((result: TauViewerShowResult) => void) | undefined>,
+  SelectRequest,
+  React.RefObject<((failure: ShowFailure) => void) | undefined>,
+] {
   const [state, setState] = useState<PageState>({ kind: 'waiting' });
   const [view, setView] = useState<HostView>(() => bridge.view());
   const [select, setSelect] = useState<SelectRequest>(undefined);
   const shownSha = useRef<string | undefined>(undefined);
   const showRef = useRef<((result: TauViewerShowResult) => void) | undefined>(undefined);
+  const failRef = useRef<((failure: ShowFailure) => void) | undefined>(undefined);
 
   useEffect(() => {
     let current = 0;
@@ -128,6 +204,12 @@ function useShownModel(
         setSelect({ modelSha: model.sha256, componentIds: result.select });
       }
       if (model.sha256 === shownSha.current) {
+        /* The same bytes may come with other issues, such as after a kernel was prepared: the bar follows them. */
+        setState((previous) =>
+          previous.kind === 'ready' && previous.current.model.sha256 === model.sha256
+            ? { kind: 'ready', current: { ...previous.current, model } }
+            : previous,
+        );
         return;
       }
       shownSha.current = model.sha256;
@@ -136,20 +218,27 @@ function useShownModel(
       setState((previous) => ({ kind: 'loading', model, loaded: 0, previous: previousOf(previous) }));
       const load = async (): Promise<void> => {
         try {
-          const artifact = await loadModel(bridge.callTool, model, (loaded) => {
-            if (request === current) {
-              setState((previous) => (previous.kind === 'loading' ? { ...previous, loaded } : previous));
-            }
-          });
+          const [artifact, saved] = await Promise.all([
+            loadModel(bridge.callTool, model, (loaded) => {
+              if (request === current) {
+                setState((previous) => (previous.kind === 'loading' ? { ...previous, loaded } : previous));
+              }
+            }),
+            readWorkbenchState(bridge.callTool, model),
+          ]);
           if (request === current) {
+            seedRef.current?.(model, saved);
             setState({ kind: 'ready', current: { model, artifact } });
           }
         } catch (error) {
           if (request === current) {
             shownSha.current = undefined;
+            const message = error instanceof Error ? error.message : String(error);
             setState((previous) => ({
               kind: 'failed',
-              message: error instanceof Error ? error.message : String(error),
+              message,
+              issues: [failureIssue(message, undefined)],
+              sourceFile: model.sourceFile,
               previous: previousOf(previous),
             }));
           }
@@ -158,26 +247,43 @@ function useShownModel(
       // async-iife: bootstrap — a host event starts the load; its outcome lands in state, and a newer model supersedes it.
       void load();
     };
+    const fail = ({ message, code, targetFile }: ShowFailure): void => {
+      /* A failed show supersedes a model still loading; the one on screen stays behind the issues. */
+      current += 1;
+      shownSha.current = undefined;
+      setState((previous) => ({
+        kind: 'failed',
+        message,
+        issues: [failureIssue(message, code)],
+        sourceFile: targetFile,
+        previous: previousOf(previous),
+      }));
+    };
     showRef.current = show;
+    failRef.current = fail;
     const unsubscribe = bridge.subscribe((event) => {
       if (event.type === 'context') {
         setView(event.view);
         return;
       }
       if (event.type === 'error') {
-        setState((previous) => ({ kind: 'failed', message: event.message, previous: previousOf(previous) }));
+        fail(event);
         return;
       }
       show(event.result);
     });
     return () => {
       showRef.current = undefined;
+      failRef.current = undefined;
       unsubscribe();
     };
-  }, [bridge]);
+  }, [bridge, seedRef]);
 
-  return [state, view, showRef, select] as const;
+  return [state, view, showRef, select, failRef] as const;
 }
+
+/** A show that failed, as the bridge reports it. */
+type ShowFailure = Readonly<{ message: string; code?: string | undefined; targetFile?: string | undefined }>;
 
 /** The agent's request to select components of one model (`show_model` with `select`). */
 type SelectRequest = Readonly<{ modelSha: string; componentIds: readonly string[] }> | undefined;
@@ -274,13 +380,18 @@ function LaneToggle({ children }: Readonly<{ children: React.ReactNode }>): Reac
 
 /**
  * What the canvas shows besides the model, in the shared stage: the download's progress, the server's build of a
- * change to the shown source, or the failure.
+ * change to the shown source, or the card's failure.
  *
  * @param state - Whether the page waits, loads, shows or failed, with the download's byte count.
  * @param building - The title of the shown source the server is building again, if it is.
- * @returns The loading pill with its share, the build, the failure, or `undefined` while waiting or showing.
+ * @param isInline - Whether the page is the card, which has no bar to list the failure in.
+ * @returns The loading pill with its share, the build, the card's failure, or `undefined` while waiting or showing.
  */
-const stageStatusOf = (state: PageState, building: string | undefined): ViewerStageStatus | undefined => {
+const stageStatusOf = (
+  state: PageState,
+  building: string | undefined,
+  isInline: boolean,
+): ViewerStageStatus | undefined => {
   if (state.kind === 'loading') {
     return {
       kind: 'loading',
@@ -289,7 +400,8 @@ const stageStatusOf = (state: PageState, building: string | undefined): ViewerSt
     };
   }
   if (state.kind === 'failed') {
-    return { kind: 'failed', message: state.message };
+    /* The tab lists a failure in the bar's issues, as desktop's editor does; the card has no bar. */
+    return isInline ? { kind: 'failed', message: state.message } : undefined;
   }
   return building === undefined ? undefined : { kind: 'loading', label: `Building ${building}` };
 };
@@ -304,7 +416,8 @@ const addedKeyOf = (model: TauViewerModel): string => model.sourceFile ?? model.
  * @returns The viewer in the composition the host asks for.
  */
 export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.JSX.Element {
-  const [state, view, showRef, select] = useShownModel(bridge);
+  const seedRef = useRef<SeedViewer | undefined>(undefined);
+  const [state, view, showRef, select, failRef] = useShownModel(bridge, seedRef);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
@@ -320,22 +433,39 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       graphicsBackend: 'webgl',
     },
   });
+  seedRef.current = (model, saved) => {
+    seedViewer(graphicsRef, entryPathOf(model), saved);
+  };
   const environment = useMemo(
     (): ViewerEnvironment => ({
       ...defaultViewerEnvironment,
       colorScheme: view.colorScheme,
+      /* The host's high-contrast theme and accent, as the Tau app passes its own (PAR-8). */
+      isHighContrast: view.isHighContrast,
+      accentColor: view.accentColor ?? defaultViewerEnvironment.accentColor,
       graphicsBackend: 'webgl',
       /* The page prints no status text of its own (E2). */
       showRenderFps: false,
       /* The view_state tool captures the live canvas (W6). */
       readableCanvas: true,
     }),
-    [view.colorScheme],
+    [view.accentColor, view.colorScheme, view.isHighContrast],
   );
   const shown = state.kind === 'ready' ? state.current : previousOf(state);
   const isInline = view.composition === 'inline';
   /* The tab opens with its panes beside a wide canvas; a narrow one keeps the canvas whole until asked. */
   const [isPanelOpen, setIsPanelOpen] = useState(() => globalThis.innerWidth >= 720);
+  /* What the lane remembers per project (PAR-7): once the shown model names its project, the lane opens as it was. */
+  const projectKey = shown?.model.projectKey;
+  const laneStore = useMemo(() => laneStoreFor(projectKey), [projectKey]);
+  useEffect(() => {
+    const { isOpen } = laneStore.readLane();
+    if (isOpen !== undefined) {
+      // oxlint-disable-next-line react/set-state-in-effect -- the project's saved lane state arrives with its model.
+      setIsPanelOpen(isOpen);
+    }
+  }, [laneStore]);
+  const previews = usePartPreviews(bridge, shown?.model);
   /* What the canvas draws follows the graphics actor, so Viewer settings and the panes change it as in the app. */
   const enableGrid = useSelector(graphicsRef, (snapshot) => snapshot.context.enableGrid);
   const enableAxes = useSelector(graphicsRef, (snapshot) => snapshot.context.enableAxes);
@@ -354,6 +484,25 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   const [liveStatus, setLiveStatus] = useState<Readonly<Record<string, TauViewerEntryStatus>> | undefined>(undefined);
   const shownSource = shown?.model.sourceFile;
   const status = shownSource === undefined ? undefined : liveStatus?.[shownSource];
+  /* Shows a source again once its kernel is prepared, reporting the outcome as a show or a failure. */
+  const showSource = useCallback(
+    (targetFile: string | undefined) => {
+      // async-iife: bootstrap — a finished preparation asks for the model again.
+      void (async () => {
+        try {
+          const result = await bridge.callTool('show_model', targetFile === undefined ? {} : { targetFile });
+          showRef.current?.(result as TauViewerShowResult);
+        } catch (error) {
+          failRef.current?.({
+            message: error instanceof Error ? error.message : String(error),
+            code: error instanceof ToolCallError ? error.code : undefined,
+            targetFile,
+          });
+        }
+      })();
+    },
+    [bridge, failRef, showRef],
+  );
   const isDrawn = useCallback((): boolean => {
     const { current } = latest;
     if (current.state.kind !== 'ready') {
@@ -379,6 +528,32 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
     [],
   );
   const linkRef = useRef<LiveLink | undefined>(undefined);
+  /* The Files pane's open (PAR-9): the server renders the file for this page alone, and the page shows it as it shows
+   * a model the agent showed, so neither the agent's last shown model nor another page moves. */
+  const openFile = useCallback(
+    async (path: string): Promise<void> => {
+      const pageId = linkRef.current?.pageId;
+      if (pageId === undefined) {
+        throw new Error('The viewer is not linked to Tau yet.');
+      }
+      const modelId = latest.current.shown?.model.id;
+      const result = await bridge.callTool(tauViewerToolName.appOpenFile, {
+        pageId,
+        path,
+        ...(modelId === undefined ? {} : { modelId }),
+      });
+      if (typeof result !== 'object' || result === null || !('model' in result)) {
+        throw new Error(`Tau could not open ${path}.`);
+      }
+      showRef.current?.(result as TauViewerShowResult);
+    },
+    [bridge, showRef],
+  );
+  /* One Files source per bridge: it lists in the shown model's project, and the live link tells it the files moved. */
+  const files = useMemo(
+    () => createFilesSource(bridge, { modelId: () => latest.current.shown?.model.id, openFile }),
+    [bridge, openFile],
+  );
   useEffect(() => {
     const link = startLiveLink(bridge.callTool, {
       view() {
@@ -401,7 +576,7 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 perspectiveZoom: cameraView.perspectiveZoom,
               };
         const { context } = graphicsRef.getSnapshot();
-        return viewStateOf({
+        const reported = viewStateOf({
           model,
           unit: unit.unit,
           camera,
@@ -410,7 +585,11 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
           composition: latest.current.view.composition,
           interactedAt: interactedAt.current,
           references: addedFrom(addedKeyOf(model)),
+          motion: motionOf(context.kinematicsRef, unit.unitId),
         });
+        /* The display, section and measurements the server keeps in the view record. */
+        const settings = liveViewSettings(graphicsRef);
+        return settings === undefined ? reported : { ...reported, settings };
       },
       follows: () => latest.current.view.follows,
       linked: () => latest.current.view.linked,
@@ -421,6 +600,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       status(next) {
         setLiveStatus(next);
       },
+      filesVersion(filesVersion) {
+        files.setFilesVersion(filesVersion);
+      },
       async capture() {
         if (!(await whenDrawn(isDrawn))) {
           return { error: 'The viewer has not drawn a model yet.' };
@@ -429,13 +611,19 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         const region = rootRef.current?.querySelector(`#${canvasRegionId}`) ?? rootRef.current;
         return region === null ? { error: 'The viewer is not on screen.' } : captureLiveView(region);
       },
+      pose(command) {
+        const unit = shownUnit();
+        if (unit !== undefined && latest.current.shown?.model.id === command.modelId) {
+          applyPoseCommand(graphicsRef.getSnapshot().context.kinematicsRef, unit.unitId, command);
+        }
+      },
     });
     linkRef.current = link;
     return () => {
       linkRef.current = undefined;
       link.stop();
     };
-  }, [addedFrom, bridge, graphicsRef, isDrawn, showRef, shownUnit]);
+  }, [addedFrom, bridge, files, graphicsRef, isDrawn, showRef, shownUnit]);
 
   /* Report the view once a newly shown model is drawn, so `view_state` finds the page without waiting for its held
    * sync to come back: a card's first sync left before it had a model. */
@@ -516,11 +704,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
   >(undefined);
   /* Request ids only grow, so a request made after the lane closed still reads as new. */
   const paneRequests = useRef(0);
-  const openPane = useCallback((pane: WorkbenchPaneId) => {
-    paneRequests.current += 1;
-    setIsPanelOpen(true);
-    setOpenPaneRequest({ pane, requestId: paneRequests.current });
-  }, []);
+  const openPane = useCallback(
+    (pane: WorkbenchPaneId) => {
+      paneRequests.current += 1;
+      laneStore.writeLaneOpen(true);
+      setIsPanelOpen(true);
+      setOpenPaneRequest({ pane, requestId: paneRequests.current });
+    },
+    [laneStore],
+  );
   /* One verb for the part menu, the Model pane's rows and the card: the part joins the set, the chat gets it along
    * the host's route, and the next sync reports the set to view_state (D2). */
   const addPartToChat = useCallback(
@@ -576,8 +768,9 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
         addToChatLabel: chatAction[view.chatRoute],
         openPane,
         reveal,
+        openPreview: previews.openPartGallery,
       }),
-    [addPartToChat, openPane, reveal, view.chatRoute],
+    [addPartToChat, openPane, previews.openPartGallery, reveal, view.chatRoute],
   );
   const rowMenus = useMemo(() => createModelComponentActionMenus(componentActions), [componentActions]);
   /* The selected part is the graphics actor's first selected component, whichever surface picked it. */
@@ -629,14 +822,21 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
       setOpenPaneRequest(undefined);
     }
     isToggleFocusPending.current = toggleRef.current !== null && toggleRef.current === document.activeElement;
+    laneStore.writeLaneOpen(!isPanelOpen);
     setIsPanelOpen(!isPanelOpen);
-  }, [isPanelOpen]);
+  }, [isPanelOpen, laneStore]);
   useEffect(() => {
     if (isToggleFocusPending.current) {
       isToggleFocusPending.current = false;
       toggleRef.current?.focus();
     }
   }, [isPanelOpen]);
+  /* The page's Capture and render timeout in the shared bar, as the Tau app adds its own (PAR-8). */
+  const captureRegion = useCallback(
+    () => rootRef.current?.querySelector(`#${canvasRegionId}`) ?? rootRef.current ?? undefined,
+    [],
+  );
+  const barControls = usePageViewerControls({ bridge, model: shown?.model, captureRegion, onNotice: setNotice });
   const toggle = <WorkbenchToggleButton ref={toggleRef} isOpen={isPanelOpen} onClick={togglePanel} />;
   return (
     <ViewerEnvironmentProvider value={environment}>
@@ -677,14 +877,24 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                     regionLabel='Model viewer'
                     partMenu={isInline ? undefined : partMenu}
                     isModelShown={shown !== undefined}
-                    status={stageStatusOf(state, status?.building === true ? shown?.model.title : undefined)}
+                    status={stageStatusOf(state, status?.building === true ? shown?.model.title : undefined, isInline)}
                     className='min-h-0 min-w-0 flex-1'
                     /* The app's bar, over the canvas, growing upward as tools start (viewer parity V2). */
                     controls={
                       isInline ? undefined : (
                         <>
                           {notice === undefined ? null : <Notice text={notice} />}
-                          <ViewerControls />
+                          <PageViewerIssues
+                            bridge={bridge}
+                            source={pageIssuesOf(state, liveStatus)}
+                            chatRoute={view.chatRoute}
+                            onPrepared={showSource}
+                            onNotice={setNotice}
+                          >
+                            {({ segment, list }) => (
+                              <ViewerControls {...barControls} leading={segment} aboveControls={list} />
+                            )}
+                          </PageViewerIssues>
                         </>
                       )
                     }
@@ -742,10 +952,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                 </div>
                 {isInline || !isPanelOpen ? null : (
                   <WorkbenchLane
+                    key={projectKey}
                     bridge={bridge}
                     model={shown?.model}
                     status={liveStatus}
                     graphicsRef={graphicsRef}
+                    files={files}
+                    store={laneStore}
+                    thumbnails={previews.thumbnails}
+                    openPartGallery={previews.openPartGallery}
                     reveal={reveal}
                     componentActions={rowMenus}
                     openPaneRequest={openPaneRequest}
@@ -775,6 +990,15 @@ export function ViewerPage({ bridge }: Readonly<{ bridge: HostBridge }>): React.
                   ) : null}
                 </div>
               ) : null}
+              {previews.galleryRequest === undefined ? null : (
+                <PagePartGallery
+                  key={`${previews.galleryRequest.unitId}:${previews.galleryRequest.componentId}`}
+                  thumbnails={previews.thumbnails}
+                  request={previews.galleryRequest}
+                  actions={componentActions}
+                  onClose={previews.closePartGallery}
+                />
+              )}
             </main>
           </GraphicsProvider>
         </TooltipProvider>

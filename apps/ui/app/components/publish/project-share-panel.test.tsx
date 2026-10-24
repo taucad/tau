@@ -801,7 +801,10 @@ describe('ProjectSharePanel', () => {
 
     renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
 
-    await userEvent.type(await screen.findByRole('textbox', { name: /share with emails/i }), 'Team@Example.com{Enter}');
+    await userEvent.type(
+      await screen.findByRole('combobox', { name: /share with emails/i }),
+      'Team@Example.com{Enter}',
+    );
     await userEvent.click(screen.getByRole('button', { name: /add access/i }));
 
     await waitFor(() => {
@@ -879,7 +882,7 @@ describe('ProjectSharePanel', () => {
     });
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
-    expect(screen.queryByRole('textbox', { name: /share with emails/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /share with emails/i })).not.toBeInTheDocument();
     expect(toastSuccessMock).toHaveBeenCalledWith('Visibility updated');
   });
 
@@ -904,7 +907,7 @@ describe('ProjectSharePanel', () => {
       });
     });
 
-    expect(await screen.findByRole('textbox', { name: /share with emails/i })).toBeInTheDocument();
+    expect(await screen.findByRole('combobox', { name: /share with emails/i })).toBeInTheDocument();
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
   });
 
@@ -929,7 +932,7 @@ describe('ProjectSharePanel', () => {
     renderPanel(<ProjectSharePanel projectId='proj_invalid_email' projectName='Demo' entryPath='main.ts' />);
 
     await userEvent.type(
-      await screen.findByRole('textbox', { name: /share with specific emails/i }),
+      await screen.findByRole('combobox', { name: /share with specific emails/i }),
       'not-an-email{Enter}',
     );
 

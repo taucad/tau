@@ -288,6 +288,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
                 'min-w-0 truncate text-sm',
                 fieldHasValue ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
               )}
+              role='group'
               aria-label={`Parameter: ${prettyLabel}`}
             >
               <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
@@ -324,7 +325,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
         </div>
       </div>
       {descriptionText ? (
-        <div className='text-xs text-muted-foreground/70'>
+        <div className='text-xs text-muted-foreground'>
           <HighlightText text={descriptionText} searchTerm={formContext.searchTerm} />
         </div>
       ) : (

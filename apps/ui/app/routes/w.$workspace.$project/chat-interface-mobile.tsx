@@ -3,16 +3,17 @@ import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { ChatInterfaceNav } from '#routes/w.$workspace.$project/chat-interface-nav.js';
-import { Tabs, TabsContent } from '@taucad/ui/components/tabs';
+import { ChatInterfaceNav, surfaceTitle } from '#routes/w.$workspace.$project/chat-interface-nav.js';
+import { mobileWorkbenchNavigationHeight } from '#components/mobile-workbench-navigation.js';
+import type { MobilePanelId } from '#constants/editor.constants.js';
 import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-interface-state.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 
-/* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its tab
- * first opens. Only one `TabsContent` is mounted at a time, so a phone that
+/* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
+ * first opens. Only the active surface is mounted, so a phone that
  * stays on the chat never downloads the editor (Monaco and the dockview
  * workbench), parameters, converter or revision panels. */
 const ChatFileTree = lazy(async () => {
@@ -44,6 +45,44 @@ const ChatRevisions = lazy(async () => {
   return { default: module.ChatRevisions };
 });
 
+/** The active surface's panel; the model has none, since the viewer behind the sheet is the model. */
+function MobileSurface({ id }: { readonly id: MobilePanelId }): React.ReactNode {
+  switch (id) {
+    case 'chat': {
+      return (
+        <ChatHistoryGate>
+          <ChatHistory />
+        </ChatHistoryGate>
+      );
+    }
+    case 'files': {
+      return <ChatFileTree />;
+    }
+    case 'parameters': {
+      return <ChatParameters />;
+    }
+    case 'editor': {
+      return <ChatEditorLayout />;
+    }
+    case 'details': {
+      return <ChatDetails />;
+    }
+    case 'converter': {
+      return <ChatConverter />;
+    }
+    case 'share': {
+      return <ProjectShareWorkbenchPanel />;
+    }
+    case 'revisions': {
+      // The pane's own title and Close, as every other panel here (L3-F15).
+      return <ChatRevisions />;
+    }
+    case 'viewer': {
+      return null;
+    }
+  }
+}
+
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
     useChatInterfaceState();
@@ -56,7 +95,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
         className={cn(
           // --nav-height is the height of the navigation tabs
           'absolute inset-0 size-full',
-          '[--nav-height:calc(var(--spacing)*11)]', // 10 units of spacing
+          mobileWorkbenchNavigationHeight,
           'md:hidden', // Hidden on desktop
           // The workspace lands over the skeleton's background rather than snapping in.
           'animate-in duration-200 fade-in-50 motion-reduce:animate-none',
@@ -67,7 +106,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
         <div
           className='relative h-full'
           style={{
-            paddingBottom: isViewerTab ? 'var(--nav-height)' : `calc(${Number(activeSnapPoint)} * 100dvh)`,
+            paddingBottom: isViewerTab ? 'var(--nav-offset)' : `calc(${Number(activeSnapPoint)} * 100dvh)`,
           }}
         >
           <ViewerDockview />
@@ -102,6 +141,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
               className={cn(
                 'flex-1 rounded-t-lg border-t bg-sidebar',
                 'z-40', // Position below the navigation tabs
+                // The drawer is portalled out of the shell, so it takes the nav's height variables itself.
+                mobileWorkbenchNavigationHeight,
                 //
                 'data-[vaul-drawer-direction=bottom]:max-h-[100dvh]',
                 'data-[vaul-drawer-direction=bottom]:mt-0',
@@ -111,49 +152,26 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
                 height: '100%',
               }}
             >
-              {/* Tab contents */}
-              <Tabs
-                value={activeTab}
+              {/* The active surface, named by its title; the nav's destinations are buttons, not tabs. */}
+              <section
+                aria-label={surfaceTitle(activeTab)}
+                data-slot='mobile-surface'
                 className={cn(
                   'flex h-full flex-col p-0',
                   // While typing, the drawer is the frame above the keyboard and the panel fills it.
                   'group-data-[keyboard=open]/drawer-content:h-auto! group-data-[keyboard=open]/drawer-content:min-h-0 group-data-[keyboard=open]/drawer-content:flex-1',
                 )}
                 style={{
-                  height: `calc(${Number(activeSnapPoint)} * 100dvh - var(--spacing)*12)`,
+                  // The visible sheet less its grabber row, its 1px top border and the nav (with the home-indicator inset) over its foot.
+                  height: `calc(${Number(activeSnapPoint)} * 100dvh - var(--drawer-handle-height) - var(--nav-offset) - 1px)`,
                 }}
-                onValueChange={handleTabChange}
               >
-                <Suspense fallback={null}>
-                  <TabsContent enableAnimation={false} value='chat' className='flex h-full flex-col'>
-                    <ChatHistoryGate>
-                      <ChatHistory />
-                    </ChatHistoryGate>
-                  </TabsContent>
-                  <TabsContent enableAnimation={false} value='files' className='flex h-full flex-col'>
-                    <ChatFileTree />
-                  </TabsContent>
-                  <TabsContent enableAnimation={false} value='parameters' className='flex h-full flex-col'>
-                    <ChatParameters />
-                  </TabsContent>
-                  <TabsContent enableAnimation={false} value='editor' className='flex h-full flex-col'>
-                    <ChatEditorLayout />
-                  </TabsContent>
-                  <TabsContent enableAnimation={false} value='details' className='flex h-full flex-col'>
-                    <ChatDetails />
-                  </TabsContent>
-                  <TabsContent enableAnimation={false} value='converter' className='flex h-full flex-col'>
-                    <ChatConverter />
-                  </TabsContent>
-                  <TabsContent enableAnimation={false} value='share' className='flex h-full flex-col'>
-                    <ProjectShareWorkbenchPanel />
-                  </TabsContent>
-                  <TabsContent enableAnimation={false} value='revisions' className='flex h-full flex-col'>
-                    {/* The pane's own title and Close, as every other panel here (L3-F15). */}
-                    <ChatRevisions />
-                  </TabsContent>
-                </Suspense>
-              </Tabs>
+                <div className='flex h-full flex-1 flex-col'>
+                  <Suspense fallback={null}>
+                    <MobileSurface id={activeTab} />
+                  </Suspense>
+                </div>
+              </section>
             </DrawerContent>
           ) : null}
         </Drawer>
@@ -166,9 +184,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
             '[:root:has([data-slot=drawer-content][data-keyboard=open])_&]:hidden',
           )}
         >
-          <Tabs value={activeTab} onValueChange={handleTabChange}>
-            <ChatInterfaceNav className='h-(--nav-height)' />
-          </Tabs>
+          <ChatInterfaceNav activeTab={activeTab} onTabChange={handleTabChange} />
         </div>
       </div>
     </ChatInterfaceSessionGate>

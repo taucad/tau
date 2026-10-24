@@ -758,12 +758,32 @@ describe('project route session identity', () => {
         line: { kind: 'unknown' },
       }),
     );
-    tauCloudIntent.set(projectA, 'open');
-    renderRouteProvider();
+    const lifecycle = deferred<Response>();
+    const fetchProjects = vi.spyOn(globalThis, 'fetch').mockReturnValue(lifecycle.promise);
+    try {
+      tauCloudIntent.set(projectA, 'open');
+      renderRouteProvider();
 
-    await waitFor(() => {
-      expect(connectRemote).toHaveBeenCalledWith('tau');
-    });
+      await waitFor(() => {
+        expect(fetchProjects).toHaveBeenCalledWith(
+          expect.stringMatching(/\/v1\/projects$/u),
+          expect.objectContaining({ credentials: 'include' }),
+        );
+      });
+      expect(connectRemote).not.toHaveBeenCalled();
+      await act(async () => {
+        lifecycle.resolve(
+          Response.json([
+            { id: projectA, name: 'Project A', role: 'owner', cloudState: 'active', canDeleteCloud: false },
+          ]),
+        );
+      });
+      await waitFor(() => {
+        expect(connectRemote).toHaveBeenCalledWith('tau');
+      });
+    } finally {
+      fetchProjects.mockRestore();
+    }
   });
 
   it('forwards a trusted created chat to the active project session', async () => {

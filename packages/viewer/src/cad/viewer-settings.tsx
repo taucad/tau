@@ -1,3 +1,4 @@
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
 import {
@@ -54,7 +55,11 @@ const timeoutOptions: TimeoutOption[] = [
   { value: 600_000, label: '10 min' },
 ];
 
-const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
+const upDirectionOptions: Array<{
+  value: UpDirection;
+  label: React.ReactNode;
+  ariaLabel: string;
+}> = [
   { value: 'x', label: <AxisLabel axis='x' />, ariaLabel: 'X-up' },
   { value: 'y', label: <AxisLabel axis='y' />, ariaLabel: 'Y-up' },
   { value: 'z', label: <AxisLabel axis='z' />, ariaLabel: 'Z-up' },
@@ -238,7 +243,10 @@ export function ViewerSettings({
 
   const handlePostProcessingToggle = useCallback(
     (checked: boolean) => {
-      graphicsRef.send({ type: 'setPostProcessingVisibility', payload: checked });
+      graphicsRef.send({
+        type: 'setPostProcessingVisibility',
+        payload: checked,
+      });
     },
     [graphicsRef],
   );
@@ -258,6 +266,7 @@ export function ViewerSettings({
     [onOperationTimeoutChange],
   );
 
+  const controlSize = useViewerControlSize();
   const operationTimeoutValue = operationTimeout?.value;
   const operationTimeoutDefault = operationTimeout?.defaultValue;
   const currentTimeoutOption = useMemo(
@@ -276,7 +285,7 @@ export function ViewerSettings({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button variant='overlay' size='icon' aria-label='Viewer settings' className={cn(className)}>
+            <Button variant='overlay' size={controlSize} aria-label='Viewer settings' className={cn(className)}>
               <Settings />
             </Button>
           </DropdownMenuTrigger>

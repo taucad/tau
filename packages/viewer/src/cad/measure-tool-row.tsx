@@ -1,3 +1,4 @@
+import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import { useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { ChevronUp, Info, Pin, PinOff, Trash } from 'lucide-react';
@@ -55,13 +56,14 @@ function MeasurementEvidence({
   details?: string;
   label: string;
 }>): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const [open, setOpen] = useState(false);
   return (
     <Tooltip open={open} onOpenChange={setOpen}>
       <TooltipTrigger asChild>
         <Button
           variant='ghost'
-          size='icon-xs'
+          size={isTouch ? 'icon-touch' : 'icon-xs'}
           aria-label={`Measurement source and accuracy for ${label}`}
           onClick={() => {
             setOpen(true);
@@ -83,6 +85,7 @@ function MeasurementEvidence({
  * @public
  */
 export function MeasurementList({ onEmptied }: Readonly<{ onEmptied: () => void }>): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const graphicsRef = useGraphics();
   const measurements = useGraphicsSelector((state) => state.context.measurements);
   const hoveredId = useGraphicsSelector((state) => state.context.hoveredMeasurementId);
@@ -154,7 +157,7 @@ export function MeasurementList({ onEmptied }: Readonly<{ onEmptied: () => void 
             <Collapsible>
               <CollapsibleTrigger
                 data-measurement-summary=''
-                className='group/measurement flex min-h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent'
+                className={`group/measurement flex w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-sm hover:bg-accent ${isTouch ? 'min-h-11' : 'min-h-7'}`}
                 aria-label={`${operationLabels[operation]}: ${label}${measurement.status === 'out-of-date' ? ', out of date' : ''}`}
               >
                 <MeasureOperationIcon operation={operation} aria-hidden className='size-4 shrink-0' />
@@ -173,7 +176,7 @@ export function MeasurementList({ onEmptied }: Readonly<{ onEmptied: () => void 
                   {name ? <span className='min-w-0 break-words'>{name}</span> : null}
                   <Button
                     variant='ghost'
-                    size='icon-xs'
+                    size={isTouch ? 'icon-touch' : 'icon-xs'}
                     aria-label={`Pin ${label}`}
                     aria-pressed={Boolean(measurement.isPinned)}
                     className={measurement.isPinned ? 'text-foreground' : 'text-muted-foreground'}
@@ -187,7 +190,7 @@ export function MeasurementList({ onEmptied }: Readonly<{ onEmptied: () => void 
                     {measurement.isPinned ? <Pin /> : <PinOff />}
                   </Button>
                   <CopyButton
-                    size='icon-xs'
+                    size={isTouch ? 'icon-touch' : 'icon-xs'}
                     tooltip={`Copy full precision for ${label}`}
                     aria-label={`Copy full precision for ${label}`}
                     disabled={measurement.status === 'pending' || measurement.status === 'unavailable'}
@@ -199,7 +202,7 @@ export function MeasurementList({ onEmptied }: Readonly<{ onEmptied: () => void 
                   />
                   <Button
                     variant='ghost'
-                    size='icon-xs'
+                    size={isTouch ? 'icon-touch' : 'icon-xs'}
                     aria-label={`Remove ${label}`}
                     className='text-muted-foreground hover:text-destructive'
                     onClick={(event) => {
@@ -266,6 +269,7 @@ export function MeasureOptions({
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
 }>): React.JSX.Element {
+  const isTouch = useViewerControlSize() === 'icon-touch';
   const graphicsRef = useGraphics();
   const count = useGraphicsSelector((state) => state.context.measurements.length);
   const mode = useGraphicsSelector((state) => state.context.measureMode);
@@ -306,7 +310,7 @@ export function MeasureOptions({
         }}
       >
         <PopoverTrigger asChild>
-          <Button variant='ghost' size='xs' className='max-w-40 truncate'>
+          <Button variant='ghost' size={isTouch ? 'touch' : 'xs'} className='max-w-40 truncate'>
             Targets: {mode === 'auto' ? 'Auto' : 'Points'} · {filter === 'auto' ? 'All' : filter}
           </Button>
         </PopoverTrigger>
@@ -339,7 +343,7 @@ export function MeasureOptions({
             </label>
             <Button
               variant='outline'
-              size='sm'
+              size={isTouch ? 'touch' : 'sm'}
               aria-label={snapEnabled ? 'Turn snapping off' : 'Turn snapping on'}
               aria-pressed={!snapEnabled}
               onClick={() => {
@@ -448,7 +452,7 @@ export function MeasureOptions({
             {catalogHasMore && (
               <Button
                 variant='outline'
-                size='sm'
+                size={isTouch ? 'touch' : 'sm'}
                 onClick={() => {
                   graphicsRef.send({
                     type: 'requestMeasureCatalog',
@@ -461,7 +465,7 @@ export function MeasureOptions({
             )}
             <Button
               variant='outline'
-              size='sm'
+              size={isTouch ? 'touch' : 'sm'}
               disabled={!activeCandidateId}
               onClick={() => {
                 graphicsRef.send({
@@ -475,7 +479,7 @@ export function MeasureOptions({
             </Button>
             <Button
               variant='default'
-              size='sm'
+              size={isTouch ? 'touch' : 'sm'}
               disabled={!activeCandidateId}
               onClick={() => {
                 graphicsRef.send({ type: 'requestMeasureCandidateCommit' });
@@ -496,7 +500,7 @@ export function MeasureOptions({
       ) : (
         <Button
           variant='ghost'
-          size='xs'
+          size={isTouch ? 'touch' : 'xs'}
           className='gap-1 tabular-nums'
           aria-expanded={expanded}
           onClick={(event) => {
@@ -518,7 +522,7 @@ export function MeasureOptions({
       )}
       <Button
         variant='ghost'
-        size='xs'
+        size={isTouch ? 'touch' : 'xs'}
         className=''
         disabled={count === 0}
         onClick={() => {

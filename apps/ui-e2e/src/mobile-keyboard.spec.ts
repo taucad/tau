@@ -19,7 +19,18 @@ import {
  */
 
 const drawer = '[data-slot="drawer-content"]';
-const navTab = (name: string): Locator => selectors.getByRole('tab', { name, exact: true });
+const navButton = (name: string): Locator =>
+  selectors.getByRole('navigation', { name: 'Workbench' }).getByRole('button', { name, exact: true });
+/** Secondary surfaces open from the All surfaces sheet. */
+const openSurface = async (name: string): Promise<void> => {
+  await target.click(navButton('All'), { touch: true });
+  await target.click(
+    selectors.getByRole('dialog', { name: 'All surfaces' }).getByRole('button', { name, exact: true }),
+    {
+      touch: true,
+    },
+  );
+};
 
 beforeEach(async () => {
   // A phone: coarse pointer, so fields take their 16px touch size, and taps.
@@ -46,20 +57,20 @@ test.each([{ pan: true }, { pan: false }])(
   async ({ pan }) => {
     await expectTypable(selectors.getByCss(composerSelector).first(), { pan });
     // The nav would ride up over the composer with Safari's pan, so it steps aside while typing.
-    await expect.poll(async () => target.isVisible(navTab('Files'))).toBe(false);
+    await expect.poll(async () => target.isVisible(navButton('Chat'))).toBe(false);
 
     await dismissIosKeyboard();
-    await expect.poll(async () => target.isVisible(navTab('Files'))).toBe(true);
+    await expect.poll(async () => target.isVisible(navButton('Chat'))).toBe(true);
   },
 );
 
 test('keeps the file filter above the keyboard', async () => {
-  await target.click(navTab('Files'), { touch: true });
+  await openSurface('Files');
   await expectTypable(selectors.getByCss(`${drawer} input[placeholder="Filter files…"]`).first());
 });
 
 test('keeps the details fields above the keyboard, scrolling a low one into view', async () => {
-  await target.click(navTab('Details'), { touch: true });
+  await openSurface('Details');
   await expectTypable(selectors.getByCss(`${drawer} textarea`).first());
   await dismissIosKeyboard();
   await expectTypable(selectors.getByCss(`${drawer} [data-slot="input-tags-input"]`).first());

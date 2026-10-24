@@ -1,3 +1,4 @@
+import { useResponsiveSurfaceContainer } from '#hooks/responsive-surface.js';
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { formatKeyCombination, setPlatform, getPlatform } from '#utils/keys.js';
@@ -162,7 +163,8 @@ function serializeEvent(event: KeyboardEvent): string {
  * Check if the event target is an editable element.
  */
 function isEditableTarget(target: EventTarget | undefined): boolean {
-  if (!target || !(target instanceof HTMLElement)) {
+  const Element = (target as { ownerDocument?: Document } | undefined)?.ownerDocument?.defaultView?.HTMLElement;
+  if (!Element || !(target instanceof Element)) {
     return false;
   }
 
@@ -193,7 +195,8 @@ function isEditableTarget(target: EventTarget | undefined): boolean {
  * Check if the event target is inside a scoped container (dialog, etc.).
  */
 function isInsideScopedContainer(target: EventTarget | undefined): boolean {
-  if (!target || !(target instanceof HTMLElement)) {
+  const Element = (target as { ownerDocument?: Document } | undefined)?.ownerDocument?.defaultView?.HTMLElement;
+  if (!Element || !(target instanceof Element)) {
     return false;
   }
 
@@ -243,6 +246,7 @@ function modifiersEqual(a: ModifierState, b: ModifierState): boolean {
  * @public
  */
 export function KeyboardProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  const container = useResponsiveSurfaceContainer();
   const [modifiers, setModifiers] = useState<ModifierState>(initialModifiers);
   const [detectedPlatform, setDetectedPlatform] = useState(getPlatform);
   const modifiersRef = useRef<ModifierState>(initialModifiers);
@@ -281,6 +285,8 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
   }, []);
 
   useEffect(() => {
+    const ownerDocument = container?.ownerDocument ?? document;
+    const ownerWindow = ownerDocument.defaultView ?? globalThis;
     // Detect and set platform on mount
     const platform = detectPlatform();
     setPlatform(platform);
@@ -380,7 +386,7 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
      * Handle visibility change: reset modifiers when tab hidden.
      */
     const handleVisibilityChange = (): void => {
-      if (document.hidden) {
+      if (ownerDocument.hidden) {
         updateModifiers(initialModifiers);
       }
     };
@@ -394,20 +400,20 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
     };
 
     // Attach single set of listeners
-    globalThis.addEventListener('keydown', handleKeyDown, { capture: true });
-    globalThis.addEventListener('keyup', handleKeyUp);
-    globalThis.addEventListener('blur', handleBlur);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    globalThis.addEventListener('pointerdown', handlePointerDown);
+    ownerWindow.addEventListener('keydown', handleKeyDown, { capture: true });
+    ownerWindow.addEventListener('keyup', handleKeyUp);
+    ownerWindow.addEventListener('blur', handleBlur);
+    ownerDocument.addEventListener('visibilitychange', handleVisibilityChange);
+    ownerWindow.addEventListener('pointerdown', handlePointerDown);
 
     return () => {
-      globalThis.removeEventListener('keydown', handleKeyDown, { capture: true });
-      globalThis.removeEventListener('keyup', handleKeyUp);
-      globalThis.removeEventListener('blur', handleBlur);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      globalThis.removeEventListener('pointerdown', handlePointerDown);
+      ownerWindow.removeEventListener('keydown', handleKeyDown, { capture: true });
+      ownerWindow.removeEventListener('keyup', handleKeyUp);
+      ownerWindow.removeEventListener('blur', handleBlur);
+      ownerDocument.removeEventListener('visibilitychange', handleVisibilityChange);
+      ownerWindow.removeEventListener('pointerdown', handlePointerDown);
     };
-  }, []);
+  }, [container]);
 
   const contextValue = useMemo<KeyboardContextValue>(
     () => ({ modifiers, platform: detectedPlatform, register, unregister }),

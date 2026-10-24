@@ -43,14 +43,25 @@ afterEach(() => {
 });
 
 describe('Tags', () => {
+  it('keeps a name when existing tags hide the placeholder', () => {
+    render(
+      <Tags tags={['reviewed']} onTagsChange={vi.fn()}>
+        <TagsTrigger placeholder='Add tags…' />
+      </Tags>,
+    );
+
+    expect(screen.getByRole('combobox', { name: 'Add tags…' })).toHaveAttribute('placeholder', '');
+  });
+
   it('adds normalized tags with Enter', async () => {
     const user = userEvent.setup();
     const onTagsChange = vi.fn();
     render(<TagsHarness onTagsChange={onTagsChange} />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Tags' })).toHaveAccessibleName('Tags');
     expect(onTagsChange).toHaveBeenLastCalledWith(['friend@example.com']);
   });
 
@@ -59,7 +70,7 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness onTagsChange={onTagsChange} shouldRenderNextFocusable />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'Friend@Example.com');
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Friend@Example.com');
     await user.tab();
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();
@@ -72,7 +83,7 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness initialTags={['friend@example.com']} onTagsChange={onTagsChange} />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'Friend@Example.com{Enter}');
 
     expect(screen.getAllByText('friend@example.com')).toHaveLength(1);
     expect(onTagsChange).not.toHaveBeenCalled();
@@ -95,7 +106,7 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness initialTags={['friend@example.com', 'team@example.com']} onTagsChange={onTagsChange} />);
 
-    const input = screen.getByRole('textbox', { name: 'Tags' });
+    const input = screen.getByRole('combobox', { name: 'Tags' });
     await user.click(input);
     await user.keyboard('{Backspace}');
 
@@ -109,7 +120,7 @@ describe('Tags', () => {
     const onTagsChange = vi.fn();
     render(<TagsHarness initialTags={['friend@example.com']} isDisabled onTagsChange={onTagsChange} />);
 
-    await user.type(screen.getByRole('textbox', { name: 'Tags' }), 'team@example.com{Enter}');
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'team@example.com{Enter}');
     await user.click(screen.getByRole('button', { name: 'Remove friend@example.com' }));
 
     expect(screen.getByText('friend@example.com')).toBeInTheDocument();

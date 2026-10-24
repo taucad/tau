@@ -184,7 +184,13 @@ function ManifestIssueLines({ issue }: { readonly issue: ProjectDiscoveryIssue }
  *
  * @returns The library.
  */
-export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1 | 2 }): React.JSX.Element {
+export function ProjectLibrary({
+  headingLevel = 1,
+  emptyComposer,
+}: {
+  readonly headingLevel?: 1 | 2;
+  /** Optional host-owned composer for an embedded library. */ readonly emptyComposer?: ReactNode;
+}): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
   /*
    * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
@@ -528,7 +534,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       />
 
       {workspaceBindingRepairs.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Workspace link repair'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Workspace link repair'>
           {workspaceBindingRepairs.map((repair) => (
             <div
               key={repair.canonicalWorkspaceId}
@@ -557,7 +563,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       )}
 
       {conflicts.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Project conflicts'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Project conflicts'>
           {conflicts.map((conflict) => {
             const key = `${conflict.locator.storageRootKey}:${conflict.locator.relativeDirectory}`;
             const label =
@@ -603,7 +609,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       )}
 
       {degradedProjects.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Projects needing repair'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Projects needing repair'>
           {degradedProjects.map((project) => (
             <div key={project.id} className='flex items-center gap-3 rounded-md border border-warning/40 p-3'>
               <AlertCircle className='size-4 shrink-0 text-warning' />
@@ -627,7 +633,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
       )}
 
       {recoveries.length > 0 && (
-        <div className='mb-6 space-y-2' aria-label='Project recovery'>
+        <div role='group' className='mb-6 space-y-2' aria-label='Project recovery'>
           {recoveries.map((recovery) => (
             <div
               key={recovery.operationId}
@@ -713,6 +719,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
         </div>
       ) : (
         <UnifiedProjectList
+          emptyComposer={emptyComposer}
           rows={toLibraryRows({ projects, held: heldProjects, cloud: cloudProjects, includeCloudOnly: !showDeleted })}
           isCatalogUnavailable={!showDeleted && auth === 'authed' && (cloudPending || isCloudFailed)}
           controls={viewControls}
@@ -780,6 +787,7 @@ export function ProjectLibrary({ headingLevel = 1 }: { readonly headingLevel?: 1
 
 type UnifiedProjectListProps = {
   readonly isCatalogUnavailable: boolean;
+  readonly emptyComposer?: ReactNode;
   readonly controls: ReactNode;
   readonly isLoading: boolean;
   readonly rows: LibraryRow[];
@@ -807,6 +815,7 @@ const defaultPageSize = 20;
 const pageSizeOptions = [defaultPageSize, 50, 100, 150, 200];
 
 function UnifiedProjectList({
+  emptyComposer,
   rows,
   viewMode,
   actions,
@@ -883,7 +892,7 @@ function UnifiedProjectList({
                   <p className='text-sm'>Start by describing what you want to build, or create from code</p>
                 </div>
               </div>
-              <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />
+              {emptyComposer ?? <NewProjectChatComposer enableAutoFocus={false} className='shadow-none' />}
               <div className='flex items-center justify-center gap-4 text-sm text-muted-foreground'>
                 <div className='h-px flex-1 bg-border' />
                 <span>or</span>
@@ -1077,6 +1086,7 @@ export function ProjectLibraryCard({
             <TooltipTrigger asChild>
               <div
                 className='flex w-fit max-w-full items-center gap-1.5 px-2 text-xs text-muted-foreground'
+                role='group'
                 aria-label={`Location: ${fullLocationLabel}`}
               >
                 <LocationIcon className='size-3 shrink-0' />

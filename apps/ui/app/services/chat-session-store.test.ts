@@ -455,7 +455,9 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
           type: 'setActiveExecution',
           execution: { kind: 'tau', model: 'model-b', hostId: scenario === 'same host' ? 'host-a' : 'host-b' },
         });
-        await vi.waitFor(() => expect(deps.patchChat).toHaveBeenCalled());
+        await vi.waitFor(() => {
+          expect(deps.patchChat).toHaveBeenCalled();
+        });
         if (scenario === 'released save') {
           // Disposing the session cancels its persistence effect; a late write
           // must not replace the observation belonging to a future session.
@@ -468,18 +470,22 @@ describe('ChatSessionStore — host command/watch cutover (PV-S10/S11)', () => {
             type: 'setActiveExecution',
             execution: { kind: 'tau', model: 'model-c', hostId: 'host-b' },
           });
-          await vi.waitFor(() => expect(deps.patchChat).toHaveBeenCalledTimes(2));
+          await vi.waitFor(() => {
+            expect(deps.patchChat).toHaveBeenCalledTimes(2);
+          });
           pending.resolve();
         }
-        await vi.waitFor(() =>
+        await vi.waitFor(() => {
           expect(
             session.persistenceActorRef.getSnapshot().matches({ activeExecutionPersistence: 'idle' }) ||
               scenario === 'released save',
-          ).toBe(true),
-        );
+          ).toBe(true);
+        });
         await settle();
         if (scenario === 'changed host' || scenario === 'superseded save') {
-          await vi.waitFor(() => expect(subscribeB).toHaveBeenCalledOnce());
+          await vi.waitFor(() => {
+            expect(subscribeB).toHaveBeenCalledOnce();
+          });
           expect(unsubscribeA).toHaveBeenCalledOnce();
           expect(closeA).toHaveBeenCalledOnce();
           expect(store.getProjection(chatId)?.ledger.runs['run_1']?.lifecycle).toBe('completed');

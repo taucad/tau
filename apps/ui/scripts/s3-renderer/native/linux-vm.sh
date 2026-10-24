@@ -11,6 +11,7 @@ umask 077
 : "${RUNNER_TEMP:?disposable hosted runner required}"
 : "${DROP:?set DROP}"
 [[ "${GITHUB_ACTIONS:-}" == true && "$(uname -m)" == x86_64 ]] || exit 3
+[[ "${S3_SETS:-all}" =~ ^[a-z0-9,-]+$ ]] || { echo "S3_SETS must be lowercase set names separated by commas" >&2; exit 1; }
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 NODE_ROOT="$(dirname "$(dirname "$(command -v node)")")"
 # Same pin as hosted-linux-vm.sh (official dated SHA256SUMS over authenticated HTTPS).

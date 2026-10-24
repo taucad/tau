@@ -249,7 +249,8 @@ const mirrorDelay = 150;
  * A visually hidden copy of the visible screen inside AurigaX's focusable `role=textbox` element. AurigaX draws to a
  * canvas only, so NVDA's review cursor (which reads the focused editable's text) found nothing but "graphic". The
  * mirror gives the textbox one text row per screen row, hides the canvas from the accessibility tree and, while the
- * textbox itself has focus, collapses the DOM caret onto the cursor row so review starts at the prompt.
+ * textbox itself has focus, collapses the DOM caret onto the cursor cell so review starts at the prompt. It stands
+ * still during IME composition, which AurigaX runs in the same element.
  */
 const createScreenMirror = (
   terminal: AurigaxTerminal,
@@ -257,6 +258,7 @@ const createScreenMirror = (
 ): { schedule: () => void; dispose: () => void } => {
   const mirror = document.createElement('div');
   mirror.dataset['s3ScreenMirror'] = 'true';
+  mirror.spellcheck = false;
   Object.assign(mirror.style, {
     position: 'absolute',
     left: '0',
@@ -269,39 +271,77 @@ const createScreenMirror = (
   });
   container.append(mirror);
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let composing = false;
+  /* One row as text: empty cells (codepoint 0 after a tab or cursor move) become spaces, wide-character spacers add
+   * nothing, and `caret` is the UTF-16 offset of column `cursorX`. */
+  const rowText = (y: number, cursorX: number): { text: string; caret: number } => {
+    const line = terminal.buffer.active.getLine(y);
+    if (!line) {
+      return { text: '', caret: 0 };
+    }
+    let text = '';
+    let caret = 0;
+    for (let x = 0; x < line.length; x++) {
+      if (x === cursorX) {
+        caret = text.length;
+      }
+      const cell = line.getCell(x);
+      if (cell && cell.getWidth() > 0) {
+        text += cell.getChars() || ' ';
+      }
+    }
+    const trimmed = text.trimEnd();
+    return { text: trimmed, caret: cursorX >= line.length ? trimmed.length : Math.min(caret, trimmed.length) };
+  };
   const sync = (): void => {
     timer = undefined;
+    if (composing) {
+      return;
+    }
     for (const canvas of container.querySelectorAll('canvas')) {
       canvas.setAttribute('aria-hidden', 'true');
     }
     const { active } = terminal.buffer;
     const top = active.viewportY;
+    const cursorRow = active.baseY + active.cursorY - top;
     while (mirror.childElementCount > terminal.rows) {
       mirror.lastElementChild?.remove();
     }
     while (mirror.childElementCount < terminal.rows) {
       mirror.append(document.createElement('div'));
     }
-    const rows = [...mirror.children] as HTMLElement[];
-    for (const [y, row] of rows.entries()) {
-      const text = active.getLine(top + y)?.translateToString(true) ?? '';
+    let caret: { node: Node; offset: number } | undefined;
+    for (const [y, row] of ([...mirror.children] as HTMLElement[]).entries()) {
+      const { text, caret: offset } = rowText(top + y, y === cursorRow ? active.cursorX : -1);
       if (row.textContent !== text) {
         row.textContent = text;
       }
+      if (y === cursorRow) {
+        caret = row.firstChild ? { node: row.firstChild, offset } : { node: row, offset: 0 };
+      }
     }
-    const cursorRow = rows[active.baseY + active.cursorY - top];
-    if (document.activeElement === container && cursorRow) {
-      const node = cursorRow.firstChild ?? cursorRow;
-      const offset = node === cursorRow ? 0 : Math.min(active.cursorX, node.textContent?.length ?? 0);
-      document.getSelection()?.collapse(node, offset);
+    if (caret && document.activeElement === container) {
+      document.getSelection()?.collapse(caret.node, caret.offset);
     }
   };
+  const schedule = (): void => {
+    timer ??= setTimeout(sync, mirrorDelay);
+  };
+  const compositionStart = (): void => {
+    composing = true;
+  };
+  const compositionEnd = (): void => {
+    composing = false;
+    schedule();
+  };
+  container.addEventListener('compositionstart', compositionStart);
+  container.addEventListener('compositionend', compositionEnd);
   return {
-    schedule: () => {
-      timer ??= setTimeout(sync, mirrorDelay);
-    },
+    schedule,
     dispose: () => {
       clearTimeout(timer);
+      container.removeEventListener('compositionstart', compositionStart);
+      container.removeEventListener('compositionend', compositionEnd);
       mirror.remove();
     },
   };
@@ -599,7 +639,12 @@ const createAurigaxView = async (options: TerminalViewOptions): Promise<Terminal
   const disposers: Array<() => void> = [];
   if (options.screenReaderMode) {
     const mirror = createScreenMirror(terminal, mount);
-    const subscriptions = [terminal.onRender(mirror.schedule), terminal.onResize(mirror.schedule)];
+    const subscriptions = [
+      terminal.onRender(mirror.schedule),
+      terminal.onResize(mirror.schedule),
+      /* Scrolling back moves the viewport without dirtying a row, so no render event fires. */
+      terminal.onScroll(mirror.schedule),
+    ];
     mount.addEventListener('focus', mirror.schedule);
     mirror.schedule();
     disposers.push(() => {

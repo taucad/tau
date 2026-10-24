@@ -44,7 +44,13 @@ export type Terminal = {
       readonly baseY: number;
       /** The absolute line at the top of the viewport (baseY unless scrolled back). */
       readonly viewportY: number;
-      getLine(index: number): { translateToString(trimRight?: boolean): string } | undefined;
+      getLine(index: number):
+        | {
+            readonly length: number;
+            translateToString(trimRight?: boolean): string;
+            getCell(x: number): { getChars(): string; getWidth(): number } | undefined;
+          }
+        | undefined;
     };
   };
   loadAddon(addon: FitAddon): void;
@@ -53,6 +59,7 @@ export type Terminal = {
   paste(text: string): void;
   onData(listener: (data: string) => void): { dispose(): void };
   onRender(listener: (range: { start: number; end: number }) => void): { dispose(): void };
+  onScroll(listener: (line: number) => void): { dispose(): void };
   onResize(listener: (size: { cols: number; rows: number }) => void): { dispose(): void };
   hasSelection(): boolean;
   getSelection(): string;

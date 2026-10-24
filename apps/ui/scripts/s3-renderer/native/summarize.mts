@@ -13,7 +13,7 @@ import process from 'node:process';
 
 const [drop, ...rest] = process.argv.slice(2);
 const setsAt = rest.indexOf('--sets');
-const sets = setsAt === -1 ? 'all' : (rest.splice(setsAt, 2)[1] ?? 'all');
+const sets = (setsAt === -1 ? 'all' : (rest.splice(setsAt, 2)[1] ?? 'all')).replaceAll(/\s/g, '');
 const selected = (label: string): boolean => {
   const diagnostic = label.startsWith('r01-diag-');
   if (sets === 'all') {
@@ -22,9 +22,13 @@ const selected = (label: string): boolean => {
   const names = sets.split(',');
   return names.includes(label) || (diagnostic && names.includes('r01-diag'));
 };
-const plans = rest.filter((plan) => selected(plan.split('=')[0]!));
-if (!drop || plans.length === 0) {
+if (!drop || rest.length === 0) {
   throw new Error('Usage: summarize.mts <drop> [--sets <all|set,set>] <label>=<suite,suite> ...');
+}
+const plans = rest.filter((plan) => selected(plan.split('=')[0]!));
+if (plans.length === 0) {
+  process.stdout.write(`### ${path.basename(drop)}: no planned set selected by --sets ${sets}\n`);
+  process.exit(0);
 }
 const lines: string[] = [];
 let failed = false;

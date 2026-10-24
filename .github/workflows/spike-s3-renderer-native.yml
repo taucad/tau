@@ -25,7 +25,8 @@ on:
       sets:
         description: >-
           Comma-separated result sets to run, or all (core, core-r06r07 on WIN-ARM only, core-default, r01-rate4, r01,
-          packaged, voiceover, nvda, orca, r01-diag on MAC-X only)
+          packaged, voiceover, nvda, orca, r01-diag on MAC-X only). Lowercase names, no spaces; anything but all skips the
+          WIN-ARM administrator-labelled steps
         default: all
   pull_request:
     paths:
@@ -231,8 +232,9 @@ jobs:
             "nvda=--skip-build --software-gl --kinds $env:KINDS --suite r04nvda --out `"$env:DROP/nvda`"",
             "core-default=--skip-build --kinds $env:KINDS --suite integrity,r02,r04,r06 --out `"$env:DROP/core-default`""
           )
-          $sets = $env:SETS -split ','
+          $sets = @($env:SETS -split ',' | ForEach-Object { $_.Trim() })
           $selected = @($runs | Where-Object { $env:SETS -eq 'all' -or $sets -contains ($_ -split '=', 2)[0] })
+          if ($selected.Count -eq 0) { Write-Host "no standard-user set selected by '$env:SETS'"; exit 0 }
           & apps/ui/scripts/s3-renderer/native/run-nonadmin.ps1 -Drop $env:DROP -TimeoutSeconds 2700 -Runs $selected
           exit $LASTEXITCODE
 

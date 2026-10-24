@@ -90,6 +90,11 @@ export type GeoSpecNodePoolOptions = {
   budget?: number;
   /** Non-verdict shard watchdog in milliseconds. */
   shardTimeout?: number;
+  /**
+   * Spec sources each worker serves from memory, keyed by project-rooted path, in place of the file on disk. A path
+   * here is never read from or written to the project; `geospec check` runs its bundled spec this way.
+   */
+  sources?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -135,6 +140,7 @@ export const createGeoSpecNodePoolRunner = (options: GeoSpecNodePoolOptions): Ge
               projectPath: options.projectPath,
               ...(options.configPath === undefined ? {} : { configPath: options.configPath }),
               ...(options.exporterModules === undefined ? {} : { exporterModules: [...options.exporterModules] }),
+              ...(options.sources === undefined ? {} : { sources: { ...options.sources } }),
               grant: grants[index++],
             },
           },

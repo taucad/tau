@@ -56,10 +56,11 @@ export const createNodeGeoSpecCliHost = (options: NodeGeoSpecCliHostOptions = {}
     }),
     loadConfig: async ({ projectPath, configPath }) =>
       loadGeoSpecConfig({ projectPath, ...(configPath === undefined ? {} : { configPath }) }),
-    createRunner: ({ projectPath, configPath, workers, shardTimeout }) =>
+    createRunner: ({ projectPath, configPath, workers, shardTimeout, sources }) =>
       createGeoSpecNodePoolRunner({
         projectPath,
         ...(configPath === undefined ? {} : { configPath }),
+        ...(sources === undefined ? {} : { sources }),
         ...(options.exporterModules === undefined ? {} : { exporterModules: options.exporterModules }),
         // `--workers` with no count parses as 0 and auto-sizes to the host's
         // parallelism; an absent `workers` runs one worker.

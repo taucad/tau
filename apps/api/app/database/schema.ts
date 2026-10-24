@@ -361,6 +361,64 @@ export const projectGit = pgTable(
 );
 
 /**
+ * Which store serves one project's repository, and whether it is frozen
+ * (Hosted Remote Storage DW1, W10 R1). Additive by construction: a project
+ * with no row here, or a row whose columns hold their defaults, is served by
+ * today's R2 store and is not frozen, so no backfill was ever needed.
+ *
+ * A sibling of `project_git` rather than three more columns on it: a route
+ * row exists only for a repository a migration or a restore has touched, and
+ * the route is read on every git request while `project_git` is rewritten on
+ * every push, so the two never contend for one row.
+ *
+ * `frozen_until` is a lease, not a flag: a writer that dies leaves no
+ * repository frozen for longer than the span it asked for (W10 step 1).
+ * `migration_id` names the job that holds the freeze, so a second job cannot
+ * thaw or switch a repository the first one froze.
+ */
+export const projectGitRoute = pgTable(
+  'project_git_route',
+  {
+    projectId: text('project_id')
+      .primaryKey()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    store: text('store').notNull().default('r2'),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }),
+    frozenUntil: timestamp('frozen_until', { withTimezone: true }),
+    migrationId: text('migration_id'),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('project_git_route_frozen_until_idx').on(table.frozenUntil),
+    check('project_git_route_store_check', sql`${table.store} IN ('r2')`),
+    check(
+      'project_git_route_freeze_check',
+      sql`${table.frozenUntil} IS NULL OR (${table.frozenAt} IS NOT NULL AND ${table.migrationId} IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * A freeze wider than one repository (DW1): today only `global`, which the
+ * restore runbook sets before a fleet restore so no client writes into a
+ * store that is being rebuilt (W13 restore step 0). No row means no freeze.
+ * `migration_id` carries the incident or restore id that holds it.
+ */
+export const gitRouteFreeze = pgTable(
+  'git_route_freeze',
+  {
+    scope: text('scope').primaryKey(),
+    frozenAt: timestamp('frozen_at', { withTimezone: true }).defaultNow().notNull(),
+    frozenUntil: timestamp('frozen_until', { withTimezone: true }).notNull(),
+    migrationId: text('migration_id').notNull(),
+  },
+  (table) => [check('git_route_freeze_scope_check', sql`${table.scope} IN ('global')`)],
+);
+
+/**
  * One quota reservation per project-scoped git-lfs object. A nullable
  * `finalized_at` means the upload URL was issued but exact bytes have not yet
  * been verified; those rows still count against quota until retention safely

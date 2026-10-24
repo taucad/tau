@@ -370,6 +370,29 @@ describe('copyRepository on a tombstoned repository', () => {
   });
 });
 
+describe('markTombstonedOwners', () => {
+  it('should mark the other owners when one marker fails, and count the failure', async () => {
+    const h = harness();
+    const deletedAt = h.time.now();
+    for (const ownerId of ['not a storable id', 'user_gone']) {
+      h.ledger.tombstones.set(ownerId, {
+        ownerId,
+        deletedAt,
+        purgeAfter: deletedAt,
+        erasure: true,
+        copyMarkedAt: undefined,
+      });
+    }
+
+    expect(await markTombstonedOwners(h.context)).toBe(1);
+
+    expect(h.destination.keys()).toStrictEqual([ownerMarkerKey('user_gone', deletedAt)]);
+    expect(h.ledger.tombstones.get('not a storable id')?.copyMarkedAt).toBeUndefined();
+    expect(total(h.recorded, 'tau.mirror.copy_failures', { stage: 'dest_write', reason: 'other' })).toBe(1);
+    expect(h.events).toContainEqual(expect.objectContaining({ event: 'tau_mirror.owner_marker_failed' }));
+  });
+});
+
 describe('rolling retention', () => {
   it('should lock every new version for exactly 30 days', async () => {
     const h = harness();

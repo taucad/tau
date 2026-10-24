@@ -12,8 +12,11 @@ import {
   tauToolNames,
 } from '#ingest.js';
 
-/** `tau.sync.operation`: the client-facing request a sync series counts. */
-const syncOperationNames = ['push', 'fetch', 'lfs_upload', 'lfs_download'] as const;
+/**
+ * `tau.sync.operation`: the client-facing request a sync series counts. `advertise` is a served
+ * `info/refs` answer (DB1); an advertisement's refusal counts against the push or fetch it opens.
+ */
+const syncOperationNames = ['push', 'fetch', 'advertise', 'lfs_upload', 'lfs_download'] as const;
 
 /** `outcome` on the sync edge. `busy` is a retryable capacity refusal; `conflict` a lost manifest race. */
 const syncOutcomes = ['ok', 'ref_rejected', 'quota_refused', 'conflict', 'busy', 'unauthorized', 'error'] as const;
@@ -55,6 +58,8 @@ const mirrorDestinations = ['b2'] as const;
 
 /** `kind` of an object the copier writes or the reconciler finds missing (W13 Finding 8). */
 const mirrorObjectKinds = ['pack', 'idx', 'manifest', 'segment', 'retired_marker', 'lfs', 'owner_marker'] as const;
+/** `tau.git.route.scope`: a freeze on one repository, or the global one (DW1). */
+const routeScopes = ['repository', 'global'] as const;
 
 /** `rank` on the hot-project gauges: the top ten, never a project or owner id. */
 const hotProjectRanks = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'] as const;
@@ -1102,6 +1107,57 @@ export const TauMetrics = {
     description: 'Distinct writers that committed to the rank-r project by writers, over the last full minute',
     attributes: z.object({
       rank: z.enum(hotProjectRanks),
+    }),
+  }),
+
+  /*
+   * The route table and the freeze answer (Hosted Remote Storage DW1/DW2, W14 OB5 N30–N34). Every
+   * label is an enum: a repository, owner or migration id never leaves the route module.
+   */
+  gitRouteFrozen: defineGauge({
+    name: 'tau.git.route.frozen',
+    unit: '{repository}',
+    description: 'Freezes holding now, by scope: repositories frozen one by one, or 1 while the global freeze holds',
+    attributes: z.object({
+      'tau.git.route.scope': z.enum(routeScopes),
+    }),
+  }),
+
+  gitRouteFrozenOldest: defineGauge({
+    name: 'tau.git.route.frozen.oldest',
+    unit: 's',
+    description: 'Age of the oldest freeze holding now, by scope; a migration freeze is a 20 s lease',
+    attributes: z.object({
+      'tau.git.route.scope': z.enum(routeScopes),
+    }),
+  }),
+
+  gitRouteHolds: defineCounter({
+    name: 'tau.git.route.holds',
+    unit: '{request}',
+    description: 'Git requests held because their repository was frozen, by how the hold ended',
+    attributes: z.object({
+      outcome: z.enum(['released', 'timed_out']),
+    }),
+  }),
+
+  gitRouteHoldDuration: defineHistogram({
+    name: 'tau.git.route.hold.duration',
+    unit: 's',
+    description: 'How long a held git request waited for its repository to thaw, by how the hold ended',
+    buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 3, 4, 5, 6],
+    attributes: z.object({
+      outcome: z.enum(['released', 'timed_out']),
+    }),
+  }),
+
+  gitRouteLookupDuration: defineHistogram({
+    name: 'tau.git.route.lookup.duration',
+    unit: 's',
+    description: 'Route lookup latency on the git request path, from this Machine’s cache or from the database',
+    buckets: [0.0001, 0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25],
+    attributes: z.object({
+      'tau.git.route.source': z.enum(['cache', 'database']),
     }),
   }),
 

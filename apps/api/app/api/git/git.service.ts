@@ -56,7 +56,9 @@ import {
   repositoryStoreKey,
 } from '#api/git/git.constants.js';
 import type { GitService as GitSmartService, QuotaAudience } from '#api/git/git.constants.js';
+import { advertiseReferences, installedGitDialect } from '#api/git/advertisement.js';
 import { HotProjects, hotProjectRanks } from '#api/git/hot-projects.js';
+import { RepositoryRouteGuard } from '#api/git/routing/route-guard.js';
 import type { HotProject } from '#api/git/hot-projects.js';
 import { commitLease } from '#api/git/store/commit.js';
 import type { MovedRef } from '#api/git/store/commit.js';
@@ -70,6 +72,7 @@ import { hydrateLease } from '#api/git/store/lease.js';
 import type { RepositoryLease } from '#api/git/store/lease.js';
 import { leaseDiskBytesPerLease, repositoryByteCeiling } from '#api/git/store/limits.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
+import { decodeManifest, isTombstoned } from '#api/git/store/manifest.js';
 import type { Manifest } from '#api/git/store/manifest.js';
 import type { RepositoryLocator, RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
@@ -81,8 +84,9 @@ import { ObjectStorageService } from '#storage/object-storage.service.js';
  * The Tau Hosted Remote's request path over the repository store (charter D1,
  * D3, D4).
  *
- * Every request hydrates a disposable lease from object storage, runs stock
- * git over it and throws it away. Nothing on this machine is durable state
+ * Every RPC hydrates a disposable lease from object storage, runs stock git
+ * over it and throws it away; the ref advertisement reads the manifest alone
+ * (DB1). Nothing on this machine is durable state
  * (NI1), nothing here holds a per-repository lock (NI3, the manifest's
  * conditional write is the lock), and nothing enumerates every repository
  * (NI10).
@@ -243,7 +247,7 @@ const directoryBytes = async (directory: string): Promise<number> => {
 /** A clone of a large repository is slow; an abandoned child is forever. */
 const rpcTimeoutMilliseconds = 10 * 60 * 1000;
 
-/** `for-each-ref`, `cat-file`, `--advertise-refs`. */
+/** `update-ref` and the publication materializer's `for-each-ref` and `cat-file`. */
 const commandTimeoutMilliseconds = 60 * 1000;
 
 /** What a 503 from this service tells the client to wait, in seconds. */
@@ -386,6 +390,8 @@ export class GitRepositoryService {
     private readonly durableEvents: DurableEventsService,
     @Optional() private readonly shutdown: ShutdownService = new ShutdownService(),
     @Optional() private readonly metrics: MetricsService = new MetricsService(),
+    /* DW1/DW2: holds a frozen repository's requests before any lease; open outside the module. */
+    @Optional() private readonly routes: RepositoryRouteGuard = RepositoryRouteGuard.open(),
   ) {
     /* A crash restarts a Machine in place on the same rootfs, so boot is the
        first chance to give the dead worker's disk back (W10 defect 2). Tracked
@@ -780,17 +786,50 @@ export class GitRepositoryService {
   }
 
   /**
-   * `info/refs?service=…`: the ref advertisement, over a lease.
+   * `info/refs?service=…`: the ref advertisement, answered from the manifest
+   * (Hosted Remote Storage DB1).
+   *
+   * No lease: no admission, no lease disk, no hydrate budget and no git child,
+   * so the first leg of every push and fetch can no longer be refused for this
+   * Machine's capacity (TAU-API-5). The project's admission and storage account
+   * are checked as for any request, and the one manifest read is the whole
+   * object-store cost. The bytes are stock git's over the lease that manifest
+   * hydrates (`advertisement.ts`).
+   *
+   * Derived-state repair (D19) is not done here, because it needs the lease
+   * this route no longer builds. It stays on the `upload-pack`, `receive-pack`
+   * and removal leases, so a repository whose row trails its manifest is
+   * repaired by the RPC that follows this advertisement (W6 G8, review FR5),
+   * until DC1 moves the comparison to every grant.
+   *
+   * The route step still applies (DW1/DW2): a frozen repository is held, then
+   * answered `429 GIT_REPOSITORY_FROZEN`, before its manifest is read, and a
+   * served advertisement counts in flight until it answers, so a drain waits
+   * for it like any leased request.
    *
    * @param access - What `authorize` resolved.
    * @param service - The service the client named.
    * @returns The advertisement bytes, without the service prefix.
+   * @throws HttpException `429 GIT_REPOSITORY_FROZEN` when the freeze hold is spent.
    */
   public async advertiseRefs(access: GitAccess, service: GitSmartService): Promise<Uint8Array<ArrayBuffer>> {
-    return this.leaseFor('advertise', access, async (lease) => {
-      await this.repairDerivedState(access, lease);
-      return this.runGit([service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', '.'], lease.directory);
-    });
+    const routed = await this.routes.admit(access.projectId);
+    try {
+      const locator = await this.resolveActiveLocator(access);
+      const read = await this.store.readManifest(locator);
+      const manifest = read === undefined ? undefined : decodeManifest(read.manifest);
+      if (isTombstoned(manifest)) {
+        throw new RepositoryStoreError(
+          'tombstoned',
+          `repository ${locator.projectId} is tombstoned and advertises no refs`,
+        );
+      }
+      return advertiseReferences({ service, refs: manifest?.refs ?? {}, dialect: await installedGitDialect() });
+    } catch (error) {
+      throw this.refusalFor(error);
+    } finally {
+      routed();
+    }
   }
 
   /**
@@ -1248,6 +1287,25 @@ export class GitRepositoryService {
    * @throws ServiceUnavailableException When another lease would not fit, or the owner already holds its share.
    */
   private async admitLease(
+    access: Pick<GitAccess, 'projectId' | 'ownerId' | 'callerId' | 'viaDevice'>,
+    operation: GitOperation,
+  ): Promise<() => void> {
+    /* The route step first (DW1/DW2): a frozen repository is held here, before it costs a slot. */
+    const routed = await this.routes.admit(access.projectId);
+    try {
+      const release = await this.admitLeaseSlot(access, operation);
+      return () => {
+        release();
+        routed();
+      };
+    } catch (error) {
+      routed();
+      throw error;
+    }
+  }
+
+  /** {@link admitLease}'s disk, owner-share and hydrate-budget steps. */
+  private async admitLeaseSlot(
     access: Pick<GitAccess, 'ownerId' | 'callerId' | 'viaDevice'>,
     operation: GitOperation,
   ): Promise<() => void> {
@@ -1397,6 +1455,8 @@ export class GitRepositoryService {
    * own attempts (W14 N10).
    */
   private async commit(args: Parameters<typeof commitLease>[0]): ReturnType<typeof commitLease> {
+    /* DW1, FR13: a lease hydrated from a migration fence reads the route past this Machine's cache. */
+    await this.routes.assertCommittable(args.lease.locator.projectId, args.lease.manifest);
     const startedAt = performance.now();
     const attempt = (outcome: GitCommitAttemptAttributes['outcome']): void => {
       this.metrics.gitCommitAttempts.add(1, { outcome, 'tau.git.commit.kind': 'push' });
@@ -1420,6 +1480,8 @@ export class GitRepositoryService {
       if (error instanceof RepositoryStoreError && error.code === 'lost') {
         this.metrics.syncManifestConflicts.add(1);
         attempt('lost_race');
+        /* DW2: a race lost to a freeze's fence gets the freeze answer, not the 503. */
+        throw (await this.routes.refusalForLostRace(args.lease.locator.projectId)) ?? error;
       } else if (!(error instanceof RepositoryStoreError && refusedBeforeManifestWrite.has(error.code))) {
         attempt('error');
       }

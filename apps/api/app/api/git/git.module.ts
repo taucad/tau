@@ -12,6 +12,7 @@ import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { repositoryRouteGuardProvider } from '#api/git/routing/routing.providers.js';
 import { RevisionSaltController } from '#api/git/revision-salt.controller.js';
 import { UsageController } from '#api/git/usage.controller.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
@@ -36,6 +37,8 @@ import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
        Redis keyspace. */
     PublicationRateLimiterService,
     GitLfsService,
+    /* DW1/DW2: the route step of git admission, ahead of every lease. */
+    repositoryRouteGuardProvider,
     S3RepositoryStore,
     { provide: repositoryStoreKey, useExisting: S3RepositoryStore },
   ],

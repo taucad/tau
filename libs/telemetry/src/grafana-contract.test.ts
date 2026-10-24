@@ -334,6 +334,12 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_mirror_reconcile_hidden_versions: 'OB9',
   tau_mirror_destination_stored_bytes: 'OB9',
   tau_mirror_destination_object_versions: 'OB9',
+  // DW1/DW2 ship the route table and freeze series; OB5's migration panels read them.
+  tau_git_route_frozen: 'OB5',
+  tau_git_route_frozen_oldest: 'OB5',
+  tau_git_route_holds_total: 'OB5',
+  tau_git_route_hold_duration: 'OB5',
+  tau_git_route_lookup_duration: 'OB5',
 };
 
 /**

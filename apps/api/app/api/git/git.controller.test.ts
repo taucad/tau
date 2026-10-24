@@ -312,6 +312,8 @@ describe('syncOutcomeOf', () => {
     [new HttpException({ code: 'GIT_SERVICE_RESTARTING' }, HttpStatus.SERVICE_UNAVAILABLE), 'busy'],
     [new HttpException({ code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' }, HttpStatus.TOO_MANY_REQUESTS), 'busy'],
     [new HttpException({ code: 'GIT_RATE_LIMITED' }, HttpStatus.TOO_MANY_REQUESTS), 'busy'],
+    /* DW2: a freeze held past its 5 s is the remote telling the client to wait 1 s, not a failure. */
+    [new HttpException({ code: 'GIT_REPOSITORY_FROZEN' }, HttpStatus.TOO_MANY_REQUESTS), 'busy'],
     /* A 503 without a capacity code is not a refusal a client is told to wait out. */
     [new HttpException('This project’s storage account is unavailable.', HttpStatus.SERVICE_UNAVAILABLE), 'error'],
     [new HttpException({ code: 'GIT_REPOSITORY_INCOMPLETE' }, HttpStatus.INTERNAL_SERVER_ERROR), 'error'],
@@ -365,6 +367,33 @@ describe('GitController sync telemetry', () => {
     });
   });
 
+  /* DB1, W14 SLO-7: the advertisement is answered from the manifest, and its count and latency are its own. */
+  it.each(['git-upload-pack', 'git-receive-pack'] as const)(
+    'counts a served %s advertisement as advertise ok with its latency, and no push or fetch',
+    async (service) => {
+      const recorded = metrics();
+      const controller = controllerWith(
+        {
+          authorize: async () => access as unknown as GitAccess,
+          advertiseRefs: async () => Buffer.from('0000'),
+        },
+        recorded,
+      );
+
+      await controller.infoRefs('proj_d1.git', service, 'user-owner', ownRequest(), replyStub().reply);
+
+      expect(recorded.syncOperations.add).toHaveBeenCalledExactlyOnceWith(1, {
+        'tau.sync.operation': 'advertise',
+        outcome: 'ok',
+      });
+      expect(recorded.syncOperationDuration.record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+        'tau.sync.operation': 'advertise',
+        outcome: 'ok',
+      });
+      expect(recorded.syncRefusals.add).not.toHaveBeenCalled();
+    },
+  );
+
   it('counts a push refused for quota at the advertisement as quota_refused', async () => {
     const recorded = metrics();
     const controller = controllerWith(
@@ -392,6 +421,7 @@ describe('GitController sync telemetry', () => {
     ['GIT_LEASE_DISK_FULL', HttpStatus.SERVICE_UNAVAILABLE, 'busy'],
     ['GIT_HYDRATE_BUDGET_EXHAUSTED', HttpStatus.TOO_MANY_REQUESTS, 'busy'],
     ['GIT_SERVICE_RESTARTING', HttpStatus.SERVICE_UNAVAILABLE, 'busy'],
+    ['GIT_REPOSITORY_FROZEN', HttpStatus.TOO_MANY_REQUESTS, 'busy'],
     ['GIT_PUSH_RACE_LOST', HttpStatus.SERVICE_UNAVAILABLE, 'conflict'],
     ['GIT_PUSH_NOT_COMMITTABLE', HttpStatus.UNPROCESSABLE_ENTITY, 'error'],
     ['GIT_REPOSITORY_CEILING_EXCEEDED', HttpStatus.PAYLOAD_TOO_LARGE, 'quota_refused'],

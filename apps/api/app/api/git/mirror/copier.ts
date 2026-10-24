@@ -437,16 +437,34 @@ export const ensureOwnerMarker = async (context: CopierContext, owner: Tombstone
   return true;
 };
 
-/** Writes every unmarked owner's marker and records it, so the copier learns of a deletion within one poll. */
+/**
+ * Writes every unmarked owner's marker and records it, so the copier learns of a
+ * deletion within one poll. An owner whose marker fails is counted and left
+ * unmarked for the next poll; it never holds up the others. Returns the number
+ * marked.
+ */
 export const markTombstonedOwners = async (context: CopierContext, limit = 100): Promise<number> => {
   const owners = await context.ledger.unmarkedTombstones(limit);
+  let marked = 0;
   for (const owner of owners) {
-    // oxlint-disable-next-line no-await-in-loop -- few rows, each one marker
-    await ensureOwnerMarker(context, owner);
-    // oxlint-disable-next-line no-await-in-loop -- recorded only after the marker is verified
-    await context.ledger.markTombstone(owner.ownerId, retentionClock(context).at);
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- few rows, each one marker
+      await ensureOwnerMarker(context, owner);
+      // oxlint-disable-next-line no-await-in-loop -- recorded only after the marker is verified
+      await context.ledger.markTombstone(owner.ownerId, retentionClock(context).at);
+      marked += 1;
+    } catch (error) {
+      const failure = failAt('dest_write', error);
+      context.metrics.failure(failure.stage, failure.reason);
+      context.report?.({
+        event: 'tau_mirror.owner_marker_failed',
+        stage: failure.stage,
+        reason: failure.reason,
+        error: failure.message,
+      });
+    }
   }
-  return owners.length;
+  return marked;
 };
 
 const runRound = async (context: CopierContext, candidate: CopyCandidate): Promise<RoundResult> => {

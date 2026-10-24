@@ -5,7 +5,8 @@ import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { GoneException, Logger, NotFoundException, ServiceUnavailableException, VersioningType } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
@@ -31,6 +32,7 @@ import type { DurableEventsService } from '#api/durable-events/durable-events.se
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 import type { GitAccess } from '#api/git/git.service.js';
 import { commitLease } from '#api/git/store/commit.js';
 import { RepositoryStoreError } from '#api/git/store/errors.js';
@@ -248,10 +250,12 @@ const createService = (
     rateLimiter = roomyBudget,
     durableEvents = mock<DurableEventsService>(),
     shutdown = new ShutdownService(),
+    metrics,
   }: {
     rateLimiter?: PublicationRateLimiterService;
     durableEvents?: DurableEventsService;
     shutdown?: ShutdownService;
+    metrics?: MetricsService;
   } = {},
 ): GitRepositoryService =>
   new GitRepositoryService(
@@ -275,6 +279,7 @@ const createService = (
     rateLimiter,
     durableEvents,
     shutdown,
+    metrics,
   );
 
 const access: GitAccess = {
@@ -1349,5 +1354,237 @@ describe('GitRepositoryService cloud host attribution (W10)', () => {
     expect(hostPush).toMatchObject({ committedBy: ownerId, viaDevice: 'agent_cloud' });
     expect(ownerPush).toMatchObject({ committedBy: ownerId });
     expect(ownerPush).not.toHaveProperty('viaDevice');
+  }, 60_000);
+});
+
+/**
+ * Every instrument the service touches, as one recorder per name, so a row reads exactly what was
+ * emitted; `on` returns the same recorder, untouched when the service never reached it.
+ */
+type Recorder = { add: Mock; record: Mock; addCallback: Mock };
+const recordingMetrics = (): { metrics: MetricsService; on: (name: string) => Recorder } => {
+  const emitted = new Map<string, Recorder>();
+  const on = (name: string): Recorder => {
+    const recorder = emitted.get(name) ?? { add: vi.fn(), record: vi.fn(), addCallback: vi.fn() };
+    emitted.set(name, recorder);
+    return recorder;
+  };
+  const metrics = new Proxy({}, { get: (_target, name: string): Recorder => on(name) });
+  return { metrics: metrics as MetricsService, on };
+};
+
+/**
+ * Hosted Remote Storage DA2 (W14 N2-N5, N7-N9, N11, N12, N14): lease admission, the lease's
+ * life, its hydrate and the manifest commit each say what happened, so TAU-API-5's refusals and
+ * the stage-1 triggers are read off series rather than inferred.
+ */
+describe('GitRepositoryService admission and commit telemetry (DA2)', () => {
+  const store = memoryStore();
+  const telemetryProjectId = 'proj-da2';
+  const telemetryAccess: GitAccess = { ...access, projectId: telemetryProjectId };
+  const locator = repositoryLocator({ ownerId, projectId: telemetryProjectId });
+  let committedBytes = 0;
+  const caughtUp = (): DatabaseService =>
+    databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false });
+
+  beforeAll(async () => {
+    const client = scratch('da2-client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'DA2');
+    git(client, 'config', 'user.email', 'da2@tau.test');
+    writeFileSync(path.join(client, 'main.scad'), 'cube(10);\n');
+    git(client, 'add', '.');
+    git(client, 'commit', '--quiet', '-m', 'first revision');
+    for (const line of ['a', 'b', 'c']) {
+      git(client, 'branch', `conflicts/main/device-${line}`);
+    }
+    const lease = await hydrateLease({ store, locator, parentDirectory: scratch('da2-lease') });
+    try {
+      execFileSync(
+        'git',
+        [
+          'push',
+          lease.directory,
+          'main',
+          'refs/heads/conflicts/main/device-a',
+          'refs/heads/conflicts/main/device-b',
+          'refs/heads/conflicts/main/device-c',
+        ],
+        { cwd: client, stdio: ['ignore', 'pipe', 'pipe'], env: gitEnvironment },
+      );
+      const result = await commitLease({ store, lease, committedBy: ownerId });
+      expect(result.committed).toBe(true);
+      if (result.committed) {
+        committedBytes = result.manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
+      }
+    } finally {
+      await lease.dispose();
+    }
+    expect(committedBytes).toBeGreaterThan(0);
+  }, 60_000);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('counts an admitted lease, holds it active for its work, reserves its disk and measures its hydrate', async () => {
+    const { metrics, on } = recordingMetrics();
+    const service = createService(store, caughtUp(), { metrics });
+    service.leaseDiskBytesPerLease = 1024;
+
+    await service.advertiseRefs(telemetryAccess, 'git-upload-pack');
+
+    expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.git.operation': 'advertise',
+      outcome: 'admitted',
+    });
+    expect(on('gitLeasesActive').add.mock.calls).toEqual([
+      [1, { 'tau.git.operation': 'advertise' }],
+      [-1, { 'tau.git.operation': 'advertise' }],
+    ]);
+    expect(on('gitLeaseReservedBytes').record.mock.calls).toEqual([[1024], [0]]);
+    expect(on('gitDiskFreeBytes').record).toHaveBeenCalledOnce();
+    expect(on('gitDiskFreeBytes').record.mock.calls[0]?.[0]).toBeGreaterThan(0);
+    expect(on('gitHydrateBytes').record).toHaveBeenCalledExactlyOnceWith(committedBytes, {
+      'tau.git.hydrate.source': 'object_store',
+    });
+  }, 60_000);
+
+  it('counts a lease refused for disk as disk_full and never holds it', async () => {
+    const { metrics, on } = recordingMetrics();
+    const service = createService(store, caughtUp(), { metrics });
+    service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+
+    await expect(service.advertiseRefs(telemetryAccess, 'git-receive-pack')).rejects.toMatchObject({
+      response: { code: 'GIT_LEASE_DISK_FULL' },
+    });
+
+    expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.git.operation': 'advertise',
+      outcome: 'disk_full',
+    });
+    expect(on('gitLeasesActive').add).not.toHaveBeenCalled();
+    expect(on('gitHydrateBytes').record).not.toHaveBeenCalled();
+  });
+
+  it('counts an owner at its share as owner_busy, and a lease taken for publication work as derive', async () => {
+    const { metrics, on } = recordingMetrics();
+    const service = createService(store, caughtUp(), { metrics });
+    const { bavail, bsize } = await statfs(tmpdir());
+    /* Two slots on this disk, so the owner's share is one lease. */
+    service.leaseDiskBytesPerLease = Math.floor((bavail * bsize) / 2.5);
+    const gate = Promise.withResolvers<void>();
+    const admitted = Promise.withResolvers<void>();
+    const held = service.withLease(telemetryAccess, async () => {
+      admitted.resolve();
+      await gate.promise;
+    });
+    await admitted.promise;
+
+    try {
+      await expect(service.withLease(telemetryAccess, async () => undefined)).rejects.toMatchObject({
+        response: { code: 'GIT_LEASE_OWNER_BUSY' },
+      });
+    } finally {
+      gate.resolve();
+      await held;
+    }
+
+    expect(on('gitAdmissions').add.mock.calls).toEqual([
+      [1, { 'tau.git.operation': 'derive', outcome: 'admitted' }],
+      [1, { 'tau.git.operation': 'derive', outcome: 'owner_busy' }],
+    ]);
+  }, 60_000);
+
+  it('counts a spent hydrate budget as budget_exhausted and gives the reservation back', async () => {
+    const { metrics, on } = recordingMetrics();
+    const service = createService(store, caughtUp(), {
+      metrics,
+      rateLimiter: {
+        consumeWindowBudget: async () => ({ allowed: false, count: 1, retryAfterSeconds: 60 }),
+      } as unknown as PublicationRateLimiterService,
+    });
+    service.leaseDiskBytesPerLease = 1024;
+
+    await expect(service.advertiseRefs(telemetryAccess, 'git-upload-pack')).rejects.toMatchObject({
+      response: { code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' },
+    });
+
+    expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.git.operation': 'advertise',
+      outcome: 'budget_exhausted',
+    });
+    expect(on('gitLeasesActive').add).not.toHaveBeenCalled();
+    expect(on('gitLeaseReservedBytes').record.mock.calls.at(-1)).toEqual([0]);
+  });
+
+  it('counts a committed write, its duration and the repository size, and ranks the project by rank alone', async () => {
+    const { metrics, on } = recordingMetrics();
+    const service = createService(store, caughtUp(), { metrics });
+    service.leaseDiskBytesPerLease = 1024;
+
+    await service.removeRef({
+      access: telemetryAccess,
+      ref: 'refs/heads/conflicts/main/device-a',
+      committedBy: ownerId,
+    });
+    await service.settled();
+
+    expect(on('gitAdmissions').add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.git.operation': 'remove_ref',
+      outcome: 'admitted',
+    });
+    expect(on('gitCommitAttempts').add).toHaveBeenCalledExactlyOnceWith(1, {
+      outcome: 'committed',
+      'tau.git.commit.kind': 'push',
+    });
+    expect(on('gitCommitDuration').record).toHaveBeenCalledExactlyOnceWith(expect.any(Number), {
+      'tau.git.commit.phase': 'total',
+      'tau.git.commit.kind': 'push',
+    });
+    const read = await store.readManifest(locator);
+    const stored = decodeManifest(read?.manifest ?? new Uint8Array()).packs.reduce(
+      (total, pack) => total + pack.bytes,
+      0,
+    );
+    expect(on('gitRepositorySize').record).toHaveBeenCalledExactlyOnceWith(stored);
+
+    /* The gauges read the last full minute: one commit, one writer, at rank 1 only. */
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 60_000 });
+    const observe = (instrument: string): Array<[number, Record<string, unknown>]> => {
+      const observed: Array<[number, Record<string, unknown>]> = [];
+      const callback = on(instrument).addCallback.mock.calls[0]?.[0] as
+        | ((result: { observe: (value: number, attributes: Record<string, unknown>) => void }) => void)
+        | undefined;
+      callback?.({ observe: (value, attributes) => observed.push([value, attributes]) });
+      return observed;
+    };
+    const rates = observe('gitHotProjectCommitRate');
+    const writers = observe('gitHotProjectWriters');
+    expect(rates[0]).toEqual([1 / 60, { rank: '1' }]);
+    expect(writers[0]).toEqual([1, { rank: '1' }]);
+    for (const series of [rates, writers]) {
+      expect(series.map(([, attributes]) => attributes)).toEqual(
+        Array.from({ length: 10 }, (_, rank) => ({ rank: String(rank + 1) })),
+      );
+      expect(series.slice(1).every(([value]) => value === 0)).toBe(true);
+    }
+  }, 60_000);
+
+  it('counts a lost conditional manifest write as lost_race, with no repository size', async () => {
+    const { metrics, on } = recordingMetrics();
+    const losing: RepositoryStore = { ...store, commitManifest: async () => 'lost' };
+    const service = createService(losing, caughtUp(), { metrics });
+    service.leaseDiskBytesPerLease = 1024;
+
+    await expect(
+      service.removeRef({ access: telemetryAccess, ref: 'refs/heads/conflicts/main/device-b', committedBy: ownerId }),
+    ).rejects.toMatchObject({ response: { code: 'GIT_PUSH_RACE_LOST' } });
+
+    expect(on('gitCommitAttempts').add).toHaveBeenCalledExactlyOnceWith(1, {
+      outcome: 'lost_race',
+      'tau.git.commit.kind': 'push',
+    });
+    expect(on('gitRepositorySize').record).not.toHaveBeenCalled();
   }, 60_000);
 });

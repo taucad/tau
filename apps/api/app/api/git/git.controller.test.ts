@@ -306,6 +306,14 @@ describe('syncOutcomeOf', () => {
     [new HttpException({ code: 'GIT_SYNC_NOT_ENTITLED' }, HttpStatus.FORBIDDEN), 'unauthorized'],
     [new HttpException({ code: 'PROJECT_NOT_FOUND' }, HttpStatus.NOT_FOUND), 'unauthorized'],
     [new HttpException({ code: 'GIT_PUSH_RACE_LOST' }, HttpStatus.SERVICE_UNAVAILABLE), 'conflict'],
+    /* W14 Finding 3: a retryable capacity refusal is busy, so availability is not read off it. */
+    [new HttpException({ code: 'GIT_LEASE_OWNER_BUSY' }, HttpStatus.SERVICE_UNAVAILABLE), 'busy'],
+    [new HttpException({ code: 'GIT_LEASE_DISK_FULL' }, HttpStatus.SERVICE_UNAVAILABLE), 'busy'],
+    [new HttpException({ code: 'GIT_SERVICE_RESTARTING' }, HttpStatus.SERVICE_UNAVAILABLE), 'busy'],
+    [new HttpException({ code: 'GIT_HYDRATE_BUDGET_EXHAUSTED' }, HttpStatus.TOO_MANY_REQUESTS), 'busy'],
+    [new HttpException({ code: 'GIT_RATE_LIMITED' }, HttpStatus.TOO_MANY_REQUESTS), 'busy'],
+    /* A 503 without a capacity code is not a refusal a client is told to wait out. */
+    [new HttpException('This project’s storage account is unavailable.', HttpStatus.SERVICE_UNAVAILABLE), 'error'],
     [new HttpException({ code: 'GIT_REPOSITORY_INCOMPLETE' }, HttpStatus.INTERNAL_SERVER_ERROR), 'error'],
     [new Error('socket hang up'), 'error'],
   ])('maps %o to %s', (error, outcome) => {
@@ -318,6 +326,7 @@ describe('GitController sync telemetry', () => {
     syncOperations: { add: vi.fn() },
     syncOperationDuration: { record: vi.fn() },
     syncPackBytes: { record: vi.fn() },
+    syncRefusals: { add: vi.fn() },
   });
   const controllerWith = (repositories: Partial<GitRepositoryService>, recorded: ReturnType<typeof metrics>) =>
     new GitController(
@@ -374,6 +383,109 @@ describe('GitController sync telemetry', () => {
     expect(recorded.syncOperations.add).toHaveBeenCalledExactlyOnceWith(1, {
       'tau.sync.operation': 'push',
       outcome: 'quota_refused',
+    });
+  });
+
+  /* W14 N1: every typed refusal by code, beside the outcome, so a lost race is a share of pushes. */
+  it.each([
+    ['GIT_LEASE_OWNER_BUSY', HttpStatus.SERVICE_UNAVAILABLE, 'busy'],
+    ['GIT_LEASE_DISK_FULL', HttpStatus.SERVICE_UNAVAILABLE, 'busy'],
+    ['GIT_HYDRATE_BUDGET_EXHAUSTED', HttpStatus.TOO_MANY_REQUESTS, 'busy'],
+    ['GIT_SERVICE_RESTARTING', HttpStatus.SERVICE_UNAVAILABLE, 'busy'],
+    ['GIT_PUSH_RACE_LOST', HttpStatus.SERVICE_UNAVAILABLE, 'conflict'],
+    ['GIT_PUSH_NOT_COMMITTABLE', HttpStatus.UNPROCESSABLE_ENTITY, 'error'],
+    ['GIT_REPOSITORY_CEILING_EXCEEDED', HttpStatus.PAYLOAD_TOO_LARGE, 'quota_refused'],
+  ] as const)(
+    'counts a push refused %s (HTTP %i) as one refusal by that code, outcome %s',
+    async (code, status, outcome) => {
+      const recorded = metrics();
+      const controller = controllerWith(
+        {
+          authorize: async () => access as unknown as GitAccess,
+          receivePack: async () => {
+            throw new HttpException({ code, message: 'refused' }, status);
+          },
+        },
+        recorded,
+      );
+      const { reply: stub } = replyStub();
+      const reply = {
+        header: stub.header,
+        raw: { once: vi.fn() },
+      } as unknown as FastifyReply;
+
+      await expect(controller.receivePack('proj_d1.git', 'user-owner', push, reply)).rejects.toBeInstanceOf(
+        HttpException,
+      );
+
+      expect(recorded.syncRefusals.add).toHaveBeenCalledExactlyOnceWith(1, {
+        'tau.sync.operation': 'push',
+        'tau.sync.refusal.code': code,
+        'http.response.status_code': status,
+      });
+      expect(recorded.syncOperations.add).toHaveBeenCalledExactlyOnceWith(1, {
+        'tau.sync.operation': 'push',
+        outcome,
+      });
+    },
+  );
+
+  it('counts a fetch refused with an undeclared code as other, and a thrown non-HTTP error as no refusal', async () => {
+    const recorded = metrics();
+    let call = 0;
+    const controller = controllerWith(
+      {
+        authorize: async () => access as unknown as GitAccess,
+        uploadPack: async () => {
+          call += 1;
+          if (call === 1) {
+            throw new HttpException({ code: 'PROJECT_NOT_FOUND', message: 'no' }, HttpStatus.NOT_FOUND);
+          }
+          throw new Error('socket hang up');
+        },
+      },
+      recorded,
+    );
+    const { reply: stub } = replyStub();
+    const reply = {
+      header: stub.header,
+      raw: { once: vi.fn() },
+    } as unknown as FastifyReply;
+
+    await expect(controller.uploadPack('proj_d1.git', 'user-owner', push, reply)).rejects.toBeInstanceOf(HttpException);
+    await expect(controller.uploadPack('proj_d1.git', 'user-owner', push, reply)).rejects.toThrow('socket hang up');
+
+    expect(recorded.syncRefusals.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.sync.operation': 'fetch',
+      'tau.sync.refusal.code': 'other',
+      'http.response.status_code': HttpStatus.NOT_FOUND,
+    });
+  });
+
+  it('counts a request refused by the per-window budget as GIT_RATE_LIMITED for its operation', async () => {
+    const recorded = metrics();
+    const controller = new GitController(
+      { get: () => 'https://api.tau.test' } as unknown as ConfigService<Environment, true>,
+      { authorize: async () => access } as unknown as GitRepositoryService,
+      {} as unknown as GitLfsService,
+      {
+        consumeWindowBudget: async () => ({
+          allowed: false,
+          count: 1,
+          retryAfterSeconds: 7,
+        }),
+      } as unknown as PublicationRateLimiterService,
+      recorded as unknown as MetricsService,
+    );
+
+    await expect(
+      controller.infoRefs('proj_d1.git', 'git-receive-pack', 'user-owner', ownRequest(), replyStub().reply),
+    ).rejects.toMatchObject({ response: { code: 'GIT_RATE_LIMITED' } });
+
+    expect(recorded.syncRefusals.add).toHaveBeenCalledExactlyOnceWith(1, {
+      'tau.sync.operation': 'push',
+      'tau.sync.refusal.code': 'GIT_RATE_LIMITED',
+      'http.response.status_code': HttpStatus.TOO_MANY_REQUESTS,
     });
   });
 });

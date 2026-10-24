@@ -517,6 +517,33 @@ describe('ArButton recovery', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
+  it('keeps a retry’s own failure open when the session refuses again at once', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    xr.requestSession
+      .mockRejectedValueOnce(new DOMException('Permission denied', 'NotAllowedError'))
+      .mockRejectedValueOnce(new DOMException('No AR runtime', 'NotSupportedError'));
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+
+    await screen.findByRole('alertdialog', { name: 'Camera access is off' });
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    await screen.findByRole('alertdialog', { name: 'AR isn’t available right now' });
+    // The first failure's focus return runs a task after it closes; it must not dismiss the second.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+    });
+    expect(screen.getByRole('alertdialog', { name: 'AR isn’t available right now' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(arButton()).toHaveFocus();
+    expect(xr.requestSession).toHaveBeenCalledTimes(2);
+  });
+
   it('names a failed USDZ export with its issue, and Escape returns focus to the control', async () => {
     installPlatform(platforms.iPhoneSafari);
     const { document: runtimeDocument } = createRuntimeDocument(async () => ({

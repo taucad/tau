@@ -141,7 +141,12 @@ export function ArControl({
           className='w-72 space-y-3'
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            localRef.current?.focus();
+            // This runs a task after the popover closes. A retry that failed at once has opened the next failure by
+            // then, and taking focus from it would dismiss it, so return focus only when nothing holds it.
+            const active = document.activeElement;
+            if (!active || active === document.body) {
+              localRef.current?.focus();
+            }
           }}
         >
           <div className='space-y-1'>

@@ -66,6 +66,13 @@ const environmentSchemaBase = z.object({
   ADDITIONAL_CORS_ORIGINS: jsonCodec(z.array(z.string()).describe('Additional CORS origin glob patterns to allow.'))
     .optional()
     .default([]),
+  TAU_AUTH_ALLOWED_EMAIL_DOMAINS: jsonCodec(
+    z
+      .array(z.string().trim().toLowerCase().min(1))
+      .describe('Email domains allowed to create an account or sign in, matched exactly. Empty = every domain.'),
+  )
+    .optional()
+    .default([]),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']),
   LOG_SERVICE: z.enum(['console', 'fly', 'google-logging', 'aws-cloudwatch']).default('console'),
 

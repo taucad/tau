@@ -1,6 +1,8 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import type { DatabaseType } from '#database/database.service.js';
 import { drainInFlight } from '#api/git/routing/in-flight.js';
 import type { InFlightRegistry } from '#api/git/routing/in-flight.js';
+import { routeCacheTtlMilliseconds } from '#api/git/routing/route.js';
 import { freezeAll, unfreezeAll } from '#api/git/routing/route-table.js';
 
 /**
@@ -31,10 +33,14 @@ export const parseFreezeSeconds = (raw: string | undefined): number => {
 
 /**
  * Freezes every repository, then waits for the requests that were in flight
- * when it began. A drain that times out is reported, never hidden: the
- * operator decides whether to wait again before restoring.
+ * when every Machine had seen it. A Machine whose cached route predates the
+ * freeze keeps admitting for up to the cache's TTL, and the global freeze has
+ * no fence behind it, so the drain first waits that TTL out and then counts
+ * every request registered before its end. A drain that times out is
+ * reported, never hidden: the operator decides whether to wait again before
+ * restoring.
  *
- * @param args - The database, the shared registry, the incident or restore id, the lease and the drain bound.
+ * @param args - The database, the shared registry, the incident or restore id, the lease, the drain bound and the settle time (the route cache's TTL).
  * @returns What was written, and whether every earlier request finished.
  */
 export const freezeEverything = async (args: {
@@ -43,6 +49,7 @@ export const freezeEverything = async (args: {
   reason: string;
   forSeconds: number;
   drainTimeoutMilliseconds?: number;
+  settleMilliseconds?: number;
 }): Promise<{
   scope: 'global';
   reason: string;
@@ -54,8 +61,10 @@ export const freezeEverything = async (args: {
     migrationId: args.reason,
     forMilliseconds: args.forSeconds * 1000,
   });
+  const settleMilliseconds = args.settleMilliseconds ?? routeCacheTtlMilliseconds;
+  await delay(settleMilliseconds);
   const drained = await drainInFlight(args.registry, {
-    before: frozenAt,
+    before: new Date(frozenAt.getTime() + settleMilliseconds),
     timeoutMilliseconds: args.drainTimeoutMilliseconds ?? globalDrainTimeoutMilliseconds,
   });
   return {

@@ -53,6 +53,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('the globa
       registry,
       reason: 'inc_restore_1',
       forSeconds: 600,
+      settleMilliseconds: 50,
     });
 
     expect(frozen).toMatchObject({
@@ -70,6 +71,36 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('the globa
     expect(isFrozen(await readRoute(database, 'proj_any'), Date.now())).toBe(false);
   });
 
+  /* A Machine whose cached route predates the freeze admits for up to the cache's TTL after it
+   * begins; the drain has to wait for those requests too, or a fleet restore starts under a write. */
+  it('waits out the route cache, and drains what a stale Machine admitted after the freeze began', async () => {
+    const registry = new MemoryInFlightRegistry();
+    let released = false;
+    setTimeout(() => {
+      void (async () => {
+        const release = await registry.register('proj_stale_cache');
+        setTimeout(() => {
+          released = true;
+          release();
+        }, 300);
+      })();
+    }, 100);
+
+    const frozen = await freezeEverything({
+      database,
+      registry,
+      reason: 'inc_restore_3',
+      forSeconds: 60,
+      settleMilliseconds: 250,
+    });
+    try {
+      expect(frozen.drained).toBe(true);
+      expect(released).toBe(true);
+    } finally {
+      await thawEverything(database);
+    }
+  });
+
   it('reports a drain that timed out rather than claiming the store is quiet', async () => {
     const registry = new MemoryInFlightRegistry();
     const release = await registry.register('proj_long');
@@ -80,6 +111,7 @@ describe.skipIf(!(await databaseReachable(process.env.DATABASE_URL)))('the globa
         reason: 'inc_restore_2',
         forSeconds: 60,
         drainTimeoutMilliseconds: 150,
+        settleMilliseconds: 50,
       });
       expect(frozen.drained).toBe(false);
     } finally {

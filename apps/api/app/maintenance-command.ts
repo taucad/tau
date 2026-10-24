@@ -89,9 +89,10 @@ const usage = `Usage: revisions-maintenance <command>
   freeze-all --for <seconds> --reason <incident or restore id>
       Freeze every repository at the API (the restore runbook's global freeze,
       DW1): git requests are held up to 5 s, then answered 429 with
-      Retry-After: 1. Waits up to 16 s for requests already in flight and
-      prints whether they drained. The freeze lapses on its own after --for
-      (at most 86400); run it again to extend it.
+      Retry-After: 1. Waits 5 s for every Machine's route cache to see it,
+      then up to 16 s for requests in flight, and prints whether they
+      drained. The freeze lapses on its own after --for (at most 86400); run
+      it again to extend it.
 
   thaw-all
       Lift the global freeze.

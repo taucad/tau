@@ -315,6 +315,12 @@ const awaitingPanel: Readonly<Record<string, string>> = {
   tau_git_repository_size: 'OB2',
   tau_git_hot_project_commit_rate: 'OB2',
   tau_git_hot_project_writers: 'OB2',
+  // DW1/DW2 ship the route table and freeze series; OB5's migration panels read them.
+  tau_git_route_frozen: 'OB5',
+  tau_git_route_frozen_oldest: 'OB5',
+  tau_git_route_holds_total: 'OB5',
+  tau_git_route_hold_duration: 'OB5',
+  tau_git_route_lookup_duration: 'OB5',
 };
 
 /**

@@ -47,6 +47,11 @@ billing-operations = 'node /app/dist/billing-command.js billing-operations-worke
 # Each pass records durable liveness; status requires recovery within 120 seconds.
 # One connection per lane (pool cap 2); the singleton remains at 512 MiB.
 # Restore remains operator-invoked using TAU_S3_RESTORE_* secrets.
+# DC4: this group is moving to the private app in `apps/maintenance/fly.prod.toml`,
+# which holds in standby (TAU_MAINTENANCE_STANDBY) while this line exists. Do not
+# remove it here alone: the cutover scales this group to zero, deletes this line,
+# its `[[vm]]` and the standby flag there in one reviewed change, after the new
+# app is deployed and healthy (`app/maintenance-app.test.ts` enforces the pairing).
 revisions-maintenance = "node /app/dist/maintenance-command.js worker"
 
 [env]

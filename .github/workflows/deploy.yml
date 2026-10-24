@@ -1,11 +1,14 @@
 # Reusable workflow for deploying API to Fly.io.
 # Supports the staging API (`tau-api-staging`, `api.taucad.dev`) and the
-# production API (`tau-api`, `api.tau.new`), and the private B2 copier
-# (`mirror`: `tau-mirror-staging` / `tau-mirror`, W13 DM1). The copier is the API
-# Dockerfile's `mirror` target, deploys with its own token (`FLY_MIRROR_API_TOKEN`,
-# from HCP tau-repo `fly_mirror_deploy_token_<env>`, change proposal P2.7), serves
-# nothing (no Sentry upload, no CORS smoke) and must end with no IP address and
-# one started Machine.
+# production API (`tau-api`, `api.tau.new`), and two private apps that serve
+# nothing: the B2 copier (`mirror`: `tau-mirror-staging` / `tau-mirror`, W13 DM1)
+# and the maintenance singleton (`maintenance`: `tau-maintenance-staging` /
+# `tau-maintenance`, north star DC4). Each is a target of the API Dockerfile
+# (`mirror`, `maintenance`) and deploys with its own token: `FLY_MIRROR_API_TOKEN`
+# (HCP tau-repo `fly_mirror_deploy_token_<env>`, change proposal P2.7) and
+# `FLY_MAINTENANCE_API_TOKEN` (HCP tau-repo `fly_maintenance_deploy_token_<env>`).
+# Neither uploads Sentry maps or runs the CORS smoke, and each must end with no IP
+# address and a started Machine; the maintenance app must have exactly one.
 #
 # The build pipeline:
 #   1. Authenticate Docker against `registry.fly.io` using FLY_API_TOKEN.
@@ -37,7 +40,7 @@ on:
       app:
         required: true
         type: string
-        description: 'App to deploy (api or mirror)'
+        description: 'App to deploy (api, mirror or maintenance)'
   workflow_dispatch:
     # Manual trigger from GitHub UI
     inputs:
@@ -55,6 +58,7 @@ on:
         options:
           - api
           - mirror
+          - maintenance
 
 jobs:
   deploy:
@@ -87,20 +91,29 @@ jobs:
         id: targets
         env:
           FLY_TOKEN_MIRROR: ${{ secrets.FLY_MIRROR_API_TOKEN }}
+          FLY_TOKEN_MAINTENANCE: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
         run: |
           # Every app but the API builds a target of the API's Dockerfile and has
           # its Fly configs in its own project.
           DOCKERFILE="apps/api/Dockerfile"
           DOCKER_TARGET=""
           TOKEN_SECRET="FLY_API_TOKEN"
-          if [ "${{ inputs.app }}" = "mirror" ]; then
+          if [ "${{ inputs.app }}" = "mirror" ] || [ "${{ inputs.app }}" = "maintenance" ]; then
+            case "${{ inputs.app }}" in
+              mirror)
+                PREFIX="tau-mirror"; TOKEN_SECRET="FLY_MIRROR_API_TOKEN"
+                TOKEN_HCP="fly_mirror_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MIRROR" ;;
+              maintenance)
+                PREFIX="tau-maintenance"; TOKEN_SECRET="FLY_MAINTENANCE_API_TOKEN"
+                TOKEN_HCP="fly_maintenance_deploy_token"; TOKEN_VALUE="$FLY_TOKEN_MAINTENANCE" ;;
+            esac
             case "${{ inputs.environment }}" in
-              staging) FLY_APP="tau-mirror-staging"; CONFIG_FILE="apps/mirror/fly.staging.toml" ;;
-              production) FLY_APP="tau-mirror"; CONFIG_FILE="apps/mirror/fly.prod.toml" ;;
+              staging) FLY_APP="${PREFIX}-staging"; CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml" ;;
+              production) FLY_APP="${PREFIX}"; CONFIG_FILE="apps/${{ inputs.app }}/fly.prod.toml" ;;
               *) echo "::error::Invalid environment: ${{ inputs.environment }}"; exit 1 ;;
             esac
-            [ -n "$FLY_TOKEN_MIRROR" ] || {
-              echo "::error::Set fly_mirror_deploy_token_${{ inputs.environment }} in HCP tau-repo and apply its FLY_MIRROR_API_TOKEN GitHub environment mapping."
+            [ -n "$TOKEN_VALUE" ] || {
+              echo "::error::Set ${TOKEN_HCP}_${{ inputs.environment }} in HCP tau-repo and apply its ${TOKEN_SECRET} GitHub environment mapping."
               exit 1
             }
             echo "fly_app=${FLY_APP}" >> "$GITHUB_OUTPUT"
@@ -108,8 +121,8 @@ jobs:
             echo "image=registry.fly.io/${FLY_APP}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
             echo "cache_ref=registry.fly.io/${FLY_APP}:buildcache" >> "$GITHUB_OUTPUT"
             echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
-            echo "docker_target=mirror" >> "$GITHUB_OUTPUT"
-            echo "token_secret=FLY_MIRROR_API_TOKEN" >> "$GITHUB_OUTPUT"
+            echo "docker_target=${{ inputs.app }}" >> "$GITHUB_OUTPUT"
+            echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
@@ -194,30 +207,33 @@ jobs:
         if: steps.superseded.outputs.superseded != 'true'
         run: |
           echo "Deploying ${{ steps.targets.outputs.image }} to ${{ inputs.environment }}"
-          # `--ha=false` keeps tau-mirror at one Machine; `--no-public-ips` keeps a first deploy from allocating any.
+          # `--ha=false` keeps each private app at one Machine (tau-maintenance: charter
+          # D21); `--no-public-ips` keeps a first deploy from allocating any.
           flyctl deploy \
             --app "${{ steps.targets.outputs.fly_app }}" \
             --config "${{ steps.targets.outputs.config_file }}" \
             --image "${{ steps.targets.outputs.image }}" \
-            ${{ inputs.app == 'mirror' && '--ha=false --no-public-ips' || '' }}
+            ${{ (inputs.app == 'mirror' || inputs.app == 'maintenance') && '--ha=false --no-public-ips' || '' }}
         env:
           FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
 
-      # DM1: the copier has no service, so it must have no IP address of any kind,
-      # and its one Machine must be started and must not have exited non-zero since
-      # the deploy (a missing secret or grant stops it at boot, naming the variable
-      # or the schema check). Names and counts only; nothing here prints a secret.
-      - name: Verify the mirror app is private and running
-        if: inputs.app == 'mirror' && steps.superseded.outputs.superseded != 'true'
+      # DM1 and DC4: a private app has no service, so it must have no IP address of
+      # any kind, and its Machine must be started and must not have exited non-zero
+      # since the deploy (a missing secret or grant stops it at boot, naming the
+      # variable or the failed check). tau-maintenance must also have exactly one
+      # Machine (charter D21). Names and counts only; nothing here prints a secret.
+      - name: Verify the ${{ inputs.app }} app is private and running
+        if: (inputs.app == 'mirror' || inputs.app == 'maintenance') && steps.superseded.outputs.superseded != 'true'
         env:
           FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
           FLY_APP: ${{ steps.targets.outputs.fly_app }}
+          APP: ${{ inputs.app }}
         run: |
           set -euo pipefail
           since=$(( $(date +%s%3N) - 120000 ))
           ips=$(flyctl ips list --app "$FLY_APP" --json | jq 'length')
           if [ "$ips" != 0 ]; then
-            echo "::error::${FLY_APP} has ${ips} IP address(es); it must have none (DM1)."
+            echo "::error::${FLY_APP} has ${ips} IP address(es); it must have none."
             exit 1
           fi
           for attempt in 1 2 3 4 5 6; do
@@ -229,6 +245,10 @@ jobs:
               '[.[].events[]? | select(.type == "exit" and (.timestamp // 0) > $since and ((.request.exit_event.exit_code // 0) != 0))] | length' \
               <<< "$machines")
             echo "attempt ${attempt}: machines=${count} started=${started} failed_exits=${exits}"
+            if [ "$APP" = maintenance ] && [ "$count" != 1 ]; then
+              echo "::error::${FLY_APP} has ${count} Machines; it must have exactly one (charter D21)."
+              exit 1
+            fi
             if [ "$exits" != 0 ]; then
               echo "::error::The ${FLY_APP} Machine exited non-zero; its log names the missing variable or the failed check."
               exit 1

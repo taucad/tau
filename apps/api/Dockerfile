@@ -2,7 +2,7 @@
 
 # Multi-stage Fly.io image for the Tau NestJS API.
 #
-# Stages: base -> deps -> build -> pruned -> runtime-base -> mirror | runtime
+# Stages: base -> deps -> build -> pruned -> runtime-base -> mirror | maintenance | runtime
 #   base         : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
 #   deps         : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
 #                  + patches); cache key independent of source edits.
@@ -13,6 +13,9 @@
 #   mirror       : the private `tau-mirror` app (W13 DM1, the B2 second copy), built with
 #                  `--target mirror`; runs `mirror-command.js worker`, metrics on 9464 only,
 #                  no health check.
+#   maintenance  : the private `tau-maintenance` app (north star DC4), built with
+#                  `--target maintenance`; runs `maintenance-command.js`, no port, no
+#                  health check (`app/maintenance-app.test.ts`).
 #   runtime      : the API. The last stage, so a build without `--target` is the API.
 #
 # Build choices (see also docs/research/api-docker-build-optimization.md):
@@ -139,6 +142,15 @@ FROM runtime-base AS mirror
 ENV OTEL_SERVICE_NAME="tau-mirror"
 EXPOSE 9464
 CMD ["node", "/app/dist/mirror-command.js", "worker"]
+
+# ── Maintenance: the private singleton `tau-maintenance` (DC4) ────────────
+# Same tree as the API, a different entry: purge, retire-lfs, blob collection,
+# project-deletion recovery and operator restore. `retire-lfs` hydrates a lease,
+# so it keeps the pinned git above. No EXPOSE and no HEALTHCHECK: the
+# command opens no listener, and Fly's `[processes]` entry in
+# `apps/maintenance/fly.*.toml` names the subcommand (`worker`).
+FROM runtime-base AS maintenance
+CMD ["node", "/app/dist/maintenance-command.js", "worker"]
 
 # ── Runtime: the API ──────────────────────────────────────────────────────
 FROM runtime-base AS runtime

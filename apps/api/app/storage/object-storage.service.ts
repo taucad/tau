@@ -19,7 +19,7 @@ import type { S3ClientConfig } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import type { ObjectStorageEnvironment } from '#config/environment.config.js';
 import { storageHealthProbeKey, storageNamespacePrefixes } from '#storage/storage.constants.js';
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { instrumentStorageClient } from '#storage/storage-metrics.js';
@@ -305,7 +305,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   private readonly signingClient: Parameters<typeof getSignedUrl>[0];
 
   public constructor(
-    private readonly configService: ConfigService<Environment, true>,
+    private readonly configService: ConfigService<ObjectStorageEnvironment, true>,
     // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
     @Optional() scopedAccount?: StorageAccount,
     // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.

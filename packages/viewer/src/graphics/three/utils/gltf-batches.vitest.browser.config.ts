@@ -44,7 +44,8 @@ export default defineConfig({
     testTimeout: 120_000,
     browser: {
       enabled: true,
-      headless: process.env['TAU_PICK_BENCHMARK'] === undefined,
+      // Foreground picking measurements opt in with Vitest's --browser.headless=false.
+      headless: true,
       screenshotDirectory: '../../out/test-results/gltf-batches-browser',
       provider: playwright({
         launchOptions: {

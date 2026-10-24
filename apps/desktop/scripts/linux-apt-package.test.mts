@@ -66,11 +66,18 @@ const assertSandboxBwrap = async (name: string, expected: string): Promise<void>
   assert.deepEqual(await readFile(path), await readFile('/usr/bin/bwrap'));
   assert.equal(command(path, []), expected);
   assert.equal(await readFile(`/etc/apparmor.d/${name}-bwrap`, 'utf8'), linuxAptBwrapProfile(name));
-  assert.equal(command('dpkg-query', ['-S', `/etc/apparmor.d/${name}-bwrap`]).trim(), `${name}: /etc/apparmor.d/${name}-bwrap`);
+  assert.equal(
+    command('dpkg-query', ['-S', `/etc/apparmor.d/${name}-bwrap`]).trim(),
+    `${name}: /etc/apparmor.d/${name}-bwrap`,
+  );
 };
 /** Assert remove/purge left no Tau sandbox grant behind and touched nothing else. */
 const assertSandboxRemoved = async (name: string): Promise<void> => {
-  for (const path of [`/opt/${name}/sandbox`, `/etc/apparmor.d/${name}-bwrap`, `/var/cache/apparmor/0123abcd/${name}-bwrap`]) {
+  for (const path of [
+    `/opt/${name}/sandbox`,
+    `/etc/apparmor.d/${name}-bwrap`,
+    `/var/cache/apparmor/0123abcd/${name}-bwrap`,
+  ]) {
     assert.notEqual(spawnSync('test', ['-e', path]).status, 0, `should remove ${path}`);
   }
   assert.equal(await readFile('/etc/apparmor.d/unrelated-sentinel', 'utf8'), 'unrelated\n');
@@ -113,7 +120,10 @@ assert.doesNotMatch(
   'should keep the bwrap profile out of conffiles so remove deletes it and reinstall restores it',
 );
 const postinst = await readFile(join(control, 'postinst'), 'utf8');
-assert.match(postinst, /^if apparmor_enabled; then\n {2}apparmor_parser -r -W \/etc\/apparmor\.d\/tau-staging-bwrap\nfi\npublish_bwrap$/mu);
+assert.match(
+  postinst,
+  /^if apparmor_enabled; then\n {2}apparmor_parser -r -W \/etc\/apparmor\.d\/tau-staging-bwrap\nfi\npublish_bwrap$/mu,
+);
 assert.doesNotMatch(postinst, /apparmor_restrict_unprivileged_userns|\/usr\/bin\/bwrap flags|aa-complain|aa-disable/u);
 const postrm = await readFile(join(control, 'postrm'), 'utf8');
 assert.match(postrm, /printf '%s' 'tau-staging-bwrap' > \/sys\/kernel\/security\/apparmor\/\.remove/u);

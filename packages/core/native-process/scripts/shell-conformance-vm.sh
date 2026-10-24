@@ -86,7 +86,8 @@ done
 [[ "$ready" == true ]]
 ssh "${ssh_options[@]}" tau@127.0.0.1 'sudo cloud-init status --wait' > "$output/cloud-init-status.txt"
 # The real APT selector pair: it copies the distro bwrap to /opt/tau-staging/sandbox/bwrap and loads its profile.
-(cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
+# dpkg-deb refuses control directories the 077 umask above would create.
+(umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
 ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture ~/node ~/tau'
 for deb in "$work"/bwrap-fixture/*.deb; do
   # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.

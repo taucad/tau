@@ -111,7 +111,8 @@ printf 'Full guest infrastructure proof passed; any selected harness outcome is 
 if [[ "$mode" != qualification ]]; then
   # Installed sandbox bwrap on the stock image: Tau-scoped profile only, shipped sysctl untouched.
   # Qualification guests install real candidates under the same package names, so they skip this fixture.
-  (cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
+  # dpkg-deb refuses control directories the 077 umask above would create.
+  (umask 022 && cd "$REPO_ROOT" && node --import @oxc-node/core/register apps/desktop/scripts/hosted-linux-bwrap-fixture.mts "$work/bwrap-fixture")
   ssh "${ssh_options[@]}" tau@127.0.0.1 'mkdir -m 700 ~/bwrap-fixture'
   for deb in "$work"/bwrap-fixture/*.deb; do
     # shellcheck disable=SC2029 # Producer-controlled artifact name, expanded on the host by design.

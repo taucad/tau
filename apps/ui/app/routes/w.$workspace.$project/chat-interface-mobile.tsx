@@ -26,6 +26,7 @@ import {
 import { useFeature } from '#flags/use-feature.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
+import { MobileProjectTopBar } from '#routes/w.$workspace.$project/mobile-project-top-bar.js';
 
 /* B-27, D-UI-16: every panel but the chat is its own chunk, loaded when its surface
  * first opens. Only the active surface is mounted, so a phone that
@@ -351,17 +352,19 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
       <div
         className={cn(
           // --nav-height is the height of the navigation tabs
-          'absolute inset-0 size-full',
+          'absolute inset-0 flex size-full flex-col overflow-hidden',
           mobileWorkbenchNavigationHeight,
           'md:hidden', // Hidden on desktop
           // The workspace lands over the skeleton's background rather than snapping in.
           'animate-in duration-200 fade-in-50 motion-reduce:animate-none',
         )}
       >
+        {/* W2 (D2, EQ2 = H1): the project's top bar — sidebar, title with status line, Share. */}
+        <MobileProjectTopBar />
         {/* Main viewer - always visible. Its box changes size in one step: an animated size
           reallocates the canvas and every render target on each frame of the transition. */}
         <div
-          className='relative h-full'
+          className='relative min-h-0 flex-1'
           style={{
             paddingBottom: isViewerTab ? 'var(--nav-offset)' : `calc(${sheetHeight})`,
           }}

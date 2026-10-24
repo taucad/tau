@@ -95,6 +95,20 @@ function ProjectUnavailableNotice({
   );
 }
 
+/**
+ * Whether the overlay covers the project: the same three conditions it renders for, so a control outside the
+ * covered pane (the phone project bar) can stand down while the overlay owns the screen.
+ *
+ * @returns `true` while the project, its files or its workspace cannot be shown.
+ */
+export function useIsProjectUnavailable(): boolean {
+  const { projectRef } = useProject();
+  const isProjectError = useSelector(projectRef, (state) => state.matches('error'));
+  const { fileManagerRef, unavailableReason } = useFileManager();
+  const isFileManagerError = useSelector(fileManagerRef, (state) => state.matches('error'));
+  return isProjectError || isFileManagerError || Boolean(unavailableReason);
+}
+
 export function ProjectUnavailableOverlay({
   className,
 }: ProjectUnavailableOverlayProps): React.JSX.Element | undefined {

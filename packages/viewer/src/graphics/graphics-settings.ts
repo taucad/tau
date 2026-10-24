@@ -193,9 +193,9 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   enableGrid: true,
   enableAxes: true,
   enableMatcap: false,
-  enablePostProcessing: false,
+  enablePostProcessing: true,
   upDirection: 'z',
   cameraFovAngle: 60,
-  graphicsBackend: 'webgl',
+  graphicsBackend: 'webgpu',
   schemaVersion: 12,
 };

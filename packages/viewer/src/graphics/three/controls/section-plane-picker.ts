@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { positionLocal } from 'three/tsl';
+import { MeshBasicNodeMaterial } from 'three/webgpu';
+import type { ResolvedGraphicsBackend } from '#graphics/graphics-settings.js';
 import { sectionPlaneAxes } from '#graphics/section-cuts.js';
 import type { SectionAxis, SectionPlane } from '#graphics/section-cuts.js';
 import type { ViewportGizmoStyle } from '#graphics/three/controls/viewport-gizmo-cube-style.js';
@@ -16,7 +19,11 @@ import { setRaycasterFromCamera } from '#graphics/three/utils/raycaster-from-cam
  */
 
 /** A square in CSS pixels from the canvas's top-left. */
-export type SectionPlanePickerRect = Readonly<{ left: number; top: number; size: number }>;
+export type SectionPlanePickerRect = Readonly<{
+  left: number;
+  top: number;
+  size: number;
+}>;
 
 /**
  * The picker's square beside the view cube's: 11/12 of its size, reaching a 24th into the cube's square, whose
@@ -24,15 +31,24 @@ export type SectionPlanePickerRect = Readonly<{ left: number; top: number; size:
  */
 export const resolveSectionPlanePickerRect = (cube: SectionPlanePickerRect): SectionPlanePickerRect => {
   const size = Math.round((cube.size * 11) / 12);
-  return { left: cube.left + cube.size / 24 - size, top: cube.top + (cube.size - size) / 2, size };
+  return {
+    left: cube.left + cube.size / 24 - size,
+    top: cube.top + (cube.size - size) / 2,
+    size,
+  };
 };
 
 /** The renderer the picker draws with: WebGL's, or WebGPU's, whose viewport `y` runs from the top. */
 export type SectionPlanePickerRenderer = Pick<
   THREE.WebGLRenderer,
-  'autoClear' | 'clearDepth' | 'getViewport' | 'render' | 'setViewport'
+  'autoClear' | 'clearDepth' | 'getViewport' | 'render' | 'setViewport' | 'getPixelRatio'
 > &
-  Readonly<{ domElement: Readonly<{ clientHeight: number }>; isWebGPURenderer?: boolean }>;
+  Readonly<{
+    domElement: Readonly<{ clientHeight: number }>;
+    isWebGPURenderer?: boolean;
+    // oxlint-disable-next-line typescript/no-restricted-types -- Three uses null for the canvas target.
+    getRenderTarget: () => THREE.RenderTarget | null;
+  }>;
 
 /** What the picker takes from the view cube's style: its face tone, label colour and font, and the axis tints. */
 export type SectionPlanePickerStyle = Pick<ViewportGizmoStyle, 'face' | 'label' | 'font' | 'planeTiles'>;
@@ -91,7 +107,11 @@ const roundedSquare = (size: number, radius: number): THREE.Shape => {
   return shape;
 };
 
-type TileGeometries = Readonly<{ face: THREE.BufferGeometry; band: THREE.BufferGeometry; label: THREE.BufferGeometry }>;
+type TileGeometries = Readonly<{
+  face: THREE.BufferGeometry;
+  band: THREE.BufferGeometry;
+  label: THREE.BufferGeometry;
+}>;
 let tileGeometries: TileGeometries | undefined;
 
 /** The tile's face, the band around it and its label, shared by every picker: created once, never disposed. */
@@ -143,7 +163,12 @@ const faceLift = 0.002;
 const labelLift = 0.006;
 
 /** A tile's scale: the plane in use stands forward, the others back; hover lifts one and a press sinks it. */
-const tileScales = { other: 0.94, current: 1, hover: 1.08, active: 0.96 } as const;
+const tileScales = {
+  other: 0.94,
+  current: 1,
+  hover: 1.08,
+  active: 0.96,
+} as const;
 const dimmedOpacity = 0.4;
 /** How far a hovered tile's face is washed with its axis colour. */
 const hoverWash = 0.35;
@@ -188,14 +213,25 @@ const contrastingLabel = (color: THREE.Color): THREE.Color => {
   return new THREE.Color().setScalar(luminance > 0.179 ? 0 : 1);
 };
 
-const createFlatMaterial = (depthWrite: boolean): THREE.MeshBasicMaterial =>
-  new THREE.MeshBasicMaterial({
+const createFlatMaterial = (
+  depthWrite: boolean,
+  backend: ResolvedGraphicsBackend,
+): THREE.MeshBasicMaterial | MeshBasicNodeMaterial => {
+  const options = {
     transparent: true,
     depthTest: true,
     depthWrite,
     fog: false,
     toneMapped: false,
-  });
+  };
+  if (backend === 'webgpu') {
+    const material = new MeshBasicNodeMaterial(options);
+    // Keep moving tile and label transforms on the node observer update path.
+    material.positionNode = positionLocal;
+    return material;
+  }
+  return new THREE.MeshBasicMaterial(options);
+};
 
 type TilePalette = Readonly<{
   face: THREE.Color;
@@ -209,7 +245,7 @@ type TilePalette = Readonly<{
 }>;
 
 /** Builds the picker once; the plane in use and the pointer only repaint it, and the cube's style only restyles it. */
-export const createSectionPlanePicker = (): SectionPlanePicker => {
+export const createSectionPlanePicker = (backend: ResolvedGraphicsBackend = 'webgl'): SectionPlanePicker => {
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-1.05, 1.05, 1.05, -1.05, 0.1, 20);
   const geometries = getTileGeometries();
@@ -217,17 +253,25 @@ export const createSectionPlanePicker = (): SectionPlanePicker => {
     const axis: SectionAxis = sectionPlaneAxes[plane];
     const tile = new THREE.Group();
     tile.name = `section-plane-tile:${plane}`;
-    const band = new THREE.Mesh(geometries.band, createFlatMaterial(true));
+    const band = new THREE.Mesh(geometries.band, createFlatMaterial(true, backend));
     band.renderOrder = viewportRenderTiers.sectionControlBody;
-    const face = new THREE.Mesh(geometries.face, createFlatMaterial(true));
+    const face = new THREE.Mesh(geometries.face, createFlatMaterial(true, backend));
     face.position.z = faceLift;
     face.renderOrder = viewportRenderTiers.sectionControlBody;
-    const label = new THREE.Mesh(geometries.label, createFlatMaterial(false));
+    const label = new THREE.Mesh(geometries.label, createFlatMaterial(false, backend));
     label.position.z = labelLift;
     label.renderOrder = viewportRenderTiers.sectionControlLabel;
     tile.add(band, face, label);
     scene.add(tile);
-    return { plane, axis, tile, band, face, label, palette: undefined as TilePalette | undefined };
+    return {
+      plane,
+      axis,
+      tile,
+      band,
+      face,
+      label,
+      palette: undefined as TilePalette | undefined,
+    };
   });
   const hitTargets = tiles.flatMap(({ band, face }) => [band, face]);
   const cameraQuaternion = new THREE.Quaternion();
@@ -236,7 +280,9 @@ export const createSectionPlanePicker = (): SectionPlanePicker => {
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   let rect: SectionPlanePickerRect | undefined;
-  let lastPaint: Parameters<SectionPlanePicker['paint']>[0] = { current: undefined };
+  let lastPaint: Parameters<SectionPlanePicker['paint']>[0] = {
+    current: undefined,
+  };
 
   const disposePalettes = (): void => {
     for (const tile of tiles) {
@@ -261,6 +307,8 @@ export const createSectionPlanePicker = (): SectionPlanePicker => {
     scene.updateMatrixWorld(true);
   };
 
+  const targetViewport = new THREE.Vector4();
+  const targetScissor = new THREE.Vector4();
   const picker: SectionPlanePicker = {
     scene,
     camera,
@@ -307,6 +355,13 @@ export const createSectionPlanePicker = (): SectionPlanePicker => {
       align(view);
       renderer.getViewport(viewport);
       const previousAutoClear = renderer.autoClear;
+      const target = isTopDown ? renderer.getRenderTarget() : undefined;
+      if (target) {
+        targetViewport.copy(target.viewport);
+        targetScissor.copy(target.scissor);
+        target.viewport.set(next.left, next.top, next.size, next.size).multiplyScalar(renderer.getPixelRatio());
+        target.scissor.copy(target.viewport);
+      }
       renderer.autoClear = false;
       try {
         renderer.clearDepth();
@@ -318,6 +373,10 @@ export const createSectionPlanePicker = (): SectionPlanePicker => {
         );
         renderer.render(scene, camera);
       } finally {
+        if (target) {
+          target.viewport.copy(targetViewport);
+          target.scissor.copy(targetScissor);
+        }
         renderer.setViewport(viewport.x, viewport.y, viewport.z, viewport.w);
         renderer.autoClear = previousAutoClear;
       }

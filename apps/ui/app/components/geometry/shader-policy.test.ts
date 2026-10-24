@@ -36,6 +36,7 @@ const productionFiles = productionRoots.flatMap((root) => {
 /** Shader modules are named by their repository-relative path: they live in the app and in `@taucad/viewer`. */
 const aliasFor = (path: string): string => relative(repositoryRoot, path).replaceAll('\\', '/');
 const registeredModules = shaderSites.flatMap(({ modules }) => [...modules]);
+const registeredHelpers = shaderSites.flatMap((site) => ('helpers' in site ? [...site.helpers] : []));
 const discoveredControlModules = new Set<string>();
 const rawShaderModules = new Set<string>();
 const customConstructors = new Set([
@@ -121,7 +122,9 @@ describe('shader policy inventory', () => {
   });
 
   it('resolves every registered module', () => {
-    for (const module of registeredModules) {
+    const implementations = [...registeredModules, ...registeredHelpers];
+    expect(new Set(implementations).size).toBe(implementations.length);
+    for (const module of implementations) {
       expect(existsSync(join(repositoryRoot, module))).toBe(true);
     }
   });

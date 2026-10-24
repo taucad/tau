@@ -1,12 +1,10 @@
 import { Plane } from '@react-three/drei';
 import React from 'react';
 import { useThree } from '@react-three/fiber';
-import type { Camera, Mesh, Object3D } from 'three';
 import { infiniteGridMaterialForBackend } from '#graphics/three/materials/infinite-grid-material.js';
 import type { InfiniteGridMaterialProperties } from '#graphics/three/materials/infinite-grid-material.js';
 import type { InfiniteGridMaterialHandle } from '#graphics/three/materials/infinite-grid-material.types.js';
 import { useThreeGraphicsBackend } from '#graphics/three/three-graphics-backend-context.jsx';
-import { useCameraRig } from '#hooks/use-graphics.jsx';
 
 type InfiniteGridProperties = {
   /**
@@ -65,9 +63,7 @@ export function InfiniteGrid(properties: InfiniteGridProperties): React.JSX.Elem
   const { materialProperties = {}, planeProperties = {}, axes } = properties;
 
   const backendWeb = useThreeGraphicsBackend();
-  const { gl, invalidate } = useThree();
-  const cameraRig = useCameraRig();
-  const meshRef = React.useRef<Mesh>(null);
+  const { invalidate } = useThree();
 
   const gridHandle = React.useMemo((): InfiniteGridMaterialHandle => {
     return infiniteGridMaterialForBackend(backendWeb, { ...materialProperties, axes });
@@ -75,36 +71,12 @@ export function InfiniteGrid(properties: InfiniteGridProperties): React.JSX.Elem
     // so the material is not rebuilt every camera decade (see `docs/research/webgpu-render-loop-audit.md`).
   }, [axes, backendWeb]);
 
-  React.useLayoutEffect(() => {
-    const mesh = meshRef.current;
-    const renderer = gl as unknown as {
-      compileAsync?: (scene: Object3D, camera: Camera) => Promise<unknown>;
-    };
-    const compile = renderer.compileAsync;
-    const cancellation = { cancelled: false };
-
-    if (mesh && typeof compile === 'function') {
-      // async-iife: bootstrap — layout effects cannot await finite endpoint pipeline warmup.
-      void (async (): Promise<void> => {
-        try {
-          await Promise.all([
-            compile.call(renderer, mesh, cameraRig.perspectiveCamera),
-            compile.call(renderer, mesh, cameraRig.orthographicCamera),
-          ]);
-          if (!cancellation.cancelled) {
-            invalidate();
-          }
-        } catch (error) {
-          console.error('Infinite-grid pipeline warm-up failed', error);
-        }
-      })();
-    }
-
-    return () => {
-      cancellation.cancelled = true;
+  React.useLayoutEffect(
+    () => () => {
       gridHandle.material.dispose();
-    };
-  }, [cameraRig, gl, gridHandle, invalidate]);
+    },
+    [gridHandle],
+  );
 
   React.useEffect(() => {
     gridHandle.applyVisualOverrides({
@@ -133,7 +105,6 @@ export function InfiniteGrid(properties: InfiniteGridProperties): React.JSX.Elem
 
   return (
     <Plane
-      ref={meshRef}
       frustumCulled={false} // Ensure the grid is always rendered
       material={gridHandle.material}
       {...planeProperties}

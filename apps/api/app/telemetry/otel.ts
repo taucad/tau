@@ -28,6 +28,7 @@ import { BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { LangChainInstrumentation } from '@traceloop/instrumentation-langchain';
 import { redactUrlQuery } from '#logger/logger-factory.js';
+import { cardinalityViews } from '#telemetry/cardinality-views.js';
 
 const configuredMetricsPort = process.env['OTEL_METRICS_PORT'];
 const metricsPort = configuredMetricsPort === undefined ? 9464 : Number(configuredMetricsPort);
@@ -89,6 +90,10 @@ const sdk = new NodeSDK({
     port: metricsPort,
     withResourceConstantLabels: /^(?:service\.name|tau\.process)$/u,
   }),
+
+  // Named views raise the series cap of the few instruments whose live set exceeds the SDK default of 2,000;
+  // every other instrument keeps that default and no instrument gets a second stream.
+  views: [...cardinalityViews],
 
   logRecordProcessors: hasOtlpEndpoint ? [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })] : undefined,
 

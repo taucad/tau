@@ -163,6 +163,12 @@ declare module 'occt-import-js' {
    */
   export type OcctImportJs = {
     /**
+     * Emscripten's byte view over the module's whole WebAssembly memory, replaced whenever the memory grows; the
+     * module does not export the `WebAssembly.Memory` itself.
+     */
+    readonly HEAPU8: Uint8Array<ArrayBuffer>;
+
+    /**
      * Import brep file
      * @param content - The file content as a Uint8Array object
      * @param parameters - Triangulation parameters, can be undefined

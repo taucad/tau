@@ -1,19 +1,7 @@
 import { useViewerControlSize } from '#cad/viewer-control-size.js';
 import React, { useCallback, useRef, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
-import {
-  Aperture,
-  Axis3D,
-  Box,
-  Grid3X3,
-  Layers,
-  Rotate3D,
-  Settings,
-  PenLine,
-  Sparkles,
-  ArrowUp,
-  Timer,
-} from 'lucide-react';
+import { Aperture, Axis3D, Box, Grid3X3, Rotate3D, Settings, PenLine, Sparkles, ArrowUp, Timer } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -195,7 +183,6 @@ export function ViewerSettings({
   const enableGrid = useGraphicsSelector((state) => state.context.enableGrid);
   const enableAxes = useGraphicsSelector((state) => state.context.enableAxes);
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
-  const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
 
@@ -237,16 +224,6 @@ export function ViewerSettings({
   const handleMatcapToggle = useCallback(
     (checked: boolean) => {
       graphicsRef.send({ type: 'setMatcapVisibility', payload: checked });
-    },
-    [graphicsRef],
-  );
-
-  const handlePostProcessingToggle = useCallback(
-    (checked: boolean) => {
-      graphicsRef.send({
-        type: 'setPostProcessingVisibility',
-        payload: checked,
-      });
     },
     [graphicsRef],
   );
@@ -328,17 +305,6 @@ export function ViewerSettings({
               <InfoTooltip>
                 A material that gives models a consistent appearance independent of scene lighting.
                 <br /> Rendering performance is improved with this enabled.
-              </InfoTooltip>
-            </DropdownMenuSwitchItem>
-            <DropdownMenuSwitchItem
-              icon={<Layers />}
-              description={`Ambient occlusion is ${enablePostProcessing ? 'active' : 'inactive'}`}
-              isChecked={enablePostProcessing}
-              onIsCheckedChange={handlePostProcessingToggle}
-            >
-              Post-processing{' '}
-              <InfoTooltip>
-                Enables screen-space ambient occlusion for more realistic depth and contact shadows.
               </InfoTooltip>
             </DropdownMenuSwitchItem>
             <DropdownMenuSeparator />

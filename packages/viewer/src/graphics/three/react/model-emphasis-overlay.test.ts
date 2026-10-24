@@ -1,10 +1,17 @@
 // @vitest-environment node
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { describe, expect, it, vi } from 'vitest';
 import {
   BoxGeometry,
   Color,
   CustomBlending,
   DepthFormat,
+  DepthTexture,
+  WebGLRenderTarget,
+  WebGLCoordinateSystem,
+  WebGPUCoordinateSystem,
   DoubleSide,
   Matrix4,
   Mesh,
@@ -12,6 +19,9 @@ import {
   OneFactor,
   PerspectiveCamera,
   Scene,
+  RGFormat,
+  RGBAFormat,
+  REVISION,
 } from 'three';
 import type { Group, Material, WebGLRenderer } from 'three';
 import {
@@ -50,6 +60,117 @@ const makeRecordingRenderer = (): { gl: WebGLRenderer; calls: string[] } => {
 };
 
 describe('model emphasis overlay resources', () => {
+  it('should guard the installed depth allocation and framebuffer implementation', () => {
+    expect(REVISION).toBe('184');
+    const require = createRequire(import.meta.url);
+    for (const [file, expected] of [
+      ['common/Textures.js', 'f254ca8221e17bf58a2aad3e99735bc6b5b183331dc9aeafd530d73bf2b3347c'],
+      ['webgl-fallback/WebGLBackend.js', '453ebc61fe7acf2530e6570a5a12699947fdca5dcbd02c092496c1b8363b82f8'],
+      ['webgl-fallback/utils/WebGLTextureUtils.js', '6b08fc0d0af38b893bd243991ba09eef844c2af99cb07c59f53f7a1c7149acc0'],
+    ]) {
+      const source = readFileSync(require.resolve(`three/src/renderers/${file}`), 'utf8');
+      expect(createHash('sha256').update(source).digest('hex'), file).toBe(expected);
+    }
+  });
+
+  it.each([false, true])('should clear color at the qualified node pass for WebGL2=%s', (isWebGl) => {
+    const resources = createModelEmphasisResources('webgpu', createSectionClip('webgpu'));
+    const frame = new WebGLRenderTarget(200, 100);
+    frame.depthTexture = new DepthTexture(200, 100);
+    resources.setMaskSize({ width: 200, height: 100, pixelRatio: 1 });
+    const { gl, calls } = makeRecordingRenderer();
+    Object.assign(gl, { coordinateSystem: isWebGl ? WebGLCoordinateSystem : WebGPUCoordinateSystem });
+    gl.getRenderTarget = () => frame;
+    const restore = vi.fn();
+    const borrowedDispose = vi.spyOn(frame.depthTexture, 'dispose');
+    const render = (): void => {
+      renderModelEmphasisMask(resources, {
+        gl,
+        camera: emptyCamera,
+        restoreDepth: restore,
+        previousClear: new Color(),
+      });
+    };
+    render();
+    expect(resources.maskTarget.depthBuffer).toBe(true);
+    expect(resources.maskTarget.samples).toBe(4);
+    expect(resources.mask.visibility.selected.depthTest).toBe(true);
+    expect(restore).toHaveBeenCalledTimes(0);
+    expect(calls.filter((call) => call === 'draw')).toHaveLength(2);
+    expect(calls.includes('clear')).toBe(false);
+    expect(resources.maskScene.children).toHaveLength(0);
+    render();
+    gl.getRenderTarget = () => null;
+    render();
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(calls).toContain('clear');
+    resources.dispose();
+    expect(borrowedDispose).not.toHaveBeenCalled();
+    frame.dispose();
+  });
+
+  it('restores clear flags and the frame target when the fused depth draw throws', () => {
+    const resources = createModelEmphasisResources('webgpu', createSectionClip('webgpu'));
+    const frame = new WebGLRenderTarget(200, 100);
+    frame.depthTexture = new DepthTexture(200, 100);
+    resources.setMaskSize({ width: 200, height: 100, pixelRatio: 1 });
+    const { gl } = makeRecordingRenderer();
+    Object.assign(gl, {
+      coordinateSystem: WebGLCoordinateSystem,
+      autoClear: false,
+      autoClearColor: false,
+      autoClearDepth: false,
+      autoClearStencil: true,
+    });
+    gl.getRenderTarget = () => frame;
+    const setTarget = vi.spyOn(gl, 'setRenderTarget');
+    gl.render = () => {
+      throw new Error('draw failed');
+    };
+    expect(() => {
+      renderModelEmphasisMask(resources, {
+        gl,
+        camera: emptyCamera,
+        restoreDepth: vi.fn(),
+        previousClear: new Color(),
+      });
+    }).toThrow('draw failed');
+    expect(setTarget).toHaveBeenLastCalledWith(frame);
+    expect([gl.autoClear, gl.autoClearColor, gl.autoClearDepth, gl.autoClearStencil]).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+    resources.dispose();
+    frame.dispose();
+  });
+
+  it('packs one node emphasis state without reducing coverage samples or depth precision', () => {
+    const resources = createModelEmphasisResources('webgpu', createSectionClip('webgpu'));
+    const source = makeSource();
+    syncModelEmphasisProxies(resources, { hover: [], selected: [source] });
+    expect(resources.maskTarget.texture.format).toBe(RGFormat);
+    expect(resources.maskTarget.samples).toBe(4);
+    expect(resources.mask.coverage.selected.color.toArray()).toEqual([1, 0, 0]);
+    expect(resources.mask.visibility.selected.color.toArray()).toEqual([0, 1, 0]);
+    expect(resources.mask.visibility.selected.opacity).toBe(0);
+    const dispose = vi.spyOn(resources.maskTarget, 'dispose');
+    syncModelEmphasisProxies(resources, { hover: [source], selected: [] });
+    expect(dispose).not.toHaveBeenCalled();
+    syncModelEmphasisProxies(resources, { hover: [source], selected: [makeSource()] });
+    expect(resources.maskTarget.texture.format).toBe(RGBAFormat);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(resources.mask.visibility.selected.opacity).toBe(1);
+    syncModelEmphasisProxies(resources, { hover: [], selected: [source] });
+    expect(resources.maskTarget.texture.format).toBe(RGBAFormat);
+    expect(dispose).toHaveBeenCalledOnce();
+    syncModelEmphasisProxies(resources, emptyModelEmphasisSet);
+    syncModelEmphasisProxies(resources, { hover: [source], selected: [] });
+    expect(resources.maskTarget.texture.format).toBe(RGFormat);
+    resources.dispose();
+  });
+
   it('proxies each emphasised mesh into both mask layers and the wash group, sharing six materials', () => {
     const resources = createModelEmphasisResources('webgl', createSectionClip('webgl'));
     const hovered = makeSource();

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   alertParityProblems,
   alertRuleProblems,
+  dashboardUidProblems,
   grafanaUidProblems,
   logSecretProblems,
   uidPrefixProblems,
@@ -26,6 +27,54 @@ describe('Grafana provisioning validation', () => {
       'tau-warning.json: duplicate alert rule UID "ok"',
       'api.json: dashboard UID "" must be 1-40 characters (has 0)',
     ]);
+  });
+});
+
+describe('dashboard UIDs across files (runtime observability T32)', () => {
+  it('rejects one UID in two dashboard files and leaves alert rules to their per-file check', () => {
+    expect(
+      dashboardUidProblems([
+        {
+          file: 'dashboards/runtime.json',
+          kind: 'dashboard',
+          uids: ['tau-runtime'],
+        },
+        {
+          file: 'dashboards/runtime-operations.json',
+          kind: 'dashboard',
+          uids: ['tau-runtime'],
+        },
+        {
+          file: 'dashboards/runtime-product.json',
+          kind: 'dashboard',
+          uids: ['tau-runtime-product'],
+        },
+        { file: 'alerts.yaml', kind: 'alert rule', uids: ['tau-runtime'] },
+      ]),
+    ).toEqual([
+      'dashboard UID "tau-runtime" is used by runtime.json, runtime-operations.json; each dashboard needs its own UID',
+    ]);
+  });
+
+  it('passes the shipped dashboards, where runtime.json and runtime-operations.json coexist', () => {
+    const directory = join(import.meta.dirname, '../../infra/grafana/dashboards');
+    const files = readdirSync(directory).filter((name) => name.endsWith('.json'));
+    expect(files).toEqual(expect.arrayContaining(['runtime.json', 'runtime-operations.json']));
+    expect(
+      dashboardUidProblems(
+        files.map((file): Parameters<typeof dashboardUidProblems>[0][number] => ({
+          file,
+          kind: 'dashboard',
+          uids: [
+            (
+              JSON.parse(readFileSync(join(directory, file), 'utf8')) as {
+                uid: string;
+              }
+            ).uid,
+          ],
+        })),
+      ),
+    ).toEqual([]);
   });
 });
 

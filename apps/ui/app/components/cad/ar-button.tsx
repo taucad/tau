@@ -2,6 +2,7 @@ import { memo, useEffect, useId, useRef } from 'react';
 import { Loader2, Scan } from 'lucide-react';
 import type { Artifact, RuntimeDocument } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
+import { cn } from '@taucad/ui/utils/cn';
 import { Popover, PopoverAnchor, PopoverContent } from '@taucad/ui/components/popover';
 import { useAr } from '#components/cad/use-ar.js';
 import type { ArFailure } from '#components/cad/use-ar.js';
@@ -14,8 +15,9 @@ export function ArIcon({ className }: { readonly className?: string }): React.JS
 
 /**
  * The capability-gated AR control. It renders only when this device can open the current model in AR — Quick Look
- * on iPhone and iPad (including iPadOS's desktop user agent), or WebXR on supported Android — whatever the layout,
- * so tablets in the desktop layout get it too (D12).
+ * on iPhone and iPad (including iPadOS's desktop user agent), or WebXR on supported Android — and nothing otherwise.
+ * It does not check the layout: the viewer bar places it after Fit view on phones and after Fullscreen in the
+ * desktop layout, so tablets get it too (D12) while desktop computers render nothing.
  */
 export const ArButton = memo(function ({
   artifact,
@@ -31,16 +33,21 @@ export const ArButton = memo(function ({
     runtimeDocument,
   );
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const wasPresentingRef = useRef(false);
+  const wasBusyRef = useRef(false);
+  const isBusy = isPreparing || isPresenting;
 
-  // Coming back from an in-page AR session, focus returns to the control that opened it.
+  // Coming back from AR, or from a session that ended while it started, focus returns to the control that opened it
+  // when the overlay took it away. A failure's popover manages focus itself.
   useEffect(() => {
-    if (wasPresentingRef.current && !isPresenting) {
-      buttonRef.current?.focus();
+    if (wasBusyRef.current && !isBusy && !failure) {
+      const active = document.activeElement;
+      if (!active || active === document.body) {
+        buttonRef.current?.focus();
+      }
     }
 
-    wasPresentingRef.current = isPresenting;
-  }, [isPresenting]);
+    wasBusyRef.current = isBusy;
+  }, [isBusy, failure]);
 
   if (!canActivateAr) {
     return undefined;
@@ -49,7 +56,7 @@ export const ArButton = memo(function ({
   return (
     <ArControl
       ref={buttonRef}
-      isPreparing={isPreparing || isPresenting}
+      isPreparing={isBusy}
       failure={failure}
       className={className}
       onActivate={() => {
@@ -93,8 +100,9 @@ export function ArControl({
       }}
       variant='ghost'
       size='icon-sm'
-      className={className}
-      aria-label={isPreparing ? 'Preparing view in your space' : 'View in your space'}
+      className={cn('aria-disabled:opacity-50', className)}
+      // One name for label, tooltip and accessible name (I6); preparing is told by aria-busy and the spinner.
+      aria-label='View in your space'
       aria-busy={isPreparing}
       // Stays focusable while preparing, so focus is never dropped to the page during an export or session.
       aria-disabled={isPreparing}

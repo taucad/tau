@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Artifact, RuntimeDocument } from '@taucad/runtime';
@@ -160,6 +160,20 @@ function createRuntimeDocument(result?: () => Promise<unknown>): {
   return { document: { export: exportModel } as unknown as RuntimeDocument, exportModel };
 }
 
+function deferred<Value>(): {
+  readonly promise: Promise<Value>;
+  readonly resolve: (value: Value) => void;
+  readonly reject: (error: unknown) => void;
+} {
+  let resolve: (value: Value) => void = () => undefined;
+  let reject: (error: unknown) => void = () => undefined;
+  const promise = new Promise<Value>((_resolve, _reject) => {
+    resolve = _resolve;
+    reject = _reject;
+  });
+  return { promise, resolve, reject };
+}
+
 /** Let client-side capability detection settle. */
 async function settle(): Promise<void> {
   await act(async () => {
@@ -287,8 +301,9 @@ describe('ArButton launch path', () => {
     expect(sceneMocks.present).toHaveBeenCalledWith(session, glbBytes, expect.anything());
     expect(exportModel).not.toHaveBeenCalled();
     expect(screen.getByRole('status')).toHaveTextContent('tap to place the model');
-    const preparing = screen.getByRole('button', { name: 'Preparing view in your space' });
-    expect(preparing).toHaveAttribute('aria-disabled', 'true');
+    // While presenting, the control keeps its one name and reports itself busy.
+    expect(arButton()).toHaveAttribute('aria-busy', 'true');
+    expect(arButton()).toHaveAttribute('aria-disabled', 'true');
 
     await userEvent.click(exit);
     expect(session.end).toHaveBeenCalled();
@@ -328,7 +343,8 @@ describe('ArButton launch path', () => {
     await settle();
     await userEvent.click(arButton());
 
-    const busy = screen.getByRole('button', { name: 'Preparing view in your space' });
+    // Label, tooltip and accessible name stay "View in your space" (I6); busy is told by aria-busy.
+    const busy = arButton();
     expect(busy).toHaveAttribute('aria-busy', 'true');
     expect(busy).toHaveAttribute('aria-disabled', 'true');
     expect(busy).toHaveFocus();
@@ -342,6 +358,107 @@ describe('ArButton launch path', () => {
       } satisfies Partial<ExportResult>);
     });
     expect(arButton()).toHaveFocus();
+    expect(arButton()).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('requests the WebXR session synchronously within the click, before any await', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    renderAr();
+    await settle();
+
+    // `fireEvent.click` dispatches synchronously: the request must already be made when it returns, because the
+    // browser grants an AR session only within the click's user activation.
+    fireEvent.click(arButton());
+    expect(xr.requestSession).toHaveBeenCalledTimes(1);
+    await screen.findByRole('button', { name: 'Exit AR' });
+  });
+
+  it('keeps the overlay in the DOM but invisible until the session is granted', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    const request = deferred<FakeXrSession>();
+    xr.requestSession.mockImplementationOnce(async () => request.promise);
+    renderAr();
+    await settle();
+    fireEvent.click(arButton());
+
+    const overlay = document.querySelector<HTMLElement>('[data-slot="ar-session-overlay"]');
+    expect(overlay).toBeInTheDocument();
+    expect(overlay).toHaveStyle({ visibility: 'hidden' });
+    await act(async () => {
+      request.resolve(session);
+    });
+    expect(await screen.findByRole('button', { name: 'Exit AR' })).toBeVisible();
+    expect(overlay?.style.visibility).toBe('');
+  });
+
+  it('disposes the scene when the session ends', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    const dispose = vi.fn();
+    sceneMocks.present.mockImplementationOnce(async () => dispose);
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+    await userEvent.click(await screen.findByRole('button', { name: 'Exit AR' }));
+
+    await waitFor(() => {
+      expect(dispose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('still removes the overlay, clears presenting and restores focus when the scene disposer throws', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    sceneMocks.present.mockImplementationOnce(async () => () => {
+      throw new Error('Context already lost');
+    });
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+    await userEvent.click(await screen.findByRole('button', { name: 'Exit AR' }));
+
+    await waitFor(() => {
+      expect(arButton()).toHaveFocus();
+    });
+    expect(arButton()).toHaveAttribute('aria-busy', 'false');
+    expect(document.querySelector('[data-slot="ar-session-overlay"]')).not.toBeInTheDocument();
+  });
+
+  it('ends a session that resolves after the viewer unmounted', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    const request = deferred<FakeXrSession>();
+    xr.requestSession.mockImplementationOnce(async () => request.promise);
+    const { unmount } = render(<ArButton artifact={glbArtifact} runtimeDocument={createRuntimeDocument().document} />, {
+      wrapper: TooltipProvider,
+    });
+    await settle();
+    fireEvent.click(arButton());
+    unmount();
+
+    await act(async () => {
+      request.resolve(session);
+    });
+    await waitFor(() => {
+      expect(session.end).toHaveBeenCalled();
+    });
+    expect(document.querySelector('[data-slot="ar-session-overlay"]')).not.toBeInTheDocument();
+  });
+
+  it('treats Exit during the model load as a return, not a failed launch', async () => {
+    installPlatform(platforms.androidChromeWebXr);
+    const load = deferred<() => void>();
+    sceneMocks.present.mockImplementationOnce(async () => load.promise);
+    renderAr();
+    await settle();
+    await userEvent.click(arButton());
+    await userEvent.click(await screen.findByRole('button', { name: 'Exit AR' }));
+
+    await act(async () => {
+      load.reject(new Error('Aborted: the session ended'));
+    });
+    await waitFor(() => {
+      expect(arButton()).toHaveFocus();
+    });
+    expect(arButton()).toHaveAttribute('aria-busy', 'false');
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 });
 

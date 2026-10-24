@@ -184,6 +184,7 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
   const [isPresenting, setIsPresenting] = useState(false);
   const [failure, setFailure] = useState<ArFailure | undefined>(undefined);
   const presentationRef = useRef<WebXrArPresentation | undefined>(undefined);
+  const isUnmountedRef = useRef(false);
 
   useEffect(() => {
     let isCurrent = true;
@@ -201,12 +202,14 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
   }, []);
 
   // End a running session with the viewer that started it.
-  useEffect(
-    () => () => {
+  // A session still starting is ended when it resolves (see `activateAr`).
+  useEffect(() => {
+    isUnmountedRef.current = false;
+    return () => {
+      isUnmountedRef.current = true;
       void presentationRef.current?.end();
-    },
-    [],
-  );
+    };
+  }, []);
 
   const glb =
     artifact?.mimeType === 'model/gltf-binary' && typeof artifact.content !== 'string' ? artifact.content : undefined;
@@ -223,14 +226,21 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
 
     if (mode === 'webxr' && glb) {
       try {
-        presentationRef.current = await startWebXrAr({
+        const presentation = await startWebXrAr({
           glb,
           onEnd() {
             presentationRef.current = undefined;
             setIsPresenting(false);
           },
         });
-        setIsPresenting(presentationRef.current.isActive());
+        if (isUnmountedRef.current) {
+          // The viewer closed while the session started: nobody is left to show or end it.
+          await presentation.end();
+          return;
+        }
+
+        presentationRef.current = presentation.isActive() ? presentation : undefined;
+        setIsPresenting(presentation.isActive());
       } catch (error) {
         setFailure(describeFailure(error));
       } finally {

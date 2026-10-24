@@ -11,7 +11,7 @@ import {
   Vector3,
   WebGLRenderer,
 } from 'three';
-import type { BufferGeometry, Material, Object3D } from 'three';
+import type { BufferGeometry, Material, Object3D, Texture } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 /** Fallback distance in front of the starting pose when the session offers no hit testing, in metres. */
@@ -25,9 +25,22 @@ function disposeObject(root: Object3D): void {
     };
     geometry?.dispose();
     for (const each of Array.isArray(material) ? material : material ? [material] : []) {
+      // The GLB's maps (base colour, normal, …) hold their own GPU textures.
+      for (const value of Object.values(each)) {
+        if ((value as Partial<Texture> | undefined)?.isTexture) {
+          (value as Texture).dispose();
+        }
+      }
+
       each.dispose();
     }
   });
+}
+
+function disposeRenderer(renderer: WebGLRenderer): void {
+  renderer.dispose();
+  // Release the WebGL context now rather than whenever the canvas is collected; each session creates one.
+  renderer.forceContextLoss();
 }
 
 async function requestHitTestSource(session: XRSession): Promise<XRHitTestSource | undefined> {
@@ -66,7 +79,7 @@ export async function presentGlbInArSession(
     await renderer.xr.setSession(session);
   } catch (error) {
     disposeObject(gltf.scene);
-    renderer.dispose();
+    disposeRenderer(renderer);
     throw error;
   }
 
@@ -132,8 +145,13 @@ export async function presentGlbInArSession(
   return () => {
     renderer.setAnimationLoop(null);
     session.removeEventListener('select', onSelect);
-    hitTestSource?.cancel();
+    try {
+      hitTestSource?.cancel();
+    } catch {
+      // The source already ended with its session, which is when this disposer usually runs.
+    }
+
     disposeObject(scene);
-    renderer.dispose();
+    disposeRenderer(renderer);
   };
 }

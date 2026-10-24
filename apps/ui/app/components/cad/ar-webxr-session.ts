@@ -48,7 +48,7 @@ function createOverlay(): { root: HTMLDivElement; hint: HTMLParagraphElement; ex
  * @param options - The GLB bytes, and `onEnd`, called once whenever the session ends after it started.
  * @returns The running presentation.
  * @throws The session request's `DOMException` (`NotAllowedError`, `NotSupportedError`, …), or the scene's error after
- *   the session was ended again.
+ *   the session was ended again. A session that ended while the model loaded resolves as an inactive presentation.
  */
 export async function startWebXrAr({
   glb,
@@ -59,7 +59,9 @@ export async function startWebXrAr({
     throw new DOMException('WebXR is not available in this browser.', 'NotSupportedError');
   }
 
+  // In the DOM for `domOverlay`, but invisible until the session is granted, so a denied request never flashes it.
   const overlay = createOverlay();
+  overlay.root.style.visibility = 'hidden';
   document.body.append(overlay.root);
 
   let session: XRSession;
@@ -74,6 +76,7 @@ export async function startWebXrAr({
     throw error;
   }
 
+  overlay.root.style.visibility = '';
   let isActive = true;
   let disposeScene: (() => void) | undefined;
   const ended = new Promise<void>((resolve) => {
@@ -81,11 +84,16 @@ export async function startWebXrAr({
       'end',
       () => {
         isActive = false;
-        disposeScene?.();
+        const dispose = disposeScene;
         disposeScene = undefined;
-        overlay.root.remove();
-        onEnd();
-        resolve();
+        // Teardown must finish even when the scene's disposer throws: the overlay leaves and the host is told.
+        try {
+          dispose?.();
+        } finally {
+          overlay.root.remove();
+          onEnd();
+          resolve();
+        }
       },
       { once: true },
     );
@@ -115,6 +123,12 @@ export async function startWebXrAr({
       dispose();
     }
   } catch (error) {
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the session's end event clears isActive while the scene loads
+    if (!isActive) {
+      // Exit AR or the system ended the session while the model loaded: that is a return, not a failure.
+      return { isActive: () => false, end };
+    }
+
     await end();
     throw error;
   }

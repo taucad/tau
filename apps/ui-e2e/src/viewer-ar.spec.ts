@@ -21,6 +21,8 @@ type ArProbe = {
   offDevice: string[];
   /** Links an AR launch clicked, as `rel href`. */
   links: string[];
+  /** The USDZ blobs handed to `URL.createObjectURL`: type, size and first four bytes (a zip's `PK\x03\x04`). */
+  usdz: Array<{ type: string; size: number; magic: number[] }>;
   sessionRequests: number;
 };
 
@@ -29,7 +31,7 @@ type ArProbe = {
  * following them), into `window.__arProbe`.
  */
 function installArProbe(): void {
-  const probe: ArProbe = { offDevice: [], links: [], sessionRequests: 0 };
+  const probe: ArProbe = { offDevice: [], links: [], usdz: [], sessionRequests: 0 };
   Object.assign(globalThis, { __arProbe: probe });
   const isOffDevice = (url: string, body: unknown): boolean => {
     const isCrossOrigin = new URL(url, location.href).origin !== location.origin;
@@ -55,6 +57,19 @@ function installArProbe(): void {
   globalThis.open = (url, ...rest) => {
     probe.offDevice.push(`open ${String(url)}`);
     return nativeOpen(url, ...rest);
+  };
+  const nativeCreateObjectUrl = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (object) => {
+    if (object instanceof Blob && object.type === 'model/vnd.usdz+zip') {
+      const record = { type: object.type, size: object.size, magic: [] as number[] };
+      probe.usdz.push(record);
+      const readMagic = async (): Promise<void> => {
+        record.magic = [...new Uint8Array(await object.slice(0, 4).arrayBuffer())];
+      };
+      // async-iife: bootstrap -- the probe is polled until the bytes land.
+      void readMagic();
+    }
+    return nativeCreateObjectUrl(object);
   };
   HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
     probe.links.push(`${this.rel} ${this.href}`);
@@ -144,27 +159,44 @@ describe('viewer AR', () => {
     expect(probe.links).toEqual([]);
   });
 
-  it('opens Quick Look with the iPadOS desktop user agent from a same-origin USDZ blob exported in the page', async () => {
-    await openViewer();
-    await target.addInitScript(emulateIpadSafari);
-    // At phone width: the desktop-layout bar a 1024px iPad gets does not yet carry the host AR action (D12, W4).
-    await showModel(phone);
+  // The UI runtime registers `jscad()` and `assimp({ preset: 'all' })`, whose export transcoder turns the fixture's GLB
+  // into USDZ in the browser's WebAssembly build, so this runs the real export pipeline end to end.
+  it.each([
+    { layout: 'phone layout', viewport: phone },
+    { layout: 'desktop layout an iPad keeps (D12)', viewport: { width: 1024, height: 1366 } },
+  ])(
+    'opens Quick Look with the iPadOS desktop user agent in the $layout from a USDZ exported in the page',
+    async ({ viewport }) => {
+      await openViewer();
+      await target.addInitScript(emulateIpadSafari);
+      await showModel(viewport);
+      if (viewport.width >= 768) {
+        // The desktop bar keeps Fullscreen and adds AR after it.
+        await target.expectVisible(selectors.getByRole('button', { name: 'Enter fullscreen' }));
+      }
 
-    await target.expectVisible(arButton(), 30_000);
-    await target.click(arButton(), { touch: true });
-    const origin = await target.evaluate(() => location.origin);
-    await expect
-      .poll(
-        async () => {
-          const { links } = await readProbe();
-          return links;
-        },
-        { timeout: 60_000 },
-      )
-      .toEqual([expect.stringMatching(new RegExp(`^ar blob:${origin}/`, 'u'))]);
-    await target.expectFocused(arButton());
-    await target.expectCount(selectors.getByRole('alertdialog'), 0);
-    const { offDevice } = await readProbe();
-    expect(offDevice).toEqual([]);
-  });
+      await target.expectVisible(arButton(), 30_000);
+      await target.click(arButton(), { touch: true });
+      const origin = await target.evaluate(() => location.origin);
+      await expect
+        .poll(
+          async () => {
+            const { links } = await readProbe();
+            return links;
+          },
+          { timeout: 60_000 },
+        )
+        .toEqual([expect.stringMatching(new RegExp(`^ar blob:${origin}/`, 'u'))]);
+      await expect
+        .poll(async () => {
+          const { usdz } = await readProbe();
+          return usdz;
+        })
+        .toEqual([expect.objectContaining({ type: 'model/vnd.usdz+zip', magic: [0x50, 0x4b, 0x03, 0x04] })]);
+      await target.expectFocused(arButton());
+      await target.expectCount(selectors.getByRole('alertdialog'), 0);
+      const { offDevice } = await readProbe();
+      expect(offDevice).toEqual([]);
+    },
+  );
 });

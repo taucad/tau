@@ -147,7 +147,13 @@ export const createSectionCapOutlineNodeMaterial = (
   material.colorNode = uniform(new Color(color));
   const { coverage, depth } = outlineNodes(faces);
   material.opacityNode = coverage;
-  material.maskNode = coverage.greaterThan(0);
+  material.maskNode = Fn(() => {
+    const visible = coverage.greaterThan(0);
+    // The owner adds padded clipping to this mask. Reject the rest of the
+    // source surface before that work; TSL eagerly builds both AND operands.
+    visible.not().discard();
+    return visible;
+  })();
   material.depthNode = depth;
   return material;
 };

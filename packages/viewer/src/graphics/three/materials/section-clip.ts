@@ -101,7 +101,7 @@ export const createSectionClipMask = (
   const firstHalfSpaces = namedUniformArray(first as Vector4[], 'tauSectionFirst');
   const secondHalfSpaces = namedUniformArray(second as Vector4[], 'tauSectionSecond');
   return Fn(() => {
-    const point = cameraWorldMatrix.mul(vec4(positionView, 1)).xyz;
+    const point = cameraWorldMatrix.mul(vec4(positionView, 1)).xyz.toVar();
     // Padding is used only by cap outlines, whose geometry has triangle normals.
     const derivatives = paddingPixels > 0 ? triangleWorldDerivatives() : undefined;
     const dx = derivatives?.dx;

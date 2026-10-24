@@ -359,6 +359,7 @@ export const shaderEvidence = {
     ],
     'structural-perf': [
       `${sectionStencilCapsUnit}::should count, cap and outline each crossing source with draws that do not depend on its triangles`,
+      'packages/viewer/src/graphics/three/node-frame-reference.browser.test.ts::should keep cap coverage independent of triangle grouping through 5K motion on %s',
     ],
     'gpu-whole-frame': [
       `${sectionStencilCapsBrowser}::should spend main-thread time on pieces and meshes, not triangles`,

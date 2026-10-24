@@ -690,6 +690,26 @@ it.each(['webgpu', 'webgl'] as const)(
       mesh.material = material;
       const generated = await renderer.debug.getShaderAsync(scene, camera, mesh);
       mesh.material = [material, material];
+      if (generated.fragmentShader === null) {
+        throw new Error('Cap coverage must compile a fragment shader');
+      }
+      // Camera-to-world pixel differentials and the clip point are invariant
+      // across faces. Keep those matrix products out of the per-face loops.
+      const faceLoops = [...generated.fragmentShader.matchAll(/for\s*\([^)]*\)\s*{/g)];
+      expect(faceLoops).toHaveLength(2);
+      // Zero-coverage surface fragments must exit before padded clipping work.
+      const firstDiscard = generated.fragmentShader.indexOf('discard;');
+      expect(firstDiscard).toBeGreaterThan(faceLoops[0]!.index);
+      expect(firstDiscard).toBeLessThan(faceLoops[1]!.index);
+      for (const loop of faceLoops) {
+        let end = loop.index + loop[0].length;
+        let braces = 1;
+        while (braces > 0 && end < generated.fragmentShader.length) {
+          const character = generated.fragmentShader[end++];
+          braces += character === '{' ? 1 : character === '}' ? -1 : 0;
+        }
+        expect(generated.fragmentShader.slice(loop.index, end)).not.toContain('cameraWorldMatrix');
+      }
       // Neither line coverage nor padded clipping may read a neighboring primitive.
       expect(JSON.stringify(generated)).not.toMatch(/\b(?:dFdx|dFdy|fwidth|dpdx|dpdy)(?:Fine|Coarse)?\s*\(/);
       for (const phase of [0, 0.125, 0.25, 0.5, 0.75, 1, 0]) {

@@ -33,5 +33,7 @@ export const triangleWorldDerivatives = (): { dx: Node<'vec3'>; dy: Node<'vec3'>
   const dy = vec3(0, 1, 0)
     .sub(ray.mul(normal.y.mul(inverse)))
     .mul(scale.div(cameraProjectionMatrix.mul(vec4(0, 1, 0, 0)).y.mul(viewportSize.y)));
-  return { dx: cameraWorldMatrix.mul(vec4(dx, 0)).xyz, dy: cameraWorldMatrix.mul(vec4(dy, 0)).xyz };
+  // Materialize before the face loops: these depend on the fragment, not the
+  // section plane. Returning expressions repeats the matrix products per face.
+  return { dx: cameraWorldMatrix.mul(vec4(dx, 0)).xyz.toVar(), dy: cameraWorldMatrix.mul(vec4(dy, 0)).xyz.toVar() };
 };

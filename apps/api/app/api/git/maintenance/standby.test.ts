@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { describe, expect, it, vi } from 'vitest';
 import { holdInStandby } from '#api/git/maintenance/standby.js';
 
@@ -24,6 +25,25 @@ describe('holdInStandby (DC4)', () => {
     await expect(held).resolves.toBeUndefined();
     expect(database).toHaveBeenCalledTimes(1);
     expect(storage).toHaveBeenCalledTimes(1);
+  });
+
+  it('should keep the process alive while it holds', async () => {
+    /* A pending promise alone does not keep Node running: the worker then exits
+       with code 13 ("unsettled top-level await") and Fly restarts it in a loop. */
+    const timers = (): number => process.getActiveResourcesInfo().filter((kind) => kind === 'Timeout').length;
+    const before = timers();
+    const stop = new AbortController();
+    const report = vi.fn<(line: string) => void>();
+
+    const held = holdInStandby({ checks: {}, signal: stop.signal, report });
+    await vi.waitFor(() => {
+      expect(report).toHaveBeenCalledTimes(1);
+    });
+    expect(timers()).toBeGreaterThan(before);
+
+    stop.abort();
+    await held;
+    expect(timers()).toBe(before);
   });
 
   it('should fail on the first broken credential, naming the check and not the error text', async () => {

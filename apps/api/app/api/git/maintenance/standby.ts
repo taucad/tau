@@ -36,7 +36,15 @@ export const holdInStandby = async (args: {
     verified.push(name);
   }
   args.report(JSON.stringify({ event: 'revisions_maintenance.standby', verified }));
-  if (!args.signal.aborted) {
+  if (args.signal.aborted) {
+    return;
+  }
+  /* A pending promise does not keep Node running: without a live handle the
+     worker exits 13 ("unsettled top-level await") and Fly restarts it in a loop. */
+  const keepAlive = setInterval(() => undefined, 60_000);
+  try {
     await once(args.signal, 'abort');
+  } finally {
+    clearInterval(keepAlive);
   }
 };

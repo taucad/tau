@@ -80,7 +80,7 @@ export const receivePackOutcome = (report: Uint8Array<ArrayBuffer>): SyncOutcome
 
 /**
  * The retryable capacity refusals: a lease this Machine cannot hold yet, an owner at its share, a
- * process that is stopping, and the two request budgets. Each carries `Retry-After`, and each is
+ * process that is stopping, the two request budgets, and a repository frozen past the hold (DW2). Each carries `Retry-After`, and each is
  * `busy`, not `error`, so an availability SLO is not read off a client being told to wait (W14
  * Finding 3, TAU-API-5). A lost manifest race is `conflict`, which is retryable too.
  */
@@ -90,6 +90,10 @@ const busyRefusalCodes: ReadonlySet<string> = new Set([
   'GIT_SERVICE_RESTARTING',
   'GIT_HYDRATE_BUDGET_EXHAUSTED',
   'GIT_RATE_LIMITED',
+  /* DW2: a repository frozen past the hold, answered 429 with `Retry-After: 1`. */
+  'GIT_REPOSITORY_FROZEN',
+  /* DA6: an owner over its in-flight cap, answered 429 with a jittered `Retry-After` of 1–3 s. */
+  'GIT_OWNER_IN_FLIGHT_LIMIT',
 ]);
 
 /** The codes `tau.sync.refusals` names; any other code counts as `other`, so the label stays bounded. */

@@ -9,7 +9,7 @@ const strictEnvironmentBoolean = (defaultValue: boolean) =>
 const unsetWhenEmpty = <T extends z.ZodType>(schema: T) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema);
 
-const environmentSchemaBase = z.object({
+export const environmentSchemaBase = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']),
   TAU_PROJECT_DELETION_ENABLED: strictEnvironmentBoolean(false).describe(
@@ -64,6 +64,13 @@ const environmentSchemaBase = z.object({
       'Browser-facing origin of this API (e.g. https://api.tau.new); used to build authenticated publication file proxy URLs. No default — startup validation must fail when it is unset.',
     ),
   ADDITIONAL_CORS_ORIGINS: jsonCodec(z.array(z.string()).describe('Additional CORS origin glob patterns to allow.'))
+    .optional()
+    .default([]),
+  TAU_AUTH_ALLOWED_EMAIL_DOMAINS: jsonCodec(
+    z
+      .array(z.string().trim().toLowerCase().min(1))
+      .describe('Email domains allowed to create an account or sign in, matched exactly. Empty = every domain.'),
+  )
     .optional()
     .default([]),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']),
@@ -501,7 +508,7 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
  * The fork is created from the base database on first use, so a worktree never shares
  * (or migrates from under) another checkout's schema.
  */
-const withWorktreeDatabases = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+export const withWorktreeDatabases = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
   // oxlint-disable-next-line @typescript-eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
   if (environment['NODE_ENV'] !== 'development') {
     return environment;
@@ -529,3 +536,20 @@ export const getEnvironment = (): Environment => {
 };
 
 export type Environment = z.infer<typeof environmentSchema>;
+
+/**
+ * The settings `ObjectStorageService` reads. It takes only these, so a process
+ * that is not the API (`tau-maintenance`, DC4) can construct the driver from a
+ * narrower configuration without holding the API's secrets.
+ */
+export type ObjectStorageEnvironment = Pick<
+  Environment,
+  | 'TAU_S3_ENDPOINT'
+  | 'TAU_S3_REGION'
+  | 'TAU_S3_ACCESS_KEY_ID'
+  | 'TAU_S3_SECRET_ACCESS_KEY'
+  | 'TAU_S3_FORCE_PATH_STYLE'
+  | 'TAU_S3_BUCKET'
+  | 'TAU_S3_PUBLIC_BASE_URL'
+  | 'TAU_S3_PRIVATE_BUCKET'
+>;

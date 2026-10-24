@@ -46,6 +46,11 @@ on:
         required: false
         type: boolean
         default: false
+      skip_asset_retention:
+        description: 'UI only: ship without keeping the previous deploys assets (only while the live origin is down)'
+        required: false
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -153,6 +158,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE: ${{ inputs.release }}
           APP: ${{ steps.release.outputs.app }}
+          SKIP_ASSET_RETENTION: ${{ inputs.skip_asset_retention }}
         run: |
           set -euo pipefail
           # A GITHUB_TOKEN may start workflow_dispatch runs. Each runs the tag's
@@ -161,7 +167,12 @@ jobs:
           if [ "$APP" = api ]; then
             gh workflow run deploy.yml --ref "$RELEASE" -f environment=production -f app=api
           else
-            gh workflow run deploy-ui.yml --ref "$RELEASE" -f environment=production
+            # Passed only when asked: an older tag's deploy-ui.yml may not know the input.
+            if [ "$SKIP_ASSET_RETENTION" = true ]; then
+              gh workflow run deploy-ui.yml --ref "$RELEASE" -f environment=production -f skip_asset_retention=true
+            else
+              gh workflow run deploy-ui.yml --ref "$RELEASE" -f environment=production
+            fi
             gh workflow run deploy-docs.yml --ref "$RELEASE" -f environment=production
           fi
 

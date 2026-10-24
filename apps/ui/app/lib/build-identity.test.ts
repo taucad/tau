@@ -1,8 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readBuildId, readBuildIdentity } from '#lib/build-identity.js';
+import {
+  askLiveBuild,
+  buildIdentityPath,
+  liveBuildIdTimeout,
+  readBuildId,
+  readBuildIdentity,
+} from '#lib/build-identity.js';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('readBuildId', () => {
@@ -17,5 +24,108 @@ describe('readBuildId', () => {
 describe('readBuildIdentity', () => {
   it('should render the compiled-in build timestamp as text', () => {
     expect(readBuildIdentity()).toBe(String(tauBuildId));
+  });
+});
+
+describe('askLiveBuild', () => {
+  it('should read the build the server renders pages for, never from a cache, within the timeout', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json({ buildId: 1_792_730_113_029 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const abortAfter = vi.spyOn(AbortSignal, 'timeout');
+
+    await expect(askLiveBuild()).resolves.toBe(1_792_730_113_029);
+    expect(fetchMock).toHaveBeenCalledWith(
+      buildIdentityPath,
+      expect.objectContaining({ cache: 'no-store', credentials: 'omit' }),
+    );
+    expect(abortAfter).toHaveBeenCalledWith(liveBuildIdTimeout);
+  });
+
+  it('should send one request for callers that ask at the same time, and a new one afterwards', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ buildId: 7 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(Promise.all([askLiveBuild(), askLiveBuild()])).resolves.toStrictEqual([7, 7]);
+    await askLiveBuild();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('should call a server that does not answer in time unreachable', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(
+      AbortSignal.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+    );
+    vi.stubGlobal('fetch', async (_url: string, init?: RequestInit) => {
+      init?.signal?.throwIfAborted();
+      return Response.json({ buildId: 7 });
+    });
+
+    await expect(askLiveBuild()).resolves.toBe('unreachable');
+  });
+
+  it('should call a network failure unreachable', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+
+    await expect(askLiveBuild()).resolves.toBe('unreachable');
+  });
+
+  it.each([502, 503, 500, 429, 408, 403])(
+    'should call a transient %i unreachable, not a host without an endpoint',
+    async (status) => {
+      vi.stubGlobal('fetch', async () => new Response('', { status }));
+
+      await expect(askLiveBuild()).resolves.toBe('unreachable');
+    },
+  );
+
+  it.each([
+    [
+      'times out while its body is read',
+      async () =>
+        new Response(
+          new ReadableStream({
+            start: (controller) => {
+              controller.error(new DOMException('The operation timed out.', 'TimeoutError'));
+            },
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'is reset while its body is read',
+      async () =>
+        new Response(
+          new ReadableStream({
+            start: (controller) => {
+              controller.error(new TypeError('network error'));
+            },
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+    ],
+    [
+      'arrives truncated',
+      async () => new Response('{"buildId":17927', { headers: { 'content-type': 'application/json' } }),
+    ],
+  ])('should call an OK JSON answer that %s unreachable, since it may pass', async (_label, answer) => {
+    vi.stubGlobal('fetch', answer);
+
+    await expect(askLiveBuild()).resolves.toBe('unreachable');
+  });
+
+  it.each([
+    ['a 404', async () => new Response('', { status: 404 })],
+    ['an answer without a build id', async () => Response.json({})],
+    ['a JSON answer that is no object', async () => Response.json(null)],
+    [
+      'an SPA fallback document (desktop and tau serve have no build endpoint)',
+      async () => new Response('<!DOCTYPE html><html></html>', { headers: { 'content-type': 'text/html' } }),
+    ],
+  ])('should say the host names no build for %s', async (_label, answer) => {
+    vi.stubGlobal('fetch', answer);
+
+    await expect(askLiveBuild()).resolves.toBe('none');
   });
 });

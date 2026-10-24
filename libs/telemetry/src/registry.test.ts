@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(87);
+    expect(metrics).toHaveLength(110);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -40,6 +40,84 @@ describe('TauMetrics', () => {
       tau_git_hot_project_commit_rate: { type: 'gauge', unit: '{commit}/s' },
       tau_git_hot_project_writers: { type: 'gauge', unit: '{writer}' },
     });
+  });
+
+  /* W13 Finding 8 / W14 OB6: the B2 copier's series, exactly as the catalogue and its rules name them. */
+  it('should declare the B2 copier and reconciler instruments by their W13 catalogue names', () => {
+    const mirror = Object.values(TauMetrics).filter((metric) => metric.name.startsWith('tau.mirror.'));
+    expect(
+      Object.fromEntries(mirror.map((metric) => [toPrometheusName(metric.name, metric.type), metric.type])),
+    ).toEqual({
+      tau_mirror_copy_lag_seconds: 'gauge',
+      tau_mirror_copy_lag_generations: 'gauge',
+      tau_mirror_backlog_repositories: 'gauge',
+      tau_mirror_lfs_backlog_objects: 'gauge',
+      tau_mirror_copy_delay_seconds: 'histogram',
+      tau_mirror_rounds_total: 'counter',
+      tau_mirror_objects_copied_total: 'counter',
+      tau_mirror_bytes_copied_total: 'counter',
+      tau_mirror_copy_failures_total: 'counter',
+      tau_mirror_retention_extensions_total: 'counter',
+      tau_mirror_retention_min_remaining_seconds: 'gauge',
+      tau_mirror_retention_max_ahead_seconds: 'gauge',
+      tau_mirror_destination_up: 'gauge',
+      tau_mirror_reconcile_last_success_timestamp_seconds: 'gauge',
+      tau_mirror_reconcile_missing_objects: 'gauge',
+      tau_mirror_reconcile_hidden_versions: 'gauge',
+      tau_mirror_destination_stored_bytes: 'gauge',
+      tau_mirror_destination_object_versions: 'gauge',
+    });
+    for (const metric of mirror) {
+      expect(Object.keys(metric.attributes.shape)).toContain('destination');
+    }
+    expect(TauMetrics.mirrorRounds.attributes.shape.outcome.options).toEqual([
+      'copied',
+      'noop',
+      'failed',
+      'tombstoned',
+    ]);
+  });
+
+  /* Hosted Remote Storage DW1/DW2 with OB5: the route table, freeze and hold series by their catalogue names. */
+  it('should declare the route table and freeze instruments by their catalogue names', () => {
+    const exported = Object.fromEntries(
+      [
+        TauMetrics.gitRouteFrozen,
+        TauMetrics.gitRouteFrozenOldest,
+        TauMetrics.gitRouteHolds,
+        TauMetrics.gitRouteHoldDuration,
+        TauMetrics.gitRouteLookupDuration,
+      ].map((metric) => [toPrometheusName(metric.name, metric.type), { type: metric.type, unit: metric.unit }]),
+    );
+    expect(exported).toEqual({
+      tau_git_route_frozen: { type: 'gauge', unit: '{repository}' },
+      tau_git_route_frozen_oldest: { type: 'gauge', unit: 's' },
+      tau_git_route_holds_total: { type: 'counter', unit: '{request}' },
+      tau_git_route_hold_duration: { type: 'histogram', unit: 's' },
+      tau_git_route_lookup_duration: { type: 'histogram', unit: 's' },
+    });
+  });
+
+  it('should bound the route labels to enums, never a repository, owner or migration id', () => {
+    for (const metric of [TauMetrics.gitRouteFrozen, TauMetrics.gitRouteFrozenOldest]) {
+      expect(metric.attributes.safeParse({ 'tau.git.route.scope': 'repository' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ 'tau.git.route.scope': 'global' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ 'tau.git.route.scope': 'mig_1' }).success).toBe(false);
+    }
+    for (const metric of [TauMetrics.gitRouteHolds, TauMetrics.gitRouteHoldDuration]) {
+      expect(Object.keys(metric.attributes.shape)).toEqual(['outcome']);
+      expect(metric.attributes.safeParse({ outcome: 'released' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ outcome: 'timed_out' }).success).toBe(true);
+      expect(metric.attributes.safeParse({ outcome: 'proj_1' }).success).toBe(false);
+    }
+    const lookup = (source: string): boolean =>
+      TauMetrics.gitRouteLookupDuration.attributes.safeParse({ 'tau.git.route.source': source }).success;
+    expect(lookup('cache')).toBe(true);
+    expect(lookup('database')).toBe(true);
+    expect(lookup('redis')).toBe(false);
+    /* A hold is at most about 5 s, so its buckets end there; a lookup is a cache hit or one indexed read. */
+    expect(TauMetrics.gitRouteHoldDuration.buckets.at(-1)).toBeGreaterThanOrEqual(5);
+    expect(TauMetrics.gitRouteLookupDuration.buckets.at(0)).toBeLessThanOrEqual(0.0001);
   });
 
   it('should split retryable refusals out of error as busy on the sync edge', () => {
@@ -333,7 +411,8 @@ describe('TauMetrics', () => {
 
   it('should use pluralized names or mass nouns for counters', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
-    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$/;
+    // `copied`: W13's catalogue fixes `tau_mirror_{objects,bytes}_copied_total` (W14 OB6).
+    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$|copied$/;
     for (const counter of counters) {
       const lastSegment = counter.name.split('.').at(-1) ?? '';
       expect(lastSegment).toMatch(validSuffixes);

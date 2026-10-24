@@ -373,10 +373,10 @@ describe.skipIf(!local)('object-store faults in a real worker (W10 item 4)', () 
   });
 
   it('keeps admitting leases after every fault above', async () => {
-    /* `#inFlightLeases` is process-private, so the observable is admission
-     * itself: at 2.5 GiB reserved per in-flight lease (D33), a counter that
-     * leaked once per fault in this file would refuse the next push long
-     * before the disk did. */
+    /* The admission ledger is process-private, so the observable is admission
+     * itself: a push reserves its quarantine bound, about 1 GiB (DA3), so a
+     * reservation that leaked once per fault in this file would refuse the
+     * next push long before the disk did. */
     const projectId = gitE2EProjectId();
     await registerProject(owner, projectId);
     const target = { base: victimUrl, projectId, token: owner.token };
@@ -536,7 +536,7 @@ describe.skipIf(!local)('a worker killed at each store fault point (W10 item 6, 
    * for admission, but nothing ever removes a lease a dead worker left: a
    * SIGKILLed process cannot unlink its own, and there is no boot sweep. On a
    * Fly Machine that restarts in place, every crash mid-push permanently
-   * reduces that worker's admission headroom by up to D33's 2.5 GiB. Unpinning
+   * reduces that worker's admission headroom by what that lease held. Unpinning
    * this is `git.service.ts`'s owner, not W10's.
    */
   it('leaves no lease directory behind when a worker is killed', () => {

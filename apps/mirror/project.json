@@ -1,0 +1,25 @@
+{
+  "name": "mirror",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/mirror",
+  "projectType": "application",
+  "metadata": {
+    "description": "Deploy unit for tau-mirror, the private copier of R2's repositories to the B2 second copy (W13 DM1). Its code is the api project's mirror command, built from apps/api/Dockerfile's `mirror` target; this project holds only its Fly configs so ci.yml's staging plan deploys it whenever api or these configs change."
+  },
+  "tags": ["scope:api", "type:app", "deploy:staging"],
+  "implicitDependencies": ["api"],
+  "targets": {
+    "deploy": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/mirror/fly.staging.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore --target mirror --ha=false --no-public-ips"
+      }
+    },
+    "deploy:prod": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "fly deploy --config ./apps/mirror/fly.prod.toml --dockerfile ./apps/api/Dockerfile --ignorefile ./apps/api/Dockerfile.dockerignore --target mirror --ha=false --no-public-ips"
+      }
+    }
+  }
+}

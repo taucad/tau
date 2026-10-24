@@ -266,10 +266,12 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t7_projection_after_visible
 #print axioms ChatLedger.t9_words_never_invalid
 #print axioms ChatLedger.t9_words_merge_once
+#print axioms ChatLedger.t9_copy_then_turn
 #print axioms ChatLedger.transition_nodup
 #print axioms ChatLedger.foldlM_nodup
 #print axioms ChatLedger.t9_history_ids_once
 #print axioms ChatLedger.t9_two_devices_one_turn
+#print axioms ChatLedger.t9_copy_merged_first
 #print axioms ChatLedger.t9_words_commit
 #print axioms ChatLedger.t8_interrupt_resolved_once
 #print axioms ChatLedger.t8_duplicate_interrupt_resolution

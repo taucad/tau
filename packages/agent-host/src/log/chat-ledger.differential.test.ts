@@ -13,7 +13,7 @@
  * - A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>`; `epoch` and `attempt` 0 mean absent.
  * - Kinds: `L` lifecycle, `S` settlement, `H` turn commit, `O`/`R` interrupt requested/resolved, `P` invocation
  *   prepared, `V` invocation settled, `M` assistant reply, `U` opaque (only written raw), `W` a person's turn said as its
- *   run settled (`abandonedTurnOf`, id `w-<arg>`).
+ *   run settled (`abandonedTurnOf`, id `w-<arg>`), `C` that turn as its run's own device said it (merge traces only).
  * - Commands: `E` append through the appender, `W` another writer's row, `WJ` a junk line, `TEAR` a torn tail,
  *   `RELOAD`, `LEDGER`, `SETTLE`, `LIFE`, `RESOLVE`, `PREP`, `BATCH`, `READER`, `READ`, `DELIVER`, `DELIVER1`, `RLEDGER`, `SEG`,
  *   `ROW`, `MERGE`, `MERGEB`, `MH`, `TABLES`.
@@ -81,7 +81,7 @@ type Random = ReturnType<typeof randomOf>;
 const below = (random: Random, bound: number) => Math.floor(random() * bound);
 const pick = <T>(random: Random, items: readonly T[]): T => items[below(random, items.length)]!;
 
-type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U' | 'W';
+type Kind = 'L' | 'S' | 'H' | 'O' | 'R' | 'P' | 'V' | 'M' | 'U' | 'W' | 'C';
 /** `undefinedKeys`: the row object carries optional keys set to `undefined`, invisible to the oracle and to the bytes. */
 type Row = {
   term: number;
@@ -226,6 +226,9 @@ const bodyOf = (row: Pick<Row, 'term' | 'seq' | 'run' | 'kind' | 'argument'>): R
         type: 'message.appended',
         message: abandonedTurnOf({ id: `w-${argument}`, role: 'user', content: 'x' }),
       };
+    }
+    case 'C': {
+      return { type: 'message.appended', message: { id: `w-${argument}`, role: 'user', content: 'x' } };
     }
     case 'U': {
       // A newer build's rows: an unknown type, a history row of a newer version, an unknown lifecycle state.
@@ -643,7 +646,7 @@ const logTrace = async (random: Random, name: string, profile: Profile): Promise
   return { text, expected };
 };
 
-type MergeRow = Omit<Row, 'kind'> & { kind: 'O' | 'W' };
+type MergeRow = Omit<Row, 'kind'> & { kind: 'O' | 'W' | 'C' };
 const segmentBytes = (rows: readonly MergeRow[]): Uint8Array<ArrayBuffer> =>
   encoder.encode(rows.map((row) => `${JSON.stringify(eventOf(row))}\n`).join(''));
 
@@ -767,7 +770,8 @@ const skewedSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRo
 
 /**
  * Devices that each say people's turns as runs settle (`W`, round 16): the same turn, said under different terms by
- * different devices, between interrupt rows. The history folds every copy of one turn as one message.
+ * different devices, between interrupt rows, and sometimes the run's own row of it (`C`), before or after a copy. The
+ * history folds every copy of one turn, and the run's own row after a copy, as one message.
  */
 const wordsSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow[] }> => {
   const devices = 2 + below(random, 2);
@@ -779,7 +783,8 @@ const wordsSegmentsOf = (random: Random): Array<{ device: number; rows: MergeRow
       const term = nextTerm++;
       clock += below(random, 20);
       for (let seq = 0, count = 1 + below(random, 3); seq < count; seq++) {
-        const kind = random() < 0.6 ? 'W' : 'O';
+        const draw = random();
+        const kind = draw < 0.5 ? 'W' : draw < 0.65 ? 'C' : 'O';
         rows.push({ term, seq, run: 1, kind, argument: below(random, 4), ms: clock, epoch: term + 1, attempt: 0 });
         clock += below(random, 4);
       }

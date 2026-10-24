@@ -144,7 +144,7 @@
     "id": "M20",
     "drift": "a person's turn said by two devices breaks the history instead of merging as one (T9: t9_words_merge_once)",
     "file": "specs/lean/ChatLedger.lean",
-    "find": "(if e.kind = .W then some h else none)",
+    "find": "(if e.kind = .W ∨ (e.kind = .C ∧ id ∈ h.copied) then some h else none)",
     "replace": "none"
   },
   {
@@ -160,5 +160,19 @@
     "file": "specs/lean/ChatLedger.lean",
     "find": "filter (fun p => decide ((lookup p.1.term cl).getD 0 ≤ B))",
     "replace": "filter (fun p => decide (p.1.started ≤ B))"
+  },
+  {
+    "id": "M23",
+    "drift": "the run's own row of a turn a copy already said breaks the history instead of merging as one (T9: t9_copy_then_turn)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "e.kind = .W ∨ (e.kind = .C ∧ id ∈ h.copied)",
+    "replace": "e.kind = .W"
+  },
+  {
+    "id": "M24",
+    "drift": "the history forgets which turns it took from a copy, so the run's own row of one breaks it (T9: t9_copy_merged_first)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "copied := if e.kind = .W then h.copied ++ [id] else h.copied",
+    "replace": "copied := h.copied"
   }
 ]

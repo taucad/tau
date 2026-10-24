@@ -214,6 +214,27 @@ describe('an event log with other devices’ segments (XD1)', () => {
 
       expect(await log.stampAfterRead?.(clock.now)).toBe(Date.parse('2026-10-23T10:09:00.000Z') + 1);
     });
+
+    /*
+     * A run another device has not settled stays out of the history, but its rows were read all the same: a term this
+     * device writes, a takeover's included, starts after it and merges after it once that device settles the run.
+     */
+    it('should stamp after a term within the bound that the history holds back as an unsettled run', async () => {
+      clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+      const held: AgentLogEvent = {
+        version: 1,
+        leaderEpoch: 'epoch-held',
+        sequence: 0,
+        recordedAt: '2026-10-23T10:09:00.000Z',
+        runId: 'run-held',
+        type: 'run.lifecycle',
+        state: 'admitted',
+      };
+      const log = await openLog(phoneTurn, { current: [segment('device-desktop', [...desktopTurn, held])] });
+
+      expect(await log.foreignRuns?.()).toEqual([expect.objectContaining({ runId: 'run-held' })]);
+      expect(await log.stampAfterRead?.(clock.now)).toBe(Date.parse('2026-10-23T10:09:00.000Z') + 1);
+    });
   });
 
   it('should keep this device’s history and report the divergence when the segments do not fold onto it', async () => {
@@ -383,6 +404,26 @@ describe('an event log with other devices’ segments (XD1)', () => {
       expect(await log.foreignRuns?.()).toEqual([]);
       expect(await log.historyIntact()).toBe(true);
       clock.now = Date.parse('2026-10-23T10:05:00.000Z');
+    });
+
+    /*
+     * The copy can merge before the run's own turn: here it went under this device's older term, and a device whose
+     * clock ran far ahead lands its term after any takeover. Whichever merges first, the turn is one message.
+     */
+    it('should keep the history whole when the run’s device settles it after another device said its turn', async () => {
+      const log = await openLog([...phoneTurn, takeover(1, 'desktop-2-user', 'desktop asks again')], {
+        current: [segment('device-desktop', [...desktopTurn, ...settled])],
+      });
+
+      expect(ids(await log.messages())).toEqual([
+        'epoch-desktop-0',
+        'epoch-desktop-1',
+        'epoch-phone-0',
+        'desktop-2-user',
+        'desktop-2-assistant',
+        'desktop-2-output',
+      ]);
+      expect(await log.historyIntact()).toBe(true);
     });
 
     /*

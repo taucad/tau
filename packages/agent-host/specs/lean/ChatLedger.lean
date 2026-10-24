@@ -25,9 +25,11 @@ namespace ChatLedger
 
 /-- `W` is the person's turn appended as its run settled before committing it (`abandonedTurnOf`): a user
 `message.appended` row whose message id `w-<arg>` names its content, so two devices that append it append the same
-message. -/
+message. `C` is that turn as the run's own device said it (a person's `message.appended` with no internal kind): the
+row a copy `W` repeats, which merges after the copy when its device's clock ran far ahead. `C` rows appear only in
+merge traces. -/
 inductive Kind where
-  | L | S | H | O | R | P | V | M | U | W
+  | L | S | H | O | R | P | V | M | U | W | C
   deriving DecidableEq, Repr, Inhabited
 
 structure Row where
@@ -170,25 +172,31 @@ def Seq.commit (S : Seq) (e : Row) : Seq :=
 /-! ## reducer.ts: the history rules the generated rows reach -/
 
 /-- A provider message id: `m-<term>-<seq>` (assistant reply), `u-<term>-<seq>-<arg>` (committed user turn) or
-`w-<arg>` (a person's turn appended as its run settled, the same id from every device that appends it). -/
+`w-<arg>` (a person's turn appended as its run settled, the same id from every device that appends it, and the id of
+the run's own row of that turn). -/
 def msgId (e : Row) : Option (Nat × Nat × Nat × Nat) :=
   match e.kind with
   | .M => some (0, e.term, e.seq, 0)
   | .H => some (1, e.term, e.seq, e.arg)
   | .W => some (2, e.arg, 0, 0)
+  | .C => some (2, e.arg, 0, 0)
   | _ => none
 
-/-- `knownMessageIds`, `preparedInvocations`, `settledInvocations` (attempt ids `a<n>` as `n`). -/
+/-- `knownMessageIds`, `preparedInvocations`, `settledInvocations` (attempt ids `a<n>` as `n`), and `copiedTurns`:
+the ids the history first took from a copy `W`. -/
 structure Hist where
   ids : List (Nat × Nat × Nat × Nat) := []
   prepared : List Nat := []
   settled : List Nat := []
+  copied : List (Nat × Nat × Nat × Nat) := []
 
 /-- `transitionOf`: `none` is `HISTORY_INVALID`. A person's turn the history already holds is the same message said
-again: it changes nothing (XD3, round 16). -/
+again: a copy `W` of it, or the run's own row `C` after a copy (`turnSaidAgain`), changes nothing (XD3, round 16). -/
 def Hist.transition (h : Hist) (e : Row) : Option Hist :=
   match msgId e with
-  | some id => if id ∈ h.ids then (if e.kind = .W then some h else none) else some { h with ids := h.ids ++ [id] }
+  | some id =>
+    if id ∈ h.ids then (if e.kind = .W ∨ (e.kind = .C ∧ id ∈ h.copied) then some h else none)
+    else some { h with ids := h.ids ++ [id], copied := if e.kind = .W then h.copied ++ [id] else h.copied }
   | none =>
     match e.kind with
     | .P => if e.arg % 4 ∈ h.prepared then none else some { h with prepared := h.prepared ++ [e.arg % 4] }
@@ -565,6 +573,7 @@ def Ledger.known (L : Ledger) (e : Row) : Ledger :=
   | .M => if e.arg < 4 then L.markShown (e.arg % 4) else L
   | .U => L
   | .W => let en := L.entry e.run; L.put e.run { en with committed := true }
+  | .C => L
 
 /-- The term rules' bookkeeping for a row that is not a redelivery: its anomaly, its term, the position. -/
 def Ledger.book (L0 : Ledger) (e : Row) (broken : Bool) (ep : Nat) : Ledger :=
@@ -807,7 +816,7 @@ structure MTerm where
   deriving Repr
 
 def Kind.ix : Kind → Nat
-  | .L => 0 | .S => 1 | .H => 2 | .O => 3 | .R => 4 | .P => 5 | .V => 6 | .M => 7 | .U => 8 | .W => 9
+  | .L => 0 | .S => 1 | .H => 2 | .O => 3 | .R => 4 | .P => 5 | .V => 6 | .M => 7 | .U => 8 | .W => 9 | .C => 10
 
 /-- A row's `canonicalJson` as a sort key. For the merge's interrupt rows (keys sorted: epoch, interruptId,
 leaderEpoch, phase, reason, recordedAt, runId, sequence, type, version) the first six fields are exactly its code-unit

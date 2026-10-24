@@ -5,7 +5,7 @@ Executable oracle over a line-based trace file, line format v2 (no `Lean.Json` i
 generator is `src/log/chat-ledger.differential.test.ts`; its output for each corpus must equal this oracle's.
 
 A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`attempt` 0: absent); kinds
-`L S H O R P V M U W`. Commands (`#` comments and blank lines ignored):
+`L S H O R P V M U W C`. Commands (`#` comments and blank lines ignored):
   T <name>                     start a trace: an empty file, an appender open on it, an empty reader
   E <row>                      append through the appender              → `A <i> <outcome>`
   W <row> / WJ / TEAR          another writer's row, a junk line, a torn fragment (no output)
@@ -34,7 +34,7 @@ def num (s : String) : Nat := s.toNat?.getD 0
 
 def kindOf : String → Kind
   | "L" => .L | "S" => .S | "H" => .H | "O" => .O | "R" => .R
-  | "P" => .P | "V" => .V | "M" => .M | "W" => .W | _ => .U
+  | "P" => .P | "V" => .V | "M" => .M | "W" => .W | "C" => .C | _ => .U
 
 def rowOf (ws : List String) : Row :=
   match ws with

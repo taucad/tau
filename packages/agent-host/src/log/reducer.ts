@@ -4,7 +4,7 @@ import type { ReadRow, ReplayReadRow } from '#log/serialization.js';
 import { createEventSequence } from '#log/event-sequence.js';
 import type { SequenceAnomaly } from '#log/event-sequence.js';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
-import { isAbandonedTurn } from '#log/event-types.js';
+import { isAbandonedTurn, isPersonsMessage } from '#log/event-types.js';
 
 type ReducerRow = { readonly event: AgentLogEvent; readonly opaque: boolean };
 
@@ -157,6 +157,17 @@ export const createEventLogReducer = (
       present.add(message.id);
     }
   };
+  /** The person's turns this history first took as a copy (`abandonedTurnOf`), by message id. */
+  const copiedTurns = new Set<string>();
+  /**
+   * Whether a person's message is a turn this history already holds (XD3): a copy of one it holds, or the run's own
+   * turn after a copy of it. A device that goes on past an abandoned run says its turn under its own term, and the run's
+   * device may later settle the run and bring its own row of that turn, merging after the copy when its clock ran far
+   * ahead. Either way it is one message, never a second (`t9_copy_then_turn` in ChatLedger.lean).
+   */
+  const turnSaidAgain = (message: ProviderMessage): boolean =>
+    knownMessageIds.has(message.id) &&
+    (isAbandonedTurn(message) || (copiedTurns.has(message.id) && isPersonsMessage(message)));
   /** The ids a row names, less those this history does not hold when missing names are skipped. */
   const held = (messageIds: readonly string[]): readonly string[] =>
     skipMissing ? messageIds.filter((id) => present.has(id)) : messageIds;
@@ -167,13 +178,16 @@ export const createEventLogReducer = (
     switch (event.type) {
       case 'message.appended': {
         /* A person's turn appended as its run settled is the same message from every device that appends it (XD3). */
-        if (isAbandonedTurn(event.message) && knownMessageIds.has(event.message.id)) {
+        if (turnSaidAgain(event.message)) {
           apply = () => undefined;
           break;
         }
         assertNewMessageId(knownMessageIds, event.message);
         apply = () => {
           knownMessageIds.add(event.message.id);
+          if (isAbandonedTurn(event.message)) {
+            copiedTurns.add(event.message.id);
+          }
           appendMessage(event.message);
         };
         break;
@@ -237,6 +251,11 @@ export const createEventLogReducer = (
         break;
       }
       case 'turn.history-projection-committed': {
+        /* The run's own commit of a turn another device already said for it changes nothing: the history went on past it. */
+        if (turnSaidAgain(event.message)) {
+          apply = () => undefined;
+          break;
+        }
         const retainedMessageIds = held(event.retainedMessageIds);
         if (retainedMessageIds.length > messages.length) {
           failHistory('A start-of-turn projection cannot retain more messages than current history contains.');

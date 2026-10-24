@@ -747,6 +747,7 @@ theorem grows_known (L : Ledger) (e : Row) : Grows L (L.known e) := by
     · exact grows_of_same fun _ => rfl
   · exact grows_of_same fun _ => rfl
   · exact grows_of_same (same_put rfl)
+  · exact grows_of_same fun _ => rfl
 
 theorem same_book (L : Ledger) (e : Row) (broken : Bool) (ep : Nat) : SameSettle L (L.book e broken ep) := by
   unfold Ledger.book
@@ -1140,6 +1141,7 @@ theorem terms_known (L : Ledger) (e : Row) : (L.known e).terms = L.terms := by
   · split
     · exact terms_markShown _ _
     · rfl
+  · rfl
   · rfl
   · rfl
 
@@ -3786,6 +3788,17 @@ theorem t9_words_merge_once (h : Hist) (e e' : Row) (he : e.kind = .W) (he' : e'
   · simp [hin]
   · simp [hin]
 
+/-- **T9** (copy, then the run's own turn): the run's own row of a turn a copy already said, merged after the copy,
+changes nothing: the history holds it once and stays valid (`turnSaidAgain`). -/
+theorem t9_copy_then_turn (h : Hist) (w c : Row) (hw : w.kind = .W) (hc : c.kind = .C) (ha : w.arg = c.arg)
+    (hnew : ((2, w.arg, 0, 0) : Nat × Nat × Nat × Nat) ∉ h.ids) :
+    (h.transition w).bind (·.transition c) = h.transition w := by
+  unfold Hist.transition msgId
+  rw [hw, hc]
+  dsimp only
+  rw [← ha]
+  simp [hnew]
+
 /-- Every transition keeps the history's message ids distinct. -/
 theorem transition_nodup (h h' : Hist) (e : Row) (hn : h.ids.Nodup) (ht : h.transition e = some h') : h'.ids.Nodup := by
   unfold Hist.transition at ht
@@ -3824,6 +3837,16 @@ their own terms; the merge holds both rows and the history one message. -/
 theorem t9_two_devices_one_turn :
     (merge [(0, [wr 1]), (1, [wr 2])]).map Row.key = [(1, 0), (2, 0)] ∧
       (histOf (merge [(0, [wr 1]), (1, [wr 2])])).map (·.ids) = some [(2, 7, 0, 0)] := by
+  decide
+
+/-- The run's own row of the turn `w-7`, said under term `t`. -/
+def cr (t : Nat) : Row := { term := t, seq := 0, run := 1, kind := .C, arg := 7, ms := t, epoch := 1, attempt := 0 }
+
+/-- **T9** (the copy first): a device said the turn of a run it found abandoned under an older term; the run's own
+device settles it later and its row of the turn merges after the copy. The history holds one message. -/
+theorem t9_copy_merged_first :
+    (merge [(0, [wr 1]), (1, [cr 2])]).map Row.key = [(1, 0), (2, 0)] ∧
+      (histOf (merge [(0, [wr 1]), (1, [cr 2])])).map (·.ids) = some [(2, 7, 0, 0)] := by
   decide
 
 /-- **T9** (the ledger reads it as committed): a turn said as its run settled commits the run's turn, so a Resume

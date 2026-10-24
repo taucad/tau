@@ -131,11 +131,12 @@ export type EventLogAppender = {
   foreignWroteSinceTermBegan?(): Promise<boolean>;
   /**
    * When a row written now is stamped (XD1, a hybrid logical clock): `now`, or one millisecond past the newest term
-   * start in the history the last open or refresh folded, whichever is later. The merge orders terms by their start, so
-   * a turn stamped this way merges after every term its history read (`t7_projection_after_visible` in
-   * ChatLedger.lean); and since that history leaves out a term dated more than `foreignClockAheadMilliseconds` past
-   * this clock, the stamp never runs further ahead than that bound, whatever another device's clock says. The floor is
-   * computed once per fold, never per write. Absent where `refresh` is.
+   * start in the history the last open or refresh folded, and past every row of another device's unsettled run that
+   * fold held out of the history, whichever is later. The merge orders terms by their start, so a turn stamped this
+   * way merges after every term its history read (`t7_projection_after_visible` in ChatLedger.lean), and after a held
+   * run's term once its device settles it; and since the fold leaves out a term or row dated more than
+   * `foreignClockAheadMilliseconds` past this clock, the stamp never runs further ahead than that bound, whatever
+   * another device's clock says. The floor is computed once per fold, never per write. Absent where `refresh` is.
    */
   stampAfterRead?(now: number): Promise<number>;
   /**
@@ -194,6 +195,34 @@ const sameSegments = (left: readonly ChatLogSegment[], right: readonly ChatLogSe
   left.every((segment, index) => segment.deviceId === right[index]!.deviceId && segment.bytes === right[index]!.bytes);
 
 const encoder = new TextEncoder();
+
+/**
+ * The newest `recordedAt`, at most `notAfter`, among the rows of other devices' runs a fold held out of the history
+ * (XD1, XD3). Those rows were read all the same: the hybrid clock follows them within the bound, so a term this device
+ * writes, a takeover's included, starts after a held run's term and merges after it once its device settles the run.
+ *
+ * @param foreign - Other devices' parsed segments.
+ * @param held - The held run ids, by device.
+ * @param notAfter - The fold's bound.
+ * @returns Epoch milliseconds, or negative infinity when no held row is within the bound.
+ */
+const newestHeldRow = (
+  foreign: readonly ParsedLogSegment[],
+  held: ReadonlyMap<string, ReadonlySet<string>>,
+  notAfter: number,
+): number => {
+  let newest = Number.NEGATIVE_INFINITY;
+  for (const segment of foreign) {
+    const heldIds = held.get(segment.deviceId);
+    for (const event of heldIds === undefined ? [] : segment.events) {
+      const recorded = Date.parse(event.recordedAt);
+      if (heldIds!.has(event.runId) && recorded <= notAfter && recorded > newest) {
+        newest = recorded;
+      }
+    }
+  }
+  return newest;
+};
 
 /**
  * Take the longest prefix of a page that fits a byte budget.
@@ -382,7 +411,8 @@ export const createEventLogAppender = async (
   let refoldAt: number | undefined;
   /**
    * The earliest time this device may stamp a row with (round 16, a hybrid logical clock): one past the newest start
-   * among the terms the last fold kept. Computed once per fold, never per write.
+   * among the terms the last fold kept, and past the rows of the runs it held out, within the bound. Computed once per
+   * fold, never per write.
    */
   let stampFloor = Number.NEGATIVE_INFINITY;
   const fold = (): void => {
@@ -439,8 +469,8 @@ export const createEventLogAppender = async (
      * and said so; this device's own terms always join. The rows kept are a prefix of the whole merge, and the clock
      * this device stamps by is after their newest start and never further ahead than the bound (round 16).
      */
-    const at = now();
-    const bounded = mergeSegmentsUpTo(toMerge, Math.max(at + foreignClockAheadMilliseconds, ownNewest), {
+    const notAfter = Math.max(now() + foreignClockAheadMilliseconds, ownNewest);
+    const bounded = mergeSegmentsUpTo(toMerge, notAfter, {
       onConflict: ({ key, keptDeviceId, droppedDeviceId }) => {
         conflicts.push({
           kind: 'conflict',
@@ -451,7 +481,8 @@ export const createEventLogAppender = async (
       },
     });
     const { rows } = bounded;
-    stampFloor = bounded.newestStart === undefined ? Number.NEGATIVE_INFINITY : bounded.newestStart + 1;
+    /* Negative infinity stays itself: with nothing read, the wall clock alone stamps. */
+    stampFloor = Math.max(bounded.newestStart ?? Number.NEGATIVE_INFINITY, newestHeldRow(foreign, held, notAfter)) + 1;
     for (const later of bounded.later) {
       conflicts.push({
         kind: 'history',

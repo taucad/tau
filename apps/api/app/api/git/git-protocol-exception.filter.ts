@@ -52,10 +52,10 @@ export class GitProtocolExceptionFilter extends HttpExceptionFilter {
     const { message: stated, code } =
       typeof body === 'object' ? (body as { message?: unknown; code?: unknown }) : { message: body, code: undefined };
     const message = typeof stated === 'string' ? stated : exception.message;
-    if (isRetryableGitRefusal(status, code)) {
+    if (typeof code === 'string' && isRetryableGitRefusal(status, code)) {
       /* The same line a browser's refusal logs, so one query counts both (X3). */
       this.logRetryableGitRefusal(
-        code as string,
+        code,
         status,
         resolveRequestId(request.headers[httpHeader.requestId], request.id as string | undefined),
       );

@@ -1,6 +1,11 @@
 # Reusable workflow for deploying API to Fly.io.
 # Supports the staging API (`tau-api-staging`, `api.taucad.dev`) and the
-# production API (`tau-api`, `api.tau.new`).
+# production API (`tau-api`, `api.tau.new`), and the private maintenance app
+# (`maintenance`: `tau-maintenance-staging`, north star DC4), which is staging-only
+# so far. The maintenance app is the API Dockerfile's `maintenance` target, deploys
+# with its own token (`FLY_MAINTENANCE_API_TOKEN`, from HCP tau-repo
+# `fly_maintenance_deploy_token_<env>`), serves nothing (no Sentry upload, no CORS
+# smoke) and must end with no IP address and exactly one Machine.
 #
 # The build pipeline:
 #   1. Authenticate Docker against `registry.fly.io` using FLY_API_TOKEN.
@@ -32,7 +37,7 @@ on:
       app:
         required: true
         type: string
-        description: 'App to deploy (api)'
+        description: 'App to deploy (api or maintenance)'
   workflow_dispatch:
     # Manual trigger from GitHub UI
     inputs:
@@ -49,6 +54,7 @@ on:
         description: 'App to deploy'
         options:
           - api
+          - maintenance
 
 jobs:
   deploy:
@@ -79,7 +85,37 @@ jobs:
 
       - name: Resolve deploy targets
         id: targets
+        env:
+          FLY_TOKEN_MAINTENANCE: ${{ secrets.FLY_MAINTENANCE_API_TOKEN }}
         run: |
+          # Every app but the API builds a target of the API's Dockerfile and has
+          # its Fly configs in its own project.
+          DOCKERFILE="apps/api/Dockerfile"
+          DOCKER_TARGET=""
+          TOKEN_SECRET="FLY_API_TOKEN"
+          if [ "${{ inputs.app }}" = "maintenance" ]; then
+            if [ "${{ inputs.environment }}" != "staging" ]; then
+              echo "::error::Only staging deploys tau-maintenance so far."
+              exit 1
+            fi
+            echo "fly_app=tau-maintenance-staging" >> "$GITHUB_OUTPUT"
+            echo "config_file=apps/maintenance/fly.staging.toml" >> "$GITHUB_OUTPUT"
+            echo "image=registry.fly.io/tau-maintenance-staging:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            echo "cache_ref=registry.fly.io/tau-maintenance-staging:buildcache" >> "$GITHUB_OUTPUT"
+            DOCKER_TARGET="maintenance"
+            TOKEN_SECRET="FLY_MAINTENANCE_API_TOKEN"
+            [ -n "$FLY_TOKEN_MAINTENANCE" ] || {
+              echo "::error::Set fly_maintenance_deploy_token_staging in HCP tau-repo and apply its FLY_MAINTENANCE_API_TOKEN GitHub environment mapping."
+              exit 1
+            }
+            echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
+            echo "docker_target=${DOCKER_TARGET}" >> "$GITHUB_OUTPUT"
+            echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "dockerfile=${DOCKERFILE}" >> "$GITHUB_OUTPUT"
+          echo "docker_target=${DOCKER_TARGET}" >> "$GITHUB_OUTPUT"
+          echo "token_secret=${TOKEN_SECRET}" >> "$GITHUB_OUTPUT"
           if [ "${{ inputs.environment }}" = "staging" ]; then
             FLY_APP="tau-api-staging"
             CONFIG_FILE="apps/${{ inputs.app }}/fly.staging.toml"
@@ -116,9 +152,10 @@ jobs:
         with:
           registry: registry.fly.io
           username: x
-          password: ${{ secrets.FLY_API_TOKEN }}
+          password: ${{ secrets[steps.targets.outputs.token_secret] }}
 
       - name: Require the Sentry source-map credential
+        if: inputs.app == 'api'
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: |
@@ -127,18 +164,19 @@ jobs:
             exit 1
           fi
 
-      - name: Build and push API image
+      - name: Build and push ${{ inputs.app }} image
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
-          file: apps/${{ inputs.app }}/Dockerfile
+          file: ${{ steps.targets.outputs.dockerfile }}
+          target: ${{ steps.targets.outputs.docker_target }}
           push: true
           tags: ${{ steps.targets.outputs.image }}
           # `mode=max` is required for monorepos so intermediate stages
           # (`deps`/`build`) survive in the cache, not just the final stage.
           cache-from: type=registry,ref=${{ steps.targets.outputs.cache_ref }}
           cache-to: type=registry,ref=${{ steps.targets.outputs.cache_ref }},mode=max
-          build-args: SENTRY_UPLOAD_ENABLED=true
+          build-args: SENTRY_UPLOAD_ENABLED=${{ inputs.app == 'api' }}
           secrets: |
             sentry_auth_token=${{ secrets.SENTRY_AUTH_TOKEN }}
             nx_cloud_token=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
@@ -157,12 +195,51 @@ jobs:
         if: steps.superseded.outputs.superseded != 'true'
         run: |
           echo "Deploying ${{ steps.targets.outputs.image }} to ${{ inputs.environment }}"
+          # `--ha=false` keeps tau-maintenance at one Machine (charter D21).
           flyctl deploy \
             --app "${{ steps.targets.outputs.fly_app }}" \
             --config "${{ steps.targets.outputs.config_file }}" \
-            --image "${{ steps.targets.outputs.image }}"
+            --image "${{ steps.targets.outputs.image }}" \
+            ${{ inputs.app == 'maintenance' && '--ha=false' || '' }}
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+
+      # DC4: the maintenance app has no service, so it must have no IP address of any
+      # kind and exactly one Machine, and that Machine must not have exited non-zero
+      # since the deploy (a missing secret or grant fails its standby checks). Names
+      # and counts only; nothing here prints a secret.
+      - name: Verify the maintenance app is private and singular
+        if: inputs.app == 'maintenance' && steps.superseded.outputs.superseded != 'true'
+        env:
+          FLY_API_TOKEN: ${{ secrets[steps.targets.outputs.token_secret] }}
+          FLY_APP: ${{ steps.targets.outputs.fly_app }}
+        run: |
+          set -euo pipefail
+          since=$(( $(date +%s%3N) - 120000 ))
+          ips=$(flyctl ips list --app "$FLY_APP" --json | jq 'length')
+          if [ "$ips" != 0 ]; then
+            echo "::error::${FLY_APP} has ${ips} IP address(es); it must have none (DC4)."
+            exit 1
+          fi
+          for attempt in 1 2 3 4 5 6; do
+            sleep 10
+            machines=$(flyctl machines list --app "$FLY_APP" --json)
+            count=$(jq 'length' <<< "$machines")
+            started=$(jq '[.[] | select(.state == "started")] | length' <<< "$machines")
+            exits=$(jq --argjson since "$since" \
+              '[.[].events[]? | select(.type == "exit" and (.timestamp // 0) > $since and ((.request.exit_event.exit_code // 0) != 0))] | length' \
+              <<< "$machines")
+            echo "attempt ${attempt}: machines=${count} started=${started} failed_exits=${exits}"
+            if [ "$count" != 1 ]; then
+              echo "::error::${FLY_APP} has ${count} Machines; it must have exactly one (charter D21)."
+              exit 1
+            fi
+            if [ "$exits" != 0 ]; then
+              echo "::error::The ${FLY_APP} Machine exited non-zero; its log names the failed revisions_maintenance.standby_failed check."
+              exit 1
+            fi
+          done
+          [ "$started" = 1 ] || { echo "::error::The ${FLY_APP} Machine is not started."; exit 1; }
 
       # The plan of the next push to `main` diffs the app against this commit.
       - name: Record this staging deploy
@@ -177,7 +254,7 @@ jobs:
       # `docs/research/staging-cors-coep-safari-rendering-audit.md` Finding
       # 11. Per user instruction this is post-deploy only — no daily cron.
       - name: Verify CORS reachability
-        if: steps.superseded.outputs.superseded != 'true'
+        if: inputs.app == 'api' && steps.superseded.outputs.superseded != 'true'
         run: bash scripts/src/smoke-cors.sh
         env:
           API_URL: ${{ steps.targets.outputs.api_url }}

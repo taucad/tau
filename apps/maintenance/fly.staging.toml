@@ -1,0 +1,66 @@
+# Fly config for `tau-maintenance-staging`, the private singleton maintenance app (Tau Brain north
+# star component 4a, package DC4). It is the API's `revisions-maintenance`
+# process group moved into an app of its own, so the jobs that need Postgres and
+# repository-write storage at once run outside the public app: tenant and project
+# purge, project-deletion recovery, `retire-lfs`, blob collection, and operator
+# restore (`TAU_S3_RESTORE_*`), later DM2's migrator.
+#
+# Private by construction: no `[http_service]`, no `[[services]]`, no
+# `[[metrics]]` and so no IP address of any kind. The deploy job refuses to
+# finish if one exists or if the app has other than one Machine
+# (`.github/workflows/deploy.yml`, app `maintenance`).
+# `apps/api/app/maintenance-app.test.ts` holds this file to that shape.
+#
+# Secrets (names only; Terraform `module.fly_maintenance_secrets` in tau-cloud
+# pushes them): DATABASE_URL (the `tau_maintenance` login), TAU_S3_ENDPOINT,
+# TAU_S3_ACCESS_KEY_ID, TAU_S3_SECRET_ACCESS_KEY (the maintenance R2 token),
+# TAU_S3_BUCKET, TAU_S3_PRIVATE_BUCKET, and for restore TAU_S3_RESTORE_ENDPOINT,
+# TAU_S3_RESTORE_BUCKET, TAU_S3_RESTORE_REGION, TAU_S3_RESTORE_ACCESS_KEY_ID,
+# TAU_S3_RESTORE_SECRET_ACCESS_KEY. No REDIS_URL: nothing here uses Redis.
+
+app = 'tau-maintenance-staging'
+primary_region = 'syd'
+kill_signal = 'SIGTERM'
+# The worker stops between passes on SIGTERM; the same window the API's group had.
+kill_timeout = '120s'
+
+[build]
+# Relative to this file: the API's Dockerfile, built at its `maintenance` target.
+dockerfile = '../api/Dockerfile'
+build-target = 'maintenance'
+
+[deploy]
+# No release_command: the API's release command owns migrations; this app never
+# migrates. Rolling replaces a single-Machine group in place, so the worker is
+# never briefly two Machines (charter D21).
+strategy = 'rolling'
+
+[processes]
+# The group keeps the name it had in the API app, so `assertSingletonProcessGroup`
+# (FLY_PROCESS_GROUP) and the liveness records keep their meaning. Exactly one
+# Machine: the deploy job passes `--ha=false` and checks the count.
+revisions-maintenance = 'node /app/dist/maintenance-command.js worker'
+
+[env]
+NODE_ENV = 'production'
+# DC4 cutover flag. Charter D21 allows one worker, and the API's own
+# `revisions-maintenance` group still runs it (`apps/api/fly.staging.toml`). Until
+# the coordinator's cutover — scale that group to zero, drop it from that file
+# and delete this line in one reviewed change — this app only proves its
+# database login and storage token and runs no pass.
+TAU_MAINTENANCE_STANDBY = 'true'
+DATABASE_CONNECT_TIMEOUT_SECONDS = '10'
+DATABASE_IDLE_TIMEOUT_SECONDS = '60'
+DATABASE_STATEMENT_TIMEOUT_MS = '15000'
+DATABASE_LOCK_TIMEOUT_MS = '5000'
+DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS = '15000'
+TAU_S3_PUBLIC_BASE_URL = 'https://cdn.taucad.dev'
+TAU_S3_REGION = 'auto'
+TAU_S3_FORCE_PATH_STYLE = 'false'
+
+# The sizing the API's `revisions-maintenance` group had (F-10: 512 MB). Restore
+# hydrates a lease of its own on the rootfs; purge and collection stream keys.
+[[vm]]
+memory = '512mb'
+cpu_kind = 'shared'
+cpus = 1

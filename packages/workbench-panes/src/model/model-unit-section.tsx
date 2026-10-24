@@ -333,7 +333,7 @@ function LiveComponentTree({
             <span className='truncate'>Weight · 0 of {leafPartIds.length} parts known</span>
             <span className='shrink-0 font-mono'>Unknown</span>
             {leafPartIds.length > 0 ? (
-              <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline'>
+              <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline pointer-coarse:min-h-6'>
                 Missing
               </CollapsibleTrigger>
             ) : undefined}

@@ -1,4 +1,5 @@
 import type { RuntimeTransportCloseResult } from '#transport/runtime-transport.types.js';
+import { readResourceLimit } from '#types/resource-limit.js';
 
 /** Why the document client became terminal. @public */
 export type RuntimeTerminatedCause = 'explicit' | 'transport-closed' | 'operation-timeout';
@@ -13,7 +14,8 @@ const isTerminationDetail = (detail: unknown): detail is RuntimeTerminatedDetail
   (!('exitCode' in detail) || detail.exitCode === undefined || typeof detail.exitCode === 'number') &&
   (!('reason' in detail) || detail.reason === undefined || typeof detail.reason === 'string') &&
   (!('released' in detail) || detail.released === undefined || typeof detail.released === 'boolean') &&
-  (!('stderrTail' in detail) || detail.stderrTail === undefined || typeof detail.stderrTail === 'string');
+  (!('stderrTail' in detail) || detail.stderrTail === undefined || typeof detail.stderrTail === 'string') &&
+  (!('exceeded' in detail) || detail.exceeded === undefined || readResourceLimit(detail.exceeded) !== undefined);
 
 const firstStderrLine = (stderrTail: string | undefined): string | undefined =>
   stderrTail
@@ -45,6 +47,7 @@ export class RuntimeTerminatedError extends Error {
             ...(close.reason === undefined ? {} : { reason: close.reason }),
             ...(close.released === undefined ? {} : { released: close.released }),
             ...(close.stderrTail === undefined ? {} : { stderrTail: close.stderrTail }),
+            ...(close.exceeded === undefined ? {} : { exceeded: close.exceeded }),
           }
         : undefined;
     super(

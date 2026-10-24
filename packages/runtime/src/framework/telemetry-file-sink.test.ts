@@ -165,6 +165,52 @@ describe('openTelemetryFileSink', () => {
     }).not.toThrow();
   });
 
+  it('should drop and count a record that will not serialize and keep writing', async () => {
+    const sink = await openTelemetryFileSink({ directory, fileName: 'utility-e.jsonl' });
+    const base = batch('kernel.render', 2);
+    const poisoned: TelemetryBatch = {
+      ...base,
+      entries: [{ ...base.entries[0]!, detail: { spanId: '0', bytes: 1n } }, base.entries[1]!],
+    };
+
+    sink!.write(poisoned);
+    sink!.write(batch('kernel.export'));
+    const lines = await readLines(join(directory, 'utility-e.jsonl'), 2);
+
+    expect(sink!.dropped).toBe(1);
+    expect(lines.map((line) => (JSON.parse(line) as { name: string }).name)).toEqual([
+      'kernel.render',
+      'kernel.export',
+    ]);
+    sink!.close();
+  });
+
+  it('should count a batch refused while the stream buffer is over its bound', async () => {
+    const sink = await openTelemetryFileSink({ directory, fileName: 'utility-f.jsonl', maxBytes: 64 * 1024 * 1024 });
+    const base = batch('kernel.render', 1);
+    const large: TelemetryBatch = {
+      ...base,
+      entries: [{ ...base.entries[0]!, detail: { spanId: '0', padding: 'x'.repeat(2 * 1024 * 1024) } }],
+    };
+
+    sink!.write(large);
+    sink!.write(batch('kernel.export', 3));
+
+    expect(sink!.dropped).toBe(3);
+    sink!.close();
+  });
+
+  it('should count spans written while a rotation is in flight', async () => {
+    const sink = await openTelemetryFileSink({ directory, fileName: 'utility-g.jsonl', maxBytes: 64 });
+
+    sink!.write(batch('kernel.render', 4));
+    sink!.write(batch('kernel.export', 2));
+
+    expect(sink!.dropped).toBe(2);
+    await readLines(join(directory, 'utility-g.jsonl.1'), 4);
+    sink!.close();
+  });
+
   it('reports no sink when its directory cannot be created', async () => {
     const blocker = join(directory, 'not-a-directory');
     await writeFile(blocker, 'occupied', 'utf8');

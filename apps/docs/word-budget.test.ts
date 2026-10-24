@@ -24,7 +24,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
   'runtime/api/testing.mdx': 500,
   'runtime/api/transport.mdx': 1450,
   // Raised 550 -> 560 on 2026-10-13 for the RealmGroup and RealmHoldInput tables (typed realm groups).
-  'runtime/api/types.mdx': 560,
+  // Raised 560 -> 610 on 2026-10-24 for ResourceLimitDetails and the Node telemetry file sink (runtime observability PR-1a).
+  'runtime/api/types.mdx': 610,
   'runtime/concepts/architecture.mdx': 1650,
   'runtime/concepts/interactive-architecture.mdx': 1100,
   'runtime/concepts/kernel-selection.mdx': 850,
@@ -69,7 +70,8 @@ const pageCeilings: Readonly<Record<string, number>> = {
 // Raised 34,850 -> 35,400 on 2026-10-19 for the SMLibPy kernel pages.
 // Raised 35,400 -> 35,500 on 2026-10-19 for the agent plugin page's install and check lines (ONB-4).
 // Raised 35,500 -> 35,550 on 2026-10-19 for the PicoVoxel, SMLib and PicoGK kernel rows (ONB-2).
-const siteCeiling = 35_550;
+// Raised 35,550 -> 35,600 on 2026-10-24 for ResourceLimitDetails and the Node telemetry file sink (runtime observability PR-1a).
+const siteCeiling = 35_600;
 
 const documentTypeCaps = {
   tutorial: 1500,

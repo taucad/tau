@@ -199,6 +199,7 @@ const exportResult = discriminatedWireUnion('success', [
 ]);
 const describeArgs = z
   .object({
+    operationId: id.optional(),
     stage: stage.optional(),
     file: file.strip(),
     resolution: z
@@ -273,6 +274,7 @@ const transcodeArgs = z
         }
       }),
     options: values,
+    operationId: id.optional(),
   })
   .strip();
 const transcodeResult = discriminatedWireUnion('success', [

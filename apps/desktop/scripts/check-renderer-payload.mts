@@ -156,7 +156,6 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
     /packages\/plugins\/image\/src\/(?:image-backend|image\.transcoder|svg(?:-renderer|\.transcoder)?|resvg)/u.test(
       path,
     ) ||
-    /packages\/geospec-engine\/src\/runner\//u.test(path) ||
     /(?:node_modules\/|\.pnpm\/)(?:[^/]*\/node_modules\/)?(?:@taulabs\/openrscad-engine|libassimp|nanoraster\/dist\/(?:renderer|native|wasm|create|render)|@resvg\/resvg-wasm|esbuild-wasm)/u.test(
       path,
     )

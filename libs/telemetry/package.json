@@ -12,13 +12,16 @@
   "author": "Richard Fontein",
   "license": "Apache-2.0",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./node": "./src/node.ts"
   },
   "imports": {
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },
   "devDependencies": {
+    "@taucad/events": "workspace:*",
     "@taucad/types": "workspace:*",
     "zod": "catalog:"
   }

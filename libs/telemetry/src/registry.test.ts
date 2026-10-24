@@ -7,7 +7,7 @@ describe('TauMetrics', () => {
   const metrics = Object.values(TauMetrics);
 
   it('should define all canonical metrics', () => {
-    expect(metrics).toHaveLength(119);
+    expect(metrics).toHaveLength(161);
   });
 
   /* Hosted Remote Storage DA2/OB2: the W14 catalogue's names, exported as the Prometheus series it lists. */
@@ -451,9 +451,14 @@ describe('TauMetrics', () => {
     const counters = metrics.filter((m) => m.type === 'counter');
     // `copied`: W13's catalogue fixes `tau_mirror_{objects,bytes}_copied_total` (W14 OB6).
     // `rejected`: the W14 catalogue's `tau_git_grants_rejected_total` (Hosted Remote Storage DC1, OB4).
-    const validSuffixes = /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$/;
+    // `usage`, `missing`, `attention`, `reuse`, `dropped`, `unavailable`, `partial`: Runtime Observability package §1
+    // fixes `tau.runtime.{kernel_usage,facts_missing,job_attention,reuse}` and `tau.telemetry.{client.dropped,
+    // spans.dropped,ingest.unavailable,ingest.partial}`; dashboards and named views use those names.
+    const validSuffixes =
+      /s$|cost$|microusd$|picousd$|flagged$|copied$|rejected$|usage$|missing$|attention$|reuse$|dropped$|unavailable$|partial$/;
     for (const counter of counters) {
-      const lastSegment = counter.name.split('.').at(-1) ?? '';
+      // A `_by_<dimension>` tail names the breakdown, not the counted thing: `operations_by_release`.
+      const lastSegment = (counter.name.split('.').at(-1) ?? '').replace(/_by_\w+$/u, '');
       expect(lastSegment).toMatch(validSuffixes);
     }
   });

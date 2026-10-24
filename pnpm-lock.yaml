@@ -3450,6 +3450,9 @@ importers:
 
   libs/telemetry:
     devDependencies:
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../events
       '@taucad/types':
         specifier: workspace:*
         version: link:../types

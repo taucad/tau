@@ -18,119 +18,11 @@ const grafanaRoot = path.resolve(import.meta.dirname, '../../../infra/grafana');
 /** Seeded Grafana trees: `bad` breaks each binding rule once, `v2` is what Tau Cloud's binding contract v2 renders. */
 const fixtureRoot = path.resolve(import.meta.dirname, 'fixtures/grafana-contract');
 
-/** The PR that declares the runtime observability instruments (Runtime Observability Blueprint, package.md §9.1). */
-const runtimeIngestPr = 'runtime observability PR-2 (obs/pr-2-telemetry-ingest)';
-
-/**
- * Prometheus labels of the runtime observability instruments the Runtime operations and product
- * dashboards and the runtime rules read ahead of their declaration (package.md §1.2, `runtimeMetrics`
- * in the design's `ingest.ts`). Once the registry declares a name, its own attributes are the label
- * source and the entry is stale.
- */
-const pendingRuntimeLabels: Readonly<Record<string, readonly string[]>> = {
-  tau_runtime_operation_duration: [
-    'tau_runtime_operation',
-    'tau_runtime_outcome',
-    'tau_runtime_route',
-    'tau_runtime_cold',
-  ],
-  tau_runtime_operation_cohort_duration: ['tau_runtime_operation', 'kernel_id', 'tau_release'],
-  tau_runtime_operation_queue: ['tau_runtime_operation', 'tau_runtime_route'],
-  tau_runtime_operations_total: [
-    'tau_runtime_operation',
-    'tau_runtime_outcome',
-    'tau_runtime_cause',
-    'kernel_id',
-    'tau_runtime_population',
-  ],
-  tau_runtime_operation_errors_total: ['tau_runtime_operation', 'error_type', 'kernel_id'],
-  tau_runtime_operations_by_release_total: ['tau_runtime_operation', 'tau_release', 'tau_runtime_failed'],
-  tau_runtime_job_attention_total: ['tau_runtime_plugin', 'tau_runtime_population'],
-  tau_runtime_plugin_operations_total: [
-    'tau_runtime_capability',
-    'tau_runtime_plugin',
-    'tau_runtime_operation',
-    'tau_runtime_outcome',
-    'tau_runtime_population',
-  ],
-  tau_runtime_machine_operations_total: [
-    'tau_runtime_plugin',
-    'tau_runtime_machine_kind',
-    'tau_runtime_machine_action',
-    'tau_runtime_outcome',
-    'tau_runtime_caller',
-    'tau_runtime_population',
-  ],
-  tau_runtime_kernel_usage_total: ['kernel_id', 'tau_runtime_route', 'tau_runtime_caller', 'tau_runtime_population'],
-  tau_runtime_transcode_formats_total: [
-    'tau_runtime_source_format',
-    'tau_runtime_format',
-    'tau_runtime_failed',
-    'tau_runtime_population',
-  ],
-  tau_runtime_entry_formats_total: ['kernel_id', 'tau_runtime_entry_format', 'tau_runtime_population'],
-  tau_runtime_operations_by_host_total: [
-    'tau_runtime_route',
-    'tau_runtime_platform',
-    'tau_runtime_os',
-    'tau_runtime_population',
-  ],
-  tau_runtime_parameter_features_total: ['kernel_id', 'tau_runtime_parameter_feature', 'tau_runtime_population'],
-  tau_runtime_operations_by_caller_total: ['tau_runtime_operation', 'tau_runtime_caller', 'tau_runtime_failed'],
-  tau_runtime_operations_by_transport_total: ['tau_runtime_operation', 'tau_runtime_transport', 'tau_runtime_outcome'],
-  tau_runtime_adaptations_total: ['kernel_id', 'error_type', 'tau_runtime_operation'],
-  tau_runtime_phase_duration: ['tau_runtime_phase', 'kernel_id', 'tau_runtime_operation'],
-  tau_runtime_middleware_duration: ['tau_runtime_middleware', 'tau_runtime_operation'],
-  tau_runtime_verify_tests: ['tau_runtime_set', 'kernel_id'],
-  tau_runtime_viewer_events_total: [
-    'tau_runtime_viewer_event',
-    'tau_runtime_backend',
-    'tau_runtime_route',
-    'tau_runtime_device',
-    'tau_runtime_format',
-  ],
-  tau_runtime_viewer_first_frame: ['tau_runtime_backend', 'tau_runtime_size_class'],
-  tau_runtime_reuse_total: ['kernel_id', 'tau_runtime_reuse'],
-  tau_runtime_facts_missing_total: ['tau_runtime_operation', 'tau_runtime_reason', 'tau_runtime_route'],
-  tau_runtime_late_terminals_total: ['tau_runtime_operation', 'tau_runtime_settled_as', 'tau_runtime_route'],
-  tau_runtime_capacity_refusals_total: [
-    'tau_runtime_limit',
-    'tau_runtime_demand_kind',
-    'kernel_id',
-    'tau_runtime_route',
-  ],
-  tau_runtime_capacity_demand_ratio: ['tau_runtime_limit'],
-  tau_runtime_kernel_heap: [
-    'kernel_id',
-    'tau_runtime_heap_source',
-    'tau_runtime_failed',
-    'tau_runtime_route',
-    'tau_runtime_device',
-    'tau_runtime_population',
-  ],
-  tau_runtime_parameters_declared: ['kernel_id', 'tau_runtime_population'],
-  tau_runtime_parameter_evaluations_total: ['kernel_id', 'tau_runtime_parameter_class', 'tau_runtime_population'],
-  tau_runtime_render_duration_by_size: ['kernel_id', 'tau_runtime_size_class', 'tau_runtime_population'],
-  tau_runtime_exports_total: ['kernel_id', 'tau_runtime_format', 'tau_runtime_outcome', 'tau_runtime_population'],
-  tau_runtime_active_principals: ['kernel_id', 'tau_runtime_set'],
-  tau_runtime_active_plugin_principals: ['tau_runtime_plugin', 'tau_runtime_set'],
-  tau_telemetry_runtime_enabled: [],
-  tau_telemetry_policy_probes_total: ['tau_runtime_route', 'answer'],
-  tau_telemetry_client_dropped_total: ['tau_runtime_route', 'reason'],
-  tau_telemetry_spans_dropped_total: ['tau_runtime_route'],
-  tau_telemetry_client_delivery_delay: ['tau_runtime_route'],
-  tau_telemetry_ingest_entries_total: ['disposition', 'tau_runtime_population'],
-  tau_telemetry_ingest_unavailable_total: ['check'],
-  tau_telemetry_ingest_partial_total: [],
-};
-
 /**
  * Names a dashboard may query ahead of the PR that declares them, as `name: 'owner/repo#PR'`. Each
  * entry goes when that PR merges; the tests fail until it does, and when no dashboard queries it.
  */
-const pendingDeclaration: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.keys(pendingRuntimeLabels).map((name) => [name, runtimeIngestPr]),
-);
+const pendingDeclaration: Readonly<Record<string, string>> = {};
 
 /**
  * The API's per-process instruments live in its OTel bootstrap rather than the registry (they observe
@@ -786,7 +678,7 @@ const registryLabels = new Map(
 /** The labels a series may be selected or grouped by: its definition's, plus `le` on a histogram's buckets. */
 const labelsOf = (series: string): readonly string[] | undefined => {
   const base = series.replace(/_(?:bucket|sum|count)$/u, '');
-  const own = registryLabels.get(base) ?? pendingRuntimeLabels[base];
+  const own = registryLabels.get(base);
   return own && [...own, ...seriesLabels, ...(series.endsWith('_bucket') ? ['le'] : [])];
 };
 

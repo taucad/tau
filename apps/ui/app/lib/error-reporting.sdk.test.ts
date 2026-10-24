@@ -42,8 +42,8 @@ vi.mock('@sentry/react', async (importOriginal) => {
 
 afterEach(async () => {
   vi.unstubAllGlobals();
-  const Sentry = await import('@sentry/react');
-  await Sentry.close();
+  const sentrySdk = await import('@sentry/react');
+  await sentrySdk.close();
 });
 
 describe('error reporting when the SDK throws as it starts', () => {
@@ -68,11 +68,12 @@ describe('error reporting when the SDK throws as it starts', () => {
     const event = new Event('unhandledrejection') as PromiseRejectionEvent;
     Object.assign(event, { reason: new TypeError('Importing a module script failed.'), promise: Promise.resolve() });
     globalThis.dispatchEvent(event);
-    // jsdom fires listeners but not the `onunhandledrejection` property a browser also calls, which is where the SDK listens.
-    const onRejection = (globalThis as { onunhandledrejection?: ((event: PromiseRejectionEvent) => void) | null })
-      .onunhandledrejection;
+    // The jsdom window fires listeners but not the `onunhandledrejection` property a browser also calls, where the SDK listens.
+    const onRejection: unknown = Reflect.get(globalThis, 'onunhandledrejection');
     expect(onRejection).toBeTypeOf('function');
-    onRejection?.(event);
+    if (typeof onRejection === 'function') {
+      Reflect.apply(onRejection, globalThis, [event]);
+    }
 
     await vi.waitFor(
       () => {

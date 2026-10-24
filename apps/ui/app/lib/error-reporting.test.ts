@@ -276,7 +276,9 @@ describe('error reporting', () => {
       now: () => ({}),
       settled: async () =>
         new Promise((resolve) => {
-          setTimeout(() => resolve({}), 60_000);
+          setTimeout(() => {
+            resolve({});
+          }, 60_000);
         }),
     });
     sentry.failNextLoad = true;

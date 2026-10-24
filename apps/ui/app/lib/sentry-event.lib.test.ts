@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import * as Sentry from '@sentry/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendSentryEventDirectly } from '#lib/sentry-event.lib.js';
+import {
+  sendSentryEventDirectly,
+  sendSentryEventsAtPageExit,
+  undeliveredAtPageExitFingerprint,
+  undeliveredAtPageExitMessage,
+} from '#lib/sentry-event.lib.js';
 
 vi.mock('#environment.config.js', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- The environment's own names.
@@ -43,6 +48,24 @@ describe('sendSentryEventDirectly', () => {
   });
 });
 
+/** The part of a posted event these tests read. */
+type PostedEvent = {
+  readonly tags?: Record<string, string>;
+  readonly fingerprint?: string[];
+  readonly exception?: { readonly values: ReadonlyArray<{ readonly value: string }> };
+};
+
+/** The events posted through a stubbed `fetch`, parsed from their envelopes. */
+const recordEvents = (): Array<{ readonly keepalive: boolean; readonly event: PostedEvent }> => {
+  const events: Array<{ readonly keepalive: boolean; readonly event: PostedEvent }> = [];
+  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+    const body = typeof init.body === 'string' ? init.body : '';
+    events.push({ keepalive: init.keepalive === true, event: JSON.parse(body.split('\n')[2] ?? '{}') as PostedEvent });
+    return new Response('{}');
+  });
+  return events;
+};
+
 describe('decorateForStaleBuild', () => {
   it.each(['superseded', 'current', 'undecided'] as const)(
     'should give an event sent without the SDK the same tag, level and fingerprint as beforeSend for %s',
@@ -77,6 +100,16 @@ describe('decorateForStaleBuild', () => {
     },
   );
 
+  it('should leave a stale_build tag that is no known decision undecorated, as it was given', async () => {
+    const events = recordEvents();
+
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name.
+    await sendSentryEventDirectly(new Error('tagged by someone else'), { stale_build: 'other', area: 'chat' });
+
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- A Sentry tag name.
+    expect(events[0]?.event.tags).toMatchObject({ stale_build: 'other', area: 'chat', delivery: 'without-sdk' });
+  });
+
   it('should skip a value the SDK already captured', async () => {
     const bodies: unknown[] = [];
     vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
@@ -89,5 +122,35 @@ describe('decorateForStaleBuild', () => {
     await sendSentryEventDirectly(failure, {});
 
     expect(bodies).toHaveLength(0);
+  });
+});
+
+describe('sendSentryEventsAtPageExit', () => {
+  it('should mark what it sends as captured, so the SDK started later never sends it again', () => {
+    const events = recordEvents();
+    const failure = new Error('sent as the page went');
+
+    sendSentryEventsAtPageExit([{ error: failure, tags: {} }]);
+    sendSentryEventsAtPageExit([{ error: failure, tags: {} }]);
+
+    expect(events).toHaveLength(1);
+    expect((failure as { __sentry_captured__?: unknown }).__sentry_captured__).toBe(true);
+  });
+
+  it('should group every summary of undelivered errors as one issue, whatever the count', () => {
+    const events = recordEvents();
+    const large = (index: number): Error => {
+      const error = new Error(`large ${String(index)} ${'x'.repeat(1500)}`);
+      error.stack = 'y'.repeat(50_000);
+      return error;
+    };
+
+    sendSentryEventsAtPageExit(Array.from({ length: 40 }, (_, index) => ({ error: large(index), tags: {} })));
+
+    const summary = events.at(-1)?.event;
+    expect(summary?.exception?.values[0]?.value).toMatch(/^\d+ further UI errors/u);
+    expect(summary?.fingerprint).toStrictEqual([...undeliveredAtPageExitFingerprint]);
+    expect(events.every((posted) => posted.keepalive)).toBe(true);
+    expect(undeliveredAtPageExitMessage(3)).toContain('3');
   });
 });

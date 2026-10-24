@@ -134,9 +134,13 @@ const markCaptured = (error: unknown): void => {
 
 /** Whether the SDK, or an earlier event sent without it, already captured a value. */
 const isCaptured = (error: unknown): boolean => {
+  if ((typeof error !== 'object' || error === null) && typeof error !== 'function') {
+    return false;
+  }
   try {
-    return (error as { __sentry_captured__?: unknown } | null | undefined)?.__sentry_captured__ === true;
+    return Reflect.get(error, '__sentry_captured__') === true;
   } catch {
+    // A getter that throws: the SDK could not have marked it either.
     return false;
   }
 };
@@ -146,16 +150,21 @@ const randomEventId = (): string => randomUuid().replaceAll('-', '');
 /** An envelope ready to post, and its size in bytes. */
 type Envelope = { readonly body: string; readonly size: number };
 
-const buildEnvelope = (
-  dsn: string,
-  error: unknown,
-  tags: Readonly<Record<string, string>>,
-  stackLimit: number,
-): Envelope => {
+/** What one event sent without the SDK is built from. */
+type EnvelopeInput = {
+  readonly dsn: string;
+  readonly error: unknown;
+  readonly tags: Readonly<Record<string, string>>;
+  readonly stackLimit: number;
+  /** Groups the event apart from what its message alone would group it with. */
+  readonly fingerprint?: readonly string[];
+};
+
+const buildEnvelope = ({ dsn, error, tags, stackLimit, fingerprint }: EnvelopeInput): Envelope => {
   const isError = error instanceof Error;
   const release = sentryRelease(readBuildId());
   const environment = sentryEnvironment();
-  const { stale_build: staleBuild, ...otherTags } = tags;
+  const staleBuild = tags['stale_build'];
   const plain: ErrorEvent = {
     type: undefined,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Sentry's event field.
@@ -165,7 +174,7 @@ const buildEnvelope = (
     level: 'error',
     ...(release === undefined ? {} : { release }),
     ...(environment === undefined ? {} : { environment }),
-    tags: { ...otherTags, delivery: 'without-sdk' },
+    tags: { ...tags, delivery: 'without-sdk' },
     exception: {
       values: [
         {
@@ -177,6 +186,7 @@ const buildEnvelope = (
     },
     ...(isError && error.stack !== undefined ? { extra: { stack: error.stack.slice(0, stackLimit) } } : {}),
     request: { url: globalThis.location.href },
+    ...(fingerprint === undefined ? {} : { fingerprint: [...fingerprint] }),
   };
   // Decorated exactly as `beforeSend` decorates the SDK's own events.
   const event = scrubSentryEvent(isStaleBuildTag(staleBuild) ? decorateForStaleBuild(plain, staleBuild) : plain);
@@ -237,13 +247,25 @@ export const sendSentryEventDirectly = async (
     return;
   }
   markCaptured(error);
-  const envelope = buildEnvelope(target.dsn, error, tags, directEventTextLimit.stack);
+  const envelope = buildEnvelope({ dsn: target.dsn, error, tags, stackLimit: directEventTextLimit.stack });
   await post(target.endpoint, envelope, fitsKeepalive(envelope.size, 1));
 };
 
 /** The message of the event that stands in for errors a page could not send as it went. */
 export const undeliveredAtPageExitMessage = (count: number): string =>
   `${String(count)} further UI errors were not delivered at page exit`;
+
+/** Fingerprint of that event, so every page's summary is one issue whatever its count. */
+export const undeliveredAtPageExitFingerprint = ['ui-errors-undelivered-at-page-exit'] as const;
+
+const buildSummaryEnvelope = (dsn: string, count: number): Envelope =>
+  buildEnvelope({
+    dsn,
+    error: new Error(undeliveredAtPageExitMessage(count)),
+    tags: {},
+    stackLimit: 0,
+    fingerprint: undeliveredAtPageExitFingerprint,
+  });
 
 /**
  * Report errors without the SDK as the page goes (`pagehide`), where only `keepalive` requests
@@ -263,15 +285,15 @@ export const sendSentryEventsAtPageExit = (
   }
   const newestFirst = reports.filter((report) => !isCaptured(report.error)).toReversed();
   // Room is kept for the summary while anything might be left out: its count has at most as many digits as the total.
-  const summarySize = buildEnvelope(
-    target.dsn,
-    new Error(undeliveredAtPageExitMessage(newestFirst.length)),
-    {},
-    0,
-  ).size;
+  const summarySize = buildSummaryEnvelope(target.dsn, newestFirst.length).size;
   let sent = 0;
   for (const [index, report] of newestFirst.entries()) {
-    const envelope = buildEnvelope(target.dsn, report.error, report.tags, directEventTextLimit.stackAtPageExit);
+    const envelope = buildEnvelope({
+      dsn: target.dsn,
+      error: report.error,
+      tags: report.tags,
+      stackLimit: directEventTextLimit.stackAtPageExit,
+    });
     const isLast = index === newestFirst.length - 1;
     if (!fitsKeepalive(envelope.size + (isLast ? 0 : summarySize), isLast ? 1 : 2)) {
       break;
@@ -283,7 +305,7 @@ export const sendSentryEventsAtPageExit = (
   }
   const left = newestFirst.length - sent;
   if (left > 0) {
-    const summary = buildEnvelope(target.dsn, new Error(undeliveredAtPageExitMessage(left)), {}, 0);
+    const summary = buildSummaryEnvelope(target.dsn, left);
     if (fitsKeepalive(summary.size, 1)) {
       // async-iife: bootstrap -- the page is going; nothing on it can wait for the answer.
       void post(target.endpoint, summary, true);

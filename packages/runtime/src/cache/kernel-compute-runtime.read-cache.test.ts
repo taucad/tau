@@ -3,7 +3,6 @@
  * binding and device (geometry cache result-path blueprint, Finding 7 and WP4).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { digestAction } from '@taucad/cache-core';
 import type { ActionDigest, CacheCodec, ComputeAction } from '@taucad/cache-core';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import { createComputeCapabilityHost, _registerComputeStore } from '#cache/kernel-compute-runtime.js';
@@ -132,7 +131,7 @@ describe('compute read-cache sizing', () => {
     }
     const report = await host.control!.inspect({});
     expect(report.logicalBytes).toBe(16 * mebibyte);
-    expect(host.readCacheBytes(), 'the engine is the only holder').toBe(0);
+    expect(await host.readCacheBytes(), 'the engine is the only holder').toBe(0);
   });
 
   it.each([
@@ -148,7 +147,9 @@ describe('compute read-cache sizing', () => {
         // oxlint-disable-next-line no-await-in-loop -- each edit publishes before the next.
         await evaluate(value, 4 * mebibyte);
       }
-      expect(host.readCacheBytes()).toBeLessThanOrEqual(bound * mebibyte);
+      // The content tier holds the bound; the action records beside it are a few hundred bytes each.
+      expect(await host.readCacheBytes()).toBeLessThanOrEqual(bound * mebibyte + 64 * 1024);
+      expect(await host.readCacheBytes()).toBeGreaterThan(memoryConstrained ? 12 * mebibyte : 20 * mebibyte);
       const before = gets.count;
       await expect(evaluate(1, 4 * mebibyte)).resolves.toMatchObject({ source: 'cache', value: { value: 1 } });
       if (memoryConstrained) {

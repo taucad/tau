@@ -39,7 +39,11 @@ const sheetSettled = async (grabber: Locator): Promise<void> =>
       });
     });
     const sheet = handle.closest('[data-slot=drawer-content]');
-    await Promise.all((sheet?.getAnimations() ?? []).map(async (animation) => animation.finished));
+    if (!sheet) {
+      throw new Error('The grabber is not inside the sheet.');
+    }
+    // A cancelled transition has settled too: a newer one replaced it or the sheet stopped moving.
+    await Promise.all(sheet.getAnimations().map(async (animation) => animation.finished.catch(() => undefined)));
   });
 
 const readLayout = async (): Promise<Layout> =>

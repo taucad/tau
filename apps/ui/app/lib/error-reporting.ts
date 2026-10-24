@@ -17,6 +17,13 @@ const loadSentry = async (): Promise<typeof SentryLibrary | undefined> => {
 /** Errors reported while the SDK is loading kept for it, at most. */
 export const unreportedErrorLimit = 50;
 
+/**
+ * Errors one page sends without the SDK, at most, those that waited for its load included: the
+ * SDK's own deduplication and rate limits are not there, and a boundary that keeps catching new
+ * errors (a remount loop) would otherwise post one event each.
+ */
+export const directErrorLimit = 100;
+
 /** Tags for a reported value: what is known now, and once its decision settles (bounded). */
 export type ErrorDescriber = {
   readonly now: (error: unknown) => Readonly<Record<string, string>>;
@@ -49,6 +56,10 @@ const waitingForTags = new Set<Report>();
 const sentDirectly = new WeakSet<Report>();
 /** Errors reported beyond the limit while the SDK was loading; logged once it settles. */
 let droppedWhileLoading = 0;
+/** Errors this page has handed to the path without the SDK ({@link directErrorLimit}). */
+let directReports = 0;
+/** Whether this page has said it dropped errors beyond {@link directErrorLimit} (said once). */
+let hasWarnedDirectLimit = false;
 /** Whether the SDK has already thrown once on this page (logged once, never reported). */
 let hasLoggedSdkThrow = false;
 /** Tags for reported values, from whoever knows them (the stale-build recovery's `stale_build`). */
@@ -98,11 +109,27 @@ const capture = (sentry: typeof SentryLibrary, reportedError: unknown): void => 
   }
 };
 
+/** Take one report onto the path without the SDK, unless the page's {@link directErrorLimit} is spent. */
+const admitDirect = (): boolean => {
+  if (directReports >= directErrorLimit) {
+    if (!hasWarnedDirectLimit) {
+      hasWarnedDirectLimit = true;
+      console.warn(
+        `[error-reporting] more than ${String(directErrorLimit)} errors without the SDK; the rest are dropped`,
+      );
+    }
+    return false;
+  }
+  directReports += 1;
+  return true;
+};
+
 /** The SDK cannot be used: what waited for it goes without it, each once its tags settle. */
 const sendWaitingWithoutSdk = (): void => {
   isSdkUnavailable = true;
   warnDropped();
-  for (const report of waitingForLoad.splice(0)) {
+  // At most `unreportedErrorLimit` waited, within the page's limit for errors without the SDK.
+  for (const report of waitingForLoad.splice(0).filter(() => admitDirect())) {
     // async-iife: bootstrap -- each event goes once its tags settle; the load's outcome is known now.
     void sendDirectlyWhenTagged(report);
   }
@@ -181,11 +208,12 @@ export const setErrorDescriber = (next: ErrorDescriber): void => {
 };
 
 /**
- * The page is hidden (every `pagehide`, kept in the back/forward cache or not, since a frozen page
- * may be evicted without running again): the errors still waiting, for the SDK's load or for their
- * tags, go now without the SDK, with the tags known now, as far as the page-exit budget allows
- * (`sendSentryEventsAtPageExit`: newest first, stacks trimmed, the rest counted in one summary
- * event). None is sent again; errors reported after the page is shown again are handled as usual.
+ * The page is hidden (the document turning hidden, and every `pagehide`, kept in the back/forward
+ * cache or not, since a hidden page may be frozen or discarded without running again): the errors
+ * still waiting, for the SDK's load or for their tags, go now without the SDK, with the tags known
+ * now, as far as the page-exit budget allows (`sendSentryEventsAtPageExit`: newest first, stacks
+ * trimmed, the rest counted in one summary event). None is sent again; errors reported after the
+ * page is shown again are handled as usual.
  */
 export const sendWaitingErrors = (): void => {
   const waiting = [...waitingForLoad.splice(0), ...waitingForTags].filter((report) => !sentDirectly.has(report));
@@ -199,8 +227,8 @@ export const sendWaitingErrors = (): void => {
 /**
  * Report an error a React or route boundary caught, which never reaches the global handlers, once
  * per page. Captured by the SDK when it is up; kept for it while it loads (at most
- * {@link unreportedErrorLimit}); sent without it once its load failed, or when the page goes before
- * it loads. Nothing is stored on the device. An error is marked reported only once it is captured,
+ * {@link unreportedErrorLimit}); sent without it once its load failed (at most
+ * {@link directErrorLimit} per page), or when the page goes before it loads. Nothing is stored on the device. An error is marked reported only once it is captured,
  * kept or sent, so one dropped while the SDK loads can be reported again. Never rejects.
  *
  * @param error - The caught value.
@@ -220,6 +248,9 @@ export const reportUiError = async (error: unknown): Promise<void> => {
     return;
   }
   if (isSdkUnavailable) {
+    if (!admitDirect()) {
+      return;
+    }
     markReported();
     await sendDirectlyWhenTagged({ error });
     return;

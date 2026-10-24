@@ -339,6 +339,25 @@ describe('error reporting', () => {
     expect(sentry.captureUiError).toHaveBeenCalledExactlyOnceWith(after);
   });
 
+  it('should send at most a bounded number of errors without the SDK per page, and say once that it dropped the rest', async () => {
+    const posted = stubIngest();
+    const page = await load();
+    sentry.failNextLoad = true;
+    await page.startErrorReporting();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    // A boundary that keeps catching a new error (a remount loop), each its own report.
+    for (let index = 0; index < page.directErrorLimit + 25; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- One report after another, as a loop would make them.
+      await page.reportUiError(new Error(`caught again ${String(index)}`));
+    }
+    page.sendWaitingErrors();
+    await settle();
+
+    expect(posted).toHaveLength(page.directErrorLimit);
+    expect(warn).toHaveBeenCalledOnce();
+  });
+
   it('should send the same thrown string twice when it is reported twice', async () => {
     const posted = stubIngest();
     const page = await load();

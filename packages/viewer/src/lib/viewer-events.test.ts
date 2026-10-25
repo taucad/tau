@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { markGeometryReceipt, observeLongAnimationFrames, onViewerEvent } from '#lib/renderer-telemetry.js';
-import type { ViewerTelemetryEvent } from '#lib/renderer-telemetry.js';
+import type { ViewerTelemetryEvent } from '#lib/viewer-events.js';
 import { resetViewerEvents, viewerContextLost, viewerFirstFrame, viewerRendererCreated } from '#lib/viewer-events.js';
 
 const unsubscribes: Array<() => void> = [];

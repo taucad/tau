@@ -19,7 +19,7 @@ describe('forwardOperations', () => {
   it('should map each settled attempt with the page context and the worker caller', () => {
     const handlers: Array<(value: RuntimeObservationInput) => void> = [];
     const client = {
-      on: vi.fn((event: string, handler: (value: never) => void) => {
+      on: vi.fn((event: string, handler: (value: RuntimeObservationInput) => void) => {
         if (event === 'operation') {
           handlers.push(handler);
         }
@@ -51,7 +51,7 @@ describe('forwardOperations', () => {
   it('should lose a forward that throws, never throwing into the runtime', () => {
     let handler: ((value: RuntimeObservationInput) => void) | undefined;
     const client = {
-      on: (event: string, next: (value: never) => void) => {
+      on: (event: string, next: (value: RuntimeObservationInput) => void) => {
         if (event === 'operation') {
           handler = next;
         }

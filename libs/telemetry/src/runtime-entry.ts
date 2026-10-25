@@ -234,8 +234,9 @@ const entrySchemas = {
 export const parseRuntimeEntry = (
   entry: Readonly<{ [key: string]: unknown; name: string }>,
 ): RuntimeEntryRecord | undefined => {
-  const schema = (entrySchemas as Readonly<Record<string, z.ZodType<RuntimeEntryRecord>>>)[entry.name];
-  const parsed = schema?.safeParse(entry);
+  const schemas = entrySchemas as Readonly<Record<string, z.ZodType<RuntimeEntryRecord>>>;
+  /* An inherited name such as `constructor` selects no schema. */
+  const parsed = Object.hasOwn(schemas, entry.name) ? schemas[entry.name]?.safeParse(entry) : undefined;
   return parsed?.success === true ? parsed.data : undefined;
 };
 

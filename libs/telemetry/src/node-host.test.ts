@@ -172,11 +172,11 @@ describe('createNodeHostTelemetry', () => {
 
   it('should leave a client it cannot subscribe to unobserved instead of throwing', () => {
     const { telemetry } = harness();
-    const client = {
-      on: () => {
+    const client: NodeObservedClient = {
+      on: (): never => {
         throw new Error('no events');
       },
-    } as unknown as NodeObservedClient;
+    };
 
     expect(() => {
       telemetry.observe(client, 'agent')();

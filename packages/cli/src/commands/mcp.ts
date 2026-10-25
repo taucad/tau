@@ -332,6 +332,8 @@ export const mcpCommand = defineCommand({
        * module there — never in this process, never before `initialize`. */
       /* Reports only as a Tau Cloud host. */
       const telemetry = cliRuntimeTelemetry('mcp', packageJson.version);
+      /* Each client's subscription ends with it, so a replaced client is not held by the reporter. */
+      const unobserve = new WeakMap<ProjectRuntimeClient, () => void>();
       const openClient = async (projectPath: string): Promise<ProjectRuntimeClient> => {
         const [{ createRuntimeClient }, { nodeWorkerTransport }, { fromNodeFs }] = await Promise.all([
           import('@taucad/runtime'),
@@ -351,7 +353,9 @@ export const mcpCommand = defineCommand({
           }),
           operationTimeout,
         });
-        telemetry?.observe(client, 'agent');
+        if (telemetry !== undefined) {
+          unobserve.set(client, telemetry.observe(client, 'agent'));
+        }
         return client;
       };
       /* A client whose thread exited is terminated, and replaced on its project's next call. The viewer's watched
@@ -360,7 +364,12 @@ export const mcpCommand = defineCommand({
       const clients = keyedResource<string, ProjectRuntimeClient>(
         openClient,
         async (client) => {
-          await client.shutdown();
+          try {
+            await client.shutdown();
+          } finally {
+            unobserve.get(client)?.();
+            unobserve.delete(client);
+          }
         },
         (client) => client.lifecycleState !== 'terminated',
       );

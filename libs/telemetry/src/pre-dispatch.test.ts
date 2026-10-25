@@ -19,7 +19,7 @@ const admissible = (entry: RuntimeOperationEntry | undefined): void => {
   if (entry === undefined) {
     throw new Error('expected an entry');
   }
-  expect(() => parseRuntimeEntry(entry)).not.toThrow();
+  expect(parseRuntimeEntry(entry)).toBeDefined();
 };
 
 describe('preparationEntry', () => {

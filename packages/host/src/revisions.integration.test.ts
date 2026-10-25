@@ -1866,11 +1866,12 @@ describe('a pull the page asks for over the host channel', () => {
       await expect(revisions.channel.request({ command: 'pullRemote', chatId: 'chat-1' })).resolves.toMatchObject({
         result: { pulls: true },
       });
-      /* A project with no remote: the placement refuses the pull CHAT_NOT_SHARED, and the page hears it. */
+      /* A project with no remote: once its remotes read has settled on none (round 28: a read still running is no
+       * evidence), the placement refuses the pull CHAT_NOT_SHARED, and the page hears it. */
       revisions.placement(() => undefined);
-      await expect(revisions.channel.request({ command: 'pullRemote', chatId: 'chat-1' })).resolves.toMatchObject({
-        result: { pulls: false },
-      });
+      await expect
+        .poll(async () => revisions.channel.request({ command: 'pullRemote', chatId: 'chat-1' }), { timeout: 20_000 })
+        .toMatchObject({ result: { pulls: false } });
     } finally {
       await revisions.release();
     }

@@ -734,17 +734,6 @@ export const createTurnPlacementPort = <Tools>(
     const kind = actor.getSnapshot().children.remote?.getSnapshot().context.kind;
     return kind !== undefined && kind !== 'none';
   };
-  /*
-   * Round 27: whether a pull can bring this project's chats here, as its root answers it. A root without the answer, or
-   * one whose answer fails, is taken to pull them: only a definite "no" lets a host pass another device's quiet run.
-   */
-  const chatsMayArrive = async (): Promise<boolean> => {
-    try {
-      return (await options.revisions.pullsChats?.()) ?? true;
-    } catch {
-      return true;
-    }
-  };
 
   /*
    * XD4: where the placement intent is on this device. A checkout id derives from its branch, so the branch is the
@@ -1137,12 +1126,13 @@ export const createTurnPlacementPort = <Tools>(
       if (fenced) {
         return fencedAnswer(requestId);
       }
-      if (!branchMayArrive() || !(await chatsMayArrive())) {
+      /* Round 27: and only where its root says it pulls this project's chats (a root without the answer does). An
+       * answer that fails rejects the pull, which its host reads as no evidence that this device cannot pull. */
+      if (!branchMayArrive() || (await options.revisions.pullsChats?.()) === false) {
         return refused({
           requestId,
           code: 'CHAT_NOT_SHARED',
-          message:
-            'This device does not pull this project’s chats (no remote, chat sync off, or no record identity), so no pull can bring another device’s copy of this chat.',
+          message: 'This device does not pull this project’s chats.',
         });
       }
       actor.send({ type: 'sync', event: { type: 'remoteMoved', generation: 0, refs: [] } });

@@ -18,6 +18,8 @@ export const cookieName = {
   codeInlayHints: 'code-inlay-hints',
   // Whether actions use pointer cursors instead of the platform default.
   pointerCursors: 'pointer-cursors',
+  // Whether the Terminal pane keeps its screen mirror and output live region (on unless the person turns it off).
+  terminalScreenReader: 'terminal-screen-reader',
 
   /* Layout */
   // Whether the sidebar is open.

@@ -108,6 +108,7 @@ vi.mock('#routes/w.$workspace.$project/chat-agents.js', () => ({ AgentsPanelBody
 vi.mock('#routes/w.$workspace.$project/chat-jobs.js', () => ({ JobsPanelBody: () => <p>Job list</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-kernel.js', () => ({ TelemetryPanelContent: () => <p>Kernel spans</p> }));
 vi.mock('#routes/w.$workspace.$project/chat-console.js', () => ({ ChatConsole: () => <p>Console log</p> }));
+vi.mock('#components/terminal/terminal-pane.js', () => ({ ProjectTerminalPane: () => <p>Shell session</p> }));
 vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
   ProjectUnavailableOverlay: () => null,
 }));
@@ -323,6 +324,7 @@ describe('ChatInterfaceMobile', () => {
     details: 'Project details',
     kernel: 'Kernel spans',
     console: 'Console log',
+    terminal: 'Shell session',
   } as const satisfies Record<WorkbenchPanelId, string>;
   const paneTitles = {
     browser: 'Browser',
@@ -339,6 +341,7 @@ describe('ChatInterfaceMobile', () => {
     details: 'Details',
     kernel: 'Telemetry',
     console: 'Console',
+    terminal: 'Terminal',
   } as const satisfies Record<WorkbenchPanelId, string>;
 
   it.each(Object.keys(paneBodies) as WorkbenchPanelId[])(

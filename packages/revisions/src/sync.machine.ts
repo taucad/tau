@@ -419,7 +419,7 @@ export type SyncProjectRecordsActorInput = Readonly<{
   syncChats: boolean;
   syncLargeExports: boolean;
   priorEvidenceHead?: string;
-  /** When this pull read the remote's refs, on this device's clock: the chats it projects record it (`chatPulledAtPath`). */
+  /** When this pull read the remote's refs, on this device's clock: the chats it projects record it (`pullRecordAfter`). */
   pulledAt?: number | undefined;
 }>;
 

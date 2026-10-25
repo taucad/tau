@@ -100,8 +100,8 @@ export type TurnPlacementAdapter<Tools> = Readonly<{
     input: Readonly<{ requestId: string; chatId: string }>,
   ) => Promise<Answer<Nothing, Fenced | 'CHAT_NOT_SHARED'>>;
   /**
-   * Pull the project's remote now (XD3): another device's run on a chat has been quiet here past the staleness bound,
-   * and only a pull can show whether it stayed quiet there. Answered once asked, not once pulled.
+   * Pull the project's remote now (XD3): another device's run on a chat has been quiet here a while, and only pulls can
+   * show whether it stayed quiet there for the staleness bound. Answered once asked, not once pulled.
    */
   pull: (input: Readonly<{ requestId: string; chatId: string }>) => Promise<Answer<Nothing, Fenced>>;
   /**

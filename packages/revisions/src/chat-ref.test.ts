@@ -10,9 +10,11 @@
  * all.
  */
 
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { classify } from '@taucad/filesystem/path-registry';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
@@ -25,6 +27,7 @@ import {
   chatPulledAtPath,
   chatSegmentPath,
   projectChats,
+  pullRecordAfter,
   replayChatSegment,
   writeChatRef,
 } from '#chat-ref.js';
@@ -343,34 +346,58 @@ describe.each([
   });
 
   /*
-   * XD3, round 18: a pull records when it read the remote's refs beside the other devices' segments, once those are
-   * written, so a reader can tell quiet it observed from quiet it only inferred. At most once a minute, never back.
+   * XD3, rounds 18 and 19: a pull records, beside the other devices' segments and once those are written, how long pulls
+   * have found each segment as it is, so a reader can tell quiet pulls evidenced from quiet it only inferred. Quiet is
+   * the sum of capped gaps between recorded pulls that found the same bytes, never one clock reading against another:
+   * a clock that went back only shortens it, and one that jumped ahead adds one capped gap.
    */
-  it.runIf(enabled)('records when a pull read the remote beside the segments it projected', async () => {
+  it.runIf(enabled)('records how long pulls found each other device’s segment as it is', async () => {
     const id = `pulled_${_engine}`;
+    const first = '{"leaderEpoch":"a","sequence":0}\n';
     const commit = await harness.port.writeRevision({
       parents: [],
-      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n']]),
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', first]]),
       provenance: { source: 'user', actorId, createdAt: now },
       summary: { generated: 'Pulled' },
     });
     const references = [{ name: chatRefName(id), head: revisionId(commit.commitId) }];
     const target = await createMemoryProvider();
-    const pull = async (pulledAt?: number) =>
-      projectChats({ port: harness.port, filesystem: target, deviceId: 'device-b', refs: references, pulledAt });
+    const pull = async (pulledAt?: number, listed = references) =>
+      projectChats({ port: harness.port, filesystem: target, deviceId: 'device-b', refs: listed, pulledAt });
     const read = async (checkout: FileSystemProvider) => readChatFile(checkout, chatPulledAtPath, id);
+    const record = (at: number, size: number, quiet: number) =>
+      `${String(at)}\ndevice-a.jsonl ${String(size)} ${String(quiet)}`;
+    const size = new TextEncoder().encode(first).byteLength;
 
     await pull();
     expect(await read(target)).toBeUndefined();
 
     await pull(now);
-    expect(await read(target)).toBe(String(now));
-    await pull(now + 30_000);
-    expect(await read(target)).toBe(String(now));
-    await pull(now - 120_000);
-    expect(await read(target)).toBe(String(now));
+    expect(await read(target)).toBe(record(now, size, 0));
+    /* Under half a minute later, with nothing new: nothing is written. */
+    await pull(now + 20_000);
+    expect(await read(target)).toBe(record(now, size, 0));
     await pull(now + 60_000);
-    expect(await read(target)).toBe(String(now + 60_000));
+    expect(await read(target)).toBe(record(now + 60_000, size, 60_000));
+    /* The clock went back an hour: the gap counts as nothing, and the pulls after it count as they go. */
+    await pull(now - 3_600_000);
+    expect(await read(target)).toBe(record(now - 3_600_000, size, 60_000));
+    await pull(now - 3_540_000);
+    expect(await read(target)).toBe(record(now - 3_540_000, size, 120_000));
+    /* The clock jumped two hours ahead: one gap counts two minutes at most. */
+    await pull(now + 3_600_000);
+    expect(await read(target)).toBe(record(now + 3_600_000, size, 240_000));
+
+    /* A pull that brings the other device's new rows starts its quiet again. */
+    const second = `${first}{"leaderEpoch":"a","sequence":1}\n`;
+    const grown = await harness.port.writeRevision({
+      parents: [revisionId(commit.commitId)],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', second]]),
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: 'Grown' },
+    });
+    await pull(now + 3_610_000, [{ name: chatRefName(id), head: revisionId(grown.commitId) }]);
+    expect(await read(target)).toBe(record(now + 3_610_000, new TextEncoder().encode(second).byteLength, 0));
 
     /* A chat holding no other device's segment has no other device's run to observe. */
     const alone = await createMemoryProvider();
@@ -382,6 +409,29 @@ describe.each([
       pulledAt: now,
     });
     expect(await read(alone)).toBeUndefined();
+  });
+
+  /* The record's step is the agent host's Lean model's (`notePull`, T11): every case of its corpus answers the same. */
+  it('answers every pull of the Lean model’s pull corpus as the model does', () => {
+    const corpus = fileURLToPath(new URL('../../agent-host/specs/lean/corpus/pull-records', import.meta.url));
+    const trace = readFileSync(`${corpus}.trace`, 'utf8')
+      .split('\n')
+      .filter((line) => line.startsWith('PULL '));
+    const expected = readFileSync(`${corpus}.expected`, 'utf8')
+      .split('\n')
+      .filter((line) => line.startsWith('QN '));
+    const answers = trace.map((line) => {
+      const [, cap, throttle, prior, at, size] = line.split(' ');
+      expect([cap, throttle]).toEqual(['120000', '30000']);
+      const [clock, priorSize, quiet] = prior === '-' ? [] : prior!.split(':');
+      const priorText = prior === '-' ? '' : `${clock!}\nx.jsonl ${priorSize!} ${quiet!}`;
+      const next = pullRecordAfter(priorText, Number(at), [`x.jsonl ${size!}`]) ?? priorText;
+      const [nextClock, entry] = next.split('\n');
+      return `QN ${nextClock!} ${entry!.split(' ').slice(1).join(' ')}`;
+    });
+
+    expect(answers.length).toBeGreaterThan(100);
+    expect(answers).toEqual(expected);
   });
 
   it.runIf(enabled)('never truncates a compatible foreign segment and rejects divergent bytes', async () => {

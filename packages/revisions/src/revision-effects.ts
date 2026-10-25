@@ -4427,7 +4427,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             reject(new RevisionPortError('INVALID_TRANSPORT', 'The remote did not answer in time.'));
           });
         });
-        /* Before the listing, on the raw clock a file's modification time is stamped by (`chatPulledAtPath`). */
+        /* Before the listing: the chats' pull records count quiet between such readings (`pullRecordAfter`). */
         const pulledAt = clock();
         const advertised = await Promise.race([port.listRemoteRefs(input.remote, { signal: abort }), deadline]);
         signal.throwIfAborted();

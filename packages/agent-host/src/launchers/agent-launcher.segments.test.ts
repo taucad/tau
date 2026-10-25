@@ -80,7 +80,7 @@ const launch = (
     pausedRunHold?: number;
     idleEviction?: number;
     closingWait?: number;
-    approvalRefresh?: number;
+    segmentRefresh?: number;
     publish?: NonNullable<TurnPlacementPort['publish']>;
     pull?: NonNullable<TurnPlacementPort['pull']>;
   }> = {},
@@ -100,7 +100,7 @@ const launch = (
       ...(options.pausedRunHold === undefined ? {} : { pausedRunHold: options.pausedRunHold }),
       ...(options.idleEviction === undefined ? {} : { idleEviction: options.idleEviction }),
       ...(options.closingWait === undefined ? {} : { closingWait: options.closingWait }),
-      ...(options.approvalRefresh === undefined ? {} : { approvalRefresh: options.approvalRefresh }),
+      ...(options.segmentRefresh === undefined ? {} : { segmentRefresh: options.segmentRefresh }),
     },
   });
   launchers.push(launcher);
@@ -1496,11 +1496,13 @@ describe('a chat continued on a second device', () => {
     const heartbeatCount = async (root: string): Promise<number> =>
       heartbeatsAfter(rowsOf(await readFile(ownLog(root), 'utf8')), 'paused').length;
 
-    /*
-     * A Stop is applied at once, never behind another command's checks: an Approve whose read of the other devices'
-     * segments stalls is refused once it is superseded, and the run stops.
+    /**
+     * A run on this device paused on an approval, on a store whose segment reads never return once the stall is armed
+     * (an offline cloud placeholder, a stale mount): a segment read is bounded at 100 ms.
      */
-    it('should stop the run at once and refuse an Approve stalled behind its segment read', async () => {
+    const stalledPausedRun = async (): Promise<
+      Readonly<{ root: string; stall: { armed: boolean }; launcher: AgentLauncher }>
+    > => {
       const root = await workspace();
       const store = createNodeChatStore({ workspaceRoot: root });
       const stall = { armed: false };
@@ -1533,7 +1535,7 @@ describe('a chat continued on a second device', () => {
             yield { type: 'completed', stopReason: 'aborted' };
           },
         },
-        { approvalRefresh: 100 },
+        { segmentRefresh: 100 },
       );
       await launcher.execute({
         type: 'start',
@@ -1548,6 +1550,59 @@ describe('a chat continued on a second device', () => {
       });
       await rowsUntil(root, (found) => found.some((row) => row.type === 'turn.finalized'));
       await sleep(100);
+      return { root, stall, launcher };
+    };
+
+    /*
+     * Round 26: every admission's segment read is bounded, a start's and a Resume's as an approval's. A start whose
+     * read never returns is refused `SEGMENTS_UNREADABLE` (`wait`) at the bound and releases the chat's dispatch turn,
+     * so the approval behind it reaches its own bound, and once the segments read again the approval is applied.
+     */
+    it('should refuse a start whose segment read never returns at the bound, and let the commands behind it on', async () => {
+      const { stall, launcher } = await stalledPausedRun();
+      stall.armed = true;
+
+      const started = launcher.execute({
+        type: 'start',
+        commandId: key(),
+        payload: {
+          chatId,
+          runId: 'run-2',
+          trigger: 'submit',
+          message: { id: 'user-2', role: 'user', content: 'again' },
+        },
+      });
+      const approved = launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+      const refusedStart = await started;
+      const refusedApproval = await approved;
+      stall.armed = false;
+      const applied = await launcher.execute({
+        type: 'resolve-interrupt',
+        commandId: key(),
+        payload: { chatId, runId: 'run-1', interruptId: 'int-1', outcome: 'approved' },
+      });
+
+      expect(refusedStart, JSON.stringify(refusedStart)).toMatchObject({
+        status: 'refused',
+        code: 'SEGMENTS_UNREADABLE',
+      });
+      expect(refusedApproval, JSON.stringify(refusedApproval)).toMatchObject({
+        status: 'refused',
+        code: 'SEGMENTS_UNREADABLE',
+      });
+      expect(applied, JSON.stringify(applied)).toMatchObject({ status: 'applied' });
+    }, 5000);
+
+    /*
+     * A Stop is applied at once, never behind another command's checks: an Approve whose read of the other devices'
+     * segments stalls is refused once it is superseded, and the run stops.
+     */
+    it('should stop the run at once and refuse an Approve stalled behind its segment read', async () => {
+      const { stall, launcher } = await stalledPausedRun();
       stall.armed = true;
 
       const approve = launcher.execute({

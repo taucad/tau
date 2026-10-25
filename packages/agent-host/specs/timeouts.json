@@ -101,10 +101,10 @@
       "owner": "XD3"
     },
     {
-      "id": "APPROVAL-REFRESH",
-      "bound": "An approval waits at most ten seconds to read the other devices' segments, then is refused SEGMENTS_UNREADABLE (wait) instead of continuing a paused run on a fence it could not check",
+      "id": "SEGMENT-REFRESH",
+      "bound": "An admission (a start, a Resume or an approval) waits at most ten seconds to read the other devices' segments, then is refused SEGMENTS_UNREADABLE (wait) and releases the chat's dispatch turn, instead of running on a fence it could not check or holding the commands behind it",
       "site": "packages/agent-host/src/host/tau-agent-host.ts",
-      "token": "approvalRefreshMilliseconds",
+      "token": "segmentRefreshMilliseconds",
       "class": "Liveness",
       "owner": "XD3"
     },

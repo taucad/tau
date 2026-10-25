@@ -193,8 +193,8 @@ export type CreateTauAgentHostOptions = {
         pausedRunHold?: number;
         /** How long a command waits for a chat's closing incarnation before `WRITER_LOCKED`; ten seconds. */
         closingWait?: number;
-        /** How long an approval waits to read the segments; {@link approvalRefreshMilliseconds}. */
-        approvalRefresh?: number;
+        /** How long an admission waits to read the segments; {@link segmentRefreshMilliseconds}. */
+        segmentRefresh?: number;
       }>
     | undefined;
   /** The clock every incarnation and its stream stall bound run on; the process's timers when absent. */
@@ -386,12 +386,13 @@ export const runHeartbeatMilliseconds = 60_000;
 export const pausedRunHoldMilliseconds = 30 * 60 * 1000;
 
 /**
- * How long an approval waits to read the other devices' segments before it is refused `SEGMENTS_UNREADABLE` (`wait`)
- * rather than continue a paused run on a fence it could not check: ten seconds.
+ * How long an admission (a start, a Resume or an approval) waits to read the other devices' segments before it is
+ * refused `SEGMENTS_UNREADABLE` (`wait`) rather than run on a fence it could not check: ten seconds. The read runs in
+ * the chat's dispatch turn, so the bound is also how long the commands behind it can wait on it (round 26).
  *
  * @public
  */
-export const approvalRefreshMilliseconds = 10_000;
+export const segmentRefreshMilliseconds = 10_000;
 
 /** A command admitted across devices: a turn's start, a Resume, or an approval of a paused run's request. @internal */
 export type AdmissionVerb = 'start' | 'resume' | 'approve';
@@ -1579,12 +1580,13 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       dispatches.delete(commandId);
     }
   };
+  /** An admission's segment read, once per dispatch, and always bounded ({@link boundedRefresh}). */
   const refreshFor = async (log: DurableEventLog, commandId: string): Promise<void> => {
     const dispatch = dispatches.get(commandId);
     if (dispatch?.refreshed === log) {
       return;
     }
-    await log.refresh?.();
+    await boundedRefresh(log);
     if (dispatch !== undefined) {
       dispatch.refreshed = log;
     }
@@ -1659,7 +1661,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   /**
    * The one cross-device admission of every command that starts or continues a run (round 20, {@link commandAdmission};
    * `admit` in ChatLedger.lean, T13): a start, a Resume and an approval. After this dispatch's read of what sync brought
-   * (an approval's bounded), it checks the run's and the other devices' runs' standing, decides the term and proposes
+   * (every admission's bounded, round 26: it runs in the chat's dispatch turn), it checks the run's and the other devices' runs' standing, decides the term and proposes
    * a new one ({@link rehome}), and hands the command's run's first batch with a place for them ({@link carriedPlace})
    * the turn of every abandoned foreign run it goes on past, so every device reads that run taken over whichever command
    * passed it.
@@ -1693,7 +1695,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     let admitted: CommandAdmission;
     let at = 0;
     try {
-      await (command.verb === 'approve' ? boundedRefresh(log) : refreshFor(log, command.commandId));
+      await refreshFor(log, command.commandId);
       const takenOver = command.verb === 'approve' && (await log.runTakenOver?.(command.runId)) === true;
       /* An unread segment may hold a live run: `foreignRuns` rejects `SEGMENTS_UNREADABLE` (`wait`), never answers none. */
       runs = takenOver ? [] : ((await log.foreignRuns?.()) ?? []);
@@ -1817,13 +1819,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
   };
 
-  /** A segment read bounded for an approval: one that does not finish in time is a segment that cannot be read. */
+  /**
+   * An admission's segment read, bounded: one that does not finish in time is a segment that cannot be read, so the
+   * command is refused `SEGMENTS_UNREADABLE` (`wait`) and the chat's dispatch turn is released (round 26).
+   */
   const boundedRefresh = async (log: DurableEventLog): Promise<void> => {
     const clock: HostClock = options.clock ?? globalThis;
     const expired = Promise.withResolvers<'expired'>();
     const timer: unknown = clock.setTimeout(() => {
       expired.resolve('expired');
-    }, options.delays?.approvalRefresh ?? approvalRefreshMilliseconds); // Bound: approvalRefreshMilliseconds.
+    }, options.delays?.segmentRefresh ?? segmentRefreshMilliseconds); // Bound: segmentRefreshMilliseconds.
     (timer as { unref?: () => void } | undefined)?.unref?.();
     try {
       const read = log.refresh?.();

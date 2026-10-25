@@ -984,6 +984,45 @@ describe('a chat continued on a second device', () => {
     });
 
     /*
+     * Round 27: a device that cannot pull the chat (chat sync off, no remote, no record identity) never gets the pulls
+     * that would show another device's quiet run abandoned. Its placement says so (`pull` refused `CHAT_NOT_SHARED`),
+     * so once that run awaits pulls it no longer holds the chat: the phone goes on and says the run's turn as data.
+     */
+    it('should admit a run past another device’s quiet run when this device cannot pull the chat, saying its turn', async () => {
+      const inFlight = await desktopInFlight();
+      const phone = await workspace();
+      const phoneModel = recordingModel('phone answer');
+      const pulls: string[] = [];
+      const onPhone = launch(createNodeChatStore({ workspaceRoot: phone }), phoneModel.transport, {
+        pull: async ({ requestId, chatId: pulledChat }) => {
+          pulls.push(pulledChat);
+          return {
+            requestId,
+            status: 'refused',
+            code: 'CHAT_NOT_SHARED',
+            message: 'This project does not sync its chats.',
+          };
+        },
+      });
+      try {
+        const slept = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        await project(phone, 'device-desktop', inFlight.bytes);
+        await utimes(join(phone, '.tau', 'chats', chatId, 'events', 'device-desktop.jsonl'), slept, slept);
+
+        expect(await start(onPhone, 'run-phone-1', 'second, on the phone')).toMatchObject({ status: 'applied' });
+        await settleRun(onPhone, 'run-phone-1');
+      } finally {
+        inFlight.release();
+      }
+
+      expect(pulls).toEqual([chatId]);
+      expect(transcriptOf(phoneModel.requests.at(-1))).toEqual([
+        'user: in flight on the desktop',
+        'user: second, on the phone',
+      ]);
+    });
+
+    /*
      * Round 16: staleness is this device's own observation, never the run's `recordedAt`. The run's rows are dated
      * past the bound, yet the phone has only just seen them: it waits the bound out on its own clock, and a pull then
      * shows the remote held nothing newer (round 18). Once it goes on, it says the person's turn of the abandoned run as

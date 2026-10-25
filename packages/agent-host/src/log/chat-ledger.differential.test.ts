@@ -1486,8 +1486,8 @@ const refreshMergeTrace = (): Trace[] => {
 
 /**
  * Where another device's run stands on this device, over every case of the evidence rule (T11, rounds 18 and 19): when
- * its segment last changed here, this device's clock (behind that included), the quiet its pulls found (or none) and
- * a takeover.
+ * its segment last changed here, this device's clock (behind that included), the quiet its pulls found (or none), a
+ * takeover, and whether this device can pull the chat at all (round 27).
  */
 const standingTrace = (): Trace => {
   const text = ['T standings'];
@@ -1500,19 +1500,21 @@ const standingTrace = (): Trace => {
     )) {
       for (const quiet of [undefined, 0, bound, bound + 1, 7200]) {
         for (const takenOver of [false, true]) {
-          text.push(`STAND ${bound} ${ask} ${changed} ${now} ${quiet ?? '-'} ${takenOver ? 1 : 0}`);
-          const standing = foreignRunStanding(
-            { observedAt: changed, pulledQuiet: quiet, ...(takenOver ? { takenOver: true } : {}) },
-            now,
-            { bound, ask },
-          );
-          expected.push(
-            standing.abandoned
-              ? 'QF abandoned'
-              : standing.awaitsPull
-                ? 'QF awaits-pull'
-                : `QF holds ${String(standing.changesAt)}`,
-          );
+          for (const pulls of [true, false]) {
+            text.push(`STAND ${bound} ${ask} ${changed} ${now} ${quiet ?? '-'} ${takenOver ? 1 : 0} ${pulls ? 1 : 0}`);
+            const standing = foreignRunStanding(
+              { observedAt: changed, pulledQuiet: quiet, ...(takenOver ? { takenOver: true } : {}) },
+              now,
+              { bound, ask, pulls },
+            );
+            expected.push(
+              standing.abandoned
+                ? 'QF abandoned'
+                : standing.awaitsPull
+                  ? 'QF awaits-pull'
+                  : `QF holds ${String(standing.changesAt)}`,
+            );
+          }
         }
       }
     }

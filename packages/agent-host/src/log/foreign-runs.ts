@@ -364,20 +364,31 @@ export const unsettledForeignRuns = (
 
 /**
  * Whether a foreign run no longer holds the chat: pulls of the remote found its segment as this reader holds it for
- * more than {@link foreignRunStaleMilliseconds}, or another device already found it abandoned and went on
- * ({@link ForeignRun.takenOver}).
+ * more than {@link foreignRunStaleMilliseconds}, another device already found it abandoned and went on
+ * ({@link ForeignRun.takenOver}), or it awaits pulls this device cannot make (`pulls: false`).
  *
  * @param run - The foreign run.
  * @param now - This device's time, in epoch milliseconds.
- * @param bound - The staleness bound; {@link foreignRunStaleMilliseconds} by default.
+ * @param limits - The staleness bound ({@link foreignRunStaleMilliseconds} by default), and whether this device can
+ *   pull the chat from a remote (`true` by default).
  * @returns `true` when the run is treated as abandoned.
  * @public
  */
 export const isAbandonedForeignRun = (
   run: Pick<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>,
   now: number,
-  bound: number = foreignRunStaleMilliseconds,
-): boolean => foreignRunStanding(run, now, { bound }).abandoned;
+  limits: ForeignRunLimits = {},
+): boolean => foreignRunStanding(run, now, limits).abandoned;
+
+/** What a foreign run's standing is read against ({@link foreignRunStanding}). @public */
+export type ForeignRunLimits = Readonly<{
+  /** The staleness bound; {@link foreignRunStaleMilliseconds} by default. */
+  bound?: number;
+  /** How long a run may be quiet here before pulls are asked for; {@link foreignRunAskPullMilliseconds} by default. */
+  ask?: number;
+  /** Whether this device can pull the chat from a remote at all (round 27); `true` by default. */
+  pulls?: boolean;
+}>;
 
 /** Where a foreign run stands at a moment ({@link foreignRunStanding}). @public */
 export type ForeignRunStanding = Readonly<{
@@ -400,27 +411,33 @@ export type ForeignRunStanding = Readonly<{
  * that, it holds the chat; once it has been quiet here past `ask`, or the clock reads earlier than its segment last
  * changed, it awaits pulls.
  *
+ * Round 27: a run that awaits pulls on a device that cannot pull the chat (`pulls: false`: chat sync off, no remote,
+ * no record identity) cannot move here, and no pull evidence can come, so it no longer holds the chat: it is abandoned,
+ * and the device that goes on past it says its turn as for any abandoned run. A run quiet here less than `ask` still
+ * holds it, so a device that only just lost its pulls does not run past a run that was live a moment ago.
+ *
  * @param run - The foreign run.
  * @param now - This device's time, in epoch milliseconds.
- * @param limits - The staleness bound, and how long it may be quiet here before pulls are asked for.
+ * @param limits - The staleness bound, how long it may be quiet here before pulls are asked for, and whether this
+ *   device can pull the chat at all (`true` by default).
  * @returns Whether it is abandoned or awaits pulls now, and when that changes with no pull and no new row.
  * @public
  */
 export const foreignRunStanding = (
   run: Pick<ForeignRun, 'observedAt' | 'pulledQuiet' | 'takenOver'>,
   now: number,
-  {
-    bound = foreignRunStaleMilliseconds,
-    ask = foreignRunAskPullMilliseconds,
-  }: Readonly<{ bound?: number; ask?: number }> = {},
+  { bound = foreignRunStaleMilliseconds, ask = foreignRunAskPullMilliseconds, pulls = true }: ForeignRunLimits = {},
 ): ForeignRunStanding => {
   if (run.takenOver === true || (run.pulledQuiet ?? 0) > bound) {
     return { abandoned: true, awaitsPull: false, changesAt: undefined };
   }
   const asksAfter = run.observedAt + ask;
-  return now > asksAfter || now < run.observedAt
-    ? { abandoned: false, awaitsPull: true, changesAt: undefined }
-    : { abandoned: false, awaitsPull: false, changesAt: asksAfter + 1 };
+  if (now > asksAfter || now < run.observedAt) {
+    return pulls
+      ? { abandoned: false, awaitsPull: true, changesAt: undefined }
+      : { abandoned: true, awaitsPull: false, changesAt: undefined };
+  }
+  return { abandoned: false, awaitsPull: false, changesAt: asksAfter + 1 };
 };
 
 /**
@@ -428,15 +445,15 @@ export const foreignRunStanding = (
  *
  * @param runs - Unsettled foreign runs.
  * @param now - This device's time, in epoch milliseconds.
- * @param bound - The staleness bound.
+ * @param limits - The staleness bound, and whether this device can pull the chat ({@link ForeignRunLimits}).
  * @returns The run, or `undefined` when no other device holds the chat.
  * @public
  */
 export const liveForeignRun = (
   runs: readonly ForeignRun[],
   now: number,
-  bound: number = foreignRunStaleMilliseconds,
+  limits: ForeignRunLimits = {},
 ): ForeignRun | undefined =>
   runs
-    .filter((run) => !isAbandonedForeignRun(run, now, bound))
+    .filter((run) => !isAbandonedForeignRun(run, now, limits))
     .toSorted((left, right) => right.observedAt - left.observedAt)[0];

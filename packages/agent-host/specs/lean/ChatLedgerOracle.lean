@@ -51,7 +51,7 @@ A row is `<term> <seq> <run> <kind> <arg> <ms> <epoch> <attempt>` (`epoch`/`atte
   REFRESHM <device> <row>      the merged rows the appender folds after a refresh reads the row appended to that
                                device's segments, or in a new segment of it (round 26)
                                                                            → `MR <rows, as M prints them>`
-  STAND <bound> <ask> <changed> <now> <quiet|-> <takenOver>   where another device's run stands
+  STAND <bound> <ask> <changed> <now> <quiet|-> <takenOver> <pulls>   where another device's run stands
                                                                            → `QF <standing> [changesAt]`
   PULL <cap> <throttle> <clock:size:quiet|-> <now> <size>   a pull's record of one segment (chat-ref.ts `notePull`)
                                                                            → `QN <clock> <size> <quiet>`
@@ -357,8 +357,9 @@ def runLine (st : St) (line : String) : St × List String :=
       | _ => none
     let r := notePull (num cap) (num th) rec_ (num n) (num sz)
     (st, [s!"QN {r.clock} {r.size} {r.quiet}"])
-  | ["STAND", b, a, c, n, p, t] =>
-    let text := match standing (num b) (num a) (num c) (num n) (if p == "-" then none else some (num p)) (t == "1") with
+  | ["STAND", b, a, c, n, p, t, u] =>
+    let text := match standing (num b) (num a) (num c) (num n) (if p == "-" then none else some (num p)) (t == "1")
+        (u == "1") with
       | .holds at_ => s!"QF holds {at_}" | .awaitsPull => "QF awaits-pull" | .abandoned => "QF abandoned"
     (st, [text])
   | ["MH"] =>

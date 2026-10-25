@@ -304,6 +304,8 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t11_unobserved_never_abandoned
 #print axioms ChatLedger.t11_quiet_run_awaits_pull
 #print axioms ChatLedger.t11_quiet_run_released
+#print axioms ChatLedger.t11_unpullable_released
+#print axioms ChatLedger.t11_unpullable_recent_holds
 #print axioms ChatLedger.t11_forward_jump_bounded
 #print axioms ChatLedger.t11_back_jump_recovers
 #print axioms ChatLedger.t12_step_keeps_heartbeat

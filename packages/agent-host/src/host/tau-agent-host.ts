@@ -360,6 +360,11 @@ type ChatStore = {
   carried?: readonly CarriedTurns[] | undefined;
   /** When this host last asked the placement to pull, for another device's run that awaits one (XD3, round 18). */
   pullAskedAt?: number | undefined;
+  /**
+   * Whether that ask found this device able to pull the chat (round 27): `false` once the placement answered it
+   * `CHAT_NOT_SHARED`, until it is asked again.
+   */
+  pulls?: boolean | undefined;
 };
 
 /**
@@ -1520,23 +1525,40 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
-   * Ask the placement to pull the project's remote (XD3, rounds 18 and 19): another device's run on the chat has been
-   * quiet here a while, and only pulls show whether it stayed quiet there for the staleness bound
-   * (`foreignRunStanding`). At most once a heartbeat interval per chat (a clock that went back asks again), and not
-   * awaited: the command it is asked for is refused `wait` either way, and the next one reads what the pull brought.
+   * Ask the placement to pull the project's remote now (XD3, rounds 18 and 19), and answer whether this device can pull
+   * the chat at all (round 27). Another device's run on the chat has been quiet here a while, and only pulls show
+   * whether it stayed quiet there for the staleness bound (`foreignRunStanding`). At most once a heartbeat interval per
+   * chat (a clock that went back asks again); between asks the last answer stands. The ask is answered once made, not
+   * once pulled, and waited for within the admission's segment bound: what the pull brings, the next command reads.
+   *
+   * A placement that cannot pull the chat (chat sync off, no remote, no record identity) answers `CHAT_NOT_SHARED`: no
+   * pull evidence can then come, so the run cannot move here and no longer holds the chat. A placement with no pull
+   * verb, or one fenced, failing or not answering in time, is taken to pull, and the run keeps holding the chat.
    *
    * @param chatId - The chat.
    * @param at - This device's time.
+   * @returns Whether this device can pull the chat.
    */
-  const askPull = (chatId: string, at: number): void => {
+  const askPull = async (chatId: string, at: number): Promise<boolean> => {
     const store = storeOf(chatId);
     const pull = options.placement?.pull;
     const since = store.pullAskedAt === undefined ? heartbeatInterval : at - store.pullAskedAt;
-    if (pull === undefined || (since >= 0 && since < heartbeatInterval)) {
-      return;
+    if (pull === undefined) {
+      return true;
+    }
+    if (since >= 0 && since < heartbeatInterval) {
+      return store.pulls ?? true;
     }
     store.pullAskedAt = at;
-    void settleQuietly(pull({ requestId: `pull:${chatId}:${String(at)}`, chatId }));
+    let pulls = true;
+    try {
+      const answer = await withinSegmentBound(pull({ requestId: `pull:${chatId}:${String(at)}`, chatId }));
+      pulls = !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED');
+    } catch {
+      /* Unanswered or failing: no evidence this device cannot pull, so the run keeps holding the chat. */
+    }
+    store.pulls = pulls;
+    return pulls;
   };
 
   /*
@@ -1665,7 +1687,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
    * flight (OQ-N21: refuse or interrupt-and-seal; this host refuses). The refusal is a `wait`: the same command is
    * admitted once sync brings that run's settlement, or once pulls found its segment as it is for more than
    * {@link foreignRunStaleMilliseconds}. A run quiet here a while awaits such pulls, so the refusal asks the placement
-   * for one ({@link askPull}). An approval of a run another device took over is refused `RUN_TAKEN_OVER`.
+   * for one ({@link askPull}), unless it cannot pull the chat at all. An approval of a run another device took over is refused `RUN_TAKEN_OVER`.
    *
    * A new term for a turn another device's turn came between (XD1): an incarnation keeps one term while it stays open,
    * and a term's rows merge together, ordered by the term's start (CL-R14), so a command admitted after this
@@ -1688,6 +1710,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     let runs: readonly ForeignRun[] = [];
     let admitted: CommandAdmission;
     let at = 0;
+    let pulls = true;
     try {
       await refreshFor(log, command.commandId);
       const takenOver = command.verb === 'approve' && (await log.runTakenOver?.(command.runId)) === true;
@@ -1695,12 +1718,14 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       runs = takenOver ? [] : ((await log.foreignRuns?.()) ?? []);
       const foreignWrote = wroteUnderTerm(chatId) && (await log.foreignWroteSinceTermBegan?.()) === true;
       at = now().getTime();
+      const asked = at;
+      pulls = runs.some((run) => foreignRunStanding(run, asked).awaitsPull) ? await askPull(chatId, asked) : true;
       admitted = commandAdmission(command.verb, {
         takenOver,
         foreignWrote,
         foreign: runs.map((run) => ({
           runId: run.runId,
-          abandoned: isAbandonedForeignRun(run, at),
+          abandoned: isAbandonedForeignRun(run, asked, { pulls }),
           said: run.takenOver === true,
           words: run.words !== undefined,
         })),
@@ -1723,10 +1748,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           'Another device found this paused turn abandoned and went on with the chat, so its request can no longer be approved here. Deny it, then send what you want next.',
         );
       }
-      const held = liveForeignRun(runs, at)!;
-      if (runs.some((run) => foreignRunStanding(run, at).awaitsPull)) {
-        askPull(chatId, at);
-      }
+      const held = liveForeignRun(runs, at, { pulls })!;
       throw coded(
         'RUN_ACTIVE_ON_ANOTHER_DEVICE' satisfies RefusalCode,
         `Chat ${chatId} is running on another device; send this again once that run finishes.`,
@@ -1814,30 +1836,36 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   };
 
   /**
-   * An admission's segment read, bounded: one that does not finish in time is a segment that cannot be read, so the
-   * command is refused `SEGMENTS_UNREADABLE` (`wait`) and the chat's dispatch turn is released (round 26).
+   * Wait for `work` at most the admission's segment bound: past it, the wait is refused `SEGMENTS_UNREADABLE` (`wait`)
+   * and the chat's dispatch turn is released (round 26). The work itself goes on; nothing that waits behind it in the
+   * log's write queue is held by it (round 27).
    */
-  const boundedRefresh = async (log: DurableEventLog): Promise<void> => {
+  const withinSegmentBound = async <Result>(work: Promise<Result> | undefined): Promise<Result | undefined> => {
+    if (work === undefined) {
+      return undefined;
+    }
     const clock: HostClock = options.clock ?? globalThis;
     const expired = Promise.withResolvers<'expired'>();
     const timer: unknown = clock.setTimeout(() => {
       expired.resolve('expired');
     }, options.delays?.segmentRefresh ?? segmentRefreshMilliseconds); // Bound: segmentRefreshMilliseconds.
     (timer as { unref?: () => void } | undefined)?.unref?.();
+    const settled = async (): Promise<Readonly<{ result: Result }>> => ({ result: await work });
     try {
-      const read = log.refresh?.();
-      const settled = async (): Promise<'read'> => {
-        await read;
-        return 'read';
-      };
-      if (read !== undefined && (await Promise.race([settled(), expired.promise])) === 'expired') {
+      const first = await Promise.race([settled(), expired.promise]);
+      if (first === 'expired') {
         throw Object.assign(new Error('The other devices’ copies of this chat could not be read in time.'), {
           code: 'SEGMENTS_UNREADABLE' satisfies RefusalCode,
         });
       }
+      return first.result;
     } finally {
       clock.clearTimeout(timer);
     }
+  };
+  /** An admission's segment read, bounded ({@link withinSegmentBound}): one that does not finish in time is unreadable. */
+  const boundedRefresh = async (log: DurableEventLog): Promise<void> => {
+    await withinSegmentBound(log.refresh?.());
   };
   /**
    * The cross-device admission of an approval (XD3, round 17). An approval lets the paused run's tool act on it at

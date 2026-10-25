@@ -488,5 +488,36 @@
     "test": "src/launchers/agent-launcher.segments.test.ts",
     "find": "      await refreshFor(log, command.commandId);\n",
     "replace": "      await (command.verb === 'approve' ? boundedRefresh(log) : log.refresh?.());\n"
+  },
+  {
+    "id": "unpullable-awaits-pull",
+    "drift": "round 27: a run on a device that cannot pull the chat awaits pulls that cannot come, so a crashed device's unsettled run holds the chat there for ever (T11: t11_unpullable_released)",
+    "file": "specs/lean/ChatLedger.lean",
+    "find": "then (if pulls then .awaitsPull else .abandoned)",
+    "replace": "then .awaitsPull"
+  },
+  {
+    "id": "pull-refusal-ignored",
+    "drift": "round 27: the host reads every pull answer as a pull, so a device whose placement cannot pull the chat (chat sync off, no remote) waits on another device's crashed run for ever",
+    "file": "src/host/tau-agent-host.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "      pulls = !(answer?.status === 'refused' && answer.code === 'CHAT_NOT_SHARED');\n",
+    "replace": "      pulls = answer?.status !== undefined;\n"
+  },
+  {
+    "id": "segment-read-in-write-queue",
+    "drift": "round 27: a refresh reads the segments inside the log's write queue, so a read that never returns holds every later append, a Stop's and a denial's included, past the admission's bound",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "            const { order, result } = beginRead(readSegments);\n            const read = await result;\n            await enqueue(async () => {\n              assertOpen();\n              land(order, read);\n            });\n",
+    "replace": "            await enqueue(async () => {\n              assertOpen();\n              const { order, result } = beginRead(readSegments);\n              land(order, await result);\n            });\n"
+  },
+  {
+    "id": "open-read-unbounded",
+    "drift": "round 27: opening a chat log waits for its first segment read with no bound, so a chat whose segments never answer never opens and a Stop of its paused run waits for ever",
+    "file": "src/log/event-log-appender.ts",
+    "test": "src/launchers/agent-launcher.segments.test.ts",
+    "find": "    const first = await Promise.race([result, expired.promise]);\n",
+    "replace": "    const first: SegmentRead | 'expired' = await result;\n"
   }
 ]

@@ -1209,12 +1209,15 @@ def quietFor (r : Option PullRec) (size : Nat) : Option Nat :=
 
 /-- `foreignRunStanding(run, now, bound)`. `quiet`: what this device's pulls evidenced for the run's segment as read
 (`pulledQuiet`); `changed`: when the segment last changed here (`observedAt`); `now`: this device's clock; `ask`: how
-long a run may be quiet here before its reader asks for pulls; `takenOver`: another device said the run's turn.
-Abandoned only on the evidence of pulls: their quiet past `bound`. The clock decides only when pulls are asked for,
-and a clock behind `changed` asks at once. -/
-def standing (bound ask changed now : Nat) (quiet : Option Nat) (takenOver : Bool) : Standing :=
+long a run may be quiet here before its reader asks for pulls; `takenOver`: another device said the run's turn;
+`pulls`: whether this device can pull the chat at all (round 27: false with chat sync off, no remote, or no record
+identity). Abandoned only on the evidence of pulls: their quiet past `bound`. The clock decides only when pulls are
+asked for, and a clock behind `changed` asks at once; a run that would await pulls this device cannot make cannot move
+here, so it is abandoned then. -/
+def standing (bound ask changed now : Nat) (quiet : Option Nat) (takenOver : Bool) (pulls : Bool := true) :
+    Standing :=
   if takenOver || decide (quiet.getD 0 > bound) then .abandoned
-  else if now > changed + ask ∨ now < changed then .awaitsPull
+  else if now > changed + ask ∨ now < changed then (if pulls then .awaitsPull else .abandoned)
   else .holds (changed + ask + 1)
 
 /-! ## segments.ts: `mergeLogSegments` (CL-R14) -/

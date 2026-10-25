@@ -24,7 +24,7 @@ export {
   unsettledForeignRuns,
   unsettledParsedRuns,
 } from '#log/foreign-runs.js';
-export type { ForeignRun, ForeignRunStanding, SegmentParse } from '#log/foreign-runs.js';
+export type { ForeignRun, ForeignRunLimits, ForeignRunStanding, SegmentParse } from '#log/foreign-runs.js';
 export { chatPulledAtFileName, pulledQuietOf, segmentDeviceIdOf } from '#launchers/chat-store.js';
 export {
   agentLogEventSchema,

@@ -4157,6 +4157,25 @@ theorem t11_quiet_run_awaits_pull (bound ask changed now : Nat) (quiet : Option 
   · simp_all
   · simp [hn]
 
+/-- **T11** (round 27: no pulls, no wait for them): on a device that cannot pull the chat (chat sync off, no remote, no
+record identity), a run that would await pulls no longer holds the chat, since no pull evidence can come; one quiet
+here less than `ask` still holds it, so a device that has only just lost its pulls does not pass a run live a moment
+ago. -/
+theorem t11_unpullable_released (bound ask changed now : Nat) (quiet : Option Nat) (t : Bool)
+    (hn : now > changed + ask ∨ now < changed) :
+    standing bound ask changed now quiet t false = .abandoned := by
+  unfold standing
+  split
+  · rfl
+  · simp [hn]
+
+theorem t11_unpullable_recent_holds (bound ask changed now : Nat)
+    (hn : ¬ (now > changed + ask ∨ now < changed)) :
+    standing bound ask changed now none false false = .holds (changed + ask + 1) := by
+  unfold standing
+  have : ¬ (0 > bound) := by omega
+  simp [this, hn]
+
 /-- **T11** (a dead device cannot lock a chat): pulls once a minute that keep finding the segment as it was free the
 chat once they span more than the bound. -/
 theorem t11_quiet_run_released :

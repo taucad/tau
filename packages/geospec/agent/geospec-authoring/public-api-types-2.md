@@ -1,333 +1,6 @@
 # geospec — Types (2)
 
-57 top-level symbols. Signatures are verbatim typescript.
-
-// Inline code-CAD model load options
-LoadModelCodeOptions: {
-    /** Source files keyed by project-relative path. */
-    code: Code;
-    /** Entry path to render from {@link code}. */
-    file: keyof Code & string;
-    /** Not accepted: inline code has no project folder to resolve in, and a load naming one is refused. */
-    rootDir?: never;
-    /** Geometry format to export. Defaults to `glb`. */
-    format?: GeoSpecModelFormat;
-    /** Explicit parameters passed to the exporter. */
-    parameters?: Record<string, unknown>;
-    /** Absolute project root passed to the exporter. */
-    projectPath?: string;
-    /** STEP reader strategy used for STEP exports. */
-    stepStreaming?: StepStreamingMode;
-    /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
-    mesh?: boolean;
-    /** Linear tolerance used while meshing exact BRep evidence. */
-    meshLinearTolerance?: number;
-    /** Angular tolerance in degrees used while meshing exact BRep evidence. */
-    meshAngularToleranceDegrees?: number;
-    /**
-     * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
-     * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
-     */
-    workUnitLimit?: number;
-    /**
-     * Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model
-     * can be checked region by region. Only an exporter that declares `region` honours it; any other
-     * exporter, or a crop the exporter cannot make, refuses with a typed diagnostic instead of loading
-     * the whole model. The cropped subject is a different subject: its load evidence records `region`,
-     * so a claim on it never stands for the whole model.
-     */
-    region?: GeoSpecLoadRegion;
-}
-
-  // Source files keyed by project-relative path
-  code: Code
-
-  // Entry path to render from {@link code }
-  file: keyof Code & string
-
-  // Not accepted
-  rootDir?: never
-
-  // Geometry format to export
-  format?: GeoSpecModelFormat
-
-  // Explicit parameters passed to the exporter
-  parameters?: Record<string, unknown>
-
-  // Absolute project root passed to the exporter
-  projectPath?: string
-
-  // STEP reader strategy used for STEP exports
-  stepStreaming?: StepStreamingMode
-
-  // Whether STEP loading should also produce mesh evidence
-  mesh?: boolean
-
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance?: number
-
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees?: number
-
-  // Default work-unit budget for every claim on this subject
-  workUnitLimit?: number
-
-  // Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model can be checked region by region
-  region?: GeoSpecLoadRegion
-
-// Filesystem-backed model load options
-LoadModelFileOptions: {
-    /**
-     * Model file to render, as a path from the project root: the same root every tool's `targetFile` resolves
-     * against, which the result names as `projectRoot` where the host reports it, as `tau mcp` does.
-     */
-    file: string;
-    /**
-     * Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root:
-     * `loadModel({ file: 'main.ts', rootDir: 'parts/gear' })` loads `parts/gear/main.ts`. Recorded in the load
-     * evidence.
-     */
-    rootDir?: string;
-    /** Absolute project root passed to the exporter. */
-    projectPath?: string;
-    /** Geometry format to export. Defaults to `glb`. */
-    format?: GeoSpecModelFormat;
-    /** Explicit parameters passed to the exporter. */
-    parameters?: Record<string, unknown>;
-    /** STEP reader strategy used for STEP exports. */
-    stepStreaming?: StepStreamingMode;
-    /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
-    mesh?: boolean;
-    /** Linear tolerance used while meshing exact BRep evidence. */
-    meshLinearTolerance?: number;
-    /** Angular tolerance in degrees used while meshing exact BRep evidence. */
-    meshAngularToleranceDegrees?: number;
-    /**
-     * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
-     * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
-     */
-    workUnitLimit?: number;
-    /**
-     * Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model
-     * can be checked region by region. Only an exporter that declares `region` honours it; any other
-     * exporter, or a crop the exporter cannot make, refuses with a typed diagnostic instead of loading
-     * the whole model. The cropped subject is a different subject: its load evidence records `region`,
-     * so a claim on it never stands for the whole model.
-     */
-    region?: GeoSpecLoadRegion;
-}
-
-  // Model file to render, as a path from the project root
-  file: string
-
-  // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
-  rootDir?: string
-
-  // Absolute project root passed to the exporter
-  projectPath?: string
-
-  // Geometry format to export
-  format?: GeoSpecModelFormat
-
-  // Explicit parameters passed to the exporter
-  parameters?: Record<string, unknown>
-
-  // STEP reader strategy used for STEP exports
-  stepStreaming?: StepStreamingMode
-
-  // Whether STEP loading should also produce mesh evidence
-  mesh?: boolean
-
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance?: number
-
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees?: number
-
-  // Default work-unit budget for every claim on this subject
-  workUnitLimit?: number
-
-  // Axis-aligned millimetre box the exporter crops the model to before export, so a large mesh model can be checked region by region
-  region?: GeoSpecLoadRegion
-
-// Options accepted by {@link import ('./load-model.js').loadModel}
-LoadModelOptions: LoadModelSourceOptions | LoadModelCodeOptions<Code> | LoadModelFileOptions
-
-  // Project-relative folder `file` resolves in, for a suite that loads from somewhere other than the project root
-  rootDir?: string
-
-  // Geometry format to export
-  format?: GeoSpecModelFormat
-
-  // Explicit parameters passed to the exporter
-  parameters?: Record<string, unknown>
-
-  // STEP reader strategy used for STEP exports
-  stepStreaming?: StepStreamingMode
-
-  // Whether STEP loading should also produce mesh evidence
-  mesh?: boolean
-
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance?: number
-
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees?: number
-
-  // Default work-unit budget for every claim on this subject
-  workUnitLimit?: number
-
-// Direct geometry-source model load options
-LoadModelSourceOptions: {
-    /** Geometry bytes, path, browser file/blob, or in-memory mesh buffer. */
-    source: MeshSource | StepSource;
-    /** Named external resources consumed alongside the direct geometry bytes. */
-    resources?: ReadonlyArray<{
-        readonly name: string;
-        readonly source: MeshSource | StepSource;
-    }>;
-    /**
-     * Project-relative folder a path `source` and each resource path resolve in. Omitted, they resolve against the
-     * project root. Recorded in the load evidence.
-     */
-    rootDir?: string;
-    /** Source geometry format. Defaults to `glb`. */
-    format?: GeoSpecModelFormat;
-    /** Source path recorded in provenance. */
-    path?: string;
-    /** Human-readable source name recorded in provenance. */
-    name?: string;
-    /** Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization. */
-    sourceUnit?: GeoSpecUnit;
-    /** Explicit parameters recorded in provenance. */
-    parameters?: Record<string, unknown>;
-    /** STEP reader strategy used for STEP sources. */
-    stepStreaming?: StepStreamingMode;
-    /** Whether STEP loading should also produce mesh evidence. Defaults to true. */
-    mesh?: boolean;
-    /** Linear tolerance used while meshing exact BRep evidence. */
-    meshLinearTolerance?: number;
-    /** Angular tolerance in degrees used while meshing exact BRep evidence. */
-    meshAngularToleranceDegrees?: number;
-    /**
-     * Default work-unit budget for every claim on this subject: a positive integer no greater than
-     * the host's maximum (default `geoSpecMaximumWorkUnitLimit`, 512 000 000). `expectGeo(subject, { workUnitLimit })` overrides
-     * it per chain. Recorded in the load evidence; it never changes the exported or admitted bytes.
-     */
-    workUnitLimit?: number;
-}
-
-  // Geometry bytes, path, browser file/blob, or in-memory mesh buffer
-  source: MeshSource | StepSource
-
-  // Named external resources consumed alongside the direct geometry bytes
-  resources?: ReadonlyArray<{
-          readonly name: string;
-          readonly source: MeshSource | StepSource;
-      }>
-
-  // Project-relative folder a path `source` and each resource path resolve in
-  rootDir?: string
-
-  // Source geometry format
-  format?: GeoSpecModelFormat
-
-  // Source path recorded in provenance
-  path?: string
-
-  // Human-readable source name recorded in provenance
-  name?: string
-
-  // Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical millimetre normalization
-  sourceUnit?: GeoSpecUnit
-
-  // Explicit parameters recorded in provenance
-  parameters?: Record<string, unknown>
-
-  // STEP reader strategy used for STEP sources
-  stepStreaming?: StepStreamingMode
-
-  // Whether STEP loading should also produce mesh evidence
-  mesh?: boolean
-
-  // Linear tolerance used while meshing exact BRep evidence
-  meshLinearTolerance?: number
-
-  // Angular tolerance in degrees used while meshing exact BRep evidence
-  meshAngularToleranceDegrees?: number
-
-  // Default work-unit budget for every claim on this subject
-  workUnitLimit?: number
-
-// Options for {@link commandExporter}
-CommandExporterOptions: {
-    readonly id: string;
-    /** File extensions without the dot, or `'*'`. */
-    readonly extensions: readonly string[];
-    /** Executable and leading arguments, such as `['python', 'export.py']`. */
-    readonly command: readonly string[];
-    /** What the command can do. Protocol 1 carries no inline sources, so `inlineSources` must not be set. */
-    readonly capabilities: GeoSpecExporterCapabilities;
-    /** Working directory of the command; defaults to the request's project root. */
-    readonly cwd?: string;
-    /** Extra environment variables, merged over this process's. */
-    readonly env?: Readonly<Record<string, string>>;
-    /** Positive milliseconds one export may run before the command is killed and the export fails. */
-    readonly exportTimeout?: number;
-}
-
-  readonly id: string
-
-  // File extensions without the dot, or `'*'`
-  readonly extensions: readonly string[]
-
-  // Executable and leading arguments, such as `['python', 'export.py']`
-  readonly command: readonly string[]
-
-  // What the command can do
-  readonly capabilities: GeoSpecExporterCapabilities
-
-  // Working directory of the command
-  readonly cwd?: string
-
-  // Extra environment variables, merged over this process's
-  readonly env?: Readonly<Record<string, string>>
-
-  // Positive milliseconds one export may run before the command is killed and the export fails
-  readonly exportTimeout?: number
-
-// Collects suites, tests, assertions, and async completion state for one GeoSpec module execution
-GeoSpecCollector: {
-    tests: GeoSpecTestCase[];
-    describe(name: string, function_: GeoSpecTestFunction): void;
-    describeSkip(name: string, _function?: GeoSpecTestFunction): void;
-    it(name: string, function_: GeoSpecTestFunction): void;
-    itSkip(name: string, _function?: GeoSpecTestFunction): void;
-    expectGeo(subject: unknown, options?: GeoSpecExpectOptions): GeoSpecMatcher;
-    waitForCompletion(testTimeout?: number, testNamePattern?: GeoSpecTestNamePattern): Promise<void>;
-}
-
-  tests: GeoSpecTestCase[]
-
-  // GeoSpecCollector.describe (method)
-  describe(name: string, function_: GeoSpecTestFunction): void;
-
-  // GeoSpecCollector.describeSkip (method)
-  describeSkip(name: string, _function?: GeoSpecTestFunction): void;
-
-  // GeoSpecCollector.it (method)
-  it(name: string, function_: GeoSpecTestFunction): void;
-
-  // GeoSpecCollector.itSkip (method)
-  itSkip(name: string, _function?: GeoSpecTestFunction): void;
-
-  // GeoSpecCollector.expectGeo (method)
-  expectGeo(subject: unknown, options?: GeoSpecExpectOptions): GeoSpecMatcher;
-
-  // GeoSpecCollector.waitForCompletion (method)
-  waitForCompletion(testTimeout?: number, testNamePattern?: GeoSpecTestNamePattern): Promise<void>;
+72 top-level symbols. Signatures are verbatim typescript.
 
 // Per-module collector configuration
 GeoSpecCollectorOptions: {
@@ -1071,6 +744,11 @@ GeoSpecNodePoolOptions: {
     budget?: number;
     /** Non-verdict shard watchdog in milliseconds. */
     shardTimeout?: number;
+    /**
+     * Spec sources each worker serves from memory, keyed by project-rooted path, in place of the file on disk. A path
+     * here is never read from or written to the project; `geospec check` runs its bundled spec this way.
+     */
+    sources?: Readonly<Record<string, string>>;
 }
 
   // Absolute project root
@@ -1093,6 +771,9 @@ GeoSpecNodePoolOptions: {
 
   // Non-verdict shard watchdog in milliseconds
   shardTimeout?: number
+
+  // Spec sources each worker serves from memory, keyed by project-rooted path, in place of the file on disk
+  sources?: Readonly<Record<string, string>>
 
 // The slice of `node:worker_threads`' `Worker` the pool drives
 // Remarks: Declared structurally so the adapter can be exercised against a stub as well as against a real thread (D-8: vitest cannot host a TypeScript worker).
@@ -1440,3 +1121,429 @@ GeoSpecRunnerRunOptions: {
 
   // Stop after the first failing file (R1)
   bail?: boolean
+
+// Everything the pool needs that differs between Node and the browser
+GeoSpecPoolOptions: {
+    /** Spawn one worker running `startGeoSpecPoolWorkerHost`. */
+    createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>;
+    /** Optional one-time worker initialization performed after its ready signal. */
+    initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void;
+    /** Wait for each native worker's cleanup acknowledgement before terminating it. */
+    gracefulShutdown?: boolean;
+    /** Worker count. Omit to let the caller's host auto-size before calling. */
+    workers: number;
+    /** Optional scheduling telemetry. Absent = declared order, no memory class. */
+    timings?: ShardTimings;
+    /** Per-shard non-verdict watchdog, milliseconds (R11). */
+    shardTimeout?: number;
+    /** Split files whose recorded duration exceeds this. Milliseconds. */
+    splitThreshold?: number;
+}
+
+  // Spawn one worker running `startGeoSpecPoolWorkerHost`
+  createWorker: () => GeoSpecPoolWorkerHandle | Promise<GeoSpecPoolWorkerHandle>
+
+  // Optional one-time worker initialization performed after its ready signal
+  initializeWorker?: (worker: GeoSpecPoolWorkerHandle) => Promise<void> | void
+
+  // Wait for each native worker's cleanup acknowledgement before terminating it
+  gracefulShutdown?: boolean
+
+  // Worker count
+  workers: number
+
+  // Optional scheduling telemetry
+  timings?: ShardTimings
+
+  // Per-shard non-verdict watchdog, milliseconds (R11)
+  shardTimeout?: number
+
+  // Split files whose recorded duration exceeds this
+  splitThreshold?: number
+
+// One shard's recorded cost
+ShardTiming: {
+    /** Wall duration of the last recorded run, in milliseconds. */
+    durationMs: number;
+    /** Highest RSS observed for this shard, in bytes. Monotonic. */
+    peakRssBytes: number;
+}
+
+  // Wall duration of the last recorded run, in milliseconds
+  durationMs: number
+
+  // Highest RSS observed for this shard, in bytes
+  peakRssBytes: number
+
+// A mutable timings table
+ShardTimings: {
+    /** Merge one observation. Peak RSS only ever grows. */
+    record(shard: string, timing: ShardTiming): void;
+    /** The hint for one shard, or `undefined` when unknown. */
+    read(shard: string): ShardTiming | undefined;
+    /** Every recorded shard, sorted by descending duration (longest-first). */
+    longestFirst(): string[];
+    /** Persist the table. Failure is silent: telemetry never fails a run. */
+    save(): void;
+}
+
+  // Merge one observation
+  // ShardTimings.record (method)
+  record(shard: string, timing: ShardTiming): void;
+
+  // The hint for one shard, or `undefined` when unknown
+  // ShardTimings.read (method)
+  read(shard: string): ShardTiming | undefined;
+
+  // Every recorded shard, sorted by descending duration (longest-first)
+  // ShardTimings.longestFirst (method)
+  longestFirst(): string[];
+
+  // Persist the table
+  // ShardTimings.save (method)
+  save(): void;
+
+// Options accepted by {@link startGeoSpecPoolWorkerHost}
+GeoSpecPoolWorkerHostOptions: {
+    /** Filesystem containing the project and test modules. */
+    filesystem: GeoSpecRunnerOptions['filesystem'];
+    /** Native assertion client shared with this worker's model admissions. */
+    nativeAssertions: GeoSpecRunnerOptions['nativeAssertions'];
+    /** Managed native admissions, released after every shard and collection pass and before shutdown. */
+    nativeModelLoader: ManagedGeoSpecNativeModelLoader;
+    /** Additional in-memory modules made available to the VM. */
+    builtinModules?: GeoSpecRunnerOptions['builtinModules'];
+    /** Module VM factory for every shard; defaults to GeoSpec's plain VM. */
+    createModuleVm?: GeoSpecRunnerOptions['createModuleVm'];
+    /** Post a message to the pool host. */
+    postMessage: (message: GeoSpecPoolWorkerMessage) => void;
+    /** Subscribe to pool-host messages. */
+    onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void;
+    /** Sample this worker's resident memory in bytes (R15 telemetry); optional. */
+    measureMemoryBytes?: () => number | undefined;
+    /** Release platform resources on shutdown, after the native subjects are released. */
+    onShutdown?: () => Promise<void> | void;
+}
+
+  // Filesystem containing the project and test modules
+  filesystem: GeoSpecRunnerOptions['filesystem']
+
+  // Native assertion client shared with this worker's model admissions
+  nativeAssertions: GeoSpecRunnerOptions['nativeAssertions']
+
+  // Managed native admissions, released after every shard and collection pass and before shutdown
+  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+
+  // Additional in-memory modules made available to the VM
+  builtinModules?: GeoSpecRunnerOptions['builtinModules']
+
+  // Module VM factory for every shard
+  createModuleVm?: GeoSpecRunnerOptions['createModuleVm']
+
+  // Post a message to the pool host
+  postMessage: (message: GeoSpecPoolWorkerMessage) => void
+
+  // Subscribe to pool-host messages
+  onHostMessage: (listener: (message: GeoSpecPoolHostMessage) => void) => void
+
+  // Sample this worker's resident memory in bytes (R15 telemetry)
+  measureMemoryBytes?: () => number | undefined
+
+  // Release platform resources on shutdown, after the native subjects are released
+  onShutdown?: () => Promise<void> | void
+
+// Runner-independent native assertion client
+GeoSpecAssertionClient: {
+    /**
+     * Start a chain; `options.workUnitLimit` overrides the client budget for its claims.
+     * Without one, a loaded subject's `loadModel` budget applies, then the client's.
+     */
+    expectGeo(subject: GeoSpecNativeSubject | GeoSpecSubject, options?: GeoSpecExpectOptions): GeoSpecAssertionMatchers;
+    query(options: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
+    query(options: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
+}
+
+  // Start a chain
+  // GeoSpecAssertionClient.expectGeo (method)
+  expectGeo(subject: GeoSpecNativeSubject | GeoSpecSubject, options?: GeoSpecExpectOptions): GeoSpecAssertionMatchers;
+
+  // GeoSpecAssertionClient.query (method)
+  query(options: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
+  query(options: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
+
+// Flat construction options for a runner-independent native assertion client
+GeoSpecAssertionClientOptions: {
+    readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string;
+    readonly engine: GeoSpecNativeEngine;
+    /** Success-evidence profile of every claim and query; omitted means `complete`. */
+    readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
+    readonly subjectSlot?: string;
+    readonly workUnitLimit?: number;
+    /**
+     * The largest `workUnitLimit` a spec may author in `loadModel` or `expectGeo` options. Host
+     * policy: omitted uses `geoSpecMaximumWorkUnitLimit`, and a host provisioned for larger claims
+     * raises it. Must be a positive safe integer.
+     */
+    readonly maximumWorkUnitLimit?: number;
+}
+
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string
+
+  readonly engine: GeoSpecNativeEngine
+
+  // Success-evidence profile of every claim and query
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
+
+  readonly subjectSlot?: string
+
+  readonly workUnitLimit?: number
+
+  // The largest `workUnitLimit` a spec may author in `loadModel` or `expectGeo` options
+  readonly maximumWorkUnitLimit?: number
+
+// Standalone native matcher chain, including core-owned negation
+GeoSpecAssertionMatchers: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport> & {
+    readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>;
+}
+
+  readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>
+
+// One authored call shared by the collector and native assertion client
+GeoSpecAuthoringInvocation: {
+    readonly arguments: readonly unknown[];
+    readonly expected: unknown;
+    readonly kind: GeoSpecAssertion['kind'];
+    readonly matcher: GeoSpecMatcherName;
+    readonly polarity: GeoSpecClaimPolarity;
+    readonly subject: unknown;
+}
+
+  readonly arguments: readonly unknown[]
+
+  readonly expected: unknown
+
+  readonly kind: GeoSpecAssertion['kind']
+
+  readonly matcher: GeoSpecMatcherName
+
+  readonly polarity: GeoSpecClaimPolarity
+
+  readonly subject: unknown
+
+// Matcher methods derived mechanically from the existing GeoSpec registry
+GeoSpecMatcherMethods: {
+    [Name in GeoSpecMatcherName]: (...arguments_: Parameters<GeoSpecMatcher[Name]>) => Result;
+}
+
+// One positive-only ancillary query
+// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports without assertion errors. A query asserts nothing, so it never fails: one whose evidence is missing or cannot decide returns a refused report whose diagnostic names the reason, such as `GEOSPEC_UNSUPPORTED_EVIDENCE`.
+GeoSpecQueryOptions: {
+    readonly capability: GeoSpecQueryCapability;
+    readonly claimId?: string;
+    readonly payload?: unknown;
+    readonly subject: GeoSpecNativeSubject;
+}
+
+  readonly capability: GeoSpecQueryCapability
+
+  readonly claimId?: string
+
+  readonly payload?: unknown
+
+  readonly subject: GeoSpecNativeSubject
+
+// Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
+MinimumDistanceFact: {
+    readonly source: 'ap242';
+    readonly assurance: 'exact-brep';
+    readonly unit: 'mm';
+    readonly coordinateSystem: 'z-up';
+    readonly subjectHash: string;
+    readonly algorithmProfile: 'geospec-minimum-distance-v1';
+    readonly occurrences: readonly [string, string];
+    readonly distance: number;
+    readonly points: readonly [readonly [number, number, number], readonly [number, number, number]];
+}
+
+  readonly source: 'ap242'
+
+  readonly assurance: 'exact-brep'
+
+  readonly unit: 'mm'
+
+  readonly coordinateSystem: 'z-up'
+
+  readonly subjectHash: string
+
+  readonly algorithmProfile: 'geospec-minimum-distance-v1'
+
+  readonly occurrences: readonly [string, string]
+
+  readonly distance: number
+
+  readonly points: readonly [readonly [number, number, number], readonly [number, number, number]]
+
+// Complete AP242 minimum over two subject-bound occurrence paths
+MinimumDistanceQuery: {
+    readonly capability: 'minimumDistance';
+    readonly subject: GeoSpecNativeSubject;
+    readonly payload: {
+        readonly pair: readonly [{
+            readonly occurrencePath: string;
+        }, {
+            readonly occurrencePath: string;
+        }];
+    };
+}
+
+  readonly capability: 'minimumDistance'
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly payload: {
+          readonly pair: readonly [{
+              readonly occurrencePath: string;
+          }, {
+              readonly occurrencePath: string;
+          }];
+      }
+
+// Geometry refusal and infrastructure interruption never masquerade as facts
+MinimumDistanceResult: {
+    readonly status: 'complete';
+    readonly fact: MinimumDistanceFact;
+} | {
+    readonly status: 'refused';
+    readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit' | 'analysis-limit' | 'resource-limit';
+    readonly message: string;
+} | {
+    readonly status: 'interrupted';
+    readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
+    readonly message: string;
+}
+
+  readonly status: 'complete'
+
+// Flat native query transport options
+GeoSpecNativeQueryOptions: Omit<GeoSpecNativeClaimOptions, 'arguments' | 'capability' | 'kind' | 'polarity'> & {
+    readonly capability: GeoSpecQueryCapability | 'minimumDistance';
+    readonly payload?: unknown;
+}
+
+  readonly engine: GeoSpecNativeEngine
+
+  readonly claimId: string
+
+  readonly evidenceProfile?: GeoSpecNativeEvidenceProfile
+
+  readonly subjectSlot: string
+
+  readonly workUnitLimit: number
+
+  // The host's largest authored budget, reported as `details.maximumLimit` on `MATCHER_TIMEOUT`
+  readonly maximumWorkUnitLimit?: number
+
+  readonly subject: GeoSpecNativeSubject
+
+  readonly capability: GeoSpecQueryCapability | 'minimumDistance'
+
+  readonly payload?: unknown
+
+// Existing positive-only ancillary operations owned by the native core
+GeoSpecQueryCapability: Exclude<(typeof geoSpecQueryCapabilities)[number], 'minimumDistance'>
+
+// Explicit support state for one source-attributed inventory field
+GeoSpecPmiField: {
+    readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported';
+    readonly value: Value | null;
+    readonly reason: string | null;
+}
+
+  readonly status: 'supported' | 'missing' | 'invalid' | 'ambiguous' | 'unsupported'
+
+  readonly value: Value | null
+
+  readonly reason: string | null
+
+// Original Part21 entity ID and exact source argument tokens
+GeoSpecPmiRawEntity: {
+    readonly sourceId: number;
+    readonly kind: string;
+    readonly arguments: readonly string[];
+}
+
+  readonly sourceId: number
+
+  readonly kind: string
+
+  readonly arguments: readonly string[]
+
+// Source-authored scalar and Rust-normalized reduced rational millimetres
+GeoSpecPmiNumber: {
+    readonly sourceId: number;
+    readonly authoredText: string;
+    readonly unitId: number;
+    readonly unitRecords: readonly GeoSpecPmiRawEntity[];
+    readonly millimetres: string;
+    readonly name: string;
+}
+
+  readonly sourceId: number
+
+  readonly authoredText: string
+
+  readonly unitId: number
+
+  readonly unitRecords: readonly GeoSpecPmiRawEntity[]
+
+  readonly millimetres: string
+
+  readonly name: string
+
+// A uniquely forward-transferred face
+GeoSpecPmiFaceAssociation: {
+    readonly sourceFaceId: number;
+    readonly occurrenceRoute: readonly number[];
+    readonly occurrence: number | null;
+    readonly publicFaceOrdinal: number;
+}
+
+  readonly sourceFaceId: number
+
+  readonly occurrenceRoute: readonly number[]
+
+  readonly occurrence: number | null
+
+  readonly publicFaceOrdinal: number
+
+// One ordered role reference, including incomplete source/transfer evidence
+GeoSpecPmiShapeReference: {
+    readonly sourceAspectId: number | null;
+    readonly sourceUsageIds: readonly number[];
+    readonly sourceItemIds: readonly number[];
+    readonly requestedRoute: GeoSpecPmiField<readonly number[]>;
+    readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>;
+}
+
+  readonly sourceAspectId: number | null
+
+  readonly sourceUsageIds: readonly number[]
+
+  readonly sourceItemIds: readonly number[]
+
+  readonly requestedRoute: GeoSpecPmiField<readonly number[]>
+
+  readonly associations: GeoSpecPmiField<readonly GeoSpecPmiFaceAssociation[]>
+
+// Normalized authored limits
+GeoSpecPmiLimits: {
+    readonly lowerMillimetres: string;
+    readonly upperMillimetres: string;
+    readonly basis: 'authored-limits' | 'nominal-plus-minus';
+}
+
+  readonly lowerMillimetres: string
+
+  readonly upperMillimetres: string
+
+  readonly basis: 'authored-limits' | 'nominal-plus-minus'

@@ -179,3 +179,44 @@ export const createNodeVmFileSystem = (root: string): VmFileSystem => {
     },
   };
 };
+
+/**
+ * Serve some project-rooted paths from memory in front of a Node `VmFileSystem`.
+ *
+ * A served path reads as its source and exists whether or not the disk holds it; writing it is refused, so the
+ * project's file of that name, if any, is never read or replaced. Every other path goes to `filesystem` unchanged.
+ *
+ * @param root - The project root `filesystem` is confined to.
+ * @param filesystem - The filesystem every other path reaches.
+ * @param sources - UTF-8 sources keyed by project-rooted path.
+ * @returns The layered filesystem.
+ * @internal
+ */
+export const withInMemorySources = (
+  root: string,
+  filesystem: VmFileSystem,
+  sources: Readonly<Record<string, string>>,
+): VmFileSystem => {
+  const served = new Map(Object.entries(sources).map(([path, source]) => [resolveUnderRoot(root, path), source]));
+  const lookup = (path: string): string | undefined => served.get(resolveUnderRoot(root, path));
+  const read = (async (path: string, encoding?: 'utf8') => {
+    const source = lookup(path);
+    if (source === undefined) {
+      return encoding === 'utf8' ? filesystem.readFile(path, 'utf8') : filesystem.readFile(path);
+    }
+    return encoding === 'utf8' ? source : new TextEncoder().encode(source);
+  }) as VmFileSystem['readFile'];
+  return {
+    exists: async (path) => lookup(path) !== undefined || filesystem.exists(path),
+    readFile: read,
+    writeFile: async (path, content) => {
+      if (lookup(path) !== undefined) {
+        throw Object.assign(new Error(`GeoSpec refused to write a path it serves from memory: '${path}'.`), {
+          code: 'EACCES',
+        });
+      }
+      await filesystem.writeFile(path, content);
+    },
+    ensureDir: async (path) => filesystem.ensureDir(path),
+  };
+};

@@ -419,6 +419,34 @@ describe.runIf(enabled)('shell conformance', () => {
     },
   );
 
+  conformance('C14', 'future folded reserved containers cannot receive hidden host writes', async () => {
+    const project = join(work, 'folded-containers');
+    mkdirSync(project, { recursive: true });
+    const aliases = ['.TAU', '.tau.', '.tau:alias'];
+    // Prove every spelling is writable by the owner, then remove it before sandbox admission.
+    for (const name of aliases) {
+      const path = join(project, name);
+      mkdirSync(path, { recursive: true });
+      writeFileSync(join(path, 'unknown'), 'OWNER-CONTROL');
+      expect(readFileSync(join(path, 'unknown'), 'utf8')).toBe('OWNER-CONTROL');
+      rmSync(path, { recursive: true });
+    }
+    const reserved = join(project, '.tau');
+    mkdirSync(reserved);
+    const filesystem = { readable: [readonly, home], writable: [project], denied: [secret], masked: [reserved] };
+    const positive = await run('printf AUTHORED > authored.txt', { filesystem, workingDirectory: project });
+    expect(positive.exitCode, positive.stderr).toBe(0);
+    expect(readFileSync(join(project, 'authored.txt'), 'utf8')).toBe('AUTHORED');
+    await Promise.all(
+      aliases.map(async (name) =>
+        run(`mkdir -p '${name}' && printf HIDDEN > '${name}/unknown'`, { filesystem, workingDirectory: project }),
+      ),
+    );
+    expect(aliases.map((name) => ({ name, persisted: existsSync(join(project, name, 'unknown')) }))).toEqual(
+      aliases.map((name) => ({ name, persisted: false })),
+    );
+  });
+
   conformance('C03', 'startup hooks are refused and the shell sees only the environment it was given', async () => {
     const positive = await run('printf %s "$GIVEN"', {
       environment: { PATH: '/usr/bin:/bin', HOME: work, LANG: 'C', GIVEN: 'GIVEN-VALUE' },

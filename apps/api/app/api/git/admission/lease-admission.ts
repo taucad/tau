@@ -129,6 +129,11 @@ export class LeaseAdmission {
     return this.#reservedBytes;
   }
 
+  /** Reserved bytes not yet on disk: what admitted leases have still to write. */
+  public get owedBytes(): number {
+    return Math.max(0, this.#reservedBytes - this.#landedBytes);
+  }
+
   /**
    * @param ownerId - The repository owner.
    * @returns Leases that owner holds here now.

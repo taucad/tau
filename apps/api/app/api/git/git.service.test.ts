@@ -2533,6 +2533,7 @@ describe('GitRepositoryService admission by kind and real bytes (DA3)', () => {
       manifest: undefined,
       token: args.preread?.token ?? 'absent',
       hydratedPackFiles: new Set(),
+      drawnBytes: { cache: 0, objectStore: 0 },
       dispose: async () => undefined,
     }));
     const { metrics, on } = recordingMetrics();

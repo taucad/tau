@@ -22,9 +22,7 @@
  * `GitModule` and `PublicationsModule` to import each other.
  */
 
-import { execFile } from 'node:child_process';
 import type { Readable } from 'node:stream';
-import { promisify } from 'node:util';
 import { and, eq, gt, sql } from 'drizzle-orm';
 import {
   isPublicationSystemArtifact,
@@ -45,8 +43,6 @@ import type { ObjectStorageService, StorageTier } from '#storage/object-storage.
 import type { StorageNamespace } from '#storage/storage.constants.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 
-const execFileAsync = promisify(execFile);
-
 /** Everything this module logs: an over-release, and nothing else. */
 const logger = new Logger('PublicationMaterializer');
 
@@ -61,57 +57,14 @@ export const maxPublishedTotalBytes = 50 * 1024 * 1024;
  * Supplied by the caller rather than spawned here, so a caller that counts its
  * git children — the smart-HTTP route does — counts these too rather than
  * letting N concurrent pushes each add an uncounted `ls-tree`/`cat-file` pair
- * (review R8). {@link leaseGitRunner} is the default for callers that do not.
+ * (review R8). On tau-api that caller is the forwarded `git-read` to
+ * tau-storage (DC1); this module spawns no git child of its own (DC3).
  */
 export type GitChildRunner = (
   directory: string,
   args: readonly string[],
   stdin?: string,
 ) => Promise<Uint8Array<ArrayBuffer>>;
-
-/* eslint-disable @typescript-eslint/naming-convention -- process environment names */
-/**
- * The isolation a lease's children run under, as `lease.ts` spawns its own: no
- * user or system configuration reaches them, so the only settings in force are
- * the ones hydration wrote into the directory.
- */
-const gitEnvironment: Record<string, string> = {
-  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-  HOME: '/nonexistent',
-  LANG: 'C',
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
-  GIT_TERMINAL_PROMPT: '0',
-};
-/* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
-
-/**
- * One `git` child in a lease, reading binary stdout.
- *
- * `lease.ts`'s own runner decodes as UTF-8, which would corrupt the bytes
- * `cat-file --batch` hands back, so the materializer keeps a buffer runner of
- * its own. The ceiling is the publication ceiling plus headroom: a tree larger
- * than that is refused from `ls-tree -l`'s sizes before anything is read.
- *
- * @param directory - The lease the child runs in.
- * @param args - Arguments after `git`.
- * @param stdin - Written to the child, when given.
- * @returns The child's stdout.
- */
-export const leaseGitRunner: GitChildRunner = async (directory, args, stdin) => {
-  const running = execFileAsync('git', [...args], {
-    cwd: directory,
-    encoding: 'buffer',
-    timeout: 60_000,
-    maxBuffer: 64 * 1024 * 1024,
-    env: gitEnvironment as NodeJS.ProcessEnv,
-  });
-  if (stdin !== undefined) {
-    running.child.stdin?.end(stdin);
-  }
-  const { stdout } = await running;
-  return new Uint8Array(stdout);
-};
 
 /** What one materialization writes into the publication row. */
 export type MaterializedPublication = Readonly<{

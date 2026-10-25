@@ -5,7 +5,10 @@ import { withOwnerLock } from '#database/owner-lock.js';
 import { assertActiveProjectLocked, assertProjectActive } from '#database/project-lifecycle.js';
 import { project, projectGit, projectGitLfsObject, projectDeletion } from '#database/schema.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
-import { hydrateLease } from '#api/git/store/lease.js';
+import { statfs } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { hydrateAdmittedLease } from '#api/git/admission/admitted-lease.js';
+import { LeaseAdmission } from '#api/git/admission/lease-admission.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import type { RepositoryStore } from '#api/git/store/port.js';
 import { lfsObjectLocations } from '#api/git/lfs-keys.js';
@@ -33,6 +36,29 @@ export type LfsRetirementDependencies = {
   readonly storage: ObjectStorageService;
   /** Where leases are built; defaults to the OS temp directory. */
   readonly leaseParentDirectory?: string;
+  /**
+   * Admits each lease by its real bytes against the lease disk (DC3). Defaults
+   * to one over `statfs` of the lease root; a refusal skips the project for
+   * this pass, and the next pass retries it.
+   */
+  readonly admission?: LeaseAdmission;
+};
+
+/** Leases built since boot share one admission, so two passes never overcommit one disk. */
+let defaultAdmission: LeaseAdmission | undefined;
+
+const admissionFor = (dependencies: LfsRetirementDependencies): LeaseAdmission => {
+  if (dependencies.admission !== undefined) {
+    return dependencies.admission;
+  }
+  const root = dependencies.leaseParentDirectory ?? tmpdir();
+  defaultAdmission ??= new LeaseAdmission({
+    readFreeBytes: async () => {
+      const { bavail, bsize } = await statfs(root);
+      return bavail * bsize;
+    },
+  });
+  return defaultAdmission;
 };
 
 type Candidate = { readonly oid: string; readonly size: number };
@@ -126,9 +152,11 @@ export const retireLfsObjects = async function* (
     }
     cursor = candidates.at(-1)!.oid;
     // oxlint-disable-next-line no-await-in-loop -- refresh and dispose one bounded batch before the next
-    const lease = await hydrateLease({
+    const admitted = await hydrateAdmittedLease({
       store: dependencies.store,
       locator,
+      ownerId: args.ownerId,
+      admission: admissionFor(dependencies),
       ...(dependencies.leaseParentDirectory === undefined
         ? {}
         : { parentDirectory: dependencies.leaseParentDirectory }),
@@ -136,10 +164,10 @@ export const retireLfsObjects = async function* (
     let referenced: ReadonlySet<string>;
     try {
       // oxlint-disable-next-line no-await-in-loop -- refresh and dispose one bounded batch before the next
-      referenced = await referencedLfsOids(lease.directory);
+      referenced = await referencedLfsOids(admitted.lease.directory);
     } finally {
       // oxlint-disable-next-line no-await-in-loop -- refresh and dispose one bounded batch before the next
-      await lease.dispose();
+      await admitted.release();
     }
 
     const unreferenced = candidates.filter((candidate) => !referenced.has(candidate.oid));
